@@ -475,11 +475,11 @@ export default function PreFiDashboard() {
             </H1>
             <Body className="text-sm sm:text-base md:text-lg lg:text-xl max-w-2xl md:max-w-none mx-auto">
               <span className="block md:inline">
-                Encourage early capital commitments and signal interest in upcoming VOI lending markets.
+                Earlier, larger deposits earn a greater share. All deposits remain in your wallet via on-chain contracts.
               </span>
               <br className="hidden md:block" />
               <span className="block md:inline">
-                Deposits are non‑custodial and tracked on‑chain. Earlier, larger deposits earn a greater share of rewards.
+                Prefund Now / Connect Wallet / Start Earning Pre-launch
               </span>
             </Body>
           </div>
