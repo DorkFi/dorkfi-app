@@ -57,6 +57,12 @@
     --deep-ocean-blue: 203 100% 21%;
     --ocean-floor: 226 53% 11%;
     --aqua-glow: 194 100% 50%;
+    
+    /* PreFi Gradients */
+    --prefi-gradient-start: 218 76% 12%;
+    --prefi-gradient-end: 194 100% 21%;
+    --progress-gradient-start: 178 100% 32%;
+    --progress-gradient-end: 46 100% 47%;
   }
 
   .dark {
@@ -211,6 +217,15 @@
   
   .wave-motion {
     animation: wave-motion 4s ease-in-out infinite;
+  }
+  
+  /* PreFi specific gradients */
+  .bg-gradient-prefi {
+    background: linear-gradient(135deg, hsl(var(--prefi-gradient-start)), hsl(var(--prefi-gradient-end)));
+  }
+  
+  .bg-gradient-progress {
+    background: linear-gradient(90deg, hsl(var(--progress-gradient-start)), hsl(var(--progress-gradient-end)));
   }
 
   /* Improved animations */

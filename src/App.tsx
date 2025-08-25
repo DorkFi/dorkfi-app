@@ -8,6 +8,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import Index from "./pages/Index";
 import LiquidationMarkets from "./pages/LiquidationMarkets";
+import PreFi from "./pages/PreFi";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -20,9 +21,11 @@ function AppContent() {
   useEffect(() => {
     if (location.pathname === '/liquidation-markets') {
       setActiveTab('liquidations');
+    } else if (location.pathname === '/prefi') {
+      setActiveTab('prefi');
     } else if (location.pathname === '/') {
       // Only set to dashboard if we're not already on a specific tab
-      if (activeTab === 'liquidations') {
+      if (activeTab === 'liquidations' || activeTab === 'prefi') {
         setActiveTab('dashboard');
       }
     }
@@ -32,6 +35,7 @@ function AppContent() {
     <Routes>
       <Route path="/" element={<Index activeTab={activeTab} onTabChange={setActiveTab} />} />
       <Route path="/liquidation-markets" element={<LiquidationMarkets activeTab={activeTab} onTabChange={setActiveTab} />} />
+      <Route path="/prefi" element={<PreFi />} />
       {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
       <Route path="*" element={<NotFound />} />
     </Routes>
