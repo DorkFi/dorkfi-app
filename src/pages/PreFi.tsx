@@ -403,15 +403,6 @@ export default function PreFiDashboard() {
               </div>
             </Link>
             
-            {/* PreFi Tab */}
-            <div className="flex-1 justify-center max-w-xs mx-4">
-              <div className="inline-flex h-9 md:h-10 items-center justify-center rounded-md bg-gray-100 dark:bg-muted p-1 text-gray-700 dark:text-muted-foreground w-full">
-                <div className="flex-1 inline-flex items-center justify-center whitespace-nowrap rounded-sm px-2 md:px-3 py-1.5 text-xs md:text-sm font-medium bg-ocean-teal text-white shadow-sm">
-                  PreFi
-                </div>
-              </div>
-            </div>
-            
             {/* Theme Toggle and Wallet */}
             <div className="flex items-center gap-2">
               <ThemeToggle />
