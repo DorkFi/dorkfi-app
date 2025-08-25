@@ -12,6 +12,8 @@ import {
   RefreshCcw,
   ExternalLink
 } from "lucide-react";
+import DorkFiButton from "@/components/ui/DorkFiButton";
+import CanvasBubbles from "@/components/CanvasBubbles";
 
 /**
  * PreFi Frontend – Single-file MVP Dashboard
@@ -360,9 +362,21 @@ export default function PreFiDashboard() {
   }, [marketsState]);
 
   return (
-    <div className="min-h-dvh w-full bg-gradient-prefi text-foreground">
+    <div className="min-h-screen bg-background relative">
+      {/* Light Mode Beach Background */}
+      <div className="absolute inset-0 light-mode-beach-bg dark:hidden" />
+      <div className="absolute inset-0 beach-overlay dark:hidden" />
+      
+      {/* Dark Mode Ocean Background */}
+      <div className="absolute inset-0 z-0 hidden dark:block dorkfi-dark-bg-with-overlay" />
+
+      {/* Advanced Canvas Bubble System - Dark Mode Only */}
+      <div className="hidden dark:block">
+        <CanvasBubbles />
+      </div>
+
       {/* Header */}
-      <header className="mx-auto max-w-6xl px-4 pt-8">
+      <header className="mx-auto max-w-6xl px-4 pt-8 relative z-10">
         <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-center">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-card-foreground">PreFi Deposit Incentives</h1>
@@ -372,19 +386,21 @@ export default function PreFiDashboard() {
           </div>
           <div className="flex items-center gap-3">
             {wallet.connected ? (
-              <button 
+              <DorkFiButton 
+                variant="secondary"
                 onClick={disconnect} 
-                className="inline-flex items-center gap-2 rounded-2xl border border-border bg-card px-4 py-2 text-sm font-medium text-card-foreground shadow-sm hover:bg-secondary transition-colors"
+                className="inline-flex items-center gap-2"
               >
                 <Wallet className="h-4 w-4" /> Disconnect {shortAddr(wallet.address)}
-              </button>
+              </DorkFiButton>
             ) : (
-              <button 
+              <DorkFiButton 
+                variant="primary"
                 onClick={connect} 
-                className="inline-flex items-center gap-2 rounded-2xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 transition-colors"
+                className="inline-flex items-center gap-2"
               >
                 <Wallet className="h-4 w-4" /> Connect Wallet
-              </button>
+              </DorkFiButton>
             )}
           </div>
         </div>
@@ -399,7 +415,7 @@ export default function PreFiDashboard() {
       </header>
 
       {/* Markets */}
-      <main className="mx-auto max-w-7xl px-4 py-8">
+      <main className="mx-auto max-w-7xl px-4 py-8 relative z-10">
         <div className="overflow-hidden rounded-2xl border border-border bg-card">
           <div className="overflow-x-auto">
             <table className="w-full text-left">
@@ -504,13 +520,14 @@ export default function PreFiDashboard() {
                             onChange={(e) => setAmounts((a) => ({ ...a, [m.id]: e.target.value }))}
                             className="w-24 rounded-xl border border-border bg-input px-3 py-1.5 text-sm text-foreground outline-none focus:border-accent focus:ring-1 focus:ring-ring transition-colors"
                           />
-                          <button
+                          <DorkFiButton
+                            variant="primary"
                             disabled={!wallet.connected || loading}
                             onClick={() => handleDeposit(m)}
-                            className="inline-flex items-center gap-2 rounded-xl bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+                            className="inline-flex items-center gap-2 text-xs px-3 py-1.5 min-h-[32px] min-w-[80px]"
                           >
                             <ArrowDownCircle className="h-4 w-4" /> Deposit
-                          </button>
+                          </DorkFiButton>
                         </div>
                       </td>
                     </motion.tr>
@@ -525,12 +542,13 @@ export default function PreFiDashboard() {
         <section className="mt-10">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-lg font-bold text-card-foreground">Activity</h2>
-            <button
+            <DorkFiButton
+              variant="secondary"
               onClick={() => setRefreshKey((k) => k + 1)}
-              className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-1.5 text-xs font-medium text-card-foreground hover:bg-secondary transition-colors"
+              className="inline-flex items-center gap-2 text-xs px-3 py-1.5 min-h-[32px] min-w-[80px]"
             >
               <RefreshCcw className="h-4 w-4" /> Refresh
-            </button>
+            </DorkFiButton>
           </div>
           <div className="overflow-hidden rounded-2xl border border-border">
             <table className="w-full text-left text-sm">
@@ -582,8 +600,13 @@ export default function PreFiDashboard() {
         </section>
       </main>
 
-      <footer className="mx-auto max-w-6xl px-4 pb-10 pt-6 text-center text-xs text-muted-foreground">
-        Built for VOI PreFi • Replace mock adapters with real contracts before launch.
+      {/* Footer */}
+      <footer className="border-t border-border/40 mt-4 relative z-10">
+        <div className="max-w-6xl mx-auto px-4 py-4 md:py-6">
+          <div className="text-center text-muted-foreground text-sm">
+            <p>Built for VOI PreFi • Replace mock adapters with real contracts before launch.</p>
+          </div>
+        </div>
       </footer>
     </div>
   );
