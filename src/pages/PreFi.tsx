@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 import DorkFiButton from "@/components/ui/DorkFiButton";
 import CanvasBubbles from "@/components/CanvasBubbles";
+import { Link } from "react-router-dom";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 /**
  * PreFi Frontend – Single-file MVP Dashboard
@@ -375,7 +377,49 @@ export default function PreFiDashboard() {
         <CanvasBubbles />
       </div>
 
-      {/* Header */}
+      {/* PreFi Header */}
+      <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-white/80 dark:header-nav-bg backdrop-blur-md supports-[backdrop-filter]:bg-white/70 dark:supports-[backdrop-filter]:header-nav-bg shadow-sm dark:shadow-none">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            {/* Logo */}
+            <Link 
+              to="/" 
+              className="flex items-center space-x-3 cursor-pointer hover:opacity-80 transition-opacity"
+              aria-label="Go to DorkFi dashboard"
+            >
+              <div className="flex flex-col">
+                <img 
+                  src="/lovable-uploads/dork_fi_logo_edit1_light.png" 
+                  alt="DorkFi logo" 
+                  className="h-8 sm:h-9 md:h-10 lg:h-11 w-auto object-contain flex-shrink-0" 
+                  fetchPriority="high"
+                  decoding="async"
+                  onError={(e) => {
+                    console.error('Logo failed to load, using placeholder');
+                    (e.currentTarget as HTMLImageElement).src = '/placeholder.svg';
+                  }}
+                />
+              </div>
+            </Link>
+            
+            {/* PreFi Tab */}
+            <div className="flex-1 justify-center max-w-xs mx-4">
+              <div className="inline-flex h-9 md:h-10 items-center justify-center rounded-md bg-gray-100 dark:bg-muted p-1 text-gray-700 dark:text-muted-foreground w-full">
+                <div className="flex-1 inline-flex items-center justify-center whitespace-nowrap rounded-sm px-2 md:px-3 py-1.5 text-xs md:text-sm font-medium bg-ocean-teal text-white shadow-sm">
+                  PreFi
+                </div>
+              </div>
+            </div>
+            
+            {/* Theme Toggle */}
+            <div className="flex items-center">
+              <ThemeToggle />
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Header Content */}
       <header className="mx-auto max-w-6xl px-4 pt-8 relative z-10">
         <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-center">
           <div>
