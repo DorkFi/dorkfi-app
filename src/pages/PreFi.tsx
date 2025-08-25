@@ -473,7 +473,7 @@ export default function PreFiDashboard() {
             <H1 className="m-0 text-4xl md:text-5xl">
               <span className="hero-header">PreFi Deposit Incentives</span>
             </H1>
-            <Body className="text-sm sm:text-base md:text-lg lg:text-xl max-w-2xl md:max-w-none mx-auto">
+            <Body className="text-sm sm:text-base md:text-lg lg:text-xl max-w-2xl mx-auto">
               <span className="block md:inline">
                 Earlier, larger deposits earn a greater share. All deposits remain in your wallet via on-chain contracts.
               </span>
