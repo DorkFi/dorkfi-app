@@ -16,6 +16,7 @@ import DorkFiButton from "@/components/ui/DorkFiButton";
 import CanvasBubbles from "@/components/CanvasBubbles";
 import { Link } from "react-router-dom";
 import { ThemeToggle } from "@/components/theme-toggle";
+import WalletButton from "@/components/WalletButton";
 
 /**
  * PreFi Frontend – Single-file MVP Dashboard
@@ -411,9 +412,10 @@ export default function PreFiDashboard() {
               </div>
             </div>
             
-            {/* Theme Toggle */}
-            <div className="flex items-center">
+            {/* Theme Toggle and Wallet */}
+            <div className="flex items-center gap-2">
               <ThemeToggle />
+              <WalletButton />
             </div>
           </div>
         </div>
@@ -421,31 +423,12 @@ export default function PreFiDashboard() {
 
       {/* Header Content */}
       <header className="mx-auto max-w-6xl px-4 pt-8 relative z-10">
-        <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-center">
+        <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-card-foreground">PreFi Deposit Incentives</h1>
             <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
               Encourage early capital commitments and signal interest in upcoming VOI lending markets. Deposits are non‑custodial and tracked on‑chain. Earlier, larger deposits earn a greater share of rewards.
             </p>
-          </div>
-          <div className="flex items-center gap-3">
-            {wallet.connected ? (
-              <DorkFiButton 
-                variant="secondary"
-                onClick={disconnect} 
-                className="inline-flex items-center gap-2"
-              >
-                <Wallet className="h-4 w-4" /> Disconnect {shortAddr(wallet.address)}
-              </DorkFiButton>
-            ) : (
-              <DorkFiButton 
-                variant="primary"
-                onClick={connect} 
-                className="inline-flex items-center gap-2"
-              >
-                <Wallet className="h-4 w-4" /> Connect Wallet
-              </DorkFiButton>
-            )}
           </div>
         </div>
 
