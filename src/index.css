@@ -1,0 +1,541 @@
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap');
+
+/* DorkFi Design System */
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    --primary: 178 100% 32%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --accent: 46 100% 47%;
+    --accent-foreground: 0 0% 0%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 178 100% 32%;
+
+    --radius: 0.5rem;
+
+    /* DorkFi Custom Colors */
+    --ocean-teal: 178 100% 32%;
+    --deep-sea-navy: 218 76% 12%;
+    --whale-gold: 46 100% 47%;
+    --warning-orange: 25 95% 60%;
+    --bubble-white: 0 0% 100%;
+    --ink-blue: 204 69% 20%;
+    --highlight-aqua: 190 100% 37%;
+    --sky-blue: 203 100% 73%;
+    
+    /* Header Navy Color */
+    --header-navy: 220 50% 12%;
+    
+    /* Ocean Gradient Colors */
+    --ocean-surface: 194 100% 51%;
+    --deep-ocean-blue: 203 100% 21%;
+    --ocean-floor: 226 53% 11%;
+    --aqua-glow: 194 100% 50%;
+  }
+
+  .dark {
+    --background: 218 76% 9%;
+    --foreground: 0 0% 100%;
+
+    --card: 218 76% 9%;
+    --card-foreground: 0 0% 100%;
+
+    --popover: 218 76% 9%;
+    --popover-foreground: 0 0% 100%;
+
+    --primary: 178 100% 32%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 217.2 32.6% 14%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217.2 32.6% 14%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --accent: 46 100% 47%;
+    --accent-foreground: 0 0% 0%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --warning-orange: 25 95% 60%;
+
+    --border: 217.2 32.6% 14%;
+    --input: 217.2 32.6% 14%;
+    --ring: 178 100% 32%;
+    
+    /* Header Navy Color for Dark Mode */
+    --header-navy: 220 50% 9%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-poppins;
+  }
+
+  /* Smooth scrolling */
+  html {
+    scroll-behavior: smooth;
+  }
+
+  /* Focus styles */
+  *:focus-visible {
+    @apply outline-none ring-2 ring-ocean-teal ring-offset-2;
+  }
+}
+
+@layer utilities {
+  .ocean-gradient {
+    background: linear-gradient(180deg, hsl(var(--ocean-surface)) 0%, hsl(var(--deep-ocean-blue)) 50%, hsl(var(--ocean-floor)) 100%);
+  }
+  
+  .ocean-gradient-with-overlay {
+    background: linear-gradient(180deg, hsl(var(--ocean-surface)) 0%, hsl(var(--deep-ocean-blue)) 50%, hsl(var(--ocean-floor)) 100%);
+    position: relative;
+  }
+  
+  .ocean-gradient-with-overlay::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: radial-gradient(ellipse at center, hsl(var(--aqua-glow) / 0.1) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  
+  /* DorkFi Dark Mode Background (image) */
+.dorkfi-dark-bg-with-overlay {
+    /* Darkened with transparent navy overlay */
+    background-image: linear-gradient(to bottom, hsl(var(--deep-sea-navy) / 0.7), hsl(var(--deep-sea-navy) / 0.7)), url('/lovable-uploads/dorkfi_bg_03.png');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+  }
+
+  .dorkfi-dark-bg-with-overlay::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at center, hsl(var(--aqua-glow) / 0.05) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  /* Optional: pure background utility without overlay */
+  .dorkfi-dark-bg {
+    background-image: url('/lovable-uploads/dorkfi_bg_03.png');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+  }
+  
+  .light-mode-beach-bg {
+    background-image: url('/lovable-uploads/beach_banner.png');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+  }
+  
+  .beach-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(to bottom, 
+      hsl(var(--bubble-white) / 0.6), 
+      hsl(var(--bubble-white) / 0.7), 
+      hsl(var(--bubble-white) / 0.8)
+    );
+    pointer-events: none;
+  }
+  
+  .header-nav-bg {
+    background: hsl(var(--header-navy) / 0.95);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+  
+  .header-nav-bg.supports-backdrop-filter {
+    background: hsl(var(--header-navy) / 0.8);
+  }
+  
+  .whale-gold {
+    color: hsl(var(--whale-gold));
+  }
+  
+  .deep-sea {
+    background-color: hsl(var(--deep-sea-navy));
+  }
+  
+  .bubble-float {
+    animation: bubble-float 3s ease-in-out infinite;
+  }
+  
+  .wave-motion {
+    animation: wave-motion 4s ease-in-out infinite;
+  }
+
+  /* Improved animations */
+  .animate-fade-in {
+    animation: fade-in 0.6s ease-out;
+  }
+
+  .animate-slide-up {
+    animation: slide-up 0.5s ease-out;
+  }
+
+  .animate-scale-in {
+    animation: scale-in 0.3s ease-out;
+  }
+}
+
+@keyframes bubble-float {
+  0%, 100% { 
+    transform: translateY(0px) scale(1); 
+    opacity: 0.7;
+  }
+  50% { 
+    transform: translateY(-10px) scale(1.05); 
+    opacity: 1;
+  }
+}
+
+@keyframes wave-motion {
+  0%, 100% { transform: translateX(0px) rotate(0deg); }
+  25% { transform: translateX(5px) rotate(1deg); }
+  75% { transform: translateX(-5px) rotate(-1deg); }
+}
+
+@keyframes fade-in {
+  0% { 
+    opacity: 0; 
+    transform: translateY(20px); 
+  }
+  100% { 
+    opacity: 1; 
+    transform: translateY(0); 
+  }
+}
+
+@keyframes slide-up {
+  0% { 
+    opacity: 0; 
+    transform: translateY(30px); 
+  }
+  100% { 
+    opacity: 1; 
+    transform: translateY(0); 
+  }
+}
+
+@keyframes scale-in {
+  0% { 
+    opacity: 0; 
+    transform: scale(0.9); 
+  }
+  100% { 
+    opacity: 1; 
+    transform: scale(1); 
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(var(--muted));
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--ocean-teal));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--ocean-teal) / 0.8);
+}
+
+/* Loading states */
+.loading-shimmer {
+  background: linear-gradient(90deg, 
+    hsl(var(--muted)) 25%, 
+    hsl(var(--muted) / 0.5) 50%, 
+    hsl(var(--muted)) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* Improved button hover effects */
+.btn-hover-lift {
+  transition: all 0.2s ease;
+}
+
+.btn-hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px hsl(var(--ocean-teal) / 0.3);
+}
+
+/* Card hover effects */
+.card-hover {
+  transition: all 0.3s ease;
+}
+
+.card-hover:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 25px hsl(var(--ocean-teal) / 0.15);
+}
+
+/* Mobile optimizations */
+@media (max-width: 768px) {
+  .container {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+  
+  /* Improve touch targets */
+  button, a, [role="button"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* Accessibility improvements */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  :root {
+    --border: 0 0% 20%;
+    --ocean-teal: 180 100% 40%;
+  }
+}
+
+/* Golden Globe Styling */
+.golden-globe {
+  background: radial-gradient(circle at 30% 30%, #FFFFFF 0%, #FFF396 25%, hsl(var(--whale-gold)) 60%, #866508 100%);
+  box-shadow: 
+    0 4px 12px rgba(255, 243, 150, 0.3),
+    inset -2px -2px 4px rgba(134, 101, 8, 0.4),
+    inset 2px 2px 4px rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(255, 243, 150, 0.2);
+}
+
+.golden-globe:hover {
+  box-shadow: 
+    0 6px 16px rgba(255, 243, 150, 0.4),
+    inset -2px -2px 4px rgba(134, 101, 8, 0.4),
+    inset 2px 2px 4px rgba(255, 255, 255, 0.6);
+}
+
+/* Hero Header Styling */
+.hero-header {
+  color: hsl(218, 76%, 12%); /* Deep navy for light mode */
+}
+
+.dark .hero-header {
+  color: white; /* White for dark mode */
+}
+
+/* Whale Gradient Text Effect */
+.whale-gradient {
+  background: linear-gradient(135deg, #0085A3 0%, #00D4FF 33%, #E0A90D 66%, #F4C430 100%);
+  background-size: 200% 200%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 
+    0 0 10px rgba(0, 212, 255, 0.3),
+    0 0 20px rgba(0, 212, 255, 0.2),
+    0 0 40px rgba(0, 212, 255, 0.1);
+  animation: whale-gradient-shift 8s ease-in-out infinite, whale-glow-pulse 3s ease-in-out infinite;
+  will-change: opacity;
+  font-family: 'Open Sans', sans-serif;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+}
+
+@keyframes whale-gradient-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+@keyframes whale-glow-pulse {
+  0%, 100% { 
+    text-shadow: 
+      0 0 10px rgba(0, 212, 255, 0.3),
+      0 0 20px rgba(0, 212, 255, 0.2),
+      0 0 40px rgba(0, 212, 255, 0.1);
+  }
+  50% { 
+    text-shadow: 
+      0 0 10px rgba(0, 212, 255, 0.5),
+      0 0 20px rgba(0, 212, 255, 0.3),
+      0 0 40px rgba(0, 212, 255, 0.2);
+  }
+}
+
+/* Unified Card BG (DorkFi Design System) */
+.dorkfi-card-bg {
+  @apply bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800;
+}
+
+/* DorkFi Text Utilities */
+.dorkfi-text-primary {
+  @apply text-slate-800 dark:text-white;
+}
+.dorkfi-text-secondary {
+  @apply text-slate-600 dark:text-slate-300;
+}
+/* Unified Spacing Utilities */
+.dorkfi-gap-sm {
+  @apply gap-3;
+}
+.dorkfi-gap-md {
+  @apply gap-6;
+}
+.dorkfi-gap-lg {
+  @apply gap-8;
+}
+.dorkfi-mb-lg {
+  @apply mb-8;
+}
+
+/* --- DorkFi Design System Utilities --- */
+
+/* Card Elevation Classes */
+.dorkfi-card-elevation-sm {
+  @apply shadow-sm;
+}
+.dorkfi-card-elevation-md {
+  @apply shadow-md;
+}
+.dorkfi-card-elevation-lg {
+  @apply shadow-lg;
+}
+
+/* Border Radius Tokens */
+.dorkfi-radius-xl {
+  @apply rounded-xl;
+}
+.dorkfi-radius-lg {
+  @apply rounded-lg;
+}
+.dorkfi-radius-md {
+  @apply rounded-md;
+}
+
+/* Typography Scale */
+.dorkfi-h1 {
+  @apply text-3xl md:text-4xl font-bold dorkfi-text-primary;
+}
+.dorkfi-h2 {
+  @apply text-xl md:text-2xl font-semibold dorkfi-text-primary;
+}
+.dorkfi-h3 {
+  @apply text-lg font-semibold dorkfi-text-primary;
+}
+.dorkfi-body {
+  @apply text-sm md:text-base font-normal dorkfi-text-secondary;
+}
+.dorkfi-caption {
+  @apply text-xs md:text-sm font-medium text-muted-foreground;
+}
+
+/* Consistent Button Styles */
+.dorkfi-btn {
+  @apply rounded-lg font-semibold px-4 py-2 min-h-[44px] min-w-[92px] transition-all text-sm btn-hover-lift shadow-sm hover:shadow-md;
+}
+/* Card consistent spacing */
+.dorkfi-card {
+  @apply p-4 dorkfi-radius-xl dorkfi-card-elevation-md;
+}
+
+/* Premium Whale Button Styles */
+.whale-button {
+  @apply relative overflow-hidden transition-all duration-300 transform;
+  background: linear-gradient(135deg, #E0A90D 0%, #F4C430 100%);
+  box-shadow: 
+    0 4px 15px rgba(224, 169, 13, 0.4),
+    0 1px 0px rgba(255, 255, 255, 0.3) inset;
+}
+
+.whale-button:hover {
+  @apply scale-105;
+  box-shadow: 
+    0 8px 25px rgba(224, 169, 13, 0.6),
+    0 1px 0px rgba(255, 255, 255, 0.4) inset;
+}
+
+/* Shimmer/glare effect on hover */
+.whale-button::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  transition: left 0.6s;
+}
+
+.whale-button:hover::before {
+  left: 100%;
+}
+
+/* Custom Focus State */
+.focus-whale {
+  @apply focus:outline-none focus:ring-4 focus:ring-highlight-aqua/30 focus:ring-offset-2 focus:ring-offset-deep-navy;
+}

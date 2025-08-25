@@ -1,0 +1,57 @@
+
+import * as React from "react";
+import { cn } from "@/lib/utils";
+
+type Variant = 
+  | "primary"
+  | "secondary"
+  | "danger"
+  | "danger-outline"
+  | "critical"
+  | "high"
+  | "moderate"
+  | "safe"
+  | "borrow"
+  | "borrow-outline";
+
+interface DorkFiButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: Variant;
+  children: React.ReactNode;
+  className?: string;
+}
+
+const variantClasses: Record<Variant, string> = {
+  primary: "bg-ocean-teal hover:bg-ocean-teal/90 text-white",
+  secondary: "border border-ocean-teal text-ocean-teal hover:bg-ocean-teal/10",
+  danger: "bg-red-500 hover:bg-red-600 text-white",
+  "danger-outline": "border border-red-500 text-red-500 hover:bg-red-500 hover:text-white",
+  critical: "bg-destructive text-destructive-foreground hover:bg-destructive/90 border-none",
+  high: "bg-accent text-accent-foreground hover:bg-accent/90 border-none",
+  moderate: "bg-whale-gold text-white hover:bg-whale-gold/90 border-none",
+  safe: "bg-ocean-teal text-white hover:bg-ocean-teal/90 border-none",
+  borrow: "bg-whale-gold text-white hover:bg-whale-gold/90 border-none",
+  "borrow-outline": "border border-whale-gold text-whale-gold hover:bg-whale-gold hover:text-white"
+};
+
+// All buttons standardized: min-h-[44px] min-w-[92px] px-4 py-2 text-sm font-semibold rounded-lg btn-hover-lift shadow-sm/hover:shadow-md transition-all, flex/center content, gap-1
+const DorkFiButton = React.forwardRef<HTMLButtonElement, DorkFiButtonProps>(
+  ({ variant = "primary", className, children, ...props }, ref) => (
+    <button
+      ref={ref}
+      className={cn(
+        "rounded-lg font-semibold px-4 py-2 min-h-[44px] min-w-[92px] text-sm btn-hover-lift shadow-sm hover:shadow-md transition-all flex items-center justify-center gap-1",
+        variantClasses[variant],
+        className
+      )}
+      type={props.type || "button"}
+      tabIndex={props.onClick ? 0 : -1}
+      style={{ pointerEvents: props.onClick ? "auto" : "none" }}
+      {...props}
+    >
+      {children}
+    </button>
+  )
+);
+
+DorkFiButton.displayName = "DorkFiButton";
+export default DorkFiButton;
