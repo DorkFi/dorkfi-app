@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import DorkFiButton from "@/components/ui/DorkFiButton";
 import CanvasBubbles from "@/components/CanvasBubbles";
+import Header from "@/components/Header";
 
 /**
  * PreFi Frontend – Single-file MVP Dashboard
@@ -284,6 +285,7 @@ export default function PreFiDashboard() {
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [txLog, setTxLog] = useState<Array<{ ts: number; marketId: string; amount: number; txId: string }>>([]);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [activeTab, setActiveTab] = useState("prefi");
 
   const launchTs = PROGRAM.LAUNCH_TIMESTAMP;
 
@@ -374,6 +376,8 @@ export default function PreFiDashboard() {
       <div className="hidden dark:block">
         <CanvasBubbles />
       </div>
+
+      <Header activeTab={activeTab} onTabChange={setActiveTab} />
 
       {/* Header */}
       <header className="mx-auto max-w-6xl px-4 pt-8 relative z-10">

@@ -22,6 +22,8 @@ const Header = ({ activeTab, onTabChange }: HeaderProps) => {
     
     if (value === 'liquidations') {
       navigate('/liquidation-markets');
+    } else if (value === 'prefi') {
+      navigate('/prefi');
     } else {
       navigate('/');
     }
@@ -40,6 +42,7 @@ const Header = ({ activeTab, onTabChange }: HeaderProps) => {
     { value: 'portfolio', label: 'Portfolio' },
     { value: 'liquidations', label: 'Liquidations' },
     { value: 'swap', label: 'Swap' },
+    { value: 'prefi', label: 'PreFi' },
   ];
 
   return (
