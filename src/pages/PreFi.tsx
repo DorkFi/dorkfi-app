@@ -474,11 +474,11 @@ export default function PreFiDashboard() {
               <span className="hero-header">PreFi Deposit Incentives</span>
             </H1>
             <Body className="text-sm sm:text-base md:text-lg lg:text-xl max-w-2xl mx-auto">
-              <span className="block md:inline">
+              <span className="block md:inline md:whitespace-nowrap">
                 Earlier, larger deposits earn a greater share. All deposits remain in your wallet via on-chain contracts.
               </span>
               <br className="hidden md:block" />
-              <span className="block md:inline">
+              <span className="block md:inline md:whitespace-nowrap">
                 Prefund Now / Connect Wallet / Start Earning Pre-launch
               </span>
             </Body>
