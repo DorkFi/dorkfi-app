@@ -618,10 +618,10 @@ export default function PreFiDashboard() {
                             className="w-24 rounded-xl border border-border bg-input px-3 py-1.5 text-sm text-foreground outline-none focus:border-accent focus:ring-1 focus:ring-ring transition-colors"
                           />
                           <DorkFiButton
-                            variant="primary"
+                            variant="secondary"
                             disabled={!wallet.connected || loading}
                             onClick={() => handleDeposit(m)}
-                            className="inline-flex items-center gap-2 text-xs px-3 py-1.5 min-h-[32px] min-w-[80px]"
+                            className="text-sm"
                           >
                             <ArrowDownCircle className="h-4 w-4" /> Deposit
                           </DorkFiButton>
