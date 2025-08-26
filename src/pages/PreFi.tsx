@@ -498,7 +498,7 @@ export default function PreFiDashboard() {
 
 
       {/* Markets */}
-      <main className="mx-auto max-w-6xl px-4 py-8 relative z-10">
+      <main className="mx-auto max-w-7xl px-4 py-8 relative z-10">
         <div className="overflow-hidden rounded-2xl border border-border bg-card">
           {/* Market Overview Header */}
           <div className="border-b border-border/60 bg-card/60 p-6">
