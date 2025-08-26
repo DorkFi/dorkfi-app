@@ -509,7 +509,9 @@ export default function PreFiDashboard() {
               </DorkFiButton>
             </div>
             <div className="space-y-3 text-sm text-muted-foreground">
-              <p>PreFi lets early supporters earn VOI rewards by pre-depositing into upcoming DorkFi markets. Deposits are non-custodial and tracked on-chain, and your share of the 2,000,000 VOI pool is time-weighted—earlier, larger deposits earn more at launch.</p>
+              <p>PreFi lets early supporters earn VOI rewards by pre-depositing into upcoming DorkFi markets.</p>
+              <p>Deposits are non-custodial and tracked on-chain, and your share of the 2,000,000 VOI.</p>
+              <p>The pool is time-weighted—earlier, larger deposits earn more at launch.</p>
             </div>
           </div>
           <div className="overflow-x-auto">
