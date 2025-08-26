@@ -19,6 +19,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import WalletButton from "@/components/WalletButton";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import { H1, Body } from "@/components/ui/Typography";
+import SimpleBubbleChart from "@/components/liquidation/SimpleBubbleChart";
 
 /**
  * PreFi Frontend – Single-file MVP Dashboard
@@ -289,6 +290,8 @@ export default function PreFiDashboard() {
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [txLog, setTxLog] = useState<Array<{ ts: number; marketId: string; amount: number; txId: string }>>([]);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [selectedMarketId, setSelectedMarketId] = useState<string | null>(null);
+  const [isBubbleVolumeView, setIsBubbleVolumeView] = useState(true);
 
   const launchTs = PROGRAM.LAUNCH_TIMESTAMP;
 
@@ -365,6 +368,52 @@ export default function PreFiDashboard() {
     }
     return sum;
   }, [marketsState]);
+
+  const bubbleData = useMemo(() => {
+    return MARKETS.map((m) => {
+      const st = marketsState[m.id];
+      const deposited = st ? fromBase(st.depositedBase, m.decimals) : 0;
+      return {
+        id: m.id,
+        symbol: m.symbol,
+        name: m.name,
+        icon: '', // Empty icon for now
+        value: deposited,
+        count: deposited > 0 ? 1 : 0,
+        successRate: Math.random() * 100, // Mock data
+        change24h: (Math.random() - 0.5) * 20, // Mock 24h change
+        lastLiquidation: new Date().toISOString(),
+        borrowPoolPercentage: Math.random() * 100,
+      };
+    });
+  }, [marketsState]);
+
+  const getMarketColor = (marketId: string) => {
+    const colors = {
+      voi: '#3B82F6',
+      ausd: '#10B981',
+      unit: '#8B5CF6',
+      btc: '#F59E0B',
+      eth: '#6366F1',
+      algo: '#EF4444',
+    };
+    return colors[marketId as keyof typeof colors] || '#64748B';
+  };
+
+  const handleBubbleSelect = (bubble: any) => {
+    setSelectedMarketId(bubble ? bubble.id : null);
+    // Scroll to the corresponding table row
+    if (bubble && bubble.id) {
+      const tableRow = document.getElementById(`market-row-${bubble.id}`);
+      if (tableRow) {
+        tableRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  };
+
+  const handleTableRowClick = (marketId: string) => {
+    setSelectedMarketId(marketId);
+  };
 
   return (
     <div className="min-h-screen bg-background relative">
@@ -526,6 +575,40 @@ export default function PreFiDashboard() {
         </DorkFiCard>
       </section>
 
+      {/* Distribution Bubble Chart */}
+      <section className="mx-auto max-w-7xl px-4 py-4 relative z-10">
+        <DorkFiCard className="p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-bold text-card-foreground">Asset Distribution</h2>
+            <div className="flex items-center gap-2">
+              <DorkFiButton
+                variant={isBubbleVolumeView ? "primary" : "secondary"}
+                onClick={() => setIsBubbleVolumeView(true)}
+                className="text-sm px-3 py-1"
+              >
+                Volume
+              </DorkFiButton>
+              <DorkFiButton
+                variant={!isBubbleVolumeView ? "primary" : "secondary"}
+                onClick={() => setIsBubbleVolumeView(false)}
+                className="text-sm px-3 py-1"
+              >
+                Count
+              </DorkFiButton>
+            </div>
+          </div>
+          <div className="min-h-[400px]">
+            <SimpleBubbleChart
+              data={bubbleData}
+              isVolumeView={isBubbleVolumeView}
+              onViewChange={setIsBubbleVolumeView}
+              onTokenSelect={handleBubbleSelect}
+              selectedTokenId={selectedMarketId || undefined}
+            />
+          </div>
+        </DorkFiCard>
+      </section>
+
       {/* Markets */}
       <main className="mx-auto max-w-7xl px-4 py-8 relative z-10">
         <div className="overflow-hidden rounded-2xl border border-border bg-card">
@@ -559,10 +642,14 @@ export default function PreFiDashboard() {
                   return (
                     <motion.tr
                       key={m.id}
+                      id={`market-row-${m.id}`}
                       initial={{ opacity: 0, y: 12 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.3, delay: index * 0.1 }}
-                      className="border-t border-border hover:bg-secondary/20 transition-colors"
+                      className={`border-t border-border hover:bg-secondary/20 transition-colors cursor-pointer ${
+                        selectedMarketId === m.id ? 'bg-ocean-teal/10 border-ocean-teal/30' : ''
+                      }`}
+                      onClick={() => handleTableRowClick(m.id)}
                     >
                       {/* Asset */}
                       <td className="px-6 py-4">
