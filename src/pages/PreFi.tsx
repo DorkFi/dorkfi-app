@@ -503,7 +503,7 @@ export default function PreFiDashboard() {
           {/* Market Overview Header */}
           <div className="border-b border-border/60 bg-card/60 p-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-card-foreground">Distribution Mechanics</h2>
+              <h2 className="text-xl font-bold text-card-foreground">How it works</h2>
               <DorkFiButton variant="secondary" className="text-sm">
                 Learn More
               </DorkFiButton>
