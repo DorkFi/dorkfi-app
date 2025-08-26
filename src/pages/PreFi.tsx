@@ -475,7 +475,7 @@ export default function PreFiDashboard() {
             </H1>
             <Body className="text-sm sm:text-base md:text-lg lg:text-xl max-w-2xl md:max-w-none mx-auto text-center">
               <span className="block md:inline md:whitespace-nowrap">
-                Pre-fund Now / Connect Wallet / Start Earning Incentives
+                Connect Wallet/ Deposit Now/ Start Earning Incentives
               </span>
               <br className="hidden md:block" />
               <span className="block md:inline md:whitespace-nowrap">
