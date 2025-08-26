@@ -509,10 +509,9 @@ export default function PreFiDashboard() {
               </DorkFiButton>
             </div>
             <div className="space-y-3 text-sm text-muted-foreground">
-              <p>Time-weighted distribution based on amount deposited prior to launch, relative to total prefunded supply</p>
-              <p>Earlier and larger deposits earn a greater share of the rewards</p>
-              <p>Rewards distributed in VOI or VOI-equivalent assets</p>
-              <p>Eligibility tracked via on-chain deposits into prefunding contracts per market</p>
+              <p>Connect your wallet → choose a market → meet the minimum → deposit to pre-fund.</p>
+              <p>Rewards are time-weighted (amount × time) and deposits remain non-custodial on-chain.</p>
+              <p>Rewards distributed in VOI.</p>
             </div>
           </div>
           <div className="overflow-x-auto">
