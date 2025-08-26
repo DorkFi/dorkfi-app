@@ -510,22 +510,10 @@ export default function PreFiDashboard() {
             </div>
             <div className="text-sm text-muted-foreground mb-3">What You Can Do Here:</div>
             <div className="space-y-3 text-sm text-muted-foreground">
-              <div className="flex items-start gap-3">
-                <div className="w-2 h-2 rounded-full bg-ocean-teal mt-1.5 flex-shrink-0"></div>
-                <p>Time-weighted distribution based on amount deposited prior to launch, relative to total prefunded supply</p>
-              </div>
-              <div className="flex items-start gap-3">
-                <div className="w-2 h-2 rounded-full bg-ocean-teal mt-1.5 flex-shrink-0"></div>
-                <p>Earlier and larger deposits earn a greater share of the rewards</p>
-              </div>
-              <div className="flex items-start gap-3">
-                <div className="w-2 h-2 rounded-full bg-ocean-teal mt-1.5 flex-shrink-0"></div>
-                <p>Rewards distributed in VOI or VOI-equivalent assets</p>
-              </div>
-              <div className="flex items-start gap-3">
-                <div className="w-2 h-2 rounded-full bg-ocean-teal mt-1.5 flex-shrink-0"></div>
-                <p>Eligibility tracked via on-chain deposits into prefunding contracts per market</p>
-              </div>
+              <p>Time-weighted distribution based on amount deposited prior to launch, relative to total prefunded supply</p>
+              <p>Earlier and larger deposits earn a greater share of the rewards</p>
+              <p>Rewards distributed in VOI or VOI-equivalent assets</p>
+              <p>Eligibility tracked via on-chain deposits into prefunding contracts per market</p>
             </div>
           </div>
           <div className="overflow-x-auto">
