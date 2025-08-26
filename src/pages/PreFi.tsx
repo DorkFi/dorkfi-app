@@ -471,7 +471,7 @@ export default function PreFiDashboard() {
 
           <div className="relative z-10 text-center">
             <H1 className="m-0 text-4xl md:text-5xl text-center">
-              <span className="hero-header">PreFi Deposit Incentives</span>
+              <span className="hero-header">PreFi Deposit</span>
             </H1>
             <Body className="text-sm sm:text-base md:text-lg lg:text-xl max-w-2xl md:max-w-none mx-auto text-center">
               <span className="block md:inline md:whitespace-nowrap">
