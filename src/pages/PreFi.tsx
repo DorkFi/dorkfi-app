@@ -499,27 +499,27 @@ export default function PreFiDashboard() {
       {/* Distribution Mechanics */}
       <section className="mx-auto max-w-7xl px-4 py-4 relative z-10">
         <DorkFiCard className="p-6">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="rounded-xl border border-border bg-card p-2">
-              <TrendingUp className="h-5 w-5 text-accent" />
-            </div>
+          <div className="flex items-center justify-between mb-6">
             <h2 className="text-xl font-bold text-card-foreground">Distribution Mechanics</h2>
+            <DorkFiButton variant="secondary" className="text-sm">
+              Learn More
+            </DorkFiButton>
           </div>
-          <div className="space-y-3 text-sm text-muted-foreground">
+          <div className="space-y-4 text-sm text-muted-foreground">
             <div className="flex items-start gap-3">
-              <div className="w-1.5 h-1.5 rounded-full bg-accent mt-2 flex-shrink-0"></div>
+              <div className="w-2 h-2 rounded-full bg-ocean-teal mt-1.5 flex-shrink-0"></div>
               <p>Time-weighted distribution based on amount deposited prior to launch, relative to total prefunded supply</p>
             </div>
             <div className="flex items-start gap-3">
-              <div className="w-1.5 h-1.5 rounded-full bg-accent mt-2 flex-shrink-0"></div>
+              <div className="w-2 h-2 rounded-full bg-ocean-teal mt-1.5 flex-shrink-0"></div>
               <p>Earlier and larger deposits earn a greater share of the rewards</p>
             </div>
             <div className="flex items-start gap-3">
-              <div className="w-1.5 h-1.5 rounded-full bg-accent mt-2 flex-shrink-0"></div>
+              <div className="w-2 h-2 rounded-full bg-ocean-teal mt-1.5 flex-shrink-0"></div>
               <p>Rewards distributed in VOI or VOI-equivalent assets</p>
             </div>
             <div className="flex items-start gap-3">
-              <div className="w-1.5 h-1.5 rounded-full bg-accent mt-2 flex-shrink-0"></div>
+              <div className="w-2 h-2 rounded-full bg-ocean-teal mt-1.5 flex-shrink-0"></div>
               <p>Eligibility tracked via on-chain deposits into prefunding contracts per market</p>
             </div>
           </div>
