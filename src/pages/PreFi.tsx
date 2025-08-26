@@ -509,7 +509,7 @@ export default function PreFiDashboard() {
               </DorkFiButton>
             </div>
             <div className="space-y-3 text-sm text-muted-foreground">
-              <p>PreFi is a pre-launch pre-funding program that lets users deposit into upcoming DorkFi lending markets before we go live. Deposits are held non-custodially in on-chain contracts, and your share of a 2,000,000 VOI reward pool is time-weighted—the earlier and larger your deposit, the greater your share at launch.</p>
+              <p>PreFi lets early supporters earn VOI rewards by pre-depositing into upcoming DorkFi markets. Deposits are non-custodial and tracked on-chain, and your share of the 2,000,000 VOI pool is time-weighted—earlier, larger deposits earn more at launch.</p>
             </div>
           </div>
           <div className="overflow-x-auto">
