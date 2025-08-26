@@ -635,52 +635,6 @@ export default function PreFiDashboard() {
           </div>
         </div>
 
-        {/* Activity */}
-        <section className="mt-10">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-lg font-bold text-card-foreground">Activity</h2>
-            <DorkFiButton
-              variant="secondary"
-              onClick={() => setRefreshKey((k) => k + 1)}
-              className="inline-flex items-center gap-2 text-xs px-3 py-1.5 min-h-[32px] min-w-[80px]"
-            >
-              <RefreshCcw className="h-4 w-4" /> Refresh
-            </DorkFiButton>
-          </div>
-          <div className="overflow-hidden rounded-2xl border border-border">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-secondary text-muted-foreground">
-                <tr>
-                  <th className="px-4 py-2">Time</th>
-                  <th className="px-4 py-2">Market</th>
-                  <th className="px-4 py-2">Amount</th>
-                  <th className="px-4 py-2">Tx</th>
-                </tr>
-              </thead>
-              <tbody className="bg-card/50">
-                {txLog.length === 0 ? (
-                  <tr>
-                    <td className="px-4 py-3 text-muted-foreground" colSpan={4}>No transactions yet.</td>
-                  </tr>
-                ) : (
-                  txLog.map((t, i) => (
-                    <tr key={i} className="border-t border-border">
-                      <td className="px-4 py-3 tabular-nums text-card-foreground">{new Date(t.ts).toLocaleString()}</td>
-                      <td className="px-4 py-3 uppercase text-primary font-semibold">{t.marketId}</td>
-                      <td className="px-4 py-3 tabular-nums text-card-foreground">{fmt.format(t.amount)}</td>
-                      <td className="px-4 py-3">
-                        <a className="inline-flex items-center gap-1 text-sm font-medium text-accent hover:text-accent/80 underline transition-colors" href="#" onClick={(e) => e.preventDefault()}>
-                          <ExternalLink className="h-4 w-4" /> View
-                        </a>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
         {/* Disclaimers */}
         <section className="mt-8">
           <div className="rounded-2xl border border-border bg-card p-4 text-xs text-muted-foreground">
