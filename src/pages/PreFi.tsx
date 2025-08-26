@@ -496,39 +496,38 @@ export default function PreFiDashboard() {
         </div>
       </header>
 
-      {/* Distribution Mechanics */}
-      <section className="mx-auto max-w-7xl px-4 py-4 relative z-10">
-        <DorkFiCard className="p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-bold text-card-foreground">Distribution Mechanics</h2>
-            <DorkFiButton variant="secondary" className="text-sm">
-              Learn More
-            </DorkFiButton>
-          </div>
-          <div className="space-y-4 text-sm text-muted-foreground">
-            <div className="flex items-start gap-3">
-              <div className="w-2 h-2 rounded-full bg-ocean-teal mt-1.5 flex-shrink-0"></div>
-              <p>Time-weighted distribution based on amount deposited prior to launch, relative to total prefunded supply</p>
-            </div>
-            <div className="flex items-start gap-3">
-              <div className="w-2 h-2 rounded-full bg-ocean-teal mt-1.5 flex-shrink-0"></div>
-              <p>Earlier and larger deposits earn a greater share of the rewards</p>
-            </div>
-            <div className="flex items-start gap-3">
-              <div className="w-2 h-2 rounded-full bg-ocean-teal mt-1.5 flex-shrink-0"></div>
-              <p>Rewards distributed in VOI or VOI-equivalent assets</p>
-            </div>
-            <div className="flex items-start gap-3">
-              <div className="w-2 h-2 rounded-full bg-ocean-teal mt-1.5 flex-shrink-0"></div>
-              <p>Eligibility tracked via on-chain deposits into prefunding contracts per market</p>
-            </div>
-          </div>
-        </DorkFiCard>
-      </section>
 
       {/* Markets */}
       <main className="mx-auto max-w-7xl px-4 py-8 relative z-10">
         <div className="overflow-hidden rounded-2xl border border-border bg-card">
+          {/* Market Overview Header */}
+          <div className="border-b border-border/60 bg-card/60 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-card-foreground">Market Overview</h2>
+              <DorkFiButton variant="secondary" className="text-sm">
+                Learn More
+              </DorkFiButton>
+            </div>
+            <div className="text-sm text-muted-foreground mb-3">What You Can Do Here:</div>
+            <div className="space-y-3 text-sm text-muted-foreground">
+              <div className="flex items-start gap-3">
+                <div className="w-2 h-2 rounded-full bg-ocean-teal mt-1.5 flex-shrink-0"></div>
+                <p>Time-weighted distribution based on amount deposited prior to launch, relative to total prefunded supply</p>
+              </div>
+              <div className="flex items-start gap-3">
+                <div className="w-2 h-2 rounded-full bg-ocean-teal mt-1.5 flex-shrink-0"></div>
+                <p>Earlier and larger deposits earn a greater share of the rewards</p>
+              </div>
+              <div className="flex items-start gap-3">
+                <div className="w-2 h-2 rounded-full bg-ocean-teal mt-1.5 flex-shrink-0"></div>
+                <p>Rewards distributed in VOI or VOI-equivalent assets</p>
+              </div>
+              <div className="flex items-start gap-3">
+                <div className="w-2 h-2 rounded-full bg-ocean-teal mt-1.5 flex-shrink-0"></div>
+                <p>Eligibility tracked via on-chain deposits into prefunding contracts per market</p>
+              </div>
+            </div>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead className="bg-secondary/60 text-muted-foreground">
