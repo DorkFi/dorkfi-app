@@ -475,11 +475,11 @@ export default function PreFiDashboard() {
             </H1>
             <Body className="text-sm sm:text-base md:text-lg lg:text-xl max-w-2xl md:max-w-none mx-auto text-center">
               <span className="block md:inline md:whitespace-nowrap">
-                Earlier, larger deposits earn a greater share. All deposits remain in your wallet via on-chain contracts.
+                Pre-fund Now / Connect Wallet / Start Earning Incentives.
               </span>
               <br className="hidden md:block" />
               <span className="block md:inline md:whitespace-nowrap">
-                Prefund Now / Connect Wallet / Start Earning Pre-launch
+                Earlier, larger deposits earn a greater share.
               </span>
             </Body>
           </div>
