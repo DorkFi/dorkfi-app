@@ -373,17 +373,24 @@ export default function PreFiDashboard() {
     return MARKETS.map((m) => {
       const st = marketsState[m.id];
       const deposited = st ? fromBase(st.depositedBase, m.decimals) : 0;
+      
+      // Ensure all values are finite numbers with minimums to prevent canvas errors
+      const safeValue = Math.max(0.01, isFinite(deposited) ? deposited : 0.01);
+      const safeSuccessRate = Math.max(1, Math.min(100, Math.random() * 100));
+      const safeChange24h = Math.max(-50, Math.min(50, (Math.random() - 0.5) * 20));
+      const safeBorrowPercentage = Math.max(1, Math.min(100, Math.random() * 100));
+      
       return {
         id: m.id,
         symbol: m.symbol,
         name: m.name,
         icon: '', // Empty icon for now
-        value: deposited,
-        count: deposited > 0 ? 1 : 0,
-        successRate: Math.random() * 100, // Mock data
-        change24h: (Math.random() - 0.5) * 20, // Mock 24h change
+        value: safeValue,
+        count: Math.max(1, deposited > 0 ? 1 : 0), // Minimum count of 1
+        successRate: safeSuccessRate,
+        change24h: safeChange24h,
         lastLiquidation: new Date().toISOString(),
-        borrowPoolPercentage: Math.random() * 100,
+        borrowPoolPercentage: safeBorrowPercentage,
       };
     });
   }, [marketsState]);
