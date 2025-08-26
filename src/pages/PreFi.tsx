@@ -508,7 +508,6 @@ export default function PreFiDashboard() {
                 Learn More
               </DorkFiButton>
             </div>
-            <div className="text-sm text-muted-foreground mb-3">What You Can Do Here:</div>
             <div className="space-y-3 text-sm text-muted-foreground">
               <p>Time-weighted distribution based on amount deposited prior to launch, relative to total prefunded supply</p>
               <p>Earlier and larger deposits earn a greater share of the rewards</p>
