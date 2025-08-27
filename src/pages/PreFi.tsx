@@ -488,9 +488,8 @@ export default function PreFiDashboard() {
 
       {/* Stats */}
       <header className="mx-auto max-w-6xl px-4 relative z-10">
-        <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <Stat label="Total VOI Rewards" value={`${fmt0.format(PROGRAM.VOI_ALLOCATION_TOTAL)} VOI`} icon={Coins} />
-          <Stat label="Launch In" value={<Countdown launchTs={launchTs} />} icon={Clock} />
           <Stat label="Your Total Deposited" value={`${fmt.format(globalDeposited)} (all mkts)`} icon={TrendingUp} />
           <Stat label="Network" value={`${wallet.network}${wallet.mockMode ? " • Mock" : ""}`} icon={BarChart3} />
         </div>
