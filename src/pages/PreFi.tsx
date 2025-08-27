@@ -556,7 +556,7 @@ export default function PreFiDashboard() {
                           <div>
                             <div className="text-sm font-semibold text-card-foreground">{m.name}</div>
                             <div className="text-xs text-muted-foreground">
-                              Min: {m.id === "btc" ? "$" : ""}{fmt.format(m.min)} {m.symbol}
+                              Min: {(m.id === "btc" || m.id === "eth") ? "$" : ""}{fmt.format(m.min)} {m.symbol}
                             </div>
                           </div>
                         </div>
