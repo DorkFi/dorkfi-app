@@ -521,7 +521,6 @@ export default function PreFiDashboard() {
                   <th className="px-6 py-4 text-sm font-medium">Wallet Balance</th>
                   <th className="px-6 py-4 text-sm font-medium">Deposited</th>
                   <th className="px-6 py-4 text-sm font-medium">Progress</th>
-                  <th className="px-6 py-4 text-sm font-medium">Est. Rewards</th>
                   <th className="px-6 py-4 text-sm font-medium">Actions</th>
                 </tr>
               </thead>
@@ -594,13 +593,6 @@ export default function PreFiDashboard() {
                             </span>
                           </div>
                           <ProgressBar value={Math.min(dep, m.min)} max={m.min} />
-                        </div>
-                      </td>
-
-                      {/* Estimated Rewards */}
-                      <td className="px-6 py-4">
-                        <div className="text-sm font-semibold text-accent tabular-nums">
-                          {fmt.format(yourEstReward)} VOI
                         </div>
                       </td>
 
