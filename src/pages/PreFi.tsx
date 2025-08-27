@@ -19,6 +19,13 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import WalletButton from "@/components/WalletButton";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import { H1, Body } from "@/components/ui/Typography";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 /**
  * PreFi Frontend – Single-file MVP Dashboard
@@ -286,9 +293,13 @@ export default function PreFiDashboard() {
   const [wallet, setWallet] = useState<WalletState>({ connected: false, network: "voi-testnet", mockMode: true });
   const [marketsState, setMarketsState] = useState<Record<string, MarketState>>({});
   const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({});
-  const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [txLog, setTxLog] = useState<Array<{ ts: number; marketId: string; amount: number; txId: string }>>([]);
   const [refreshKey, setRefreshKey] = useState(0);
+  
+  // Modal state
+  const [isDepositModalOpen, setIsDepositModalOpen] = useState(false);
+  const [selectedMarket, setSelectedMarket] = useState<Market | null>(null);
+  const [modalAmount, setModalAmount] = useState("");
 
   const launchTs = PROGRAM.LAUNCH_TIMESTAMP;
 
@@ -329,30 +340,47 @@ export default function PreFiDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wallet.connected, refreshKey]);
 
-  const handleDeposit = async (m: Market) => {
-    const num = Number(amounts[m.id] || 0);
-    if (!wallet.connected || !wallet.address || !Number.isFinite(num) || num <= 0) return;
-    const base = toBase(num, m.decimals);
-    setLoadingMap((x) => ({ ...x, [m.id]: true }));
+  // Modal handlers
+  const openDepositModal = (market: Market) => {
+    setSelectedMarket(market);
+    setModalAmount("");
+    setIsDepositModalOpen(true);
+  };
+
+  const closeDepositModal = () => {
+    setIsDepositModalOpen(false);
+    setSelectedMarket(null);
+    setModalAmount("");
+  };
+
+  const handleConfirmDeposit = async () => {
+    if (!selectedMarket || !wallet.connected || !wallet.address) return;
+    
+    const num = Number(modalAmount);
+    if (!Number.isFinite(num) || num <= 0) return;
+    
+    const base = toBase(num, selectedMarket.decimals);
+    setLoadingMap((x) => ({ ...x, [selectedMarket.id]: true }));
+    
     try {
-      const { txId } = await chainApi.depositToPrefund(wallet, m, base);
+      const { txId } = await chainApi.depositToPrefund(wallet, selectedMarket, base);
       // In production, re-pull chain state from indexer after confirmation
-      setTxLog((t) => [{ ts: Date.now(), marketId: m.id, amount: num, txId }, ...t]);
+      setTxLog((t) => [{ ts: Date.now(), marketId: selectedMarket.id, amount: num, txId }, ...t]);
       // Optimistic update in mock
       setMarketsState((s) => {
-        const cur = s[m.id];
+        const cur = s[selectedMarket.id];
         return {
           ...s,
-          [m.id]: {
+          [selectedMarket.id]: {
             walletBalanceBase: cur?.walletBalanceBase ?? 0n,
             depositedBase: (cur?.depositedBase ?? 0n) + base,
             totalStakeSecondsBase: cur?.totalStakeSecondsBase ?? 10_000_000n,
           },
         };
       });
-      setAmounts((a) => ({ ...a, [m.id]: "" }));
+      closeDepositModal();
     } finally {
-      setLoadingMap((x) => ({ ...x, [m.id]: false }));
+      setLoadingMap((x) => ({ ...x, [selectedMarket.id]: false }));
     }
   };
 
@@ -600,20 +628,11 @@ export default function PreFiDashboard() {
 
                       {/* Actions */}
                       <td className="px-6 py-4">
-                        <div className="flex items-center justify-center gap-3">
-                          <input
-                            type="number"
-                            min={0}
-                            step={1 / 10 ** m.decimals}
-                            placeholder={`Amount`}
-                            value={amounts[m.id] ?? ""}
-                            onChange={(e) => setAmounts((a) => ({ ...a, [m.id]: e.target.value }))}
-                            className="w-24 rounded-xl border border-border bg-input px-3 py-1.5 text-sm text-foreground outline-none focus:border-accent focus:ring-1 focus:ring-ring transition-colors text-center"
-                          />
+                        <div className="flex items-center justify-center">
                           <DorkFiButton
                             variant="secondary"
                             disabled={!wallet.connected || loading}
-                            onClick={() => handleDeposit(m)}
+                            onClick={() => openDepositModal(m)}
                             className="text-sm"
                           >
                             <ArrowDownCircle className="h-4 w-4" /> Deposit
@@ -652,6 +671,81 @@ export default function PreFiDashboard() {
           </div>
         </div>
       </footer>
+
+      {/* Deposit Modal */}
+      <Dialog open={isDepositModalOpen} onOpenChange={setIsDepositModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              Deposit {selectedMarket?.symbol}
+            </DialogTitle>
+          </DialogHeader>
+          
+          {selectedMarket && (
+            <div className="space-y-4 p-6">
+              {/* Wallet Balance */}
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-muted-foreground">Wallet Balance:</span>
+                <span className="font-semibold">
+                  {marketsState[selectedMarket.id] 
+                    ? fmt.format(fromBase(marketsState[selectedMarket.id].walletBalanceBase, selectedMarket.decimals))
+                    : "0"
+                  } {selectedMarket.symbol}
+                </span>
+              </div>
+              
+              {/* Minimum Requirement */}
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-muted-foreground">Minimum to Qualify:</span>
+                <span className="font-semibold">
+                  {(selectedMarket.id === "btc" || selectedMarket.id === "eth" || selectedMarket.id === "ausd") ? "$" : ""}{fmt.format(selectedMarket.min)} {selectedMarket.symbol}
+                </span>
+              </div>
+              
+              {/* Amount Input */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-card-foreground">
+                  Amount to Deposit
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  step={1 / 10 ** selectedMarket.decimals}
+                  placeholder="0.00"
+                  value={modalAmount}
+                  onChange={(e) => setModalAmount(e.target.value)}
+                  className="w-full rounded-xl border border-border bg-input px-4 py-3 text-lg text-foreground outline-none focus:border-accent focus:ring-1 focus:ring-ring transition-colors text-center"
+                  autoFocus
+                />
+              </div>
+            </div>
+          )}
+          
+          <DialogFooter className="p-6 pt-0">
+            <div className="flex gap-3 w-full">
+              <DorkFiButton
+                variant="secondary"
+                onClick={closeDepositModal}
+                className="flex-1"
+              >
+                Cancel
+              </DorkFiButton>
+              <DorkFiButton
+                variant="secondary"
+                onClick={handleConfirmDeposit}
+                disabled={!modalAmount || Number(modalAmount) <= 0 || (selectedMarket && loadingMap[selectedMarket.id])}
+                className="flex-1"
+              >
+                {selectedMarket && loadingMap[selectedMarket.id] ? (
+                  <RefreshCcw className="h-4 w-4 animate-spin" />
+                ) : (
+                  "Confirm Deposit"
+                )}
+              </DorkFiButton>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
