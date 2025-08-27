@@ -514,14 +514,14 @@ export default function PreFiDashboard() {
             </div>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-left">
+            <table className="w-full">
               <thead className="bg-secondary/60 text-muted-foreground">
                 <tr>
-                  <th className="px-6 py-4 text-sm font-medium">Asset</th>
-                  <th className="px-6 py-4 text-sm font-medium">Wallet Balance</th>
-                  <th className="px-6 py-4 text-sm font-medium">Deposited</th>
-                  <th className="px-6 py-4 text-sm font-medium">Progress</th>
-                  <th className="px-6 py-4 text-sm font-medium">Actions</th>
+                  <th className="px-6 py-4 text-sm font-medium text-left">Asset</th>
+                  <th className="px-6 py-4 text-sm font-medium text-right">Wallet Balance</th>
+                  <th className="px-6 py-4 text-sm font-medium text-right">Deposited</th>
+                  <th className="px-6 py-4 text-sm font-medium text-center w-48">Progress</th>
+                  <th className="px-6 py-4 text-sm font-medium text-center">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -563,14 +563,14 @@ export default function PreFiDashboard() {
                       </td>
 
                       {/* Wallet Balance */}
-                      <td className="px-6 py-4">
+                      <td className="px-6 py-4 text-right">
                         <div className="text-sm font-semibold tabular-nums text-card-foreground">
                           {loading ? "…" : `${fmt.format(wal)} ${m.symbol}`}
                         </div>
                       </td>
 
                       {/* Deposited */}
-                      <td className="px-6 py-4">
+                      <td className="px-6 py-4 text-right">
                         <div className="text-sm font-semibold tabular-nums text-card-foreground">
                           {loading ? "…" : `${fmt.format(dep)} ${m.symbol}`}
                         </div>
@@ -600,7 +600,7 @@ export default function PreFiDashboard() {
 
                       {/* Actions */}
                       <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center justify-center gap-3">
                           <input
                             type="number"
                             min={0}
@@ -608,7 +608,7 @@ export default function PreFiDashboard() {
                             placeholder={`Amount`}
                             value={amounts[m.id] ?? ""}
                             onChange={(e) => setAmounts((a) => ({ ...a, [m.id]: e.target.value }))}
-                            className="w-24 rounded-xl border border-border bg-input px-3 py-1.5 text-sm text-foreground outline-none focus:border-accent focus:ring-1 focus:ring-ring transition-colors"
+                            className="w-24 rounded-xl border border-border bg-input px-3 py-1.5 text-sm text-foreground outline-none focus:border-accent focus:ring-1 focus:ring-ring transition-colors text-center"
                           />
                           <DorkFiButton
                             variant="secondary"
