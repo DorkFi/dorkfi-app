@@ -10,7 +10,8 @@ import {
   TrendingUp,
   BarChart3,
   RefreshCcw,
-  ExternalLink
+  ExternalLink,
+  InfoIcon
 } from "lucide-react";
 import DorkFiButton from "@/components/ui/DorkFiButton";
 import CanvasBubbles from "@/components/CanvasBubbles";
@@ -24,8 +25,15 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent } from "@/components/ui/card";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import SupplyBorrowCongrats from "@/components/SupplyBorrowCongrats";
 
 /**
  * PreFi Frontend – Single-file MVP Dashboard
@@ -300,6 +308,8 @@ export default function PreFiDashboard() {
   const [isDepositModalOpen, setIsDepositModalOpen] = useState(false);
   const [selectedMarket, setSelectedMarket] = useState<Market | null>(null);
   const [modalAmount, setModalAmount] = useState("");
+  const [modalFiatValue, setModalFiatValue] = useState(0);
+  const [showSuccess, setShowSuccess] = useState(false);
 
   const launchTs = PROGRAM.LAUNCH_TIMESTAMP;
 
@@ -344,6 +354,8 @@ export default function PreFiDashboard() {
   const openDepositModal = (market: Market) => {
     setSelectedMarket(market);
     setModalAmount("");
+    setModalFiatValue(0);
+    setShowSuccess(false);
     setIsDepositModalOpen(true);
   };
 
@@ -351,36 +363,90 @@ export default function PreFiDashboard() {
     setIsDepositModalOpen(false);
     setSelectedMarket(null);
     setModalAmount("");
+    setModalFiatValue(0);
+    setShowSuccess(false);
+  };
+
+  // Update fiat value when amount changes
+  useEffect(() => {
+    if (modalAmount && selectedMarket) {
+      const numAmount = parseFloat(modalAmount);
+      // Mock token price - replace with real prices
+      const mockPrice = selectedMarket.id === "ausd" ? 1 : 
+                       selectedMarket.id === "voi" ? 0.05 :
+                       selectedMarket.id === "btc" ? 65000 :
+                       selectedMarket.id === "eth" ? 3000 :
+                       selectedMarket.id === "algo" ? 0.25 : 1;
+      setModalFiatValue(numAmount * mockPrice);
+    } else {
+      setModalFiatValue(0);
+    }
+  }, [modalAmount, selectedMarket]);
+
+  const handleMaxClick = () => {
+    if (selectedMarket && marketsState[selectedMarket.id]) {
+      const balance = fromBase(marketsState[selectedMarket.id].walletBalanceBase, selectedMarket.decimals);
+      setModalAmount(balance.toString());
+    }
+  };
+
+  const handleViewTransaction = () => {
+    window.open("https://testnet.algoexplorer.io/", "_blank");
+  };
+
+  const handleGoToPortfolio = () => {
+    closeDepositModal();
+    // Navigate to portfolio or main page
+  };
+
+  const handleMakeAnother = () => {
+    setShowSuccess(false);
+    setModalAmount("");
+    setModalFiatValue(0);
   };
 
   const handleConfirmDeposit = async () => {
-    if (!selectedMarket || !wallet.connected || !wallet.address) return;
+    if (!selectedMarket || !modalAmount || Number(modalAmount) <= 0) return;
     
-    const num = Number(modalAmount);
-    if (!Number.isFinite(num) || num <= 0) return;
+    const amount = Number(modalAmount);
+    const amountBase = BigInt(Math.floor(amount * 10 ** selectedMarket.decimals));
     
-    const base = toBase(num, selectedMarket.decimals);
-    setLoadingMap((x) => ({ ...x, [selectedMarket.id]: true }));
+    console.log(`[DEPOSIT] ${amount} ${selectedMarket.symbol} (${amountBase} base units)`);
+    
+    setLoadingMap(prev => ({ ...prev, [selectedMarket.id]: true }));
     
     try {
-      const { txId } = await chainApi.depositToPrefund(wallet, selectedMarket, base);
-      // In production, re-pull chain state from indexer after confirmation
-      setTxLog((t) => [{ ts: Date.now(), marketId: selectedMarket.id, amount: num, txId }, ...t]);
-      // Optimistic update in mock
-      setMarketsState((s) => {
-        const cur = s[selectedMarket.id];
+      await chainApi.depositToPrefund(wallet, selectedMarket, amountBase);
+      
+      // Update tx log
+      setTxLog(prev => [{
+        ts: Date.now(),
+        marketId: selectedMarket.id,
+        amount: amount,
+        txId: `TXN_${Math.random().toString(36).substring(2, 15)}`,
+      }, ...prev]);
+      
+      // Refresh balances (optimistic update for mock)
+      setMarketsState(prev => {
+        const current = prev[selectedMarket.id];
         return {
-          ...s,
+          ...prev,
           [selectedMarket.id]: {
-            walletBalanceBase: cur?.walletBalanceBase ?? 0n,
-            depositedBase: (cur?.depositedBase ?? 0n) + base,
-            totalStakeSecondsBase: cur?.totalStakeSecondsBase ?? 10_000_000n,
+            walletBalanceBase: current?.walletBalanceBase ?? 0n,
+            depositedBase: (current?.depositedBase ?? 0n) + amountBase,
+            totalStakeSecondsBase: current?.totalStakeSecondsBase ?? 10_000_000n,
           },
         };
       });
-      closeDepositModal();
-    } finally {
-      setLoadingMap((x) => ({ ...x, [selectedMarket.id]: false }));
+      
+      // Show success screen
+      setTimeout(() => {
+        setShowSuccess(true);
+        setLoadingMap(prev => ({ ...prev, [selectedMarket.id]: false }));
+      }, 500);
+    } catch (error) {
+      console.error("Deposit failed:", error);
+      setLoadingMap(prev => ({ ...prev, [selectedMarket.id]: false }));
     }
   };
 
@@ -673,77 +739,151 @@ export default function PreFiDashboard() {
       </footer>
 
       {/* Deposit Modal */}
-      <Dialog open={isDepositModalOpen} onOpenChange={setIsDepositModalOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>
-              Deposit {selectedMarket?.symbol}
-            </DialogTitle>
-          </DialogHeader>
-          
-          {selectedMarket && (
-            <div className="space-y-4 p-6">
-              {/* Wallet Balance */}
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-muted-foreground">Wallet Balance:</span>
-                <span className="font-semibold">
-                  {marketsState[selectedMarket.id] 
-                    ? fmt.format(fromBase(marketsState[selectedMarket.id].walletBalanceBase, selectedMarket.decimals))
-                    : "0"
-                  } {selectedMarket.symbol}
-                </span>
-              </div>
-              
-              {/* Minimum Requirement */}
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-muted-foreground">Minimum to Qualify:</span>
-                <span className="font-semibold">
-                  {(selectedMarket.id === "btc" || selectedMarket.id === "eth" || selectedMarket.id === "ausd") ? "$" : ""}{fmt.format(selectedMarket.min)} {selectedMarket.symbol}
-                </span>
-              </div>
-              
-              {/* Amount Input */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-card-foreground">
-                  Amount to Deposit
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  step={1 / 10 ** selectedMarket.decimals}
-                  placeholder="0.00"
-                  value={modalAmount}
-                  onChange={(e) => setModalAmount(e.target.value)}
-                  className="w-full rounded-xl border border-border bg-input px-4 py-3 text-lg text-foreground outline-none focus:border-accent focus:ring-1 focus:ring-ring transition-colors text-center"
-                  autoFocus
-                />
-              </div>
+      <Dialog open={isDepositModalOpen} onOpenChange={closeDepositModal}>
+        <DialogContent className="bg-card dark:bg-slate-900 rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl card-hover hover:shadow-lg hover:border-ocean-teal/40 transition-all max-w-md px-0 py-0">
+          {showSuccess ? (
+            <div className="p-6">
+              <SupplyBorrowCongrats
+                transactionType="deposit"
+                asset={selectedMarket?.symbol || ""}
+                assetIcon={selectedMarket ? `/lovable-uploads/dorkfi_${selectedMarket.symbol.toLowerCase()}_icon.png` : ""}
+                amount={modalAmount}
+                onViewTransaction={handleViewTransaction}
+                onGoToPortfolio={handleGoToPortfolio}
+                onMakeAnother={handleMakeAnother}
+                onClose={closeDepositModal}
+              />
             </div>
-          )}
-          
-          <DialogFooter className="p-6 pt-0">
-            <div className="flex gap-3 w-full">
-              <DorkFiButton
-                variant="secondary"
-                onClick={closeDepositModal}
-                className="flex-1"
-              >
-                Cancel
-              </DorkFiButton>
-              <DorkFiButton
-                variant="secondary"
-                onClick={handleConfirmDeposit}
-                disabled={!modalAmount || Number(modalAmount) <= 0 || (selectedMarket && loadingMap[selectedMarket.id])}
-                className="flex-1"
-              >
-                {selectedMarket && loadingMap[selectedMarket.id] ? (
-                  <RefreshCcw className="h-4 w-4 animate-spin" />
-                ) : (
-                  "Confirm Deposit"
+          ) : (
+            <>
+              <DialogHeader className="pt-6 px-8 pb-1">
+                <DialogTitle className="text-2xl font-bold text-center text-slate-800 dark:text-white">
+                  Deposit
+                </DialogTitle>
+                <DialogDescription className="text-center mt-1 text-sm text-slate-400 dark:text-slate-400">
+                  Enter the amount to deposit. Your available balance and requirements are shown below.
+                </DialogDescription>
+                {selectedMarket && (
+                  <div className="flex items-center justify-center gap-3 pb-2 mt-3">
+                    <div className="rounded-xl border border-border bg-primary/10 px-3 py-1">
+                      <div className="text-sm font-bold text-primary">{selectedMarket.symbol}</div>
+                    </div>
+                    <span className="text-xl font-semibold text-slate-800 dark:text-white">{selectedMarket.name}</span>
+                  </div>
                 )}
-              </DorkFiButton>
-            </div>
-          </DialogFooter>
+              </DialogHeader>
+              
+              {selectedMarket && (
+                <div className="space-y-6 pt-2 px-8 pb-8">
+                  <div className="space-y-3">
+                    <Label htmlFor="amount" className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                      Amount
+                    </Label>
+                    <div className="relative">
+                      <Input
+                        id="amount"
+                        type="number"
+                        inputMode="decimal"
+                        placeholder="0.0"
+                        autoFocus
+                        value={modalAmount}
+                        onChange={(e) => setModalAmount(e.target.value)}
+                        className="bg-white/80 dark:bg-slate-800 border-gray-300 dark:border-slate-600 text-slate-800 dark:text-white pr-16 text-lg h-12"
+                      />
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={handleMaxClick}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-teal-400 hover:bg-teal-400/10 h-8 px-3"
+                      >
+                        MAX
+                      </Button>
+                    </div>
+                    {modalFiatValue > 0 && (
+                      <p className="text-sm text-slate-500 dark:text-slate-400">
+                        ≈ ${modalFiatValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </p>
+                    )}
+                    <p className="text-xs text-slate-400 dark:text-slate-500">
+                      Wallet Balance: {marketsState[selectedMarket.id] 
+                        ? fmt.format(fromBase(marketsState[selectedMarket.id].walletBalanceBase, selectedMarket.decimals))
+                        : "0"
+                      } {selectedMarket.symbol}
+                    </p>
+                  </div>
+
+                  <Card className="bg-white/80 dark:bg-slate-800 border-gray-200 dark:border-slate-700">
+                    <CardContent className="p-4 space-y-3">
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-slate-500 dark:text-slate-400">Minimum to Qualify</span>
+                          <Tooltip>
+                             <TooltipTrigger asChild>
+                               <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                             </TooltipTrigger>
+                            <TooltipContent>
+                              <p>Minimum deposit required to qualify for Phase 0 rewards</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
+                        <span className="text-sm font-medium text-slate-800 dark:text-white">
+                          {(selectedMarket.id === "btc" || selectedMarket.id === "eth" || selectedMarket.id === "ausd") ? "$" : ""}{fmt.format(selectedMarket.min)} {selectedMarket.symbol}
+                        </span>
+                      </div>
+
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-slate-500 dark:text-slate-400">Current Deposited</span>
+                          <Tooltip>
+                             <TooltipTrigger asChild>
+                               <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                             </TooltipTrigger>
+                            <TooltipContent>
+                              <p>Amount you have already deposited for this market</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
+                        <span className="text-sm font-medium text-slate-800 dark:text-white">
+                          {marketsState[selectedMarket.id] 
+                            ? fmt.format(fromBase(marketsState[selectedMarket.id].depositedBase, selectedMarket.decimals))
+                            : "0"
+                          } {selectedMarket.symbol}
+                        </span>
+                      </div>
+
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-slate-500 dark:text-slate-400">Launch Countdown</span>
+                          <Tooltip>
+                             <TooltipTrigger asChild>
+                               <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                             </TooltipTrigger>
+                            <TooltipContent>
+                              <p>Time remaining until market launch and reward distribution</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
+                        <span className="text-sm font-medium text-teal-600 dark:text-teal-400">
+                          {Math.floor((launchTs - Date.now()) / (1000 * 60 * 60 * 24))} days
+                        </span>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Button
+                    onClick={handleConfirmDeposit}
+                    disabled={!modalAmount || Number(modalAmount) <= 0 || loadingMap[selectedMarket.id]}
+                    className="w-full font-semibold text-white h-12 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loadingMap[selectedMarket.id] ? (
+                      <RefreshCcw className="h-4 w-4 animate-spin mr-2" />
+                    ) : null}
+                    Deposit {selectedMarket.symbol}
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </div>
