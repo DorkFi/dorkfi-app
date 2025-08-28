@@ -352,11 +352,13 @@ export default function PreFiDashboard() {
 
   // Modal handlers
   const openDepositModal = (market: Market) => {
+    console.log("Opening deposit modal for", market.symbol);
     setSelectedMarket(market);
     setModalAmount("");
     setModalFiatValue(0);
     setShowSuccess(false);
     setIsDepositModalOpen(true);
+    console.log("Modal should be open now, isDepositModalOpen:", true);
   };
 
   const closeDepositModal = () => {
@@ -697,8 +699,11 @@ export default function PreFiDashboard() {
                         <div className="flex items-center justify-center">
                           <DorkFiButton
                             variant="secondary"
-                            disabled={!wallet.connected || loading}
-                            onClick={() => openDepositModal(m)}
+                            disabled={loading}
+                            onClick={() => {
+                              console.log("Deposit clicked for", m.symbol);
+                              openDepositModal(m);
+                            }}
                             className="text-sm"
                           >
                             <ArrowDownCircle className="h-4 w-4" /> Deposit
