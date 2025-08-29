@@ -875,10 +875,18 @@ export default function PreFiDashboard() {
                 </DialogDescription>
                 {selectedMarket && (
                   <div className="flex items-center justify-center gap-3 pb-2 mt-3">
+                     <img 
+                       src={getTokenImagePath(selectedMarket.symbol)} 
+                       alt={selectedMarket.symbol}
+                       className="w-10 h-10 rounded-full"
+                       onError={(e) => {
+                         e.currentTarget.src = '/placeholder.svg';
+                       }}
+                     />
                      <div className="rounded-xl border border-border bg-primary/10 px-3 py-1">
                        <div className="text-sm font-bold text-primary">{selectedMarket.symbol}</div>
                      </div>
-                    <span className="text-xl font-semibold text-slate-800 dark:text-white">{selectedMarket.symbol}</span>
+                    <span className="text-xl font-semibold text-slate-800 dark:text-white">{selectedMarket.name}</span>
                   </div>
                 )}
               </DialogHeader>
