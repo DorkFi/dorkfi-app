@@ -153,6 +153,16 @@ const MARKETS: Market[] = [
     contractAddress: "APP_ID_ALGO_PREFUND", // TODO
     decimals: 6,
   },
+  {
+    id: "pow",
+    name: "POW",
+    symbol: "POW",
+    min: 20, // USD equivalent
+    tokenStandard: "arc200",
+    assetId: "ARC200_ID_POW", // TODO
+    contractAddress: "APP_ID_POW_PREFUND", // TODO
+    decimals: 6,
+  },
 ];
 
 /*************************
@@ -386,11 +396,12 @@ export default function PreFiDashboard() {
       const numAmount = parseFloat(modalAmount);
                       // Mock token price - replace with real prices
                       const mockPrice = selectedMarket.id === "ausd" ? 1 : 
-                                       selectedMarket.id === "voi" ? 0.05 :
-                                       selectedMarket.id === "btc" ? 65000 :
-                                       selectedMarket.id === "cbbtc" ? 65000 :
-                                       selectedMarket.id === "eth" ? 3000 :
-                                       selectedMarket.id === "algo" ? 0.25 : 1;
+                                        selectedMarket.id === "voi" ? 0.05 :
+                                        selectedMarket.id === "btc" ? 65000 :
+                                        selectedMarket.id === "cbbtc" ? 65000 :
+                                        selectedMarket.id === "eth" ? 3000 :
+                                        selectedMarket.id === "algo" ? 0.25 :
+                                        selectedMarket.id === "pow" ? 0.10 : 1;
       setModalFiatValue(numAmount * mockPrice);
     } else {
       setModalFiatValue(0);

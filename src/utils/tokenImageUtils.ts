@@ -11,7 +11,8 @@ export const getTokenImagePath = (symbol: string): string => {
     'WBTC': '/lovable-uploads/WrappedBTC.png',
     'cbBTC': '/lovable-uploads/cbBTC.png',
     'ETH': '/lovable-uploads/ETH.jpg',
-    'ALGO': '/lovable-uploads/Algo.webp'
+    'ALGO': '/lovable-uploads/Algo.webp',
+    'POW': '/lovable-uploads/POW.png'
   };
   
   return tokenImageMap[cleanSymbol] || '/placeholder.svg';
