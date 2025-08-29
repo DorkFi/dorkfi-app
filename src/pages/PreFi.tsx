@@ -680,7 +680,7 @@ export default function PreFiDashboard() {
                            <div>
                              <div className="text-sm font-semibold text-card-foreground">{m.name}</div>
                              <div className="text-xs text-muted-foreground">
-                               Min: {(m.id === "btc" || m.id === "cbbtc" || m.id === "eth" || m.id === "ausd") ? "$" : ""}{fmt.format(m.min)} {m.symbol}
+                               Min: {(m.id === "btc" || m.id === "cbbtc" || m.id === "eth" || m.id === "ausd" || m.id === "pow") ? "$" : ""}{fmt.format(m.min)} {m.symbol}
                              </div>
                            </div>
                          </div>
@@ -860,7 +860,7 @@ export default function PreFiDashboard() {
                           </Tooltip>
                         </div>
                          <span className="text-sm font-medium text-slate-800 dark:text-white">
-                           {(selectedMarket.id === "btc" || selectedMarket.id === "cbbtc" || selectedMarket.id === "eth" || selectedMarket.id === "ausd") ? "$" : ""}{fmt.format(selectedMarket.min)} {selectedMarket.symbol}
+                           {(selectedMarket.id === "btc" || selectedMarket.id === "cbbtc" || selectedMarket.id === "eth" || selectedMarket.id === "ausd" || selectedMarket.id === "pow") ? "$" : ""}{fmt.format(selectedMarket.min)} {selectedMarket.symbol}
                          </span>
                       </div>
 
