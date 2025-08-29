@@ -34,6 +34,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import SupplyBorrowCongrats from "@/components/SupplyBorrowCongrats";
+import { getTokenImagePath } from "@/utils/tokenImageUtils";
 
 /**
  * PreFi Frontend – Single-file MVP Dashboard
@@ -643,20 +644,25 @@ export default function PreFiDashboard() {
                       transition={{ duration: 0.3, delay: index * 0.1 }}
                       className="border-t border-border hover:bg-secondary/20 transition-colors"
                     >
-                      {/* Asset */}
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="rounded-xl border border-border bg-primary/10 px-3 py-1">
-                            <div className="text-sm font-bold text-primary">{m.symbol}</div>
-                          </div>
-                          <div>
-                            <div className="text-sm font-semibold text-card-foreground">{m.name}</div>
-                            <div className="text-xs text-muted-foreground">
-                              Min: {(m.id === "btc" || m.id === "eth" || m.id === "ausd") ? "$" : ""}{fmt.format(m.min)} {m.symbol}
-                            </div>
-                          </div>
-                        </div>
-                      </td>
+                       {/* Asset */}
+                       <td className="px-6 py-4">
+                         <div className="flex items-center gap-3">
+                           <img 
+                             src={getTokenImagePath(m.symbol)} 
+                             alt={m.symbol}
+                             className="w-10 h-10 rounded-full"
+                             onError={(e) => {
+                               e.currentTarget.src = '/placeholder.svg';
+                             }}
+                           />
+                           <div>
+                             <div className="text-sm font-semibold text-card-foreground">{m.name}</div>
+                             <div className="text-xs text-muted-foreground">
+                               Min: {(m.id === "btc" || m.id === "eth" || m.id === "ausd") ? "$" : ""}{fmt.format(m.min)} {m.symbol}
+                             </div>
+                           </div>
+                         </div>
+                       </td>
 
                       {/* Wallet Balance */}
                       <td className="px-6 py-4 text-right">
