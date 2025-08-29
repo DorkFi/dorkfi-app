@@ -124,6 +124,16 @@ const MARKETS: Market[] = [
     decimals: 8,
   },
   {
+    id: "cbbtc",
+    name: "Coinbase BTC",
+    symbol: "cbBTC",
+    min: 20, // USD equivalent
+    tokenStandard: "arc200",
+    assetId: "ARC200_ID_cbBTC", // TODO
+    contractAddress: "APP_ID_cbBTC_PREFUND", // TODO
+    decimals: 8,
+  },
+  {
     id: "eth",
     name: "Wrapped ETH",
     symbol: "ETH",
@@ -374,12 +384,13 @@ export default function PreFiDashboard() {
   useEffect(() => {
     if (modalAmount && selectedMarket) {
       const numAmount = parseFloat(modalAmount);
-      // Mock token price - replace with real prices
-      const mockPrice = selectedMarket.id === "ausd" ? 1 : 
-                       selectedMarket.id === "voi" ? 0.05 :
-                       selectedMarket.id === "btc" ? 65000 :
-                       selectedMarket.id === "eth" ? 3000 :
-                       selectedMarket.id === "algo" ? 0.25 : 1;
+                      // Mock token price - replace with real prices
+                      const mockPrice = selectedMarket.id === "ausd" ? 1 : 
+                                       selectedMarket.id === "voi" ? 0.05 :
+                                       selectedMarket.id === "btc" ? 65000 :
+                                       selectedMarket.id === "cbbtc" ? 65000 :
+                                       selectedMarket.id === "eth" ? 3000 :
+                                       selectedMarket.id === "algo" ? 0.25 : 1;
       setModalFiatValue(numAmount * mockPrice);
     } else {
       setModalFiatValue(0);
@@ -658,7 +669,7 @@ export default function PreFiDashboard() {
                            <div>
                              <div className="text-sm font-semibold text-card-foreground">{m.name}</div>
                              <div className="text-xs text-muted-foreground">
-                               Min: {(m.id === "btc" || m.id === "eth" || m.id === "ausd") ? "$" : ""}{fmt.format(m.min)} {m.symbol}
+                               Min: {(m.id === "btc" || m.id === "cbbtc" || m.id === "eth" || m.id === "ausd") ? "$" : ""}{fmt.format(m.min)} {m.symbol}
                              </div>
                            </div>
                          </div>
@@ -837,9 +848,9 @@ export default function PreFiDashboard() {
                             </TooltipContent>
                           </Tooltip>
                         </div>
-                        <span className="text-sm font-medium text-slate-800 dark:text-white">
-                          {(selectedMarket.id === "btc" || selectedMarket.id === "eth" || selectedMarket.id === "ausd") ? "$" : ""}{fmt.format(selectedMarket.min)} {selectedMarket.symbol}
-                        </span>
+                         <span className="text-sm font-medium text-slate-800 dark:text-white">
+                           {(selectedMarket.id === "btc" || selectedMarket.id === "cbbtc" || selectedMarket.id === "eth" || selectedMarket.id === "ausd") ? "$" : ""}{fmt.format(selectedMarket.min)} {selectedMarket.symbol}
+                         </span>
                       </div>
 
                       <div className="flex justify-between items-center">

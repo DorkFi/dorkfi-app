@@ -9,6 +9,7 @@ export const getTokenImagePath = (symbol: string): string => {
     'USDC': '/lovable-uploads/aUSDC.png',
     'BTC': '/lovable-uploads/WBTC.jpg',
     'WBTC': '/lovable-uploads/WBTC.jpg',
+    'cbBTC': '/lovable-uploads/cbBTC.png',
     'ETH': '/lovable-uploads/ETH.jpg',
     'ALGO': '/lovable-uploads/Algo.webp'
   };
