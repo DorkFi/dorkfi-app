@@ -968,23 +968,6 @@ export default function PreFiDashboard() {
                           } {selectedMarket.symbol}
                         </span>
                       </div>
-
-                      <div className="flex justify-between items-center">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm text-slate-500 dark:text-slate-400">Launch Countdown</span>
-                          <Tooltip>
-                             <TooltipTrigger asChild>
-                               <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
-                             </TooltipTrigger>
-                            <TooltipContent>
-                              <p>Time remaining until market launch and reward distribution</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </div>
-                        <span className="text-sm font-medium text-teal-600 dark:text-teal-400">
-                          {Math.floor((launchTs - Date.now()) / (1000 * 60 * 60 * 24))} days
-                        </span>
-                      </div>
                     </CardContent>
                   </Card>
 
