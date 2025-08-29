@@ -715,7 +715,7 @@ export default function PreFiDashboard() {
                               </span>
                             </div>
                             <span className="text-muted-foreground tabular-nums">
-                              {fmt.format(Math.min(dep, m.min))} / {fmt.format(m.min)}
+                              {fmt.format(Math.min(dep, m.min))} / {(m.id === "btc" || m.id === "cbbtc" || m.id === "eth" || m.id === "ausd" || m.id === "pow") ? "$" : ""}{fmt.format(m.min)}
                             </span>
                           </div>
                           <ProgressBar value={Math.min(dep, m.min)} max={m.min} />
