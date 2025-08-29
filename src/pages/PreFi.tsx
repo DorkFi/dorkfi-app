@@ -856,7 +856,7 @@ export default function PreFiDashboard() {
               <SupplyBorrowCongrats
                 transactionType="deposit"
                 asset={selectedMarket?.symbol || ""}
-                assetIcon={selectedMarket ? `/lovable-uploads/dorkfi_${selectedMarket.symbol.toLowerCase()}_icon.png` : ""}
+                assetIcon={selectedMarket ? getTokenImagePath(selectedMarket.symbol) : ""}
                 amount={modalAmount}
                 onViewTransaction={handleViewTransaction}
                 onGoToPortfolio={handleGoToPortfolio}
