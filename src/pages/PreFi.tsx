@@ -608,9 +608,38 @@ export default function PreFiDashboard() {
       {/* Stats */}
       <header className="mx-auto max-w-6xl px-4 relative z-10">
         <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <Stat label="Total VOI Rewards" value={`${fmt0.format(PROGRAM.VOI_ALLOCATION_TOTAL)} VOI`} icon={Coins} />
-          <Stat label="Your Total Deposited" value={`${fmt.format(globalDeposited)} (all mkts)`} icon={TrendingUp} />
-          <Stat label="Network" value={`${wallet.network}${wallet.mockMode ? " • Mock" : ""}`} icon={BarChart3} />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div>
+                <Stat label="Total VOI Rewards" value={`${fmt0.format(PROGRAM.VOI_ALLOCATION_TOTAL)} VOI`} icon={Coins} />
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Total VOI tokens allocated as rewards for Phase 0 participants who meet minimum requirements.</p>
+            </TooltipContent>
+          </Tooltip>
+          
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div>
+                <Stat label="Your Total Deposited" value={`${fmt.format(globalDeposited)} (all mkts)`} icon={TrendingUp} />
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Combined value of all your deposits across all markets. Earlier deposits earn more rewards.</p>
+            </TooltipContent>
+          </Tooltip>
+          
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div>
+                <Stat label="Network" value={`${wallet.network}${wallet.mockMode ? " • Mock" : ""}`} icon={BarChart3} />
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Connected blockchain network. Mock mode shows sample data for demonstration.</p>
+            </TooltipContent>
+          </Tooltip>
         </div>
       </header>
 
@@ -636,10 +665,58 @@ export default function PreFiDashboard() {
             <table className="w-full">
               <thead className="bg-secondary/60 text-muted-foreground">
                 <tr>
-                  <th className="px-6 py-4 text-sm font-medium text-left">Asset</th>
-                  <th className="px-6 py-4 text-sm font-medium text-right">Wallet Balance</th>
-                  <th className="px-6 py-4 text-sm font-medium text-right">Deposited</th>
-                  <th className="px-6 py-4 text-sm font-medium text-center w-48">Progress</th>
+                  <th className="px-6 py-4 text-sm font-medium text-left">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="cursor-help inline-flex items-center gap-1">
+                          Asset
+                          <InfoIcon className="h-3 w-3" />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>Available tokens for PreFi deposits. Each asset has a minimum deposit requirement to qualify for VOI rewards.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </th>
+                  <th className="px-6 py-4 text-sm font-medium text-right">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="cursor-help inline-flex items-center gap-1">
+                          Wallet Balance
+                          <InfoIcon className="h-3 w-3" />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>Your current wallet balance for this asset. This shows how much you can deposit.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </th>
+                  <th className="px-6 py-4 text-sm font-medium text-right">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="cursor-help inline-flex items-center gap-1">
+                          Deposited
+                          <InfoIcon className="h-3 w-3" />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>Amount you've already deposited for this asset. Deposits are non-custodial and tracked on-chain.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </th>
+                  <th className="px-6 py-4 text-sm font-medium text-center w-48">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="cursor-help inline-flex items-center justify-center gap-1">
+                          Progress
+                          <InfoIcon className="h-3 w-3" />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>Shows your progress towards the minimum deposit requirement. You must meet the minimum to qualify for VOI rewards.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </th>
                   <th className="px-6 py-4 text-sm font-medium text-center">Actions</th>
                 </tr>
               </thead>
