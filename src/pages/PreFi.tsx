@@ -13,6 +13,7 @@ import {
   ExternalLink,
   InfoIcon
 } from "lucide-react";
+import { useIsMobile } from "@/hooks/use-mobile";
 import DorkFiButton from "@/components/ui/DorkFiButton";
 import CanvasBubbles from "@/components/CanvasBubbles";
 import { Link } from "react-router-dom";
@@ -319,6 +320,7 @@ function ProgressBar({ value, max }: { value: number; max: number }) {
  * Main Component         *
  *************************/
 export default function PreFiDashboard() {
+  const isMobile = useIsMobile();
   const [wallet, setWallet] = useState<WalletState>({ connected: false, network: "voi-testnet", mockMode: true });
   const [marketsState, setMarketsState] = useState<Record<string, MarketState>>({});
   const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({});
@@ -666,192 +668,293 @@ export default function PreFiDashboard() {
               <p>The pool is time-weighted—earlier, larger deposits earn more at launch.</p>
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-secondary/60 text-muted-foreground">
-                <tr>
-                  <th className="px-6 py-4 text-sm font-medium text-left">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="cursor-help inline-flex items-center gap-1">
-                          Asset
-                          <InfoIcon className="h-3 w-3" />
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Available tokens for PreFi deposits. Each asset has a minimum deposit requirement to qualify for VOI rewards.</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </th>
-                  <th className="px-6 py-4 text-sm font-medium text-right">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="cursor-help inline-flex items-center gap-1">
-                          Wallet Balance
-                          <InfoIcon className="h-3 w-3" />
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Your current wallet balance for this asset. This shows how much you can deposit.</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </th>
-                  <th className="px-6 py-4 text-sm font-medium text-right">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="cursor-help inline-flex items-center gap-1">
-                          Deposited
-                          <InfoIcon className="h-3 w-3" />
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Amount you've already deposited for this asset. Deposits are non-custodial and tracked on-chain.</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </th>
-                  <th className="px-6 py-4 text-sm font-medium text-right">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="cursor-help inline-flex items-center gap-1">
-                          Est. APY
-                          <InfoIcon className="h-3 w-3" />
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Estimated APY based on dynamic time-weighted distributions.</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </th>
-                  <th className="px-6 py-4 text-sm font-medium text-center w-48">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="cursor-help inline-flex items-center justify-center gap-1">
-                          Progress
-                          <InfoIcon className="h-3 w-3" />
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Shows your progress towards the minimum deposit requirement. You must meet the minimum to qualify for VOI rewards.</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </th>
-                  <th className="px-6 py-4 text-sm font-medium text-center">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {MARKETS.map((m, index) => {
-                  const st = marketsState[m.id];
-                  const loading = !!loadingMap[m.id];
-                  const dep = st ? fromBase(st.depositedBase, m.decimals) : 0;
-                  const wal = st ? fromBase(st.walletBalanceBase, m.decimals) : 0;
-                  const minOk = dep >= m.min;
+          {isMobile ? (
+            // Mobile Card Layout
+            <div className="space-y-3 p-4">
+              {MARKETS.map((m, index) => {
+                const st = marketsState[m.id];
+                const loading = !!loadingMap[m.id];
+                const dep = st ? fromBase(st.depositedBase, m.decimals) : 0;
+                const wal = st ? fromBase(st.walletBalanceBase, m.decimals) : 0;
+                const minOk = dep >= m.min;
 
-                  // Reward estimate (very rough): user's stake‑seconds vs global
-                  const secondsRemaining = Math.max(0, Math.floor((launchTs - Date.now()) / 1000));
-                  const myStakeSeconds = BigInt(Math.floor(dep * secondsRemaining));
-                  const totalSS = st?.totalStakeSecondsBase ?? 10_000_000n; // placeholder global
-                  const share = totalSS > 0n ? Number(myStakeSeconds) / Number(totalSS) : 0;
-                  const yourEstReward = PROGRAM.VOI_ALLOCATION_TOTAL * share * 0.25; // 25% rough portion to this market — adjust once split is known
-
-                  return (
-                    <motion.tr
-                      key={m.id}
-                      initial={{ opacity: 0, y: 12 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.3, delay: index * 0.1 }}
-                      className="border-t border-border hover:bg-secondary/20 transition-colors"
-                    >
-                       {/* Asset */}
-                       <td className="px-6 py-4">
-                         <div className="flex items-center gap-3">
-                           <img 
-                             src={getTokenImagePath(m.symbol)} 
-                             alt={m.symbol}
-                             className="w-10 h-10 rounded-full"
-                             onError={(e) => {
-                               e.currentTarget.src = '/placeholder.svg';
-                             }}
-                           />
-                           <div>
-                             <div className="text-sm font-semibold text-card-foreground">{m.name}</div>
-                             <div className="text-xs text-muted-foreground">
-                               Min: {(m.id === "btc" || m.id === "cbbtc" || m.id === "eth" || m.id === "ausd" || m.id === "pow") ? "$" : ""}{fmt.format(m.min)} {m.symbol}
-                             </div>
-                           </div>
-                         </div>
-                       </td>
-
-                      {/* Wallet Balance */}
-                      <td className="px-6 py-4 text-right">
-                        <div className="text-sm font-semibold tabular-nums text-card-foreground">
-                          {loading ? "…" : `${fmt.format(wal)} ${m.symbol}`}
+                return (
+                  <motion.div
+                    key={m.id}
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3, delay: index * 0.05 }}
+                  >
+                    <DorkFiCard className="p-4 space-y-3">
+                      {/* Asset Header */}
+                      <div className="flex items-center gap-3">
+                        <img 
+                          src={getTokenImagePath(m.symbol)} 
+                          alt={m.symbol}
+                          className="w-9 h-9 rounded-full flex-shrink-0"
+                          onError={(e) => {
+                            e.currentTarget.src = '/placeholder.svg';
+                          }}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-semibold text-card-foreground">{m.name}</div>
+                          <div className="text-xs text-muted-foreground">
+                            Min: {(m.id === "btc" || m.id === "cbbtc" || m.id === "eth" || m.id === "ausd" || m.id === "pow") ? "$" : ""}{fmt.format(m.min)} {m.symbol}
+                          </div>
                         </div>
-                      </td>
-
-                      {/* Deposited */}
-                      <td className="px-6 py-4 text-right">
-                        <div className="text-sm font-semibold tabular-nums text-card-foreground">
-                          {loading ? "…" : `${fmt.format(dep)} ${m.symbol}`}
+                        <div className="text-xs font-medium text-accent">
+                          Est. APY {loading ? "…" : `${(m.id === "voi" ? "15.8" : 
+                                                      m.id === "ausd" ? "8.2" :
+                                                      m.id === "unit" ? "12.4" :
+                                                      m.id === "btc" ? "6.5" :
+                                                      m.id === "cbbtc" ? "6.3" :
+                                                      m.id === "eth" ? "7.1" :
+                                                      m.id === "algo" ? "9.7" : "10.2")}%`}
                         </div>
-                      </td>
+                      </div>
 
-                      {/* Est. APY */}
-                      <td className="px-6 py-4 text-right">
-                        <div className="text-sm font-semibold tabular-nums text-accent">
-                          {loading ? "…" : `${(m.id === "voi" ? "15.8" : 
-                                              m.id === "ausd" ? "8.2" :
-                                              m.id === "unit" ? "12.4" :
-                                              m.id === "btc" ? "6.5" :
-                                              m.id === "cbbtc" ? "6.3" :
-                                              m.id === "eth" ? "7.1" :
-                                              m.id === "algo" ? "9.7" : "10.2")}%`}
+                      {/* Balance Grid */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <div className="text-xs text-muted-foreground">Wallet</div>
+                          <div className="text-sm font-semibold tabular-nums text-card-foreground">
+                            {loading ? "…" : `${fmt.format(wal)} ${m.symbol}`}
+                          </div>
                         </div>
-                      </td>
+                        <div>
+                          <div className="text-xs text-muted-foreground">Deposited</div>
+                          <div className="text-sm font-semibold tabular-nums text-card-foreground">
+                            {loading ? "…" : `${fmt.format(dep)} ${m.symbol}`}
+                          </div>
+                        </div>
+                      </div>
 
-                      {/* Progress */}
-                      <td className="px-6 py-4 w-48">
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between text-xs">
-                            <div className="flex items-center gap-1">
-                              {minOk ? (
-                                <CheckCircle2 className="h-3 w-3 text-accent" />
-                              ) : (
-                                <AlertCircle className="h-3 w-3 text-destructive" />
-                              )}
-                              <span className="text-muted-foreground">
-                                {minOk ? "Qualified" : "Needs more"}
-                              </span>
-                            </div>
-                            <span className="text-muted-foreground tabular-nums">
-                              {fmt.format(Math.min(dep, m.min))} / {(m.id === "btc" || m.id === "cbbtc" || m.id === "eth" || m.id === "ausd" || m.id === "pow") ? "$" : ""}{fmt.format(m.min)}
+                      {/* Progress Section */}
+                      <div>
+                        <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+                          <div className="flex items-center gap-1">
+                            {minOk ? (
+                              <CheckCircle2 className="h-3 w-3 text-accent" />
+                            ) : (
+                              <AlertCircle className="h-3 w-3 text-destructive" />
+                            )}
+                            <span>
+                              {minOk ? "Qualified" : "Needs more"}
                             </span>
                           </div>
-                          <ProgressBar value={Math.min(dep, m.min)} max={m.min} />
+                          <span className="tabular-nums">
+                            {fmt.format(Math.min(dep, m.min))} / {(m.id === "btc" || m.id === "cbbtc" || m.id === "eth" || m.id === "ausd" || m.id === "pow") ? "$" : ""}{fmt.format(m.min)}
+                          </span>
                         </div>
-                      </td>
+                        <ProgressBar value={Math.min(dep, m.min)} max={m.min} />
+                      </div>
 
-                      {/* Actions */}
-                      <td className="px-6 py-4">
-                        <div className="flex items-center justify-center">
-                          <DorkFiButton
-                            variant="secondary"
-                            disabled={loading}
-                            onClick={() => {
-                              console.log("Deposit clicked for", m.symbol);
-                              openDepositModal(m);
-                            }}
-                            className="text-sm"
-                          >
-                            <ArrowDownCircle className="h-4 w-4" /> Deposit
-                          </DorkFiButton>
-                        </div>
-                      </td>
-                    </motion.tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                      {/* Deposit Button */}
+                      <DorkFiButton
+                        variant="secondary"
+                        disabled={loading}
+                        onClick={() => {
+                          console.log("Deposit clicked for", m.symbol);
+                          openDepositModal(m);
+                        }}
+                        className="w-full justify-center text-sm"
+                      >
+                        <ArrowDownCircle className="h-4 w-4" /> Deposit
+                      </DorkFiButton>
+                    </DorkFiCard>
+                  </motion.div>
+                );
+              })}
+            </div>
+          ) : (
+            // Desktop/Tablet Table Layout
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-secondary/60 text-muted-foreground">
+                  <tr>
+                    <th className="px-6 py-4 text-sm font-medium text-left">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="cursor-help inline-flex items-center gap-1">
+                            Asset
+                            <InfoIcon className="h-3 w-3" />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Available tokens for PreFi deposits. Each asset has a minimum deposit requirement to qualify for VOI rewards.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </th>
+                    <th className="px-6 py-4 text-sm font-medium text-right">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="cursor-help inline-flex items-center gap-1">
+                            Wallet Balance
+                            <InfoIcon className="h-3 w-3" />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Your current wallet balance for this asset. This shows how much you can deposit.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </th>
+                    <th className="px-6 py-4 text-sm font-medium text-right">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="cursor-help inline-flex items-center gap-1">
+                            Deposited
+                            <InfoIcon className="h-3 w-3" />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Amount you've already deposited for this asset. Deposits are non-custodial and tracked on-chain.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </th>
+                    <th className="px-6 py-4 text-sm font-medium text-right">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="cursor-help inline-flex items-center gap-1">
+                            Est. APY
+                            <InfoIcon className="h-3 w-3" />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Estimated APY based on dynamic time-weighted distributions.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </th>
+                    <th className="px-6 py-4 text-sm font-medium text-center w-48">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="cursor-help inline-flex items-center justify-center gap-1">
+                            Progress
+                            <InfoIcon className="h-3 w-3" />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Shows your progress towards the minimum deposit requirement. You must meet the minimum to qualify for VOI rewards.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </th>
+                    <th className="px-6 py-4 text-sm font-medium text-center">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {MARKETS.map((m, index) => {
+                    const st = marketsState[m.id];
+                    const loading = !!loadingMap[m.id];
+                    const dep = st ? fromBase(st.depositedBase, m.decimals) : 0;
+                    const wal = st ? fromBase(st.walletBalanceBase, m.decimals) : 0;
+                    const minOk = dep >= m.min;
+
+                    // Reward estimate (very rough): user's stake‑seconds vs global
+                    const secondsRemaining = Math.max(0, Math.floor((launchTs - Date.now()) / 1000));
+                    const myStakeSeconds = BigInt(Math.floor(dep * secondsRemaining));
+                    const totalSS = st?.totalStakeSecondsBase ?? 10_000_000n; // placeholder global
+                    const share = totalSS > 0n ? Number(myStakeSeconds) / Number(totalSS) : 0;
+                    const yourEstReward = PROGRAM.VOI_ALLOCATION_TOTAL * share * 0.25; // 25% rough portion to this market — adjust once split is known
+
+                    return (
+                      <motion.tr
+                        key={m.id}
+                        initial={{ opacity: 0, y: 12 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.3, delay: index * 0.1 }}
+                        className="border-t border-border hover:bg-secondary/20 transition-colors"
+                      >
+                         {/* Asset */}
+                         <td className="px-6 py-4">
+                           <div className="flex items-center gap-3">
+                             <img 
+                               src={getTokenImagePath(m.symbol)} 
+                               alt={m.symbol}
+                               className="w-10 h-10 rounded-full"
+                               onError={(e) => {
+                                 e.currentTarget.src = '/placeholder.svg';
+                               }}
+                             />
+                             <div>
+                               <div className="text-sm font-semibold text-card-foreground">{m.name}</div>
+                               <div className="text-xs text-muted-foreground">
+                                 Min: {(m.id === "btc" || m.id === "cbbtc" || m.id === "eth" || m.id === "ausd" || m.id === "pow") ? "$" : ""}{fmt.format(m.min)} {m.symbol}
+                               </div>
+                             </div>
+                           </div>
+                         </td>
+
+                        {/* Wallet Balance */}
+                        <td className="px-6 py-4 text-right">
+                          <div className="text-sm font-semibold tabular-nums text-card-foreground">
+                            {loading ? "…" : `${fmt.format(wal)} ${m.symbol}`}
+                          </div>
+                        </td>
+
+                        {/* Deposited */}
+                        <td className="px-6 py-4 text-right">
+                          <div className="text-sm font-semibold tabular-nums text-card-foreground">
+                            {loading ? "…" : `${fmt.format(dep)} ${m.symbol}`}
+                          </div>
+                        </td>
+
+                        {/* Est. APY */}
+                        <td className="px-6 py-4 text-right">
+                          <div className="text-sm font-semibold tabular-nums text-accent">
+                            {loading ? "…" : `${(m.id === "voi" ? "15.8" : 
+                                                m.id === "ausd" ? "8.2" :
+                                                m.id === "unit" ? "12.4" :
+                                                m.id === "btc" ? "6.5" :
+                                                m.id === "cbbtc" ? "6.3" :
+                                                m.id === "eth" ? "7.1" :
+                                                m.id === "algo" ? "9.7" : "10.2")}%`}
+                          </div>
+                        </td>
+
+                        {/* Progress */}
+                        <td className="px-6 py-4 w-48">
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between text-xs">
+                              <div className="flex items-center gap-1">
+                                {minOk ? (
+                                  <CheckCircle2 className="h-3 w-3 text-accent" />
+                                ) : (
+                                  <AlertCircle className="h-3 w-3 text-destructive" />
+                                )}
+                                <span className="text-muted-foreground">
+                                  {minOk ? "Qualified" : "Needs more"}
+                                </span>
+                              </div>
+                              <span className="text-muted-foreground tabular-nums">
+                                {fmt.format(Math.min(dep, m.min))} / {(m.id === "btc" || m.id === "cbbtc" || m.id === "eth" || m.id === "ausd" || m.id === "pow") ? "$" : ""}{fmt.format(m.min)}
+                              </span>
+                            </div>
+                            <ProgressBar value={Math.min(dep, m.min)} max={m.min} />
+                          </div>
+                        </td>
+
+                        {/* Actions */}
+                        <td className="px-6 py-4">
+                          <div className="flex items-center justify-center">
+                            <DorkFiButton
+                              variant="secondary"
+                              disabled={loading}
+                              onClick={() => {
+                                console.log("Deposit clicked for", m.symbol);
+                                openDepositModal(m);
+                              }}
+                              className="text-sm"
+                            >
+                              <ArrowDownCircle className="h-4 w-4" /> Deposit
+                            </DorkFiButton>
+                          </div>
+                        </td>
+                      </motion.tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* Disclaimers */}
