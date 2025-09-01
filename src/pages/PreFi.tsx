@@ -649,10 +649,15 @@ export default function PreFiDashboard() {
         <div className="overflow-hidden rounded-2xl border border-border bg-card">
           {/* Market Overview Header */}
           <div className="border-b border-border/60 bg-card/60 p-6">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
               <h2 className="text-xl font-bold text-card-foreground">What is PreFi?</h2>
-              <DorkFiButton variant="secondary" className="text-sm">
+              <DorkFiButton 
+                variant="secondary" 
+                className="text-sm inline-flex items-center gap-2 self-start sm:self-auto"
+                onClick={() => window.open("https://docs.dorkfi.com/prefi", "_blank")}
+              >
                 Learn More
+                <ExternalLink className="h-3 w-3" />
               </DorkFiButton>
             </div>
             <div className="space-y-3 text-sm text-muted-foreground">
