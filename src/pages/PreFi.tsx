@@ -635,7 +635,7 @@ export default function PreFiDashboard() {
           <Tooltip>
             <TooltipTrigger asChild>
               <div>
-                <Stat label="Network" value={`${wallet.network}${wallet.mockMode ? " • Mock" : ""}`} icon={BarChart3} />
+                <Stat label="Network" value="Voi Network" icon={BarChart3} />
               </div>
             </TooltipTrigger>
             <TooltipContent>
