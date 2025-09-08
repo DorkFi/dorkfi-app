@@ -1,12 +1,14 @@
 {
   "name": "vite_react_shadcn_ts",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "build:dev": "vite build --mode development",
+    "build": "npm run prebuild && vite build",
+    "build:dev": "npm run prebuild && vite build --mode development",
+    "prebuild": "node scripts/update-version.cjs",
+    "setup-version": "bash scripts/setup-version-management.sh",
     "lint": "eslint .",
     "preview": "vite preview"
   },

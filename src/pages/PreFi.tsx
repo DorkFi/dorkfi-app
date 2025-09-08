@@ -36,6 +36,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import SupplyBorrowCongrats from "@/components/SupplyBorrowCongrats";
 import { getTokenImagePath } from "@/utils/tokenImageUtils";
+import VersionDisplay from "@/components/VersionDisplay";
 
 /**
  * PreFi Frontend – Single-file MVP Dashboard
@@ -976,8 +977,11 @@ export default function PreFiDashboard() {
       {/* Footer */}
       <footer className="border-t border-border/40 mt-4 relative z-10">
         <div className="max-w-6xl mx-auto px-4 py-4 md:py-6">
-          <div className="text-center text-muted-foreground text-sm">
-            <p>© 2025 DorkFi Protocol. Dive into the depths of DeFi.</p>
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-center sm:text-left">
+            <div className="text-muted-foreground text-sm">
+              <p>© 2025 DorkFi Protocol. Dive into the depths of DeFi.</p>
+            </div>
+            <VersionDisplay />
           </div>
         </div>
       </footer>
