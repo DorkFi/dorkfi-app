@@ -11,14 +11,14 @@ import {
   BarChart3,
   RefreshCcw,
   ExternalLink,
-  InfoIcon
+  InfoIcon,
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import DorkFiButton from "@/components/ui/DorkFiButton";
 import CanvasBubbles from "@/components/CanvasBubbles";
 import { Link } from "react-router-dom";
 import { ThemeToggle } from "@/components/theme-toggle";
-import WalletButton from "@/components/WalletButton";
+import WalletNetworkButton from "@/components/WalletNetworkButton";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import { H1, Body } from "@/components/ui/Typography";
 import {
@@ -33,10 +33,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import SupplyBorrowCongrats from "@/components/SupplyBorrowCongrats";
 import { getTokenImagePath } from "@/utils/tokenImageUtils";
 import VersionDisplay from "@/components/VersionDisplay";
+import { getCurrentNetworkConfig, getAllTokens } from "@/config";
 
 /**
  * PreFi Frontend – Single-file MVP Dashboard
@@ -85,87 +90,48 @@ type Market = {
   decimals: number;
 };
 
-const MARKETS: Market[] = [
-  {
-    id: "voi",
-    name: "VOI",
-    symbol: "VOI",
-    min: 10_000,
-    tokenStandard: "native",
-    contractAddress: "APP_ID_VOI_PREFUND", // TODO
-    decimals: 6,
-  },
-  {
-    id: "ausd",
-    name: "Aramid USDC",
-    symbol: "USDC",
-    min: 20,
-    tokenStandard: "asa",
-    assetId: "ASA_ID_aUSD", // TODO
-    contractAddress: "APP_ID_aUSD_PREFUND", // TODO
-    decimals: 6,
-  },
-  {
-    id: "unit",
-    name: "UNIT",
-    symbol: "UNIT",
-    min: 10,
-    tokenStandard: "arc200",
-    assetId: "ARC200_ID_UNIT", // TODO
-    contractAddress: "APP_ID_UNIT_PREFUND", // TODO
-    decimals: 6,
-  },
-  {
-    id: "btc",
-    name: "Wrapped BTC",
-    symbol: "BTC",
-    min: 20, // USD equivalent
-    tokenStandard: "arc200",
-    assetId: "ARC200_ID_WBTC", // TODO
-    contractAddress: "APP_ID_BTC_PREFUND", // TODO
-    decimals: 8,
-  },
-  {
-    id: "cbbtc",
-    name: "Coinbase BTC",
-    symbol: "cbBTC",
-    min: 20, // USD equivalent
-    tokenStandard: "arc200",
-    assetId: "ARC200_ID_cbBTC", // TODO
-    contractAddress: "APP_ID_cbBTC_PREFUND", // TODO
-    decimals: 8,
-  },
-  {
-    id: "eth",
-    name: "Wrapped ETH",
-    symbol: "ETH",
-    min: 20, // USD equivalent
-    tokenStandard: "arc200",
-    assetId: "ARC200_ID_WETH", // TODO
-    contractAddress: "APP_ID_ETH_PREFUND", // TODO
-    decimals: 8,
-  },
-  {
-    id: "algo",
-    name: "Algorand",
-    symbol: "ALGO",
-    min: 100,
-    tokenStandard: "asa", // ALGO is native on Algorand; use your VOI chain mapping
-    assetId: "ASA_ID_ALGO_WRAPPED", // TODO if wrapped; else adjust adapter
-    contractAddress: "APP_ID_ALGO_PREFUND", // TODO
-    decimals: 6,
-  },
-  {
-    id: "pow",
-    name: "POW",
-    symbol: "POW",
-    min: 20, // USD equivalent
-    tokenStandard: "arc200",
-    assetId: "ARC200_ID_POW", // TODO
-    contractAddress: "APP_ID_POW_PREFUND", // TODO
-    decimals: 6,
-  },
-];
+// Get markets from configuration
+const getMarketsFromConfig = (): Market[] => {
+  const networkConfig = getCurrentNetworkConfig();
+  const tokens = getAllTokens(networkConfig.networkId);
+
+  return tokens.map((token) => {
+    // Determine token standard based on assetId
+    let tokenStandard: TokenStandard = "native";
+    if (token.assetId) {
+      if (token.assetId.startsWith("ASA_ID")) {
+        tokenStandard = "asa";
+      } else if (token.assetId.startsWith("ARC200_ID")) {
+        tokenStandard = "arc200";
+      }
+    }
+
+    // Set minimum deposit requirements
+    const minDeposits: { [key: string]: number } = {
+      VOI: 10_000,
+      USDC: 20,
+      UNIT: 10,
+      BTC: 20,
+      cbBTC: 20,
+      ETH: 20,
+      ALGO: 100,
+      POW: 20,
+    };
+
+    return {
+      id: token.symbol.toLowerCase(),
+      name: token.name,
+      symbol: token.symbol,
+      min: minDeposits[token.symbol] || 10,
+      tokenStandard,
+      assetId: token.assetId,
+      contractAddress: `APP_ID_${token.symbol}_PREFUND`, // TODO: Get from config when available
+      decimals: token.decimals,
+    };
+  });
+};
+
+const MARKETS: Market[] = getMarketsFromConfig();
 
 /*************************
  * Utilities              *
@@ -174,8 +140,10 @@ const fmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 6 });
 const fmt0 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 const shortAddr = (a?: string) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "—");
 const nowSec = () => Math.floor(Date.now() / 1000);
-const toBase = (amt: number, decimals: number) => BigInt(Math.round(amt * 10 ** decimals));
-const fromBase = (amt: bigint, decimals: number) => Number(amt) / 10 ** decimals;
+const toBase = (amt: number, decimals: number) =>
+  BigInt(Math.round(amt * 10 ** decimals));
+const fromBase = (amt: bigint, decimals: number) =>
+  Number(amt) / 10 ** decimals;
 
 /*************************
  * Minimal State & Types  *
@@ -235,7 +203,9 @@ const chainApi = {
     const seed = BigInt(
       Array.from(market.id).reduce((a, c) => a + c.charCodeAt(0), 0)
     );
-    return (seed * 10_000n) % (100_000_000n * BigInt(10 ** (market.decimals - 2)));
+    return (
+      (seed * 10_000n) % (100_000_000n * BigInt(10 ** (market.decimals - 2)))
+    );
   },
 
   async getUserDepositBase(
@@ -246,7 +216,10 @@ const chainApi = {
     // Mock: derive from address hash + market
     if (!wallet.address) return 0n;
     const h = BigInt(
-      Array.from(wallet.address + market.id).reduce((a, c) => a + c.charCodeAt(0), 0)
+      Array.from(wallet.address + market.id).reduce(
+        (a, c) => a + c.charCodeAt(0),
+        0
+      )
     );
     return (h * 1_234_567n) % (500_000n * BigInt(10 ** market.decimals));
   },
@@ -262,8 +235,7 @@ const chainApi = {
     wallet: WalletState,
     market: Market,
     amountBase: bigint
-  ): Promise<{ txId: string }>
-  {
+  ): Promise<{ txId: string }> {
     // TODO: implement actual app call / token transfer into prefund vault contract
     // For now, simulate success with a fake tx id and small delay
     await new Promise((r) => setTimeout(r, 850));
@@ -274,15 +246,27 @@ const chainApi = {
 /*************************
  * UI Components          *
  *************************/
-function Stat({ label, value, icon: Icon }: { label: string; value: string | React.ReactNode; icon: any }) {
+function Stat({
+  label,
+  value,
+  icon: Icon,
+}: {
+  label: string;
+  value: string | React.ReactNode;
+  icon: any;
+}) {
   return (
     <div className="flex items-center gap-3 rounded-2xl border border-border bg-card/60 p-4 shadow-sm">
       <div className="rounded-xl border border-border bg-card p-2">
         <Icon className="h-5 w-5 text-accent" />
       </div>
       <div>
-        <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
-        <div className="text-lg font-semibold text-card-foreground">{value}</div>
+        <div className="text-xs uppercase tracking-wide text-muted-foreground">
+          {label}
+        </div>
+        <div className="text-lg font-semibold text-card-foreground">
+          {value}
+        </div>
       </div>
     </div>
   );
@@ -301,7 +285,9 @@ function Countdown({ launchTs }: { launchTs: number }) {
   const m = Math.floor((sec % 3600) / 60);
   const s = sec % 60;
   return (
-    <div className="font-semibold tabular-nums text-card-foreground">{d}d {h}h {m}m {s}s</div>
+    <div className="font-semibold tabular-nums text-card-foreground">
+      {d}d {h}h {m}m {s}s
+    </div>
   );
 }
 
@@ -309,9 +295,9 @@ function ProgressBar({ value, max }: { value: number; max: number }) {
   const pct = Math.max(0, Math.min(100, (value / max) * 100));
   return (
     <div className="h-2 w-full rounded-full bg-secondary">
-      <div 
-        className="h-2 rounded-full bg-gradient-progress transition-all duration-300" 
-        style={{ width: `${pct}%` }} 
+      <div
+        className="h-2 rounded-full bg-gradient-progress transition-all duration-300"
+        style={{ width: `${pct}%` }}
       />
     </div>
   );
@@ -322,12 +308,20 @@ function ProgressBar({ value, max }: { value: number; max: number }) {
  *************************/
 export default function PreFiDashboard() {
   const isMobile = useIsMobile();
-  const [wallet, setWallet] = useState<WalletState>({ connected: false, network: "voi-testnet", mockMode: true });
-  const [marketsState, setMarketsState] = useState<Record<string, MarketState>>({});
+  const [wallet, setWallet] = useState<WalletState>({
+    connected: false,
+    network: "voi-testnet",
+    mockMode: true,
+  });
+  const [marketsState, setMarketsState] = useState<Record<string, MarketState>>(
+    {}
+  );
   const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({});
-  const [txLog, setTxLog] = useState<Array<{ ts: number; marketId: string; amount: number; txId: string }>>([]);
+  const [txLog, setTxLog] = useState<
+    Array<{ ts: number; marketId: string; amount: number; txId: string }>
+  >([]);
   const [refreshKey, setRefreshKey] = useState(0);
-  
+
   // Modal state
   const [isDepositModalOpen, setIsDepositModalOpen] = useState(false);
   const [selectedMarket, setSelectedMarket] = useState<Market | null>(null);
@@ -397,14 +391,23 @@ export default function PreFiDashboard() {
   useEffect(() => {
     if (modalAmount && selectedMarket) {
       const numAmount = parseFloat(modalAmount);
-                      // Mock token price - replace with real prices
-                      const mockPrice = selectedMarket.id === "ausd" ? 1 : 
-                                        selectedMarket.id === "voi" ? 0.05 :
-                                        selectedMarket.id === "btc" ? 65000 :
-                                        selectedMarket.id === "cbbtc" ? 65000 :
-                                        selectedMarket.id === "eth" ? 3000 :
-                                        selectedMarket.id === "algo" ? 0.25 :
-                                        selectedMarket.id === "pow" ? 0.10 : 1;
+      // Mock token price - replace with real prices
+      const mockPrice =
+        selectedMarket.id === "ausd"
+          ? 1
+          : selectedMarket.id === "voi"
+          ? 0.05
+          : selectedMarket.id === "btc"
+          ? 65000
+          : selectedMarket.id === "cbbtc"
+          ? 65000
+          : selectedMarket.id === "eth"
+          ? 3000
+          : selectedMarket.id === "algo"
+          ? 0.25
+          : selectedMarket.id === "pow"
+          ? 0.1
+          : 1;
       setModalFiatValue(numAmount * mockPrice);
     } else {
       setModalFiatValue(0);
@@ -413,7 +416,10 @@ export default function PreFiDashboard() {
 
   const handleMaxClick = () => {
     if (selectedMarket && marketsState[selectedMarket.id]) {
-      const balance = fromBase(marketsState[selectedMarket.id].walletBalanceBase, selectedMarket.decimals);
+      const balance = fromBase(
+        marketsState[selectedMarket.id].walletBalanceBase,
+        selectedMarket.decimals
+      );
       setModalAmount(balance.toString());
     }
   };
@@ -435,46 +441,54 @@ export default function PreFiDashboard() {
 
   const handleConfirmDeposit = async () => {
     if (!selectedMarket || !modalAmount || Number(modalAmount) <= 0) return;
-    
+
     const amount = Number(modalAmount);
-    const amountBase = BigInt(Math.floor(amount * 10 ** selectedMarket.decimals));
-    
-    console.log(`[DEPOSIT] ${amount} ${selectedMarket.symbol} (${amountBase} base units)`);
-    
-    setLoadingMap(prev => ({ ...prev, [selectedMarket.id]: true }));
-    
+    const amountBase = BigInt(
+      Math.floor(amount * 10 ** selectedMarket.decimals)
+    );
+
+    console.log(
+      `[DEPOSIT] ${amount} ${selectedMarket.symbol} (${amountBase} base units)`
+    );
+
+    setLoadingMap((prev) => ({ ...prev, [selectedMarket.id]: true }));
+
     try {
       await chainApi.depositToPrefund(wallet, selectedMarket, amountBase);
-      
+
       // Update tx log
-      setTxLog(prev => [{
-        ts: Date.now(),
-        marketId: selectedMarket.id,
-        amount: amount,
-        txId: `TXN_${Math.random().toString(36).substring(2, 15)}`,
-      }, ...prev]);
-      
+      setTxLog((prev) => [
+        {
+          ts: Date.now(),
+          marketId: selectedMarket.id,
+          amount: amount,
+          txId: `TXN_${Math.random().toString(36).substring(2, 15)}`,
+        },
+        ...prev,
+      ]);
+
       // Refresh balances (optimistic update for mock)
-      setMarketsState(prev => {
+      setMarketsState((prev) => {
         const current = prev[selectedMarket.id];
         return {
           ...prev,
           [selectedMarket.id]: {
             walletBalanceBase: current?.walletBalanceBase ?? 0n,
             depositedBase: (current?.depositedBase ?? 0n) + amountBase,
-            totalStakeSecondsBase: current?.totalStakeSecondsBase ?? 10_000_000n,
+            totalStakeSecondsBase:
+              current?.totalStakeSecondsBase ?? 10_000_000n,
           },
         };
       });
-      
+
       // Show success screen
       setTimeout(() => {
         setShowSuccess(true);
-        setLoadingMap(prev => ({ ...prev, [selectedMarket.id]: false }));
+        setLoadingMap((prev) => ({ ...prev, [selectedMarket.id]: false }));
       }, 500);
     } catch (error) {
       console.error("Deposit failed:", error);
-      setLoadingMap(prev => ({ ...prev, [selectedMarket.id]: false }));
+      setLoadingMap((prev) => ({ ...prev, [selectedMarket.id]: false }));
     }
   };
 
@@ -493,7 +507,7 @@ export default function PreFiDashboard() {
       {/* Light Mode Beach Background */}
       <div className="absolute inset-0 light-mode-beach-bg dark:hidden" />
       <div className="absolute inset-0 beach-overlay dark:hidden" />
-      
+
       {/* Dark Mode Ocean Background */}
       <div className="absolute inset-0 z-0 hidden dark:block dorkfi-dark-bg-with-overlay" />
 
@@ -507,30 +521,31 @@ export default function PreFiDashboard() {
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             {/* Logo */}
-            <Link 
-              to="/" 
+            <Link
+              to="/"
               className="flex items-center space-x-3 cursor-pointer hover:opacity-80 transition-opacity"
               aria-label="Go to DorkFi dashboard"
             >
               <div className="flex flex-col">
-                <img 
-                  src="/lovable-uploads/dork_fi_logo_edit1_light.png" 
-                  alt="DorkFi logo" 
-                  className="h-8 sm:h-9 md:h-10 lg:h-11 w-auto object-contain flex-shrink-0" 
+                <img
+                  src="/lovable-uploads/dork_fi_logo_edit1_light.png"
+                  alt="DorkFi logo"
+                  className="h-8 sm:h-9 md:h-10 lg:h-11 w-auto object-contain flex-shrink-0"
                   fetchPriority="high"
                   decoding="async"
                   onError={(e) => {
-                    console.error('Logo failed to load, using placeholder');
-                    (e.currentTarget as HTMLImageElement).src = '/placeholder.svg';
+                    console.error("Logo failed to load, using placeholder");
+                    (e.currentTarget as HTMLImageElement).src =
+                      "/placeholder.svg";
                   }}
                 />
               </div>
             </Link>
-            
-            {/* Theme Toggle and Wallet */}
+
+            {/* Theme Toggle, Admin Link, and Wallet */}
             <div className="flex items-center gap-2">
               <ThemeToggle />
-              <WalletButton />
+              <WalletNetworkButton />
             </div>
           </div>
         </div>
@@ -538,13 +553,16 @@ export default function PreFiDashboard() {
 
       {/* Hero Section */}
       <div className="mx-auto max-w-6xl px-4 pt-8 relative z-10">
-        <DorkFiCard 
+        <DorkFiCard
           hoverable
           className="relative text-center overflow-hidden p-6 md:p-8 mb-8"
         >
           {/* Decorative elements */}
           {/* Birds - light mode only */}
-          <div className="absolute top-6 left-10 opacity-80 pointer-events-none z-0 animate-bubble-float dark:hidden hidden md:block" style={{ animationDelay: '0s' }}>
+          <div
+            className="absolute top-6 left-10 opacity-80 pointer-events-none z-0 animate-bubble-float dark:hidden hidden md:block"
+            style={{ animationDelay: "0s" }}
+          >
             <img
               src="/lovable-uploads/bird_thinner.png"
               alt="Decorative DorkFi bird - top left"
@@ -553,7 +571,10 @@ export default function PreFiDashboard() {
               decoding="async"
             />
           </div>
-          <div className="absolute top-14 right-12 opacity-70 pointer-events-none z-0 animate-bubble-float dark:hidden hidden md:block" style={{ animationDelay: '0.5s' }}>
+          <div
+            className="absolute top-14 right-12 opacity-70 pointer-events-none z-0 animate-bubble-float dark:hidden hidden md:block"
+            style={{ animationDelay: "0.5s" }}
+          >
             <img
               src="/lovable-uploads/bird_thinner.png"
               alt="Decorative DorkFi bird - top right"
@@ -562,7 +583,10 @@ export default function PreFiDashboard() {
               decoding="async"
             />
           </div>
-          <div className="absolute bottom-10 left-14 opacity-60 pointer-events-none z-0 animate-bubble-float dark:hidden hidden md:block" style={{ animationDelay: '1s' }}>
+          <div
+            className="absolute bottom-10 left-14 opacity-60 pointer-events-none z-0 animate-bubble-float dark:hidden hidden md:block"
+            style={{ animationDelay: "1s" }}
+          >
             <img
               src="/lovable-uploads/bird_thinner.png"
               alt="Decorative DorkFi bird - bottom left"
@@ -572,7 +596,10 @@ export default function PreFiDashboard() {
             />
           </div>
           {/* Dark mode gold fish */}
-          <div className="absolute top-4 left-8 opacity-80 pointer-events-none z-0 animate-bubble-float hidden dark:md:block" style={{ animationDelay: '0s' }}>
+          <div
+            className="absolute top-4 left-8 opacity-80 pointer-events-none z-0 animate-bubble-float hidden dark:md:block"
+            style={{ animationDelay: "0s" }}
+          >
             <img
               src="/lovable-uploads/DorkFi_gold_fish.png"
               alt="Decorative DorkFi gold fish - top left"
@@ -581,7 +608,10 @@ export default function PreFiDashboard() {
               decoding="async"
             />
           </div>
-          <div className="absolute top-12 right-12 opacity-80 pointer-events-none z-0 animate-bubble-float hidden dark:md:block" style={{ animationDelay: '0.5s' }}>
+          <div
+            className="absolute top-12 right-12 opacity-80 pointer-events-none z-0 animate-bubble-float hidden dark:md:block"
+            style={{ animationDelay: "0.5s" }}
+          >
             <img
               src="/lovable-uploads/DorkFi_gold_fish.png"
               alt="Decorative DorkFi gold fish - top right"
@@ -614,25 +644,39 @@ export default function PreFiDashboard() {
           <Tooltip>
             <TooltipTrigger asChild>
               <div>
-                <Stat label="Total VOI Rewards" value={`${fmt0.format(PROGRAM.VOI_ALLOCATION_TOTAL)} VOI`} icon={Coins} />
+                <Stat
+                  label="Total VOI Rewards"
+                  value={`${fmt0.format(PROGRAM.VOI_ALLOCATION_TOTAL)} VOI`}
+                  icon={Coins}
+                />
               </div>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Total VOI tokens allocated as rewards for Phase 0 participants who meet minimum requirements.</p>
+              <p>
+                Total VOI tokens allocated as rewards for Phase 0 participants
+                who meet minimum requirements.
+              </p>
             </TooltipContent>
           </Tooltip>
-          
+
           <Tooltip>
             <TooltipTrigger asChild>
               <div>
-                <Stat label="Your Total Deposited" value={`${fmt.format(globalDeposited)} (all mkts)`} icon={TrendingUp} />
+                <Stat
+                  label="Your Total Deposited"
+                  value={`${fmt.format(globalDeposited)} (all mkts)`}
+                  icon={TrendingUp}
+                />
               </div>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Combined value of all your deposits across all markets. Earlier deposits earn more rewards.</p>
+              <p>
+                Combined value of all your deposits across all markets. Earlier
+                deposits earn more rewards.
+              </p>
             </TooltipContent>
           </Tooltip>
-          
+
           <Tooltip>
             <TooltipTrigger asChild>
               <div>
@@ -640,12 +684,14 @@ export default function PreFiDashboard() {
               </div>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Connected blockchain network. Mock mode shows sample data for demonstration.</p>
+              <p>
+                Connected blockchain network. Mock mode shows sample data for
+                demonstration.
+              </p>
             </TooltipContent>
           </Tooltip>
         </div>
       </header>
-
 
       {/* Markets */}
       <main className="mx-auto max-w-6xl px-4 py-8 relative z-10">
@@ -653,20 +699,33 @@ export default function PreFiDashboard() {
           {/* Market Overview Header */}
           <div className="border-b border-border/60 bg-card/60 p-6">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-              <h2 className="text-xl font-bold text-card-foreground">What is PreFi?</h2>
-              <DorkFiButton 
-                variant="secondary" 
+              <h2 className="text-xl font-bold text-card-foreground">
+                What is PreFi?
+              </h2>
+              <DorkFiButton
+                variant="secondary"
                 className="text-sm inline-flex items-center gap-2 self-start sm:self-auto"
-                onClick={() => window.open("https://docs.dorkfi.com/prefi", "_blank")}
+                onClick={() =>
+                  window.open("https://docs.dorkfi.com/prefi", "_blank")
+                }
               >
                 Learn More
                 <ExternalLink className="h-3 w-3" />
               </DorkFiButton>
             </div>
             <div className="space-y-3 text-sm text-muted-foreground">
-              <p>PreFi lets early supporters earn VOI rewards by pre-depositing into upcoming DorkFi markets.</p>
-              <p>Deposits are non-custodial, tracked on-chain, and earn a share of 2,000,000 VOI incentives.</p>
-              <p>The pool is time-weighted—earlier, larger deposits earn more at launch.</p>
+              <p>
+                PreFi lets early supporters earn VOI rewards by pre-depositing
+                into upcoming DorkFi markets.
+              </p>
+              <p>
+                Deposits are non-custodial, tracked on-chain, and earn a share
+                of 2,000,000 VOI incentives.
+              </p>
+              <p>
+                The pool is time-weighted—earlier, larger deposits earn more at
+                launch.
+              </p>
             </div>
           </div>
           {isMobile ? (
@@ -689,41 +748,68 @@ export default function PreFiDashboard() {
                     <DorkFiCard className="p-4 space-y-3">
                       {/* Asset Header */}
                       <div className="flex items-center gap-3">
-                        <img 
-                          src={getTokenImagePath(m.symbol)} 
+                        <img
+                          src={getTokenImagePath(m.symbol)}
                           alt={m.symbol}
                           className="w-9 h-9 rounded-full flex-shrink-0"
                           onError={(e) => {
-                            e.currentTarget.src = '/placeholder.svg';
+                            e.currentTarget.src = "/placeholder.svg";
                           }}
                         />
                         <div className="flex-1 min-w-0">
-                          <div className="text-sm font-semibold text-card-foreground">{m.name}</div>
+                          <div className="text-sm font-semibold text-card-foreground">
+                            {m.name}
+                          </div>
                           <div className="text-xs text-muted-foreground">
-                            Min: {(m.id === "btc" || m.id === "cbbtc" || m.id === "eth" || m.id === "ausd" || m.id === "pow") ? "$" : ""}{fmt.format(m.min)} {m.symbol}
+                            Min:{" "}
+                            {m.id === "btc" ||
+                            m.id === "cbbtc" ||
+                            m.id === "eth" ||
+                            m.id === "ausd" ||
+                            m.id === "pow"
+                              ? "$"
+                              : ""}
+                            {fmt.format(m.min)} {m.symbol}
                           </div>
                         </div>
                         <div className="text-xs font-medium text-accent">
-                          Est. APY {loading ? "…" : `${(m.id === "voi" ? "15.8" : 
-                                                      m.id === "ausd" ? "8.2" :
-                                                      m.id === "unit" ? "12.4" :
-                                                      m.id === "btc" ? "6.5" :
-                                                      m.id === "cbbtc" ? "6.3" :
-                                                      m.id === "eth" ? "7.1" :
-                                                      m.id === "algo" ? "9.7" : "10.2")}%`}
+                          Est. APY{" "}
+                          {loading
+                            ? "…"
+                            : `${
+                                m.id === "voi"
+                                  ? "15.8"
+                                  : m.id === "ausd"
+                                  ? "8.2"
+                                  : m.id === "unit"
+                                  ? "12.4"
+                                  : m.id === "btc"
+                                  ? "6.5"
+                                  : m.id === "cbbtc"
+                                  ? "6.3"
+                                  : m.id === "eth"
+                                  ? "7.1"
+                                  : m.id === "algo"
+                                  ? "9.7"
+                                  : "10.2"
+                              }%`}
                         </div>
                       </div>
 
                       {/* Balance Grid */}
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <div className="text-xs text-muted-foreground">Wallet</div>
+                          <div className="text-xs text-muted-foreground">
+                            Wallet
+                          </div>
                           <div className="text-sm font-semibold tabular-nums text-card-foreground">
                             {loading ? "…" : `${fmt.format(wal)} ${m.symbol}`}
                           </div>
                         </div>
                         <div>
-                          <div className="text-xs text-muted-foreground">Deposited</div>
+                          <div className="text-xs text-muted-foreground">
+                            Deposited
+                          </div>
                           <div className="text-sm font-semibold tabular-nums text-card-foreground">
                             {loading ? "…" : `${fmt.format(dep)} ${m.symbol}`}
                           </div>
@@ -739,12 +825,18 @@ export default function PreFiDashboard() {
                             ) : (
                               <AlertCircle className="h-3 w-3 text-destructive" />
                             )}
-                            <span>
-                              {minOk ? "Qualified" : "Needs more"}
-                            </span>
+                            <span>{minOk ? "Qualified" : "Needs more"}</span>
                           </div>
                           <span className="tabular-nums">
-                            {fmt.format(Math.min(dep, m.min))} / {(m.id === "btc" || m.id === "cbbtc" || m.id === "eth" || m.id === "ausd" || m.id === "pow") ? "$" : ""}{fmt.format(m.min)}
+                            {fmt.format(Math.min(dep, m.min))} /{" "}
+                            {m.id === "btc" ||
+                            m.id === "cbbtc" ||
+                            m.id === "eth" ||
+                            m.id === "ausd" ||
+                            m.id === "pow"
+                              ? "$"
+                              : ""}
+                            {fmt.format(m.min)}
                           </span>
                         </div>
                         <ProgressBar value={Math.min(dep, m.min)} max={m.min} />
@@ -782,7 +874,11 @@ export default function PreFiDashboard() {
                           </span>
                         </TooltipTrigger>
                         <TooltipContent>
-                          <p>Available tokens for PreFi deposits. Each asset has a minimum deposit requirement to qualify for VOI rewards.</p>
+                          <p>
+                            Available tokens for PreFi deposits. Each asset has
+                            a minimum deposit requirement to qualify for VOI
+                            rewards.
+                          </p>
                         </TooltipContent>
                       </Tooltip>
                     </th>
@@ -795,7 +891,10 @@ export default function PreFiDashboard() {
                           </span>
                         </TooltipTrigger>
                         <TooltipContent>
-                          <p>Your current wallet balance for this asset. This shows how much you can deposit.</p>
+                          <p>
+                            Your current wallet balance for this asset. This
+                            shows how much you can deposit.
+                          </p>
                         </TooltipContent>
                       </Tooltip>
                     </th>
@@ -808,7 +907,10 @@ export default function PreFiDashboard() {
                           </span>
                         </TooltipTrigger>
                         <TooltipContent>
-                          <p>Amount you've already deposited for this asset. Deposits are non-custodial and tracked on-chain.</p>
+                          <p>
+                            Amount you've already deposited for this asset.
+                            Deposits are non-custodial and tracked on-chain.
+                          </p>
                         </TooltipContent>
                       </Tooltip>
                     </th>
@@ -821,7 +923,10 @@ export default function PreFiDashboard() {
                           </span>
                         </TooltipTrigger>
                         <TooltipContent>
-                          <p>Estimated APY based on dynamic time-weighted distributions.</p>
+                          <p>
+                            Estimated APY based on dynamic time-weighted
+                            distributions.
+                          </p>
                         </TooltipContent>
                       </Tooltip>
                     </th>
@@ -834,11 +939,17 @@ export default function PreFiDashboard() {
                           </span>
                         </TooltipTrigger>
                         <TooltipContent>
-                          <p>Shows your progress towards the minimum deposit requirement. You must meet the minimum to qualify for VOI rewards.</p>
+                          <p>
+                            Shows your progress towards the minimum deposit
+                            requirement. You must meet the minimum to qualify
+                            for VOI rewards.
+                          </p>
                         </TooltipContent>
                       </Tooltip>
                     </th>
-                    <th className="px-6 py-4 text-sm font-medium text-center">Actions</th>
+                    <th className="px-6 py-4 text-sm font-medium text-center">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -846,15 +957,26 @@ export default function PreFiDashboard() {
                     const st = marketsState[m.id];
                     const loading = !!loadingMap[m.id];
                     const dep = st ? fromBase(st.depositedBase, m.decimals) : 0;
-                    const wal = st ? fromBase(st.walletBalanceBase, m.decimals) : 0;
+                    const wal = st
+                      ? fromBase(st.walletBalanceBase, m.decimals)
+                      : 0;
                     const minOk = dep >= m.min;
 
                     // Reward estimate (very rough): user's stake‑seconds vs global
-                    const secondsRemaining = Math.max(0, Math.floor((launchTs - Date.now()) / 1000));
-                    const myStakeSeconds = BigInt(Math.floor(dep * secondsRemaining));
+                    const secondsRemaining = Math.max(
+                      0,
+                      Math.floor((launchTs - Date.now()) / 1000)
+                    );
+                    const myStakeSeconds = BigInt(
+                      Math.floor(dep * secondsRemaining)
+                    );
                     const totalSS = st?.totalStakeSecondsBase ?? 10_000_000n; // placeholder global
-                    const share = totalSS > 0n ? Number(myStakeSeconds) / Number(totalSS) : 0;
-                    const yourEstReward = PROGRAM.VOI_ALLOCATION_TOTAL * share * 0.25; // 25% rough portion to this market — adjust once split is known
+                    const share =
+                      totalSS > 0n
+                        ? Number(myStakeSeconds) / Number(totalSS)
+                        : 0;
+                    const yourEstReward =
+                      PROGRAM.VOI_ALLOCATION_TOTAL * share * 0.25; // 25% rough portion to this market — adjust once split is known
 
                     return (
                       <motion.tr
@@ -864,25 +986,35 @@ export default function PreFiDashboard() {
                         transition={{ duration: 0.3, delay: index * 0.1 }}
                         className="border-t border-border hover:bg-secondary/20 transition-colors"
                       >
-                         {/* Asset */}
-                         <td className="px-6 py-4">
-                           <div className="flex items-center gap-3">
-                             <img 
-                               src={getTokenImagePath(m.symbol)} 
-                               alt={m.symbol}
-                               className="w-10 h-10 rounded-full"
-                               onError={(e) => {
-                                 e.currentTarget.src = '/placeholder.svg';
-                               }}
-                             />
-                             <div>
-                               <div className="text-sm font-semibold text-card-foreground">{m.name}</div>
-                               <div className="text-xs text-muted-foreground">
-                                 Min: {(m.id === "btc" || m.id === "cbbtc" || m.id === "eth" || m.id === "ausd" || m.id === "pow") ? "$" : ""}{fmt.format(m.min)} {m.symbol}
-                               </div>
-                             </div>
-                           </div>
-                         </td>
+                        {/* Asset */}
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <img
+                              src={getTokenImagePath(m.symbol)}
+                              alt={m.symbol}
+                              className="w-10 h-10 rounded-full"
+                              onError={(e) => {
+                                e.currentTarget.src = "/placeholder.svg";
+                              }}
+                            />
+                            <div>
+                              <div className="text-sm font-semibold text-card-foreground">
+                                {m.name}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                Min:{" "}
+                                {m.id === "btc" ||
+                                m.id === "cbbtc" ||
+                                m.id === "eth" ||
+                                m.id === "ausd" ||
+                                m.id === "pow"
+                                  ? "$"
+                                  : ""}
+                                {fmt.format(m.min)} {m.symbol}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
 
                         {/* Wallet Balance */}
                         <td className="px-6 py-4 text-right">
@@ -901,13 +1033,25 @@ export default function PreFiDashboard() {
                         {/* Est. APY */}
                         <td className="px-6 py-4 text-right">
                           <div className="text-sm font-semibold tabular-nums text-accent">
-                            {loading ? "…" : `${(m.id === "voi" ? "15.8" : 
-                                                m.id === "ausd" ? "8.2" :
-                                                m.id === "unit" ? "12.4" :
-                                                m.id === "btc" ? "6.5" :
-                                                m.id === "cbbtc" ? "6.3" :
-                                                m.id === "eth" ? "7.1" :
-                                                m.id === "algo" ? "9.7" : "10.2")}%`}
+                            {loading
+                              ? "…"
+                              : `${
+                                  m.id === "voi"
+                                    ? "15.8"
+                                    : m.id === "ausd"
+                                    ? "8.2"
+                                    : m.id === "unit"
+                                    ? "12.4"
+                                    : m.id === "btc"
+                                    ? "6.5"
+                                    : m.id === "cbbtc"
+                                    ? "6.3"
+                                    : m.id === "eth"
+                                    ? "7.1"
+                                    : m.id === "algo"
+                                    ? "9.7"
+                                    : "10.2"
+                                }%`}
                           </div>
                         </td>
 
@@ -926,10 +1070,21 @@ export default function PreFiDashboard() {
                                 </span>
                               </div>
                               <span className="text-muted-foreground tabular-nums">
-                                {fmt.format(Math.min(dep, m.min))} / {(m.id === "btc" || m.id === "cbbtc" || m.id === "eth" || m.id === "ausd" || m.id === "pow") ? "$" : ""}{fmt.format(m.min)}
+                                {fmt.format(Math.min(dep, m.min))} /{" "}
+                                {m.id === "btc" ||
+                                m.id === "cbbtc" ||
+                                m.id === "eth" ||
+                                m.id === "ausd" ||
+                                m.id === "pow"
+                                  ? "$"
+                                  : ""}
+                                {fmt.format(m.min)}
                               </span>
                             </div>
-                            <ProgressBar value={Math.min(dep, m.min)} max={m.min} />
+                            <ProgressBar
+                              value={Math.min(dep, m.min)}
+                              max={m.min}
+                            />
                           </div>
                         </td>
 
@@ -962,13 +1117,22 @@ export default function PreFiDashboard() {
         <section className="mt-8">
           <div className="rounded-2xl border border-border bg-card p-4 text-xs text-muted-foreground">
             <p className="mb-2">
-              <strong className="text-primary">Non‑custodial:</strong> All prefunding deposits remain user‑controlled in on‑chain contracts.
+              <strong className="text-primary">Non‑custodial:</strong> All
+              prefunding deposits remain user‑controlled in on‑chain contracts.
             </p>
             <p className="mb-2">
-              <strong className="text-primary">Time‑weighted distribution:</strong> Rewards accrue based on amount × time until launch. Earlier deposits earn more. Participants below the minimum threshold in any market will not qualify for Phase 0 rewards.
+              <strong className="text-primary">
+                Time‑weighted distribution:
+              </strong>{" "}
+              Rewards accrue based on amount × time until launch. Earlier
+              deposits earn more. Participants below the minimum threshold in
+              any market will not qualify for Phase 0 rewards.
             </p>
             <p>
-              <strong className="text-primary">Estimates only:</strong> Reward estimates displayed are indicative and assume placeholder global totals. Final distribution will use the on‑chain prefunding state at launch.
+              <strong className="text-primary">Estimates only:</strong> Reward
+              estimates displayed are indicative and assume placeholder global
+              totals. Final distribution will use the on‑chain prefunding state
+              at launch.
             </p>
           </div>
         </section>
@@ -994,7 +1158,9 @@ export default function PreFiDashboard() {
               <SupplyBorrowCongrats
                 transactionType="deposit"
                 asset={selectedMarket?.symbol || ""}
-                assetIcon={selectedMarket ? getTokenImagePath(selectedMarket.symbol) : ""}
+                assetIcon={
+                  selectedMarket ? getTokenImagePath(selectedMarket.symbol) : ""
+                }
                 amount={modalAmount}
                 onViewTransaction={handleViewTransaction}
                 onGoToPortfolio={handleGoToPortfolio}
@@ -1009,27 +1175,33 @@ export default function PreFiDashboard() {
                   Deposit
                 </DialogTitle>
                 <DialogDescription className="text-center mt-1 text-sm text-slate-400 dark:text-slate-400">
-                  Enter the amount to deposit. Your available balance and requirements are shown below.
+                  Enter the amount to deposit. Your available balance and
+                  requirements are shown below.
                 </DialogDescription>
                 {selectedMarket && (
-                   <div className="flex items-center justify-center gap-3 pb-2 mt-3">
-                      <img 
-                        src={getTokenImagePath(selectedMarket.symbol)} 
-                        alt={selectedMarket.symbol}
-                        className="w-10 h-10 rounded-full"
-                        onError={(e) => {
-                          e.currentTarget.src = '/placeholder.svg';
-                        }}
-                      />
-                     <span className="text-xl font-semibold text-slate-800 dark:text-white">{selectedMarket.name}</span>
-                   </div>
+                  <div className="flex items-center justify-center gap-3 pb-2 mt-3">
+                    <img
+                      src={getTokenImagePath(selectedMarket.symbol)}
+                      alt={selectedMarket.symbol}
+                      className="w-10 h-10 rounded-full"
+                      onError={(e) => {
+                        e.currentTarget.src = "/placeholder.svg";
+                      }}
+                    />
+                    <span className="text-xl font-semibold text-slate-800 dark:text-white">
+                      {selectedMarket.name}
+                    </span>
+                  </div>
                 )}
               </DialogHeader>
-              
+
               {selectedMarket && (
                 <div className="space-y-6 pt-2 px-8 pb-8">
                   <div className="space-y-3">
-                    <Label htmlFor="amount" className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                    <Label
+                      htmlFor="amount"
+                      className="text-sm font-medium text-slate-600 dark:text-slate-300"
+                    >
                       Amount
                     </Label>
                     <div className="relative">
@@ -1054,14 +1226,24 @@ export default function PreFiDashboard() {
                     </div>
                     {modalFiatValue > 0 && (
                       <p className="text-sm text-slate-500 dark:text-slate-400">
-                        ≈ ${modalFiatValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ≈ $
+                        {modalFiatValue.toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                       </p>
                     )}
                     <p className="text-xs text-slate-400 dark:text-slate-500">
-                      Wallet Balance: {marketsState[selectedMarket.id] 
-                        ? fmt.format(fromBase(marketsState[selectedMarket.id].walletBalanceBase, selectedMarket.decimals))
-                        : "0"
-                      } {selectedMarket.symbol}
+                      Wallet Balance:{" "}
+                      {marketsState[selectedMarket.id]
+                        ? fmt.format(
+                            fromBase(
+                              marketsState[selectedMarket.id].walletBalanceBase,
+                              selectedMarket.decimals
+                            )
+                          )
+                        : "0"}{" "}
+                      {selectedMarket.symbol}
                     </p>
                   </div>
 
@@ -1069,38 +1251,61 @@ export default function PreFiDashboard() {
                     <CardContent className="p-4 space-y-3">
                       <div className="flex justify-between items-center">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm text-slate-500 dark:text-slate-400">Minimum to Qualify</span>
+                          <span className="text-sm text-slate-500 dark:text-slate-400">
+                            Minimum to Qualify
+                          </span>
                           <Tooltip>
-                             <TooltipTrigger asChild>
-                               <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
-                             </TooltipTrigger>
+                            <TooltipTrigger asChild>
+                              <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                            </TooltipTrigger>
                             <TooltipContent>
-                              <p>Minimum deposit required to qualify for Phase 0 rewards</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </div>
-                         <span className="text-sm font-medium text-slate-800 dark:text-white">
-                           {(selectedMarket.id === "btc" || selectedMarket.id === "cbbtc" || selectedMarket.id === "eth" || selectedMarket.id === "ausd" || selectedMarket.id === "pow") ? "$" : ""}{fmt.format(selectedMarket.min)} {selectedMarket.symbol}
-                         </span>
-                      </div>
-
-                      <div className="flex justify-between items-center">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm text-slate-500 dark:text-slate-400">Current Deposited</span>
-                          <Tooltip>
-                             <TooltipTrigger asChild>
-                               <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
-                             </TooltipTrigger>
-                            <TooltipContent>
-                              <p>Amount you have already deposited for this market</p>
+                              <p>
+                                Minimum deposit required to qualify for Phase 0
+                                rewards
+                              </p>
                             </TooltipContent>
                           </Tooltip>
                         </div>
                         <span className="text-sm font-medium text-slate-800 dark:text-white">
-                          {marketsState[selectedMarket.id] 
-                            ? fmt.format(fromBase(marketsState[selectedMarket.id].depositedBase, selectedMarket.decimals))
-                            : "0"
-                          } {selectedMarket.symbol}
+                          {selectedMarket.id === "btc" ||
+                          selectedMarket.id === "cbbtc" ||
+                          selectedMarket.id === "eth" ||
+                          selectedMarket.id === "ausd" ||
+                          selectedMarket.id === "pow"
+                            ? "$"
+                            : ""}
+                          {fmt.format(selectedMarket.min)}{" "}
+                          {selectedMarket.symbol}
+                        </span>
+                      </div>
+
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-slate-500 dark:text-slate-400">
+                            Current Deposited
+                          </span>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>
+                                Amount you have already deposited for this
+                                market
+                              </p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
+                        <span className="text-sm font-medium text-slate-800 dark:text-white">
+                          {marketsState[selectedMarket.id]
+                            ? fmt.format(
+                                fromBase(
+                                  marketsState[selectedMarket.id].depositedBase,
+                                  selectedMarket.decimals
+                                )
+                              )
+                            : "0"}{" "}
+                          {selectedMarket.symbol}
                         </span>
                       </div>
                     </CardContent>
@@ -1108,7 +1313,11 @@ export default function PreFiDashboard() {
 
                   <Button
                     onClick={handleConfirmDeposit}
-                    disabled={!modalAmount || Number(modalAmount) <= 0 || loadingMap[selectedMarket.id]}
+                    disabled={
+                      !modalAmount ||
+                      Number(modalAmount) <= 0 ||
+                      loadingMap[selectedMarket.id]
+                    }
                     className="w-full font-semibold text-white h-12 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {loadingMap[selectedMarket.id] ? (

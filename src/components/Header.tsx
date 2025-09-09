@@ -4,7 +4,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 import { useState } from "react";
-import WalletButton from "@/components/WalletButton";
+import WalletNetworkButton from "@/components/WalletNetworkButton";
 
 interface HeaderProps {
   activeTab: string;
@@ -99,7 +99,7 @@ const Header = ({ activeTab, onTabChange }: HeaderProps) => {
           {/* Desktop and Tablet Actions */}
           <div className="hidden md:flex items-center gap-2 md:gap-3">
             <ThemeToggle />
-            <WalletButton />
+            <WalletNetworkButton />
           </div>
 
           {/* Mobile Menu Button */}
@@ -135,7 +135,7 @@ const Header = ({ activeTab, onTabChange }: HeaderProps) => {
                 </Button>
               ))}
               <div className="mt-4">
-                <WalletButton />
+                <WalletNetworkButton />
               </div>
             </div>
           </div>
