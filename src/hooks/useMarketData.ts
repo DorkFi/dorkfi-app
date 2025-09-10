@@ -1,4 +1,6 @@
 import { useState, useMemo } from 'react';
+import { useNetwork } from '@/contexts/NetworkContext';
+import { getAllTokens, NetworkId } from '@/config';
 
 export interface MarketData {
   asset: string;
@@ -20,6 +22,32 @@ export interface MarketData {
   reserveFactor: number;
   collectorContract: string;
 }
+
+// Generate market data based on network
+const generateMarketDataForNetwork = (networkId: NetworkId): MarketData[] => {
+  const tokens = getAllTokens(networkId);
+  
+  return tokens.map((token) => ({
+    asset: token.symbol,
+    icon: token.logoPath,
+    totalSupply: Math.floor(Math.random() * 3000000) + 500000,
+    totalSupplyUSD: Math.floor(Math.random() * 3000000) + 500000,
+    supplyAPY: Math.random() * 5 + 2, // 2-7%
+    totalBorrow: Math.floor(Math.random() * 1500000) + 200000,
+    totalBorrowUSD: Math.floor(Math.random() * 1500000) + 200000,
+    borrowAPY: Math.random() * 8 + 4, // 4-12%
+    utilization: Math.random() * 60 + 20, // 20-80%
+    collateralFactor: Math.random() * 20 + 70, // 70-90%
+    walletBalance: Math.floor(Math.random() * 5000) + 100,
+    supplyCap: Math.floor(Math.random() * 5000000) + 1000000,
+    supplyCapUSD: Math.floor(Math.random() * 5000000) + 1000000,
+    maxLTV: Math.random() * 15 + 65, // 65-80%
+    liquidationThreshold: Math.random() * 10 + 75, // 75-85%
+    liquidationPenalty: Math.random() * 5 + 3, // 3-8%
+    reserveFactor: Math.random() * 10 + 10, // 10-20%
+    collectorContract: `0x${Math.random().toString(16).substr(2, 8)}...${Math.random().toString(16).substr(2, 4)}`
+  }));
+};
 
 const mockMarketData: MarketData[] = [
   { 
@@ -161,10 +189,14 @@ export const useMarketData = ({
   pageSize = 10
 }: UseMarketDataProps = {}) => {
   const [currentPage, setCurrentPage] = useState(1);
+  const { currentNetwork } = useNetwork();
+  
+  // Get market data for current network
+  const marketData = useMemo(() => generateMarketDataForNetwork(currentNetwork), [currentNetwork]);
 
   const { filteredData, totalPages, paginatedData } = useMemo(() => {
     // Filter data based on search term
-    let filtered = mockMarketData.filter(market =>
+    let filtered = marketData.filter(market =>
       market.asset.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
@@ -194,7 +226,7 @@ export const useMarketData = ({
       totalPages,
       paginatedData: paginated
     };
-  }, [searchTerm, sortField, sortOrder, currentPage, pageSize]);
+  }, [searchTerm, sortField, sortOrder, currentPage, pageSize, marketData]);
 
   const handleSearchChange = (newSearchTerm: string) => {
     setCurrentPage(1);

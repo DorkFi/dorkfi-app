@@ -36,6 +36,19 @@ export interface SystemHealth {
   lastChecked: string;
 }
 
+export interface CreateMarketParams {
+  tokenId: number;
+  collateralFactor: bigint;
+  liquidationThreshold: bigint;
+  reserveFactor: bigint;
+  borrowRate: bigint;
+  slope: bigint;
+  maxTotalDeposits: bigint;
+  maxTotalBorrows: bigint;
+  liquidationBonus: bigint;
+  closeFactor: bigint;
+}
+
 /**
  * Fetches the current paused state from the protocol
  * This would typically read from a smart contract or API endpoint
@@ -54,7 +67,7 @@ export const fetchPausedState = async (
       );
 
       const ci = new CONTRACT(
-        Number(networkConfig.contracts.lendingPool),
+        Number(networkConfig.contracts.lendingPools[0]),
         clients.algod,
         undefined,
         { ...LendingPoolAppSpec.contract, events: [] },
@@ -164,14 +177,13 @@ export const togglePauseState = async (
   pause: boolean,
   address: string
 ): Promise<
-  | { success: true; txns: string[] }
-  | { success: false; error: any }
+  { success: true; txns: string[] } | { success: false; error: any }
 > => {
   try {
     const networkConfig = getCurrentNetworkConfig();
     const lendingPoolAddress = getContractAddress(
       networkConfig.networkId,
-      "lendingPool"
+      "lendingPools"
     );
 
     console.log(`Attempting to ${pause ? "pause" : "unpause"} protocol...`);
@@ -182,7 +194,7 @@ export const togglePauseState = async (
         networkConfig.walletNetworkId as AlgorandNetwork
       );
       const ci = new CONTRACT(
-        Number(networkConfig.contracts.lendingPool),
+        Number(networkConfig.contracts.lendingPools[0]),
         clients.algod,
         undefined,
         { ...LendingPoolAppSpec.contract, events: [] },
@@ -242,5 +254,178 @@ export const formatPauseDuration = (pausedAt: string): string => {
     return `${diffHours}h ${diffMinutes % 60}m`;
   } else {
     return `${diffMinutes}m`;
+  }
+};
+
+/**
+ * Creates a new market in the lending pool
+ * This method handles the creation of new lending markets with specified parameters
+ */
+export const createMarket = async (
+  poolId: number,
+  params: CreateMarketParams,
+  address: string
+): Promise<
+  | { success: true; marketId: number; txns: string[] }
+  | { success: false; error: any }
+> => {
+  try {
+    const networkConfig = getCurrentNetworkConfig();
+    console.log("Creating market with params:", params);
+    console.log("Network config:", networkConfig);
+
+    // Validate parameters
+    if (params.tokenId <= 0) {
+      throw new Error("Token ID must be greater than 0");
+    }
+    if (params.collateralFactor < 0 || params.collateralFactor > 10000) {
+      throw new Error("Collateral factor must be between 0 and 10000");
+    }
+    if (
+      params.liquidationThreshold < 0 ||
+      params.liquidationThreshold > 10000
+    ) {
+      throw new Error("Liquidation threshold must be between 0 and 10000");
+    }
+    if (params.reserveFactor < 0 || params.reserveFactor > 10000) {
+      throw new Error("Reserve factor must be between 0 and 10000");
+    }
+    if (params.liquidationBonus < 0 || params.liquidationBonus > 10000) {
+      throw new Error("Liquidation bonus must be between 0 and 10000");
+    }
+    if (params.closeFactor < 0 || params.closeFactor > 10000) {
+      throw new Error("Close factor must be between 0 and 10000");
+    }
+
+    if (isCurrentNetworkAVM()) {
+      // Use Algorand SDK and contract calls
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      const ci = new CONTRACT(
+        Number(poolId),
+        clients.algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        {
+          addr: address,
+          sk: new Uint8Array(),
+        }
+      );
+
+      // First, get the cost of creating a market
+      const costResult = await ci.create_market_cost();
+      if (!costResult.success) {
+        throw new Error("Failed to get market creation cost");
+      }
+
+      console.log("Market creation cost:", costResult.returnValue);
+
+      // Create the market with the provided parameters
+      ci.setPaymentAmount(costResult.returnValue);
+      ci.setFee(8000);
+      const createResult = await ci.create_market(
+        params.tokenId,
+        params.collateralFactor,
+        params.liquidationThreshold,
+        params.reserveFactor,
+        params.borrowRate,
+        params.slope,
+        params.maxTotalDeposits,
+        params.maxTotalBorrows,
+        params.liquidationBonus,
+        params.closeFactor
+      );
+
+      console.log({ createResult });
+
+      if (!createResult.success) {
+        throw new Error("Failed to create market");
+      }
+
+      console.log("Market created successfully:", createResult.returnValue);
+
+      return {
+        success: true,
+        marketId: Number(createResult.returnValue),
+        txns: [...createResult.txns],
+      };
+    } else if (isCurrentNetworkEVM()) {
+      throw new Error("EVM networks are not supported yet");
+    } else {
+      throw new Error("Unsupported network");
+    }
+  } catch (error) {
+    console.error("Failed to create market:", error);
+    return {
+      success: false,
+      error: error,
+    };
+  }
+};
+
+/**
+ * Update price for a specific market
+ */
+export const updateMarketPrice = async (
+  poolId: string,
+  marketId: string,
+  newPrice: string,
+  userAddress: string
+): Promise<
+  { success: false; error: any } | { success: true; txns: string[] }
+> => {
+  console.log("updateMarketPrice", { poolId, marketId, newPrice, userAddress });
+
+  try {
+    const networkConfig = getCurrentNetworkConfig();
+
+    if (isCurrentNetworkAVM()) {
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      // Convert price to proper units (assuming 6 decimals for price)
+      const priceInSmallestUnit = BigInt(newPrice)
+
+      const ci = new CONTRACT(
+        Number(poolId),
+        clients.algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        {
+          addr: userAddress,
+          sk: new Uint8Array(),
+        }
+      );
+
+      // Create update price transaction
+      const updatePriceTx = await ci.set_market_price(
+        Number(marketId),
+        priceInSmallestUnit
+      );
+
+      console.log("updatePriceTx", { updatePriceTx });
+
+      if (!updatePriceTx.success) {
+        throw new Error("Failed to create update price transaction");
+      }
+
+      return {
+        success: true,
+        txns: [...updatePriceTx.txns],
+      };
+    } else if (isCurrentNetworkEVM()) {
+      throw new Error("EVM networks are not supported yet");
+    } else {
+      throw new Error("Unsupported network");
+    }
+  } catch (error) {
+    console.error("Error updating market price:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    };
   }
 };

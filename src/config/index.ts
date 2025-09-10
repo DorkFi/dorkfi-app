@@ -19,12 +19,45 @@ export type NetworkId =
 export type NetworkType = "avm" | "evm";
 
 export interface ContractConfig {
-  lendingPool: string;
+  lendingPools: string[];
   priceOracle?: string;
   liquidationEngine?: string;
   governance?: string;
   treasury?: string;
   // Add more contracts as needed
+}
+
+export interface TokenConfig {
+  assetId?: string;
+  contractId?: string; // Contract address or application ID for smart contract tokens
+  poolId?: string; // Lending pool ID for this token
+  decimals: number;
+  name: string;
+  symbol: string;
+  logoPath: string;
+  // Market override configuration
+  marketOverride?: {
+    displayName: string;
+    displaySymbol: string;
+    underlyingAssetId?: string; // The actual asset ID if different from display
+    underlyingContractId?: string; // The actual contract ID if different from display
+    isSmartContract: boolean; // Whether this is a smart contract-based asset
+  };
+}
+
+export interface PreFiParameters {
+  collateral_factor: number;
+  liquidation_threshold: number;
+  reserve_factor: number;
+  borrow_rate_base: number;
+  slope: number;
+  liquidation_bonus: number;
+  close_factor: number;
+  max_borrow_caps: {
+    stablecoins: string;
+    majors: string;
+    volatile: string;
+  };
 }
 
 export interface NetworkConfig {
@@ -39,14 +72,9 @@ export interface NetworkConfig {
   explorerUrl: string;
   contracts: ContractConfig;
   tokens: {
-    [symbol: string]: {
-      assetId?: string;
-      decimals: number;
-      name: string;
-      symbol: string;
-      logoPath: string;
-    };
+    [symbol: string]: TokenConfig;
   };
+  preFiParameters?: PreFiParameters;
 }
 
 export interface GlobalConfig {
@@ -78,7 +106,7 @@ const voiMainnetConfig: NetworkConfig = {
   indexerUrl: "https://mainnet-idx.voi.nodely.dev",
   explorerUrl: "https://voi.observer",
   contracts: {
-    lendingPool: "41760711",
+    lendingPools: ["41760711"],
     // Add other contract IDs as they become available
     priceOracle: undefined,
     liquidationEngine: undefined,
@@ -87,60 +115,95 @@ const voiMainnetConfig: NetworkConfig = {
   },
   tokens: {
     VOI: {
-      assetId: undefined, // Native token
+      assetId: "0",
+      poolId: "41760711",
+      contractId: "41877720",
       decimals: 6,
       name: "VOI",
       symbol: "VOI",
       logoPath: "/lovable-uploads/VOI.png",
+      marketOverride: {
+        displayName: "Voi",
+        displaySymbol: "Voi",
+        isSmartContract: true,
+      },
     },
-    USDC: {
-      assetId: "ASA_ID_aUSD", // TODO: Replace with actual ASA ID
-      decimals: 6,
-      name: "Aramid USDC",
-      symbol: "USDC",
-      logoPath: "/lovable-uploads/aUSDC.png",
-    },
-    UNIT: {
-      assetId: "ARC200_ID_UNIT", // TODO: Replace with actual ARC-200 ID
-      decimals: 6,
-      name: "UNIT",
-      symbol: "UNIT",
-      logoPath: "/lovable-uploads/UNIT.png",
-    },
-    BTC: {
-      assetId: "ARC200_ID_WBTC", // TODO: Replace with actual ARC-200 ID
-      decimals: 8,
-      name: "Wrapped BTC",
-      symbol: "BTC",
-      logoPath: "/lovable-uploads/WrappedBTC.png",
-    },
-    cbBTC: {
-      assetId: "ARC200_ID_cbBTC", // TODO: Replace with actual ARC-200 ID
-      decimals: 8,
-      name: "Coinbase BTC",
-      symbol: "cbBTC",
-      logoPath: "/lovable-uploads/cbBTC.png",
-    },
-    ETH: {
-      assetId: "ARC200_ID_WETH", // TODO: Replace with actual ARC-200 ID
-      decimals: 8,
-      name: "Wrapped ETH",
-      symbol: "ETH",
-      logoPath: "/lovable-uploads/ETH.jpg",
-    },
-    ALGO: {
-      assetId: "ASA_ID_ALGO_WRAPPED", // TODO: Replace with actual ASA ID
-      decimals: 6,
-      name: "Algorand",
-      symbol: "ALGO",
-      logoPath: "/lovable-uploads/Algo.webp",
-    },
-    POW: {
-      assetId: "ARC200_ID_POW", // TODO: Replace with actual ARC-200 ID
-      decimals: 6,
-      name: "POW",
-      symbol: "POW",
-      logoPath: "/lovable-uploads/POW.png",
+    // USDC: {
+    //   assetId: "ASA_ID_aUSD", // TODO: Replace with actual ASA ID
+    //   contractId: "APP_ID_USDC_CONTRACT", // TODO: Replace with actual contract ID
+    //   decimals: 6,
+    //   name: "Aramid USDC",
+    //   symbol: "USDC",
+    //   logoPath: "/lovable-uploads/aUSDC.png",
+    // },
+    // UNIT: {
+    //   assetId: "ARC200_ID_UNIT", // TODO: Replace with actual ARC-200 ID
+    //   contractId: "APP_ID_UNIT_CONTRACT", // TODO: Replace with actual contract ID
+    //   decimals: 6,
+    //   name: "UNIT",
+    //   symbol: "UNIT",
+    //   logoPath: "/lovable-uploads/UNIT.png",
+    // },
+    // BTC: {
+    //   assetId: "ARC200_ID_WBTC", // TODO: Replace with actual ARC-200 ID
+    //   contractId: "APP_ID_WBTC_CONTRACT", // TODO: Replace with actual contract ID
+    //   decimals: 8,
+    //   name: "Wrapped BTC",
+    //   symbol: "BTC",
+    //   logoPath: "/lovable-uploads/WrappedBTC.png",
+    // },
+    // cbBTC: {
+    //   assetId: "ARC200_ID_cbBTC", // TODO: Replace with actual ARC-200 ID
+    //   contractId: "APP_ID_cbBTC_CONTRACT", // TODO: Replace with actual contract ID
+    //   decimals: 8,
+    //   name: "Coinbase BTC",
+    //   symbol: "cbBTC",
+    //   logoPath: "/lovable-uploads/cbBTC.png",
+    // },
+    // ETH: {
+    //   assetId: "ARC200_ID_WETH", // TODO: Replace with actual ARC-200 ID
+    //   contractId: "APP_ID_WETH_CONTRACT", // TODO: Replace with actual contract ID
+    //   decimals: 8,
+    //   name: "Wrapped ETH",
+    //   symbol: "ETH",
+    //   logoPath: "/lovable-uploads/ETH.jpg",
+    // },
+    // ALGO: {
+    //   assetId: "ASA_ID_ALGO_WRAPPED", // TODO: Replace with actual ASA ID
+    //   contractId: "APP_ID_ALGO_WRAPPER", // TODO: Replace with actual contract ID
+    //   decimals: 6,
+    //   name: "Algorand",
+    //   symbol: "ALGO",
+    //   logoPath: "/lovable-uploads/Algo.webp",
+    //   marketOverride: {
+    //     displayName: "Algo",
+    //     displaySymbol: "Algo",
+    //     underlyingAssetId: "ASA_ID_ALGO_WRAPPED", // The actual wrapped ALGO asset ID
+    //     underlyingContractId: "APP_ID_ALGO_WRAPPER", // The actual wrapper contract ID
+    //     isSmartContract: true, // This is a wrapped/smart contract version
+    //   },
+    // },
+    // POW: {
+    //   assetId: "ARC200_ID_POW", // TODO: Replace with actual ARC-200 ID
+    //   contractId: "APP_ID_POW_CONTRACT", // TODO: Replace with actual contract ID
+    //   decimals: 6,
+    //   name: "POW",
+    //   symbol: "POW",
+    //   logoPath: "/lovable-uploads/POW.png",
+    // },
+  },
+  preFiParameters: {
+    collateral_factor: 780, // 78% = 780 bp
+    liquidation_threshold: 825, // 82.5% = 825 bp
+    reserve_factor: 100, // 10% = 100 bp
+    borrow_rate_base: 50, // 5% = 50 bp
+    slope: 100, // 10% = 100 bp
+    liquidation_bonus: 50, // 5% = 50 bp
+    close_factor: 350, // 35% = 350 bp
+    max_borrow_caps: {
+      stablecoins: "100000",
+      majors: "50000",
+      volatile: "10000",
     },
   },
 };
@@ -159,7 +222,7 @@ const voiTestnetConfig: NetworkConfig = {
   indexerUrl: "https://testnet-idx.voi.nodely.dev",
   explorerUrl: "https://testnet.voi.observer",
   contracts: {
-    lendingPool: "TESTNET_LENDING_POOL_ID", // TODO: Replace with actual testnet contract ID
+    lendingPools: ["TESTNET_LENDING_POOL_ID"], // TODO: Replace with actual testnet contract ID
     priceOracle: undefined,
     liquidationEngine: undefined,
     governance: undefined,
@@ -168,6 +231,7 @@ const voiTestnetConfig: NetworkConfig = {
   tokens: {
     VOI: {
       assetId: undefined, // Native token
+      poolId: "41760711", // Same pool ID as mainnet for now
       decimals: 6,
       name: "VOI",
       symbol: "VOI",
@@ -191,7 +255,7 @@ const algorandMainnetConfig: NetworkConfig = {
   indexerUrl: "https://mainnet-idx.algonode.cloud",
   explorerUrl: "https://algoexplorer.io",
   contracts: {
-    lendingPool: "ALGORAND_LENDING_POOL_ID", // TODO: Replace with actual contract ID
+    lendingPools: ["ALGORAND_LENDING_POOL_ID"], // TODO: Replace with actual contract ID
     priceOracle: undefined,
     liquidationEngine: undefined,
     governance: undefined,
@@ -200,6 +264,7 @@ const algorandMainnetConfig: NetworkConfig = {
   tokens: {
     ALGO: {
       assetId: undefined, // Native token
+      poolId: "ALGORAND_LENDING_POOL_ID", // TODO: Replace with actual pool ID
       decimals: 6,
       name: "Algorand",
       symbol: "ALGO",
@@ -222,7 +287,7 @@ const algorandTestnetConfig: NetworkConfig = {
   indexerUrl: "https://testnet-idx.algonode.cloud",
   explorerUrl: "https://testnet.algoexplorer.io",
   contracts: {
-    lendingPool: "ALGORAND_TESTNET_LENDING_POOL_ID", // TODO: Replace with actual contract ID
+    lendingPools: ["ALGORAND_TESTNET_LENDING_POOL_ID"], // TODO: Replace with actual contract ID
     priceOracle: undefined,
     liquidationEngine: undefined,
     governance: undefined,
@@ -231,6 +296,7 @@ const algorandTestnetConfig: NetworkConfig = {
   tokens: {
     ALGO: {
       assetId: undefined, // Native token
+      poolId: "ALGORAND_LENDING_POOL_ID", // TODO: Replace with actual pool ID
       decimals: 6,
       name: "Algorand",
       symbol: "ALGO",
@@ -253,7 +319,10 @@ const baseMainnetConfig: NetworkConfig = {
   indexerUrl: "https://base-mainnet.g.alchemy.com/v2/demo", // Using Alchemy as indexer
   explorerUrl: "https://basescan.org",
   contracts: {
-    lendingPool: "0x1234567890123456789012345678901234567890", // TODO: Replace with actual contract address
+    lendingPools: [
+      "0x1234567890123456789012345678901234567890",
+      "0x2345678901234567890123456789012345678901",
+    ], // Multiple pools for demonstration
     priceOracle: undefined,
     liquidationEngine: undefined,
     governance: undefined,
@@ -262,6 +331,7 @@ const baseMainnetConfig: NetworkConfig = {
   tokens: {
     ETH: {
       assetId: undefined, // Native token
+      poolId: "ETHEREUM_LENDING_POOL_ID", // TODO: Replace with actual pool ID
       decimals: 18,
       name: "Ethereum",
       symbol: "ETH",
@@ -269,6 +339,7 @@ const baseMainnetConfig: NetworkConfig = {
     },
     USDC: {
       assetId: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", // Base USDC
+      poolId: "USDC_LENDING_POOL_ID", // TODO: Replace with actual pool ID
       decimals: 6,
       name: "USD Coin",
       symbol: "USDC",
@@ -291,7 +362,7 @@ const baseTestnetConfig: NetworkConfig = {
   indexerUrl: "https://base-sepolia.g.alchemy.com/v2/demo",
   explorerUrl: "https://sepolia.basescan.org",
   contracts: {
-    lendingPool: "0x1234567890123456789012345678901234567890", // TODO: Replace with actual testnet contract address
+    lendingPools: ["0x1234567890123456789012345678901234567890"], // TODO: Replace with actual testnet contract address
     priceOracle: undefined,
     liquidationEngine: undefined,
     governance: undefined,
@@ -300,6 +371,7 @@ const baseTestnetConfig: NetworkConfig = {
   tokens: {
     ETH: {
       assetId: undefined, // Native token
+      poolId: "ETHEREUM_LENDING_POOL_ID", // TODO: Replace with actual pool ID
       decimals: 18,
       name: "Ethereum",
       symbol: "ETH",
@@ -322,7 +394,7 @@ const ethereumMainnetConfig: NetworkConfig = {
   indexerUrl: "https://eth-mainnet.g.alchemy.com/v2/demo",
   explorerUrl: "https://etherscan.io",
   contracts: {
-    lendingPool: "0x1234567890123456789012345678901234567890", // TODO: Replace with actual contract address
+    lendingPools: ["0x1234567890123456789012345678901234567890"], // TODO: Replace with actual contract address
     priceOracle: undefined,
     liquidationEngine: undefined,
     governance: undefined,
@@ -331,6 +403,7 @@ const ethereumMainnetConfig: NetworkConfig = {
   tokens: {
     ETH: {
       assetId: undefined, // Native token
+      poolId: "ETHEREUM_LENDING_POOL_ID", // TODO: Replace with actual pool ID
       decimals: 18,
       name: "Ethereum",
       symbol: "ETH",
@@ -360,7 +433,7 @@ const ethereumTestnetConfig: NetworkConfig = {
   indexerUrl: "https://eth-sepolia.g.alchemy.com/v2/demo",
   explorerUrl: "https://sepolia.etherscan.io",
   contracts: {
-    lendingPool: "0x1234567890123456789012345678901234567890", // TODO: Replace with actual testnet contract address
+    lendingPools: ["0x1234567890123456789012345678901234567890"], // TODO: Replace with actual testnet contract address
     priceOracle: undefined,
     liquidationEngine: undefined,
     governance: undefined,
@@ -369,6 +442,7 @@ const ethereumTestnetConfig: NetworkConfig = {
   tokens: {
     ETH: {
       assetId: undefined, // Native token
+      poolId: "ETHEREUM_LENDING_POOL_ID", // TODO: Replace with actual pool ID
       decimals: 18,
       name: "Ethereum",
       symbol: "ETH",
@@ -391,7 +465,7 @@ const localnetConfig: NetworkConfig = {
   indexerUrl: "http://localhost:8980",
   explorerUrl: "http://localhost:3000",
   contracts: {
-    lendingPool: "LOCAL_LENDING_POOL_ID", // TODO: Replace with actual local contract ID
+    lendingPools: ["LOCAL_LENDING_POOL_ID"], // TODO: Replace with actual local contract ID
     priceOracle: undefined,
     liquidationEngine: undefined,
     governance: undefined,
@@ -400,6 +474,7 @@ const localnetConfig: NetworkConfig = {
   tokens: {
     ALGO: {
       assetId: undefined, // Native token
+      poolId: "ALGORAND_LENDING_POOL_ID", // TODO: Replace with actual pool ID
       decimals: 6,
       name: "Algorand",
       symbol: "ALGO",
@@ -515,8 +590,37 @@ export const isNetworkEnabled = (networkId: NetworkId): boolean => {
 export const getContractAddress = (
   networkId: NetworkId,
   contractName: keyof ContractConfig
-): string | undefined => {
+): string | string[] | undefined => {
   return config.networks[networkId].contracts[contractName];
+};
+
+/**
+ * Get all lending pools for a specific network
+ */
+export const getLendingPools = (networkId: NetworkId): string[] => {
+  return config.networks[networkId].contracts.lendingPools;
+};
+
+/**
+ * Get the first lending pool for a specific network (for backward compatibility)
+ */
+export const getLendingPool = (networkId: NetworkId): string | undefined => {
+  const pools = getLendingPools(networkId);
+  return pools.length > 0 ? pools[0] : undefined;
+};
+
+/**
+ * Get lending pools for the current network
+ */
+export const getCurrentLendingPools = (): string[] => {
+  return getLendingPools(config.defaultNetwork);
+};
+
+/**
+ * Get the first lending pool for the current network (for backward compatibility)
+ */
+export const getCurrentLendingPool = (): string | undefined => {
+  return getLendingPool(config.defaultNetwork);
 };
 
 export const getTokenConfig = (networkId: NetworkId, symbol: string) => {
@@ -525,6 +629,102 @@ export const getTokenConfig = (networkId: NetworkId, symbol: string) => {
 
 export const getAllTokens = (networkId: NetworkId) => {
   return Object.values(config.networks[networkId].tokens);
+};
+
+/**
+ * Get token display information with market override support
+ * This function returns the display name and symbol, considering market overrides
+ */
+export const getTokenDisplayInfo = (networkId: NetworkId, symbol: string) => {
+  const tokenConfig = getTokenConfig(networkId, symbol);
+  if (!tokenConfig) {
+    return null;
+  }
+
+  // If market override is configured, use the override values
+  if (tokenConfig.marketOverride) {
+    return {
+      name: tokenConfig.marketOverride.displayName,
+      symbol: tokenConfig.marketOverride.displaySymbol,
+      underlyingAssetId:
+        tokenConfig.marketOverride.underlyingAssetId || tokenConfig.assetId,
+      underlyingContractId:
+        tokenConfig.marketOverride.underlyingContractId ||
+        tokenConfig.contractId,
+      isSmartContract: tokenConfig.marketOverride.isSmartContract,
+      originalName: tokenConfig.name,
+      originalSymbol: tokenConfig.symbol,
+      originalContractId: tokenConfig.contractId,
+    };
+  }
+
+  // Otherwise, return the original token information
+  return {
+    name: tokenConfig.name,
+    symbol: tokenConfig.symbol,
+    underlyingAssetId: tokenConfig.assetId,
+    underlyingContractId: tokenConfig.contractId,
+    isSmartContract: false,
+    originalName: tokenConfig.name,
+    originalSymbol: tokenConfig.symbol,
+    originalContractId: tokenConfig.contractId,
+  };
+};
+
+/**
+ * Get all tokens with display information (considering market overrides)
+ */
+export const getAllTokensWithDisplayInfo = (networkId: NetworkId) => {
+  const tokens = config.networks[networkId].tokens;
+  return Object.entries(tokens).map(([symbol, tokenConfig]) => ({
+    symbol,
+    ...getTokenDisplayInfo(networkId, symbol)!,
+    decimals: tokenConfig.decimals,
+    logoPath: tokenConfig.logoPath,
+  }));
+};
+
+/**
+ * Check if a token has market override configured
+ */
+export const hasMarketOverride = (
+  networkId: NetworkId,
+  symbol: string
+): boolean => {
+  const tokenConfig = getTokenConfig(networkId, symbol);
+  return tokenConfig?.marketOverride !== undefined;
+};
+
+/**
+ * Get the underlying asset ID for a token (considering market overrides)
+ */
+export const getUnderlyingAssetId = (
+  networkId: NetworkId,
+  symbol: string
+): string | undefined => {
+  const displayInfo = getTokenDisplayInfo(networkId, symbol);
+  return displayInfo?.underlyingAssetId;
+};
+
+/**
+ * Get the underlying contract ID for a token (considering market overrides)
+ */
+export const getUnderlyingContractId = (
+  networkId: NetworkId,
+  symbol: string
+): string | undefined => {
+  const displayInfo = getTokenDisplayInfo(networkId, symbol);
+  return displayInfo?.underlyingContractId;
+};
+
+/**
+ * Get PreFi parameters for a network
+ */
+export const getPreFiParameters = (
+  networkId: NetworkId
+): PreFiParameters | undefined => {
+  const network = getNetworkConfig(networkId);
+  return network?.preFiParameters;
 };
 
 export const isFeatureEnabled = (

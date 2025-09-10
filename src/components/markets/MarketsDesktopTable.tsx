@@ -10,15 +10,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Info } from "lucide-react";
-import { MarketData } from "@/hooks/useMarketData";
+import { Info, Loader2 } from "lucide-react";
+import { OnDemandMarketData } from "@/hooks/useOnDemandMarketData";
 import MarketsTableActions from "./MarketsTableActions";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 
 interface MarketsDesktopTableProps {
-  markets: MarketData[];
-  onRowClick: (market: MarketData) => void;
-  onInfoClick: (e: React.MouseEvent, market: MarketData) => void;
+  markets: OnDemandMarketData[];
+  onRowClick: (market: OnDemandMarketData) => void;
+  onInfoClick: (e: React.MouseEvent, market: OnDemandMarketData) => void;
   onDepositClick: (asset: string) => void;
   onBorrowClick: (asset: string) => void;
 }
@@ -32,6 +32,19 @@ const headerTooltips = {
   utilization: "Percentage of deposited assets that are currently borrowed.",
   actions: "Quick actions to deposit or borrow the selected asset.",
 };
+
+const LoadingCell = ({ children }: { children: React.ReactNode }) => (
+  <div className="flex items-center justify-center gap-2 text-muted-foreground">
+    <Loader2 className="w-4 h-4 animate-spin" />
+    <span className="text-sm">Loading...</span>
+  </div>
+);
+
+const ErrorCell = ({ error }: { error: string }) => (
+  <div className="flex items-center justify-center text-red-500 text-sm">
+    Error: {error}
+  </div>
+);
 
 const MarketsDesktopTable = ({
   markets,
@@ -196,44 +209,74 @@ const MarketsDesktopTable = ({
                   </div>
                 </TableCell>
                 <TableCell className="text-center">
-                  <div>
-                    <div className="font-medium">
-                      ${market.totalSupplyUSD.toLocaleString()}
+                  {market.isLoading ? (
+                    <LoadingCell />
+                  ) : market.error ? (
+                    <ErrorCell error={market.error} />
+                  ) : (
+                    <div>
+                      <div className="font-medium">
+                        ${market.totalSupplyUSD.toLocaleString()}
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        {market.totalSupply.toLocaleString()} {market.asset}
+                      </div>
                     </div>
-                    <div className="text-sm text-muted-foreground">
-                      {market.totalSupply.toLocaleString()} {market.asset}
-                    </div>
-                  </div>
+                  )}
                 </TableCell>
                 <TableCell className="text-center">
-                  <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-                    {market.supplyAPY}%
-                  </Badge>
+                  {market.isLoading ? (
+                    <LoadingCell />
+                  ) : market.error ? (
+                    <ErrorCell error={market.error} />
+                  ) : (
+                    <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                      {market.supplyAPY.toFixed(2)}%
+                    </Badge>
+                  )}
                 </TableCell>
                 <TableCell className="text-center">
-                  <div>
-                    <div className="font-medium">
-                      ${market.totalBorrowUSD.toLocaleString()}
+                  {market.isLoading ? (
+                    <LoadingCell />
+                  ) : market.error ? (
+                    <ErrorCell error={market.error} />
+                  ) : (
+                    <div>
+                      <div className="font-medium">
+                        ${market.totalBorrowUSD.toLocaleString()}
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        {market.totalBorrow.toLocaleString()} {market.asset}
+                      </div>
                     </div>
-                    <div className="text-sm text-muted-foreground">
-                      {market.totalBorrow.toLocaleString()} {market.asset}
-                    </div>
-                  </div>
+                  )}
                 </TableCell>
                 <TableCell className="text-center">
-                  <Badge className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
-                    {market.borrowAPY}%
-                  </Badge>
+                  {market.isLoading ? (
+                    <LoadingCell />
+                  ) : market.error ? (
+                    <ErrorCell error={market.error} />
+                  ) : (
+                    <Badge className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
+                      {market.borrowAPY.toFixed(2)}%
+                    </Badge>
+                  )}
                 </TableCell>
                 <TableCell className="text-center">
-                  <div className="flex flex-col items-center space-y-1">
-                    <div className="text-sm font-medium">
-                      {market.utilization}%
+                  {market.isLoading ? (
+                    <LoadingCell />
+                  ) : market.error ? (
+                    <ErrorCell error={market.error} />
+                  ) : (
+                    <div className="flex flex-col items-center space-y-1">
+                      <div className="text-sm font-medium">
+                        {market.utilization.toFixed(1)}%
+                      </div>
+                      <div className="flex justify-center w-full">
+                        <Progress value={market.utilization} className="h-2 w-20" />
+                      </div>
                     </div>
-                    <div className="flex justify-center w-full">
-                      <Progress value={market.utilization} className="h-2 w-20" />
-                    </div>
-                  </div>
+                  )}
                 </TableCell>
                 <TableCell className="text-center">
                   <MarketsTableActions

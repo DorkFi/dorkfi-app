@@ -8,6 +8,10 @@ import {
   getCurrentNetworkConfig, 
   getNetworkConfig, 
   getContractAddress, 
+  getLendingPools,
+  getLendingPool,
+  getCurrentLendingPools,
+  getCurrentLendingPool,
   getTokenConfig, 
   getAllTokens,
   isFeatureEnabled,
@@ -32,15 +36,24 @@ export const getCurrentNetwork = () => {
   return config;
 };
 
-// Example: Get lending pool contract address for current network
+// Example: Get lending pool contract address for current network (backward compatibility)
 export const getLendingPoolAddress = () => {
-  const config = getCurrentNetworkConfig();
-  return getContractAddress(config.networkId, 'lendingPool');
+  return getCurrentLendingPool();
 };
 
-// Example: Get lending pool contract address for specific network
+// Example: Get all lending pools for current network
+export const getAllLendingPools = () => {
+  return getCurrentLendingPools();
+};
+
+// Example: Get lending pool contract address for specific network (backward compatibility)
 export const getLendingPoolAddressForNetwork = (networkId: NetworkId) => {
-  return getContractAddress(networkId, 'lendingPool');
+  return getLendingPool(networkId);
+};
+
+// Example: Get all lending pools for specific network
+export const getAllLendingPoolsForNetwork = (networkId: NetworkId) => {
+  return getLendingPools(networkId);
 };
 
 // Example: Get token configuration
@@ -71,7 +84,7 @@ export const switchToTestnet = () => {
 export const getAllContractAddresses = () => {
   const config = getCurrentNetworkConfig();
   return {
-    lendingPool: config.contracts.lendingPool,
+    lendingPools: config.contracts.lendingPools,
     priceOracle: config.contracts.priceOracle,
     liquidationEngine: config.contracts.liquidationEngine,
     governance: config.contracts.governance,

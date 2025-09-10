@@ -1,10 +1,10 @@
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ExternalLink } from "lucide-react";
 
-import { useMarketData, SortField, SortOrder } from "@/hooks/useMarketData";
+import { useOnDemandMarketData, SortField, SortOrder } from "@/hooks/useOnDemandMarketData";
 import MarketSearchFilters from "@/components/markets/MarketSearchFilters";
 import MarketPagination from "@/components/markets/MarketPagination";
 import SupplyBorrowModal from "@/components/SupplyBorrowModal";
@@ -27,12 +27,16 @@ const MarketsTable = () => {
     currentPage,
     setCurrentPage,
     handleSearchChange,
-    handleSortChange
-  } = useMarketData({
+    handleSortChange,
+    loadVisibleMarkets,
+    isLoading
+  } = useOnDemandMarketData({
     searchTerm,
     sortField,
     sortOrder,
-    pageSize: 10
+    pageSize: 10,
+    autoLoad: true,
+    throttleMs: 60 * 1000 // 1 minute throttle
   });
 
   const handleSearchTermChange = (value: string) => {
@@ -45,6 +49,14 @@ const MarketsTable = () => {
     setSortOrder(order);
     handleSortChange(field, order);
   };
+
+  // Load visible markets when component mounts or markets change
+  useEffect(() => {
+    if (markets.length > 0) {
+      const visibleMarketKeys = markets.map(market => market.asset.toLowerCase());
+      loadVisibleMarkets(visibleMarketKeys);
+    }
+  }, [markets, loadVisibleMarkets]);
 
   const handleDepositClick = (asset: string) => {
     setDepositModal({ isOpen: true, asset });

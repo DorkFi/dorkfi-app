@@ -20,10 +20,21 @@ export interface OHLCDataPoint {
 }
 
 export interface MimirToken {
-  contractId: string;
-  symbol: string;
   name: string;
+  symbol: string;
+  creator: string;
+  deleted: number;
+  tokenId: string | null;
   decimals: number;
+  imageUrl: string | null;
+  verified: number;
+  mintRound: number;
+  contractId: number;
+  globalState: Array<{
+    key: string;
+    value: string;
+  }>;
+  totalSupply: string;
 }
 
 export interface MimirPriceResponse {
@@ -46,10 +57,17 @@ export interface TokenPair {
   popular?: boolean;
 }
 
-export const MIMIR_BASE_URL = 'https://voi-mainnet-mimirapi.nftnavigator.xyz/api/v1';
+export const MIMIR_BASE_URL = 'https://voi-mainnet-mimirapi.nftnavigator.xyz';
 
 export const TOKEN_MAP: Record<string, string> = {
   'VOI': 'VOI',
   'UNIT': 'UNIT', 
-  'USDC': 'aUSDC'
+  'USDC': 'aUSDC',
+  'BTC': 'WBTC',
+  'ETH': 'WETH',
+  'ALGO': 'ALGO',
+  'POW': 'POW',
+  'cbBTC': 'cbBTC',
+  'USDT': 'USDT',
+  'DAI': 'DAI'
 };

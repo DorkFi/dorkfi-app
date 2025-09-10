@@ -3,14 +3,14 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Info } from "lucide-react";
-import { MarketData } from "@/hooks/useMarketData";
+import { OnDemandMarketData } from "@/hooks/useOnDemandMarketData";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import DorkFiButton from "@/components/ui/DorkFiButton";
 
 interface MarketCardViewProps {
-  markets: MarketData[];
-  onRowClick: (market: MarketData) => void;
-  onInfoClick: (e: React.MouseEvent, market: MarketData) => void;
+  markets: OnDemandMarketData[];
+  onRowClick: (market: OnDemandMarketData) => void;
+  onInfoClick: (e: React.MouseEvent, market: OnDemandMarketData) => void;
   onDepositClick: (asset: string) => void;
   onBorrowClick: (asset: string) => void;
 }

@@ -1,7 +1,7 @@
 {
   "name": "vite_react_shadcn_ts",
   "private": true,
-  "version": "0.1.11",
+  "version": "0.1.12",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -47,6 +47,7 @@
     "@txnlab/use-wallet-react": "^3.7.2",
     "algosdk": "^2.9.0",
     "apexcharts": "^4.7.0",
+    "bignumber.js": "^9.3.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.0.0",

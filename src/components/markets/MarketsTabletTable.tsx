@@ -3,14 +3,14 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Info } from "lucide-react";
-import { MarketData } from "@/hooks/useMarketData";
+import { OnDemandMarketData } from "@/hooks/useOnDemandMarketData";
 import MarketsTableActions from "./MarketsTableActions";
 import { Button } from "@/components/ui/button";
 
 interface MarketsTabletTableProps {
-  markets: MarketData[];
-  onRowClick: (market: MarketData) => void;
-  onInfoClick: (e: React.MouseEvent, market: MarketData) => void;
+  markets: OnDemandMarketData[];
+  onRowClick: (market: OnDemandMarketData) => void;
+  onInfoClick: (e: React.MouseEvent, market: OnDemandMarketData) => void;
   onDepositClick: (asset: string) => void;
   onBorrowClick: (asset: string) => void;
 }

@@ -41,7 +41,16 @@ import {
 import SupplyBorrowCongrats from "@/components/SupplyBorrowCongrats";
 import { getTokenImagePath } from "@/utils/tokenImageUtils";
 import VersionDisplay from "@/components/VersionDisplay";
-import { getCurrentNetworkConfig, getAllTokens } from "@/config";
+import {
+  getCurrentNetworkConfig,
+  getAllTokens,
+  NetworkId,
+  isCurrentNetworkEVM,
+  isCurrentNetworkAlgorandCompatible,
+} from "@/config";
+import { useNetwork } from "@/contexts/NetworkContext";
+import { deposit } from "@/services/lendingService";
+import { useWallet } from "@txnlab/use-wallet-react";
 
 /**
  * PreFi Frontend – Single-file MVP Dashboard
@@ -81,19 +90,21 @@ type TokenStandard = "native" | "asa" | "arc200";
 
 type Market = {
   id: string;
+  poolId?: string; // lending pool ID for this token
+  marketId?: string; // lending market ID for this token
+  contractId?: string; // prefunding contract / app id (placeholder)
   name: string;
   symbol: string;
   min: number; // minimum qualifying deposit for Phase 0
   tokenStandard: TokenStandard;
   assetId?: string; // ASA/ARC‑200 ID if applicable
-  contractAddress: string; // prefunding contract / app id (placeholder)
   decimals: number;
 };
 
-// Get markets from configuration
-const getMarketsFromConfig = (): Market[] => {
+// Get markets from configuration - now reactive to network changes
+const getMarketsFromConfig = (networkId: NetworkId): Market[] => {
   const networkConfig = getCurrentNetworkConfig();
-  const tokens = getAllTokens(networkConfig.networkId);
+  const tokens = getAllTokens(networkId);
 
   return tokens.map((token) => {
     // Determine token standard based on assetId
@@ -120,6 +131,8 @@ const getMarketsFromConfig = (): Market[] => {
 
     return {
       id: token.symbol.toLowerCase(),
+      poolId: token.poolId,
+      marketId: token.contractId,
       name: token.name,
       symbol: token.symbol,
       min: minDeposits[token.symbol] || 10,
@@ -130,8 +143,6 @@ const getMarketsFromConfig = (): Market[] => {
     };
   });
 };
-
-const MARKETS: Market[] = getMarketsFromConfig();
 
 /*************************
  * Utilities              *
@@ -151,7 +162,7 @@ const fromBase = (amt: bigint, decimals: number) =>
 interface WalletState {
   address?: string;
   connected: boolean;
-  network: "voi-mainnet" | "voi-testnet";
+  network: NetworkId;
   mockMode: boolean;
 }
 
@@ -307,10 +318,19 @@ function ProgressBar({ value, max }: { value: number; max: number }) {
  * Main Component         *
  *************************/
 export default function PreFiDashboard() {
+  const { activeAccount, signTransactions } = useWallet();
   const isMobile = useIsMobile();
+  const { currentNetwork } = useNetwork();
+
+  // Get markets for current network
+  const markets = useMemo(
+    () => getMarketsFromConfig(currentNetwork),
+    [currentNetwork]
+  );
+
   const [wallet, setWallet] = useState<WalletState>({
     connected: false,
-    network: "voi-testnet",
+    network: currentNetwork,
     mockMode: true,
   });
   const [marketsState, setMarketsState] = useState<Record<string, MarketState>>(
@@ -333,13 +353,22 @@ export default function PreFiDashboard() {
 
   const connect = async () => {
     const s = await chainApi.connectWalletMock();
-    setWallet(s);
+    setWallet({ ...s, network: currentNetwork });
     setRefreshKey((k) => k + 1);
   };
   const disconnect = async () => {
     await chainApi.disconnectWallet();
-    setWallet({ connected: false, network: "voi-testnet", mockMode: true });
+    setWallet({ connected: false, network: currentNetwork, mockMode: true });
   };
+
+  // Update wallet network when currentNetwork changes
+  useEffect(() => {
+    setWallet((prev) => ({ ...prev, network: currentNetwork }));
+    // Clear markets state when network changes
+    setMarketsState({});
+    setTxLog([]);
+    setRefreshKey((k) => k + 1);
+  }, [currentNetwork]);
 
   const loadMarket = async (m: Market) => {
     setLoadingMap((x) => ({ ...x, [m.id]: true }));
@@ -364,9 +393,16 @@ export default function PreFiDashboard() {
 
   useEffect(() => {
     if (!wallet.connected) return;
-    MARKETS.forEach(loadMarket);
+    markets.forEach(loadMarket);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wallet.connected, refreshKey]);
+  }, [wallet.connected, markets, refreshKey]);
+
+  // Handle network changes
+  const handleNetworkChange = (networkId: NetworkId) => {
+    console.log("Network changed to:", networkId);
+    // The network context will handle the actual switching
+    // This component will automatically react via the useNetwork hook
+  };
 
   // Modal handlers
   const openDepositModal = (market: Market) => {
@@ -454,15 +490,57 @@ export default function PreFiDashboard() {
     setLoadingMap((prev) => ({ ...prev, [selectedMarket.id]: true }));
 
     try {
-      await chainApi.depositToPrefund(wallet, selectedMarket, amountBase);
+      let depositResult: {
+        success: boolean;
+        txId?: string;
+        error?: string;
+      } | null = null;
 
-      // Update tx log
+      if (isCurrentNetworkAlgorandCompatible()) {
+        if (!activeAccount) {
+          console.error("Wallet not connected");
+          return;
+        }
+        console.log("selectedMarket", selectedMarket);
+        console.log("Deposit parameters:", {
+          poolId: selectedMarket.poolId || "",
+          marketId: selectedMarket.marketId || "",
+          amount: modalAmount,
+          userAddress: activeAccount.address,
+          networkId: currentNetwork,
+        });
+        // Call the lending service deposit method
+        depositResult = await deposit(
+          selectedMarket.poolId || "", // poolId - use token's poolId or fallback
+          selectedMarket.marketId || "", // marketId
+          modalAmount, // amount as string
+          activeAccount.address, // userAddress
+          currentNetwork, // networkId
+          undefined // signer - will be handled externally for now
+        );
+
+        if (!depositResult.success) {
+          throw new Error(depositResult.error || "Deposit failed");
+        }
+      } else if (isCurrentNetworkEVM()) {
+        // TODO: Implement EVM deposit
+        depositResult = {
+          success: true,
+          txId: `TXN_${Math.random().toString(36).substring(2, 15)}`,
+        };
+      } else {
+        throw new Error("Unsupported network");
+      }
+
+      // Update tx log with actual transaction ID
       setTxLog((prev) => [
         {
           ts: Date.now(),
           marketId: selectedMarket.id,
           amount: amount,
-          txId: `TXN_${Math.random().toString(36).substring(2, 15)}`,
+          txId:
+            depositResult?.txId ||
+            `TXN_${Math.random().toString(36).substring(2, 15)}`,
         },
         ...prev,
       ]);
@@ -489,18 +567,24 @@ export default function PreFiDashboard() {
     } catch (error) {
       console.error("Deposit failed:", error);
       setLoadingMap((prev) => ({ ...prev, [selectedMarket.id]: false }));
+
+      // You could add a toast notification here to show the error to the user
+      // For now, we'll just log it
+      if (error instanceof Error) {
+        console.error("Deposit error:", error.message);
+      }
     }
   };
 
   const globalDeposited = useMemo(() => {
     let sum = 0;
-    for (const m of MARKETS) {
+    for (const m of markets) {
       const st = marketsState[m.id];
       if (!st) continue;
       sum += fromBase(st.depositedBase, m.decimals);
     }
     return sum;
-  }, [marketsState]);
+  }, [marketsState, markets]);
 
   return (
     <div className="min-h-screen bg-background relative">
@@ -545,7 +629,7 @@ export default function PreFiDashboard() {
             {/* Theme Toggle, Admin Link, and Wallet */}
             <div className="flex items-center gap-2">
               <ThemeToggle />
-              <WalletNetworkButton />
+              <WalletNetworkButton onNetworkChange={handleNetworkChange} />
             </div>
           </div>
         </div>
@@ -731,7 +815,7 @@ export default function PreFiDashboard() {
           {isMobile ? (
             // Mobile Card Layout
             <div className="space-y-3 p-4">
-              {MARKETS.map((m, index) => {
+              {markets.map((m, index) => {
                 const st = marketsState[m.id];
                 const loading = !!loadingMap[m.id];
                 const dep = st ? fromBase(st.depositedBase, m.decimals) : 0;
@@ -953,7 +1037,7 @@ export default function PreFiDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {MARKETS.map((m, index) => {
+                  {markets.map((m, index) => {
                     const st = marketsState[m.id];
                     const loading = !!loadingMap[m.id];
                     const dep = st ? fromBase(st.depositedBase, m.decimals) : 0;

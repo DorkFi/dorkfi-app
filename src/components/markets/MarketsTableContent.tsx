@@ -1,14 +1,14 @@
 
 import { useBreakpoint } from "@/hooks/useBreakpoint";
-import { MarketData } from "@/hooks/useMarketData";
+import { OnDemandMarketData } from "@/hooks/useOnDemandMarketData";
 import MarketsDesktopTable from "./MarketsDesktopTable";
 import MarketsTabletTable from "./MarketsTabletTable";
 import MarketCardView from "./MarketCardView";
 
 interface MarketsTableContentProps {
-  markets: MarketData[];
-  onRowClick: (market: MarketData) => void;
-  onInfoClick: (e: React.MouseEvent, market: MarketData) => void;
+  markets: OnDemandMarketData[];
+  onRowClick: (market: OnDemandMarketData) => void;
+  onInfoClick: (e: React.MouseEvent, market: OnDemandMarketData) => void;
   onDepositClick: (asset: string) => void;
   onBorrowClick: (asset: string) => void;
 }
