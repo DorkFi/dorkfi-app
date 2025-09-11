@@ -249,7 +249,7 @@ export default function CountdownPage() {
             </div>
           </div>
         </DialogContent>
-      </Dialogt>
+      </Dialog>
     </div>
   );
 }
