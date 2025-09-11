@@ -8,8 +8,9 @@ import PreFi from "./pages/PreFi";
 import Admin from "./pages/Admin";
 import { NetworkProvider } from "./contexts/NetworkContext";
 import CountdownPage from "./pages/Countdown";
+import AuthGuard from "./components/AuthGuard";
 
-const LAUNCH_TIMESTAMP =  Date.UTC(2025, 8, 13, 0, 29, 0); // Sep 12, 2025 5:29 PM PDT
+const LAUNCH_TIMESTAMP = Date.UTC(2025, 8, 13, 0, 29, 0); // Sep 12, 2025 5:29 PM PDT
 
 function ConditionalHomePage() {
   const now = Date.now();
@@ -33,8 +34,22 @@ function App() {
           <BrowserRouter>
             <Routes>
               <Route path="/" element={<ConditionalHomePage />} />
-              <Route path="/prefi" element={<PreFi />} />
-              <Route path="/admin" element={<Admin />} />
+              <Route 
+                path="/prefi" 
+                element={
+                  <AuthGuard>
+                    <PreFi />
+                  </AuthGuard>
+                } 
+              />
+              <Route 
+                path="/admin" 
+                element={
+                  <AuthGuard>
+                    <Admin />
+                  </AuthGuard>
+                } 
+              />
               <Route path="/countdown" element={<CountdownPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
