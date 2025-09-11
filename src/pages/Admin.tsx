@@ -2554,7 +2554,7 @@ export default function AdminDashboard() {
               </div>
 
               {/* Technical Details */}
-              {/*<div className="p-4 bg-muted/30 rounded-lg">
+              <div className="p-4 bg-muted/30 rounded-lg">
                 <h4 className="text-sm font-medium text-muted-foreground mb-4">
                   Technical Details
                 </h4>
@@ -2567,10 +2567,6 @@ export default function AdminDashboard() {
                       {marketViewData.tokenId}
                     </span>
                   </div>
-                  {<div className="flex justify-between">
-                    <span className="text-sm text-muted-foreground">Contract ID:</span>
-                    <span className="text-sm font-mono">{marketViewData.tokenContractId}</span>
-                  </div>}
                   <div className="flex justify-between">
                     <span className="text-sm text-muted-foreground">
                       Decimals:
@@ -2589,7 +2585,6 @@ export default function AdminDashboard() {
                   </div>
                 </div>
               </div>
-              */}
 
               {/* Market Parameters */}
               <div className="p-4 bg-muted/30 rounded-lg">

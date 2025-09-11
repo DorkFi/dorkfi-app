@@ -4,6 +4,7 @@ import {
   Wallet,
   Coins,
   ArrowDownCircle,
+  ArrowUpCircle,
   CheckCircle2,
   AlertCircle,
   Clock,
@@ -12,6 +13,7 @@ import {
   RefreshCcw,
   ExternalLink,
   InfoIcon,
+  ShoppingCart,
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import DorkFiButton from "@/components/ui/DorkFiButton";
@@ -39,6 +41,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import SupplyBorrowCongrats from "@/components/SupplyBorrowCongrats";
+import WithdrawModal from "@/components/WithdrawModal";
 import { getTokenImagePath } from "@/utils/tokenImageUtils";
 import VersionDisplay from "@/components/VersionDisplay";
 import {
@@ -49,10 +52,12 @@ import {
   isCurrentNetworkAlgorandCompatible,
 } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { deposit } from "@/services/lendingService";
+import { deposit, withdraw, fetchMarketInfo } from "@/services/lendingService";
 import { useWallet } from "@txnlab/use-wallet-react";
 import algorandService, { AlgorandNetwork } from "@/services/algorandService";
 import { waitForConfirmation } from "algosdk";
+import { ARC200Service } from "@/services/arc200Service";
+import BigNumber from "bignumber.js";
 
 /**
  * PreFi Frontend – Single-file MVP Dashboard
@@ -83,9 +88,9 @@ import { waitForConfirmation } from "algosdk";
  * Program Configuration  *
  *************************/
 const PROGRAM = {
-  VOI_ALLOCATION_TOTAL: 2_000_000, // VOI total rewards for Phase 0
-  LAUNCH_TIMESTAMP: Date.UTC(2025, 9, 15, 16, 0, 0), // TODO: set actual launch (Oct 15, 2025 16:00 UTC shown as example)
-  // If launch is TBD, the UI will show a countdown using this placeholder.
+  VOI_ALLOCATION_TOTAL: 5_000_000, // VOI total rewards for Phase 0 (5M VOI)
+  LAUNCH_TIMESTAMP: Date.UTC(2025, 8, 13, 0, 29, 0), // Sep 12, 2025 5:29 PM PDT
+  // PreFi Phase 0 ends and markets launch on this date.
 };
 
 type TokenStandard = "native" | "asa" | "arc200";
@@ -95,6 +100,7 @@ type Market = {
   poolId?: string; // lending pool ID for this token
   marketId?: string; // lending market ID for this token
   contractId?: string; // prefunding contract / app id (placeholder)
+  nTokenId?: string; // nToken ID for this token
   name: string;
   symbol: string;
   min: number; // minimum qualifying deposit for Phase 0
@@ -135,6 +141,7 @@ const getMarketsFromConfig = (networkId: NetworkId): Market[] => {
       id: token.symbol.toLowerCase(),
       poolId: token.poolId,
       marketId: token.contractId,
+      nTokenId: token.nTokenId,
       name: token.name,
       symbol: token.symbol,
       min: minDeposits[token.symbol] || 10,
@@ -159,6 +166,130 @@ const fromBase = (amt: bigint, decimals: number) =>
   Number(amt) / 10 ** decimals;
 
 /*************************
+ * APY Calculation Utils  *
+ *************************/
+
+// Market allocation percentages (how much of total VOI rewards each market gets)
+const getMarketAllocation = (marketId: string): number => {
+  const allocations: Record<string, number> = {
+    voi: 0.25, // 25% of total VOI rewards
+    ausd: 0.15, // 15% of total VOI rewards
+    unit: 0.2, // 20% of total VOI rewards
+    btc: 0.12, // 12% of total VOI rewards
+    cbbtc: 0.1, // 10% of total VOI rewards
+    eth: 0.1, // 10% of total VOI rewards
+    algo: 0.05, // 5% of total VOI rewards
+    pow: 0.03, // 3% of total VOI rewards
+  };
+  return allocations[marketId] || 0.05; // Default 5%
+};
+
+// Risk adjustment factors based on token stability and adoption
+const getRiskAdjustmentFactor = (marketId: string): number => {
+  const riskFactors: Record<string, number> = {
+    voi: 1.0, // Native token, lowest risk
+    ausd: 0.95, // Stablecoin, very low risk
+    unit: 0.9, // Established token
+    btc: 0.85, // High value, moderate risk
+    cbbtc: 0.85, // High value, moderate risk
+    eth: 0.8, // High value, moderate risk
+    algo: 0.75, // Cross-chain token, higher risk
+    pow: 0.7, // Newer token, highest risk
+  };
+  return riskFactors[marketId] || 0.8;
+};
+
+// Fallback APY values (current hardcoded values)
+const getFallbackAPY = (marketId: string): number => {
+  const fallbackAPYs: Record<string, number> = {
+    voi: 15.8,
+    ausd: 8.2,
+    unit: 12.4,
+    btc: 6.5,
+    cbbtc: 6.3,
+    eth: 7.1,
+    algo: 9.7,
+    pow: 10.2,
+  };
+  return fallbackAPYs[marketId] || 10.0;
+};
+
+// Calculate PreFi reward APY based on time-weighted rewards
+const calculatePreFiRewardAPY = (
+  market: Market,
+  voiPrice: number,
+  userDeposit: number,
+  timeRemaining: number,
+  marketPrices: Record<string, number>
+): number => {
+  if (voiPrice <= 0 || userDeposit <= 0 || timeRemaining <= 0) {
+    return 0;
+  }
+
+  // Get market allocation percentage
+  const marketAllocation = getMarketAllocation(market.id);
+
+  // Calculate user's estimated reward share
+  // This is a simplified calculation - in reality, it would depend on total stake-seconds
+  const totalVOIRewards = PROGRAM.VOI_ALLOCATION_TOTAL * marketAllocation;
+
+  // Estimate user's share based on deposit size and time remaining
+  // This is a placeholder calculation - real implementation would use actual stake-seconds
+  const estimatedUserReward =
+    (userDeposit / 1000000) *
+    (timeRemaining / (365 * 24 * 60 * 60)) *
+    totalVOIRewards;
+
+  // Convert to APY
+  const rewardValueUSD = estimatedUserReward * voiPrice;
+  const depositValueUSD = userDeposit * (marketPrices[market.id] || 1);
+
+  if (depositValueUSD <= 0) return 0;
+
+  // Annualized APY = (Reward Value / Deposit Value) * (365 days / Time Remaining)
+  const daysRemaining = timeRemaining / (24 * 60 * 60);
+  const apy = (rewardValueUSD / depositValueUSD) * (365 / daysRemaining) * 100;
+
+  return Math.max(0, apy);
+};
+
+// Main APY calculation function
+const calculateMarketAPY = (
+  market: Market,
+  voiPrice: number,
+  userDeposit: number,
+  timeRemaining: number,
+  marketPrices: Record<string, number>,
+  marketInfo?: any // Optional real market data
+): number => {
+  try {
+    // Base APY from lending protocol (if available)
+    const baseAPY = marketInfo?.supplyRate ? marketInfo.supplyRate * 100 : 0;
+
+    // PreFi reward APY calculation
+    const preFiRewardAPY = calculatePreFiRewardAPY(
+      market,
+      voiPrice,
+      userDeposit,
+      timeRemaining,
+      marketPrices
+    );
+
+    // Risk adjustment factor
+    const riskFactor = getRiskAdjustmentFactor(market.id);
+
+    // Total APY = Base APY + PreFi Reward APY (adjusted for risk)
+    const totalAPY = baseAPY + preFiRewardAPY * riskFactor;
+
+    // Ensure minimum APY and cap maximum APY
+    return Math.max(0.1, Math.min(totalAPY, 50.0)); // Cap at 50% APY
+  } catch (error) {
+    console.error(`Error calculating APY for ${market.symbol}:`, error);
+    return getFallbackAPY(market.id);
+  }
+};
+
+/*************************
  * Minimal State & Types  *
  *************************/
 interface WalletState {
@@ -172,6 +303,11 @@ interface MarketState {
   walletBalanceBase: bigint; // user wallet token balance
   depositedBase: bigint; // user deposited (prefunded) balance
   totalStakeSecondsBase: bigint; // global stake‑seconds from chain (placeholder)
+}
+
+interface MarketBalance {
+  balance: bigint;
+  deposited: bigint;
 }
 
 /*************************
@@ -207,34 +343,74 @@ const chainApi = {
   },
 
   // ====== READS ======
-  async getWalletBalanceBase(
-    _wallet: WalletState,
+  async getMarketBalance(
+    address: string,
     market: Market
-  ): Promise<bigint> {
-    // Replace with token balance lookup via indexer/node
-    // Mock: random-ish stable balances per market
-    const seed = BigInt(
-      Array.from(market.id).reduce((a, c) => a + c.charCodeAt(0), 0)
-    );
-    return (
-      (seed * 10_000n) % (100_000_000n * BigInt(10 ** (market.decimals - 2)))
-    );
-  },
+  ): Promise<MarketBalance> {
+    // Get real wallet balance from blockchain
+    if (!address) return { balance: 0n, deposited: 0n };
 
-  async getUserDepositBase(
-    wallet: WalletState,
-    market: Market
-  ): Promise<bigint> {
-    // Replace with read from prefunding contract state (local state/box)
-    // Mock: derive from address hash + market
-    if (!wallet.address) return 0n;
-    const h = BigInt(
-      Array.from(wallet.address + market.id).reduce(
-        (a, c) => a + c.charCodeAt(0),
-        0
-      )
-    );
-    return (h * 1_234_567n) % (500_000n * BigInt(10 ** market.decimals));
+    try {
+      const networkConfig = getCurrentNetworkConfig();
+      const algorandClients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+      ARC200Service.initialize(algorandClients);
+
+      // For native tokens (like VOI), use assetId "0"
+      // For other tokens, use their contractId
+      const tokenId = market.assetId === "0" ? "0" : market.contractId;
+      const nTokenId = market.nTokenId;
+
+      if (!tokenId)
+        return {
+          balance: 0n,
+          deposited: 0n,
+        };
+
+      let balance = 0n;
+      if (market.assetId === "0") {
+        // For native VOI, get account balance minus minimum balance
+        const accInfo = await algorandClients.algod
+          .accountInformation(address)
+          .do();
+        balance = BigInt(
+          Math.max(0, accInfo.amount - accInfo["min-balance"] - 1e6)
+        );
+      } else {
+        // For other tokens, get balance from ARC200Service
+        const tokenBalance = await ARC200Service.getBalance(address, tokenId);
+        balance = tokenBalance ? BigInt(tokenBalance) : 0n;
+      }
+
+      let deposited = 0n;
+      if (nTokenId) {
+        // Get deposited balance (nToken balance)
+        const nTokenBalance = await ARC200Service.getBalance(address, nTokenId);
+        deposited = nTokenBalance ? BigInt(nTokenBalance) : 0n;
+      }
+
+      console.log(`Balance for ${market.symbol}:`, {
+        tokenId,
+        nTokenId,
+        balance: balance.toString(),
+        deposited: deposited.toString(),
+      });
+
+      return {
+        balance,
+        deposited,
+      };
+    } catch (error) {
+      console.error(
+        `Error fetching wallet balance for ${market.symbol}:`,
+        error
+      );
+      return {
+        balance: 0n,
+        deposited: 0n,
+      };
+    }
   },
 
   async getTotalStakeSecondsBase(_market: Market): Promise<bigint> {
@@ -325,10 +501,14 @@ export default function PreFiDashboard() {
   const { currentNetwork } = useNetwork();
 
   // Get markets for current network
-  const markets = useMemo(
-    () => getMarketsFromConfig(currentNetwork),
-    [currentNetwork]
-  );
+  const markets = useMemo(() => {
+    const marketList = getMarketsFromConfig(currentNetwork);
+    console.log(
+      `Created ${marketList.length} markets for network ${currentNetwork}:`,
+      marketList
+    );
+    return marketList;
+  }, [currentNetwork]);
 
   const [wallet, setWallet] = useState<WalletState>({
     connected: false,
@@ -343,19 +523,66 @@ export default function PreFiDashboard() {
     Array<{ ts: number; marketId: string; amount: number; txId: string }>
   >([]);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   // Modal state
   const [isDepositModalOpen, setIsDepositModalOpen] = useState(false);
+  const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false);
   const [selectedMarket, setSelectedMarket] = useState<Market | null>(null);
   const [modalAmount, setModalAmount] = useState("");
   const [modalFiatValue, setModalFiatValue] = useState(0);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [withdrawModalPrice, setWithdrawModalPrice] = useState(0);
+  const [voiPrice, setVoiPrice] = useState(0);
+  const [marketPrices, setMarketPrices] = useState<Record<string, number>>({});
+  const [isBuyModalOpen, setIsBuyModalOpen] = useState(false);
 
   const launchTs = PROGRAM.LAUNCH_TIMESTAMP;
+
+  // Fetch VOI price for reward calculations
+  const fetchVoiPrice = async () => {
+    try {
+      // Find VOI market from the markets list
+      const voiMarket = markets.find(
+        (m) => m.symbol === "VOI" || m.symbol === "Voi"
+      );
+      if (voiMarket && voiMarket.poolId && voiMarket.marketId) {
+        const marketInfo = await fetchMarketInfo(
+          voiMarket.poolId,
+          voiMarket.marketId,
+          currentNetwork
+        );
+
+        if (marketInfo && marketInfo.price) {
+          // The price from fetchMarketInfo is already scaled by 10^18, but we need to scale by 10^(18 + token.decimals)
+          // So we need to scale down by an additional 10^token.decimals
+          const partiallyScaledPrice = parseFloat(marketInfo.price);
+          const additionalScaling = Math.pow(10, voiMarket.decimals);
+          const finalPrice = partiallyScaledPrice / additionalScaling;
+          setVoiPrice(finalPrice);
+          console.log(`VOI price: $${finalPrice}`);
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching VOI price:", error);
+      // Fallback to mock price
+      setVoiPrice(0.05); // $0.05 fallback
+    }
+  };
 
   const connect = async () => {
     const s = await chainApi.connectWalletMock();
     setWallet({ ...s, network: currentNetwork });
+
+    // Initialize ARC200Service with Algorand clients
+    if (isCurrentNetworkAlgorandCompatible()) {
+      const networkConfig = getCurrentNetworkConfig();
+      const algorandClients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+      ARC200Service.initialize(algorandClients);
+    }
+
     setRefreshKey((k) => k + 1);
   };
   const disconnect = async () => {
@@ -369,35 +596,103 @@ export default function PreFiDashboard() {
     // Clear markets state when network changes
     setMarketsState({});
     setTxLog([]);
+    setIsInitialLoad(true); // Reset initial load flag for new network
     setRefreshKey((k) => k + 1);
   }, [currentNetwork]);
 
-  const loadMarket = async (m: Market) => {
-    setLoadingMap((x) => ({ ...x, [m.id]: true }));
+  const loadMarket = async (m: Market, isInitialLoad = false) => {
+    // Only show loading indicators on initial load
+    if (isInitialLoad) {
+      setLoadingMap((x) => ({ ...x, [m.id]: true }));
+    }
+    console.log("Loading market:", m);
     try {
-      const [wb, dep, totalSS] = await Promise.all([
-        chainApi.getWalletBalanceBase(wallet, m),
-        chainApi.getUserDepositBase(wallet, m),
-        chainApi.getTotalStakeSecondsBase(m),
-      ]);
+      // Get wallet balance from chainApi (for wallet balance)
+      const wb = await chainApi.getMarketBalance(
+        activeAccount?.address || "",
+        m
+      );
+
+      console.log("Market balance result:", wb);
+      console.log("Market:", m);
+
+      // Get total stake seconds from chainApi
+      const totalSS = await chainApi.getTotalStakeSecondsBase(m);
+
       setMarketsState((s) => ({
         ...s,
         [m.id]: {
-          walletBalanceBase: wb,
-          depositedBase: dep,
+          walletBalanceBase: wb.balance,
+          depositedBase: wb.deposited,
           totalStakeSecondsBase: totalSS,
         },
       }));
+
+      // Fetch market price for USD calculations
+      if (m.poolId && m.marketId) {
+        try {
+          const marketInfo = await fetchMarketInfo(
+            m.poolId,
+            m.marketId,
+            currentNetwork
+          );
+
+          if (marketInfo && marketInfo.price) {
+            // The price from fetchMarketInfo is already scaled by 10^18, but we need to scale by 10^(18 + token.decimals)
+            // So we need to scale down by an additional 10^token.decimals
+            const partiallyScaledPrice = parseFloat(marketInfo.price);
+            const additionalScaling = Math.pow(10, m.decimals);
+            const finalPrice = partiallyScaledPrice / additionalScaling;
+            setMarketPrices((prev) => ({ ...prev, [m.id]: finalPrice }));
+            console.log(`Market price for ${m.symbol}: $${finalPrice}`);
+          }
+        } catch (error) {
+          console.error(`Error fetching price for ${m.symbol}:`, error);
+          // Set fallback prices
+          const fallbackPrices: Record<string, number> = {
+            voi: 0.05,
+            ausd: 1.0,
+            unit: 7.0,
+            btc: 65000,
+            cbbtc: 65000,
+            eth: 3000,
+            algo: 0.25,
+            pow: 0.1,
+          };
+          setMarketPrices((prev) => ({
+            ...prev,
+            [m.id]: fallbackPrices[m.id] || 1.0,
+          }));
+        }
+      }
     } finally {
-      setLoadingMap((x) => ({ ...x, [m.id]: false }));
+      if (isInitialLoad) {
+        setLoadingMap((x) => ({ ...x, [m.id]: false }));
+      }
     }
   };
 
   useEffect(() => {
-    if (!wallet.connected) return;
-    markets.forEach(loadMarket);
+    if (!activeAccount?.address) return;
+    console.log("Loading markets for address:", activeAccount.address);
+
+    // Load all markets with initial load flag
+    const loadPromises = markets.map((market) =>
+      loadMarket(market, isInitialLoad)
+    );
+
+    // When all markets are loaded, mark initial load as complete
+    Promise.all(loadPromises).then(() => {
+      if (isInitialLoad) {
+        setIsInitialLoad(false);
+      }
+    });
+
+    // Fetch VOI price for reward calculations
+    fetchVoiPrice();
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wallet.connected, markets, refreshKey]);
+  }, [activeAccount?.address, markets, refreshKey]);
 
   // Handle network changes
   const handleNetworkChange = (networkId: NetworkId) => {
@@ -425,32 +720,210 @@ export default function PreFiDashboard() {
     setShowSuccess(false);
   };
 
+  // Withdraw modal handlers
+  const openWithdrawModal = async (market: Market) => {
+    console.log("=== OPENING WITHDRAW MODAL ===");
+    console.log("Opening withdraw modal for", market.symbol);
+    console.log("Current isWithdrawModalOpen state:", isWithdrawModalOpen);
+    console.log("Market object:", market);
+    console.log("Market object keys:", Object.keys(market));
+    console.log("Market.nTokenId:", market.nTokenId);
+    console.log("Market.marketId:", market.marketId);
+    console.log("Market.poolId:", market.poolId);
+    console.log("Market.contractId:", market.contractId);
+    console.log("Active account address:", activeAccount?.address);
+    console.log("Current network:", currentNetwork);
+
+    // Set loading state for this market
+    setLoadingMap((prev) => ({ ...prev, [market.id]: true }));
+
+    try {
+      if (!activeAccount?.address) {
+        console.error("Wallet not connected");
+        alert("Please connect your wallet first.");
+        return;
+      }
+
+      // Check if nTokenId is missing and try to get it
+      let nTokenId = market.nTokenId;
+      if (!nTokenId) {
+        console.log("=== nTokenId MISSING - TRYING TO FETCH ===");
+        console.log(
+          "market.nTokenId is undefined, trying to fetch from marketInfo"
+        );
+
+        try {
+          const marketInfo = await fetchMarketInfo(
+            market.poolId || "1",
+            market.marketId || market.symbol,
+            currentNetwork
+          );
+          nTokenId = marketInfo.ntokenId;
+          console.log(
+            "Successfully fetched nTokenId from marketInfo:",
+            nTokenId
+          );
+        } catch (error) {
+          console.error("Failed to fetch marketInfo:", error);
+          console.log("Using marketId as fallback for nTokenId");
+          nTokenId = market.marketId;
+        }
+      }
+
+      console.log("=== FINAL nTokenId ===");
+      console.log("Using nTokenId:", nTokenId);
+
+      const networkConfig = getCurrentNetworkConfig();
+      const algorandClients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+      ARC200Service.initialize(algorandClients);
+      const balance = await ARC200Service.getBalance(
+        activeAccount.address,
+        nTokenId
+      );
+      console.log("balance", balance);
+
+      // Set the market and open the modal
+      console.log("=== OPENING MODAL ===");
+      console.log("Setting selectedMarket to:", market.symbol);
+      setSelectedMarket(market);
+      setModalAmount("1000000000000000000"); // here
+      setModalFiatValue(0);
+      setShowSuccess(false);
+
+      // Fetch real market price for withdraw modal
+      try {
+        if (market.poolId && market.marketId) {
+          const marketInfo = await fetchMarketInfo(
+            market.poolId,
+            market.marketId,
+            currentNetwork
+          );
+
+          if (marketInfo && marketInfo.price) {
+            // The price from fetchMarketInfo is already scaled by 10^18, but we need to scale by 10^(18 + token.decimals)
+            // So we need to scale down by an additional 10^token.decimals
+            const partiallyScaledPrice = parseFloat(marketInfo.price);
+            const additionalScaling = Math.pow(10, market.decimals);
+            const finalPrice = partiallyScaledPrice / additionalScaling;
+            console.log(
+              `Withdraw modal price for ${market.symbol}: $${finalPrice}`
+            );
+            setWithdrawModalPrice(finalPrice);
+          } else {
+            console.warn(`No price data for ${market.symbol}, using fallback`);
+            setWithdrawModalPrice(0);
+          }
+        } else {
+          console.warn(`Missing poolId or marketId for ${market.symbol}`);
+          setWithdrawModalPrice(0);
+        }
+      } catch (error) {
+        console.error(
+          `Error fetching price for withdraw modal ${market.symbol}:`,
+          error
+        );
+        setWithdrawModalPrice(0);
+      }
+
+      console.log("About to set isWithdrawModalOpen to true");
+      setIsWithdrawModalOpen(true);
+      console.log("Set isWithdrawModalOpen to true");
+
+      // Force a re-render check
+      setTimeout(() => {
+        console.log("=== STATE CHECK AFTER TIMEOUT ===");
+        console.log("isWithdrawModalOpen:", isWithdrawModalOpen);
+        console.log("selectedMarket:", selectedMarket?.symbol);
+        console.log(
+          "Modal should render:",
+          isWithdrawModalOpen && selectedMarket
+        );
+      }, 100);
+    } catch (error) {
+      console.error(
+        `Error fetching deposited balance for ${market.symbol}:`,
+        error
+      );
+      alert(`Error fetching balance for ${market.symbol}. Please try again.`);
+    } finally {
+      // Clear loading state
+      setLoadingMap((prev) => ({ ...prev, [market.id]: false }));
+    }
+  };
+
+  const closeWithdrawModal = () => {
+    setIsWithdrawModalOpen(false);
+    setSelectedMarket(null);
+    setModalAmount("");
+    setModalFiatValue(0);
+    setShowSuccess(false);
+    setWithdrawModalPrice(0);
+  };
+
   // Update fiat value when amount changes
   useEffect(() => {
-    if (modalAmount && selectedMarket) {
-      const numAmount = parseFloat(modalAmount);
-      // Mock token price - replace with real prices
-      const mockPrice =
-        selectedMarket.id === "ausd"
-          ? 1
-          : selectedMarket.id === "voi"
-          ? 0.05
-          : selectedMarket.id === "btc"
-          ? 65000
-          : selectedMarket.id === "cbbtc"
-          ? 65000
-          : selectedMarket.id === "eth"
-          ? 3000
-          : selectedMarket.id === "algo"
-          ? 0.25
-          : selectedMarket.id === "pow"
-          ? 0.1
-          : 1;
-      setModalFiatValue(numAmount * mockPrice);
-    } else {
-      setModalFiatValue(0);
-    }
-  }, [modalAmount, selectedMarket]);
+    const updateFiatValue = async () => {
+      if (modalAmount && selectedMarket) {
+        const numAmount = parseFloat(modalAmount);
+
+        try {
+          // Get real market price from lending service
+          if (selectedMarket.poolId && selectedMarket.marketId) {
+            const marketInfo = await fetchMarketInfo(
+              selectedMarket.poolId,
+              selectedMarket.marketId,
+              currentNetwork
+            );
+
+            if (marketInfo && marketInfo.price) {
+              // The price from fetchMarketInfo is already scaled by 10^18, but we need to scale by 10^(18 + token.decimals)
+              // So we need to scale down by an additional 10^token.decimals
+              const partiallyScaledPrice = parseFloat(marketInfo.price);
+              const additionalScaling = Math.pow(10, selectedMarket.decimals);
+              const finalPrice = partiallyScaledPrice / additionalScaling;
+              console.log(
+                `Partially scaled price: ${partiallyScaledPrice}, Token decimals: ${selectedMarket.decimals}, Final price for ${selectedMarket.symbol}: $${finalPrice}`
+              );
+              setModalFiatValue(numAmount * finalPrice);
+            } else {
+              throw new Error("No price data from market info");
+            }
+          } else {
+            throw new Error("Missing poolId or marketId");
+          }
+        } catch (error) {
+          console.error(
+            `Error fetching market price for ${selectedMarket.symbol}:`,
+            error
+          );
+          // Fallback to mock prices if API fails
+          const mockPrice =
+            selectedMarket.id === "ausd"
+              ? 1
+              : selectedMarket.id === "voi"
+              ? 0.05
+              : selectedMarket.id === "btc"
+              ? 65000
+              : selectedMarket.id === "cbbtc"
+              ? 65000
+              : selectedMarket.id === "eth"
+              ? 3000
+              : selectedMarket.id === "algo"
+              ? 0.25
+              : selectedMarket.id === "pow"
+              ? 0.1
+              : 1;
+          setModalFiatValue(numAmount * mockPrice);
+        }
+      } else {
+        setModalFiatValue(0);
+      }
+    };
+
+    updateFiatValue();
+  }, [modalAmount, selectedMarket, currentNetwork]);
 
   const handleMaxClick = () => {
     if (selectedMarket && marketsState[selectedMarket.id]) {
@@ -480,14 +953,11 @@ export default function PreFiDashboard() {
   const handleConfirmDeposit = async () => {
     if (!selectedMarket || !modalAmount || Number(modalAmount) <= 0) return;
 
-    const amount = Number(modalAmount);
-    const amountBase = BigInt(
-      Math.floor(amount * 10 ** selectedMarket.decimals)
-    );
+    const amount = new BigNumber(modalAmount)
+      .multipliedBy(10 ** selectedMarket.decimals)
+      .toFixed(0);
 
-    console.log(
-      `[DEPOSIT] ${amount} ${selectedMarket.symbol} (${amountBase} base units)`
-    );
+    console.log(`[DEPOSIT] ${amount} ${selectedMarket.symbol}`);
 
     setLoadingMap((prev) => ({ ...prev, [selectedMarket.id]: true }));
 
@@ -511,7 +981,7 @@ export default function PreFiDashboard() {
         depositResult = await deposit(
           selectedMarket.poolId || "", // poolId - use token's poolId or fallback
           selectedMarket.marketId || "", // marketId
-          modalAmount, // amount as string
+          amount, // amount as string
           activeAccount.address, // userAddress
           currentNetwork // networkId
         );
@@ -548,12 +1018,15 @@ export default function PreFiDashboard() {
         throw new Error("Unsupported network");
       }
 
+      // Calculate amountBase for state update (amount is already in atomic units)
+      const amountBase = BigInt(amount);
+
       // Update tx log with actual transaction ID
       setTxLog((prev) => [
         {
           ts: Date.now(),
           marketId: selectedMarket.id,
-          amount: amount,
+          amount: Number(modalAmount), // Use user-friendly amount, not atomic units
           txId:
             depositResult?.txId ||
             `TXN_${Math.random().toString(36).substring(2, 15)}`,
@@ -561,13 +1034,13 @@ export default function PreFiDashboard() {
         ...prev,
       ]);
 
-      // Refresh balances (optimistic update for mock)
+      // Refresh balances (optimistic update)
       setMarketsState((prev) => {
         const current = prev[selectedMarket.id];
         return {
           ...prev,
           [selectedMarket.id]: {
-            walletBalanceBase: current?.walletBalanceBase ?? 0n,
+            walletBalanceBase: (current?.walletBalanceBase ?? 0n) - amountBase, // Subtract deposited amount from wallet
             depositedBase: (current?.depositedBase ?? 0n) + amountBase,
             totalStakeSecondsBase:
               current?.totalStakeSecondsBase ?? 10_000_000n,
@@ -580,6 +1053,13 @@ export default function PreFiDashboard() {
         setShowSuccess(true);
         setLoadingMap((prev) => ({ ...prev, [selectedMarket.id]: false }));
       }, 500);
+
+      // Refresh balances from blockchain to ensure accuracy (silent refresh)
+      setTimeout(() => {
+        if (selectedMarket) {
+          loadMarket(selectedMarket, false); // false = no loading indicators
+        }
+      }, 2000); // Delay to allow success screen to show first
     } catch (error) {
       console.error("Deposit failed:", error);
       setLoadingMap((prev) => ({ ...prev, [selectedMarket.id]: false }));
@@ -592,15 +1072,28 @@ export default function PreFiDashboard() {
     }
   };
 
+  // Debug withdraw modal state
+  useEffect(() => {
+    console.log("=== MODAL STATE CHANGE ===");
+    console.log("Withdraw modal state:", {
+      isWithdrawModalOpen,
+      selectedMarket: selectedMarket?.symbol,
+      selectedMarketId: selectedMarket?.id,
+    });
+    console.log("Modal should render:", isWithdrawModalOpen && selectedMarket);
+  }, [isWithdrawModalOpen, selectedMarket]);
+
   const globalDeposited = useMemo(() => {
     let sum = 0;
     for (const m of markets) {
       const st = marketsState[m.id];
       if (!st) continue;
-      sum += fromBase(st.depositedBase, m.decimals);
+      const tokenAmount = fromBase(st.depositedBase, m.decimals);
+      const price = marketPrices[m.id] || 0;
+      sum += tokenAmount * price;
     }
     return sum;
-  }, [marketsState, markets]);
+  }, [marketsState, markets, marketPrices]);
 
   return (
     <div className="min-h-screen bg-background relative">
@@ -642,9 +1135,19 @@ export default function PreFiDashboard() {
               </div>
             </Link>
 
-            {/* Theme Toggle, Admin Link, and Wallet */}
+            {/* Theme Toggle, Buy Button, and Wallet */}
             <div className="flex items-center gap-2">
               <ThemeToggle />
+              <button
+                className="p-2 rounded-lg bg-green-600 hover:bg-green-700 text-white transition-colors"
+                onClick={() => {
+                  console.log("Buy tokens clicked from navigation");
+                  setIsBuyModalOpen(true);
+                }}
+                title="Buy Tokens"
+              >
+                <ShoppingCart className="h-5 w-5" />
+              </button>
               <WalletNetworkButton onNetworkChange={handleNetworkChange} />
             </div>
           </div>
@@ -745,16 +1248,23 @@ export default function PreFiDashboard() {
             <TooltipTrigger asChild>
               <div>
                 <Stat
-                  label="Total VOI Rewards"
-                  value={`${fmt0.format(PROGRAM.VOI_ALLOCATION_TOTAL)} VOI`}
+                  label="Total Rewards"
+                  value={
+                    voiPrice > 0
+                      ? `$${fmt0.format(
+                          PROGRAM.VOI_ALLOCATION_TOTAL * voiPrice
+                        )}`
+                      : "Loading..."
+                  }
                   icon={Coins}
                 />
               </div>
             </TooltipTrigger>
             <TooltipContent>
               <p>
-                Total VOI tokens allocated as rewards for Phase 0 participants
-                who meet minimum requirements.
+                Total USD value of VOI rewards allocated for Phase 0
+                participants who meet minimum requirements. Calculated using
+                current VOI market price.
               </p>
             </TooltipContent>
           </Tooltip>
@@ -764,7 +1274,7 @@ export default function PreFiDashboard() {
               <div>
                 <Stat
                   label="Your Total Deposited"
-                  value={`${fmt.format(globalDeposited)} (all mkts)`}
+                  value={`$${fmt.format(globalDeposited)}`}
                   icon={TrendingUp}
                 />
               </div>
@@ -780,7 +1290,17 @@ export default function PreFiDashboard() {
           <Tooltip>
             <TooltipTrigger asChild>
               <div>
-                <Stat label="Network" value="Voi Network" icon={BarChart3} />
+                <Stat
+                  label="Network"
+                  value={
+                    currentNetwork.startsWith("voi")
+                      ? "Voi Network"
+                      : currentNetwork.startsWith("algorand")
+                      ? "Algorand"
+                      : getCurrentNetworkConfig().name
+                  }
+                  icon={BarChart3}
+                />
               </div>
             </TooltipTrigger>
             <TooltipContent>
@@ -820,7 +1340,7 @@ export default function PreFiDashboard() {
               </p>
               <p>
                 Deposits are non-custodial, tracked on-chain, and earn a share
-                of 2,000,000 VOI incentives.
+                of 5,000,000 VOI incentives.
               </p>
               <p>
                 The pool is time-weighted—earlier, larger deposits earn more at
@@ -836,6 +1356,10 @@ export default function PreFiDashboard() {
                 const loading = !!loadingMap[m.id];
                 const dep = st ? fromBase(st.depositedBase, m.decimals) : 0;
                 const wal = st ? fromBase(st.walletBalanceBase, m.decimals) : 0;
+                console.log(
+                  `Market ${m.symbol}: dep=${dep}, wal=${wal}, st=`,
+                  st
+                );
                 const minOk = dep >= m.min;
 
                 return (
@@ -876,23 +1400,23 @@ export default function PreFiDashboard() {
                           Est. APY{" "}
                           {loading
                             ? "…"
-                            : `${
-                                m.id === "voi"
-                                  ? "15.8"
-                                  : m.id === "ausd"
-                                  ? "8.2"
-                                  : m.id === "unit"
-                                  ? "12.4"
-                                  : m.id === "btc"
-                                  ? "6.5"
-                                  : m.id === "cbbtc"
-                                  ? "6.3"
-                                  : m.id === "eth"
-                                  ? "7.1"
-                                  : m.id === "algo"
-                                  ? "9.7"
-                                  : "10.2"
-                              }%`}
+                            : (() => {
+                                const timeRemaining = Math.max(
+                                  0,
+                                  (launchTs - Date.now()) / 1000
+                                );
+                                const currentDeposit = st
+                                  ? fromBase(st.depositedBase, m.decimals)
+                                  : 0;
+                                const apy = calculateMarketAPY(
+                                  m,
+                                  voiPrice,
+                                  currentDeposit,
+                                  timeRemaining,
+                                  marketPrices
+                                );
+                                return `${apy.toFixed(1)}%`;
+                              })()}
                         </div>
                       </div>
 
@@ -911,49 +1435,87 @@ export default function PreFiDashboard() {
                             Deposited
                           </div>
                           <div className="text-sm font-semibold tabular-nums text-card-foreground">
-                            {loading ? "…" : `${fmt.format(dep)} ${m.symbol}`}
+                            {loading
+                              ? "…"
+                              : marketPrices[m.id]
+                              ? `$${fmt.format(dep * marketPrices[m.id])}`
+                              : `${fmt.format(dep)} ${m.symbol}`}
                           </div>
                         </div>
                       </div>
 
                       {/* Progress Section */}
-                      <div>
-                        <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between">
                           <div className="flex items-center gap-1">
                             {minOk ? (
-                              <CheckCircle2 className="h-3 w-3 text-accent" />
+                              <div className="flex items-center gap-1">
+                                <CheckCircle2 className="h-3 w-3 text-green-500" />
+                                <span className="text-xs font-medium text-green-600 dark:text-green-400">
+                                  Qualified
+                                </span>
+                              </div>
                             ) : (
-                              <AlertCircle className="h-3 w-3 text-destructive" />
+                              <div className="flex items-center gap-1">
+                                <AlertCircle className="h-3 w-3 text-orange-500" />
+                                <span className="text-xs font-medium text-orange-600 dark:text-orange-400">
+                                  Needs more
+                                </span>
+                              </div>
                             )}
-                            <span>{minOk ? "Qualified" : "Needs more"}</span>
                           </div>
-                          <span className="tabular-nums">
-                            {fmt.format(Math.min(dep, m.min))} /{" "}
-                            {m.id === "btc" ||
-                            m.id === "cbbtc" ||
-                            m.id === "eth" ||
-                            m.id === "ausd" ||
-                            m.id === "pow"
-                              ? "$"
-                              : ""}
-                            {fmt.format(m.min)}
-                          </span>
+                          <div className="text-right">
+                            <div className="text-xs font-semibold tabular-nums">
+                              {fmt.format(Math.min(dep, m.min))} /{" "}
+                              {m.id === "btc" ||
+                              m.id === "cbbtc" ||
+                              m.id === "eth" ||
+                              m.id === "ausd" ||
+                              m.id === "pow"
+                                ? "$"
+                                : ""}
+                              {fmt.format(m.min)}
+                            </div>
+                          </div>
                         </div>
                         <ProgressBar value={Math.min(dep, m.min)} max={m.min} />
+                        {!minOk && (
+                          <div className="text-xs text-muted-foreground">
+                            Deposit {fmt.format(m.min - dep)} more
+                          </div>
+                        )}
                       </div>
 
                       {/* Deposit Button */}
-                      <DorkFiButton
-                        variant="secondary"
-                        disabled={loading}
-                        onClick={() => {
-                          console.log("Deposit clicked for", m.symbol);
-                          openDepositModal(m);
-                        }}
-                        className="w-full justify-center text-sm"
-                      >
-                        <ArrowDownCircle className="h-4 w-4" /> Deposit
-                      </DorkFiButton>
+                      <div className="flex gap-2">
+                        <DorkFiButton
+                          variant="secondary"
+                          disabled={loading}
+                          onClick={() => {
+                            console.log("Deposit clicked for", m.symbol);
+                            openDepositModal(m);
+                          }}
+                          className="flex-1 justify-center text-sm"
+                        >
+                          <ArrowDownCircle className="h-4 w-4" /> Deposit
+                        </DorkFiButton>
+                        <DorkFiButton
+                          variant="secondary"
+                          disabled={loading}
+                          onClick={async () => {
+                            console.log(
+                              "Withdraw clicked for",
+                              m.symbol,
+                              "dep:",
+                              dep
+                            );
+                            await openWithdrawModal(m);
+                          }}
+                          className="flex-1 justify-center text-sm"
+                        >
+                          <ArrowUpCircle className="h-4 w-4" /> Withdraw
+                        </DorkFiButton>
+                      </div>
                     </DorkFiCard>
                   </motion.div>
                 );
@@ -1060,6 +1622,10 @@ export default function PreFiDashboard() {
                     const wal = st
                       ? fromBase(st.walletBalanceBase, m.decimals)
                       : 0;
+                    console.log(
+                      `Desktop Market ${m.symbol}: dep=${dep}, wal=${wal}, st=`,
+                      st
+                    );
                     const minOk = dep >= m.min;
 
                     // Reward estimate (very rough): user's stake‑seconds vs global
@@ -1126,7 +1692,11 @@ export default function PreFiDashboard() {
                         {/* Deposited */}
                         <td className="px-6 py-4 text-right">
                           <div className="text-sm font-semibold tabular-nums text-card-foreground">
-                            {loading ? "…" : `${fmt.format(dep)} ${m.symbol}`}
+                            {loading
+                              ? "…"
+                              : marketPrices[m.id]
+                              ? `$${fmt.format(dep * marketPrices[m.id])}`
+                              : `${fmt.format(dep)} ${m.symbol}`}
                           </div>
                         </td>
 
@@ -1135,62 +1705,76 @@ export default function PreFiDashboard() {
                           <div className="text-sm font-semibold tabular-nums text-accent">
                             {loading
                               ? "…"
-                              : `${
-                                  m.id === "voi"
-                                    ? "15.8"
-                                    : m.id === "ausd"
-                                    ? "8.2"
-                                    : m.id === "unit"
-                                    ? "12.4"
-                                    : m.id === "btc"
-                                    ? "6.5"
-                                    : m.id === "cbbtc"
-                                    ? "6.3"
-                                    : m.id === "eth"
-                                    ? "7.1"
-                                    : m.id === "algo"
-                                    ? "9.7"
-                                    : "10.2"
-                                }%`}
+                              : (() => {
+                                  const timeRemaining = Math.max(
+                                    0,
+                                    (launchTs - Date.now()) / 1000
+                                  );
+                                  const currentDeposit = st
+                                    ? fromBase(st.depositedBase, m.decimals)
+                                    : 0;
+                                  const apy = calculateMarketAPY(
+                                    m,
+                                    voiPrice,
+                                    currentDeposit,
+                                    timeRemaining,
+                                    marketPrices
+                                  );
+                                  return `${apy.toFixed(1)}%`;
+                                })()}
                           </div>
                         </td>
 
                         {/* Progress */}
                         <td className="px-6 py-4 w-48">
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between text-xs">
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between">
                               <div className="flex items-center gap-1">
                                 {minOk ? (
-                                  <CheckCircle2 className="h-3 w-3 text-accent" />
+                                  <div className="flex items-center gap-1">
+                                    <CheckCircle2 className="h-3 w-3 text-green-500" />
+                                    <span className="text-xs font-medium text-green-600 dark:text-green-400">
+                                      Qualified
+                                    </span>
+                                  </div>
                                 ) : (
-                                  <AlertCircle className="h-3 w-3 text-destructive" />
+                                  <div className="flex items-center gap-1">
+                                    <AlertCircle className="h-3 w-3 text-orange-500" />
+                                    <span className="text-xs font-medium text-orange-600 dark:text-orange-400">
+                                      Needs more
+                                    </span>
+                                  </div>
                                 )}
-                                <span className="text-muted-foreground">
-                                  {minOk ? "Qualified" : "Needs more"}
-                                </span>
                               </div>
-                              <span className="text-muted-foreground tabular-nums">
-                                {fmt.format(Math.min(dep, m.min))} /{" "}
-                                {m.id === "btc" ||
-                                m.id === "cbbtc" ||
-                                m.id === "eth" ||
-                                m.id === "ausd" ||
-                                m.id === "pow"
-                                  ? "$"
-                                  : ""}
-                                {fmt.format(m.min)}
-                              </span>
+                              <div className="text-right">
+                                <div className="text-xs font-semibold tabular-nums">
+                                  {fmt.format(Math.min(dep, m.min))} /{" "}
+                                  {m.id === "btc" ||
+                                  m.id === "cbbtc" ||
+                                  m.id === "eth" ||
+                                  m.id === "ausd" ||
+                                  m.id === "pow"
+                                    ? "$"
+                                    : ""}
+                                  {fmt.format(m.min)}
+                                </div>
+                              </div>
                             </div>
                             <ProgressBar
                               value={Math.min(dep, m.min)}
                               max={m.min}
                             />
+                            {!minOk && (
+                              <div className="text-xs text-muted-foreground">
+                                Deposit {fmt.format(m.min - dep)} more
+                              </div>
+                            )}
                           </div>
                         </td>
 
                         {/* Actions */}
                         <td className="px-6 py-4">
-                          <div className="flex items-center justify-center">
+                          <div className="flex items-center justify-center gap-2">
                             <DorkFiButton
                               variant="secondary"
                               disabled={loading}
@@ -1201,6 +1785,22 @@ export default function PreFiDashboard() {
                               className="text-sm"
                             >
                               <ArrowDownCircle className="h-4 w-4" /> Deposit
+                            </DorkFiButton>
+                            <DorkFiButton
+                              variant="secondary"
+                              disabled={loading}
+                              onClick={async () => {
+                                console.log(
+                                  "Withdraw clicked for",
+                                  m.symbol,
+                                  "dep:",
+                                  dep
+                                );
+                                await openWithdrawModal(m);
+                              }}
+                              className="text-sm"
+                            >
+                              <ArrowUpCircle className="h-4 w-4" /> Withdraw
                             </DorkFiButton>
                           </div>
                         </td>
@@ -1398,14 +1998,22 @@ export default function PreFiDashboard() {
                         </div>
                         <span className="text-sm font-medium text-slate-800 dark:text-white">
                           {marketsState[selectedMarket.id]
-                            ? fmt.format(
-                                fromBase(
-                                  marketsState[selectedMarket.id].depositedBase,
-                                  selectedMarket.decimals
-                                )
-                              )
-                            : "0"}{" "}
-                          {selectedMarket.symbol}
+                            ? marketPrices[selectedMarket.id]
+                              ? `$${fmt.format(
+                                  fromBase(
+                                    marketsState[selectedMarket.id]
+                                      .depositedBase,
+                                    selectedMarket.decimals
+                                  ) * marketPrices[selectedMarket.id]
+                                )}`
+                              : `${fmt.format(
+                                  fromBase(
+                                    marketsState[selectedMarket.id]
+                                      .depositedBase,
+                                    selectedMarket.decimals
+                                  )
+                                )} ${selectedMarket.symbol}`
+                            : "0"}
                         </span>
                       </div>
                     </CardContent>
@@ -1429,6 +2037,218 @@ export default function PreFiDashboard() {
               )}
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Withdraw Modal */}
+      {(() => {
+        console.log("=== MODAL RENDER CHECK ===");
+        console.log("isWithdrawModalOpen:", isWithdrawModalOpen);
+        console.log("selectedMarket:", selectedMarket?.symbol);
+        console.log(
+          "Should render modal:",
+          isWithdrawModalOpen && selectedMarket
+        );
+        return null;
+      })()}
+      {isWithdrawModalOpen && selectedMarket && (
+        <WithdrawModal
+          isOpen={isWithdrawModalOpen}
+          onClose={closeWithdrawModal}
+          tokenSymbol={selectedMarket.symbol}
+          tokenIcon={getTokenImagePath(selectedMarket.symbol)}
+          currentlyDeposited={
+            marketsState[selectedMarket.id]
+              ? fromBase(
+                  marketsState[selectedMarket.id].depositedBase,
+                  selectedMarket.decimals
+                )
+              : 0
+          }
+          minimumToQualify={selectedMarket.min}
+          marketStats={{
+            supplyAPY: (() => {
+              const timeRemaining = Math.max(0, (launchTs - Date.now()) / 1000);
+              const currentDeposit = marketsState[selectedMarket.id]
+                ? fromBase(
+                    marketsState[selectedMarket.id].depositedBase,
+                    selectedMarket.decimals
+                  )
+                : 0;
+              return calculateMarketAPY(
+                selectedMarket,
+                voiPrice,
+                currentDeposit,
+                timeRemaining,
+                marketPrices
+              );
+            })(),
+            utilization: 65,
+            collateralFactor: 75,
+            tokenPrice: withdrawModalPrice,
+          }}
+          onSubmit={async (amount) => {
+            if (!selectedMarket) return;
+
+            const amountNumber = Number(amount);
+            const amountBase = BigInt(
+              Math.floor(amountNumber * 10 ** selectedMarket.decimals)
+            );
+
+            console.log(
+              `[WITHDRAW] ${amountNumber} ${selectedMarket.symbol} (${amountBase} base units)`
+            );
+
+            setLoadingMap((prev) => ({ ...prev, [selectedMarket.id]: true }));
+
+            try {
+              let withdrawResult;
+
+              if (isCurrentNetworkAlgorandCompatible()) {
+                if (!activeAccount) {
+                  console.error("Wallet not connected");
+                  return;
+                }
+                console.log("selectedMarket", selectedMarket);
+                console.log("Withdraw parameters:", {
+                  poolId: selectedMarket.poolId || "",
+                  marketId: selectedMarket.marketId || "",
+                  amount: amount,
+                  userAddress: activeAccount.address,
+                  networkId: currentNetwork,
+                });
+                // Call the lending service withdraw method
+                withdrawResult = await withdraw(
+                  selectedMarket.poolId || "", // poolId - use token's poolId or fallback
+                  selectedMarket.marketId || "", // marketId
+                  amount, // amount as string
+                  activeAccount.address, // userAddress
+                  currentNetwork // networkId
+                );
+
+                if (!withdrawResult.success) {
+                  throw new Error(withdrawResult.error || "Withdraw failed");
+                }
+
+                console.log("withdrawResult", { withdrawResult });
+
+                const stxns = await signTransactions(
+                  withdrawResult.txns.map((txn: string) =>
+                    Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+                  )
+                );
+
+                const networkConfig = getCurrentNetworkConfig();
+                const algorandClients = algorandService.initializeClients(
+                  networkConfig.walletNetworkId as AlgorandNetwork
+                );
+
+                const res = await algorandClients.algod
+                  .sendRawTransaction(stxns)
+                  .do();
+
+                await waitForConfirmation(algorandClients.algod, res.txId, 4);
+
+                console.log("Transaction confirmed:", res);
+              } else if (isCurrentNetworkEVM()) {
+                // TODO: Implement EVM withdraw
+                withdrawResult = {
+                  success: true,
+                  txId: `TXN_${Math.random().toString(36).substring(2, 15)}`,
+                };
+              } else {
+                throw new Error("Unsupported network");
+              }
+
+              // Update tx log with actual transaction ID
+              setTxLog((prev) => [
+                {
+                  ts: Date.now(),
+                  marketId: selectedMarket.id,
+                  amount: -amountNumber, // Negative amount for withdraw
+                  txId:
+                    withdrawResult?.txId ||
+                    `TXN_${Math.random().toString(36).substring(2, 15)}`,
+                },
+                ...prev,
+              ]);
+
+              // Refresh balances (optimistic update)
+              setMarketsState((prev) => {
+                const current = prev[selectedMarket.id];
+                return {
+                  ...prev,
+                  [selectedMarket.id]: {
+                    walletBalanceBase:
+                      (current?.walletBalanceBase ?? 0n) + amountBase, // Add withdrawn amount to wallet
+                    depositedBase:
+                      (current?.depositedBase ?? 0n) > amountBase
+                        ? (current?.depositedBase ?? 0n) - amountBase
+                        : 0n,
+                    totalStakeSecondsBase:
+                      current?.totalStakeSecondsBase ?? 10_000_000n,
+                  },
+                };
+              });
+
+              // Clear loading state
+              setLoadingMap((prev) => ({
+                ...prev,
+                [selectedMarket.id]: false,
+              }));
+
+              // Close modal and show success
+              closeWithdrawModal();
+
+              // Refresh balances from blockchain to ensure accuracy (silent refresh)
+              setTimeout(() => {
+                if (selectedMarket) {
+                  loadMarket(selectedMarket, false); // false = no loading indicators
+                }
+              }, 1000); // Small delay to ensure transaction is fully processed
+            } catch (error) {
+              console.error("Withdraw failed:", error);
+              setLoadingMap((prev) => ({
+                ...prev,
+                [selectedMarket.id]: false,
+              }));
+
+              // You could add a toast notification here to show the error to the user
+              // For now, we'll just log it
+              if (error instanceof Error) {
+                console.error("Withdraw error:", error.message);
+              }
+            }
+          }}
+          isLoading={loadingMap[selectedMarket.id] || false}
+        />
+      )}
+
+      {/* Buy Modal */}
+      <Dialog open={isBuyModalOpen} onOpenChange={setIsBuyModalOpen}>
+        <DialogContent className="bg-card dark:bg-slate-900 rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl card-hover hover:shadow-lg hover:border-ocean-teal/40 transition-all max-w-lg px-0 py-0">
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-card-foreground">
+                Buy VOI Tokens
+              </h2>
+            </div>
+            <div className="text-sm text-muted-foreground mb-4">
+              Purchase VOI tokens directly through our integrated widget
+            </div>
+            <div className="flex justify-center">
+              <iframe
+                src={`https://ibuyvoi.com/widget?destination=${
+                  activeAccount?.address || "VOI_WALLET_ADDRESS"
+                }&theme=auto`}
+                width="480"
+                height="600"
+                frameBorder="0"
+                style={{ borderRadius: "16px" }}
+                title="VOI Purchase Widget"
+              />
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

@@ -1,11 +1,21 @@
 import { useState, useEffect } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { InfoIcon } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import SupplyBorrowCongrats from "./SupplyBorrowCongrats";
 
 interface WithdrawModalProps {
@@ -14,15 +24,28 @@ interface WithdrawModalProps {
   tokenSymbol: string;
   tokenIcon: string;
   currentlyDeposited: number;
+  minimumToQualify: number;
   marketStats: {
     supplyAPY: number;
     utilization: number;
     collateralFactor: number;
     tokenPrice: number;
   };
+  onSubmit?: (amount: string) => void;
+  isLoading?: boolean;
 }
 
-const WithdrawModal = ({ isOpen, onClose, tokenSymbol, tokenIcon, currentlyDeposited, marketStats }: WithdrawModalProps) => {
+const WithdrawModal = ({
+  isOpen,
+  onClose,
+  tokenSymbol,
+  tokenIcon,
+  currentlyDeposited,
+  minimumToQualify,
+  marketStats,
+  onSubmit,
+  isLoading = false,
+}: WithdrawModalProps) => {
   const [amount, setAmount] = useState("");
   const [fiatValue, setFiatValue] = useState(0);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -50,11 +73,15 @@ const WithdrawModal = ({ isOpen, onClose, tokenSymbol, tokenIcon, currentlyDepos
   };
 
   const handleSubmit = () => {
-    console.log(`Withdraw ${amount} ${tokenSymbol}`);
-    
-    setTimeout(() => {
-      setShowSuccess(true);
-    }, 500);
+    if (onSubmit) {
+      onSubmit(amount);
+    } else {
+      console.log(`Withdraw ${amount} ${tokenSymbol}`);
+
+      setTimeout(() => {
+        setShowSuccess(true);
+      }, 500);
+    }
   };
 
   const handleViewTransaction = () => {
@@ -72,80 +99,167 @@ const WithdrawModal = ({ isOpen, onClose, tokenSymbol, tokenIcon, currentlyDepos
     setFiatValue(0);
   };
 
-  const isValidAmount = amount && parseFloat(amount) > 0 && parseFloat(amount) <= currentlyDeposited;
+  const isValidAmount =
+    amount &&
+    parseFloat(amount) > 0 &&
+    parseFloat(amount) <= currentlyDeposited;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="bg-card dark:bg-slate-900 rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl card-hover hover:shadow-lg hover:border-ocean-teal/40 transition-all max-w-md px-0 py-0">
-          {showSuccess ? (
-            <div className="p-6">
-              <SupplyBorrowCongrats
-                transactionType="withdraw"
-                asset={tokenSymbol}
-                assetIcon={tokenIcon}
-                amount={amount}
-                onViewTransaction={handleViewTransaction}
-                onGoToPortfolio={handleGoToPortfolio}
-                onMakeAnother={handleMakeAnother}
-                onClose={onClose}
-              />
-            </div>
-          ) : (
-            <>
-              <DialogHeader className="pt-6 px-8 pb-1">
-                <DialogTitle className="text-2xl font-bold text-center text-slate-800 dark:text-white">
-                  Withdraw
-                </DialogTitle>
-                <DialogDescription className="text-center mt-1 text-sm text-slate-400 dark:text-slate-400">
-                  Enter the amount to withdraw. Your deposited total and rates are shown below.
-                </DialogDescription>
-                <div className="flex items-center justify-center gap-3 pb-2 mt-3">
-                  <img 
-                    src={tokenIcon} 
-                    alt={tokenSymbol}
-                    className="w-12 h-12 rounded-full shadow"
-                  />
-                  <span className="text-xl font-semibold text-slate-800 dark:text-white">{tokenSymbol}</span>
-                </div>
-              </DialogHeader>
-              
-              <div className="space-y-6 pt-2 px-8 pb-8">
-                <div className="space-y-3">
-                  <Label htmlFor="amount" className="text-sm font-medium text-slate-600 dark:text-slate-300">
-                    Amount
-                  </Label>
-                  <div className="relative">
-                    <Input
-                      id="amount"
-                      type="number"
-                      inputMode="decimal"
-                      placeholder="0.0"
-                      autoFocus
-                      value={amount}
-                      onChange={(e) => setAmount(e.target.value)}
-                      className="bg-white/80 dark:bg-slate-800 border-gray-300 dark:border-slate-600 text-slate-800 dark:text-white pr-16 text-lg h-12"
-                    />
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={handleMaxClick}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-red-400 hover:bg-red-400/10 h-8 px-3"
-                    >
-                      MAX
-                    </Button>
-                  </div>
-                  {fiatValue > 0 && (
-                    <p className="text-sm text-slate-500 dark:text-slate-400">
-                      ≈ ${fiatValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </p>
-                  )}
-                  <p className="text-xs text-slate-400 dark:text-slate-500">
-                    Currently Deposited: {currentlyDeposited.toLocaleString()} {tokenSymbol} 
-                    (${(currentlyDeposited * marketStats.tokenPrice).toLocaleString()})
-                  </p>
-                </div>
+      <DialogContent className="bg-card dark:bg-slate-900 rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl card-hover hover:shadow-lg hover:border-ocean-teal/40 transition-all max-w-md px-0 py-0">
+        {showSuccess ? (
+          <div className="p-6">
+            <SupplyBorrowCongrats
+              transactionType="withdraw"
+              asset={tokenSymbol}
+              assetIcon={tokenIcon}
+              amount={amount}
+              onViewTransaction={handleViewTransaction}
+              onGoToPortfolio={handleGoToPortfolio}
+              onMakeAnother={handleMakeAnother}
+              onClose={onClose}
+            />
+          </div>
+        ) : (
+          <>
+            <DialogHeader className="pt-6 px-8 pb-1">
+              <DialogTitle className="text-2xl font-bold text-center text-slate-800 dark:text-white">
+                Withdraw
+              </DialogTitle>
+              <DialogDescription className="text-center mt-1 text-sm text-slate-400 dark:text-slate-400">
+                Enter the amount to withdraw. Your deposited total and rates are
+                shown below.
+              </DialogDescription>
+              <div className="flex items-center justify-center gap-3 pb-2 mt-3">
+                <img
+                  src={tokenIcon}
+                  alt={tokenSymbol}
+                  className="w-12 h-12 rounded-full shadow"
+                />
+                <span className="text-xl font-semibold text-slate-800 dark:text-white">
+                  {tokenSymbol}
+                </span>
+              </div>
+            </DialogHeader>
 
-                <Card className="bg-white/80 dark:bg-slate-800 border-gray-200 dark:border-slate-700">
+            <div className="space-y-6 pt-2 px-8 pb-8">
+              <div className="space-y-3">
+                <Label
+                  htmlFor="amount"
+                  className="text-sm font-medium text-slate-600 dark:text-slate-300"
+                >
+                  Amount
+                </Label>
+                <div className="relative">
+                  <Input
+                    id="amount"
+                    type="number"
+                    inputMode="decimal"
+                    placeholder="0.0"
+                    autoFocus
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    className="bg-white/80 dark:bg-slate-800 border-gray-300 dark:border-slate-600 text-slate-800 dark:text-white pr-16 text-lg h-12"
+                  />
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={handleMaxClick}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-red-400 hover:bg-red-400/10 h-8 px-3"
+                  >
+                    MAX
+                  </Button>
+                </div>
+                {fiatValue > 0 && (
+                  <p className="text-sm text-slate-500 dark:text-slate-400">
+                    ≈ $
+                    {fiatValue.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </p>
+                )}
+                <div className="space-y-2">
+                  <p className="text-xs text-slate-400 dark:text-slate-500">
+                    Currently Deposited: {currentlyDeposited.toLocaleString()}{" "}
+                    {tokenSymbol}
+                    ($
+                    {(
+                      currentlyDeposited * marketStats.tokenPrice
+                    ).toLocaleString()}
+                    )
+                  </p>
+
+                  {/* Qualification Status */}
+                  <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-500 dark:text-slate-400">
+                        Minimum to Qualify
+                      </span>
+                      <Tooltip>
+                        <TooltipTrigger>
+                          <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>
+                            Minimum deposit required to qualify for Phase 0
+                            rewards
+                          </p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                    <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                      {minimumToQualify.toLocaleString()} {tokenSymbol}
+                    </span>
+                  </div>
+
+                  {/* Qualification Progress */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-slate-500 dark:text-slate-400">
+                        Qualification Progress
+                      </span>
+                      <span
+                        className={`font-medium ${
+                          currentlyDeposited >= minimumToQualify
+                            ? "text-green-600 dark:text-green-400"
+                            : "text-orange-600 dark:text-orange-400"
+                        }`}
+                      >
+                        {currentlyDeposited >= minimumToQualify
+                          ? "Qualified ✓"
+                          : "Not Qualified"}
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2">
+                      <div
+                        className={`h-2 rounded-full transition-all duration-300 ${
+                          currentlyDeposited >= minimumToQualify
+                            ? "bg-green-500"
+                            : "bg-orange-500"
+                        }`}
+                        style={{
+                          width: `${Math.min(
+                            100,
+                            (currentlyDeposited / minimumToQualify) * 100
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                    {currentlyDeposited < minimumToQualify && (
+                      <p className="text-xs text-orange-600 dark:text-orange-400">
+                        Need{" "}
+                        {(
+                          minimumToQualify - currentlyDeposited
+                        ).toLocaleString()}{" "}
+                        more {tokenSymbol} to qualify
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/*<Card className="bg-white/80 dark:bg-slate-800 border-gray-200 dark:border-slate-700">
                   <CardContent className="p-4 space-y-3">
                     <div className="flex justify-between items-center">
                       <div className="flex items-center gap-2">
@@ -192,19 +306,19 @@ const WithdrawModal = ({ isOpen, onClose, tokenSymbol, tokenIcon, currentlyDepos
                       <span className="text-sm font-medium text-slate-800 dark:text-white">{marketStats.collateralFactor}%</span>
                     </div>
                   </CardContent>
-                </Card>
+                </Card>*/}
 
-                <Button
-                  onClick={handleSubmit}
-                  disabled={!isValidAmount}
-                  className="w-full font-semibold text-white h-12 bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Withdraw {tokenSymbol}
-                </Button>
-              </div>
-            </>
-          )}
-        </DialogContent>
+              <Button
+                onClick={handleSubmit}
+                disabled={!isValidAmount || isLoading}
+                className="w-full font-semibold text-white h-12 bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isLoading ? "Processing..." : `Withdraw ${tokenSymbol}`}
+              </Button>
+            </div>
+          </>
+        )}
+      </DialogContent>
     </Dialog>
   );
 };

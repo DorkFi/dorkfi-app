@@ -31,6 +31,7 @@ export interface TokenConfig {
   assetId?: string;
   contractId?: string; // Contract address or application ID for smart contract tokens
   poolId?: string; // Lending pool ID for this token
+  nTokenId?: string; // nToken ID for deposits in lending protocol
   decimals: number;
   name: string;
   symbol: string;
@@ -118,6 +119,7 @@ const voiMainnetConfig: NetworkConfig = {
       assetId: "0",
       poolId: "41760711",
       contractId: "41877720",
+      nTokenId: "42125195",
       decimals: 6,
       name: "VOI",
       symbol: "VOI",
@@ -249,13 +251,13 @@ const algorandMainnetConfig: NetworkConfig = {
   walletNetworkId: "mainnet",
   name: "Algorand Mainnet",
   networkType: "avm",
-  rpcUrl: "https://mainnet-api.algonode.cloud",
+  rpcUrl: "https://mainnet-api.4160.nodely.dev",
   rpcPort: 443,
   rpcToken: undefined, // Public endpoint, no token required
-  indexerUrl: "https://mainnet-idx.algonode.cloud",
+  indexerUrl: "https://mainnet-idx.4160.nodely.dev",
   explorerUrl: "https://algoexplorer.io",
   contracts: {
-    lendingPools: ["ALGORAND_LENDING_POOL_ID"], // TODO: Replace with actual contract ID
+    lendingPools: ["3207735602"],
     priceOracle: undefined,
     liquidationEngine: undefined,
     governance: undefined,
@@ -263,12 +265,18 @@ const algorandMainnetConfig: NetworkConfig = {
   },
   tokens: {
     ALGO: {
-      assetId: undefined, // Native token
-      poolId: "ALGORAND_LENDING_POOL_ID", // TODO: Replace with actual pool ID
+      assetId: "0",
+      poolId: "3207735602",
+      contractId: "3207744109",
       decimals: 6,
       name: "Algorand",
       symbol: "ALGO",
       logoPath: "/lovable-uploads/Algo.webp",
+      marketOverride: {
+        displayName: "Algo",
+        displaySymbol: "Algo",
+        isSmartContract: true,
+      },
     },
   },
 };
