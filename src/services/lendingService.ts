@@ -15,7 +15,7 @@ import {
   getPreFiParameters,
 } from "@/config";
 import algorandService, { AlgorandNetwork } from "./algorandService";
-import { CONTRACT } from "ulujs";
+import { abi, CONTRACT } from "ulujs";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
 import algosdk from "algosdk";
 import BigNumber from "bignumber.js";
@@ -26,6 +26,7 @@ export interface MarketInfo {
   marketId: string;
   tokenId: string;
   tokenContractId: string;
+  ntokenId: string;
   name: string;
   symbol: string;
   decimals: number;
@@ -178,6 +179,17 @@ export const fetchMarketInfo = async (
         return new BigNumber(price).div(new BigNumber(10).pow(18)).toFixed(12);
       };
 
+      const formatDeposit = (deposit: string) => {
+        return new BigNumber(deposit)
+          .div(new BigNumber(10).pow(token?.decimals || 0))
+          .toFixed(0);
+      };
+
+      const totalDeposits = formatDeposit(
+        market.totalScaledDeposits.toString()
+      );
+      const totalBorrows = formatDeposit(market.totalScaledBorrows.toString());
+
       const marketInfo: MarketInfo = {
         networkId: networkId,
         poolId: poolId,
@@ -203,16 +215,19 @@ export const fetchMarketInfo = async (
         liquidationBonus:
           parseFloat(market.liquidationBonus.toString()) / 10000,
         closeFactor: parseFloat(market.closeFactor.toString()) / 10000,
-        totalDeposits: market.totalScaledDeposits.toString(),
-        totalBorrows: market.totalScaledBorrows.toString(),
+        totalDeposits,
+        totalBorrows,
         utilizationRate,
         supplyRate,
         borrowRateCurrent: parseFloat(market.borrowRate.toString()) / 10000,
         price: formatPrice(market.price.toString()),
         isActive: true,
         isPaused: market.paused,
+        ntokenId: market.ntokenId.toString(),
         lastUpdated: new Date().toISOString(),
       };
+
+      console.log("marketInfo", { marketInfo });
 
       return marketInfo;
     } else if (isCurrentNetworkEVM()) {
@@ -589,9 +604,11 @@ export const deposit = async (
   marketId: string,
   amount: string,
   userAddress: string,
-  networkId: NetworkId,
-  signer?: any
-): Promise<{ success: boolean; txId?: string; error?: string }> => {
+  networkId: NetworkId
+): Promise<
+  | { success: boolean; txId?: string; error?: string }
+  | { success: true; txns: string[] }
+> => {
   console.log("deposit", { poolId, marketId, amount, userAddress, networkId });
 
   try {
@@ -618,6 +635,8 @@ export const deposit = async (
         (token) => token.underlyingContractId === marketId
       );
 
+      console.log("Token found:", token);
+
       if (!token) {
         console.error("Token not found for marketId:", marketId);
         console.error(
@@ -631,17 +650,6 @@ export const deposit = async (
       const amountInSmallestUnit = new BigNumber(amount)
         .multipliedBy(10 ** token.decimals)
         .toFixed(0);
-
-      const ci = new CONTRACT(
-        Number(poolId),
-        clients.algod,
-        undefined,
-        { ...LendingPoolAppSpec.contract, events: [] },
-        {
-          addr: userAddress,
-          sk: new Uint8Array(),
-        }
-      );
 
       // Check if market is paused
       const marketPaused = await isMarketPaused(poolId, marketId, networkId);
@@ -666,49 +674,162 @@ export const deposit = async (
         throw new Error("Deposit would exceed maximum total deposits");
       }
 
-      // Create deposit transaction
-      const depositTx = await ci.deposit(
-        Number(marketId),
-        BigInt(amountInSmallestUnit)
+      const ci = new CONTRACT(
+        Number(poolId),
+        clients.algod,
+        undefined,
+        abi.custom,
+        {
+          addr: userAddress,
+          sk: new Uint8Array(),
+        }
       );
 
-      console.log("depositTx", { depositTx });
+      const builder = {
+        lending: new CONTRACT(
+          Number(poolId),
+          clients.algod,
+          undefined,
+          { ...LendingPoolAppSpec.contract, events: [] },
+          {
+            addr: userAddress,
+            sk: new Uint8Array(),
+          },
+          true,
+          false,
+          true
+        ),
+        token: new CONTRACT(
+          Number(token.underlyingContractId),
+          clients.algod,
+          undefined,
+          abi.nt200,
+          {
+            addr: userAddress,
+            sk: new Uint8Array(),
+          },
+          true,
+          false,
+          true
+        ),
+        ntoken: new CONTRACT(
+          Number(marketInfo.ntokenId),
+          clients.algod,
+          undefined,
+          abi.nt200,
+          {
+            addr: userAddress,
+            sk: new Uint8Array(),
+          }
+        ),
+      };
 
-      if (!depositTx.success) {
+      let customTx: any;
+
+      for (const p of [
+        [0, 0],
+        [0, 1],
+        [1, 1],
+        [1, 0],
+      ]) {
+        const [p1, p2] = p;
+        const buildN = [];
+
+        // TODO fund ntoken
+
+        // conditionally deposit to token
+        if (token.underlyingAssetId === "0") {
+          if (p1 > 0) {
+            const txnO = (
+              await builder.token.createBalanceBox(
+                algosdk.getApplicationAddress(Number(poolId))
+              )
+            ).obj;
+            console.log("createBalanceBox", { txnO });
+            buildN.push({
+              ...txnO,
+              payment: 28500,
+              note: new TextEncoder().encode("nt200 createBalanceBox"),
+            });
+          }
+          if (p2 > 0) {
+            const txnO = (await builder.token.createBalanceBox(userAddress))
+              .obj;
+            buildN.push({
+              ...txnO,
+              payment: 28501,
+              note: new TextEncoder().encode("nt200 createBalanceBox"),
+            });
+          }
+          {
+            const txnO = (
+              await builder.token.deposit(BigInt(amountInSmallestUnit))
+            ).obj;
+            buildN.push({
+              ...txnO,
+              payment: BigInt(amountInSmallestUnit),
+              note: new TextEncoder().encode("nt200 deposit"),
+            });
+          }
+        }
+
+        // approve spending of token
+        {
+          const txnO = (
+            await builder.token.arc200_approve(
+              algosdk.getApplicationAddress(Number(poolId)),
+              BigInt(amountInSmallestUnit)
+            )
+          ).obj;
+          buildN.push({
+            ...txnO,
+            payment: 28502,
+            note: new TextEncoder().encode("arc200 approve"),
+          });
+        }
+
+        // deposit to lending pool
+        {
+          const depositCost = 900000;
+          const txnO = (
+            await builder.lending.deposit(
+              Number(marketId),
+              BigInt(amountInSmallestUnit)
+            )
+          ).obj as any;
+          buildN.push({
+            ...txnO,
+            note: new TextEncoder().encode("lending deposit"),
+            payment: depositCost,
+          });
+        }
+
+        console.log("buildN", { buildN });
+
+        // Create deposit transaction
+        ci.setFee(2000);
+        ci.setEnableGroupResourceSharing(true);
+        ci.setExtraTxns(buildN);
+
+        customTx = await ci.custom();
+
+        console.log("customTx", { customTx });
+
+        if (customTx.success) {
+          break;
+        }
+      }
+
+      console.log("customTx", { customTx });
+
+      if (!customTx.success) {
         throw new Error("Failed to create deposit transaction");
       }
 
-      // If signer is provided, sign and send the transaction
-      if (signer) {
-        try {
-          const signedTx = await signer.signTxn(depositTx.txns);
-          const sendResult = await clients.algod
-            .sendRawTransaction(signedTx)
-            .do();
-
-          console.log("Deposit transaction sent:", sendResult.txId);
-
-          return {
-            success: true,
-            txId: sendResult.txId,
-          };
-        } catch (signError) {
-          console.error(
-            "Error signing/sending deposit transaction:",
-            signError
-          );
-          return {
-            success: false,
-            error: `Transaction failed: ${signError.message}`,
-          };
-        }
-      } else {
-        // Return transaction for external signing
-        return {
-          success: true,
-          txId: depositTx.txns[0]?.txID?.() || "pending",
-        };
-      }
+      return {
+        success: true,
+        txns: [...customTx.txns],
+      };
     } else if (isCurrentNetworkEVM()) {
       throw new Error("EVM networks are not supported yet");
     } else {

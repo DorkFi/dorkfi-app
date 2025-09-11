@@ -1225,10 +1225,25 @@ export default function AdminDashboard() {
                           </p>
                           <p className="font-semibold">
                             {market.isLoaded && market.marketInfo
-                              ? `$${(
-                                  parseFloat(market.marketInfo.totalDeposits) /
-                                  1000000
-                                ).toFixed(2)}M`
+                              ? `$${(() => {
+                                  const value =
+                                    parseFloat(
+                                      market.marketInfo.totalDeposits
+                                    ) *
+                                    (parseFloat(market.marketInfo.price) /
+                                      1000000);
+                                  if (value >= 1000000000) {
+                                    return `${(value / 1000000000).toFixed(
+                                      2
+                                    )}B`;
+                                  } else if (value >= 1000000) {
+                                    return `${(value / 1000000).toFixed(2)}M`;
+                                  } else if (value >= 1000) {
+                                    return `${(value / 1000).toFixed(2)}K`;
+                                  } else {
+                                    return value.toFixed(2);
+                                  }
+                                })()}`
                               : "Loading..."}
                           </p>
                         </div>
@@ -1236,10 +1251,23 @@ export default function AdminDashboard() {
                           <p className="text-muted-foreground">Total Borrows</p>
                           <p className="font-semibold">
                             {market.isLoaded && market.marketInfo
-                              ? `$${(
-                                  parseFloat(market.marketInfo.totalBorrows) /
-                                  1000000
-                                ).toFixed(2)}M`
+                              ? `$${(() => {
+                                  const value =
+                                    parseFloat(market.marketInfo.totalBorrows) *
+                                    (parseFloat(market.marketInfo.price) /
+                                      1000000);
+                                  if (value >= 1000000000) {
+                                    return `${(value / 1000000000).toFixed(
+                                      2
+                                    )}B`;
+                                  } else if (value >= 1000000) {
+                                    return `${(value / 1000000).toFixed(2)}M`;
+                                  } else if (value >= 1000) {
+                                    return `${(value / 1000).toFixed(2)}K`;
+                                  } else {
+                                    return value.toFixed(2);
+                                  }
+                                })()}`
                               : "Loading..."}
                           </p>
                         </div>
@@ -2462,10 +2490,20 @@ export default function AdminDashboard() {
                     </p>
                     <p className="text-lg font-semibold">
                       $
-                      {(
-                        parseFloat(marketViewData.totalDeposits) / 1000000
-                      ).toFixed(2)}
-                      M
+                      {(() => {
+                        const value =
+                          parseFloat(marketViewData.totalDeposits) *
+                          (parseFloat(marketViewData.price) / 1000000);
+                        if (value >= 1000000000) {
+                          return `${(value / 1000000000).toFixed(2)}B`;
+                        } else if (value >= 1000000) {
+                          return `${(value / 1000000).toFixed(2)}M`;
+                        } else if (value >= 1000) {
+                          return `${(value / 1000).toFixed(2)}K`;
+                        } else {
+                          return value.toFixed(2);
+                        }
+                      })()}
                     </p>
                   </div>
                   <div>
@@ -2474,10 +2512,20 @@ export default function AdminDashboard() {
                     </p>
                     <p className="text-lg font-semibold">
                       $
-                      {(
-                        parseFloat(marketViewData.totalBorrows) / 1000000
-                      ).toFixed(2)}
-                      M
+                      {(() => {
+                        const value =
+                          parseFloat(marketViewData.totalBorrows) *
+                          (parseFloat(marketViewData.price) / 1000000);
+                        if (value >= 1000000000) {
+                          return `${(value / 1000000000).toFixed(2)}B`;
+                        } else if (value >= 1000000) {
+                          return `${(value / 1000000).toFixed(2)}M`;
+                        } else if (value >= 1000) {
+                          return `${(value / 1000).toFixed(2)}K`;
+                        } else {
+                          return value.toFixed(2);
+                        }
+                      })()}
                     </p>
                   </div>
                   <div>
@@ -2620,10 +2668,20 @@ export default function AdminDashboard() {
                     </span>
                     <span>
                       $
-                      {(
-                        parseFloat(marketViewData.maxTotalDeposits) / 1000000
-                      ).toFixed(2)}
-                      M
+                      {(() => {
+                        const value =
+                          parseFloat(marketViewData.maxTotalDeposits) *
+                          (parseFloat(marketViewData.price) / 1000000);
+                        if (value >= 1000000000) {
+                          return `${(value / 1000000000).toFixed(2)}B`;
+                        } else if (value >= 1000000) {
+                          return `${(value / 1000000).toFixed(2)}M`;
+                        } else if (value >= 1000) {
+                          return `${(value / 1000).toFixed(2)}K`;
+                        } else {
+                          return value.toFixed(2);
+                        }
+                      })()}
                     </span>
                   </div>
                   <div className="flex justify-between">
@@ -2632,10 +2690,20 @@ export default function AdminDashboard() {
                     </span>
                     <span>
                       $
-                      {(
-                        parseFloat(marketViewData.maxTotalBorrows) / 1000000
-                      ).toFixed(2)}
-                      M
+                      {(() => {
+                        const value = parseFloat(
+                          marketViewData.maxTotalBorrows
+                        );
+                        if (value >= 1000000000) {
+                          return `${(value / 1000000000).toFixed(2)}B`;
+                        } else if (value >= 1000000) {
+                          return `${(value / 1000000).toFixed(2)}M`;
+                        } else if (value >= 1000) {
+                          return `${(value / 1000).toFixed(2)}K`;
+                        } else {
+                          return value.toFixed(2);
+                        }
+                      })()}
                     </span>
                   </div>
                 </div>

@@ -51,6 +51,8 @@ import {
 import { useNetwork } from "@/contexts/NetworkContext";
 import { deposit } from "@/services/lendingService";
 import { useWallet } from "@txnlab/use-wallet-react";
+import algorandService, { AlgorandNetwork } from "@/services/algorandService";
+import { waitForConfirmation } from "algosdk";
 
 /**
  * PreFi Frontend – Single-file MVP Dashboard
@@ -490,11 +492,7 @@ export default function PreFiDashboard() {
     setLoadingMap((prev) => ({ ...prev, [selectedMarket.id]: true }));
 
     try {
-      let depositResult: {
-        success: boolean;
-        txId?: string;
-        error?: string;
-      } | null = null;
+      let depositResult;
 
       if (isCurrentNetworkAlgorandCompatible()) {
         if (!activeAccount) {
@@ -515,13 +513,31 @@ export default function PreFiDashboard() {
           selectedMarket.marketId || "", // marketId
           modalAmount, // amount as string
           activeAccount.address, // userAddress
-          currentNetwork, // networkId
-          undefined // signer - will be handled externally for now
+          currentNetwork // networkId
         );
 
         if (!depositResult.success) {
           throw new Error(depositResult.error || "Deposit failed");
         }
+
+        console.log("depositResult", { depositResult });
+
+        const stxns = await signTransactions(
+          depositResult.txns.map((txn: string) =>
+            Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+          )
+        );
+
+        const networkConfig = getCurrentNetworkConfig();
+        const algorandClients = algorandService.initializeClients(
+          networkConfig.walletNetworkId as AlgorandNetwork
+        );
+
+        const res = await algorandClients.algod.sendRawTransaction(stxns).do();
+
+        await waitForConfirmation(algorandClients.algod, res.txId, 4);
+
+        console.log("Transaction confirmed:", res);
       } else if (isCurrentNetworkEVM()) {
         // TODO: Implement EVM deposit
         depositResult = {
