@@ -1,11 +1,16 @@
 import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Calendar, Clock, Rocket, Star, Waves } from "lucide-react";
+import { Calendar, Clock, Rocket, Star, Waves, ShoppingCart } from "lucide-react";
 
 import WalletButton from "@/components/WalletButton";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
+import {
+  Dialog,
+  DialogContent,
+} from "@/components/ui/dialog";
+import { useWallet } from "@txnlab/use-wallet-react";
 
 const LAUNCH_TIMESTAMP = Date.UTC(2025, 8, 13, 0, 29, 0); // Sep 12, 2025 5:29 PM PDT
 
@@ -45,6 +50,8 @@ function CountdownCard({ value, label }: TimeUnit) {
 
 export default function CountdownPage() {
   const [timeLeft, setTimeLeft] = useState(LAUNCH_TIMESTAMP - Date.now());
+  const [isBuyModalOpen, setIsBuyModalOpen] = useState(false);
+  const { activeAccount } = useWallet();
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -118,8 +125,20 @@ export default function CountdownPage() {
               </div>
             </Link>
             
-            {/* Wallet */}
+            {/* Wallet and Buy Button */}
             <div className="flex items-center gap-2">
+              {activeAccount?.address && (
+                <button
+                  className="p-2 rounded-lg bg-green-600 hover:bg-green-700 text-white transition-colors"
+                  onClick={() => {
+                    console.log("Buy tokens clicked from countdown navigation");
+                    setIsBuyModalOpen(true);
+                  }}
+                  title="Buy Tokens"
+                >
+                  <ShoppingCart className="h-5 w-5" />
+                </button>
+              )}
               <WalletButton />
             </div>
           </div>
@@ -203,6 +222,34 @@ export default function CountdownPage() {
           </p>
         </div>
       </footer>
+
+      {/* Buy Modal */}
+      <Dialog open={isBuyModalOpen} onOpenChange={setIsBuyModalOpen}>
+        <DialogContent className="bg-card dark:bg-slate-900 rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl card-hover hover:shadow-lg hover:border-ocean-teal/40 transition-all max-w-lg px-0 py-0">
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-card-foreground">
+                Buy VOI Tokens
+              </h2>
+            </div>
+            <div className="text-sm text-muted-foreground mb-4">
+              Purchase VOI tokens directly through our integrated widget
+            </div>
+            <div className="flex justify-center">
+              <iframe
+                src={`https://ibuyvoi.com/widget?destination=${
+                  activeAccount?.address || "VOI_WALLET_ADDRESS"
+                }&theme=auto`}
+                width="480"
+                height="600"
+                frameBorder="0"
+                style={{ borderRadius: "16px" }}
+                title="VOI Purchase Widget"
+              />
+            </div>
+          </div>
+        </DialogContent>
+      </Dialogt>
     </div>
   );
 }
