@@ -47,6 +47,7 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
 
     return new WalletManager({
       wallets: [
+        WalletId.PERA,
         WalletId.KIBISIS,
         {
           id: WalletId.LUTE,
