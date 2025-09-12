@@ -199,28 +199,14 @@ const getRiskAdjustmentFactor = (marketId: string): number => {
   return riskFactors[marketId] || 0.8;
 };
 
-// Fallback APY values (current hardcoded values)
-const getFallbackAPY = (marketId: string): number => {
-  const fallbackAPYs: Record<string, number> = {
-    voi: 15.8,
-    ausd: 8.2,
-    unit: 12.4,
-    btc: 6.5,
-    cbbtc: 6.3,
-    eth: 7.1,
-    algo: 9.7,
-    pow: 10.2,
-  };
-  return fallbackAPYs[marketId] || 10.0;
-};
-
-// Calculate PreFi reward APY based on time-weighted rewards
-const calculatePreFiRewardAPY = (
+// Calculate raw reward APR from deposit caps or actual deposits
+const calculateRewardAPR = (
   market: Market,
   voiPrice: number,
   userDeposit: number,
   timeRemaining: number,
-  marketPrices: Record<string, number>
+  marketPrices: Record<string, number>,
+  actualDeposits?: number // Optional actual deposits vs cap
 ): number => {
   if (voiPrice <= 0 || userDeposit <= 0 || timeRemaining <= 0) {
     return 0;
@@ -228,61 +214,121 @@ const calculatePreFiRewardAPY = (
 
   // Get market allocation percentage
   const marketAllocation = getMarketAllocation(market.id);
-
-  // Calculate user's estimated reward share
-  // This is a simplified calculation - in reality, it would depend on total stake-seconds
-  const totalVOIRewards = PROGRAM.VOI_ALLOCATION_TOTAL * marketAllocation;
-
-  // Estimate user's share based on deposit size and time remaining
-  // This is a placeholder calculation - real implementation would use actual stake-seconds
-  const estimatedUserReward =
-    (userDeposit / 1000000) *
-    (timeRemaining / (365 * 24 * 60 * 60)) *
-    totalVOIRewards;
-
-  // Convert to APY
-  const rewardValueUSD = estimatedUserReward * voiPrice;
-  const depositValueUSD = userDeposit * (marketPrices[market.id] || 1);
-
-  if (depositValueUSD <= 0) return 0;
-
-  // Annualized APY = (Reward Value / Deposit Value) * (365 days / Time Remaining)
-  const daysRemaining = timeRemaining / (24 * 60 * 60);
-  const apy = (rewardValueUSD / depositValueUSD) * (365 / daysRemaining) * 100;
-
-  return Math.max(0, apy);
+  
+  // Calculate monthly VOI rewards value
+  const monthlyVOIRewards = (PROGRAM.VOI_ALLOCATION_TOTAL * marketAllocation) / 12; // Monthly allocation
+  const monthlyRewardsValueUSD = monthlyVOIRewards * voiPrice;
+  
+  // Use actual deposits if provided, otherwise use user deposit as proxy
+  const depositCap = actualDeposits || userDeposit;
+  
+  // Raw APR calculation: (Monthly VOI Rewards Value ÷ Deposit Cap) × 12
+  const rawAPR = (monthlyRewardsValueUSD / depositCap) * 12;
+  
+  return Math.max(0, rawAPR);
 };
 
-// Main APY calculation function
+// Normalize raw APR into user-friendly display ranges
+const normalizeAPR = (rawAPR: number, marketId: string): { min: number; max: number } => {
+  // Define display ranges based on market type
+  const ranges: Record<string, { min: number; max: number }> = {
+    // Stable anchors (USDC, BTC, ETH)
+    ausd: { min: 2, max: 4 },
+    btc: { min: 2, max: 4 },
+    cbbtc: { min: 2, max: 4 },
+    eth: { min: 2, max: 4 },
+    
+    // Governance / derivative tokens
+    unit: { min: 5, max: 8 },
+    
+    // Boosted or community tokens
+    voi: { min: 10, max: 15 },
+    pow: { min: 10, max: 15 },
+    
+    // High-risk / microcap experimental markets
+    algo: { min: 20, max: 20 }, // Will show as 20%+
+  };
+  
+  const range = ranges[marketId] || { min: 5, max: 8 }; // Default range
+  
+  // If raw APR is within range, use it
+  if (rawAPR >= range.min && rawAPR <= range.max) {
+    return { min: rawAPR, max: rawAPR };
+  }
+  
+  // If raw APR is below range, use minimum
+  if (rawAPR < range.min) {
+    return { min: range.min, max: range.min };
+  }
+  
+  // If raw APR is above range, cap at maximum
+  return { min: range.max, max: range.max };
+};
+
+// Get display APY (high end of range for app display)
+const getDisplayAPY = (rawAPR: number, marketId: string): number => {
+  const normalized = normalizeAPR(rawAPR, marketId);
+  return normalized.max;
+};
+
+// Fallback APY values matching documentation examples
+const getFallbackAPY = (marketId: string): number => {
+  const fallbackAPYs: Record<string, number> = {
+    // Voi A Market
+    voi: 12,    // VOI → 12%
+    ausd: 8,   // aUSD → 8%
+    unit: 15,  // UNIT → 15%
+    algo: 20,  // ALGO → 20%+
+    eth: 12,   // ETH → 12%
+    btc: 8,    // WBTC / cbBTC → 8%
+    cbbtc: 8,  // WBTC / cbBTC → 8%
+    pow: 15,   // POW → 15%
+    
+    // Algorand A Market
+    usdc: 4,   // USDC → 4%
+    tiny: 15, // TINY → 15%
+    compx: 20, // COMPX → 20%+
+    finite: 15, // FINITE → 15%
+  };
+  return fallbackAPYs[marketId] || 10.0;
+};
+
+// Main APY calculation function using normalization layer approach
 const calculateMarketAPY = (
   market: Market,
   voiPrice: number,
   userDeposit: number,
   timeRemaining: number,
   marketPrices: Record<string, number>,
-  marketInfo?: any // Optional real market data
+  marketInfo?: any, // Optional real market data
+  actualDeposits?: number // Optional actual deposits vs cap
 ): number => {
   try {
     // Base APY from lending protocol (if available)
     const baseAPY = marketInfo?.supplyRate ? marketInfo.supplyRate * 100 : 0;
 
-    // PreFi reward APY calculation
-    const preFiRewardAPY = calculatePreFiRewardAPY(
+    // Calculate raw reward APR
+    const rawRewardAPR = calculateRewardAPR(
       market,
       voiPrice,
       userDeposit,
       timeRemaining,
-      marketPrices
+      marketPrices,
+      actualDeposits
     );
 
-    // Risk adjustment factor
+    // Apply risk adjustment to raw APR
     const riskFactor = getRiskAdjustmentFactor(market.id);
+    const adjustedRawAPR = rawRewardAPR * riskFactor;
 
-    // Total APY = Base APY + PreFi Reward APY (adjusted for risk)
-    const totalAPY = baseAPY + preFiRewardAPY * riskFactor;
+    // Combine base APY with adjusted reward APR
+    const totalRawAPR = baseAPY + adjustedRawAPR;
+
+    // Normalize and get display APY
+    const displayAPY = getDisplayAPY(totalRawAPR, market.id);
 
     // Ensure minimum APY and cap maximum APY
-    return Math.max(0.1, Math.min(totalAPY, 50.0)); // Cap at 50% APY
+    return Math.max(0.1, Math.min(displayAPY, 50.0)); // Cap at 50% APY
   } catch (error) {
     console.error(`Error calculating APY for ${market.symbol}:`, error);
     return getFallbackAPY(market.id);
@@ -1424,7 +1470,10 @@ export default function PreFiDashboard() {
                                   timeRemaining,
                                   marketPrices
                                 );
-                                return `${apy.toFixed(1)}%`;
+                                // Show "20%+" for volatile microcap markets
+                                return m.id === "algo" && apy >= 20 
+                                  ? "20%+" 
+                                  : `${apy.toFixed(1)}%`;
                               })()}
                         </div>
                       </div>
@@ -1729,7 +1778,10 @@ export default function PreFiDashboard() {
                                     timeRemaining,
                                     marketPrices
                                   );
-                                  return `${apy.toFixed(1)}%`;
+                                  // Show "20%+" for volatile microcap markets
+                                  return m.id === "algo" && apy >= 20 
+                                    ? "20%+" 
+                                    : `${apy.toFixed(1)}%`;
                                 })()}
                           </div>
                         </td>
@@ -2084,13 +2136,15 @@ export default function PreFiDashboard() {
                     selectedMarket.decimals
                   )
                 : 0;
-              return calculateMarketAPY(
+              const apy = calculateMarketAPY(
                 selectedMarket,
                 voiPrice,
                 currentDeposit,
                 timeRemaining,
                 marketPrices
               );
+              // Show "20%+" for volatile microcap markets
+              return selectedMarket.id === "algo" && apy >= 20 ? 20 : apy;
             })(),
             utilization: 65,
             collateralFactor: 75,
