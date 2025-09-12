@@ -43,7 +43,7 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
     // Then get the updated config
     const networkConfig = getCurrentNetworkConfig();
 
-    const walletConnectProjectId = "e7b04c22de006e0fc7cef5a00cb7fac9";
+    const walletConnectProjectId = "cd7fe0125d88d239da79fa286e6de2a8";
 
     return new WalletManager({
       wallets: [
