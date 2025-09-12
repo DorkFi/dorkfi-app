@@ -68,12 +68,12 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
           },
         },
       ],
-      // algod: {
-      //   baseServer: networkConfig.rpcUrl,
-      //   port: networkConfig.rpcPort,
-      //   token: networkConfig.rpcToken,
-      // },
-      network: NetworkId.MAINNET, // networkConfig.walletNetworkId as NetworkId,
+      algod: {
+        baseServer: networkConfig.rpcUrl,
+        port: networkConfig.rpcPort,
+        token: networkConfig.rpcToken,
+      },
+      network: networkConfig.walletNetworkId as NetworkId,
     });
   };
 
