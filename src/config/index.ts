@@ -134,14 +134,14 @@ const voiMainnetConfig: NetworkConfig = {
         isSmartContract: true,
       },
     },
-    USDC: {
+    aUSDC: {
       assetId: "302190",
       poolId: "41760711",
       contractId: "395614",
       nTokenId: "42577758",
       decimals: 6,
       name: "Aramid USDC",
-      symbol: "USDC",
+      symbol: "aUSDC",
       logoPath: "/lovable-uploads/aUSDC.png",
       tokenStandard: "asa",
     },
@@ -154,6 +154,17 @@ const voiMainnetConfig: NetworkConfig = {
       symbol: "UNIT",
       logoPath: "/lovable-uploads/UNIT.png",
       tokenStandard: "arc200",
+    },
+    ALGO: {
+      assetId: "302189",
+      contractId: "413153",
+      poolId: "41760711",
+      nTokenId: "42674504",
+      decimals: 6,
+      name: "Algorand",
+      symbol: "ALGO",
+      logoPath: "/lovable-uploads/Algo.webp",
+      tokenStandard: "asa",
     },
     // BTC: {
     //   assetId: "ARC200_ID_WBTC", // TODO: Replace with actual ARC-200 ID
@@ -179,21 +190,7 @@ const voiMainnetConfig: NetworkConfig = {
     //   symbol: "ETH",
     //   logoPath: "/lovable-uploads/ETH.jpg",
     // },
-    // ALGO: {
-    //   assetId: "ASA_ID_ALGO_WRAPPED", // TODO: Replace with actual ASA ID
-    //   contractId: "APP_ID_ALGO_WRAPPER", // TODO: Replace with actual contract ID
-    //   decimals: 6,
-    //   name: "Algorand",
-    //   symbol: "ALGO",
-    //   logoPath: "/lovable-uploads/Algo.webp",
-    //   marketOverride: {
-    //     displayName: "Algo",
-    //     displaySymbol: "Algo",
-    //     underlyingAssetId: "ASA_ID_ALGO_WRAPPED", // The actual wrapped ALGO asset ID
-    //     underlyingContractId: "APP_ID_ALGO_WRAPPER", // The actual wrapper contract ID
-    //     isSmartContract: true, // This is a wrapped/smart contract version
-    //   },
-    // },
+
     // POW: {
     //   assetId: "ARC200_ID_POW", // TODO: Replace with actual ARC-200 ID
     //   contractId: "APP_ID_POW_CONTRACT", // TODO: Replace with actual contract ID

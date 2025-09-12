@@ -221,7 +221,8 @@ export default function AdminDashboard() {
   const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
   const [isMarketViewModalOpen, setIsMarketViewModalOpen] = useState(false);
   const [isPriceUpdateModalOpen, setIsPriceUpdateModalOpen] = useState(false);
-  const [isMaxDepositsUpdateModalOpen, setIsMaxDepositsUpdateModalOpen] = useState(false);
+  const [isMaxDepositsUpdateModalOpen, setIsMaxDepositsUpdateModalOpen] =
+    useState(false);
   const [selectedMarket, setSelectedMarket] = useState<any>(null);
   const [priceUpdateData, setPriceUpdateData] = useState<{
     marketId: string;
@@ -359,10 +360,7 @@ export default function AdminDashboard() {
       console.log({ newMarket });
 
       const createMarketParams: CreateMarketParams = {
-        tokenId:
-          marketType === "prefi"
-            ? Number(newMarket.tokenContractId)
-            : Number(newMarket.tokenId),
+        tokenId: Number(newMarket.tokenContractId),
         collateralFactor: BigInt(
           BigNumber(newMarket.collateralFactor).multipliedBy(10000).toFixed(0)
         ),
@@ -510,7 +508,10 @@ export default function AdminDashboard() {
       marketId: contractId, // Use the token's contract ID, not the market's tokenContractId
       poolId: market.marketInfo?.poolId || "",
       currentPrice: market.marketInfo?.price
-        ? (parseFloat(market.marketInfo.price) / Math.pow(10, token?.decimals || 6)).toFixed(6)
+        ? (
+            parseFloat(market.marketInfo.price) /
+            Math.pow(10, token?.decimals || 6)
+          ).toFixed(6)
         : "0",
       newPrice: "",
     });
@@ -531,7 +532,10 @@ export default function AdminDashboard() {
       marketId: contractId, // Use the token's contract ID, not the market's tokenContractId
       poolId: market.marketInfo?.poolId || "",
       currentMaxDeposits: market.marketInfo?.maxTotalDeposits
-        ? (parseFloat(market.marketInfo.maxTotalDeposits) / Math.pow(10, token?.decimals || 6)).toFixed(0)
+        ? (
+            parseFloat(market.marketInfo.maxTotalDeposits) /
+            Math.pow(10, token?.decimals || 6)
+          ).toFixed(0)
         : "0",
       newMaxDeposits: "",
     });
@@ -1328,12 +1332,15 @@ export default function AdminDashboard() {
                             {market.isLoaded && market.marketInfo
                               ? `$${(() => {
                                   // Get token decimals for proper price scaling
-                                  const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+                                  const tokens =
+                                    getAllTokensWithDisplayInfo(currentNetwork);
                                   const token = tokens.find(
-                                    (t) => t.symbol.toLowerCase() === market.asset?.toLowerCase()
+                                    (t) =>
+                                      t.symbol.toLowerCase() ===
+                                      market.asset?.toLowerCase()
                                   );
                                   const tokenDecimals = token?.decimals || 6;
-                                  
+
                                   const value =
                                     parseFloat(
                                       market.marketInfo.totalDeposits
@@ -1361,12 +1368,15 @@ export default function AdminDashboard() {
                             {market.isLoaded && market.marketInfo
                               ? `$${(() => {
                                   // Get token decimals for proper price scaling
-                                  const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+                                  const tokens =
+                                    getAllTokensWithDisplayInfo(currentNetwork);
                                   const token = tokens.find(
-                                    (t) => t.symbol.toLowerCase() === market.asset?.toLowerCase()
+                                    (t) =>
+                                      t.symbol.toLowerCase() ===
+                                      market.asset?.toLowerCase()
                                   );
                                   const tokenDecimals = token?.decimals || 6;
-                                  
+
                                   const value =
                                     parseFloat(market.marketInfo.totalBorrows) *
                                     (parseFloat(market.marketInfo.price) /
@@ -2617,7 +2627,8 @@ export default function AdminDashboard() {
                       {(() => {
                         const value =
                           parseFloat(marketViewData.totalDeposits) *
-                          (parseFloat(marketViewData.price) / Math.pow(10, marketViewData.decimals || 6));
+                          (parseFloat(marketViewData.price) /
+                            Math.pow(10, marketViewData.decimals || 6));
                         if (value >= 1000000000) {
                           return `${(value / 1000000000).toFixed(2)}B`;
                         } else if (value >= 1000000) {
@@ -2639,7 +2650,8 @@ export default function AdminDashboard() {
                       {(() => {
                         const value =
                           parseFloat(marketViewData.totalBorrows) *
-                          (parseFloat(marketViewData.price) / Math.pow(10, marketViewData.decimals || 6));
+                          (parseFloat(marketViewData.price) /
+                            Math.pow(10, marketViewData.decimals || 6));
                         if (value >= 1000000000) {
                           return `${(value / 1000000000).toFixed(2)}B`;
                         } else if (value >= 1000000) {
@@ -2671,7 +2683,11 @@ export default function AdminDashboard() {
                       Market Price
                     </p>
                     <p className="text-lg font-semibold">
-                      ${(parseFloat(marketViewData.price) / Math.pow(10, marketViewData.decimals || 6)).toFixed(6)}
+                      $
+                      {(
+                        parseFloat(marketViewData.price) /
+                        Math.pow(10, marketViewData.decimals || 6)
+                      ).toFixed(6)}
                     </p>
                   </div>
                 </div>
@@ -2790,7 +2806,8 @@ export default function AdminDashboard() {
                       {(() => {
                         const value =
                           parseFloat(marketViewData.maxTotalDeposits) *
-                          (parseFloat(marketViewData.price) / Math.pow(10, marketViewData.decimals || 6));
+                          (parseFloat(marketViewData.price) /
+                            Math.pow(10, marketViewData.decimals || 6));
                         if (value >= 1000000000) {
                           return `${(value / 1000000000).toFixed(2)}B`;
                         } else if (value >= 1000000) {
@@ -2919,7 +2936,9 @@ export default function AdminDashboard() {
       >
         <DialogContent className="max-w-md p-8">
           <DialogHeader className="pb-6">
-            <DialogTitle className="text-xl">Update Market Max Deposits</DialogTitle>
+            <DialogTitle className="text-xl">
+              Update Market Max Deposits
+            </DialogTitle>
             <DialogDescription>
               Update the maximum total deposits allowed for the selected market.
             </DialogDescription>
@@ -2968,7 +2987,9 @@ export default function AdminDashboard() {
             >
               Cancel
             </Button>
-            <Button onClick={handleUpdateMaxDeposits}>Update Max Deposits</Button>
+            <Button onClick={handleUpdateMaxDeposits}>
+              Update Max Deposits
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

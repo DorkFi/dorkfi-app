@@ -369,6 +369,9 @@ export const createMarket = async (
         }
       );
 
+      const market = await ci.get_market(params.tokenId);
+      console.log("market", { market });
+
       // First, get the cost of creating a market
       const costResult = await ci.create_market_cost();
 
@@ -383,6 +386,10 @@ export const createMarket = async (
       // Create the market with the provided parameters
       ci.setPaymentAmount(costResult.returnValue);
       ci.setFee(8000);
+
+      console.log({
+        createMarketParams: params,
+      });
       const createResult = await ci.create_market(
         params.tokenId,
         params.collateralFactor,
@@ -589,7 +596,12 @@ export const updateMarketMaxDeposits = async (
 ): Promise<
   { success: false; error: any } | { success: true; txns: string[] }
 > => {
-  console.log("updateMarketMaxDeposits", { poolId, marketId, newMaxDeposits, userAddress });
+  console.log("updateMarketMaxDeposits", {
+    poolId,
+    marketId,
+    newMaxDeposits,
+    userAddress,
+  });
 
   try {
     const networkConfig = getCurrentNetworkConfig();
