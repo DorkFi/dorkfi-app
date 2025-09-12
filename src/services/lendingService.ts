@@ -730,6 +730,9 @@ export const withdraw = async (
         ci.setFee(4000);
         ci.setEnableGroupResourceSharing(true);
         ci.setExtraTxns(buildN);
+        if (networkConfig.networkId === "algorand-mainnet") {
+          ci.setBeaconId(3209233839); // TODO move this to ulujs
+        }
 
         customTx = await ci.custom();
 
@@ -787,10 +790,11 @@ export const deposit = async (
     const networkConfig = getCurrentNetworkConfig();
 
     if (isCurrentNetworkAlgorandCompatible()) {
+      console.log({ networkConfig });
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
-
+      1;
       // Get token information
       const allTokens = getAllTokensWithDisplayInfo(networkId);
       console.log(
@@ -976,6 +980,9 @@ export const deposit = async (
         ci.setFee(2000);
         ci.setEnableGroupResourceSharing(true);
         ci.setExtraTxns(buildN);
+        if (networkConfig.networkId === "algorand-mainnet") {
+          ci.setBeaconId(3209233839); // TODO move this to ulujs
+        }
 
         customTx = await ci.custom();
 

@@ -10,6 +10,8 @@ import {
   getContractAddress,
   isCurrentNetworkEVM,
   isCurrentNetworkAVM,
+  isCurrentNetworkVOI,
+  isCurrentNetworkAlgorand,
 } from "@/config";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
 import { CONTRACT } from "ulujs";
@@ -60,8 +62,8 @@ export const fetchPausedState = async (
     const networkConfig = getCurrentNetworkConfig();
     console.log("Network config:", networkConfig);
 
-    if (isCurrentNetworkAVM()) {
-      // Use Algorand SDK, ASA tokens, app calls
+    if (isCurrentNetworkVOI()) {
+      // Use VOI-specific service for VOI networks
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
@@ -83,6 +85,34 @@ export const fetchPausedState = async (
       }
       return {
         isPaused: isPaused.returnValue,
+        pausedBy: undefined,
+        pausedAt: undefined,
+        pauseReason: undefined,
+        pausedContracts: [],
+        lastUpdated: new Date().toISOString(),
+      };
+    } else if (isCurrentNetworkAlgorand()) {
+      // Use Algorand-specific service for Algorand networks
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      const ci = new CONTRACT(
+        Number(networkConfig.contracts.lendingPools[0]),
+        clients.algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        {
+          addr: "G3MSA75OZEJTCCENOJDLDJK7UD7E2K5DNC7FVHCNOV7E3I4DTXTOWDUIFQ", // TODO replace with address with tokens
+          sk: new Uint8Array(),
+        }
+      );
+
+      const pausedResult = await ci.get_paused();
+      console.log("Paused result:", pausedResult);
+
+      return {
+        isPaused: pausedResult.returnValue === 1,
         pausedBy: undefined,
         pausedAt: undefined,
         pauseReason: undefined,
@@ -189,7 +219,8 @@ export const togglePauseState = async (
     console.log(`Attempting to ${pause ? "pause" : "unpause"} protocol...`);
     console.log("Lending Pool Address:", lendingPoolAddress);
 
-    if (isCurrentNetworkAVM()) {
+    if (isCurrentNetworkVOI()) {
+      // Use VOI-specific service for VOI networks
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
@@ -206,6 +237,30 @@ export const togglePauseState = async (
       const pauseR = await ci.pause(pause ? 1 : 0);
       if (!pauseR.success) {
         throw new Error("Failed to pause protocol");
+      } else {
+        return {
+          success: true,
+          txns: [...pauseR.txns],
+        };
+      }
+    } else if (isCurrentNetworkAlgorand()) {
+      // Use Algorand-specific service for Algorand networks
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+      const ci = new CONTRACT(
+        Number(networkConfig.contracts.lendingPools[0]),
+        clients.algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        {
+          addr: address,
+          sk: new Uint8Array(),
+        }
+      );
+      const pauseR = await ci.pause(pause ? 1 : 0);
+      if (!pauseR.success) {
+        throw new Error("Failed to pause/unpause protocol");
       } else {
         return {
           success: true,
@@ -297,8 +352,8 @@ export const createMarket = async (
       throw new Error("Close factor must be between 0 and 10000");
     }
 
-    if (isCurrentNetworkAVM()) {
-      // Use Algorand SDK and contract calls
+    if (isCurrentNetworkVOI()) {
+      // Use VOI-specific service for VOI networks
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
@@ -316,6 +371,65 @@ export const createMarket = async (
 
       // First, get the cost of creating a market
       const costResult = await ci.create_market_cost();
+
+      console.log("costResult", { costResult });
+
+      if (!costResult.success) {
+        throw new Error("Failed to get market creation cost");
+      }
+
+      console.log("Market creation cost:", costResult.returnValue);
+
+      // Create the market with the provided parameters
+      ci.setPaymentAmount(costResult.returnValue);
+      ci.setFee(8000);
+      const createResult = await ci.create_market(
+        params.tokenId,
+        params.collateralFactor,
+        params.liquidationThreshold,
+        params.reserveFactor,
+        params.borrowRate,
+        params.slope,
+        params.maxTotalDeposits,
+        params.maxTotalBorrows,
+        params.liquidationBonus,
+        params.closeFactor
+      );
+
+      console.log({ createResult });
+
+      if (!createResult.success) {
+        throw new Error("Failed to create market");
+      }
+
+      console.log("Market created successfully:", createResult.returnValue);
+
+      return {
+        success: true,
+        marketId: Number(createResult.returnValue),
+        txns: [...createResult.txns],
+      };
+    } else if (isCurrentNetworkAlgorand()) {
+      // Use Algorand-specific service for Algorand networks
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      const ci = new CONTRACT(
+        Number(poolId),
+        clients.algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        {
+          addr: address,
+          sk: new Uint8Array(),
+        }
+      );
+
+      // Get the cost of creating a market
+      const costResult = await ci.create_market_cost();
+      console.log("costResult", { costResult });
+
       if (!costResult.success) {
         throw new Error("Failed to get market creation cost");
       }
@@ -381,13 +495,14 @@ export const updateMarketPrice = async (
   try {
     const networkConfig = getCurrentNetworkConfig();
 
-    if (isCurrentNetworkAVM()) {
+    if (isCurrentNetworkVOI()) {
+      // Use VOI-specific service for VOI networks
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
 
       // Convert price to proper units (assuming 6 decimals for price)
-      const priceInSmallestUnit = BigInt(newPrice)
+      const priceInSmallestUnit = BigInt(newPrice);
 
       const ci = new CONTRACT(
         Number(poolId),
@@ -410,6 +525,39 @@ export const updateMarketPrice = async (
 
       if (!updatePriceTx.success) {
         throw new Error("Failed to create update price transaction");
+      }
+
+      return {
+        success: true,
+        txns: [...updatePriceTx.txns],
+      };
+    } else if (isCurrentNetworkAlgorand()) {
+      // Use Algorand-specific service for Algorand networks
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      // Convert price to proper units (assuming 6 decimals for price)
+      const priceInSmallestUnit = BigInt(newPrice);
+
+      const ci = new CONTRACT(
+        Number(poolId),
+        clients.algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        {
+          addr: userAddress,
+          sk: new Uint8Array(),
+        }
+      );
+
+      const updatePriceTx = await ci.set_market_price(
+        Number(marketId),
+        priceInSmallestUnit
+      );
+
+      if (!updatePriceTx.success) {
+        throw new Error("Failed to update market price");
       }
 
       return {

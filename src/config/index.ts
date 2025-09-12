@@ -268,6 +268,7 @@ const algorandMainnetConfig: NetworkConfig = {
       assetId: "0",
       poolId: "3207735602",
       contractId: "3207744109",
+      nTokenId: "3209220112",
       decimals: 6,
       name: "Algorand",
       symbol: "ALGO",
@@ -766,6 +767,16 @@ export const isCurrentNetworkAVM = (): boolean => {
 
 export const isCurrentNetworkEVM = (): boolean => {
   return getCurrentNetworkType() === "evm";
+};
+
+export const isCurrentNetworkVOI = (): boolean => {
+  const networkId = getCurrentNetworkConfig().networkId;
+  return networkId === "voi-mainnet" || networkId === "voi-testnet";
+};
+
+export const isCurrentNetworkAlgorand = (): boolean => {
+  const networkId = getCurrentNetworkConfig().networkId;
+  return networkId === "algorand-mainnet" || networkId === "algorand-testnet";
 };
 
 /**
