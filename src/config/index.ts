@@ -130,14 +130,16 @@ const voiMainnetConfig: NetworkConfig = {
         isSmartContract: true,
       },
     },
-    // USDC: {
-    //   assetId: "ASA_ID_aUSD", // TODO: Replace with actual ASA ID
-    //   contractId: "APP_ID_USDC_CONTRACT", // TODO: Replace with actual contract ID
-    //   decimals: 6,
-    //   name: "Aramid USDC",
-    //   symbol: "USDC",
-    //   logoPath: "/lovable-uploads/aUSDC.png",
-    // },
+    USDC: {
+      assetId: "302190",
+      poolId: "41760711",
+      contractId: "395614",
+      nTokenId: "42577758",
+      decimals: 6,
+      name: "Aramid USDC",
+      symbol: "USDC",
+      logoPath: "/lovable-uploads/aUSDC.png",
+    },
     // UNIT: {
     //   assetId: "ARC200_ID_UNIT", // TODO: Replace with actual ARC-200 ID
     //   contractId: "APP_ID_UNIT_CONTRACT", // TODO: Replace with actual contract ID

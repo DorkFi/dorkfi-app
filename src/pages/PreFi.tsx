@@ -93,7 +93,7 @@ const PROGRAM = {
   // PreFi Phase 0 ends and markets launch on this date.
 };
 
-type TokenStandard = "native" | "asa" | "arc200";
+export type TokenStandard = "network" | "asa" | "arc200";
 
 type Market = {
   id: string;
@@ -116,13 +116,13 @@ const getMarketsFromConfig = (networkId: NetworkId): Market[] => {
 
   return tokens.map((token) => {
     // Determine token standard based on assetId
-    let tokenStandard: TokenStandard = "native";
-    if (token.assetId) {
-      if (token.assetId.startsWith("ASA_ID")) {
-        tokenStandard = "asa";
-      } else if (token.assetId.startsWith("ARC200_ID")) {
-        tokenStandard = "arc200";
-      }
+    let tokenStandard: TokenStandard;
+    if (token.assetId === "0") {
+      tokenStandard = "network";
+    } else if (token.assetId !== "0") {
+      tokenStandard = "asa";
+    } else {
+      tokenStandard = "arc200";
     }
 
     // Set minimum deposit requirements
@@ -357,30 +357,38 @@ const chainApi = {
       );
       ARC200Service.initialize(algorandClients);
 
-      // For native tokens (like VOI), use assetId "0"
+      // For network tokens (like VOI), use assetId "0"
       // For other tokens, use their contractId
-      const tokenId = market.assetId === "0" ? "0" : market.contractId;
+      const [assetType, tokenId] =
+        market.assetId === "0"
+          ? ["network", "0"]
+          : !isNaN(Number(market.assetId))
+          ? ["asa", market.assetId]
+          : ["arc200", market.contractId];
+
       const nTokenId = market.nTokenId;
 
-      if (!tokenId)
-        return {
-          balance: 0n,
-          deposited: 0n,
-        };
-
       let balance = 0n;
-      if (market.assetId === "0") {
-        // For native VOI, get account balance minus minimum balance
+      if (assetType === "network") {
+        // For network VOI, get account balance minus minimum balance
         const accInfo = await algorandClients.algod
           .accountInformation(address)
           .do();
         balance = BigInt(
           Math.max(0, accInfo.amount - accInfo["min-balance"] - 1e6)
         );
-      } else {
+      } else if (assetType === "asa") {
+        const accAssetInfo = await algorandClients.algod
+          .accountAssetInformation(address, Number(market.assetId))
+          .do();
+        console.log("accAssetInfo", accAssetInfo);
+        balance = BigInt(accAssetInfo["asset-holding"].amount);
+      } else if (assetType === "arc200") {
         // For other tokens, get balance from ARC200Service
         const tokenBalance = await ARC200Service.getBalance(address, tokenId);
         balance = tokenBalance ? BigInt(tokenBalance) : 0n;
+      } else {
+        throw new Error(`Unsupported asset type: ${assetType}`);
       }
 
       let deposited = 0n;
@@ -981,6 +989,7 @@ export default function PreFiDashboard() {
         depositResult = await deposit(
           selectedMarket.poolId || "", // poolId - use token's poolId or fallback
           selectedMarket.marketId || "", // marketId
+          selectedMarket.tokenStandard, // assetType - pass the token standard
           amount, // amount as string
           activeAccount.address, // userAddress
           currentNetwork // networkId

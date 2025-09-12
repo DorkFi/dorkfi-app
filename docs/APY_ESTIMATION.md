@@ -1,200 +1,149 @@
 # APY Estimation Strategy for PreFi
 
-This document explains how APY (Annual Percentage Yield) estimates are calculated in the DorkFi PreFi system.
+This document explains how APY (Annual Percentage Yield) estimates are calculated and presented in the DorkFi PreFi system, reflecting both raw reward math and user-facing display values.
 
 ## Overview
 
-The PreFi APY estimation combines multiple factors to provide users with realistic yield expectations:
+The PreFi APY estimation combines several components to provide users with credible, market-aware yield expectations:
 
-1. **Base Lending APY** - From the underlying lending protocol
-2. **PreFi Reward APY** - Time-weighted VOI token rewards
-3. **Risk Adjustment** - Based on token stability and adoption
-4. **Fallback Values** - Static APY when calculations fail
+- **Reward APY (Raw)** – Based on VOI emissions distributed relative to market deposit caps.
+- **Normalization Layer** – Converts raw APRs into user-friendly ranges to avoid extreme values.
+- **Risk & Market Adjustments** – Highlights volatility and risk in experimental or microcap markets.
+- **Fallback Values** – Static APY numbers used if calculations fail or data is missing.
+
+> **Note:** Actual rewards are distributed based on deposit-USD-seconds (amount × time), meaning that both deposit size and how long funds remain deposited determine the final payout.
 
 ## Core Components
 
-### 1. Market Allocation Percentages
+### 1. Reward Allocation by Deposit Caps
 
-Each market receives a specific percentage of the total VOI rewards pool:
+Rewards are diluted across markets according to deposit caps (USD value).
 
-```typescript
-const allocations = {
-  'voi': 0.25,    // 25% - Native token, highest priority
-  'unit': 0.20,   // 20% - Established token
-  'ausd': 0.15,   // 15% - Stablecoin
-  'btc': 0.12,    // 12% - High-value asset
-  'cbbtc': 0.10,  // 10% - High-value asset
-  'eth': 0.10,    // 10% - High-value asset
-  'algo': 0.05,   // 5% - Cross-chain token
-  'pow': 0.03,    // 3% - Newer token
-};
+**Formula:**
+```
+APR = (Monthly VOI Rewards Value ÷ Deposit Cap) × 12
 ```
 
-**Rationale**: Native tokens and established assets receive higher allocations to incentivize participation in core markets.
+- **Smaller-cap markets** → higher raw APR
+- **Larger-cap markets** → lower raw APR
 
-### 2. Risk Adjustment Factors
+### 2. Actual Deposits vs Cap
 
-Risk factors adjust PreFi rewards based on token stability:
+The realized APR depends on actual deposits:
 
-```typescript
-const riskFactors = {
-  'voi': 1.0,     // Native token, lowest risk
-  'ausd': 0.95,   // Stablecoin, very low risk
-  'unit': 0.90,   // Established token
-  'btc': 0.85,    // High value, moderate risk
-  'cbbtc': 0.85,  // High value, moderate risk
-  'eth': 0.80,    // High value, moderate risk
-  'algo': 0.75,   // Cross-chain token, higher risk
-  'pow': 0.70,    // Newer token, highest risk
-};
+```
+APR = (Monthly VOI Rewards Value ÷ Actual Deposits) × 12
 ```
 
-**Rationale**: More stable and established tokens receive higher risk-adjusted rewards to encourage participation in safer markets.
+- If actual deposits < cap, APR is higher (fewer depositors sharing rewards).
+- If actual deposits = cap, APR = cap-based estimate.
+- If actual deposits > cap, APR stabilizes at the cap level.
 
-### 3. PreFi Reward APY Calculation
+### 3. Normalization Layer (Display APYs)
 
-The PreFi reward APY is calculated using a time-weighted approach:
+To avoid confusing spikes (e.g., 400% APR on ALGO with low deposits), raw APRs are mapped into display ranges:
 
-```typescript
-// Simplified calculation (actual implementation uses stake-seconds)
-const estimatedUserReward = (userDeposit / 1000000) * (timeRemaining / (365 * 24 * 60 * 60)) * totalVOIRewards;
+- **2–4%** → Stable anchors (e.g., USDC, BTC, ETH)
+- **5–8%** → Governance / derivative tokens
+- **10–15%** → Boosted or community tokens
+- **20%+** → High-risk / microcap experimental markets
 
-// Convert to APY
-const rewardValueUSD = estimatedUserReward * voiPrice;
-const depositValueUSD = userDeposit * marketPrice;
+In the app, the high end of the range is displayed.
+For example: "5–8%" → "8%".
 
-// Annualized APY
-const apy = (rewardValueUSD / depositValueUSD) * (365 / daysRemaining) * 100;
-```
+### 4. Example Display APYs
 
-**Key Factors**:
-- **User Deposit Size**: Larger deposits earn proportionally more rewards
-- **Time Remaining**: Earlier deposits earn more due to time-weighting
-- **VOI Price**: Current market price affects USD value of rewards
-- **Market Price**: Token price affects deposit value calculation
+#### Voi A Market
+- **VOI** → 12%
+- **aUSD** → 8%
+- **UNIT** → 15%
+- **ALGO** → 20%+
+- **ETH** → 12%
+- **WBTC / cbBTC** → 8%
+- **POW** → 15%
 
-### 4. Total APY Calculation
+#### Algorand A Market
+- **USDC** → 4%
+- **ALGO** → 4%
+- **VOI** → 12%
+- **UNIT** → 12%
+- **POW** → 15%
+- **TINY** → 15%
+- **COMPX** → 20%+
+- **FINITE** → 15%
 
-The final APY combines all components:
+**Major bridged assets (ETH, BTC, Wormhole)** → 4–7%
 
-```typescript
-const totalAPY = baseAPY + (preFiRewardAPY * riskFactor);
-```
+#### Community Markets (B tiers)
+- **SHELLY, COOP, ALPHA, CORN** → 12–15%
+- **NODE, MONKO, AMMO, GM, IAT** → 20%+
 
-**Constraints**:
-- Minimum APY: 0.1%
-- Maximum APY: 50%
-- Fallback to static values on calculation errors
+### 5. Fallback Strategy
 
-## Implementation Details
-
-### Function Hierarchy
-
-1. **`calculateMarketAPY()`** - Main calculation function
-2. **`calculatePreFiRewardAPY()`** - PreFi-specific reward calculation
-3. **`getMarketAllocation()`** - Market allocation percentages
-4. **`getRiskAdjustmentFactor()`** - Risk adjustment factors
-5. **`getFallbackAPY()`** - Static fallback values
-
-### Error Handling
-
-The system includes comprehensive error handling:
-
-- **Missing Data**: Falls back to static APY values
-- **Calculation Errors**: Logs errors and uses fallback
-- **Edge Cases**: Handles zero deposits, negative time, etc.
-- **Network Issues**: Graceful degradation when market data unavailable
-
-### Real-time Updates
-
-APY estimates update dynamically based on:
-
-- **VOI Price Changes**: Affects reward USD value
-- **User Deposit Changes**: Affects reward share calculation
-- **Time Progression**: Reduces time-weighted rewards
-- **Market Price Changes**: Affects deposit value
-
-## Fallback Strategy
-
-When dynamic calculations fail, the system uses static APY values:
+If dynamic calculations fail, static APYs are used:
 
 ```typescript
 const fallbackAPYs = {
-  'voi': 15.8,    // High APY for native token
-  'ausd': 8.2,    // Moderate APY for stablecoin
-  'unit': 12.4,   // High APY for established token
-  'btc': 6.5,     // Lower APY for high-value asset
-  'cbbtc': 6.3,   // Lower APY for high-value asset
-  'eth': 7.1,     // Moderate APY for high-value asset
-  'algo': 9.7,    // Higher APY for cross-chain token
-  'pow': 10.2,    // High APY for newer token
+  'usdc': 4,
+  'algo': 4,
+  'voi': 12,
+  'unit': 12,
+  'pow': 15,
+  'shelly': 15,
+  'monko': 20,
 };
 ```
 
+Fallbacks mirror display-normalized values, not raw APRs.
+
+## Implementation Details
+
+### Calculation Flow
+
+1. **`calculateRewardAPR()`** – Computes raw APR from deposit caps or actual deposits.
+2. **`normalizeAPR()`** – Maps raw APR into user-facing ranges.
+3. **`getDisplayAPY()`** – Chooses the high end of the range for app display.
+4. **`getFallbackAPY()`** – Static values used when calculations fail.
+
+### Real-Time Updates
+
+APY estimates update dynamically based on:
+
+- **VOI price** (affects reward value)
+- **Actual deposits** (affects dilution)
+- **Deposit-USD-seconds accumulation** (time-weighted rewards)
+- **Market participation**
+
 ## User Experience
 
-### Display Locations
+### Display Strategy
 
-APY estimates are shown in:
-
-1. **Mobile Market Cards**: Real-time APY for each market
-2. **Desktop Market Table**: Column showing estimated APY
-3. **Withdraw Modal**: APY context for withdrawal decisions
-4. **Deposit Modal**: APY information for deposit decisions
+- **Market Cards / Tables** → Show display APY (high end of range).
+- **Deposit/Withdraw Modals** → Show current APR with context:
+  - "Current APR based on $X deposited: Y% (normalizes as deposits approach cap)."
 
 ### Formatting
 
-- **Precision**: Displayed to 1 decimal place (e.g., "15.8%")
-- **Loading State**: Shows "…" while calculating
-- **Error State**: Falls back to static values seamlessly
+- Use single numbers (e.g., "12%") rather than ranges.
+- Use "20%+" for volatile microcap markets.
+- Show tooltips explaining that APYs are estimates, not guarantees.
 
 ## Future Enhancements
 
-### Planned Improvements
+- **Dynamic VOI Distribution** – Adjust reward pools based on market demand.
+- **On-Chain Integration** – Use actual utilization and stake-seconds.
+- **Historical Analysis** – Track how display APYs matched realized yields.
+- **Advanced Risk Modeling** – More nuanced volatility & liquidity adjustments.
 
-1. **Real Stake-Seconds**: Replace simplified calculation with actual on-chain stake-seconds
-2. **Market Data Integration**: Use real lending protocol APY data
-3. **Dynamic Allocations**: Adjust market allocations based on participation
-4. **Advanced Risk Models**: More sophisticated risk assessment
-5. **Historical Analysis**: Track APY accuracy over time
+## Disclaimer
 
-### Data Sources
+APY estimates are indicative only and subject to:
 
-Future implementations will integrate:
+- Market conditions (token prices, utilization)
+- Participation (actual deposits vs caps)
+- Reward schedule changes
+- Smart contract risks
 
-- **On-chain Data**: Real stake-seconds and total deposits
-- **Price Feeds**: Real-time token prices
-- **Lending Protocol**: Actual supply/borrow rates
-- **Market Analytics**: Historical performance data
+Users should not treat APYs as guaranteed returns.
+Final rewards are calculated using deposit-USD-seconds, ensuring fair distribution by deposit size and time.
 
-## Technical Notes
-
-### Performance Considerations
-
-- **Caching**: APY calculations are cached to avoid repeated computation
-- **Throttling**: Updates are throttled to prevent excessive recalculation
-- **Lazy Loading**: Calculations only run when needed
-
-### Accuracy Disclaimer
-
-APY estimates are **indicative only** and subject to:
-
-- **Market Conditions**: Token prices and lending rates change
-- **Participation**: Total deposits affect individual reward shares
-- **Time Decay**: Rewards decrease as launch approaches
-- **Protocol Changes**: Smart contract parameters may change
-
-### Risk Warnings
-
-Users should understand that:
-
-- **Estimates Only**: APY calculations are estimates, not guarantees
-- **Market Risk**: Token prices can fluctuate significantly
-- **Protocol Risk**: Smart contract risks exist
-- **Liquidity Risk**: Withdrawals may be subject to liquidity constraints
-
-## Conclusion
-
-The PreFi APY estimation system provides users with transparent, dynamic yield expectations while maintaining robustness through fallback mechanisms. The multi-factor approach ensures fair reward distribution while accounting for risk and market conditions.
-
-For technical implementation details, see the source code in `src/pages/PreFi.tsx` in the APY Calculation Utils section.

@@ -19,6 +19,7 @@ import { abi, CONTRACT } from "ulujs";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
 import algosdk from "algosdk";
 import BigNumber from "bignumber.js";
+import { TokenStandard } from "@/pages/PreFi";
 
 export interface MarketInfo {
   networkId: NetworkId;
@@ -777,6 +778,7 @@ export const withdraw = async (
 export const deposit = async (
   poolId: string,
   marketId: string,
+  tokenStandard: TokenStandard,
   amount: string,
   userAddress: string,
   networkId: NetworkId
@@ -832,6 +834,13 @@ export const deposit = async (
       }
 
       // Get market info to check limits
+      console.log({
+        fetchMarketInfo: {
+          poolId,
+          marketId,
+          networkId,
+        },
+      });
       const marketInfo = await fetchMarketInfo(poolId, marketId, networkId);
       if (!marketInfo) {
         throw new Error("Failed to fetch market info");
@@ -913,7 +922,7 @@ export const deposit = async (
         // TODO fund ntoken
 
         // conditionally deposit to token
-        if (token.underlyingAssetId === "0") {
+        if (tokenStandard == "network") {
           if (p1 > 0) {
             const txnO = (
               await builder.token.createBalanceBox(
@@ -944,6 +953,18 @@ export const deposit = async (
               note: new TextEncoder().encode("nt200 deposit"),
             });
           }
+        } else if (tokenStandard == "asa") {
+          const payment = 28502;
+          const aamt = BigInt(amount);
+          const xaid = Number(token.underlyingAssetId);
+          const axfer = { payment, aamt, xaid };
+          console.log("axfer", { axfer });
+          const txnO = (await builder.token.deposit(BigInt(amount))).obj;
+          buildN.push({
+            ...txnO,
+            ...axfer,
+            note: new TextEncoder().encode("nt200 deposit"),
+          });
         }
 
         // approve spending of token
@@ -956,10 +977,25 @@ export const deposit = async (
           ).obj;
           buildN.push({
             ...txnO,
-            payment: 28502,
+            payment: 28503,
             note: new TextEncoder().encode("arc200 approve"),
           });
         }
+
+        // arc200 transfer
+        // {
+        //   const txnO = (
+        //     await builder.token.arc200_transfer(
+        //       algosdk.getApplicationAddress(Number(poolId)),
+        //       0
+        //     )
+        //   ).obj;
+        //   buildN.push({
+        //     ...txnO,
+        //     payment: 28504,
+        //     note: new TextEncoder().encode("arc200 transfer"),
+        //   });
+        // }
 
         // deposit to lending pool
         {
