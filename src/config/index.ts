@@ -177,14 +177,17 @@ const voiMainnetConfig: NetworkConfig = {
       logoPath: "/lovable-uploads/aETH.png",
       tokenStandard: "asa",
     },
-    // BTC: {
-    //   assetId: "ARC200_ID_WBTC", // TODO: Replace with actual ARC-200 ID
-    //   contractId: "APP_ID_WBTC_CONTRACT", // TODO: Replace with actual contract ID
-    //   decimals: 8,
-    //   name: "Wrapped BTC",
-    //   symbol: "BTC",
-    //   logoPath: "/lovable-uploads/WrappedBTC.png",
-    // },
+    aBTC: {
+      assetId: "40152643", 
+      contractId: "40153368",
+      poolId: "41760711",
+      nTokenId: "42701185",
+      decimals: 8,
+      name: "Aramid BTC",
+      symbol: "aBTC",
+      logoPath: "/lovable-uploads/WrappedBTC.png",
+      tokenStandard: "asa",
+    },
     // cbBTC: {
     //   assetId: "ARC200_ID_cbBTC", // TODO: Replace with actual ARC-200 ID
     //   contractId: "APP_ID_cbBTC_CONTRACT", // TODO: Replace with actual contract ID
