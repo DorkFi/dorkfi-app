@@ -2185,6 +2185,7 @@ export default function PreFiDashboard() {
                 withdrawResult = await withdraw(
                   selectedMarket.poolId || "", // poolId - use token's poolId or fallback
                   selectedMarket.marketId || "", // marketId
+                  selectedMarket.tokenStandard || "", // tokenStandard
                   amount, // amount as string
                   activeAccount.address, // userAddress
                   currentNetwork // networkId

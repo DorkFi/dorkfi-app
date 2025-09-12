@@ -603,6 +603,7 @@ export const fetchMarketHealth = async (
 export const withdraw = async (
   poolId: string,
   marketId: string,
+  tokenStandard: TokenStandard,
   amount: string,
   userAddress: string,
   networkId: NetworkId
@@ -610,7 +611,14 @@ export const withdraw = async (
   | { success: boolean; txId?: string; error?: string }
   | { success: true; txns: string[] }
 > => {
-  console.log("withdraw", { poolId, marketId, amount, userAddress, networkId });
+  console.log("withdraw", {
+    poolId,
+    marketId,
+    amount,
+    userAddress,
+    networkId,
+    tokenStandard,
+  });
 
   try {
     const networkConfig = getCurrentNetworkConfig();
@@ -715,7 +723,7 @@ export const withdraw = async (
         }
 
         // cond a token withdraw
-        {
+        if (tokenStandard != "arc200") {
           const txnO = (
             await builder.token.withdraw(BigInt(amountInSmallestUnit))
           ).obj;

@@ -84,6 +84,7 @@ import {
   createMarket,
   CreateMarketParams,
   updateMarketPrice,
+  updateMarketMaxDeposits,
 } from "@/services/adminService";
 import { useOnDemandMarketData } from "@/hooks/useOnDemandMarketData";
 import { fetchMarketInfo } from "@/services/lendingService";
@@ -220,6 +221,7 @@ export default function AdminDashboard() {
   const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
   const [isMarketViewModalOpen, setIsMarketViewModalOpen] = useState(false);
   const [isPriceUpdateModalOpen, setIsPriceUpdateModalOpen] = useState(false);
+  const [isMaxDepositsUpdateModalOpen, setIsMaxDepositsUpdateModalOpen] = useState(false);
   const [selectedMarket, setSelectedMarket] = useState<any>(null);
   const [priceUpdateData, setPriceUpdateData] = useState<{
     marketId: string;
@@ -231,6 +233,17 @@ export default function AdminDashboard() {
     poolId: "",
     currentPrice: "",
     newPrice: "",
+  });
+  const [maxDepositsUpdateData, setMaxDepositsUpdateData] = useState<{
+    marketId: string;
+    poolId: string;
+    currentMaxDeposits: string;
+    newMaxDeposits: string;
+  }>({
+    marketId: "",
+    poolId: "",
+    currentMaxDeposits: "",
+    newMaxDeposits: "",
   });
   const [isLoadingMarketView, setIsLoadingMarketView] = useState(false);
   const [marketViewData, setMarketViewData] = useState<any>(null);
@@ -504,6 +517,27 @@ export default function AdminDashboard() {
     setIsPriceUpdateModalOpen(true);
   };
 
+  const handleEditMaxDeposits = (market: any) => {
+    setSelectedMarket(market);
+
+    // Get the correct contract ID from the token configuration
+    const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+    const token = tokens.find(
+      (t) => t.symbol.toLowerCase() === market.asset?.toLowerCase()
+    );
+    const contractId = token?.underlyingContractId || "";
+
+    setMaxDepositsUpdateData({
+      marketId: contractId, // Use the token's contract ID, not the market's tokenContractId
+      poolId: market.marketInfo?.poolId || "",
+      currentMaxDeposits: market.marketInfo?.maxTotalDeposits
+        ? (parseFloat(market.marketInfo.maxTotalDeposits) / Math.pow(10, token?.decimals || 6)).toFixed(0)
+        : "0",
+      newMaxDeposits: "",
+    });
+    setIsMaxDepositsUpdateModalOpen(true);
+  };
+
   const handleUpdatePrice = async () => {
     if (!activeAccount) {
       alert("Please connect your wallet first");
@@ -566,6 +600,73 @@ export default function AdminDashboard() {
     } catch (error) {
       console.error("Error updating price:", error);
       alert("Failed to update price. Please try again.");
+    }
+  };
+
+  const handleUpdateMaxDeposits = async () => {
+    if (!activeAccount) {
+      alert("Please connect your wallet first");
+      return;
+    }
+
+    if (
+      !maxDepositsUpdateData.newMaxDeposits ||
+      parseFloat(maxDepositsUpdateData.newMaxDeposits) <= 0
+    ) {
+      alert("Please enter a valid max deposits amount");
+      return;
+    }
+
+    try {
+      if (isCurrentNetworkAlgorandCompatible()) {
+        console.log("maxDepositsUpdateData", maxDepositsUpdateData);
+        const result = await updateMarketMaxDeposits(
+          maxDepositsUpdateData.poolId,
+          maxDepositsUpdateData.marketId,
+          BigNumber(maxDepositsUpdateData.newMaxDeposits)
+            .multipliedBy(
+              BigNumber(10).pow(selectedMarket.marketInfo?.decimals || 6)
+            )
+            .toFixed(0),
+          activeAccount.address
+        );
+        if (result.success) {
+          const networkConfig = getCurrentNetworkConfig();
+          const algorandClients = algorandService.initializeClients(
+            networkConfig.walletNetworkId as AlgorandNetwork
+          );
+          const stxn = await signTransactions(
+            result.txns.map((txn) =>
+              Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+            )
+          );
+
+          const res = await algorandClients.algod.sendRawTransaction(stxn).do();
+
+          await waitForConfirmation(algorandClients.algod, res.txId, 4);
+
+          console.log("Transaction confirmed:", res);
+          alert("Max deposits updated successfully!");
+          setIsMaxDepositsUpdateModalOpen(false);
+          setMaxDepositsUpdateData({
+            marketId: "",
+            poolId: "",
+            currentMaxDeposits: "",
+            newMaxDeposits: "",
+          });
+          // Refresh markets data
+          loadAllMarkets();
+        } else {
+          alert(`Failed to update max deposits: ${(result as any).error}`);
+        }
+      } else if (isCurrentNetworkEVM()) {
+        throw new Error("EVM networks are not supported yet");
+      } else {
+        throw new Error("Unsupported network");
+      }
+    } catch (error) {
+      console.error("Error updating max deposits:", error);
+      alert("Failed to update max deposits. Please try again.");
     }
   };
 
@@ -1338,7 +1439,16 @@ export default function AdminDashboard() {
                           onClick={() => handleEditMarket(market)}
                         >
                           <Edit className="h-3 w-3 mr-1" />
-                          Edit
+                          Edit Price
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => handleEditMaxDeposits(market)}
+                        >
+                          <Edit className="h-3 w-3 mr-1" />
+                          Max Deposits
                         </Button>
                         <Button
                           variant="outline"
@@ -2798,6 +2908,67 @@ export default function AdminDashboard() {
               Cancel
             </Button>
             <Button onClick={handleUpdatePrice}>Update Price</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Max Deposits Update Modal */}
+      <Dialog
+        open={isMaxDepositsUpdateModalOpen}
+        onOpenChange={setIsMaxDepositsUpdateModalOpen}
+      >
+        <DialogContent className="max-w-md p-8">
+          <DialogHeader className="pb-6">
+            <DialogTitle className="text-xl">Update Market Max Deposits</DialogTitle>
+            <DialogDescription>
+              Update the maximum total deposits allowed for the selected market.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6">
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="currentMaxDeposits">Current Max Deposits</Label>
+                <Input
+                  id="currentMaxDeposits"
+                  value={maxDepositsUpdateData.currentMaxDeposits}
+                  disabled
+                  className="bg-muted"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="newMaxDeposits">New Max Deposits</Label>
+                <Input
+                  id="newMaxDeposits"
+                  type="number"
+                  step="1"
+                  placeholder="Enter new max deposits amount"
+                  value={maxDepositsUpdateData.newMaxDeposits}
+                  onChange={(e) =>
+                    setMaxDepositsUpdateData((prev) => ({
+                      ...prev,
+                      newMaxDeposits: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+
+              <div className="text-sm text-muted-foreground">
+                <p>Market ID: {maxDepositsUpdateData.marketId}</p>
+                <p>Pool ID: {maxDepositsUpdateData.poolId}</p>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="pt-6">
+            <Button
+              variant="outline"
+              onClick={() => setIsMaxDepositsUpdateModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleUpdateMaxDeposits}>Update Max Deposits</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -577,3 +577,104 @@ export const updateMarketPrice = async (
     };
   }
 };
+
+/**
+ * Update max total deposits for a specific market
+ */
+export const updateMarketMaxDeposits = async (
+  poolId: string,
+  marketId: string,
+  newMaxDeposits: string,
+  userAddress: string
+): Promise<
+  { success: false; error: any } | { success: true; txns: string[] }
+> => {
+  console.log("updateMarketMaxDeposits", { poolId, marketId, newMaxDeposits, userAddress });
+
+  try {
+    const networkConfig = getCurrentNetworkConfig();
+
+    if (isCurrentNetworkVOI()) {
+      // Use VOI-specific service for VOI networks
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      // Convert max deposits to proper units (assuming 6 decimals for the value)
+      const maxDepositsInSmallestUnit = BigInt(newMaxDeposits);
+
+      const ci = new CONTRACT(
+        Number(poolId),
+        clients.algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        {
+          addr: userAddress,
+          sk: new Uint8Array(),
+        }
+      );
+
+      // Create update max deposits transaction
+      // Note: This assumes there's a set_market_max_deposits method in the contract
+      // If the method name is different, it should be updated accordingly
+      const updateMaxDepositsTx = await ci.set_market_max_total_deposits(
+        Number(marketId),
+        maxDepositsInSmallestUnit
+      );
+
+      console.log("updateMaxDepositsTx", { updateMaxDepositsTx });
+
+      if (!updateMaxDepositsTx.success) {
+        throw new Error("Failed to create update max deposits transaction");
+      }
+
+      return {
+        success: true,
+        txns: [...updateMaxDepositsTx.txns],
+      };
+    } else if (isCurrentNetworkAlgorand()) {
+      // Use Algorand-specific service for Algorand networks
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      // Convert max deposits to proper units
+      const maxDepositsInSmallestUnit = BigInt(newMaxDeposits);
+
+      const ci = new CONTRACT(
+        Number(poolId),
+        clients.algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        {
+          addr: userAddress,
+          sk: new Uint8Array(),
+        }
+      );
+
+      const updateMaxDepositsTx = await ci.set_market_max_deposits(
+        Number(marketId),
+        maxDepositsInSmallestUnit
+      );
+
+      if (!updateMaxDepositsTx.success) {
+        throw new Error("Failed to update market max deposits");
+      }
+
+      return {
+        success: true,
+        txns: [...updateMaxDepositsTx.txns],
+      };
+    } else if (isCurrentNetworkEVM()) {
+      throw new Error("EVM networks are not supported yet");
+    } else {
+      throw new Error("Unsupported network");
+    }
+  } catch (error) {
+    console.error("Error updating market max deposits:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    };
+  }
+};
