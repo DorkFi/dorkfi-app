@@ -197,14 +197,17 @@ const voiMainnetConfig: NetworkConfig = {
     //   logoPath: "/lovable-uploads/cbBTC.png",
     // },
 
-    // POW: {
-    //   assetId: "ARC200_ID_POW", // TODO: Replace with actual ARC-200 ID
-    //   contractId: "APP_ID_POW_CONTRACT", // TODO: Replace with actual contract ID
-    //   decimals: 6,
-    //   name: "POW",
-    //   symbol: "POW",
-    //   logoPath: "/lovable-uploads/POW.png",
-    // },
+    POW: {
+      assetId: "40152679", 
+      contractId: "40153155", 
+      poolId: "41760711",
+      nTokenId: "42702842",
+      decimals: 6,
+      name: "POW",
+      symbol: "POW",
+      logoPath: "/lovable-uploads/POW.png",
+      tokenStandard: "asa",
+    },
   },
   preFiParameters: {
     collateral_factor: 780, // 78% = 780 bp

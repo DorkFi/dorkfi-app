@@ -129,7 +129,7 @@ const getMarketsFromConfig = (networkId: NetworkId): Market[] => {
       ETH: 0.005,
       aETH: 0.005,
       ALGO: 100,
-      POW: 20,
+      POW: 5000,
     };
 
     return {
