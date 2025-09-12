@@ -126,6 +126,7 @@ const getMarketsFromConfig = (networkId: NetworkId): Market[] => {
       BTC: 20,
       cbBTC: 20,
       ETH: 0.005,
+      aETH: 0.005,
       ALGO: 100,
       POW: 20,
     };

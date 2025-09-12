@@ -4,13 +4,15 @@ export const getTokenImagePath = (symbol: string): string => {
     VOI: "/lovable-uploads/VOI.png",
     UNIT: "/lovable-uploads/UNIT.png",
     USDC: "/lovable-uploads/USDC.webp",
-    aUSDC: "/lovable-uploads/aUSDC.png",
     BTC: "/lovable-uploads/WrappedBTC.png",
     WBTC: "/lovable-uploads/WrappedBTC.png",
     cbBTC: "/lovable-uploads/cbBTC.png",
     ETH: "/lovable-uploads/ETH.jpg",
     ALGO: "/lovable-uploads/Algo.webp",
     POW: "/lovable-uploads/POW.png",
+    aUSDC: "/lovable-uploads/aUSDC.png",
+    aETH: "/lovable-uploads/aETH.png",
+    aALGO: "/lovable-uploads/aALGO.png",
   };
 
   // First check for exact match (including prefixed tokens like aUSDC)

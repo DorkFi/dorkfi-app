@@ -155,26 +155,26 @@ const voiMainnetConfig: NetworkConfig = {
       logoPath: "/lovable-uploads/UNIT.png",
       tokenStandard: "arc200",
     },
-    ALGO: {
+    aALGO: {
       assetId: "302189",
       contractId: "413153",
       poolId: "41760711",
       nTokenId: "42674504",
       decimals: 6,
-      name: "Algorand",
-      symbol: "ALGO",
-      logoPath: "/lovable-uploads/Algo.webp",
+      name: "Aramid Algorand",
+      symbol: "aALGO",
+      logoPath: "/lovable-uploads/aALGO.png",
       tokenStandard: "asa",
     },
-    ETH: {
-      assetId: "302193", 
-      contractId: "40153308", 
+    aETH: {
+      assetId: "302193",
+      contractId: "40153308",
       poolId: "41760711",
       nTokenId: "42682188",
       decimals: 6,
-      name: "Wrapped ETH",
-      symbol: "ETH",
-      logoPath: "/lovable-uploads/ETH.jpg",
+      name: "Aramid ETH",
+      symbol: "aETH",
+      logoPath: "/lovable-uploads/aETH.png",
       tokenStandard: "asa",
     },
     // BTC: {
@@ -193,7 +193,6 @@ const voiMainnetConfig: NetworkConfig = {
     //   symbol: "cbBTC",
     //   logoPath: "/lovable-uploads/cbBTC.png",
     // },
-
 
     // POW: {
     //   assetId: "ARC200_ID_POW", // TODO: Replace with actual ARC-200 ID
