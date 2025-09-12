@@ -27,6 +27,8 @@ export interface ContractConfig {
   // Add more contracts as needed
 }
 
+export type TokenStandard = "network" | "asa" | "arc200";
+
 export interface TokenConfig {
   assetId?: string;
   contractId?: string; // Contract address or application ID for smart contract tokens
@@ -36,6 +38,7 @@ export interface TokenConfig {
   name: string;
   symbol: string;
   logoPath: string;
+  tokenStandard: TokenStandard; // Token standard: network, asa, or arc200
   // Market override configuration
   marketOverride?: {
     displayName: string;
@@ -124,6 +127,7 @@ const voiMainnetConfig: NetworkConfig = {
       name: "VOI",
       symbol: "VOI",
       logoPath: "/lovable-uploads/VOI.png",
+      tokenStandard: "network",
       marketOverride: {
         displayName: "Voi",
         displaySymbol: "Voi",
@@ -139,15 +143,18 @@ const voiMainnetConfig: NetworkConfig = {
       name: "Aramid USDC",
       symbol: "USDC",
       logoPath: "/lovable-uploads/aUSDC.png",
+      tokenStandard: "asa",
     },
-    // UNIT: {
-    //   assetId: "ARC200_ID_UNIT", // TODO: Replace with actual ARC-200 ID
-    //   contractId: "APP_ID_UNIT_CONTRACT", // TODO: Replace with actual contract ID
-    //   decimals: 6,
-    //   name: "UNIT",
-    //   symbol: "UNIT",
-    //   logoPath: "/lovable-uploads/UNIT.png",
-    // },
+    UNIT: {
+      contractId: "420069",
+      poolId: "41760711",
+      nTokenId: "42638644",
+      decimals: 8,
+      name: "UNIT",
+      symbol: "UNIT",
+      logoPath: "/lovable-uploads/UNIT.png",
+      tokenStandard: "arc200",
+    },
     // BTC: {
     //   assetId: "ARC200_ID_WBTC", // TODO: Replace with actual ARC-200 ID
     //   contractId: "APP_ID_WBTC_CONTRACT", // TODO: Replace with actual contract ID
@@ -240,6 +247,7 @@ const voiTestnetConfig: NetworkConfig = {
       name: "VOI",
       symbol: "VOI",
       logoPath: "/lovable-uploads/VOI.png",
+      tokenStandard: "network",
     },
     // Add testnet-specific tokens as needed
   },
@@ -275,6 +283,7 @@ const algorandMainnetConfig: NetworkConfig = {
       name: "Algorand",
       symbol: "ALGO",
       logoPath: "/lovable-uploads/Algo.webp",
+      tokenStandard: "network",
       marketOverride: {
         displayName: "Algo",
         displaySymbol: "Algo",
@@ -312,6 +321,7 @@ const algorandTestnetConfig: NetworkConfig = {
       name: "Algorand",
       symbol: "ALGO",
       logoPath: "/lovable-uploads/Algo.webp",
+      tokenStandard: "network",
     },
   },
 };
@@ -347,6 +357,7 @@ const baseMainnetConfig: NetworkConfig = {
       name: "Ethereum",
       symbol: "ETH",
       logoPath: "/lovable-uploads/ETH.jpg",
+      tokenStandard: "network",
     },
     USDC: {
       assetId: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", // Base USDC
@@ -355,6 +366,7 @@ const baseMainnetConfig: NetworkConfig = {
       name: "USD Coin",
       symbol: "USDC",
       logoPath: "/lovable-uploads/aUSDC.png",
+      tokenStandard: "arc200",
     },
   },
 };
@@ -387,6 +399,7 @@ const baseTestnetConfig: NetworkConfig = {
       name: "Ethereum",
       symbol: "ETH",
       logoPath: "/lovable-uploads/ETH.jpg",
+      tokenStandard: "network",
     },
   },
 };
@@ -419,6 +432,7 @@ const ethereumMainnetConfig: NetworkConfig = {
       name: "Ethereum",
       symbol: "ETH",
       logoPath: "/lovable-uploads/ETH.jpg",
+      tokenStandard: "network",
     },
     USDC: {
       assetId: "0xA0b86a33E6441b8c4C8C0e4A0b86a33E6441b8c4C", // Ethereum USDC
@@ -426,6 +440,7 @@ const ethereumMainnetConfig: NetworkConfig = {
       name: "USD Coin",
       symbol: "USDC",
       logoPath: "/lovable-uploads/aUSDC.png",
+      tokenStandard: "arc200",
     },
   },
 };
@@ -458,6 +473,7 @@ const ethereumTestnetConfig: NetworkConfig = {
       name: "Ethereum",
       symbol: "ETH",
       logoPath: "/lovable-uploads/ETH.jpg",
+      tokenStandard: "network",
     },
   },
 };
@@ -490,6 +506,7 @@ const localnetConfig: NetworkConfig = {
       name: "Algorand",
       symbol: "ALGO",
       logoPath: "/lovable-uploads/Algo.webp",
+      tokenStandard: "network",
     },
     VOI: {
       assetId: undefined, // Native token
@@ -497,6 +514,7 @@ const localnetConfig: NetworkConfig = {
       name: "VOI",
       symbol: "VOI",
       logoPath: "/lovable-uploads/VOI.png",
+      tokenStandard: "network",
     },
   },
 };

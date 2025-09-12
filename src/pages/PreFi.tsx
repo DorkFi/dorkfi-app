@@ -50,6 +50,7 @@ import {
   NetworkId,
   isCurrentNetworkEVM,
   isCurrentNetworkAlgorandCompatible,
+  TokenStandard,
 } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { deposit, withdraw, fetchMarketInfo } from "@/services/lendingService";
@@ -58,6 +59,7 @@ import algorandService, { AlgorandNetwork } from "@/services/algorandService";
 import { waitForConfirmation } from "algosdk";
 import { ARC200Service } from "@/services/arc200Service";
 import BigNumber from "bignumber.js";
+import { ARC200TokenService } from "@/services/mimirApi/arc200TokenService";
 
 /**
  * PreFi Frontend – Single-file MVP Dashboard
@@ -93,8 +95,6 @@ const PROGRAM = {
   // PreFi Phase 0 ends and markets launch on this date.
 };
 
-export type TokenStandard = "network" | "asa" | "arc200";
-
 type Market = {
   id: string;
   poolId?: string; // lending pool ID for this token
@@ -115,15 +115,8 @@ const getMarketsFromConfig = (networkId: NetworkId): Market[] => {
   const tokens = getAllTokens(networkId);
 
   return tokens.map((token) => {
-    // Determine token standard based on assetId
-    let tokenStandard: TokenStandard;
-    if (token.assetId === "0") {
-      tokenStandard = "network";
-    } else if (token.assetId !== "0") {
-      tokenStandard = "asa";
-    } else {
-      tokenStandard = "arc200";
-    }
+    // Use token standard from config
+    const tokenStandard = token.tokenStandard;
 
     // Set minimum deposit requirements
     const minDeposits: { [key: string]: number } = {
@@ -214,22 +207,26 @@ const calculateRewardAPR = (
 
   // Get market allocation percentage
   const marketAllocation = getMarketAllocation(market.id);
-  
+
   // Calculate monthly VOI rewards value
-  const monthlyVOIRewards = (PROGRAM.VOI_ALLOCATION_TOTAL * marketAllocation) / 12; // Monthly allocation
+  const monthlyVOIRewards =
+    (PROGRAM.VOI_ALLOCATION_TOTAL * marketAllocation) / 12; // Monthly allocation
   const monthlyRewardsValueUSD = monthlyVOIRewards * voiPrice;
-  
+
   // Use actual deposits if provided, otherwise use user deposit as proxy
   const depositCap = actualDeposits || userDeposit;
-  
+
   // Raw APR calculation: (Monthly VOI Rewards Value ÷ Deposit Cap) × 12
   const rawAPR = (monthlyRewardsValueUSD / depositCap) * 12;
-  
+
   return Math.max(0, rawAPR);
 };
 
 // Normalize raw APR into user-friendly display ranges
-const normalizeAPR = (rawAPR: number, marketId: string): { min: number; max: number } => {
+const normalizeAPR = (
+  rawAPR: number,
+  marketId: string
+): { min: number; max: number } => {
   // Define display ranges based on market type
   const ranges: Record<string, { min: number; max: number }> = {
     // Stable anchors (USDC, BTC, ETH)
@@ -237,30 +234,30 @@ const normalizeAPR = (rawAPR: number, marketId: string): { min: number; max: num
     btc: { min: 2, max: 4 },
     cbbtc: { min: 2, max: 4 },
     eth: { min: 2, max: 4 },
-    
+
     // Governance / derivative tokens
     unit: { min: 5, max: 8 },
-    
+
     // Boosted or community tokens
     voi: { min: 10, max: 15 },
     pow: { min: 10, max: 15 },
-    
+
     // High-risk / microcap experimental markets
     algo: { min: 20, max: 20 }, // Will show as 20%+
   };
-  
+
   const range = ranges[marketId] || { min: 5, max: 8 }; // Default range
-  
+
   // If raw APR is within range, use it
   if (rawAPR >= range.min && rawAPR <= range.max) {
     return { min: rawAPR, max: rawAPR };
   }
-  
+
   // If raw APR is below range, use minimum
   if (rawAPR < range.min) {
     return { min: range.min, max: range.min };
   }
-  
+
   // If raw APR is above range, cap at maximum
   return { min: range.max, max: range.max };
 };
@@ -275,17 +272,17 @@ const getDisplayAPY = (rawAPR: number, marketId: string): number => {
 const getFallbackAPY = (marketId: string): number => {
   const fallbackAPYs: Record<string, number> = {
     // Voi A Market
-    voi: 12,    // VOI → 12%
-    ausd: 8,   // aUSD → 8%
-    unit: 15,  // UNIT → 15%
-    algo: 20,  // ALGO → 20%+
-    eth: 12,   // ETH → 12%
-    btc: 8,    // WBTC / cbBTC → 8%
-    cbbtc: 8,  // WBTC / cbBTC → 8%
-    pow: 15,   // POW → 15%
-    
+    voi: 12, // VOI → 12%
+    ausd: 8, // aUSD → 8%
+    unit: 15, // UNIT → 15%
+    algo: 20, // ALGO → 20%+
+    eth: 12, // ETH → 12%
+    btc: 8, // WBTC / cbBTC → 8%
+    cbbtc: 8, // WBTC / cbBTC → 8%
+    pow: 15, // POW → 15%
+
     // Algorand A Market
-    usdc: 4,   // USDC → 4%
+    usdc: 4, // USDC → 4%
     tiny: 15, // TINY → 15%
     compx: 20, // COMPX → 20%+
     finite: 15, // FINITE → 15%
@@ -410,7 +407,7 @@ const chainApi = {
           ? ["network", "0"]
           : !isNaN(Number(market.assetId))
           ? ["asa", market.assetId]
-          : ["arc200", market.contractId];
+          : ["arc200", market.marketId];
 
       const nTokenId = market.nTokenId;
 
@@ -431,7 +428,9 @@ const chainApi = {
         balance = BigInt(accAssetInfo["asset-holding"].amount);
       } else if (assetType === "arc200") {
         // For other tokens, get balance from ARC200Service
+        console.log("tokenId", tokenId);
         const tokenBalance = await ARC200Service.getBalance(address, tokenId);
+        console.log("tokenBalance", tokenBalance);
         balance = tokenBalance ? BigInt(tokenBalance) : 0n;
       } else {
         throw new Error(`Unsupported asset type: ${assetType}`);
@@ -1011,6 +1010,8 @@ export default function PreFiDashboard() {
       .multipliedBy(10 ** selectedMarket.decimals)
       .toFixed(0);
 
+    console.log("balance", amount);
+
     console.log(`[DEPOSIT] ${amount} ${selectedMarket.symbol}`);
 
     setLoadingMap((prev) => ({ ...prev, [selectedMarket.id]: true }));
@@ -1471,8 +1472,8 @@ export default function PreFiDashboard() {
                                   marketPrices
                                 );
                                 // Show "20%+" for volatile microcap markets
-                                return m.id === "algo" && apy >= 20 
-                                  ? "20%+" 
+                                return m.id === "algo" && apy >= 20
+                                  ? "20%+"
                                   : `${apy.toFixed(1)}%`;
                               })()}
                         </div>
@@ -1779,8 +1780,8 @@ export default function PreFiDashboard() {
                                     marketPrices
                                   );
                                   // Show "20%+" for volatile microcap markets
-                                  return m.id === "algo" && apy >= 20 
-                                    ? "20%+" 
+                                  return m.id === "algo" && apy >= 20
+                                    ? "20%+"
                                     : `${apy.toFixed(1)}%`;
                                 })()}
                           </div>
