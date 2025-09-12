@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Calendar, Clock, Rocket, Star, Waves, ShoppingCart } from "lucide-react";
 
-import WalletButton from "@/components/WalletButton";
+import WalletNetworkButton from "@/components/WalletNetworkButton";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
@@ -139,7 +139,7 @@ export default function CountdownPage() {
                   <ShoppingCart className="h-5 w-5" />
                 </button>
               )}
-              <WalletButton />
+              <WalletNetworkButton />
             </div>
           </div>
         </div>

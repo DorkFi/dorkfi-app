@@ -535,7 +535,7 @@ export const config: GlobalConfig = {
     localnet: localnetConfig,
   },
   defaultNetwork: "voi-mainnet",
-  enabledNetworks: ["voi-mainnet", "algorand-mainnet", "base-mainnet"],
+  enabledNetworks: ["voi-mainnet", "algorand-mainnet"],
   version: "1.0.0",
   features: {
     enablePreFi: true,
