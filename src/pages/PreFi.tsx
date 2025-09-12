@@ -125,7 +125,7 @@ const getMarketsFromConfig = (networkId: NetworkId): Market[] => {
       UNIT: 10,
       BTC: 20,
       cbBTC: 20,
-      ETH: 20,
+      ETH: 0.005,
       ALGO: 100,
       POW: 20,
     };
@@ -1447,7 +1447,7 @@ export default function PreFiDashboard() {
                             m.id === "eth" ||
                             m.id === "ausd" ||
                             m.id === "pow"
-                              ? "$"
+                              ? "" // removed $ sign
                               : ""}
                             {fmt.format(m.min)} {m.symbol}
                           </div>
@@ -1531,7 +1531,7 @@ export default function PreFiDashboard() {
                               m.id === "eth" ||
                               m.id === "ausd" ||
                               m.id === "pow"
-                                ? "$"
+                                ? "" // removed $ sign
                                 : ""}
                               {fmt.format(m.min)}
                             </div>
@@ -1733,7 +1733,7 @@ export default function PreFiDashboard() {
                                 m.id === "eth" ||
                                 m.id === "ausd" ||
                                 m.id === "pow"
-                                  ? "$"
+                                  ? "" // removed $ sign
                                   : ""}
                                 {fmt.format(m.min)} {m.symbol}
                               </div>
@@ -1816,7 +1816,7 @@ export default function PreFiDashboard() {
                                   m.id === "eth" ||
                                   m.id === "ausd" ||
                                   m.id === "pow"
-                                    ? "$"
+                                    ? "" // removed $ sign/
                                     : ""}
                                   {fmt.format(m.min)}
                                 </div>
@@ -2034,7 +2034,7 @@ export default function PreFiDashboard() {
                           selectedMarket.id === "eth" ||
                           selectedMarket.id === "ausd" ||
                           selectedMarket.id === "pow"
-                            ? "$"
+                            ? "" // removed $ sign
                             : ""}
                           {fmt.format(selectedMarket.min)}{" "}
                           {selectedMarket.symbol}

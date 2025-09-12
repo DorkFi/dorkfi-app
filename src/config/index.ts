@@ -166,6 +166,17 @@ const voiMainnetConfig: NetworkConfig = {
       logoPath: "/lovable-uploads/Algo.webp",
       tokenStandard: "asa",
     },
+    ETH: {
+      assetId: "302193", 
+      contractId: "40153308", 
+      poolId: "41760711",
+      nTokenId: "42682188",
+      decimals: 6,
+      name: "Wrapped ETH",
+      symbol: "ETH",
+      logoPath: "/lovable-uploads/ETH.jpg",
+      tokenStandard: "asa",
+    },
     // BTC: {
     //   assetId: "ARC200_ID_WBTC", // TODO: Replace with actual ARC-200 ID
     //   contractId: "APP_ID_WBTC_CONTRACT", // TODO: Replace with actual contract ID
@@ -182,14 +193,7 @@ const voiMainnetConfig: NetworkConfig = {
     //   symbol: "cbBTC",
     //   logoPath: "/lovable-uploads/cbBTC.png",
     // },
-    // ETH: {
-    //   assetId: "ARC200_ID_WETH", // TODO: Replace with actual ARC-200 ID
-    //   contractId: "APP_ID_WETH_CONTRACT", // TODO: Replace with actual contract ID
-    //   decimals: 8,
-    //   name: "Wrapped ETH",
-    //   symbol: "ETH",
-    //   logoPath: "/lovable-uploads/ETH.jpg",
-    // },
+
 
     // POW: {
     //   assetId: "ARC200_ID_POW", // TODO: Replace with actual ARC-200 ID
