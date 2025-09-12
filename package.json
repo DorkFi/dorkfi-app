@@ -1,7 +1,7 @@
 {
   "name": "vite_react_shadcn_ts",
   "private": true,
-  "version": "0.1.41",
+  "version": "0.1.42",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,7 +13,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@agoralabs-sh/avm-web-provider": "file:agoralabs-sh/avm-web-provider@1.7.2",
     "@algorandfoundation/algokit-utils": "^6.2.1",
     "@blockshake/defly-connect": "^1.1.6",
     "@hookform/resolvers": "^3.9.0",
