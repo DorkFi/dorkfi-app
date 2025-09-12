@@ -47,34 +47,33 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
 
     return new WalletManager({
       wallets: [
-        WalletId.PERA,
-        WalletId.DEFLY,
+        //WalletId.PERA,
+        //WalletId.DEFLY,
         WalletId.KIBISIS,
         {
           id: WalletId.LUTE,
           options: { siteName: "DorkFi" },
         },
-        {
-          id: WalletId.WALLETCONNECT,
-          options: {
-            projectId: walletConnectProjectId,
-            metadata: {
-              name: "POW App",
-              url: "https://app.dork.fi",
-              description: "DorkFi App",
-              icons: ["https://app.dork.fi/favicon.ico"],
-            },
-            themeMode: "light",
-          },
-        },
+        // {
+        //   id: WalletId.WALLETCONNECT,
+        //   options: {
+        //     projectId: walletConnectProjectId,
+        //     metadata: {
+        //       name: "POW App",
+        //       url: "https://app.dork.fi",
+        //       description: "DorkFi App",
+        //       icons: ["https://app.dork.fi/favicon.ico"],
+        //     },
+        //     themeMode: "light",
+        //   },
+        // },
       ],
       algod: {
         baseServer: networkConfig.rpcUrl,
         port: networkConfig.rpcPort,
         token: networkConfig.rpcToken,
       },
-      defaultNetwork: NetworkId.MAINNET,
-      network: NetworkId.MAINNET, // networkConfig.walletNetworkId as NetworkId,
+      network: networkConfig.walletNetworkId as NetworkId,
     });
   };
 
