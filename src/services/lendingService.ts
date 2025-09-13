@@ -7,6 +7,7 @@
 
 import {
   getCurrentNetworkConfig,
+  getNetworkConfig,
   isCurrentNetworkAlgorandCompatible,
   isCurrentNetworkEVM,
   NetworkId,
@@ -249,7 +250,7 @@ export const fetchAllMarkets = async (
   networkId: NetworkId
 ): Promise<MarketInfo[]> => {
   try {
-    const networkConfig = getCurrentNetworkConfig();
+    const networkConfig = getNetworkConfig(networkId);
 
     if (isCurrentNetworkAlgorandCompatible()) {
       const clients = algorandService.initializeClients(

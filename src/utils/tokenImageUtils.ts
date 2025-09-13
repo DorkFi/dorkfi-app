@@ -13,6 +13,7 @@ export const getTokenImagePath = (symbol: string): string => {
     aUSDC: "/lovable-uploads/aUSDC.png",
     aETH: "/lovable-uploads/aETH.png",
     aALGO: "/lovable-uploads/aALGO.png",
+    aVOI: "/lovable-uploads/aVOI.webp",
   };
 
   // First check for exact match (including prefixed tokens like aUSDC)

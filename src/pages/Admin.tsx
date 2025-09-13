@@ -63,6 +63,7 @@ import CanvasBubbles from "@/components/CanvasBubbles";
 import VersionDisplay from "@/components/VersionDisplay";
 import {
   getCurrentNetworkConfig,
+  getNetworkConfig,
   getAllTokens,
   getContractAddress,
   isCurrentNetworkAlgorandCompatible,
@@ -99,7 +100,7 @@ import BigNumber from "bignumber.js";
 
 // Get markets from configuration - now reactive to network changes
 const getMarketsFromConfig = (networkId: NetworkId) => {
-  const networkConfig = getCurrentNetworkConfig();
+  const networkConfig = getNetworkConfig(networkId);
   const tokens = getAllTokensWithDisplayInfo(networkId);
 
   return tokens.map((token) => ({
@@ -400,9 +401,7 @@ export default function AdminDashboard() {
       };
 
       const createMarketResult = await createMarket(
-        marketType === "prefi"
-          ? Number(newMarket.poolId)
-          : Number(newMarket.tokenContractId),
+        Number(newMarket.poolId),
         createMarketParams,
         activeAccount.address
       );

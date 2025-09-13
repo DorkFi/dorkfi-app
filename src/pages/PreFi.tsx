@@ -46,6 +46,7 @@ import { getTokenImagePath } from "@/utils/tokenImageUtils";
 import VersionDisplay from "@/components/VersionDisplay";
 import {
   getCurrentNetworkConfig,
+  getNetworkConfig,
   getAllTokens,
   NetworkId,
   isCurrentNetworkEVM,
@@ -111,7 +112,7 @@ type Market = {
 
 // Get markets from configuration - now reactive to network changes
 const getMarketsFromConfig = (networkId: NetworkId): Market[] => {
-  const networkConfig = getCurrentNetworkConfig();
+  const networkConfig = getNetworkConfig(networkId);
   const tokens = getAllTokens(networkId);
 
   return tokens.map((token) => {
