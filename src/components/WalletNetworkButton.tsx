@@ -25,7 +25,7 @@ const WalletNetworkButton = ({
   onNetworkChange,
 }: WalletNetworkButtonProps) => {
   const { activeAccount, activeWallet, activeWalletAccounts, setActiveNetwork } = useWallet();
-  const { currentNetwork: contextNetwork, switchNetwork } = useNetwork();
+  const { currentNetwork: contextNetwork, switchNetwork, isSwitchingNetwork } = useNetwork();
   const [copied, setCopied] = useState(false);
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
   const [selectedNetwork, setSelectedNetwork] = useState<NetworkId>(contextNetwork);
@@ -90,33 +90,21 @@ const WalletNetworkButton = ({
   };
 
   const handleNetworkChange = async (networkId: NetworkId) => {
+    if (isSwitchingNetwork) return; // Prevent multiple simultaneous switches
+    
     try {
       setSelectedNetwork(networkId);
       
-      // Use the network context to switch networks
-      switchNetwork(networkId);
+      // Use the network context to switch networks (this will handle wallet disconnection)
+      await switchNetwork(networkId);
       
       // Get the new network configuration
       const networkConfig = getNetworkConfig(networkId);
       
-      // If wallet is connected, use setActiveNetwork to switch networks
-      if (activeWallet && activeAccount) {
-        console.log(`Switching wallet to network: ${networkConfig.name}`);
-        
-        // Use the wallet's setActiveNetwork method
-        await setActiveNetwork(networkConfig.walletNetworkId as any);
-        
-        toast({
-          title: "Network Switched",
-          description: `Switched to ${networkConfig.name}`,
-        });
-      } else {
-        // If no wallet connected, just update the network
-        toast({
-          title: "Network Switched", 
-          description: `Switched to ${networkConfig.name}`,
-        });
-      }
+      toast({
+        title: "Network Switched",
+        description: `Switched to ${networkConfig.name}. Please reconnect your wallet if needed.`,
+      });
       
       // Notify parent component about network change
       onNetworkChange?.(networkId);
@@ -261,28 +249,37 @@ const WalletNetworkButton = ({
               </div>
               {enabledNetworks.map((networkId) => {
                 const networkConfig = getNetworkConfig(networkId);
+                const isCurrentlySwitching = isSwitchingNetwork && selectedNetwork === networkId;
+                const isDisabled = isSwitchingNetwork;
+                
                 return (
                   <DropdownMenuItem
                     key={networkId}
-                    onClick={() => handleNetworkChange(networkId)}
-                    className={`cursor-pointer flex items-center justify-between ${
-                      selectedNetwork === networkId ? "bg-accent" : ""
-                    }`}
+                    onClick={() => !isDisabled && handleNetworkChange(networkId)}
+                    className={`flex items-center justify-between ${
+                      isDisabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
+                    } ${selectedNetwork === networkId ? "bg-accent" : ""}`}
+                    disabled={isDisabled}
                   >
                     <div className="flex items-center gap-2">
-                      {isOnline ? (
+                      {isCurrentlySwitching ? (
+                        <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                      ) : isOnline ? (
                         <Wifi className="w-4 h-4 text-green-500" />
                       ) : (
                         <WifiOff className="w-4 h-4 text-red-500" />
                       )}
                       <div className="flex flex-col">
-                        <span className="font-medium text-sm">{networkConfig.name}</span>
+                        <span className="font-medium text-sm">
+                          {networkConfig.name}
+                          {isCurrentlySwitching && " (Switching...)"}
+                        </span>
                         <span className="text-xs text-muted-foreground">
                           {networkConfig.networkType.toUpperCase()}
                         </span>
                       </div>
                     </div>
-                    {selectedNetwork === networkId && (
+                    {selectedNetwork === networkId && !isCurrentlySwitching && (
                       <div className="w-2 h-2 bg-green-500 rounded-full" />
                     )}
                   </DropdownMenuItem>

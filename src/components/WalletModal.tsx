@@ -61,9 +61,17 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
           id: "pera",
           name: "Pera Wallet",
           icon: wallets.find((w) => w.id === "pera")?.metadata.icon || "🔗",
-          description: "Connect with Pera wallet (Algorand)",
+          description: "Connect with Pera wallet (Algorand/VOI)",
           isInstalled: true,
           downloadUrl: "https://perawallet.app/",
+        },
+        {
+          id: "defly",
+          name: "Defly Wallet",
+          icon: wallets.find((w) => w.id === "defly")?.metadata.icon || "🔗",
+          description: "Connect with Defly wallet (Algorand/VOI)",
+          isInstalled: true,
+          downloadUrl: "https://defly.app/",
         },
         {
           id: "walletconnect",
