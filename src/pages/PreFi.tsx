@@ -130,6 +130,7 @@ const getMarketsFromConfig = (networkId: NetworkId): Market[] => {
       aETH: 0.005,
       ALGO: 100,
       POW: 5000,
+      TINY: 1500,
     };
 
     return {
@@ -840,9 +841,9 @@ export default function PreFiDashboard() {
   // Load pool progress data even when not connected (for pool progress display)
   useEffect(() => {
     if (activeAccount?.address) return; // Skip if user is connected (handled above)
-    
+
     console.log("Loading pool progress data for unconnected users");
-    
+
     const loadPoolData = async () => {
       const loadPromises = markets.map(async (market) => {
         try {
@@ -866,7 +867,9 @@ export default function PreFiDashboard() {
 
               // Store max total deposits for pool progress
               if (marketInfo.maxTotalDeposits) {
-                const maxTotalDeposits = parseFloat(marketInfo.maxTotalDeposits);
+                const maxTotalDeposits = parseFloat(
+                  marketInfo.maxTotalDeposits
+                );
                 setMarketMaxTotalDeposits((prev) => ({
                   ...prev,
                   [market.id]: maxTotalDeposits,
@@ -878,12 +881,18 @@ export default function PreFiDashboard() {
                 const partiallyScaledPrice = parseFloat(marketInfo.price);
                 const additionalScaling = Math.pow(10, market.decimals);
                 const finalPrice = partiallyScaledPrice / additionalScaling;
-                setMarketPrices((prev) => ({ ...prev, [market.id]: finalPrice }));
+                setMarketPrices((prev) => ({
+                  ...prev,
+                  [market.id]: finalPrice,
+                }));
               }
             }
           }
         } catch (error) {
-          console.error(`Error fetching pool data for ${market.symbol}:`, error);
+          console.error(
+            `Error fetching pool data for ${market.symbol}:`,
+            error
+          );
         }
       });
 
@@ -1709,7 +1718,11 @@ export default function PreFiDashboard() {
 
                         // Show qualification progress if not qualified AND has deposits
                         // Otherwise show pool progress (including when deposited = 0)
-                        if (!minOk && st && fromBase(st.depositedBase, m.decimals) > 0) {
+                        if (
+                          !minOk &&
+                          st &&
+                          fromBase(st.depositedBase, m.decimals) > 0
+                        ) {
                           const dep = st
                             ? fromBase(st.depositedBase, m.decimals)
                             : 0;
@@ -2075,7 +2088,11 @@ export default function PreFiDashboard() {
 
                             // Show qualification progress if not qualified AND has deposits
                             // Otherwise show pool progress (including when deposited = 0)
-                            if (!minOk && st && fromBase(st.depositedBase, m.decimals) > 0) {
+                            if (
+                              !minOk &&
+                              st &&
+                              fromBase(st.depositedBase, m.decimals) > 0
+                            ) {
                               const dep = st
                                 ? fromBase(st.depositedBase, m.decimals)
                                 : 0;

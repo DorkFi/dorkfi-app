@@ -342,6 +342,17 @@ const algorandMainnetConfig: NetworkConfig = {
       logoPath: "/lovable-uploads/POW.png",
       tokenStandard: "asa",
     },
+    TINY: {
+      assetId: "2200000000",
+      poolId: "3207735602",
+      contractId: "3211740909",
+      nTokenId: "3211743044",
+      decimals: 6,
+      name: "TINY",
+      symbol: "TINY",
+      logoPath: "/lovable-uploads/TINY.webp",
+      tokenStandard: "asa",
+    },
   },
 };
 
