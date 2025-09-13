@@ -298,6 +298,17 @@ const algorandMainnetConfig: NetworkConfig = {
         isSmartContract: true,
       },
     },
+    USDC: {
+      assetId: "31566704",
+      poolId: "3207735602",
+      contractId: "3210682240",
+      nTokenId: "3210686647",
+      decimals: 6,
+      name: "USD Coin",
+      symbol: "USDC",
+      logoPath: "/lovable-uploads/USDC.png",
+      tokenStandard: "asa",
+    },
   },
 };
 
