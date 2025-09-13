@@ -1385,7 +1385,7 @@ export default function PreFiDashboard() {
                 variant="secondary"
                 className="text-sm inline-flex items-center gap-2 self-start sm:self-auto"
                 onClick={() =>
-                  window.open("https://docs.dorkfi.com/prefi", "_blank")
+                  window.open("https://docs.dork.fi/", "_blank")
                 }
               >
                 Learn More
