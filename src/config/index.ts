@@ -331,6 +331,17 @@ const algorandMainnetConfig: NetworkConfig = {
       logoPath: "/lovable-uploads/UNIT.png",
       tokenStandard: "asa",
     },
+    POW: {
+      assetId: "2994233666",
+      poolId: "3207735602",
+      contractId: "3080081069",
+      nTokenId: "3210859195",
+      decimals: 8,
+      name: "POW",
+      symbol: "POW",
+      logoPath: "/lovable-uploads/POW.png",
+      tokenStandard: "asa",
+    },
   },
 };
 

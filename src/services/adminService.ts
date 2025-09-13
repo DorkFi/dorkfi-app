@@ -664,10 +664,12 @@ export const updateMarketMaxDeposits = async (
         }
       );
 
-      const updateMaxDepositsTx = await ci.set_market_max_deposits(
+      const updateMaxDepositsTx = await ci.set_market_max_total_deposits(
         Number(marketId),
         maxDepositsInSmallestUnit
       );
+
+      console.log("updateMaxDepositsTx", { updateMaxDepositsTx });
 
       if (!updateMaxDepositsTx.success) {
         throw new Error("Failed to update market max deposits");
