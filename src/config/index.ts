@@ -145,16 +145,16 @@ const voiMainnetConfig: NetworkConfig = {
       logoPath: "/lovable-uploads/aUSDC.png",
       tokenStandard: "asa",
     },
-    // UNIT: {
-    //   contractId: "420069",
-    //   poolId: "41760711",
-    //   nTokenId: "42638644",
-    //   decimals: 8,
-    //   name: "UNIT",
-    //   symbol: "UNIT",
-    //   logoPath: "/lovable-uploads/UNIT.png",
-    //   tokenStandard: "arc200",
-    // },
+    UNIT: {
+      contractId: "420069",
+      poolId: "41760711",
+      nTokenId: "42638644",
+      decimals: 8,
+      name: "UNIT",
+      symbol: "UNIT",
+      logoPath: "/lovable-uploads/UNIT.png",
+      tokenStandard: "arc200",
+    },
     aALGO: {
       assetId: "302189",
       contractId: "413153",
@@ -189,8 +189,8 @@ const voiMainnetConfig: NetworkConfig = {
       tokenStandard: "asa",
     },
     acbBTC: {
-      assetId: "40152648", // TODO: Replace with actual ARC-200 ID
-      contractId: "40153415", // TODO: Replace with actual contract ID
+      assetId: "40152648", 
+      contractId: "40153415",
       poolId: "41760711",
       nTokenId: "42706178",
       decimals: 8,
@@ -336,7 +336,7 @@ const algorandMainnetConfig: NetworkConfig = {
       poolId: "3207735602",
       contractId: "3080081069",
       nTokenId: "3210859195",
-      decimals: 8,
+      decimals: 6,
       name: "POW",
       symbol: "POW",
       logoPath: "/lovable-uploads/POW.png",

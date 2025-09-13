@@ -592,6 +592,7 @@ export default function PreFiDashboard() {
   const [withdrawModalPrice, setWithdrawModalPrice] = useState(0);
   const [voiPrice, setVoiPrice] = useState(0);
   const [marketPrices, setMarketPrices] = useState<Record<string, number>>({});
+  const [marketTotalDeposits, setMarketTotalDeposits] = useState<Record<string, number>>({});
   const [isBuyModalOpen, setIsBuyModalOpen] = useState(false);
 
   const launchTs = PROGRAM.LAUNCH_TIMESTAMP;
@@ -685,7 +686,7 @@ export default function PreFiDashboard() {
         },
       }));
 
-      // Fetch market price for USD calculations
+      // Fetch market price and total deposits for USD calculations
       if (m.poolId && m.marketId) {
         try {
           const marketInfo = await fetchMarketInfo(
@@ -702,6 +703,13 @@ export default function PreFiDashboard() {
             const finalPrice = partiallyScaledPrice / additionalScaling;
             setMarketPrices((prev) => ({ ...prev, [m.id]: finalPrice }));
             console.log(`Market price for ${m.symbol}: $${finalPrice}`);
+          }
+
+          // Store total deposits for this market
+          if (marketInfo && marketInfo.totalDeposits) {
+            const totalDeposits = parseFloat(marketInfo.totalDeposits);
+            setMarketTotalDeposits((prev) => ({ ...prev, [m.id]: totalDeposits }));
+            console.log(`Total deposits for ${m.symbol}: ${totalDeposits}`);
           }
         } catch (error) {
           console.error(`Error fetching price for ${m.symbol}:`, error);
@@ -720,6 +728,8 @@ export default function PreFiDashboard() {
             ...prev,
             [m.id]: fallbackPrices[m.id] || 1.0,
           }));
+          // Set fallback total deposits (0 for now)
+          setMarketTotalDeposits((prev) => ({ ...prev, [m.id]: 0 }));
         }
       }
     } finally {
@@ -1155,6 +1165,17 @@ export default function PreFiDashboard() {
     return sum;
   }, [marketsState, markets, marketPrices]);
 
+  // Calculate total locked value across all markets using totalScaledDeposits
+  const totalLockedValue = useMemo(() => {
+    let sum = 0;
+    for (const m of markets) {
+      const totalDeposits = marketTotalDeposits[m.id] || 0;
+      const price = marketPrices[m.id] || 0;
+      sum += totalDeposits * price;
+    }
+    return sum;
+  }, [marketTotalDeposits, markets, marketPrices]);
+
   return (
     <div className="min-h-screen bg-background relative">
       {/* Light Mode Beach Background */}
@@ -1308,23 +1329,18 @@ export default function PreFiDashboard() {
             <TooltipTrigger asChild>
               <div>
                 <Stat
-                  label="Total Rewards"
-                  value={
-                    voiPrice > 0
-                      ? `$${fmt0.format(
-                          PROGRAM.VOI_ALLOCATION_TOTAL * voiPrice
-                        )}`
-                      : "Loading..."
-                  }
+                  label="Total Locked Value"
+                  value={`$${fmt0.format(totalLockedValue)}`}
                   icon={Coins}
                 />
               </div>
             </TooltipTrigger>
             <TooltipContent>
               <p>
-                Total USD value of VOI rewards allocated for Phase 0
-                participants who meet minimum requirements. Calculated using
-                current VOI market price.
+                Total USD value of all deposits locked across all PreFi markets.
+                This represents the total value committed by all participants
+                in the PreFi program, calculated using totalScaledDeposits from
+                each market.
               </p>
             </TooltipContent>
           </Tooltip>
