@@ -31,6 +31,63 @@ const WalletNetworkButton = ({
   const [selectedNetwork, setSelectedNetwork] = useState<NetworkId>(contextNetwork);
   const { toast } = useToast();
 
+  // Determine which networks are supported by the connected wallet
+  const getSupportedNetworks = (): NetworkId[] => {
+    if (!activeWallet) {
+      // If no wallet connected, show all enabled networks
+      return getEnabledNetworks();
+    }
+
+    const walletId = activeWallet.id.toLowerCase();
+    const walletName = activeWallet.metadata?.name?.toLowerCase() || '';
+    
+    // Debug logging to see what we have
+    console.log('Wallet Debug:', {
+      walletId,
+      walletName,
+      metadata: activeWallet.metadata,
+      fullWallet: activeWallet
+    });
+    
+    // Universal wallets that work on both VOI and Algorand
+    if (walletId === 'lute' || walletId === 'kibisis') {
+      return getEnabledNetworks(); // Show all AVM networks
+    }
+    
+    // VOI-specific wallets
+    if (walletId === 'vera' || walletId === 'biatec' || walletName.includes('vera') || walletName.includes('biatec')) {
+      return ['voi-mainnet']; // Only VOI Mainnet
+    }
+    
+    // Algorand-specific wallets
+    if (walletId === 'pera' || walletId === 'defly' || walletName.includes('pera') || walletName.includes('defly')) {
+      return ['algorand-mainnet']; // Only Algorand Mainnet
+    }
+    
+    // WalletConnect - check if it's a specific wallet
+    if (walletId === 'walletconnect') {
+      // If connected via WalletConnect, check the wallet name to determine restrictions
+      if (walletName.includes('vera') || walletName.includes('biatec')) {
+        return ['voi-mainnet']; // VOI-specific wallets via WalletConnect
+      }
+      if (walletName.includes('pera') || walletName.includes('defly')) {
+        return ['algorand-mainnet']; // Algorand-specific wallets via WalletConnect
+      }
+      
+      // Fallback: If WalletConnect on VOI Mainnet, assume it's a VOI-specific wallet
+      // This handles cases where wallet name doesn't contain the specific wallet name
+      if (currentNetwork === 'voi-mainnet') {
+        return ['voi-mainnet']; // Assume VOI-specific wallet
+      }
+      
+      // If WalletConnect but unknown wallet, show all networks
+      return getEnabledNetworks();
+    }
+    
+    // Default: show all networks if wallet type is unknown
+    return getEnabledNetworks();
+  };
+
   const handleCopyAddress = () => {
     if (activeAccount?.address) {
       navigator.clipboard.writeText(activeAccount.address);
@@ -93,18 +150,57 @@ const WalletNetworkButton = ({
     if (isSwitchingNetwork) return; // Prevent multiple simultaneous switches
     
     try {
+      // Check if the target network is supported by the connected wallet
+      const supportedNetworks = getSupportedNetworks();
+      if (activeWallet && !supportedNetworks.includes(networkId)) {
+        const networkConfig = getNetworkConfig(networkId);
+        toast({
+          title: "Network Not Supported",
+          description: `Your ${activeWallet.name} wallet does not support ${networkConfig.name}. Please disconnect and connect a compatible wallet.`,
+          variant: "destructive",
+        });
+        return;
+      }
+      
       setSelectedNetwork(networkId);
       
-      // Use the network context to switch networks (this will handle wallet disconnection)
-      await switchNetwork(networkId);
+      // Check if the connected wallet supports seamless network switching
+      const isUniversalWallet = activeWallet && 
+        (activeWallet.id.toLowerCase() === 'lute' || activeWallet.id.toLowerCase() === 'kibisis');
       
-      // Get the new network configuration
-      const networkConfig = getNetworkConfig(networkId);
-      
-      toast({
-        title: "Network Switched",
-        description: `Switched to ${networkConfig.name}. Please reconnect your wallet if needed.`,
-      });
+      if (isUniversalWallet && activeAccount) {
+        // For universal wallets, switch network without disconnecting
+        await switchNetwork(networkId);
+        
+        // Get the new network configuration
+        const networkConfig = getNetworkConfig(networkId);
+        
+        toast({
+          title: "Network Switched",
+          description: `Switched to ${networkConfig.name}. Wallet remains connected.`,
+        });
+      } else {
+        // For other wallets or when not connected, use standard switching
+        await switchNetwork(networkId);
+        
+        // Get the new network configuration
+        const networkConfig = getNetworkConfig(networkId);
+        
+        // If no wallet is connected, open wallet modal after switching network
+        if (!activeAccount) {
+          setIsWalletModalOpen(true);
+          toast({
+            title: "Network Switched",
+            description: `Switched to ${networkConfig.name}. Please connect your wallet.`,
+          });
+        } else {
+          // If wallet is connected but not universal, show reconnection message
+          toast({
+            title: "Network Switched",
+            description: `Switched to ${networkConfig.name}. Please reconnect your wallet if needed.`,
+          });
+        }
+      }
       
       // Notify parent component about network change
       onNetworkChange?.(networkId);
@@ -126,7 +222,8 @@ const WalletNetworkButton = ({
   const currentConfig = getNetworkConfig(selectedNetwork);
   const isOnline = true; // You can implement actual network status checking here
   const enabledNetworks = getEnabledNetworks();
-  const showNetworkSection = enabledNetworks.length > 1;
+  const supportedNetworks = getSupportedNetworks();
+  const showNetworkSection = supportedNetworks.length > 1;
 
   if (activeAccount) {
     return (
@@ -177,7 +274,7 @@ const WalletNetworkButton = ({
                     Network
                   </div>
                 </div>
-                {enabledNetworks.map((networkId) => {
+                {getSupportedNetworks().map((networkId) => {
                   const networkConfig = getNetworkConfig(networkId);
                   return (
                     <DropdownMenuItem
@@ -247,10 +344,11 @@ const WalletNetworkButton = ({
                   Network
                 </div>
               </div>
-              {enabledNetworks.map((networkId) => {
+              {getSupportedNetworks().map((networkId) => {
                 const networkConfig = getNetworkConfig(networkId);
                 const isCurrentlySwitching = isSwitchingNetwork && selectedNetwork === networkId;
                 const isDisabled = isSwitchingNetwork;
+                const isCurrentNetwork = selectedNetwork === networkId;
                 
                 return (
                   <DropdownMenuItem
@@ -258,7 +356,7 @@ const WalletNetworkButton = ({
                     onClick={() => !isDisabled && handleNetworkChange(networkId)}
                     className={`flex items-center justify-between ${
                       isDisabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
-                    } ${selectedNetwork === networkId ? "bg-accent" : ""}`}
+                    } ${isCurrentNetwork ? "bg-accent" : ""}`}
                     disabled={isDisabled}
                   >
                     <div className="flex items-center gap-2">
@@ -276,10 +374,11 @@ const WalletNetworkButton = ({
                         </span>
                         <span className="text-xs text-muted-foreground">
                           {networkConfig.networkType.toUpperCase()}
+                          {!activeAccount && !isCurrentNetwork && " • Connect wallet"}
                         </span>
                       </div>
                     </div>
-                    {selectedNetwork === networkId && !isCurrentlySwitching && (
+                    {isCurrentNetwork && !isCurrentlySwitching && (
                       <div className="w-2 h-2 bg-green-500 rounded-full" />
                     )}
                   </DropdownMenuItem>

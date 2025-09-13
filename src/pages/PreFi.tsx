@@ -17,9 +17,7 @@ import {
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import DorkFiButton from "@/components/ui/DorkFiButton";
-import CanvasBubbles from "@/components/CanvasBubbles";
 import { Link } from "react-router-dom";
-import { ThemeToggle } from "@/components/theme-toggle";
 import WalletNetworkButton from "@/components/WalletNetworkButton";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import { H1, Body } from "@/components/ui/Typography";
@@ -155,12 +153,62 @@ const getMarketsFromConfig = (networkId: NetworkId): Market[] => {
  *************************/
 const fmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 6 });
 const fmt0 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
+const fmtCompact = new Intl.NumberFormat(undefined, {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+const fmtPrecise = new Intl.NumberFormat(undefined, {
+  maximumFractionDigits: 4,
+  minimumFractionDigits: 0,
+});
 const shortAddr = (a?: string) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "—");
 const nowSec = () => Math.floor(Date.now() / 1000);
 const toBase = (amt: number, decimals: number) =>
   BigInt(Math.round(amt * 10 ** decimals));
 const fromBase = (amt: bigint, decimals: number) =>
   Number(amt) / 10 ** decimals;
+
+// Format pool capacity numbers for better readability
+const formatPoolCapacity = (current: number, max: number) => {
+  // Determine precision based on the max value
+  let currentFormatted: string;
+  let maxFormatted: string;
+
+  if (max >= 1_000_000) {
+    // Large values - use M/K formatting
+    currentFormatted =
+      current >= 1_000_000
+        ? fmtCompact.format(current / 1_000_000) + "M"
+        : current >= 1_000
+        ? fmtCompact.format(current / 1_000) + "K"
+        : fmt0.format(current);
+
+    maxFormatted = fmtCompact.format(max / 1_000_000) + "M";
+  } else if (max >= 1_000) {
+    // Medium values - use K formatting
+    currentFormatted =
+      current >= 1_000
+        ? fmtCompact.format(current / 1_000) + "K"
+        : current < 10 && current > 0
+        ? fmtPrecise.format(current)
+        : fmt0.format(current);
+
+    maxFormatted = fmtCompact.format(max / 1_000) + "K";
+  } else {
+    // Small values - show high precision
+    // For very small max values, show more decimal places
+    const precision = max < 1 ? 6 : max < 10 ? 4 : 2;
+    const smallFmt = new Intl.NumberFormat(undefined, {
+      maximumFractionDigits: precision,
+      minimumFractionDigits: 0,
+    });
+
+    currentFormatted = smallFmt.format(current);
+    maxFormatted = smallFmt.format(max);
+  }
+
+  return `${currentFormatted} / ${maxFormatted}`;
+};
 
 /*************************
  * APY Calculation Utils  *
@@ -502,17 +550,15 @@ function Stat({
   icon: any;
 }) {
   return (
-    <div className="flex items-center gap-3 rounded-2xl border border-border bg-card/60 p-4 shadow-sm">
-      <div className="rounded-xl border border-border bg-card p-2">
-        <Icon className="h-5 w-5 text-accent" />
+    <div className="flex items-center gap-3 rounded-2xl border border-ocean-teal/20 bg-gradient-to-br from-slate-900 to-slate-800 p-4 shadow-sm dark-glow-card">
+      <div className="rounded-xl border border-ocean-teal/30 bg-slate-800/60 p-2">
+        <Icon className="h-5 w-5 text-aqua-glow" />
       </div>
       <div>
-        <div className="text-xs uppercase tracking-wide text-muted-foreground">
+        <div className="text-xs uppercase tracking-wide text-slate-400">
           {label}
         </div>
-        <div className="text-lg font-semibold text-card-foreground">
-          {value}
-        </div>
+        <div className="text-lg font-semibold text-white">{value}</div>
       </div>
     </div>
   );
@@ -539,11 +585,20 @@ function Countdown({ launchTs }: { launchTs: number }) {
 
 function ProgressBar({ value, max }: { value: number; max: number }) {
   const pct = Math.max(0, Math.min(100, (value / max) * 100));
+
+  // More exaggerated non-linear progress: much more progress shown at earlier stages
+  // Using a more aggressive curve: sqrt(percentage) * 12
+  // This makes 0-30% show dramatically more visual progress, compresses 70-100% heavily
+  const visualPct = Math.sqrt(pct) * 12;
+
   return (
-    <div className="h-2 w-full rounded-full bg-secondary">
+    <div className="h-3 w-full rounded-md border-2 border-border bg-secondary">
       <div
-        className="h-2 rounded-full bg-gradient-progress transition-all duration-300"
-        style={{ width: `${pct}%` }}
+        className="h-3 rounded-md transition-all duration-500 shadow-lg"
+        style={{
+          width: `${Math.min(100, visualPct)}%`,
+          background: "linear-gradient(90deg, #7091b1 0%, #e2b342 100%)",
+        }}
       />
     </div>
   );
@@ -592,7 +647,12 @@ export default function PreFiDashboard() {
   const [withdrawModalPrice, setWithdrawModalPrice] = useState(0);
   const [voiPrice, setVoiPrice] = useState(0);
   const [marketPrices, setMarketPrices] = useState<Record<string, number>>({});
-  const [marketTotalDeposits, setMarketTotalDeposits] = useState<Record<string, number>>({});
+  const [marketTotalDeposits, setMarketTotalDeposits] = useState<
+    Record<string, number>
+  >({});
+  const [marketMaxTotalDeposits, setMarketMaxTotalDeposits] = useState<
+    Record<string, number>
+  >({});
   const [isBuyModalOpen, setIsBuyModalOpen] = useState(false);
 
   const launchTs = PROGRAM.LAUNCH_TIMESTAMP;
@@ -708,8 +768,23 @@ export default function PreFiDashboard() {
           // Store total deposits for this market
           if (marketInfo && marketInfo.totalDeposits) {
             const totalDeposits = parseFloat(marketInfo.totalDeposits);
-            setMarketTotalDeposits((prev) => ({ ...prev, [m.id]: totalDeposits }));
+            setMarketTotalDeposits((prev) => ({
+              ...prev,
+              [m.id]: totalDeposits,
+            }));
             console.log(`Total deposits for ${m.symbol}: ${totalDeposits}`);
+          }
+
+          // Store max total deposits for this market
+          if (marketInfo && marketInfo.maxTotalDeposits) {
+            const maxTotalDeposits = parseFloat(marketInfo.maxTotalDeposits);
+            setMarketMaxTotalDeposits((prev) => ({
+              ...prev,
+              [m.id]: maxTotalDeposits,
+            }));
+            console.log(
+              `Max total deposits for ${m.symbol}: ${maxTotalDeposits}`
+            );
           }
         } catch (error) {
           console.error(`Error fetching price for ${m.symbol}:`, error);
@@ -739,6 +814,7 @@ export default function PreFiDashboard() {
     }
   };
 
+  // Load market data for connected users
   useEffect(() => {
     if (!activeAccount?.address) return;
     console.log("Loading markets for address:", activeAccount.address);
@@ -760,6 +836,62 @@ export default function PreFiDashboard() {
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeAccount?.address, markets, refreshKey]);
+
+  // Load pool progress data even when not connected (for pool progress display)
+  useEffect(() => {
+    if (activeAccount?.address) return; // Skip if user is connected (handled above)
+    
+    console.log("Loading pool progress data for unconnected users");
+    
+    const loadPoolData = async () => {
+      const loadPromises = markets.map(async (market) => {
+        try {
+          // Fetch market info for pool progress data
+          if (market.poolId && market.marketId) {
+            const marketInfo = await fetchMarketInfo(
+              market.poolId,
+              market.marketId,
+              currentNetwork
+            );
+
+            if (marketInfo) {
+              // Store total deposits for pool progress
+              if (marketInfo.totalDeposits) {
+                const totalDeposits = parseFloat(marketInfo.totalDeposits);
+                setMarketTotalDeposits((prev) => ({
+                  ...prev,
+                  [market.id]: totalDeposits,
+                }));
+              }
+
+              // Store max total deposits for pool progress
+              if (marketInfo.maxTotalDeposits) {
+                const maxTotalDeposits = parseFloat(marketInfo.maxTotalDeposits);
+                setMarketMaxTotalDeposits((prev) => ({
+                  ...prev,
+                  [market.id]: maxTotalDeposits,
+                }));
+              }
+
+              // Store market price for USD conversion
+              if (marketInfo.price) {
+                const partiallyScaledPrice = parseFloat(marketInfo.price);
+                const additionalScaling = Math.pow(10, market.decimals);
+                const finalPrice = partiallyScaledPrice / additionalScaling;
+                setMarketPrices((prev) => ({ ...prev, [market.id]: finalPrice }));
+              }
+            }
+          }
+        } catch (error) {
+          console.error(`Error fetching pool data for ${market.symbol}:`, error);
+        }
+      });
+
+      await Promise.all(loadPromises);
+    };
+
+    loadPoolData();
+  }, [markets, currentNetwork, activeAccount?.address]);
 
   // Handle network changes
   const handleNetworkChange = (networkId: NetworkId) => {
@@ -1165,6 +1297,51 @@ export default function PreFiDashboard() {
     return sum;
   }, [marketsState, markets, marketPrices]);
 
+  // Memoize pool progress calculations for better performance
+  const poolProgressData = useMemo(() => {
+    // Fallback max deposits map for when real data isn't available yet
+    // These are more realistic USD values for max total deposits
+    const fallbackMaxDepositsMap: Record<string, number> = {
+      voi: 200_000_000, // $200M VOI
+      ausd: 50_000_000, // $50M aUSD
+      unit: 100_000_000, // $100M UNIT
+      btc: 500_000_000, // $500M BTC (was 75M)
+      cbbtc: 500_000_000, // $500M cbBTC (was 75M)
+      eth: 300_000_000, // $300M ETH (was 100M)
+      algo: 25_000_000, // $25M ALGO
+      pow: 30_000_000, // $30M POW
+    };
+
+    return markets.map((market) => {
+      // Use real maxTotalDeposits from market info if available, otherwise fallback
+      const realMaxDeposits = marketMaxTotalDeposits[market.id];
+      const maxDeposits =
+        realMaxDeposits || fallbackMaxDepositsMap[market.id] || 50_000_000;
+
+      // Debug logging to see what values we're getting
+      if (realMaxDeposits !== undefined) {
+        console.log(
+          `${market.symbol} max deposits: real=${realMaxDeposits}, fallback=${
+            fallbackMaxDepositsMap[market.id]
+          }, using=${maxDeposits}`
+        );
+      }
+
+      // Use real totalScaledDeposits from market info if available
+      // totalScaledDeposits is already in USD values
+      const totalDepositsUSD = marketTotalDeposits[market.id] || 0;
+      const percentage = Math.min(100, (totalDepositsUSD / maxDeposits) * 100);
+
+      return {
+        marketId: market.id,
+        maxDeposits,
+        totalDepositsUSD,
+        percentage,
+        formattedCapacity: formatPoolCapacity(totalDepositsUSD, maxDeposits),
+      };
+    });
+  }, [markets, marketTotalDeposits, marketMaxTotalDeposits]);
+
   // Calculate total locked value across all markets using totalScaledDeposits
   const totalLockedValue = useMemo(() => {
     let sum = 0;
@@ -1182,13 +1359,16 @@ export default function PreFiDashboard() {
       <div className="absolute inset-0 light-mode-beach-bg dark:hidden" />
       <div className="absolute inset-0 beach-overlay dark:hidden" />
 
-      {/* Dark Mode Ocean Background */}
-      <div className="absolute inset-0 z-0 hidden dark:block dorkfi-dark-bg-with-overlay" />
+      {/* Dark Mode Surf Background */}
+      <div
+        className="absolute inset-0 z-0 bg-cover bg-center"
+        style={{
+          backgroundImage: "url('/lovable-uploads/dark_surf_prefi.png')",
+        }}
+      />
 
-      {/* Advanced Canvas Bubble System - Dark Mode Only */}
-      <div className="hidden dark:block">
-        <CanvasBubbles />
-      </div>
+      {/* Dark overlay */}
+      <div className="absolute inset-0 z-0 bg-black/40"></div>
 
       {/* PreFi Header */}
       <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-white/80 dark:header-nav-bg backdrop-blur-md supports-[backdrop-filter]:bg-white/70 dark:supports-[backdrop-filter]:header-nav-bg shadow-sm dark:shadow-none">
@@ -1218,17 +1398,18 @@ export default function PreFiDashboard() {
 
             {/* Theme Toggle, Buy Button, and Wallet */}
             <div className="flex items-center gap-2">
-              <ThemeToggle />
-              <button
-                className="p-2 rounded-lg bg-green-600 hover:bg-green-700 text-white transition-colors"
-                onClick={() => {
-                  console.log("Buy tokens clicked from navigation");
-                  setIsBuyModalOpen(true);
-                }}
-                title="Buy Tokens"
-              >
-                <ShoppingCart className="h-5 w-5" />
-              </button>
+              {activeAccount && (
+                <button
+                  className="p-2 rounded-lg bg-green-600 hover:bg-green-700 text-white transition-colors"
+                  onClick={() => {
+                    console.log("Buy tokens clicked from navigation");
+                    setIsBuyModalOpen(true);
+                  }}
+                  title="Buy Tokens"
+                >
+                  <ShoppingCart className="h-5 w-5" />
+                </button>
+              )}
               <WalletNetworkButton onNetworkChange={handleNetworkChange} />
             </div>
           </div>
@@ -1239,77 +1420,65 @@ export default function PreFiDashboard() {
       <div className="mx-auto max-w-6xl px-4 pt-8 relative z-10">
         <DorkFiCard
           hoverable
-          className="relative text-center overflow-hidden p-6 md:p-8 mb-8"
+          className="relative text-center overflow-hidden p-6 md:p-8 mb-8 !bg-gradient-to-br !from-slate-900 !to-slate-800 border-slate-700"
         >
           {/* Decorative elements */}
-          {/* Birds - light mode only */}
+          {/* Moon decoration - left side */}
           <div
-            className="absolute top-6 left-10 opacity-80 pointer-events-none z-0 animate-bubble-float dark:hidden hidden md:block"
+            className="absolute top-4 left-8 opacity-80 pointer-events-none z-0 animate-bubble-float hidden md:block"
             style={{ animationDelay: "0s" }}
           >
             <img
-              src="/lovable-uploads/bird_thinner.png"
-              alt="Decorative DorkFi bird - top left"
-              className="w-8 h-8 md:w-10 md:h-10 -rotate-6 select-none"
-              loading="lazy"
-              decoding="async"
-            />
-          </div>
-          <div
-            className="absolute top-14 right-12 opacity-70 pointer-events-none z-0 animate-bubble-float dark:hidden hidden md:block"
-            style={{ animationDelay: "0.5s" }}
-          >
-            <img
-              src="/lovable-uploads/bird_thinner.png"
-              alt="Decorative DorkFi bird - top right"
-              className="w-7 h-7 md:w-9 md:h-9 rotate-3 select-none"
-              loading="lazy"
-              decoding="async"
-            />
-          </div>
-          <div
-            className="absolute bottom-10 left-14 opacity-60 pointer-events-none z-0 animate-bubble-float dark:hidden hidden md:block"
-            style={{ animationDelay: "1s" }}
-          >
-            <img
-              src="/lovable-uploads/bird_thinner.png"
-              alt="Decorative DorkFi bird - bottom left"
-              className="w-7 h-7 md:w-9 md:h-9 -rotate-2 select-none"
-              loading="lazy"
-              decoding="async"
-            />
-          </div>
-          {/* Dark mode gold fish */}
-          <div
-            className="absolute top-4 left-8 opacity-80 pointer-events-none z-0 animate-bubble-float hidden dark:md:block"
-            style={{ animationDelay: "0s" }}
-          >
-            <img
-              src="/lovable-uploads/DorkFi_gold_fish.png"
-              alt="Decorative DorkFi gold fish - top left"
+              src="/lovable-uploads/moon_dorkfi.png"
+              alt="Decorative DorkFi moon - top left"
               className="w-[2.844844rem] h-[2.844844rem] md:w-[3.793125rem] md:h-[3.793125rem] select-none"
               loading="lazy"
               decoding="async"
             />
           </div>
+          {/* Star decorations - right side */}
           <div
-            className="absolute top-12 right-12 opacity-80 pointer-events-none z-0 animate-bubble-float hidden dark:md:block"
-            style={{ animationDelay: "0.5s" }}
+            className="absolute top-6 right-8 opacity-80 pointer-events-none z-0 animate-bubble-float hidden md:block"
+            style={{ animationDelay: "0.3s" }}
           >
             <img
-              src="/lovable-uploads/DorkFi_gold_fish.png"
-              alt="Decorative DorkFi gold fish - top right"
-              className="w-[1.896563rem] h-[1.896563rem] md:w-[2.844844rem] md:h-[2.844844rem] -scale-x-100 select-none"
+              src="/lovable-uploads/star_dorkfi.png"
+              alt="Decorative DorkFi star - top right"
+              className="w-[1.5rem] h-[1.5rem] md:w-[2rem] md:h-[2rem] select-none"
+              loading="lazy"
+              decoding="async"
+            />
+          </div>
+          <div
+            className="absolute top-16 right-12 opacity-70 pointer-events-none z-0 animate-bubble-float hidden md:block"
+            style={{ animationDelay: "0.7s" }}
+          >
+            <img
+              src="/lovable-uploads/star_dorkfi.png"
+              alt="Decorative DorkFi star - middle right"
+              className="w-[1.2rem] h-[1.2rem] md:w-[1.5rem] md:h-[1.5rem] select-none"
+              loading="lazy"
+              decoding="async"
+            />
+          </div>
+          <div
+            className="absolute top-4 right-16 opacity-60 pointer-events-none z-0 animate-bubble-float hidden md:block"
+            style={{ animationDelay: "1s" }}
+          >
+            <img
+              src="/lovable-uploads/star_dorkfi.png"
+              alt="Decorative DorkFi star - far right"
+              className="w-[1rem] h-[1rem] md:w-[1.2rem] md:h-[1.2rem] select-none"
               loading="lazy"
               decoding="async"
             />
           </div>
 
-          <div className="relative z-10 text-center">
-            <H1 className="m-0 text-4xl md:text-5xl text-center">
+          <div className="relative z-1 text-center">
+            <H1 className="m-0 text-4xl md:text-5xl text-center text-white">
               <span className="hero-header">PreFi Deposits</span>
             </H1>
-            <Body className="text-sm sm:text-base md:text-lg lg:text-xl max-w-2xl md:max-w-none mx-auto text-center">
+            <p className="text-sm sm:text-base md:text-lg lg:text-xl max-w-2xl md:max-w-none mx-auto text-center text-muted-foreground">
               <span className="block md:inline md:whitespace-nowrap">
                 Connect Wallet / Deposit Now
               </span>
@@ -1317,7 +1486,7 @@ export default function PreFiDashboard() {
               <span className="block md:inline md:whitespace-nowrap">
                 Earlier, larger deposits earn a greater share.
               </span>
-            </Body>
+            </p>
           </div>
         </DorkFiCard>
       </div>
@@ -1338,8 +1507,8 @@ export default function PreFiDashboard() {
             <TooltipContent>
               <p>
                 Total USD value of all deposits locked across all PreFi markets.
-                This represents the total value committed by all participants
-                in the PreFi program, calculated using totalScaledDeposits from
+                This represents the total value committed by all participants in
+                the PreFi program, calculated using totalScaledDeposits from
                 each market.
               </p>
             </TooltipContent>
@@ -1391,7 +1560,7 @@ export default function PreFiDashboard() {
 
       {/* Markets */}
       <main className="mx-auto max-w-6xl px-4 py-8 relative z-10">
-        <div className="overflow-hidden rounded-2xl border border-border bg-card">
+        <div className="overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-slate-900 to-slate-800 dark-glow-card">
           {/* Market Overview Header */}
           <div className="border-b border-border/60 bg-card/60 p-6">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
@@ -1401,9 +1570,7 @@ export default function PreFiDashboard() {
               <DorkFiButton
                 variant="secondary"
                 className="text-sm inline-flex items-center gap-2 self-start sm:self-auto"
-                onClick={() =>
-                  window.open("https://docs.dork.fi/", "_blank")
-                }
+                onClick={() => window.open("https://docs.dork.fi/", "_blank")}
               >
                 Learn More
                 <ExternalLink className="h-3 w-3" />
@@ -1445,7 +1612,7 @@ export default function PreFiDashboard() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.3, delay: index * 0.05 }}
                   >
-                    <DorkFiCard className="p-4 space-y-3">
+                    <DorkFiCard className="p-4 space-y-3 dark-glow-card">
                       {/* Asset Header */}
                       <div className="flex items-center gap-3">
                         <img
@@ -1513,57 +1680,138 @@ export default function PreFiDashboard() {
                           <div className="text-xs text-muted-foreground">
                             Deposited
                           </div>
-                          <div className="text-sm font-semibold tabular-nums text-card-foreground">
-                            {loading
-                              ? "…"
-                              : marketPrices[m.id]
-                              ? `$${fmt.format(dep * marketPrices[m.id])}`
-                              : `${fmt.format(dep)} ${m.symbol}`}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Progress Section */}
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1">
-                            {minOk ? (
+                          <div className="space-y-1">
+                            <div className="text-sm font-semibold tabular-nums text-card-foreground">
+                              {loading
+                                ? "…"
+                                : marketPrices[m.id]
+                                ? `$${fmt.format(dep * marketPrices[m.id])}`
+                                : `${fmt.format(dep)} ${m.symbol}`}
+                            </div>
+                            {minOk && (
                               <div className="flex items-center gap-1">
                                 <CheckCircle2 className="h-3 w-3 text-green-500" />
                                 <span className="text-xs font-medium text-green-600 dark:text-green-400">
                                   Qualified
                                 </span>
                               </div>
-                            ) : (
-                              <div className="flex items-center gap-1">
-                                <AlertCircle className="h-3 w-3 text-orange-500" />
-                                <span className="text-xs font-medium text-orange-600 dark:text-orange-400">
-                                  Needs more
-                                </span>
-                              </div>
                             )}
                           </div>
-                          <div className="text-right">
-                            <div className="text-xs font-semibold tabular-nums">
-                              {fmt.format(Math.min(dep, m.min))} /{" "}
-                              {m.id === "btc" ||
-                              m.id === "cbbtc" ||
-                              m.id === "eth" ||
-                              m.id === "ausd" ||
-                              m.id === "pow"
-                                ? "" // removed $ sign
-                                : ""}
-                              {fmt.format(m.min)}
-                            </div>
-                          </div>
                         </div>
-                        <ProgressBar value={Math.min(dep, m.min)} max={m.min} />
-                        {!minOk && (
-                          <div className="text-xs text-muted-foreground">
-                            Deposit {fmt.format(m.min - dep)} more
-                          </div>
-                        )}
                       </div>
+
+                      {/* Pool Progress Section */}
+                      {(() => {
+                        const poolData = poolProgressData.find(
+                          (p) => p.marketId === m.id
+                        );
+                        if (!poolData) return null;
+
+                        // Show qualification progress if not qualified AND has deposits
+                        // Otherwise show pool progress (including when deposited = 0)
+                        if (!minOk && st && fromBase(st.depositedBase, m.decimals) > 0) {
+                          const dep = st
+                            ? fromBase(st.depositedBase, m.decimals)
+                            : 0;
+                          const progressPct = Math.min(
+                            100,
+                            (dep / m.min) * 100
+                          );
+
+                          return (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div className="space-y-2 cursor-help">
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-1">
+                                      <AlertCircle className="h-3 w-3 text-orange-500" />
+                                      <span className="text-xs font-medium text-orange-600 dark:text-orange-400">
+                                        Needs more
+                                      </span>
+                                    </div>
+                                    <div className="text-xs font-semibold tabular-nums text-card-foreground">
+                                      {fmt.format(Math.min(dep, m.min))} /{" "}
+                                      {fmt.format(m.min)}
+                                    </div>
+                                  </div>
+                                  <ProgressBar value={progressPct} max={100} />
+                                  <div className="text-xs text-muted-foreground">
+                                    Deposit {fmt.format(m.min - dep)} more
+                                  </div>
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <div className="space-y-1">
+                                  <p className="font-semibold">
+                                    {m.name} Qualification
+                                  </p>
+                                  <p>
+                                    Current: {fmt.format(dep)} {m.symbol}
+                                  </p>
+                                  <p>
+                                    Required: {fmt.format(m.min)} {m.symbol}
+                                  </p>
+                                  <p>Progress: {progressPct.toFixed(1)}%</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    Meet minimum to qualify for VOI rewards
+                                  </p>
+                                </div>
+                              </TooltipContent>
+                            </Tooltip>
+                          );
+                        }
+
+                        // Show pool progress (total deposits vs max deposits)
+                        // This includes: qualified users, not connected, or deposited = 0
+                        return (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div className="space-y-2 cursor-help">
+                                <ProgressBar
+                                  value={poolData.percentage}
+                                  max={100}
+                                />
+                                <div className="text-left">
+                                  <div className="text-sm font-semibold tabular-nums text-card-foreground">
+                                    {poolData.formattedCapacity}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground/60">
+                                    {poolData.percentage.toFixed(1)}% full
+                                  </div>
+                                </div>
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <div className="space-y-1">
+                                <p className="font-semibold">
+                                  {m.name} Pool Status
+                                </p>
+                                <p>
+                                  Current: $
+                                  {fmt.format(poolData.totalDepositsUSD)}
+                                </p>
+                                <p>
+                                  Maximum: ${fmt.format(poolData.maxDeposits)}
+                                </p>
+                                <p>
+                                  Capacity: {poolData.percentage.toFixed(1)}%
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  {poolData.percentage < 20
+                                    ? "Low capacity"
+                                    : poolData.percentage < 50
+                                    ? "Medium capacity"
+                                    : poolData.percentage < 80
+                                    ? "Good capacity"
+                                    : poolData.percentage < 95
+                                    ? "High capacity"
+                                    : "Near full"}
+                                </p>
+                              </div>
+                            </TooltipContent>
+                          </Tooltip>
+                        );
+                      })()}
 
                       {/* Deposit Button */}
                       <div className="flex gap-2">
@@ -1579,7 +1827,7 @@ export default function PreFiDashboard() {
                           <ArrowDownCircle className="h-4 w-4" /> Deposit
                         </DorkFiButton>
                         <DorkFiButton
-                          variant="secondary"
+                          variant="danger-outline"
                           disabled={loading}
                           onClick={async () => {
                             console.log(
@@ -1604,7 +1852,7 @@ export default function PreFiDashboard() {
             // Desktop/Tablet Table Layout
             <div className="overflow-x-auto">
               <table className="w-full">
-                <thead className="bg-secondary/60 text-muted-foreground">
+                <thead className="bg-gradient-to-r from-slate-800/80 to-slate-700/80 backdrop-blur-sm text-card-foreground font-semibold border-b border-border/50">
                   <tr>
                     <th className="px-6 py-4 text-sm font-medium text-left">
                       <Tooltip>
@@ -1675,15 +1923,15 @@ export default function PreFiDashboard() {
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <span className="cursor-help inline-flex items-center justify-center gap-1">
-                            Progress
+                            Pool Progress
                             <InfoIcon className="h-3 w-3" />
                           </span>
                         </TooltipTrigger>
                         <TooltipContent>
                           <p>
-                            Shows your progress towards the minimum deposit
-                            requirement. You must meet the minimum to qualify
-                            for VOI rewards.
+                            Shows the total pool capacity utilization. Displays
+                            how much of the maximum deposit limit has been
+                            reached across all participants.
                           </p>
                         </TooltipContent>
                       </Tooltip>
@@ -1729,7 +1977,7 @@ export default function PreFiDashboard() {
                         initial={{ opacity: 0, y: 12 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.3, delay: index * 0.1 }}
-                        className="border-t border-border hover:bg-secondary/20 transition-colors"
+                        className="border-t border-border hover:bg-secondary/20 transition-colors card-hover cursor-pointer"
                       >
                         {/* Asset */}
                         <td className="px-6 py-4">
@@ -1770,12 +2018,22 @@ export default function PreFiDashboard() {
 
                         {/* Deposited */}
                         <td className="px-6 py-4 text-right">
-                          <div className="text-sm font-semibold tabular-nums text-card-foreground">
-                            {loading
-                              ? "…"
-                              : marketPrices[m.id]
-                              ? `$${fmt.format(dep * marketPrices[m.id])}`
-                              : `${fmt.format(dep)} ${m.symbol}`}
+                          <div className="space-y-1">
+                            <div className="text-sm font-semibold tabular-nums text-card-foreground">
+                              {loading
+                                ? "…"
+                                : marketPrices[m.id]
+                                ? `$${fmt.format(dep * marketPrices[m.id])}`
+                                : `${fmt.format(dep)} ${m.symbol}`}
+                            </div>
+                            {minOk && (
+                              <div className="flex items-center justify-end gap-1">
+                                <CheckCircle2 className="h-3 w-3 text-green-500" />
+                                <span className="text-xs font-medium text-green-600 dark:text-green-400">
+                                  Qualified
+                                </span>
+                              </div>
+                            )}
                           </div>
                         </td>
 
@@ -1807,51 +2065,124 @@ export default function PreFiDashboard() {
                           </div>
                         </td>
 
-                        {/* Progress */}
+                        {/* Pool Progress */}
                         <td className="px-6 py-4 w-48">
-                          <div className="space-y-1">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-1">
-                                {minOk ? (
-                                  <div className="flex items-center gap-1">
-                                    <CheckCircle2 className="h-3 w-3 text-green-500" />
-                                    <span className="text-xs font-medium text-green-600 dark:text-green-400">
-                                      Qualified
-                                    </span>
+                          {(() => {
+                            const poolData = poolProgressData.find(
+                              (p) => p.marketId === m.id
+                            );
+                            if (!poolData) return null;
+
+                            // Show qualification progress if not qualified AND has deposits
+                            // Otherwise show pool progress (including when deposited = 0)
+                            if (!minOk && st && fromBase(st.depositedBase, m.decimals) > 0) {
+                              const dep = st
+                                ? fromBase(st.depositedBase, m.decimals)
+                                : 0;
+                              const progressPct = Math.min(
+                                100,
+                                (dep / m.min) * 100
+                              );
+
+                              return (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <div className="space-y-2 cursor-help">
+                                      <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-1">
+                                          <AlertCircle className="h-3 w-3 text-orange-500" />
+                                          <span className="text-xs font-medium text-orange-600 dark:text-orange-400">
+                                            Needs more
+                                          </span>
+                                        </div>
+                                        <div className="text-xs font-semibold tabular-nums text-card-foreground">
+                                          {fmt.format(Math.min(dep, m.min))} /{" "}
+                                          {fmt.format(m.min)}
+                                        </div>
+                                      </div>
+                                      <ProgressBar
+                                        value={progressPct}
+                                        max={100}
+                                      />
+                                      <div className="text-xs text-muted-foreground">
+                                        Deposit {fmt.format(m.min - dep)} more
+                                      </div>
+                                    </div>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <div className="space-y-1">
+                                      <p className="font-semibold">
+                                        {m.name} Qualification
+                                      </p>
+                                      <p>
+                                        Current: {fmt.format(dep)} {m.symbol}
+                                      </p>
+                                      <p>
+                                        Required: {fmt.format(m.min)} {m.symbol}
+                                      </p>
+                                      <p>Progress: {progressPct.toFixed(1)}%</p>
+                                      <p className="text-xs text-muted-foreground">
+                                        Meet minimum to qualify for VOI rewards
+                                      </p>
+                                    </div>
+                                  </TooltipContent>
+                                </Tooltip>
+                              );
+                            }
+
+                            // Show pool progress (total deposits vs max deposits)
+                            // This includes: qualified users, not connected, or deposited = 0
+                            return (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <div className="space-y-2 cursor-help">
+                                    <ProgressBar
+                                      value={poolData.percentage}
+                                      max={100}
+                                    />
+                                    <div className="text-left">
+                                      <div className="text-sm font-semibold tabular-nums text-card-foreground">
+                                        {poolData.formattedCapacity}
+                                      </div>
+                                      <div className="text-xs text-muted-foreground/60">
+                                        {poolData.percentage.toFixed(1)}% full
+                                      </div>
+                                    </div>
                                   </div>
-                                ) : (
-                                  <div className="flex items-center gap-1">
-                                    <AlertCircle className="h-3 w-3 text-orange-500" />
-                                    <span className="text-xs font-medium text-orange-600 dark:text-orange-400">
-                                      Needs more
-                                    </span>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <div className="space-y-1">
+                                    <p className="font-semibold">
+                                      {m.name} Pool Status
+                                    </p>
+                                    <p>
+                                      Current: $
+                                      {fmt.format(poolData.totalDepositsUSD)}
+                                    </p>
+                                    <p>
+                                      Maximum: $
+                                      {fmt.format(poolData.maxDeposits)}
+                                    </p>
+                                    <p>
+                                      Capacity: {poolData.percentage.toFixed(1)}
+                                      %
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                      {poolData.percentage < 20
+                                        ? "Low capacity"
+                                        : poolData.percentage < 50
+                                        ? "Medium capacity"
+                                        : poolData.percentage < 80
+                                        ? "Good capacity"
+                                        : poolData.percentage < 95
+                                        ? "High capacity"
+                                        : "Near full"}
+                                    </p>
                                   </div>
-                                )}
-                              </div>
-                              <div className="text-right">
-                                <div className="text-xs font-semibold tabular-nums">
-                                  {fmt.format(Math.min(dep, m.min))} /{" "}
-                                  {m.id === "btc" ||
-                                  m.id === "cbbtc" ||
-                                  m.id === "eth" ||
-                                  m.id === "ausd" ||
-                                  m.id === "pow"
-                                    ? "" // removed $ sign/
-                                    : ""}
-                                  {fmt.format(m.min)}
-                                </div>
-                              </div>
-                            </div>
-                            <ProgressBar
-                              value={Math.min(dep, m.min)}
-                              max={m.min}
-                            />
-                            {!minOk && (
-                              <div className="text-xs text-muted-foreground">
-                                Deposit {fmt.format(m.min - dep)} more
-                              </div>
-                            )}
-                          </div>
+                                </TooltipContent>
+                              </Tooltip>
+                            );
+                          })()}
                         </td>
 
                         {/* Actions */}
@@ -1869,7 +2200,7 @@ export default function PreFiDashboard() {
                               <ArrowDownCircle className="h-4 w-4" /> Deposit
                             </DorkFiButton>
                             <DorkFiButton
-                              variant="secondary"
+                              variant="danger-outline"
                               disabled={loading}
                               onClick={async () => {
                                 console.log(
@@ -1897,7 +2228,7 @@ export default function PreFiDashboard() {
 
         {/* Disclaimers */}
         <section className="mt-8">
-          <div className="rounded-2xl border border-border bg-card p-4 text-xs text-muted-foreground">
+          <div className="rounded-2xl border border-ocean-teal/20 bg-gradient-to-br from-slate-900 to-slate-800 dark-glow-card p-4 text-xs text-muted-foreground">
             <p className="mb-2">
               <strong className="text-primary">Non‑custodial:</strong> All
               prefunding deposits remain user‑controlled in on‑chain contracts.
@@ -1910,11 +2241,16 @@ export default function PreFiDashboard() {
               deposits earn more. Participants below the minimum threshold in
               any market will not qualify for Phase 0 rewards.
             </p>
-            <p>
+            <p className="mb-2">
               <strong className="text-primary">Estimates only:</strong> Reward
               estimates displayed are indicative and assume placeholder global
               totals. Final distribution will use the on‑chain prefunding state
               at launch.
+            </p>
+            <p>
+              <strong className="text-primary">Risk Disclaimer:</strong> Enter
+              at your own risk. Crypto is volatile, code is experimental, and
+              rewards may not moon. DYOR, fren.
             </p>
           </div>
         </section>
@@ -1934,7 +2270,7 @@ export default function PreFiDashboard() {
 
       {/* Deposit Modal */}
       <Dialog open={isDepositModalOpen} onOpenChange={closeDepositModal}>
-        <DialogContent className="bg-card dark:bg-slate-900 rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl card-hover hover:shadow-lg hover:border-ocean-teal/40 transition-all max-w-md px-0 py-0">
+        <DialogContent className="bg-card rounded-xl border border-border shadow-xl card-hover hover:shadow-lg hover:border-accent/40 transition-all max-w-md px-0 py-0">
           {showSuccess ? (
             <div className="p-6">
               <SupplyBorrowCongrats
@@ -1995,13 +2331,12 @@ export default function PreFiDashboard() {
                         autoFocus
                         value={modalAmount}
                         onChange={(e) => setModalAmount(e.target.value)}
-                        className="bg-white/80 dark:bg-slate-800 border-gray-300 dark:border-slate-600 text-slate-800 dark:text-white pr-16 text-lg h-12"
+                        className="bg-background border-border text-foreground pr-16 text-lg h-12"
                       />
                       <Button
-                        size="sm"
                         variant="ghost"
                         onClick={handleMaxClick}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-teal-400 hover:bg-teal-400/10 h-8 px-3"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-accent hover:bg-accent/10 h-8 px-3"
                       >
                         MAX
                       </Button>
@@ -2029,16 +2364,16 @@ export default function PreFiDashboard() {
                     </p>
                   </div>
 
-                  <Card className="bg-white/80 dark:bg-slate-800 border-gray-200 dark:border-slate-700">
+                  <Card className="bg-card border-border">
                     <CardContent className="p-4 space-y-3">
                       <div className="flex justify-between items-center">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm text-slate-500 dark:text-slate-400">
+                          <span className="text-sm text-muted-foreground">
                             Minimum to Qualify
                           </span>
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                              <InfoIcon className="h-3 w-3 text-muted-foreground" />
                             </TooltipTrigger>
                             <TooltipContent>
                               <p>
@@ -2048,7 +2383,7 @@ export default function PreFiDashboard() {
                             </TooltipContent>
                           </Tooltip>
                         </div>
-                        <span className="text-sm font-medium text-slate-800 dark:text-white">
+                        <span className="text-sm font-medium text-card-foreground">
                           {selectedMarket.id === "btc" ||
                           selectedMarket.id === "cbbtc" ||
                           selectedMarket.id === "eth" ||
@@ -2063,12 +2398,12 @@ export default function PreFiDashboard() {
 
                       <div className="flex justify-between items-center">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm text-slate-500 dark:text-slate-400">
+                          <span className="text-sm text-muted-foreground">
                             Current Deposited
                           </span>
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                              <InfoIcon className="h-3 w-3 text-muted-foreground" />
                             </TooltipTrigger>
                             <TooltipContent>
                               <p>
@@ -2108,7 +2443,7 @@ export default function PreFiDashboard() {
                       Number(modalAmount) <= 0 ||
                       loadingMap[selectedMarket.id]
                     }
-                    className="w-full font-semibold text-white h-12 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full font-semibold h-12 bg-primary hover:bg-primary/90 text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {loadingMap[selectedMarket.id] ? (
                       <RefreshCcw className="h-4 w-4 animate-spin mr-2" />
@@ -2311,7 +2646,7 @@ export default function PreFiDashboard() {
 
       {/* Buy Modal */}
       <Dialog open={isBuyModalOpen} onOpenChange={setIsBuyModalOpen}>
-        <DialogContent className="bg-card dark:bg-slate-900 rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl card-hover hover:shadow-lg hover:border-ocean-teal/40 transition-all max-w-lg px-0 py-0">
+        <DialogContent className="bg-card rounded-xl border border-border shadow-xl card-hover hover:shadow-lg hover:border-accent/40 transition-all max-w-lg px-0 py-0">
           <div className="p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold text-card-foreground">

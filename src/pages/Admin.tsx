@@ -26,7 +26,6 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { Link } from "react-router-dom";
-import { ThemeToggle } from "@/components/theme-toggle";
 import WalletButton from "@/components/WalletButton";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import DorkFiButton from "@/components/ui/DorkFiButton";
@@ -880,7 +879,6 @@ export default function AdminDashboard() {
 
             {/* Theme Toggle and Wallet */}
             <div className="flex items-center gap-2">
-              <ThemeToggle />
               <WalletNetworkButton onNetworkChange={handleNetworkChange} />
             </div>
           </div>

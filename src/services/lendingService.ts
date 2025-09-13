@@ -184,12 +184,13 @@ export const fetchMarketInfo = async (
       const formatDeposit = (deposit: string) => {
         return new BigNumber(deposit)
           .div(new BigNumber(10).pow(token?.decimals || 0))
-          .toFixed(0);
+          .toFixed(4);
       };
 
       const totalDeposits = formatDeposit(
         market.totalScaledDeposits.toString()
       );
+
       const totalBorrows = formatDeposit(market.totalScaledBorrows.toString());
 
       const marketInfo: MarketInfo = {

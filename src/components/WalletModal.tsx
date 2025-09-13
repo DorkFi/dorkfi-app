@@ -42,7 +42,8 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
     if (isAVM) {
       // AVM networks (VOI, Algorand) - show Algorand-compatible wallets
       console.log({ wallets });
-      return [
+
+      const baseWallets = [
         {
           id: "kibisis",
           name: "Kibisis",
@@ -57,30 +58,62 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
           description: "Connect with Lute wallet (Algorand/VOI)",
           isInstalled: true,
         },
-        {
-          id: "pera",
-          name: "Pera Wallet",
-          icon: wallets.find((w) => w.id === "pera")?.metadata.icon || "🔗",
-          description: "Connect with Pera wallet (Algorand/VOI)",
-          isInstalled: true,
-          downloadUrl: "https://perawallet.app/",
-        },
-        {
-          id: "defly",
-          name: "Defly Wallet",
-          icon: wallets.find((w) => w.id === "defly")?.metadata.icon || "🔗",
-          description: "Connect with Defly wallet (Algorand/VOI)",
-          isInstalled: true,
-          downloadUrl: "https://defly.app/",
-        },
-        {
-          id: "walletconnect",
-          name: "WalletConnect",
-          icon: "🔗",
-          description: "Connect with WalletConnect (Multi-chain)",
-          isInstalled: true,
-        },
       ];
+
+      // Add VOI-specific wallets
+      if (currentNetwork === "voi-mainnet") {
+        baseWallets.push(
+          {
+            id: "biatec",
+            name: "Biatec Wallet",
+            icon: wallets.find((w) => w.id === "biatec")?.metadata.icon || "🔗",
+            description: "Connect with Biatec wallet (VOI Network)",
+            isInstalled: true,
+            downloadUrl: "https://biatec.io/",
+          },
+          {
+            id: "vera",
+            name: "Vera Wallet",
+            icon: "/lovable-uploads/verwallet.png",
+            description: "Connect with Vera Wallet (VOI Network)",
+            isInstalled: true,
+            downloadUrl: "https://getvera.app/",
+          }
+        );
+      }
+
+      // Add other wallets based on network
+      if (currentNetwork === "algorand-mainnet") {
+        baseWallets.push(
+          {
+            id: "pera",
+            name: "Pera Wallet",
+            icon: wallets.find((w) => w.id === "pera")?.metadata.icon || "🔗",
+            description: "Connect with Pera wallet (Algorand)",
+            isInstalled: true,
+            downloadUrl: "https://perawallet.app/",
+          },
+          {
+            id: "defly",
+            name: "Defly Wallet",
+            icon: wallets.find((w) => w.id === "defly")?.metadata.icon || "🔗",
+            description: "Connect with Defly wallet (Algorand)",
+            isInstalled: true,
+            downloadUrl: "https://defly.app/",
+          }
+        );
+      }
+
+      // Add WalletConnect for all AVM networks
+      baseWallets.push({
+        id: "walletconnect",
+        name: "WalletConnect",
+        icon: "🔗",
+        description: "Connect with WalletConnect (Multi-chain)",
+        isInstalled: true,
+      });
+
+      return baseWallets;
     } else if (isEVM) {
       // EVM networks (Ethereum, Base) - show Ethereum-compatible wallets
       return [
@@ -129,10 +162,24 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
     if (isAVM) {
       // For AVM networks, only show wallets that are actually available in the WalletManager
       const availableWalletIds = wallets.map((w) => w.id);
-      return allProviders.filter(
-        (provider) =>
+      return allProviders.filter((provider) => {
+        // Always show Vera Wallet if WalletConnect is available and we're on VOI Mainnet
+        if (
+          provider.id === "vera" &&
+          currentNetwork === "voi-mainnet" &&
+          availableWalletIds.includes("walletconnect")
+        ) {
+          return true;
+        }
+        // Show Biatec wallet if it's available in the WalletManager
+        if (provider.id === "biatec" && availableWalletIds.includes("biatec")) {
+          return true;
+        }
+        // Show other wallets if they're available or not installed
+        return (
           availableWalletIds.includes(provider.id) || !provider.isInstalled
-      );
+        );
+      });
     }
 
     // For EVM networks, show all providers (they'll show "coming soon" message)
@@ -147,19 +194,39 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
 
       // For AVM networks, find the wallet from the wallets array
       if (isAVM) {
-        const wallet = wallets.find((w) => w.id === providerId);
+        // Handle Vera Wallet specifically (uses WalletConnect)
+        if (providerId === "vera") {
+          const walletConnectWallet = wallets.find(
+            (w) => w.id === "walletconnect"
+          );
 
-        if (!wallet) {
-          throw new Error("Wallet provider not found");
+          if (!walletConnectWallet) {
+            throw new Error("WalletConnect wallet not found");
+          }
+
+          // Connect to WalletConnect (which will show Vera Wallet in the modal)
+          await walletConnectWallet.connect();
+
+          toast({
+            title: "Vera Wallet Connected",
+            description:
+              "Successfully connected to Vera Wallet via WalletConnect",
+          });
+        } else {
+          const wallet = wallets.find((w) => w.id === providerId);
+
+          if (!wallet) {
+            throw new Error("Wallet provider not found");
+          }
+
+          // Connect to the wallet
+          await wallet.connect();
+
+          toast({
+            title: "Wallet Connected",
+            description: `Successfully connected to ${wallet.metadata.name}`,
+          });
         }
-
-        // Connect to the wallet
-        await wallet.connect();
-
-        toast({
-          title: "Wallet Connected",
-          description: `Successfully connected to ${wallet.metadata.name}`,
-        });
       } else if (isEVM) {
         // For EVM networks, we would need to implement EVM wallet connection
         // For now, show a message that EVM wallets are not yet implemented
@@ -220,6 +287,12 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold">
                   {provider.icon.startsWith("data:") ? (
+                    <img
+                      src={provider.icon}
+                      alt={provider.name}
+                      className="w-25 h-25 rounded-full"
+                    />
+                  ) : provider.icon.startsWith("/") ? (
                     <img
                       src={provider.icon}
                       alt={provider.name}

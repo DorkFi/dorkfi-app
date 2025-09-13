@@ -3,6 +3,20 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Custom animations */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite;
+}
+
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap');
 
 /* DorkFi Design System */
@@ -344,6 +358,57 @@
 .card-hover:hover {
   transform: translateY(-4px);
   box-shadow: 0 8px 25px hsl(var(--ocean-teal) / 0.15);
+}
+
+/* Dark glow card effects */
+.dark-glow-card {
+  position: relative;
+  box-shadow: 0 0 15px hsl(var(--aqua-glow) / 0.1);
+  border: 1px solid hsl(var(--ocean-teal) / 0.3);
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+/* Enhanced glow on hover in dark mode */
+.dark-glow-card:hover {
+  transform: translateY(-6px) scale(1.02);
+  box-shadow: 
+    0 12px 35px hsl(var(--ocean-teal) / 0.4),
+    0 0 30px hsl(var(--aqua-glow) / 0.25);
+  border-color: hsl(var(--ocean-teal) / 0.6);
+}
+
+/* Overlay glow effect for additional depth */
+.dark-glow-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    circle at 50% 50%, 
+    hsl(var(--aqua-glow) / 0.08) 0%, 
+    transparent 70%
+  );
+  pointer-events: none;
+  opacity: 0.7;
+  transition: opacity 0.3s ease;
+}
+
+.dark-glow-card:hover::before {
+  opacity: 1;
+}
+
+/* Pulse glow effect for special cards */
+.dark-glow-card.pulse-glow {
+  animation: dark-glow-pulse 2s ease-in-out infinite;
+}
+
+@keyframes dark-glow-pulse {
+  0%, 100% {
+    box-shadow: 0 0 15px hsl(var(--aqua-glow) / 0.1);
+  }
+  50% {
+    box-shadow: 0 0 25px hsl(var(--aqua-glow) / 0.2);
+  }
 }
 
 /* Mobile optimizations */
