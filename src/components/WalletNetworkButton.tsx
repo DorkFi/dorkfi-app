@@ -8,7 +8,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import { Wallet, Copy, LogOut, CheckCircle, ChevronDown, Wifi, WifiOff } from "lucide-react";
+import { Wallet, Copy, LogOut, CheckCircle, ChevronDown, Wifi, WifiOff, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import WalletModal from "./WalletModal";
 import AccountSelector from "./AccountSelector";
@@ -141,6 +141,56 @@ const WalletNetworkButton = ({
       toast({
         title: "Switch Failed",
         description: "Failed to switch account",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleClearSiteData = async () => {
+    try {
+      // Clear localStorage
+      localStorage.clear();
+      
+      // Clear sessionStorage
+      sessionStorage.clear();
+      
+      // Clear IndexedDB (if used)
+      if ('indexedDB' in window) {
+        const databases = await indexedDB.databases();
+        await Promise.all(
+          databases.map(db => {
+            return new Promise((resolve, reject) => {
+              const deleteReq = indexedDB.deleteDatabase(db.name!);
+              deleteReq.onerror = () => reject(deleteReq.error);
+              deleteReq.onsuccess = () => resolve(deleteReq.result);
+            });
+          })
+        );
+      }
+      
+      // Clear cookies (if accessible)
+      document.cookie.split(";").forEach(cookie => {
+        const eqPos = cookie.indexOf("=");
+        const name = eqPos > -1 ? cookie.substr(0, eqPos) : cookie;
+        document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`;
+        document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=${window.location.hostname}`;
+      });
+      
+      toast({
+        title: "Site Data Cleared",
+        description: "All local data has been cleared successfully",
+      });
+      
+      // Optionally reload the page to ensure clean state
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
+      
+    } catch (error) {
+      console.error('Failed to clear site data:', error);
+      toast({
+        title: "Clear Failed",
+        description: "Failed to clear some site data",
         variant: "destructive",
       });
     }
@@ -305,6 +355,12 @@ const WalletNetworkButton = ({
                 })}
               </>
             )}
+            
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={handleClearSiteData} className="cursor-pointer text-orange-600">
+              <Trash2 className="w-4 h-4 mr-2" />
+              Clear Site Data
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -386,6 +442,12 @@ const WalletNetworkButton = ({
               })}
             </>
           )}
+          
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={handleClearSiteData} className="cursor-pointer text-orange-600">
+            <Trash2 className="w-4 h-4 mr-2" />
+            Clear Site Data
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       

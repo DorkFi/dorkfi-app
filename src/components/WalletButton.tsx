@@ -2,7 +2,7 @@
 import { useWallet } from "@txnlab/use-wallet-react"
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Wallet, Copy, LogOut, CheckCircle } from "lucide-react";
+import { Wallet, Copy, LogOut, CheckCircle, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
 import WalletModal from "./WalletModal";
@@ -72,6 +72,56 @@ const WalletButton = () => {
     }
   };
 
+  const handleClearSiteData = async () => {
+    try {
+      // Clear localStorage
+      localStorage.clear();
+      
+      // Clear sessionStorage
+      sessionStorage.clear();
+      
+      // Clear IndexedDB (if used)
+      if ('indexedDB' in window) {
+        const databases = await indexedDB.databases();
+        await Promise.all(
+          databases.map(db => {
+            return new Promise((resolve, reject) => {
+              const deleteReq = indexedDB.deleteDatabase(db.name!);
+              deleteReq.onerror = () => reject(deleteReq.error);
+              deleteReq.onsuccess = () => resolve(deleteReq.result);
+            });
+          })
+        );
+      }
+      
+      // Clear cookies (if accessible)
+      document.cookie.split(";").forEach(cookie => {
+        const eqPos = cookie.indexOf("=");
+        const name = eqPos > -1 ? cookie.substr(0, eqPos) : cookie;
+        document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`;
+        document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=${window.location.hostname}`;
+      });
+      
+      toast({
+        title: "Site Data Cleared",
+        description: "All local data has been cleared successfully",
+      });
+      
+      // Optionally reload the page to ensure clean state
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
+      
+    } catch (error) {
+      console.error('Failed to clear site data:', error);
+      toast({
+        title: "Clear Failed",
+        description: "Failed to clear some site data",
+        variant: "destructive",
+      });
+    }
+  };
+
   const formatAddress = (address: string) => {
     return `${address.slice(0, 6)}...${address.slice(-4)}`;
   };
@@ -102,6 +152,10 @@ const WalletButton = () => {
               )}
               {copied ? "Copied!" : "Copy Address"}
             </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleClearSiteData} className="cursor-pointer text-orange-600">
+              <Trash2 className="w-4 h-4 mr-2" />
+              Clear Site Data
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={handleDisconnect} className="cursor-pointer text-red-600">
               <LogOut className="w-4 h-4 mr-2" />
               Disconnect
@@ -113,7 +167,7 @@ const WalletButton = () => {
   }
 
   return (
-    <>
+    <div className="flex flex-col items-center space-y-3">
       <Button 
         onClick={handleOpenWalletModal}
         className="bg-whale-gold hover:bg-whale-gold/90 text-black font-semibold transition-all hover:scale-105"
@@ -122,11 +176,20 @@ const WalletButton = () => {
         Connect Wallet
       </Button>
       
+      <Button 
+        onClick={handleClearSiteData}
+        variant="outline"
+        className="text-orange-600 border-orange-600 hover:bg-orange-50 transition-all hover:scale-105"
+      >
+        <Trash2 className="w-4 h-4 mr-2" />
+        Clear Site Data
+      </Button>
+      
       <WalletModal 
         isOpen={isWalletModalOpen}
         onClose={handleCloseWalletModal}
       />
-    </>
+    </div>
   );
 };
 

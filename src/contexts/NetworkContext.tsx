@@ -17,6 +17,7 @@ import {
   setCurrentNetwork,
   getNetworkConfig,
 } from "@/config";
+import { getSavedNetwork, saveSelectedNetwork } from "@/utils/networkPersistence";
 
 interface NetworkContextType {
   currentNetwork: ConfigNetworkId;
@@ -34,8 +35,11 @@ interface NetworkProviderProps {
 export const NetworkProvider: React.FC<NetworkProviderProps> = ({
   children,
 }) => {
-  const [currentNetwork, setCurrentNetworkState] =
-    useState<ConfigNetworkId>("voi-mainnet");
+  // Initialize with saved network or default to voi-mainnet
+  const [currentNetwork, setCurrentNetworkState] = useState<ConfigNetworkId>(() => {
+    const savedNetwork = getSavedNetwork();
+    return savedNetwork || "voi-mainnet";
+  });
   const [isSwitchingNetwork, setIsSwitchingNetwork] = useState(false);
 
   // Create WalletManager with current network configuration
@@ -67,7 +71,7 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
     if (networkConfig.networkType === "avm") {
       // AVM networks (Algorand/VOI) - use Algorand-compatible wallets
       // These wallets work with both VOI and Algorand networks
-      const wallets = [
+      const wallets: any[] = [
         WalletId.KIBISIS,
         {
           id: WalletId.LUTE,
@@ -210,6 +214,9 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
         // For universal wallets, keep the connection and just update the network
         setCurrentNetworkState(networkId);
         
+        // Save the selected network
+        saveSelectedNetwork(networkId);
+        
         // Create new WalletManager with new network configuration
         const newWalletManager = createWalletManager(networkId);
         setWalletManager(newWalletManager);
@@ -231,6 +238,9 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
 
         // Update local state
         setCurrentNetworkState(networkId);
+
+        // Save the selected network
+        saveSelectedNetwork(networkId);
 
         // Create new WalletManager with new network configuration
         const newWalletManager = createWalletManager(networkId);
