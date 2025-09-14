@@ -275,7 +275,10 @@ const algorandMainnetConfig: NetworkConfig = {
   indexerUrl: "https://mainnet-idx.4160.nodely.dev",
   explorerUrl: "https://algoexplorer.io",
   contracts: {
-    lendingPools: ["3207735602"],
+    lendingPools: [
+      "3207735602", 
+      "3212536201"
+    ],
     priceOracle: undefined,
     liquidationEngine: undefined,
     governance: undefined,
@@ -461,6 +464,18 @@ const algorandMainnetConfig: NetworkConfig = {
       name: "HAY",
       symbol: "HAY",
       logoPath: "/lovable-uploads/wBTC.png",
+      tokenStandard: "asa",
+    },
+    // COOP 796425061 6 3212524778
+    COOP: {
+      assetId: "796425061",
+      poolId: "3212536201",
+      contractId: "3212524778",
+      nTokenId: "3212561970",
+      decimals: 6,
+      name: "COOP",
+      symbol: "COOP",
+      logoPath: "/lovable-uploads/COOP.webp",
       tokenStandard: "asa",
     },
   },
@@ -857,6 +872,7 @@ export const getTokenDisplayInfo = (networkId: NetworkId, symbol: string) => {
       originalName: tokenConfig.name,
       originalSymbol: tokenConfig.symbol,
       originalContractId: tokenConfig.contractId,
+      poolId: tokenConfig.poolId, // Include pool ID from config
     };
   }
 
@@ -870,6 +886,7 @@ export const getTokenDisplayInfo = (networkId: NetworkId, symbol: string) => {
     originalName: tokenConfig.name,
     originalSymbol: tokenConfig.symbol,
     originalContractId: tokenConfig.contractId,
+    poolId: tokenConfig.poolId, // Include pool ID from config
   };
 };
 

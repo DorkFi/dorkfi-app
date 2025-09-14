@@ -17,6 +17,7 @@ import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClien
 import { CONTRACT } from "ulujs";
 import algorandService, { AlgorandNetwork } from "./algorandService";
 import algosdk from "algosdk";
+import { decodeMarket } from "./lendingService";
 
 export interface PausedState {
   isPaused: boolean;
@@ -108,11 +109,12 @@ export const fetchPausedState = async (
         }
       );
 
-      const pausedResult = await ci.get_paused();
-      console.log("Paused result:", pausedResult);
+      const marketResult = await ci.get_market();
+      const market = decodeMarket(marketResult.returnValue);
+      console.log("Paused result:", market.paused);
 
       return {
-        isPaused: pausedResult.returnValue === 1,
+        isPaused: market.paused,
         pausedBy: undefined,
         pausedAt: undefined,
         pauseReason: undefined,
@@ -249,7 +251,7 @@ export const togglePauseState = async (
         networkConfig.walletNetworkId as AlgorandNetwork
       );
       const ci = new CONTRACT(
-        Number(networkConfig.contracts.lendingPools[0]),
+        Number(networkConfig.contracts.lendingPools[1]),
         clients.algod,
         undefined,
         { ...LendingPoolAppSpec.contract, events: [] },

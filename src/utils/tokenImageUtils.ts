@@ -25,6 +25,7 @@ export const getTokenImagePath = (symbol: string): string => {
     AVAX: "/lovable-uploads/wBTC.png",
     HAY: "/lovable-uploads/HAY.webp",
     COMPX: "/lovable-uploads/COMPX.webp",
+    COOP: "/lovable-uploads/COOP.webp",
   };
 
   // First check for exact match (including prefixed tokens like aUSDC)

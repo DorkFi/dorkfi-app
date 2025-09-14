@@ -736,6 +736,7 @@ export default function AdminDashboard() {
           !pausedState.isPaused,
           activeAccount?.address
         );
+        console.log("togglePauseResult", togglePauseResult);
         if (togglePauseResult.success) {
           // Reload paused state after successful toggle
           const stxns = await signTransactions(
@@ -2605,6 +2606,14 @@ export default function AdminDashboard() {
                   <div>
                     <p className="text-muted-foreground">Market ID</p>
                     <p className="font-medium">{marketViewData.marketId}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Pool ID</p>
+                    <p className="font-medium">{marketViewData.poolId}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Token Contract ID</p>
+                    <p className="font-medium">{marketViewData.tokenContractId}</p>
                   </div>
                 </div>
               </div>

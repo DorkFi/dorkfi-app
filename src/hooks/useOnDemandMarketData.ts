@@ -120,17 +120,33 @@ export const useOnDemandMarketData = ({
     setLoadingMarkets(prev => new Set(prev).add(marketKey));
     
     try {
-      // Get pool ID from network config
-      const lendingPools = getLendingPools(currentNetwork);
-      const poolId = lendingPools[0] || '1'; // Use first lending pool or fallback
+      // Use the pool ID directly from the token config
+      const marketId = token.underlyingContractId || token.underlyingAssetId || token.originalContractId;
+      const poolId = token.poolId;
       
-      const marketInfo = await fetchMarketInfo(
-        poolId,
-        token.underlyingContractId || token.underlyingAssetId || token.originalContractId,
-        currentNetwork
-      );
+      if (!poolId) {
+        console.log(`No pool ID configured for token ${token.symbol}`);
+        setMarketsData(prev => ({
+          ...prev,
+          [marketKey]: {
+            ...prev[marketKey],
+            isLoading: false,
+            isLoaded: true,
+            error: 'No pool ID configured for this token',
+            lastFetched: Date.now(),
+          }
+        }));
+        return;
+      }
+      
+      console.log(`Loading market ${marketId} for token ${token.symbol} using pool: ${poolId}`);
+      
+      // Fetch market info using the configured pool ID
+      const marketInfo = await fetchMarketInfo(poolId, marketId, currentNetwork);
 
       if (marketInfo) {
+        // Use the pool ID from the token config
+        console.log(`Setting market data for ${token.symbol} with pool ID: ${poolId}`);
         const marketData: OnDemandMarketData = {
           asset: token.symbol,
           icon: token.logoPath,
@@ -152,7 +168,7 @@ export const useOnDemandMarketData = ({
           collectorContract: '', // Not available in MarketInfo
           isLoading: false,
           isLoaded: true,
-          marketInfo,
+          marketInfo, // This contains the correct poolId for this market
           lastFetched: Date.now(),
         };
 

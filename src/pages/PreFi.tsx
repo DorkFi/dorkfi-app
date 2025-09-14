@@ -141,6 +141,7 @@ const getMarketsFromConfig = (networkId: NetworkId): Market[] => {
       AVAX: 1,
       HAY: 500,
       COMPX: 20000,
+      COOP: 2000,
     };
 
     return {
