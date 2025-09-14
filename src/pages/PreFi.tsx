@@ -126,11 +126,21 @@ const getMarketsFromConfig = (networkId: NetworkId): Market[] => {
       cbBTC: 0.0002,
       acbBTC: 0.0002,
       aBTC: 0.0002,
+      goBTC: 0.0002,
+      wBTC: 0.0002,
       ETH: 0.005,
       aETH: 0.005,
+      goETH: 0.005,
+      wETH: 0.005,
       ALGO: 100,
       POW: 5000,
       TINY: 1500,
+      FINITE: 1500,
+      LINK: 1,
+      SOL: 0.1,
+      AVAX: 1,
+      HAY: 500,
+      COMPX: 20000,
     };
 
     return {

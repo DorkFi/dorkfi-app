@@ -15,6 +15,16 @@ export const getTokenImagePath = (symbol: string): string => {
     aALGO: "/lovable-uploads/aALGO.png",
     aVOI: "/lovable-uploads/aVOI.webp",
     TINY: "/lovable-uploads/TINY.webp",
+    FINITE: "/lovable-uploads/FINITE.webp",
+    goETH: "/lovable-uploads/goETH.webp",
+    wETH: "/lovable-uploads/wETH.webp",
+    goBTC: "/lovable-uploads/goBTC.webp",
+    wBTC: "/lovable-uploads/wBTC.png",
+    LINK: "/lovable-uploads/wBTC.png",
+    SOL: "/lovable-uploads/wBTC.png",
+    AVAX: "/lovable-uploads/wBTC.png",
+    HAY: "/lovable-uploads/HAY.webp",
+    COMPX: "/lovable-uploads/COMPX.webp",
   };
 
   // First check for exact match (including prefixed tokens like aUSDC)
