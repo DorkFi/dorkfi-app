@@ -508,7 +508,7 @@ export default function AdminDashboard() {
       currentPrice: market.marketInfo?.price
         ? (
             parseFloat(market.marketInfo.price) /
-            Math.pow(10, token?.decimals || 6)
+            Math.pow(10, 6)
           ).toFixed(6)
         : "0",
       newPrice: "",
@@ -561,9 +561,7 @@ export default function AdminDashboard() {
           priceUpdateData.poolId,
           priceUpdateData.marketId,
           BigNumber(priceUpdateData.newPrice)
-            .multipliedBy(
-              BigNumber(10).pow(selectedMarket.marketInfo?.decimals || 6)
-            )
+            .multipliedBy(BigNumber(10).pow(6))
             .toFixed(0),
           activeAccount.address
         );
@@ -2613,7 +2611,9 @@ export default function AdminDashboard() {
                   </div>
                   <div>
                     <p className="text-muted-foreground">Token Contract ID</p>
-                    <p className="font-medium">{marketViewData.tokenContractId}</p>
+                    <p className="font-medium">
+                      {marketViewData.tokenContractId}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -2691,8 +2691,7 @@ export default function AdminDashboard() {
                     <p className="text-lg font-semibold">
                       $
                       {(
-                        parseFloat(marketViewData.price) /
-                        Math.pow(10, marketViewData.decimals || 6)
+                        parseFloat(marketViewData.price) / Math.pow(10, 6)
                       ).toFixed(6)}
                     </p>
                   </div>
@@ -2813,7 +2812,7 @@ export default function AdminDashboard() {
                         const value =
                           parseFloat(marketViewData.maxTotalDeposits) *
                           (parseFloat(marketViewData.price) /
-                            Math.pow(10, marketViewData.decimals || 6));
+                            Math.pow(10, 6));
                         if (value >= 1000000000) {
                           return `${(value / 1000000000).toFixed(2)}B`;
                         } else if (value >= 1000000) {

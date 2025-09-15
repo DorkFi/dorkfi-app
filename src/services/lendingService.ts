@@ -921,12 +921,12 @@ export const deposit = async (
       let customTx: any;
 
       for (const p of [
-        [0, 0],
-        [0, 1],
-        [1, 1],
-        [1, 0],
+        [0, 0, 0],
+        [0, 1, 0],
+        [1, 1, 1],
+        [1, 0, 1],
       ]) {
-        const [p1, p2] = p;
+        const [p1, p2, p3] = p;
         const buildN = [];
 
         // TODO fund ntoken
@@ -982,7 +982,7 @@ export const deposit = async (
           const txnO = (
             await builder.token.arc200_approve(
               algosdk.getApplicationAddress(Number(poolId)),
-              BigInt(amount)
+              BigInt(new BigNumber(amount).multipliedBy(1.1).toFixed(0)) // TODO only increase for NODE
             )
           ).obj;
           buildN.push({
@@ -993,23 +993,23 @@ export const deposit = async (
         }
 
         // arc200 transfer
-        {
-          const txnO = (
-            await builder.token.arc200_transfer(
-              algosdk.getApplicationAddress(Number(poolId)),
-              0
-            )
-          ).obj;
-          buildN.push({
-            ...txnO,
-            payment: 28504,
-            note: new TextEncoder().encode("arc200 transfer"),
-          });
-        }
+        // {
+        //   const txnO = (
+        //     await builder.token.arc200_transfer(
+        //       algosdk.getApplicationAddress(Number(poolId)),
+        //       0
+        //     )
+        //   ).obj;
+        //   buildN.push({
+        //     ...txnO,
+        //     payment: 28504,
+        //     note: new TextEncoder().encode("arc200 transfer"),
+        //   });
+        // }
 
         // deposit to lending pool
         {
-          const depositCost = 900000;
+          const depositCost = p3 > 0 ? 900000 : 0;
           const txnO = (
             await builder.lending.deposit(Number(marketId), BigInt(amount))
           ).obj as any;

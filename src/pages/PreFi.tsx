@@ -142,6 +142,12 @@ const getMarketsFromConfig = (networkId: NetworkId): Market[] => {
       HAY: 500,
       COMPX: 20000,
       COOP: 2000,
+      MONKO: 20e6, // 20M
+      ALPHA: 2000,
+      AKTA: 20000,
+      BRO: 1e6, // 1M
+      PEPE: 2e6, // 2M
+      HOG: 5,
     };
 
     return {
@@ -186,8 +192,20 @@ const formatPoolCapacity = (current: number, max: number) => {
   let currentFormatted: string;
   let maxFormatted: string;
 
-  if (max >= 1_000_000) {
-    // Large values - use M/K formatting
+  if (max >= 1_000_000_000) {
+    // Very large values (billions) - use B/M/K formatting
+    currentFormatted =
+      current >= 1_000_000_000
+        ? fmtCompact.format(current / 1_000_000_000) + "B"
+        : current >= 1_000_000
+        ? fmtCompact.format(current / 1_000_000) + "M"
+        : current >= 1_000
+        ? fmtCompact.format(current / 1_000) + "K"
+        : fmt0.format(current);
+
+    maxFormatted = fmtCompact.format(max / 1_000_000_000) + "B";
+  } else if (max >= 1_000_000) {
+    // Large values (millions) - use M/K formatting
     currentFormatted =
       current >= 1_000_000
         ? fmtCompact.format(current / 1_000_000) + "M"
@@ -771,10 +789,12 @@ export default function PreFiDashboard() {
             // The price from fetchMarketInfo is already scaled by 10^18, but we need to scale by 10^(18 + token.decimals)
             // So we need to scale down by an additional 10^token.decimals
             const partiallyScaledPrice = parseFloat(marketInfo.price);
-            const additionalScaling = Math.pow(10, m.decimals);
+            const additionalScaling = Math.pow(10, 6);
             const finalPrice = partiallyScaledPrice / additionalScaling;
             setMarketPrices((prev) => ({ ...prev, [m.id]: finalPrice }));
-            console.log(`Market price for ${m.symbol}: $${finalPrice}`);
+            console.log(
+              `Market price for ${m.symbol}: $${finalPrice} (scaled by 10^${m.decimals})`
+            );
           }
 
           // Store total deposits for this market
@@ -890,7 +910,7 @@ export default function PreFiDashboard() {
               // Store market price for USD conversion
               if (marketInfo.price) {
                 const partiallyScaledPrice = parseFloat(marketInfo.price);
-                const additionalScaling = Math.pow(10, market.decimals);
+                const additionalScaling = Math.pow(10, 6);
                 const finalPrice = partiallyScaledPrice / additionalScaling;
                 setMarketPrices((prev) => ({
                   ...prev,
@@ -1024,7 +1044,7 @@ export default function PreFiDashboard() {
             // The price from fetchMarketInfo is already scaled by 10^18, but we need to scale by 10^(18 + token.decimals)
             // So we need to scale down by an additional 10^token.decimals
             const partiallyScaledPrice = parseFloat(marketInfo.price);
-            const additionalScaling = Math.pow(10, market.decimals);
+            const additionalScaling = Math.pow(10, 6);
             const finalPrice = partiallyScaledPrice / additionalScaling;
             console.log(
               `Withdraw modal price for ${market.symbol}: $${finalPrice}`
@@ -1100,7 +1120,8 @@ export default function PreFiDashboard() {
               // The price from fetchMarketInfo is already scaled by 10^18, but we need to scale by 10^(18 + token.decimals)
               // So we need to scale down by an additional 10^token.decimals
               const partiallyScaledPrice = parseFloat(marketInfo.price);
-              const additionalScaling = Math.pow(10, selectedMarket.decimals);
+              //const additionalScaling = Math.pow(10, selectedMarket.decimals);
+              const additionalScaling = Math.pow(10, 6);
               const finalPrice = partiallyScaledPrice / additionalScaling;
               console.log(
                 `Partially scaled price: ${partiallyScaledPrice}, Token decimals: ${selectedMarket.decimals}, Final price for ${selectedMarket.symbol}: $${finalPrice}`
@@ -1330,6 +1351,7 @@ export default function PreFiDashboard() {
       eth: 300_000_000, // $300M ETH (was 100M)
       algo: 25_000_000, // $25M ALGO
       pow: 30_000_000, // $30M POW
+      monko: 10_000_000_000, // $10B MONKO
     };
 
     return markets.map((market) => {
@@ -1367,9 +1389,31 @@ export default function PreFiDashboard() {
     let sum = 0;
     for (const m of markets) {
       const totalDeposits = marketTotalDeposits[m.id] || 0;
+
       const price = marketPrices[m.id] || 0;
-      sum += totalDeposits * price;
+
+      const marketTVL = totalDeposits * price;
+
+      console.log(
+        m.symbol,
+        "price",
+        price,
+        "totalDeposits",
+        totalDeposits,
+        "marketTVL",
+        marketTVL
+      );
+
+      // Debug logging to understand the values
+      console.log(
+        `TLV calculation for ${m.symbol}: deposits=${totalDeposits}, price=${price}, value=${marketTVL}`
+      );
+
+      // totalDeposits is already in token units, price is in USD per token
+      // So we multiply to get USD value
+      sum += marketTVL;
     }
+    console.log(`Total locked value calculated: ${sum}`);
     return sum;
   }, [marketTotalDeposits, markets, marketPrices]);
 
@@ -1648,6 +1692,10 @@ export default function PreFiDashboard() {
                             {m.name}
                           </div>
                           <div className="text-xs text-muted-foreground">
+                            Wallet:{" "}
+                            {loading ? "…" : `${fmt.format(wal)} ${m.symbol}`}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
                             Min:{" "}
                             {m.id === "btc" ||
                             m.id === "cbbtc" ||
@@ -1686,37 +1734,24 @@ export default function PreFiDashboard() {
                         </div>
                       </div>
 
-                      {/* Balance Grid */}
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <div className="text-xs text-muted-foreground">
-                            Wallet
-                          </div>
-                          <div className="text-sm font-semibold tabular-nums text-card-foreground">
-                            {loading ? "…" : `${fmt.format(wal)} ${m.symbol}`}
-                          </div>
+                      {/* Deposited Section */}
+                      <div>
+                        <div className="text-xs text-muted-foreground">
+                          Deposited
                         </div>
-                        <div>
-                          <div className="text-xs text-muted-foreground">
-                            Deposited
+                        <div className="space-y-1">
+                          <div className="text-sm font-semibold tabular-nums text-card-foreground">
+                            {loading
+                              ? "…"
+                              : marketPrices[m.id]
+                              ? `$${fmt.format(dep * marketPrices[m.id])}`
+                              : `${fmt.format(dep)} ${m.symbol}`}
                           </div>
-                          <div className="space-y-1">
-                            <div className="text-sm font-semibold tabular-nums text-card-foreground">
-                              {loading
-                                ? "…"
-                                : marketPrices[m.id]
-                                ? `$${fmt.format(dep * marketPrices[m.id])}`
-                                : `${fmt.format(dep)} ${m.symbol}`}
+                          {!loading && dep > 0 && (
+                            <div className="text-xs text-muted-foreground">
+                              {fmt.format(dep)} {m.symbol}
                             </div>
-                            {minOk && (
-                              <div className="flex items-center gap-1">
-                                <CheckCircle2 className="h-3 w-3 text-green-500" />
-                                <span className="text-xs font-medium text-green-600 dark:text-green-400">
-                                  Qualified
-                                </span>
-                              </div>
-                            )}
-                          </div>
+                          )}
                         </div>
                       </div>
 
@@ -1798,6 +1833,14 @@ export default function PreFiDashboard() {
                                 <div className="text-left">
                                   <div className="text-sm font-semibold tabular-nums text-card-foreground">
                                     {poolData.formattedCapacity}
+                                    <span className="text-xs text-muted-foreground ml-1">
+                                      ($
+                                      {fmtCompact.format(
+                                        poolData.totalDepositsUSD *
+                                          (marketPrices[m.id] || 0)
+                                      )}
+                                      )
+                                    </span>
                                   </div>
                                   <div className="text-xs text-muted-foreground/60">
                                     {poolData.percentage.toFixed(1)}% full
@@ -1891,22 +1934,6 @@ export default function PreFiDashboard() {
                             Available tokens for PreFi deposits. Each asset has
                             a minimum deposit requirement to qualify for VOI
                             rewards.
-                          </p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </th>
-                    <th className="px-6 py-4 text-sm font-medium text-right">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span className="cursor-help inline-flex items-center gap-1">
-                            Wallet Balance
-                            <InfoIcon className="h-3 w-3" />
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>
-                            Your current wallet balance for this asset. This
-                            shows how much you can deposit.
                           </p>
                         </TooltipContent>
                       </Tooltip>
@@ -2014,9 +2041,15 @@ export default function PreFiDashboard() {
                                 e.currentTarget.src = "/placeholder.svg";
                               }}
                             />
-                            <div>
+                            <div className="space-y-1">
                               <div className="text-sm font-semibold text-card-foreground">
                                 {m.name}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                Wallet:{" "}
+                                {loading
+                                  ? "…"
+                                  : `${fmt.format(wal)} ${m.symbol}`}
                               </div>
                               <div className="text-xs text-muted-foreground">
                                 Min:{" "}
@@ -2033,13 +2066,6 @@ export default function PreFiDashboard() {
                           </div>
                         </td>
 
-                        {/* Wallet Balance */}
-                        <td className="px-6 py-4 text-right">
-                          <div className="text-sm font-semibold tabular-nums text-card-foreground">
-                            {loading ? "…" : `${fmt.format(wal)} ${m.symbol}`}
-                          </div>
-                        </td>
-
                         {/* Deposited */}
                         <td className="px-6 py-4 text-right">
                           <div className="space-y-1">
@@ -2050,6 +2076,31 @@ export default function PreFiDashboard() {
                                 ? `$${fmt.format(dep * marketPrices[m.id])}`
                                 : `${fmt.format(dep)} ${m.symbol}`}
                             </div>
+                            {!loading && dep > 0 && (
+                              <div className="space-y-1">
+                                <div className="text-xs text-muted-foreground">
+                                  {fmt.format(dep)} {m.symbol}
+                                </div>
+                                {(() => {
+                                  const poolData = poolProgressData.find(
+                                    (p) => p.marketId === m.id
+                                  );
+                                  if (
+                                    poolData &&
+                                    poolData.totalDepositsUSD > 0
+                                  ) {
+                                    const userShare =
+                                      (dep / poolData.totalDepositsUSD) * 100;
+                                    return userShare > 0.01 ? (
+                                      <div className="text-xs text-accent">
+                                        {userShare.toFixed(2)}% share
+                                      </div>
+                                    ) : null;
+                                  }
+                                  return null;
+                                })()}
+                              </div>
+                            )}
                             {minOk && (
                               <div className="flex items-center justify-end gap-1">
                                 <CheckCircle2 className="h-3 w-3 text-green-500" />
@@ -2171,6 +2222,14 @@ export default function PreFiDashboard() {
                                     <div className="text-left">
                                       <div className="text-sm font-semibold tabular-nums text-card-foreground">
                                         {poolData.formattedCapacity}
+                                        <span className="text-xs text-muted-foreground ml-1">
+                                          ($
+                                          {fmtCompact.format(
+                                            poolData.totalDepositsUSD *
+                                              (marketPrices[m.id] || 0)
+                                          )}
+                                          )
+                                        </span>
                                       </div>
                                       <div className="text-xs text-muted-foreground/60">
                                         {poolData.percentage.toFixed(1)}% full
