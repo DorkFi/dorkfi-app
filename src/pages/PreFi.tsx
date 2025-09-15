@@ -1600,7 +1600,7 @@ export default function PreFiDashboard() {
             <TooltipTrigger asChild>
               <div>
                 <Stat
-                  label="Network"
+                  label="Current Network"
                   value={
                     currentNetwork.startsWith("voi")
                       ? "Voi Network"
