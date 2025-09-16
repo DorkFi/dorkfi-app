@@ -1645,6 +1645,9 @@ export default function PreFiDashboard() {
         (() => {
           const walletId = activeWallet.id.toLowerCase();
           const walletName = activeWallet.metadata?.name?.toLowerCase() || "";
+          console.log("walletId", walletId);
+          console.log("walletName", walletName);
+          console.log("currentNetwork", currentNetwork);
           const isIncompatible =
             (currentNetwork === "voi-mainnet" && walletId === "pera") ||
             (currentNetwork === "voi-mainnet" && walletId === "defly") ||
@@ -2300,6 +2303,7 @@ export default function PreFiDashboard() {
                                 </TooltipTrigger>
                                 <TooltipContent>
                                   <div className="space-y-1">
+                                    /{" "}
                                     <p className="font-semibold">
                                       {m.name} Pool Status
                                     </p>
