@@ -1,3 +1,15 @@
+// Network logo mapping utility
+export const getNetworkLogoPath = (networkId: string): string => {
+  const networkLogoMap: Record<string, string> = {
+    "voi-mainnet": "/lovable-uploads/VOI.png",
+    "voi-testnet": "/lovable-uploads/VOI.png",
+    "algorand-mainnet": "/lovable-uploads/Algo.webp",
+    "algorand-testnet": "/lovable-uploads/Algo.webp",
+  };
+
+  return networkLogoMap[networkId] || "/placeholder.svg";
+};
+
 // Token image mapping utility
 export const getTokenImagePath = (symbol: string): string => {
   const tokenImageMap: Record<string, string> = {

@@ -51,7 +51,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import SupplyBorrowCongrats from "@/components/SupplyBorrowCongrats";
 import WithdrawModal from "@/components/WithdrawModal";
-import { getTokenImagePath } from "@/utils/tokenImageUtils";
+import { getTokenImagePath, getNetworkLogoPath } from "@/utils/tokenImageUtils";
 import VersionDisplay from "@/components/VersionDisplay";
 import {
   getCurrentNetworkConfig,
@@ -1614,11 +1614,15 @@ export default function PreFiDashboard() {
                     }`}
                   >
                     <div className="flex items-center gap-2">
-                      {isOnline ? (
-                        <Wifi className="w-4 h-4 text-green-500" />
-                      ) : (
-                        <WifiOff className="w-4 h-4 text-red-500" />
-                      )}
+                      <img 
+                        src={getNetworkLogoPath(networkId)} 
+                        alt={`${networkConfig.name} logo`}
+                        className="w-6 h-6 rounded-full"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.src = "/placeholder.svg";
+                        }}
+                      />
                       <div className="flex flex-col">
                         <span className="font-medium text-sm">
                           {networkConfig.name}

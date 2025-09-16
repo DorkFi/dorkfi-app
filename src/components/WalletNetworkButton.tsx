@@ -14,6 +14,7 @@ import WalletModal from "./WalletModal";
 import AccountSelector from "./AccountSelector";
 import { config, NetworkId, getNetworkConfig, getEnabledNetworks } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
+import { getNetworkLogoPath } from "@/utils/tokenImageUtils";
 
 interface WalletNetworkButtonProps {
   currentNetwork?: NetworkId;
@@ -318,11 +319,15 @@ const WalletNetworkButton = ({
                       }`}
                     >
                       <div className="flex items-center gap-2">
-                        {isOnline ? (
-                          <Wifi className="w-4 h-4 text-green-500" />
-                        ) : (
-                          <WifiOff className="w-4 h-4 text-red-500" />
-                        )}
+                        <img 
+                          src={getNetworkLogoPath(networkId)} 
+                          alt={`${networkConfig.name} logo`}
+                          className="w-6 h-6 rounded-full"
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            target.src = "/placeholder.svg";
+                          }}
+                        />
                         <div className="flex flex-col">
                           <span className="font-medium text-sm">{networkConfig.name}</span>
                           <span className="text-xs text-muted-foreground">
@@ -401,10 +406,16 @@ const WalletNetworkButton = ({
                     <div className="flex items-center gap-2">
                       {isCurrentlySwitching ? (
                         <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                      ) : isOnline ? (
-                        <Wifi className="w-4 h-4 text-green-500" />
                       ) : (
-                        <WifiOff className="w-4 h-4 text-red-500" />
+                        <img 
+                          src={getNetworkLogoPath(networkId)} 
+                          alt={`${networkConfig.name} logo`}
+                          className="w-6 h-6 rounded-full"
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            target.src = "/placeholder.svg";
+                          }}
+                        />
                       )}
                       <div className="flex flex-col">
                         <span className="font-medium text-sm">
