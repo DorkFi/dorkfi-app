@@ -36,11 +36,11 @@ const NETWORK_CONFIGS: Record<
   Omit<AlgorandConfig, "network">
 > = {
   mainnet: {
-    algodToken: "",
-    algodServer: "https://mainnet-api.4160.nodely.dev",
+    algodToken: "2A65A886E60E05601ED3AE81531A3FB4",
+    algodServer: "https://mainnet-api.4160.nodely.io",
     algodPort: 443,
-    indexerToken: "",
-    indexerServer: "https://mainnet-idx.4160.nodely.dev",
+    indexerToken: "2A65A886E60E05601ED3AE81531A3FB4",
+    indexerServer: "https://mainnet-idx.4160.nodely.io",
     indexerPort: 443,
   },
   testnet: {
