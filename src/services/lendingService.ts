@@ -10,6 +10,8 @@ import {
   getNetworkConfig,
   isCurrentNetworkAlgorandCompatible,
   isCurrentNetworkEVM,
+  isAlgorandCompatibleNetwork,
+  isEVMNetwork,
   NetworkId,
   getAllTokensWithDisplayInfo,
   getLendingPools,
@@ -131,9 +133,9 @@ export const fetchMarketInfo = async (
 ): Promise<MarketInfo | null> => {
   console.log("fetchMarketInfo", { poolId, marketId, networkId });
   try {
-    const networkConfig = getCurrentNetworkConfig();
+    const networkConfig = getNetworkConfig(networkId);
 
-    if (isCurrentNetworkAlgorandCompatible()) {
+    if (isAlgorandCompatibleNetwork(networkId)) {
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
@@ -233,7 +235,7 @@ export const fetchMarketInfo = async (
       console.log("marketInfo", { marketInfo });
 
       return marketInfo;
-    } else if (isCurrentNetworkEVM()) {
+    } else if (isEVMNetwork(networkId)) {
       throw new Error("EVM networks are not supported yet");
     } else {
       throw new Error("Unsupported network");
@@ -253,7 +255,7 @@ export const fetchAllMarkets = async (
   try {
     const networkConfig = getNetworkConfig(networkId);
 
-    if (isCurrentNetworkAlgorandCompatible()) {
+    if (isAlgorandCompatibleNetwork(networkId)) {
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
@@ -366,7 +368,7 @@ export const fetchAllMarkets = async (
       await new Promise((resolve) => setTimeout(resolve, 300));
 
       return markets;
-    } else if (isCurrentNetworkEVM()) {
+    } else if (isEVMNetwork(networkId)) {
       // For EVM networks, also use config-based markets
       const tokens = getAllTokensWithDisplayInfo(networkId);
       const lendingPools = getLendingPools(networkId);
@@ -625,7 +627,7 @@ export const withdraw = async (
   try {
     const networkConfig = getCurrentNetworkConfig();
 
-    if (isCurrentNetworkAlgorandCompatible()) {
+    if (isAlgorandCompatibleNetwork(networkId)) {
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
@@ -764,7 +766,7 @@ export const withdraw = async (
         success: true,
         txns: customTx.txns,
       };
-    } else if (isCurrentNetworkEVM()) {
+    } else if (isEVMNetwork(networkId)) {
       // TODO: Implement EVM withdraw
       return {
         success: true,
@@ -801,7 +803,7 @@ export const deposit = async (
   try {
     const networkConfig = getCurrentNetworkConfig();
 
-    if (isCurrentNetworkAlgorandCompatible()) {
+    if (isAlgorandCompatibleNetwork(networkId)) {
       console.log({ networkConfig });
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
@@ -1049,7 +1051,7 @@ export const deposit = async (
         success: true,
         txns: [...customTx.txns],
       };
-    } else if (isCurrentNetworkEVM()) {
+    } else if (isEVMNetwork(networkId)) {
       throw new Error("EVM networks are not supported yet");
     } else {
       throw new Error("Unsupported network");

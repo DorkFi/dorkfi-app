@@ -201,55 +201,38 @@ const WalletNetworkButton = ({
     
     try {
       // Check if the target network is supported by the connected wallet
-      const supportedNetworks = getSupportedNetworks();
-      if (activeWallet && !supportedNetworks.includes(networkId)) {
-        const networkConfig = getNetworkConfig(networkId);
-        toast({
-          title: "Network Not Supported",
-          description: `Your ${activeWallet.name} wallet does not support ${networkConfig.name}. Please disconnect and connect a compatible wallet.`,
-          variant: "destructive",
-        });
-        return;
-      }
+      // const supportedNetworks = getSupportedNetworks();
+      // if (activeWallet && !supportedNetworks.includes(networkId)) {
+      //   const networkConfig = getNetworkConfig(networkId);
+      //   toast({
+      //     title: "Network Not Supported",
+      //     description: `Your ${activeWallet.name} wallet does not support ${networkConfig.name}. Please disconnect and connect a compatible wallet.`,
+      //     variant: "destructive",
+      //   });
+      //   return;
+      // }
       
       setSelectedNetwork(networkId);
       
-      // Check if the connected wallet supports seamless network switching
-      const isUniversalWallet = activeWallet && 
-        (activeWallet.id.toLowerCase() === 'lute' || activeWallet.id.toLowerCase() === 'kibisis');
+      // Switch network - all wallets stay connected
+      await switchNetwork(networkId);
       
-      if (isUniversalWallet && activeAccount) {
-        // For universal wallets, switch network without disconnecting
-        await switchNetwork(networkId);
-        
-        // Get the new network configuration
-        const networkConfig = getNetworkConfig(networkId);
-        
+      // Get the new network configuration
+      const networkConfig = getNetworkConfig(networkId);
+      
+      // If no wallet is connected, open wallet modal after switching network
+      if (!activeAccount) {
+        setIsWalletModalOpen(true);
+        toast({
+          title: "Network Switched",
+          description: `Switched to ${networkConfig.name}. Please connect your wallet.`,
+        });
+      } else {
+        // Wallet remains connected
         toast({
           title: "Network Switched",
           description: `Switched to ${networkConfig.name}. Wallet remains connected.`,
         });
-      } else {
-        // For other wallets or when not connected, use standard switching
-        await switchNetwork(networkId);
-        
-        // Get the new network configuration
-        const networkConfig = getNetworkConfig(networkId);
-        
-        // If no wallet is connected, open wallet modal after switching network
-        if (!activeAccount) {
-          setIsWalletModalOpen(true);
-          toast({
-            title: "Network Switched",
-            description: `Switched to ${networkConfig.name}. Please connect your wallet.`,
-          });
-        } else {
-          // If wallet is connected but not universal, show reconnection message
-          toast({
-            title: "Network Switched",
-            description: `Switched to ${networkConfig.name}. Please reconnect your wallet if needed.`,
-          });
-        }
       }
       
       // Notify parent component about network change

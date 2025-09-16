@@ -14,6 +14,9 @@ import {
   ExternalLink,
   InfoIcon,
   ShoppingCart,
+  ChevronDown,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import DorkFiButton from "@/components/ui/DorkFiButton";
@@ -21,6 +24,7 @@ import { Link } from "react-router-dom";
 import WalletNetworkButton from "@/components/WalletNetworkButton";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import { H1, Body } from "@/components/ui/Typography";
+import MultiNetworkTLV from "@/components/MultiNetworkTLV";
 import {
   Dialog,
   DialogContent,
@@ -38,6 +42,13 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import SupplyBorrowCongrats from "@/components/SupplyBorrowCongrats";
 import WithdrawModal from "@/components/WithdrawModal";
 import { getTokenImagePath } from "@/utils/tokenImageUtils";
@@ -50,6 +61,7 @@ import {
   isCurrentNetworkEVM,
   isCurrentNetworkAlgorandCompatible,
   TokenStandard,
+  getEnabledNetworks,
 } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { deposit, withdraw, fetchMarketInfo } from "@/services/lendingService";
@@ -638,9 +650,9 @@ function ProgressBar({ value, max }: { value: number; max: number }) {
  * Main Component         *
  *************************/
 export default function PreFiDashboard() {
-  const { activeAccount, signTransactions } = useWallet();
+  const { activeAccount, activeWallet, signTransactions } = useWallet();
   const isMobile = useIsMobile();
-  const { currentNetwork } = useNetwork();
+  const { currentNetwork, switchNetwork } = useNetwork();
 
   // Get markets for current network
   const markets = useMemo(() => {
@@ -684,6 +696,12 @@ export default function PreFiDashboard() {
     Record<string, number>
   >({});
   const [isBuyModalOpen, setIsBuyModalOpen] = useState(false);
+
+  // Multi-network configuration - memoized to prevent recreation
+  const enabledNetworks: NetworkId[] = useMemo(
+    () => ["voi-mainnet", "algorand-mainnet"],
+    []
+  );
 
   const launchTs = PROGRAM.LAUNCH_TIMESTAMP;
 
@@ -934,10 +952,14 @@ export default function PreFiDashboard() {
   }, [markets, currentNetwork, activeAccount?.address]);
 
   // Handle network changes
-  const handleNetworkChange = (networkId: NetworkId) => {
+  const handleNetworkChange = async (networkId: NetworkId) => {
     console.log("Network changed to:", networkId);
-    // The network context will handle the actual switching
-    // This component will automatically react via the useNetwork hook
+    try {
+      await switchNetwork(networkId);
+      console.log("Successfully switched to network:", networkId);
+    } catch (error) {
+      console.error("Failed to switch network:", error);
+    }
   };
 
   // Modal handlers
@@ -1384,39 +1406,6 @@ export default function PreFiDashboard() {
     });
   }, [markets, marketTotalDeposits, marketMaxTotalDeposits]);
 
-  // Calculate total locked value across all markets using totalScaledDeposits
-  const totalLockedValue = useMemo(() => {
-    let sum = 0;
-    for (const m of markets) {
-      const totalDeposits = marketTotalDeposits[m.id] || 0;
-
-      const price = marketPrices[m.id] || 0;
-
-      const marketTVL = totalDeposits * price;
-
-      console.log(
-        m.symbol,
-        "price",
-        price,
-        "totalDeposits",
-        totalDeposits,
-        "marketTVL",
-        marketTVL
-      );
-
-      // Debug logging to understand the values
-      console.log(
-        `TLV calculation for ${m.symbol}: deposits=${totalDeposits}, price=${price}, value=${marketTVL}`
-      );
-
-      // totalDeposits is already in token units, price is in USD per token
-      // So we multiply to get USD value
-      sum += marketTVL;
-    }
-    console.log(`Total locked value calculated: ${sum}`);
-    return sum;
-  }, [marketTotalDeposits, markets, marketPrices]);
-
   return (
     <div className="min-h-screen bg-background relative">
       {/* Light Mode Beach Background */}
@@ -1558,25 +1547,12 @@ export default function PreFiDashboard() {
       {/* Stats */}
       <header className="mx-auto max-w-6xl px-4 relative z-10">
         <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div>
-                <Stat
-                  label="Total Locked Value"
-                  value={`$${fmt0.format(totalLockedValue)}`}
-                  icon={Coins}
-                />
-              </div>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>
-                Total USD value of all deposits locked across all PreFi markets.
-                This represents the total value committed by all participants in
-                the PreFi program, calculated using totalScaledDeposits from
-                each market.
-              </p>
-            </TooltipContent>
-          </Tooltip>
+          <MultiNetworkTLV
+            enabledNetworks={enabledNetworks}
+            showBreakdown={false}
+            refreshInterval={300000}
+            autoRefresh={true}
+          />
 
           <Tooltip>
             <TooltipTrigger asChild>
@@ -1596,31 +1572,116 @@ export default function PreFiDashboard() {
             </TooltipContent>
           </Tooltip>
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div>
-                <Stat
-                  label="Current Network"
-                  value={
-                    currentNetwork.startsWith("voi")
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <div className="flex items-center gap-3 rounded-2xl border border-ocean-teal/20 bg-gradient-to-br from-slate-900 to-slate-800 p-4 shadow-sm dark-glow-card cursor-pointer hover:border-ocean-teal/40 transition-all hover:scale-105">
+                <div className="rounded-xl border border-ocean-teal/30 bg-slate-800/60 p-2">
+                  <BarChart3 className="h-5 w-5 text-aqua-glow" />
+                </div>
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-slate-400">
+                    Current Network
+                  </div>
+                  <div className="text-lg font-semibold text-white">
+                    {currentNetwork.startsWith("voi")
                       ? "Voi Network"
                       : currentNetwork.startsWith("algorand")
                       ? "Algorand"
-                      : getCurrentNetworkConfig().name
-                  }
-                  icon={BarChart3}
-                />
+                      : getCurrentNetworkConfig().name}
+                    <ChevronDown className="h-4 w-4 text-slate-400 ml-2 inline" />
+                  </div>
+                </div>
               </div>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>
-                Connected blockchain network. Mock mode shows sample data for
-                demonstration.
-              </p>
-            </TooltipContent>
-          </Tooltip>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64">
+              <div className="px-2 py-1.5">
+                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  Switch Network
+                </div>
+              </div>
+              <DropdownMenuSeparator />
+              {getEnabledNetworks().map((networkId) => {
+                const networkConfig = getNetworkConfig(networkId);
+                const isCurrentNetwork = currentNetwork === networkId;
+                const isOnline = true; // You can implement actual network status checking here
+
+                return (
+                  <DropdownMenuItem
+                    key={networkId}
+                    onClick={() => handleNetworkChange(networkId)}
+                    className={`cursor-pointer flex items-center justify-between ${
+                      isCurrentNetwork ? "bg-accent" : ""
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      {isOnline ? (
+                        <Wifi className="w-4 h-4 text-green-500" />
+                      ) : (
+                        <WifiOff className="w-4 h-4 text-red-500" />
+                      )}
+                      <div className="flex flex-col">
+                        <span className="font-medium text-sm">
+                          {networkConfig.name}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {networkConfig.networkType.toUpperCase()}
+                        </span>
+                      </div>
+                    </div>
+                    {isCurrentNetwork && (
+                      <div className="w-2 h-2 bg-green-500 rounded-full" />
+                    )}
+                  </DropdownMenuItem>
+                );
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
+
+      {/* Wallet Compatibility Warning */}
+      {activeAccount &&
+        activeWallet &&
+        (() => {
+          const walletId = activeWallet.id.toLowerCase();
+          const walletName = activeWallet.metadata?.name?.toLowerCase() || "";
+          const isIncompatible =
+            (currentNetwork === "voi-mainnet" && walletId === "pera") ||
+            (currentNetwork === "voi-mainnet" && walletId === "defly") ||
+            (currentNetwork === "algorand-mainnet" && walletId === "vera") ||
+            (currentNetwork === "algorand-mainnet" && walletId === "biatec");
+
+          return isIncompatible ? (
+            <section className="mx-auto max-w-6xl px-4 py-4 relative z-10">
+              <div className="rounded-2xl border border-yellow-500/20 bg-gradient-to-br from-yellow-900/20 to-orange-900/20 p-4 shadow-sm">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-xl border border-yellow-500/30 bg-yellow-800/20 p-2 flex-shrink-0">
+                    <AlertCircle className="h-5 w-5 text-yellow-400" />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="text-sm font-semibold text-yellow-200 mb-1">
+                      Wallet Compatibility Notice
+                    </h3>
+                    <p className="text-sm text-yellow-100/80 mb-2">
+                      Your current wallet ({activeWallet.name}) is not
+                      compatible with{" "}
+                      {currentNetwork.startsWith("voi") ? "VOI" : "Algorand"}{" "}
+                      network. For the best experience, we recommend using:
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <span className="inline-flex items-center px-2 py-1 rounded-md bg-yellow-800/40 text-xs font-medium text-yellow-200 border border-yellow-500/30">
+                        Kibisis (Universal)
+                      </span>
+                      <span className="inline-flex items-center px-2 py-1 rounded-md bg-yellow-800/40 text-xs font-medium text-yellow-200 border border-yellow-500/30">
+                        Lute (Universal)
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          ) : null;
+        })()}
 
       {/* Markets */}
       <main className="mx-auto max-w-6xl px-4 py-8 relative z-10">
@@ -2243,11 +2304,11 @@ export default function PreFiDashboard() {
                                       {m.name} Pool Status
                                     </p>
                                     <p>
-                                      Current: $
+                                      Current:{` `}
                                       {fmt.format(poolData.totalDepositsUSD)}
                                     </p>
                                     <p>
-                                      Maximum: $
+                                      Maximum:{` `}
                                       {fmt.format(poolData.maxDeposits)}
                                     </p>
                                     <p>

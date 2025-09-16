@@ -17,7 +17,10 @@ import {
   setCurrentNetwork,
   getNetworkConfig,
 } from "@/config";
-import { getSavedNetwork, saveSelectedNetwork } from "@/utils/networkPersistence";
+import {
+  getSavedNetwork,
+  saveSelectedNetwork,
+} from "@/utils/networkPersistence";
 
 interface NetworkContextType {
   currentNetwork: ConfigNetworkId;
@@ -36,10 +39,12 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
   children,
 }) => {
   // Initialize with saved network or default to voi-mainnet
-  const [currentNetwork, setCurrentNetworkState] = useState<ConfigNetworkId>(() => {
-    const savedNetwork = getSavedNetwork();
-    return savedNetwork || "voi-mainnet";
-  });
+  const [currentNetwork, setCurrentNetworkState] = useState<ConfigNetworkId>(
+    () => {
+      const savedNetwork = getSavedNetwork();
+      return savedNetwork || "voi-mainnet";
+    }
+  );
   const [isSwitchingNetwork, setIsSwitchingNetwork] = useState(false);
 
   // Create WalletManager with current network configuration
@@ -69,69 +74,46 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
     const networkConfig = getNetworkConfig(networkId);
 
     if (networkConfig.networkType === "avm") {
-      // AVM networks (Algorand/VOI) - use Algorand-compatible wallets
-      // These wallets work with both VOI and Algorand networks
-      const wallets: any[] = [
+      // Include ALL AVM wallets for ALL AVM networks to prevent disconnection
+      // This allows switching to any network without disconnecting the wallet
+      return [
         WalletId.KIBISIS,
         {
           id: WalletId.LUTE,
           options: { siteName: "DorkFi" },
         },
-      ];
-      // Note: WalletConnect configuration needs proper setup for production use
-      // Additional AVM wallets can be added here as they become available
-      if (networkId === "voi-mainnet") {
-        return [
-          WalletId.KIBISIS,
-          {
-            id: WalletId.LUTE,
-            options: { siteName: "DorkFi" },
-          },
-          {
-            id: WalletId.BIATEC,
-            options: {
-              projectId: "cd7fe0125d88d239da79fa286e6de2a8",
-              metadata: {
-                name: "DorkFi",
-                description: "DorkFi DeFi Protocol",
-                url: "https://app.dork.fi",
-                icons: ["https://app.dork.fi/favicon.ico"],
-              },
-              // Vera Wallet specific configuration
-              enableExplorer: true,
-              explorerRecommendedWalletIds: ["biatec"],
-              themeMode: "light",
+        WalletId.PERA,
+        {
+          id: WalletId.BIATEC,
+          options: {
+            projectId: "cd7fe0125d88d239da79fa286e6de2a8",
+            metadata: {
+              name: "DorkFi",
+              description: "DorkFi DeFi Protocol",
+              url: "https://app.dork.fi",
+              icons: ["https://app.dork.fi/favicon.ico"],
             },
+            enableExplorer: true,
+            explorerRecommendedWalletIds: ["biatec"],
+            themeMode: "light",
           },
-          {
-            id: WalletId.WALLETCONNECT,
-            options: {
-              projectId: "cd7fe0125d88d239da79fa286e6de2a8",
-              metadata: {
-                name: "DorkFi",
-                description: "DorkFi DeFi Protocol",
-                url: "https://app.dork.fi",
-                icons: ["https://app.dork.fi/favicon.ico"],
-              },
-              // Vera Wallet specific configuration
-              enableExplorer: true,
-              explorerRecommendedWalletIds: ["vera"],
-              themeMode: "light",
+        },
+        {
+          id: WalletId.WALLETCONNECT,
+          options: {
+            projectId: "cd7fe0125d88d239da79fa286e6de2a8",
+            metadata: {
+              name: "DorkFi",
+              description: "DorkFi DeFi Protocol",
+              url: "https://app.dork.fi",
+              icons: ["https://app.dork.fi/favicon.ico"],
             },
+            enableExplorer: true,
+            explorerRecommendedWalletIds: ["vera"],
+            themeMode: "light",
           },
-        ];
-      } else if (networkId === "algorand-mainnet") {
-        return [
-          WalletId.KIBISIS,
-          {
-            id: WalletId.LUTE,
-            options: { siteName: "DorkFi" },
-          },
-          WalletId.PERA,
-          //WalletId.DEFLY,
-        ];
-      }
-      return wallets;
+        },
+      ] as any[];
     } else if (networkConfig.networkType === "evm") {
       // EVM networks (Ethereum/Base) - for now return empty array
       // EVM wallet integration would be implemented here
@@ -141,48 +123,66 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
     return [];
   };
 
-  const isNetworkSupportedByWallet = (networkId: ConfigNetworkId, walletId?: string, walletName?: string): boolean => {
+  const isNetworkSupportedByWallet = (
+    networkId: ConfigNetworkId,
+    walletId?: string,
+    walletName?: string
+  ): boolean => {
     if (!walletId) return true; // If no wallet connected, all networks are allowed
-    
+
     const walletIdLower = walletId.toLowerCase();
-    const walletNameLower = (walletName || '').toLowerCase();
-    
+    const walletNameLower = (walletName || "").toLowerCase();
+
     // Universal wallets support all AVM networks
-    if (walletIdLower === 'lute' || walletIdLower === 'kibisis') {
+    if (walletIdLower === "lute" || walletIdLower === "kibisis") {
       return true;
     }
-    
+
     // VOI-specific wallets only support VOI Mainnet
-    if (walletIdLower === 'vera' || walletIdLower === 'biatec' || 
-        walletNameLower.includes('vera') || walletNameLower.includes('biatec')) {
-      return networkId === 'voi-mainnet';
+    if (
+      walletIdLower === "vera" ||
+      walletIdLower === "biatec" ||
+      walletNameLower.includes("vera") ||
+      walletNameLower.includes("biatec")
+    ) {
+      return networkId === "voi-mainnet";
     }
-    
+
     // Algorand-specific wallets only support Algorand Mainnet
-    if (walletIdLower === 'pera' || walletIdLower === 'defly' || 
-        walletNameLower.includes('pera') || walletNameLower.includes('defly')) {
-      return networkId === 'algorand-mainnet';
+    if (
+      walletIdLower === "pera" ||
+      walletIdLower === "defly" ||
+      walletNameLower.includes("pera") ||
+      walletNameLower.includes("defly")
+    ) {
+      return networkId === "algorand-mainnet";
     }
-    
+
     // WalletConnect - check wallet name for specific restrictions
-    if (walletIdLower === 'walletconnect') {
-      if (walletNameLower.includes('vera') || walletNameLower.includes('biatec')) {
-        return networkId === 'voi-mainnet';
+    if (walletIdLower === "walletconnect") {
+      if (
+        walletNameLower.includes("vera") ||
+        walletNameLower.includes("biatec")
+      ) {
+        return networkId === "voi-mainnet";
       }
-      if (walletNameLower.includes('pera') || walletNameLower.includes('defly')) {
-        return networkId === 'algorand-mainnet';
+      if (
+        walletNameLower.includes("pera") ||
+        walletNameLower.includes("defly")
+      ) {
+        return networkId === "algorand-mainnet";
       }
-      
+
       // Fallback: If WalletConnect on VOI Mainnet, assume it's a VOI-specific wallet
       // This handles cases where wallet name doesn't contain the specific wallet name
-      if (currentNetwork === 'voi-mainnet') {
-        return networkId === 'voi-mainnet';
+      if (currentNetwork === "voi-mainnet") {
+        return networkId === "voi-mainnet";
       }
-      
+
       // Unknown WalletConnect wallet, allow all networks
       return true;
     }
-    
+
     // Default: allow all networks for unknown wallet types
     return true;
   };
@@ -200,42 +200,10 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
       // Get current wallet state before switching
       const currentActiveWallet = walletManager.activeWallet;
       const wasConnected = currentActiveWallet?.isConnected;
-      const walletId = currentActiveWallet?.id?.toLowerCase();
 
-      // Validate that the target network is supported by the connected wallet
-      if (wasConnected && walletId && !isNetworkSupportedByWallet(networkId, walletId, currentActiveWallet.metadata?.name)) {
-        throw new Error(`Wallet ${currentActiveWallet.name} does not support ${networkId} network`);
-      }
-
-      // Check if this is a universal wallet that supports seamless switching
-      const isUniversalWallet = walletId === 'lute' || walletId === 'kibisis';
-
-      if (isUniversalWallet && wasConnected) {
-        // For universal wallets, keep the connection and just update the network
-        setCurrentNetworkState(networkId);
-        
-        // Save the selected network
-        saveSelectedNetwork(networkId);
-        
-        // Create new WalletManager with new network configuration
-        const newWalletManager = createWalletManager(networkId);
-        setWalletManager(newWalletManager);
-        
-        // Note: Universal wallets maintain their connection across network switches
-      } else {
-        // For non-universal wallets or when not connected, use standard switching
-        if (wasConnected && currentActiveWallet) {
-          try {
-            await currentActiveWallet.disconnect();
-          } catch (error) {
-            console.warn(
-              "Failed to disconnect wallet during network switch:",
-              error
-            );
-            // Continue with network switch even if disconnect fails
-          }
-        }
-
+      // Allow switching to any network - no wallet compatibility validation
+      // Keep wallet connected during network switches for all wallets
+      if (wasConnected) {
         // Update local state
         setCurrentNetworkState(networkId);
 
@@ -246,8 +214,17 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
         const newWalletManager = createWalletManager(networkId);
         setWalletManager(newWalletManager);
 
-        // Note: User will need to reconnect wallet manually after network switch
-        // This is intentional to ensure proper wallet state management
+        // Note: All wallets maintain their connection across network switches
+      } else {
+        // For when not connected, use standard switching
+        setCurrentNetworkState(networkId);
+
+        // Save the selected network
+        saveSelectedNetwork(networkId);
+
+        // Create new WalletManager with new network configuration
+        const newWalletManager = createWalletManager(networkId);
+        setWalletManager(newWalletManager);
       }
     } catch (error) {
       console.error("Failed to switch network:", error);
