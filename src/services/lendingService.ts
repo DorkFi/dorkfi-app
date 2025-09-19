@@ -57,6 +57,9 @@ export interface MarketInfo {
 export interface UserPosition {
   userId: string;
   marketId: string;
+  poolId?: string;
+  contractId?: string;
+  nTokenId?: string;
   supplyBalance: string;
   borrowBalance: string;
   collateralValue: string;
@@ -995,19 +998,19 @@ export const deposit = async (
         }
 
         // arc200 transfer
-        // {
-        //   const txnO = (
-        //     await builder.token.arc200_transfer(
-        //       algosdk.getApplicationAddress(Number(poolId)),
-        //       0
-        //     )
-        //   ).obj;
-        //   buildN.push({
-        //     ...txnO,
-        //     payment: 28504,
-        //     note: new TextEncoder().encode("arc200 transfer"),
-        //   });
-        // }
+        {
+          const txnO = (
+            await builder.token.arc200_transfer(
+              algosdk.getApplicationAddress(Number(poolId)),
+              0
+            )
+          ).obj;
+          buildN.push({
+            ...txnO,
+            payment: 28504,
+            note: new TextEncoder().encode("arc200 transfer"),
+          });
+        }
 
         // deposit to lending pool
         {

@@ -5,6 +5,7 @@ import {
   Coins,
   ArrowDownCircle,
   ArrowUpCircle,
+  ArrowRightLeft,
   CheckCircle2,
   AlertCircle,
   Clock,
@@ -57,20 +58,24 @@ import {
   getCurrentNetworkConfig,
   getNetworkConfig,
   getAllTokens,
+  getTokenConfig,
   NetworkId,
   isCurrentNetworkEVM,
   isCurrentNetworkAlgorandCompatible,
   TokenStandard,
   getEnabledNetworks,
+  isMigrationEnabled,
 } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { deposit, withdraw, fetchMarketInfo } from "@/services/lendingService";
 import { useWallet } from "@txnlab/use-wallet-react";
 import algorandService, { AlgorandNetwork } from "@/services/algorandService";
-import { waitForConfirmation } from "algosdk";
+import algosdk, { waitForConfirmation } from "algosdk";
 import { ARC200Service } from "@/services/arc200Service";
 import BigNumber from "bignumber.js";
 import { ARC200TokenService } from "@/services/mimirApi/arc200TokenService";
+import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
+import { abi, CONTRACT } from "ulujs";
 
 /**
  * PreFi Frontend – Single-file MVP Dashboard
@@ -112,6 +117,7 @@ type Market = {
   marketId?: string; // lending market ID for this token
   contractId?: string; // prefunding contract / app id (placeholder)
   nTokenId?: string; // nToken ID for this token
+  oldNTokenId?: string; // old nToken ID for migration
   name: string;
   symbol: string;
   min: number; // minimum qualifying deposit for Phase 0
@@ -167,6 +173,7 @@ const getMarketsFromConfig = (networkId: NetworkId): Market[] => {
       poolId: token.poolId,
       marketId: token.contractId,
       nTokenId: token.nTokenId,
+      oldNTokenId: token.oldNTokenId, // Add old nToken ID for migration
       name: token.name,
       symbol: token.symbol,
       min: minDeposits[token.symbol] || 10,
@@ -440,11 +447,13 @@ interface MarketState {
   walletBalanceBase: bigint; // user wallet token balance
   depositedBase: bigint; // user deposited (prefunded) balance
   totalStakeSecondsBase: bigint; // global stake‑seconds from chain (placeholder)
+  oldNTokenBalanceBase?: bigint; // user old nToken balance for migration
 }
 
 interface MarketBalance {
   balance: bigint;
   deposited: bigint;
+  oldNTokenBalance?: bigint; // old nToken balance for migration
 }
 
 /*************************
@@ -531,10 +540,22 @@ const chainApi = {
       }
 
       let deposited = 0n;
+      let oldNTokenBalance = 0n;
       if (nTokenId) {
         // Get deposited balance (nToken balance)
         const nTokenBalance = await ARC200Service.getBalance(address, nTokenId);
         deposited = nTokenBalance ? BigInt(nTokenBalance) : 0n;
+      }
+
+      // Get old nToken balance for migration if oldNTokenId exists
+      if (market.oldNTokenId) {
+        const oldNTokenBalanceResult = await ARC200Service.getBalance(
+          address,
+          market.oldNTokenId
+        );
+        oldNTokenBalance = oldNTokenBalanceResult
+          ? BigInt(oldNTokenBalanceResult)
+          : 0n;
       }
 
       console.log(`Balance for ${market.symbol}:`, {
@@ -547,6 +568,7 @@ const chainApi = {
       return {
         balance,
         deposited,
+        oldNTokenBalance,
       };
     } catch (error) {
       console.error(
@@ -556,6 +578,7 @@ const chainApi = {
       return {
         balance: 0n,
         deposited: 0n,
+        oldNTokenBalance: 0n,
       };
     }
   },
@@ -791,6 +814,7 @@ export default function PreFiDashboard() {
           walletBalanceBase: wb.balance,
           depositedBase: wb.deposited,
           totalStakeSecondsBase: totalSS,
+          oldNTokenBalanceBase: wb.oldNTokenBalance,
         },
       }));
 
@@ -1406,6 +1430,230 @@ export default function PreFiDashboard() {
     });
   }, [markets, marketTotalDeposits, marketMaxTotalDeposits]);
 
+  // TODO move this to lending service
+  const handleMigrate = async (market: Market) => {
+    const token = getTokenConfig(currentNetwork, market.symbol);
+    const remainingBalance = await ARC200Service.getBalance(
+      activeAccount?.address || "",
+      market.oldNTokenId || ""
+    );
+    const extraBalance = await ARC200Service.getBalance(
+      activeAccount?.address || "",
+      token.contractId || ""
+    );
+    const withdrawBalance = remainingBalance + extraBalance;
+
+    const networkConfig = getCurrentNetworkConfig();
+    const ci = new CONTRACT(
+      Number(market.oldNTokenId),
+      algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      ).algod,
+      undefined,
+      abi.custom,
+      { addr: activeAccount?.address || "", sk: new Uint8Array() }
+    );
+    const builder = {
+      ntoken: new CONTRACT(
+        Number(token.oldNTokenId),
+        algorandService.initializeClients(
+          networkConfig.walletNetworkId as AlgorandNetwork
+        ).algod,
+        undefined,
+        abi.nt200,
+        { addr: activeAccount?.address || "", sk: new Uint8Array() },
+        true,
+        false,
+        true
+      ),
+      oldToken: new CONTRACT(
+        Number(token.oldContractId),
+        algorandService.initializeClients(
+          networkConfig.walletNetworkId as AlgorandNetwork
+        ).algod,
+        undefined,
+        abi.nt200,
+        { addr: activeAccount?.address || "", sk: new Uint8Array() },
+        true,
+        false,
+        true
+      ),
+      newToken: new CONTRACT(
+        Number(token.contractId),
+        algorandService.initializeClients(
+          networkConfig.walletNetworkId as AlgorandNetwork
+        ).algod,
+        undefined,
+        abi.nt200,
+        { addr: activeAccount?.address || "", sk: new Uint8Array() },
+        true,
+        false,
+        true
+      ),
+      oldLendingPool: new CONTRACT(
+        Number(token.oldPoolId),
+        algorandService.initializeClients(
+          networkConfig.walletNetworkId as AlgorandNetwork
+        ).algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        { addr: activeAccount?.address || "", sk: new Uint8Array() },
+        true,
+        false,
+        true
+      ),
+      newLendingPool: new CONTRACT(
+        Number(market.poolId),
+        algorandService.initializeClients(
+          networkConfig.walletNetworkId as AlgorandNetwork
+        ).algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        { addr: activeAccount?.address || "", sk: new Uint8Array() },
+        true,
+        false,
+        true
+      ),
+    };
+    let customR;
+    for (const p of [
+      [0, 0, 0, 0], // do not create balance boxes
+      [0, 0, 1, 1], // do not create balance boxes
+      [0, 0, 0, 1], // do not create balance boxes
+      [0, 0, 1, 0], // do not create balance boxes
+      [1, 0, 0, 0], // do create balance box a
+      [0, 1, 1, 0], // do create balance box b
+      [1, 1, 1, 1], // do create balance boxes
+    ]) {
+      const [p1, p2, p3, p4] = p;
+      const buildN = [];
+      // withdraw from old market
+      {
+        const txnO = (
+          await builder.oldLendingPool.withdraw(
+            Number(token.oldContractId),
+            BigInt(remainingBalance)
+          )
+        ).obj;
+        buildN.push({
+          ...txnO,
+          note: new TextEncoder().encode("lending withdraw"),
+        });
+      }
+      // withdraw from atoken
+      {
+        const txnO = (await builder.oldToken.withdraw(BigInt(remainingBalance)))
+          .obj;
+        buildN.push({
+          ...txnO,
+          note: new TextEncoder().encode("atoken withdraw"),
+        });
+      }
+      // create balance box a
+      if (p1 > 0) {
+        const txnO = (
+          await builder.newToken.createBalanceBox(activeAccount?.address || "")
+        ).obj;
+        buildN.push({
+          ...txnO,
+          payment: 28500,
+          note: new TextEncoder().encode("btoken create balance box"),
+        });
+      }
+      // create balance box b
+      if (p2 > 0) {
+        const txnO = (
+          await builder.newToken.createBalanceBox(
+            algosdk.getApplicationAddress(Number(token.poolId))
+          )
+        ).obj;
+        buildN.push({
+          ...txnO,
+          payment: 28501,
+          note: new TextEncoder().encode("btoken create balance box"),
+        });
+      }
+      // deposit to new token
+      {
+        const txnO = (await builder.newToken.deposit(BigInt(remainingBalance)))
+          .obj;
+        const axfer = {
+          aamt: BigInt(remainingBalance),
+          xaid: token.assetId ? Number(token.assetId) : 0,
+        };
+        buildN.push({
+          ...txnO,
+          ...axfer,
+          note: new TextEncoder().encode("btoken deposit"),
+        });
+      }
+      // arc200 approve
+      {
+        const txnO = (
+          await builder.newToken.arc200_approve(
+            algosdk.getApplicationAddress(Number(token.poolId)),
+            BigInt(withdrawBalance)
+          )
+        ).obj;
+        buildN.push({
+          ...txnO,
+          note: new TextEncoder().encode("nt200 approve"),
+          payment: p3 > 0 ? 28100 : 0,
+        });
+      }
+      // deposit to new market
+      {
+        const txnO = (
+          await builder.newLendingPool.deposit(
+            Number(token.contractId),
+            BigInt(withdrawBalance)
+          )
+        ).obj;
+        buildN.push({
+          ...txnO,
+          note: new TextEncoder().encode("lending deposit"),
+          payment: p4 > 0 ? 900000 : 0,
+        });
+      }
+      console.log("buildN", { buildN });
+      ci.setFee(9000);
+      ci.setEnableGroupResourceSharing(true);
+      ci.setExtraTxns(buildN);
+      console.log({ networkConfig });
+      if (networkConfig.networkId === "algorand-mainnet") {
+        ci.setBeaconId(3209233839); // TODO move this to ulujs
+      }
+      customR = await ci.custom();
+      console.log({ customR });
+      if (customR.success) {
+        break;
+      }
+    }
+    if (!customR.success) {
+      throw new Error("Failed to create withdraw transaction");
+    }
+    const stxns = await signTransactions(
+      customR.txns.map((txn: string) =>
+        Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+      )
+    );
+
+    const algorandClients = algorandService.initializeClients(
+      networkConfig.walletNetworkId as AlgorandNetwork
+    );
+
+    const res = await algorandClients.algod.sendRawTransaction(stxns).do();
+
+    await waitForConfirmation(algorandClients.algod, res.txId, 4);
+
+    console.log("Transaction confirmed:", res);
+
+    // Reload market data after successful migration
+    if (market) {
+      await loadMarket(market, true);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background relative">
       {/* Light Mode Beach Background */}
@@ -1449,19 +1697,21 @@ export default function PreFiDashboard() {
               </div>
             </Link>
 
-            {/* Theme Toggle, Buy Button, and Wallet */}
+            {/* Theme Toggle, Buy Button, Migration Link, and Wallet */}
             <div className="flex items-center gap-2">
               {activeAccount && (
-                <button
-                  className="p-2 rounded-lg bg-green-600 hover:bg-green-700 text-white transition-colors"
-                  onClick={() => {
-                    console.log("Buy tokens clicked from navigation");
-                    setIsBuyModalOpen(true);
-                  }}
-                  title="Buy Tokens"
-                >
-                  <ShoppingCart className="h-5 w-5" />
-                </button>
+                <>
+                  <button
+                    className="p-2 rounded-lg bg-green-600 hover:bg-green-700 text-white transition-colors"
+                    onClick={() => {
+                      console.log("Buy tokens clicked from navigation");
+                      setIsBuyModalOpen(true);
+                    }}
+                    title="Buy Tokens"
+                  >
+                    <ShoppingCart className="h-5 w-5" />
+                  </button>
+                </>
               )}
               <WalletNetworkButton onNetworkChange={handleNetworkChange} />
             </div>
@@ -1614,8 +1864,8 @@ export default function PreFiDashboard() {
                     }`}
                   >
                     <div className="flex items-center gap-2">
-                      <img 
-                        src={getNetworkLogoPath(networkId)} 
+                      <img
+                        src={getNetworkLogoPath(networkId)}
                         alt={`${networkConfig.name} logo`}
                         className="w-6 h-6 rounded-full"
                         onError={(e) => {
@@ -1957,7 +2207,7 @@ export default function PreFiDashboard() {
                             console.log("Deposit clicked for", m.symbol);
                             openDepositModal(m);
                           }}
-                          className="flex-1 justify-center text-sm"
+                          className="flex-grow flex-1 justify-center text-sm"
                         >
                           <ArrowDownCircle className="h-4 w-4" /> Deposit
                         </DorkFiButton>
@@ -1973,11 +2223,39 @@ export default function PreFiDashboard() {
                             );
                             await openWithdrawModal(m);
                           }}
-                          className="flex-1 justify-center text-sm"
+                          className="flex-grow flex-1 justify-center text-sm"
                         >
                           <ArrowUpCircle className="h-4 w-4" /> Withdraw
                         </DorkFiButton>
                       </div>
+
+                      {/* Migrate Button - Show only if token has oldNTokenId and balance > 0 */}
+                      {m.oldNTokenId &&
+                        st?.oldNTokenBalanceBase &&
+                        st.oldNTokenBalanceBase > 0n && (
+                          <DorkFiButton
+                            variant="secondary"
+                            disabled={loading}
+                            onClick={() => handleMigrate(m)}
+                            className="w-full justify-center text-sm border-blue-500 text-blue-500 hover:bg-blue-500 hover:text-white"
+                          >
+                            <ArrowRightLeft className="h-4 w-4" /> Migrate{" "}
+                            {loading
+                              ? "..."
+                              : (() => {
+                                  const oldNTokenBalance =
+                                    st?.oldNTokenBalanceBase
+                                      ? fromBase(
+                                          st.oldNTokenBalanceBase,
+                                          m.decimals
+                                        )
+                                      : 0;
+                                  return `${fmt.format(oldNTokenBalance)} ${
+                                    m.symbol
+                                  }`;
+                                })()}
+                          </DorkFiButton>
+                        )}
                     </DorkFiCard>
                   </motion.div>
                 );
@@ -2343,34 +2621,83 @@ export default function PreFiDashboard() {
 
                         {/* Actions */}
                         <td className="px-6 py-4">
-                          <div className="flex items-center justify-center gap-2">
-                            <DorkFiButton
-                              variant="secondary"
-                              disabled={loading}
-                              onClick={() => {
-                                console.log("Deposit clicked for", m.symbol);
-                                openDepositModal(m);
-                              }}
-                              className="text-sm"
-                            >
-                              <ArrowDownCircle className="h-4 w-4" /> Deposit
-                            </DorkFiButton>
-                            <DorkFiButton
-                              variant="danger-outline"
-                              disabled={loading}
-                              onClick={async () => {
-                                console.log(
-                                  "Withdraw clicked for",
-                                  m.symbol,
-                                  "dep:",
-                                  dep
-                                );
-                                await openWithdrawModal(m);
-                              }}
-                              className="text-sm"
-                            >
-                              <ArrowUpCircle className="h-4 w-4" /> Withdraw
-                            </DorkFiButton>
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-center gap-2">
+                              <DorkFiButton
+                                variant="secondary"
+                                disabled={loading}
+                                onClick={() => {
+                                  console.log("Deposit clicked for", m.symbol);
+                                  openDepositModal(m);
+                                }}
+                                className="flex-grow text-sm"
+                              >
+                                <ArrowDownCircle className="h-4 w-4" /> Deposit
+                              </DorkFiButton>
+                              <DorkFiButton
+                                variant="danger-outline"
+                                disabled={loading}
+                                onClick={async () => {
+                                  console.log(
+                                    "Withdraw clicked for",
+                                    m.symbol,
+                                    "dep:",
+                                    dep
+                                  );
+                                  await openWithdrawModal(m);
+                                }}
+                                className="flex-grow text-sm"
+                              >
+                                <ArrowUpCircle className="h-4 w-4" /> Withdraw
+                              </DorkFiButton>
+                            </div>
+
+                            {/* Migrate Button - Show only if token has oldNTokenId and balance > 0 */}
+                            {m.oldNTokenId &&
+                              st?.oldNTokenBalanceBase &&
+                              st.oldNTokenBalanceBase > 0n && (
+                                <div className="flex items-center justify-center">
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <DorkFiButton
+                                        variant="secondary"
+                                        disabled={loading}
+                                        onClick={() => {
+                                          if (m.oldNTokenId) {
+                                            handleMigrate(m);
+                                          }
+                                        }}
+                                        className="w-full text-sm border-blue-500 text-blue-500 hover:bg-blue-500 hover:text-white"
+                                      >
+                                        <ArrowRightLeft className="h-4 w-4" />{" "}
+                                        Migrate{" "}
+                                        {loading
+                                          ? "..."
+                                          : (() => {
+                                              const oldNTokenBalance =
+                                                st?.oldNTokenBalanceBase
+                                                  ? fromBase(
+                                                      st.oldNTokenBalanceBase,
+                                                      m.decimals
+                                                    )
+                                                  : 0;
+                                              return `${fmt.format(
+                                                oldNTokenBalance
+                                              )} ${m.symbol}`;
+                                            })()}
+                                      </DorkFiButton>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <div className="space-y-1">
+                                        <p className="font-semibold">
+                                          Migration Details
+                                        </p>
+                                        <p>Migrate from old to new market</p>
+                                      </div>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </div>
+                              )}
                           </div>
                         </td>
                       </motion.tr>

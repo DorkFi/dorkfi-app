@@ -47,6 +47,9 @@ export interface TokenConfig {
     underlyingContractId?: string; // The actual contract ID if different from display
     isSmartContract: boolean; // Whether this is a smart contract-based asset
   };
+  oldPoolId?: string;
+  oldContractId?: string;
+  oldNTokenId?: string;
 }
 
 export interface PreFiParameters {
@@ -93,6 +96,7 @@ export interface GlobalConfig {
     enableLiquidations: boolean;
     enableSwap: boolean;
     enableGovernance: boolean;
+    enableMigration: boolean;
   };
 }
 
@@ -442,17 +446,33 @@ const algorandMainnetConfig: NetworkConfig = {
       logoPath: "/lovable-uploads/aVOI.webp",
       tokenStandard: "asa",
     },
+    // new
     UNIT: {
       assetId: "3121954282",
       poolId: "3207735602",
-      contractId: "3210808778",
-      nTokenId: "3210828987",
+      contractId: "3220125024",
+      nTokenId: "3220137925",
+      oldPoolId: "3207735602",
+      oldContractId: "3210808778",
+      oldNTokenId: "3210828987",
       decimals: 8,
       name: "UNIT",
       symbol: "UNIT",
       logoPath: "/lovable-uploads/UNIT.png",
       tokenStandard: "asa",
     },
+    // old
+    // UNIT: {
+    //   assetId: "3121954282",
+    //   poolId: "3207735602",
+    //   contractId: "3210808778",
+    //   nTokenId: "3210828987",
+    //   decimals: 8,
+    //   name: "UNIT",
+    //   symbol: "UNIT",
+    //   logoPath: "/lovable-uploads/UNIT.png",
+    //   tokenStandard: "asa",
+    // },
     POW: {
       assetId: "2994233666",
       poolId: "3207735602",
@@ -671,6 +691,32 @@ const algorandMainnetConfig: NetworkConfig = {
       name: "HOG",
       symbol: "HOG",
       logoPath: "/lovable-uploads/HOG.webp",
+      tokenStandard: "asa",
+    },
+    // SCOUT 569120128 6 3220313750
+    SCOUT: {
+      assetId: "569120128",
+      poolId: "3212536201",
+      contractId: "3220313750",
+      nTokenId: "3220327258",
+      decimals: 6,
+      name: "SCOUT",
+      symbol: "SCOUT",
+      logoPath:
+        "https://algorand-wallet-mainnet.b-cdn.net/media/asset_verification_requests_logo_png/2022/06/30/f339b006471443f982e3f5bb22dea3ac.png?width=200&quality=70",
+      tokenStandard: "asa",
+    },
+    // GOLD$ 246516580 6 3220347315
+    GOLD$: {
+      assetId: "246516580",
+      poolId: "3212536201",
+      contractId: "3220347315",
+      nTokenId: "3220356360",
+      decimals: 6,
+      name: "GOLD$",
+      symbol: "GOLD$",
+      logoPath:
+        "https://algorand-wallet-mainnet.b-cdn.net/media/assets-logo-png/2023/04/10/a5706bc6e41049a385d80468259ce1f4.png?width=200&quality=70",
       tokenStandard: "asa",
     },
   },
@@ -925,6 +971,7 @@ export const config: GlobalConfig = {
     enableLiquidations: true,
     enableSwap: true,
     enableGovernance: false, // Disabled until governance contracts are deployed
+    enableMigration: true, // Enable asset migration feature
   },
 };
 
@@ -989,6 +1036,10 @@ export const getCurrentRpcConfig = () => {
 
 export const getEnabledNetworks = (): NetworkId[] => {
   return config.enabledNetworks;
+};
+
+export const isMigrationEnabled = (): boolean => {
+  return getConfig().features.enableMigration;
 };
 
 export const getEnabledNetworkConfigs = (): NetworkConfig[] => {
@@ -1225,6 +1276,7 @@ export const getEnvironmentConfig = (): Partial<GlobalConfig> => {
       features: {
         ...config.features,
         enablePreFi: false, // Disable PreFi in tests
+        enableMigration: true, // Keep migration enabled in tests
       },
     };
   }
