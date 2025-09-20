@@ -60,6 +60,7 @@ export const getTokenImagePath = (symbol: string): string => {
       "https://algorand-wallet-mainnet.b-cdn.net/media/asset_verification_requests_logo_png/2022/06/30/f339b006471443f982e3f5bb22dea3ac.png?width=200&quality=70",
     GOLD$:
       "https://algorand-wallet-mainnet.b-cdn.net/media/assets-logo-png/2023/04/10/a5706bc6e41049a385d80468259ce1f4.png?width=200&quality=70",
+    EV: "/lovable-uploads/EV.png",
   };
 
   // First check for exact match (including prefixed tokens like aUSDC)

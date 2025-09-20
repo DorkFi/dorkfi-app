@@ -18,6 +18,7 @@ import {
   ChevronDown,
   Wifi,
   WifiOff,
+  Copy,
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import DorkFiButton from "@/components/ui/DorkFiButton";
@@ -120,7 +121,6 @@ type Market = {
   oldNTokenId?: string; // old nToken ID for migration
   name: string;
   symbol: string;
-  min: number; // minimum qualifying deposit for Phase 0
   tokenStandard: TokenStandard;
   assetId?: string; // ASA/ARC‑200 ID if applicable
   decimals: number;
@@ -135,48 +135,15 @@ const getMarketsFromConfig = (networkId: NetworkId): Market[] => {
     // Use token standard from config
     const tokenStandard = token.tokenStandard;
 
-    // Set minimum deposit requirements
-    const minDeposits: { [key: string]: number } = {
-      VOI: 10_000,
-      USDC: 20,
-      UNIT: 10,
-      BTC: 0.0002,
-      cbBTC: 0.0002,
-      acbBTC: 0.0002,
-      aBTC: 0.0002,
-      goBTC: 0.0002,
-      wBTC: 0.0002,
-      ETH: 0.005,
-      aETH: 0.005,
-      goETH: 0.005,
-      wETH: 0.005,
-      ALGO: 100,
-      POW: 5000,
-      TINY: 1500,
-      FINITE: 1500,
-      LINK: 1,
-      SOL: 0.1,
-      AVAX: 1,
-      HAY: 500,
-      COMPX: 20000,
-      COOP: 2000,
-      MONKO: 20e6, // 20M
-      ALPHA: 2000,
-      AKTA: 20000,
-      BRO: 1e6, // 1M
-      PEPE: 2e6, // 2M
-      HOG: 5,
-    };
-
     return {
       id: token.symbol.toLowerCase(),
       poolId: token.poolId,
       marketId: token.contractId,
+      contractId: token.contractId,
       nTokenId: token.nTokenId,
       oldNTokenId: token.oldNTokenId, // Add old nToken ID for migration
       name: token.name,
       symbol: token.symbol,
-      min: minDeposits[token.symbol] || 10,
       tokenStandard,
       assetId: token.assetId,
       contractAddress: `APP_ID_${token.symbol}_PREFUND`, // TODO: Get from config when available
@@ -200,6 +167,116 @@ const fmtPrecise = new Intl.NumberFormat(undefined, {
 });
 const shortAddr = (a?: string) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "—");
 const nowSec = () => Math.floor(Date.now() / 1000);
+const copyToClipboard = async (text: string) => {
+  console.log('Attempting to copy:', text);
+  
+  try {
+    // Try modern clipboard API first
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      console.log('Successfully copied using clipboard API');
+      showCopyFeedback();
+      return;
+    }
+    
+    // Fallback for older browsers or non-HTTPS
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-999999px';
+    textArea.style.top = '-999999px';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    
+    const successful = document.execCommand('copy');
+    document.body.removeChild(textArea);
+    
+    if (successful) {
+      console.log('Successfully copied using fallback method');
+      showCopyFeedback();
+    } else {
+      console.error('Failed to copy using fallback method');
+    }
+  } catch (err) {
+    console.error('Failed to copy text:', err);
+    
+    // Try fallback even if clipboard API fails
+    try {
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      textArea.style.position = 'fixed';
+      textArea.style.left = '-999999px';
+      textArea.style.top = '-999999px';
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      
+      const successful = document.execCommand('copy');
+      document.body.removeChild(textArea);
+      
+      if (successful) {
+        console.log('Successfully copied using fallback after error');
+        showCopyFeedback();
+      } else {
+        console.error('All copy methods failed');
+      }
+    } catch (fallbackErr) {
+      console.error('Fallback copy also failed:', fallbackErr);
+    }
+  }
+};
+
+const showCopyFeedback = () => {
+  // Create a temporary toast notification
+  const toast = document.createElement('div');
+  toast.textContent = 'Copied to clipboard!';
+  toast.style.cssText = `
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: #10b981;
+    color: white;
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    z-index: 9999;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    transition: opacity 0.3s ease;
+  `;
+  
+  document.body.appendChild(toast);
+  
+  // Remove after 2 seconds
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    setTimeout(() => {
+      if (document.body.contains(toast)) {
+        document.body.removeChild(toast);
+      }
+    }, 300);
+  }, 2000);
+};
+
+const getCopyValue = (market: Market): string | null => {
+  console.log('Getting copy value for market:', market.symbol, 'standard:', market.tokenStandard);
+  
+  switch (market.tokenStandard) {
+    case "asa":
+      console.log('ASA token - assetId:', market.assetId);
+      return market.assetId || null;
+    case "arc200":
+      console.log('ARC200 token - contractId:', market.contractId);
+      return market.contractId || null;
+    case "network":
+      console.log('Network token - no copy value');
+      return null; // Don't show copy for network tokens
+    default:
+      console.log('Unknown token standard:', market.tokenStandard);
+      return null;
+  }
+};
 const toBase = (amt: number, decimals: number) =>
   BigInt(Math.round(amt * 10 ** decimals));
 const fromBase = (amt: bigint, decimals: number) =>
@@ -1985,7 +2062,6 @@ export default function PreFiDashboard() {
                   `Market ${m.symbol}: dep=${dep}, wal=${wal}, st=`,
                   st
                 );
-                const minOk = dep >= m.min;
 
                 return (
                   <motion.div
@@ -2006,23 +2082,26 @@ export default function PreFiDashboard() {
                           }}
                         />
                         <div className="flex-1 min-w-0">
-                          <div className="text-sm font-semibold text-card-foreground">
-                            {m.name}
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-card-foreground">
+                              {m.name}
+                            </span>
+                            {(() => {
+                              const copyValue = getCopyValue(m);
+                              return copyValue ? (
+                                <button
+                                  onClick={() => copyToClipboard(copyValue)}
+                                  className="p-1 hover:bg-secondary rounded transition-colors"
+                                  title={`Copy ${m.tokenStandard === "asa" ? "Asset ID" : "Contract ID"}`}
+                                >
+                                  <Copy className="h-3 w-3 text-muted-foreground hover:text-foreground" />
+                                </button>
+                              ) : null;
+                            })()}
                           </div>
                           <div className="text-xs text-muted-foreground">
-                            Wallet:{" "}
+                            Balance:{" "}
                             {loading ? "…" : `${fmt.format(wal)} ${m.symbol}`}
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            Min:{" "}
-                            {m.id === "btc" ||
-                            m.id === "cbbtc" ||
-                            m.id === "eth" ||
-                            m.id === "ausd" ||
-                            m.id === "pow"
-                              ? "" // removed $ sign
-                              : ""}
-                            {fmt.format(m.min)} {m.symbol}
                           </div>
                         </div>
                         <div className="text-xs font-medium text-accent">
@@ -2080,66 +2159,7 @@ export default function PreFiDashboard() {
                         );
                         if (!poolData) return null;
 
-                        // Show qualification progress if not qualified AND has deposits
-                        // Otherwise show pool progress (including when deposited = 0)
-                        if (
-                          !minOk &&
-                          st &&
-                          fromBase(st.depositedBase, m.decimals) > 0
-                        ) {
-                          const dep = st
-                            ? fromBase(st.depositedBase, m.decimals)
-                            : 0;
-                          const progressPct = Math.min(
-                            100,
-                            (dep / m.min) * 100
-                          );
-
-                          return (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <div className="space-y-2 cursor-help">
-                                  <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-1">
-                                      <AlertCircle className="h-3 w-3 text-orange-500" />
-                                      <span className="text-xs font-medium text-orange-600 dark:text-orange-400">
-                                        Needs more
-                                      </span>
-                                    </div>
-                                    <div className="text-xs font-semibold tabular-nums text-card-foreground">
-                                      {fmt.format(Math.min(dep, m.min))} /{" "}
-                                      {fmt.format(m.min)}
-                                    </div>
-                                  </div>
-                                  <ProgressBar value={progressPct} max={100} />
-                                  <div className="text-xs text-muted-foreground">
-                                    Deposit {fmt.format(m.min - dep)} more
-                                  </div>
-                                </div>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <div className="space-y-1">
-                                  <p className="font-semibold">
-                                    {m.name} Qualification
-                                  </p>
-                                  <p>
-                                    Current: {fmt.format(dep)} {m.symbol}
-                                  </p>
-                                  <p>
-                                    Required: {fmt.format(m.min)} {m.symbol}
-                                  </p>
-                                  <p>Progress: {progressPct.toFixed(1)}%</p>
-                                  <p className="text-xs text-muted-foreground">
-                                    Meet minimum to qualify for VOI rewards
-                                  </p>
-                                </div>
-                              </TooltipContent>
-                            </Tooltip>
-                          );
-                        }
-
                         // Show pool progress (total deposits vs max deposits)
-                        // This includes: qualified users, not connected, or deposited = 0
                         return (
                           <Tooltip>
                             <TooltipTrigger asChild>
@@ -2277,9 +2297,7 @@ export default function PreFiDashboard() {
                         </TooltipTrigger>
                         <TooltipContent>
                           <p>
-                            Available tokens for PreFi deposits. Each asset has
-                            a minimum deposit requirement to qualify for VOI
-                            rewards.
+                            Available tokens for PreFi deposits.
                           </p>
                         </TooltipContent>
                       </Tooltip>
@@ -2350,7 +2368,6 @@ export default function PreFiDashboard() {
                       `Desktop Market ${m.symbol}: dep=${dep}, wal=${wal}, st=`,
                       st
                     );
-                    const minOk = dep >= m.min;
 
                     // Reward estimate (very rough): user's stake‑seconds vs global
                     const secondsRemaining = Math.max(
@@ -2388,25 +2405,28 @@ export default function PreFiDashboard() {
                               }}
                             />
                             <div className="space-y-1">
-                              <div className="text-sm font-semibold text-card-foreground">
-                                {m.name}
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-semibold text-card-foreground">
+                                  {m.name}
+                                </span>
+                                {(() => {
+                                  const copyValue = getCopyValue(m);
+                                  return copyValue ? (
+                                    <button
+                                      onClick={() => copyToClipboard(copyValue)}
+                                      className="p-1 hover:bg-secondary rounded transition-colors"
+                                      title={`Copy ${m.tokenStandard === "asa" ? "Asset ID" : "Contract ID"}`}
+                                    >
+                                      <Copy className="h-3 w-3 text-muted-foreground hover:text-foreground" />
+                                    </button>
+                                  ) : null;
+                                })()}
                               </div>
                               <div className="text-xs text-muted-foreground">
-                                Wallet:{" "}
+                                Balance:{" "}
                                 {loading
                                   ? "…"
                                   : `${fmt.format(wal)} ${m.symbol}`}
-                              </div>
-                              <div className="text-xs text-muted-foreground">
-                                Min:{" "}
-                                {m.id === "btc" ||
-                                m.id === "cbbtc" ||
-                                m.id === "eth" ||
-                                m.id === "ausd" ||
-                                m.id === "pow"
-                                  ? "" // removed $ sign
-                                  : ""}
-                                {fmt.format(m.min)} {m.symbol}
                               </div>
                             </div>
                           </div>
@@ -2445,14 +2465,6 @@ export default function PreFiDashboard() {
                                   }
                                   return null;
                                 })()}
-                              </div>
-                            )}
-                            {minOk && (
-                              <div className="flex items-center justify-end gap-1">
-                                <CheckCircle2 className="h-3 w-3 text-green-500" />
-                                <span className="text-xs font-medium text-green-600 dark:text-green-400">
-                                  Qualified
-                                </span>
                               </div>
                             )}
                           </div>
@@ -2494,69 +2506,7 @@ export default function PreFiDashboard() {
                             );
                             if (!poolData) return null;
 
-                            // Show qualification progress if not qualified AND has deposits
-                            // Otherwise show pool progress (including when deposited = 0)
-                            if (
-                              !minOk &&
-                              st &&
-                              fromBase(st.depositedBase, m.decimals) > 0
-                            ) {
-                              const dep = st
-                                ? fromBase(st.depositedBase, m.decimals)
-                                : 0;
-                              const progressPct = Math.min(
-                                100,
-                                (dep / m.min) * 100
-                              );
-
-                              return (
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <div className="space-y-2 cursor-help">
-                                      <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-1">
-                                          <AlertCircle className="h-3 w-3 text-orange-500" />
-                                          <span className="text-xs font-medium text-orange-600 dark:text-orange-400">
-                                            Needs more
-                                          </span>
-                                        </div>
-                                        <div className="text-xs font-semibold tabular-nums text-card-foreground">
-                                          {fmt.format(Math.min(dep, m.min))} /{" "}
-                                          {fmt.format(m.min)}
-                                        </div>
-                                      </div>
-                                      <ProgressBar
-                                        value={progressPct}
-                                        max={100}
-                                      />
-                                      <div className="text-xs text-muted-foreground">
-                                        Deposit {fmt.format(m.min - dep)} more
-                                      </div>
-                                    </div>
-                                  </TooltipTrigger>
-                                  <TooltipContent>
-                                    <div className="space-y-1">
-                                      <p className="font-semibold">
-                                        {m.name} Qualification
-                                      </p>
-                                      <p>
-                                        Current: {fmt.format(dep)} {m.symbol}
-                                      </p>
-                                      <p>
-                                        Required: {fmt.format(m.min)} {m.symbol}
-                                      </p>
-                                      <p>Progress: {progressPct.toFixed(1)}%</p>
-                                      <p className="text-xs text-muted-foreground">
-                                        Meet minimum to qualify for VOI rewards
-                                      </p>
-                                    </div>
-                                  </TooltipContent>
-                                </Tooltip>
-                              );
-                            }
-
                             // Show pool progress (total deposits vs max deposits)
-                            // This includes: qualified users, not connected, or deposited = 0
                             return (
                               <Tooltip>
                                 <TooltipTrigger asChild>
@@ -2721,8 +2671,7 @@ export default function PreFiDashboard() {
                 Time‑weighted distribution:
               </strong>{" "}
               Rewards accrue based on amount × time until launch. Earlier
-              deposits earn more. Participants below the minimum threshold in
-              any market will not qualify for Phase 0 rewards.
+              deposits earn more.
             </p>
             <p className="mb-2">
               <strong className="text-primary">Estimates only:</strong> Reward
@@ -2852,36 +2801,6 @@ export default function PreFiDashboard() {
                       <div className="flex justify-between items-center">
                         <div className="flex items-center gap-2">
                           <span className="text-sm text-muted-foreground">
-                            Minimum to Qualify
-                          </span>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <InfoIcon className="h-3 w-3 text-muted-foreground" />
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <p>
-                                Minimum deposit required to qualify for Phase 0
-                                rewards
-                              </p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </div>
-                        <span className="text-sm font-medium text-card-foreground">
-                          {selectedMarket.id === "btc" ||
-                          selectedMarket.id === "cbbtc" ||
-                          selectedMarket.id === "eth" ||
-                          selectedMarket.id === "ausd" ||
-                          selectedMarket.id === "pow"
-                            ? "" // removed $ sign
-                            : ""}
-                          {fmt.format(selectedMarket.min)}{" "}
-                          {selectedMarket.symbol}
-                        </span>
-                      </div>
-
-                      <div className="flex justify-between items-center">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm text-muted-foreground">
                             Current Deposited
                           </span>
                           <Tooltip>
@@ -2965,7 +2884,6 @@ export default function PreFiDashboard() {
                 )
               : 0
           }
-          minimumToQualify={selectedMarket.min}
           marketStats={{
             supplyAPY: (() => {
               const timeRemaining = Math.max(0, (launchTs - Date.now()) / 1000);

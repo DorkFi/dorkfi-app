@@ -237,6 +237,17 @@ const voiMainnetConfig: NetworkConfig = {
       logoPath: "/lovable-uploads/NV.png",
       tokenStandard: "network",
     },
+    EV: {
+      assetId: "0",
+      contractId: "828295",
+      poolId: "44866061",
+      nTokenId: "45447486",
+      decimals: 6,
+      name: "enVOI",
+      symbol: "EV",
+      logoPath: "/lovable-uploads/EV.png",
+      tokenStandard: "network",
+    },
     bVOI: {
       assetId: "0",
       contractId: "8471125",

@@ -24,7 +24,6 @@ interface WithdrawModalProps {
   tokenSymbol: string;
   tokenIcon: string;
   currentlyDeposited: number;
-  minimumToQualify: number;
   marketStats: {
     supplyAPY: number;
     utilization: number;
@@ -41,7 +40,6 @@ const WithdrawModal = ({
   tokenSymbol,
   tokenIcon,
   currentlyDeposited,
-  minimumToQualify,
   marketStats,
   onSubmit,
   isLoading = false,
@@ -189,73 +187,6 @@ const WithdrawModal = ({
                     ).toLocaleString()}
                     )
                   </p>
-
-                  {/* Qualification Status */}
-                  <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-500 dark:text-slate-400">
-                        Minimum to Qualify
-                      </span>
-                      <Tooltip>
-                        <TooltipTrigger>
-                          <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>
-                            Minimum deposit required to qualify for Phase 0
-                            rewards
-                          </p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </div>
-                    <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
-                      {minimumToQualify.toLocaleString()} {tokenSymbol}
-                    </span>
-                  </div>
-
-                  {/* Qualification Progress */}
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-slate-500 dark:text-slate-400">
-                        Qualification Progress
-                      </span>
-                      <span
-                        className={`font-medium ${
-                          currentlyDeposited >= minimumToQualify
-                            ? "text-green-600 dark:text-green-400"
-                            : "text-orange-600 dark:text-orange-400"
-                        }`}
-                      >
-                        {currentlyDeposited >= minimumToQualify
-                          ? "Qualified ✓"
-                          : "Not Qualified"}
-                      </span>
-                    </div>
-                    <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2">
-                      <div
-                        className={`h-2 rounded-full transition-all duration-300 ${
-                          currentlyDeposited >= minimumToQualify
-                            ? "bg-green-500"
-                            : "bg-orange-500"
-                        }`}
-                        style={{
-                          width: `${Math.min(
-                            100,
-                            (currentlyDeposited / minimumToQualify) * 100
-                          )}%`,
-                        }}
-                      />
-                    </div>
-                    {currentlyDeposited < minimumToQualify && (
-                      <p className="text-xs text-orange-600 dark:text-orange-400">
-                        Need{" "}
-                        {(
-                          minimumToQualify - currentlyDeposited
-                        ).toLocaleString()}{" "}
-                        more {tokenSymbol} to qualify
-                      </p>
-                    )}
-                  </div>
                 </div>
               </div>
 
