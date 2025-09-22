@@ -36,11 +36,11 @@ const NETWORK_CONFIGS: Record<
   Omit<AlgorandConfig, "network">
 > = {
   mainnet: {
-    algodToken: "2A65A886E60E05601ED3AE81531A3FB4",
-    algodServer: "https://mainnet-api.4160.nodely.io",
+    algodToken: "",
+    algodServer: "https://mainnet-api.algorand.nautilus.sh",
     algodPort: 443,
-    indexerToken: "2A65A886E60E05601ED3AE81531A3FB4",
-    indexerServer: "https://mainnet-idx.4160.nodely.io",
+    indexerToken: "",
+    indexerServer: "https://mainnet-idx.4160.nodely.dev",
     indexerPort: 443,
   },
   testnet: {
@@ -84,6 +84,20 @@ class AlgorandService {
   private currentNetwork: AlgorandNetwork = "testnet";
 
   /**
+   * Convert AlgorandNetwork to NetworkId for config functions
+   */
+  private algorandNetworkToNetworkId(network: AlgorandNetwork): string {
+    const mapping: Record<AlgorandNetwork, string> = {
+      mainnet: "algorand-mainnet",
+      testnet: "algorand-testnet",
+      local: "localnet",
+      voimain: "voi-mainnet",
+      voitest: "voi-testnet",
+    };
+    return mapping[network];
+  }
+
+  /**
    * Initialize clients for a specific network
    */
   public initializeClients(
@@ -97,17 +111,19 @@ class AlgorandService {
       ...customConfig,
     };
 
+    console.log("initializeClients - network:", network, "baseConfig:", baseConfig, "customConfig:", customConfig, "final config:", config);
+
     // Create Algod client
     const algod = new Algodv2(
       config.algodToken,
-      config.algodServer,
+      config.algodServer, // This is now a full URL
       config.algodPort
     );
 
     // Create Indexer client
     const indexer = new Indexer(
       config.indexerToken,
-      config.indexerServer,
+      config.indexerServer, // This is now a full URL
       config.indexerPort
     );
 
@@ -124,6 +140,58 @@ class AlgorandService {
   }
 
   /**
+   * Initialize clients optimized for read operations (uses public RPC URL when available)
+   */
+  public async initializeClientsForReads(
+    network: AlgorandNetwork,
+    customConfig?: Partial<AlgorandConfig>
+  ): Promise<AlgorandClients> {
+    // Import config functions dynamically to avoid circular dependencies
+    const { getAlgorandConfigForReads } = await import("@/config");
+ 
+    // Convert AlgorandNetwork to NetworkId
+    const networkId = this.algorandNetworkToNetworkId(network);
+    
+    // Get the read-optimized config
+    const readConfig = getAlgorandConfigForReads(networkId as any);
+    
+    console.log("initializeClientsForReads - network:", network, "networkId:", networkId, "readConfig:", readConfig);
+ 
+    // Merge with any custom config provided
+    const finalConfig = {
+      ...readConfig,
+      ...customConfig,
+    };
+
+    return this.initializeClients(network, finalConfig);
+  }
+
+  /**
+   * Initialize clients optimized for transaction sending (uses regular RPC URL)
+   */
+  public async initializeClientsForTransactions(
+    network: AlgorandNetwork,
+    customConfig?: Partial<AlgorandConfig>
+  ): Promise<AlgorandClients> {
+    // Import config functions dynamically to avoid circular dependencies
+    const { getAlgorandConfigForTransactions } = await import("@/config");
+ 
+    // Convert AlgorandNetwork to NetworkId
+    const networkId = this.algorandNetworkToNetworkId(network);
+    
+    // Get the transaction-optimized config
+    const transactionConfig = getAlgorandConfigForTransactions(networkId as any);
+ 
+    // Merge with any custom config provided
+    const finalConfig = {
+      ...transactionConfig,
+      ...customConfig,
+    };
+
+    return this.initializeClients(network, finalConfig);
+  }
+
+  /**
    * Get clients for the current network
    */
   public getCurrentClients(): AlgorandClients {
@@ -134,6 +202,20 @@ class AlgorandService {
       );
     }
     return clients;
+  }
+
+  /**
+   * Get clients optimized for read operations (uses public RPC URL when available)
+   */
+  public async getCurrentClientsForReads(): Promise<AlgorandClients> {
+    return this.initializeClientsForReads(this.currentNetwork);
+  }
+
+  /**
+   * Get clients optimized for transaction sending (uses regular RPC URL)
+   */
+  public async getCurrentClientsForTransactions(): Promise<AlgorandClients> {
+    return this.initializeClientsForTransactions(this.currentNetwork);
   }
 
   /**
@@ -313,7 +395,11 @@ export default algorandService;
 // Export utility functions for convenience
 export const {
   initializeClients,
+  initializeClientsForReads,
+  initializeClientsForTransactions,
   getCurrentClients,
+  getCurrentClientsForReads,
+  getCurrentClientsForTransactions,
   getClients,
   switchNetwork,
   getCurrentNetwork,

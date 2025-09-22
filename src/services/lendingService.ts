@@ -139,7 +139,7 @@ export const fetchMarketInfo = async (
     const networkConfig = getNetworkConfig(networkId);
 
     if (isAlgorandCompatibleNetwork(networkId)) {
-      const clients = algorandService.initializeClients(
+      const clients = await algorandService.initializeClientsForReads(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
 
@@ -811,7 +811,6 @@ export const deposit = async (
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
-      1;
       // Get token information
       const allTokens = getAllTokensWithDisplayInfo(networkId);
       console.log(

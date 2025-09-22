@@ -409,10 +409,7 @@ export default function AdminDashboard() {
         console.log("Market creation result:", createMarketResult);
 
         if (isCurrentNetworkAlgorandCompatible()) {
-          const networkConfig = getCurrentNetworkConfig();
-          const algorandClients = algorandService.initializeClients(
-            networkConfig.walletNetworkId as AlgorandNetwork
-          );
+          const algorandClients = await algorandService.getCurrentClientsForTransactions();
           const stxn = await signTransactions(
             createMarketResult.txns.map((txn) =>
               Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))

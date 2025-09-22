@@ -73,6 +73,7 @@ export interface NetworkConfig {
   name: string;
   networkType: NetworkType;
   rpcUrl: string;
+  rpcPublicUrl?: string;
   rpcPort?: number;
   rpcToken?: string;
   indexerUrl: string;
@@ -407,6 +408,7 @@ const algorandMainnetConfig: NetworkConfig = {
   name: "Algorand Mainnet",
   networkType: "avm",
   rpcUrl: "https://mainnet-api.4160.nodely.dev",
+  rpcPublicUrl: "https://mainnet-api.algorand.nautilus.sh",
   rpcPort: 443,
   rpcToken: undefined, // Public endpoint, no token required
   indexerUrl: "https://mainnet-idx.4160.nodely.dev",
@@ -1024,6 +1026,10 @@ export const getRpcToken = (networkId: NetworkId): string | undefined => {
   return config.networks[networkId].rpcToken;
 };
 
+export const getRpcPublicUrl = (networkId: NetworkId): string | undefined => {
+  return config.networks[networkId].rpcPublicUrl;
+};
+
 export const getCurrentRpcPort = (): number | undefined => {
   return getRpcPort(config.defaultNetwork);
 };
@@ -1032,10 +1038,15 @@ export const getCurrentRpcToken = (): string | undefined => {
   return getRpcToken(config.defaultNetwork);
 };
 
+export const getCurrentRpcPublicUrl = (): string | undefined => {
+  return getRpcPublicUrl(config.defaultNetwork);
+};
+
 export const getRpcConfig = (networkId: NetworkId) => {
   const networkConfig = config.networks[networkId];
   return {
     url: networkConfig.rpcUrl,
+    publicUrl: networkConfig.rpcPublicUrl,
     port: networkConfig.rpcPort,
     token: networkConfig.rpcToken,
   };
@@ -1334,7 +1345,8 @@ export const getAlgorandNetworkFromNetworkId = (
 };
 
 export const getAlgorandConfigFromNetworkConfig = (
-  networkConfig: NetworkConfig
+  networkConfig: NetworkConfig,
+  usePublicUrl: boolean = true
 ) => {
   const algorandNetwork = getAlgorandNetworkFromNetworkId(
     networkConfig.networkId
@@ -1345,8 +1357,10 @@ export const getAlgorandConfigFromNetworkConfig = (
     );
   }
 
-  // Extract server and port from RPC URL
-  const rpcUrl = networkConfig.rpcUrl;
+  // Use public URL if available and requested, otherwise fall back to regular RPC URL
+  const rpcUrl = usePublicUrl && networkConfig.rpcPublicUrl 
+    ? networkConfig.rpcPublicUrl 
+    : networkConfig.rpcUrl;
   const indexerUrl = networkConfig.indexerUrl;
 
   // Parse server from URL (remove protocol)
@@ -1361,10 +1375,10 @@ export const getAlgorandConfigFromNetworkConfig = (
   return {
     network: algorandNetwork,
     algodToken: networkConfig.rpcToken ?? "", // Use configured token or empty string
-    algodServer,
+    algodServer: rpcUrl, // Use full URL instead of just hostname
     algodPort,
     indexerToken: "", // Indexer tokens not currently configured
-    indexerServer,
+    indexerServer: indexerUrl, // Use full URL instead of just hostname
     indexerPort,
   };
 };
@@ -1380,17 +1394,47 @@ export const isCurrentNetworkAlgorandCompatible = (): boolean => {
 /**
  * Get Algorand configuration for the current network
  */
-export const getCurrentAlgorandConfig = () => {
+export const getCurrentAlgorandConfig = (usePublicUrl: boolean = true) => {
   const currentConfig = getCurrentNetworkConfig();
-  return getAlgorandConfigFromNetworkConfig(currentConfig);
+  return getAlgorandConfigFromNetworkConfig(currentConfig, usePublicUrl);
+};
+
+/**
+ * Get Algorand configuration optimized for transaction sending (uses regular RPC URL)
+ */
+export const getAlgorandConfigForTransactions = (networkId: NetworkId) => {
+  const networkConfig = getNetworkConfig(networkId);
+  return getAlgorandConfigFromNetworkConfig(networkConfig, false);
+};
+
+/**
+ * Get Algorand configuration optimized for read operations (uses public RPC URL when available)
+ */
+export const getAlgorandConfigForReads = (networkId: NetworkId) => {
+  const networkConfig = getNetworkConfig(networkId);
+  return getAlgorandConfigFromNetworkConfig(networkConfig, true);
+};
+
+/**
+ * Get current Algorand configuration optimized for transaction sending
+ */
+export const getCurrentAlgorandConfigForTransactions = () => {
+  return getAlgorandConfigForTransactions(config.defaultNetwork);
+};
+
+/**
+ * Get current Algorand configuration optimized for read operations
+ */
+export const getCurrentAlgorandConfigForReads = () => {
+  return getAlgorandConfigForReads(config.defaultNetwork);
 };
 
 /**
  * Initialize Algorand clients for the current network
  * This function bridges the gap between our network config and Algorand service
  */
-export const initializeAlgorandForCurrentNetwork = async () => {
-  const algorandConfig = getCurrentAlgorandConfig();
+export const initializeAlgorandForCurrentNetwork = async (usePublicUrl: boolean = true) => {
+  const algorandConfig = getCurrentAlgorandConfig(usePublicUrl);
 
   // Import AlgorandService functions dynamically to avoid circular dependencies
   const { initializeClients } = await import("@/services/algorandService");

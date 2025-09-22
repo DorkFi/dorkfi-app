@@ -1364,10 +1364,7 @@ export default function PreFiDashboard() {
           )
         );
 
-        const networkConfig = getCurrentNetworkConfig();
-        const algorandClients = algorandService.initializeClients(
-          networkConfig.walletNetworkId as AlgorandNetwork
-        );
+        const algorandClients = await algorandService.getCurrentClientsForTransactions();
 
         const res = await algorandClients.algod.sendRawTransaction(stxns).do();
 
@@ -1715,9 +1712,7 @@ export default function PreFiDashboard() {
       )
     );
 
-    const algorandClients = algorandService.initializeClients(
-      networkConfig.walletNetworkId as AlgorandNetwork
-    );
+    const algorandClients = await algorandService.getCurrentClientsForTransactions();
 
     const res = await algorandClients.algod.sendRawTransaction(stxns).do();
 
@@ -2959,10 +2954,7 @@ export default function PreFiDashboard() {
                   )
                 );
 
-                const networkConfig = getCurrentNetworkConfig();
-                const algorandClients = algorandService.initializeClients(
-                  networkConfig.walletNetworkId as AlgorandNetwork
-                );
+                const algorandClients = await algorandService.getCurrentClientsForTransactions();
 
                 const res = await algorandClients.algod
                   .sendRawTransaction(stxns)

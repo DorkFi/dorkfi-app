@@ -7,17 +7,17 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import PreFi from "./pages/PreFi";
 import Admin from "./pages/Admin";
 import { NetworkProvider } from "./contexts/NetworkContext";
-import CountdownPage from "./pages/Countdown";
+//import CountdownPage from "./pages/Countdown";
 import AuthGuard from "./components/AuthGuard";
 
 const LAUNCH_TIMESTAMP = Date.UTC(2025, 8, 13, 0, 29, 0); // Sep 12, 2025 5:29 PM PDT
 
-function ConditionalHomePage() {
-  const now = Date.now();
-  const isBeforeLaunch = now < LAUNCH_TIMESTAMP;
+// function ConditionalHomePage() {
+//   const now = Date.now();
+//   const isBeforeLaunch = now < LAUNCH_TIMESTAMP;
 
-  return isBeforeLaunch ? <CountdownPage /> : <PreFi />;
-}
+//   return isBeforeLaunch ? <CountdownPage /> : <PreFi />;
+// }
 
 function App() {
   return (
@@ -33,15 +33,15 @@ function App() {
           <Sonner />
           <BrowserRouter>
             <Routes>
-              <Route path="/" element={<ConditionalHomePage />} />
-              <Route 
+              <Route path="/" element={<PreFi />} />
+              {/*<Route 
                 path="/prefi" 
                 element={
                   <AuthGuard>
                     <PreFi />
                   </AuthGuard>
                 } 
-              />
+              />*/}
               <Route 
                 path="/admin" 
                 element={
@@ -50,7 +50,7 @@ function App() {
                   </AuthGuard>
                 } 
               />
-              <Route path="/countdown" element={<CountdownPage />} />
+              {/*<Route path="/countdown" element={<CountdownPage />} />*/}
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </BrowserRouter>
