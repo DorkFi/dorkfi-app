@@ -64,21 +64,22 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
       </div>
       
       <div className="flex flex-col gap-2 w-full mt-2">
-        <DorkFiButton
+        {/* TODO: Add back in when we have a transaction page */}
+        {/*<DorkFiButton
           variant="primary"
           className="w-full bg-ocean-teal hover:bg-ocean-teal/90 text-white rounded-xl py-3 text-lg"
           onClick={onViewTransaction}
         >
           View Transaction
-        </DorkFiButton>
+        </DorkFiButton>*/}
         
-        <DorkFiButton
+        {/*<DorkFiButton
           variant="secondary"
           className="w-full border-ocean-teal text-ocean-teal dark:border-whale-gold dark:text-whale-gold"
           onClick={onGoToPortfolio}
         >
           Go to Portfolio
-        </DorkFiButton>
+        </DorkFiButton>*/}
         
         <DorkFiButton
           variant="secondary"

@@ -32,6 +32,8 @@ interface WithdrawModalProps {
   };
   onSubmit?: (amount: string) => void;
   isLoading?: boolean;
+  showTooltip?: boolean;
+  tooltipText?: string;
 }
 
 const WithdrawModal = ({
@@ -43,6 +45,8 @@ const WithdrawModal = ({
   marketStats,
   onSubmit,
   isLoading = false,
+  showTooltip = false,
+  tooltipText = "",
 }: WithdrawModalProps) => {
   const [amount, setAmount] = useState("");
   const [fiatValue, setFiatValue] = useState(0);
@@ -134,9 +138,22 @@ const WithdrawModal = ({
                   alt={tokenSymbol}
                   className="w-12 h-12 rounded-full shadow"
                 />
-                <span className="text-xl font-semibold text-slate-800 dark:text-white">
-                  {tokenSymbol}
-                </span>
+                {showTooltip ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="text-xl font-semibold text-slate-800 dark:text-white cursor-help underline decoration-dotted">
+                        {tokenSymbol}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>{tooltipText}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <span className="text-xl font-semibold text-slate-800 dark:text-white">
+                    {tokenSymbol}
+                  </span>
+                )}
               </div>
             </DialogHeader>
 
@@ -180,7 +197,20 @@ const WithdrawModal = ({
                 <div className="space-y-2">
                   <p className="text-xs text-slate-400 dark:text-slate-500">
                     Currently Deposited: {currentlyDeposited.toLocaleString()}{" "}
-                    {tokenSymbol}
+                    {showTooltip ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="cursor-help underline decoration-dotted">
+                            {tokenSymbol}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>{tooltipText}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      tokenSymbol
+                    )}
                     ($
                     {(
                       currentlyDeposited * marketStats.tokenPrice
@@ -244,7 +274,20 @@ const WithdrawModal = ({
                 disabled={!isValidAmount || isLoading}
                 className="w-full font-semibold text-white h-12 bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isLoading ? "Processing..." : `Withdraw ${tokenSymbol}`}
+                {isLoading ? "Processing..." : `Withdraw ${showTooltip ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="cursor-help underline decoration-dotted">
+                        {tokenSymbol}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>{tooltipText}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                ) : (
+                  tokenSymbol
+                )}`}
               </Button>
             </div>
           </>
