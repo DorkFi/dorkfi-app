@@ -24,6 +24,8 @@ import {
   Hash,
   ArrowLeft,
   ArrowRight,
+  Calculator,
+  Search,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import WalletButton from "@/components/WalletButton";
@@ -74,6 +76,15 @@ import {
 } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
 import {
+  APP_SPEC as LendingPoolAppSpec,
+  DorkFiLendingPoolClient,
+} from "@/clients/DorkFiLendingPoolClient";
+import algorandService, { AlgorandNetwork } from "@/services/algorandService";
+import { abi, CONTRACT } from "ulujs";
+import { fetchMarketInfo } from "@/services/lendingService";
+// import { fromBase } from "@/utils/fromBase"; // Commented out as it's not being used
+import { useCallback, useMemo } from "react";
+import {
   fetchPausedState,
   fetchSystemHealth,
   fetchAdminStats,
@@ -87,15 +98,16 @@ import {
   updateMarketMaxDeposits,
 } from "@/services/adminService";
 import { useOnDemandMarketData } from "@/hooks/useOnDemandMarketData";
-import { fetchMarketInfo } from "@/services/lendingService";
 import WalletNetworkButton from "@/components/WalletNetworkButton";
 import { TokenAutocomplete } from "@/components/ui/TokenAutocomplete";
 import { TokenContractModal } from "@/components/ui/TokenContractModal";
 import { useWallet } from "@txnlab/use-wallet-react";
 import algosdk, { waitForConfirmation } from "algosdk";
 import { initializeAlgorandForCurrentNetwork } from "@/services/algorandExamples";
-import algorandService, { AlgorandNetwork } from "@/services/algorandService";
 import BigNumber from "bignumber.js";
+import envoiService, { type EnvoiNameResponse } from "@/services/envoiService";
+import { fromBase } from "@/utils/calculationUtils";
+import { ARC200Service } from "@/services/arc200Service";
 
 // Get markets from configuration - now reactive to network changes
 const getMarketsFromConfig = (networkId: NetworkId) => {
@@ -112,6 +124,8 @@ const getMarketsFromConfig = (networkId: NetworkId) => {
     underlyingContractId: token.underlyingContractId, // The actual contract ID to use
     originalContractId: token.originalContractId, // The original contract ID
     isSmartContract: token.isSmartContract, // Whether this is a smart contract-based asset
+    decimals: token.decimals, // CRITICAL: Token decimals for proper calculations
+    poolId: token.poolId, // Pool ID for this token
     status: "active" as const,
     totalDeposits: Math.floor(Math.random() * 1000000) + 50000, // Mock data
     users: Math.floor(Math.random() * 500) + 50, // Mock data
@@ -212,6 +226,35 @@ export default function AdminDashboard() {
 
   // Test transaction state
   const [isTestTxLoading, setIsTestTxLoading] = useState(false);
+
+  // User Analysis state
+  const [userAnalysisAddress, setUserAnalysisAddress] = useState("");
+  const [userGlobalData, setUserGlobalData] = useState<{
+    totalCollateralValue: number;
+    totalBorrowValue: number;
+    lastUpdateTime: number;
+  } | null>(null);
+  const [userMarketsState, setUserMarketsState] = useState<Record<string, any>>(
+    {}
+  );
+  const [userMarketPrices, setUserMarketPrices] = useState<
+    Record<string, number>
+  >({});
+  const [userGetUserData, setUserGetUserData] = useState<Record<string, any>>(
+    {}
+  );
+  const [globalDataLoading, setGlobalDataLoading] = useState(false);
+  const [globalDataError, setGlobalDataError] = useState<string | null>(null);
+
+  // Envoi state
+  const [envoiData, setEnvoiData] = useState<EnvoiNameResponse | null>(null);
+  const [envoiLoading, setEnvoiLoading] = useState(false);
+  const [envoiError, setEnvoiError] = useState<string | null>(null);
+  const [envoiSearchQuery, setEnvoiSearchQuery] = useState("");
+  const [envoiSearchResults, setEnvoiSearchResults] = useState<
+    Array<{ name: string; address: string; tokenId: string }>
+  >([]);
+  const [envoiSearchLoading, setEnvoiSearchLoading] = useState(false);
 
   // Lending service state - using on-demand loading now
 
@@ -409,7 +452,8 @@ export default function AdminDashboard() {
         console.log("Market creation result:", createMarketResult);
 
         if (isCurrentNetworkAlgorandCompatible()) {
-          const algorandClients = await algorandService.getCurrentClientsForTransactions();
+          const algorandClients =
+            await algorandService.getCurrentClientsForTransactions();
           const stxn = await signTransactions(
             createMarketResult.txns.map((txn) =>
               Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
@@ -503,10 +547,7 @@ export default function AdminDashboard() {
       marketId: contractId, // Use the token's contract ID, not the market's tokenContractId
       poolId: market.marketInfo?.poolId || "",
       currentPrice: market.marketInfo?.price
-        ? (
-            parseFloat(market.marketInfo.price) /
-            Math.pow(10, 6)
-          ).toFixed(6)
+        ? (parseFloat(market.marketInfo.price) / Math.pow(10, 6)).toFixed(6)
         : "0",
       newPrice: "",
     });
@@ -825,6 +866,1277 @@ export default function AdminDashboard() {
     loadSystemHealth();
   }, []);
 
+  // User Analysis Functions
+  const fetchUserGlobalData = useCallback(
+    async (userAddress: string) => {
+      console.log(
+        "📊 fetchUserGlobalData called with:",
+        userAddress,
+        "on network:",
+        currentNetwork
+      );
+
+      if (!userAddress || !currentNetwork) {
+        console.warn("⚠️ Missing userAddress or currentNetwork:", {
+          userAddress,
+          currentNetwork,
+        });
+        setUserGlobalData(null);
+        return;
+      }
+
+      console.log("🔄 Starting global data fetch...");
+      setGlobalDataLoading(true);
+      setGlobalDataError(null);
+
+      try {
+        const networkConfig = getCurrentNetworkConfig();
+        const clients = algorandService.initializeClients(
+          networkConfig.walletNetworkId as AlgorandNetwork
+        );
+
+        // Initialize aggregate values
+        let totalCollateralValueUSD = 0;
+        let totalBorrowValueUSD = 0;
+        let lastUpdateTime = 0;
+
+        for (const poolId of networkConfig.contracts.lendingPools) {
+          const ci = new CONTRACT(
+            Number(poolId),
+            clients.algod,
+            undefined,
+            { ...LendingPoolAppSpec.contract, events: [] },
+            {
+              addr: algosdk.getApplicationAddress(Number(poolId)),
+              sk: new Uint8Array(),
+            }
+          );
+
+          const globalUserR = await ci.get_global_user(userAddress);
+          console.log("globalUserR", globalUserR);
+          if (globalUserR.success) {
+            const globalUser = globalUserR.returnValue;
+            // Contract stores totalCollateralValue with scaling: (deposit_amount * price) // SCALE
+            // Where SCALE = 1e18, so we need to divide by 1e18 to get USD value
+            const totalCollateralValueRaw = globalUser[0].toString();
+            console.log("totalCollateralValueRaw", totalCollateralValueRaw);
+            const poolCollateralValueUSD = new BigNumber(
+              totalCollateralValueRaw
+            )
+              .div(1e14) // TODO likely not correct need to check
+              .toNumber();
+            console.log(
+              "poolCollateralValueUSD",
+              poolCollateralValueUSD,
+              "type:",
+              typeof poolCollateralValueUSD
+            );
+            const poolBorrowValueUSD = new BigNumber(
+              globalUser[1].toString()
+            ).toNumber();
+
+            // Ensure we're working with numbers, not strings
+            const collateralValue = Number(poolCollateralValueUSD) || 0;
+            const borrowValue = Number(poolBorrowValueUSD) || 0;
+
+            // Aggregate values from all pools
+            totalCollateralValueUSD += collateralValue;
+            totalBorrowValueUSD += borrowValue;
+            // Use the latest update time from all pools
+            lastUpdateTime = Math.max(lastUpdateTime, Number(globalUser[2]));
+
+            console.log("✅ Pool data fetched:", {
+              poolId,
+              userAddress,
+              poolCollateralValue: poolCollateralValueUSD,
+              poolBorrowValue: poolBorrowValueUSD,
+              poolLastUpdateTime: Number(globalUser[2]),
+              rawValue: globalUser[0].toString(),
+              scalingFactor: "1e18",
+            });
+          } else {
+            throw new Error("Failed to get global user data");
+          }
+        }
+
+        // Set aggregated data once after processing all pools
+        console.log("🔍 Final aggregated values before setting state:", {
+          totalCollateralValueUSD,
+          totalBorrowValueUSD,
+          "totalCollateralValueUSD type": typeof totalCollateralValueUSD,
+          "totalBorrowValueUSD type": typeof totalBorrowValueUSD,
+        });
+
+        setUserGlobalData({
+          totalCollateralValue: totalCollateralValueUSD,
+          totalBorrowValue: totalBorrowValueUSD,
+          lastUpdateTime: lastUpdateTime,
+        });
+        console.log("✅ Aggregated user global data:", {
+          userAddress,
+          totalCollateralValue: totalCollateralValueUSD,
+          totalBorrowValue: totalBorrowValueUSD,
+          lastUpdateTime: lastUpdateTime,
+        });
+      } catch (error) {
+        console.error("❌ Error fetching user global data:", error);
+        setGlobalDataError(
+          error instanceof Error ? error.message : "Unknown error"
+        );
+        setUserGlobalData(null);
+      } finally {
+        setGlobalDataLoading(false);
+      }
+    },
+    [currentNetwork]
+  );
+
+  const fetchUserGetUserData = useCallback(
+    async (userAddress: string) => {
+      console.log(
+        "🔍 fetchUserGetUserData called with:",
+        userAddress,
+        "on network:",
+        currentNetwork
+      );
+
+      if (!userAddress || !currentNetwork) {
+        console.warn(
+          "⚠️ Missing userAddress or currentNetwork for get_user data:",
+          { userAddress, currentNetwork }
+        );
+        return {};
+      }
+
+      console.log("🔄 Starting get_user data fetch...");
+      const userDataByMarket: Record<string, any> = {};
+
+      try {
+        const networkConfig = getCurrentNetworkConfig();
+        const clients = algorandService.initializeClients(
+          networkConfig.walletNetworkId as AlgorandNetwork
+        );
+        const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+        console.log(
+          `🔍 Total tokens to process: ${tokens.length}`,
+          tokens.map((t) => ({
+            symbol: t.symbol,
+            underlyingContractId: t.underlyingContractId,
+            poolId: t.poolId,
+          }))
+        );
+
+        // Fetch user data for each market using get_user
+        for (const token of tokens) {
+          try {
+            const marketId = token.symbol.toLowerCase();
+            console.log(`🔍 Processing token ${token.symbol}:`, {
+              symbol: token.symbol,
+              underlyingContractId: token.underlyingContractId,
+              poolId: token.poolId,
+              marketId,
+            });
+
+            // Get market info to determine the pool and token ID
+            console.log(
+              `🔄 Calling fetchMarketInfo for ${token.symbol} with:`,
+              {
+                poolId: token.poolId || "1",
+                underlyingContractId:
+                  token.underlyingContractId || token.symbol,
+                currentNetwork,
+              }
+            );
+
+            const marketInfo = await fetchMarketInfo(
+              token.poolId || "1",
+              token.underlyingContractId || token.symbol,
+              currentNetwork
+            );
+            console.log(`📊 Market info for ${token.symbol}:`, marketInfo);
+            console.log(`🔍 Condition check for ${token.symbol}:`, {
+              hasMarketInfo: !!marketInfo,
+              marketInfoType: typeof marketInfo,
+              hasUnderlyingContractId: !!token.underlyingContractId,
+              underlyingContractId: token.underlyingContractId,
+              underlyingContractIdType: typeof token.underlyingContractId,
+              conditionResult: !!(marketInfo && token.underlyingContractId),
+            });
+
+            if (marketInfo && token.underlyingContractId) {
+              console.log(
+                `✅ Conditions met for ${token.symbol}, calling get_user...`
+              );
+              const poolId = token.poolId || "1";
+              console.log("poolId", poolId);
+              const ci = new CONTRACT(
+                Number(poolId),
+                clients.algod,
+                undefined,
+                { ...LendingPoolAppSpec.contract, events: [] },
+                {
+                  addr: algosdk.getApplicationAddress(Number(poolId)),
+                  sk: new Uint8Array(),
+                }
+              );
+
+              console.log(`🔧 CONTRACT object created for ${token.symbol}:`, {
+                poolId: Number(poolId),
+                hasGetUser: typeof ci.get_user === "function",
+                contractMethods: Object.getOwnPropertyNames(
+                  Object.getPrototypeOf(ci)
+                ),
+              });
+
+              // Call get_user method
+              console.log(
+                `🔄 About to call get_user for ${token.symbol} with:`,
+                {
+                  userAddress,
+                  underlyingContractId: token.underlyingContractId,
+                  underlyingContractIdType: typeof token.underlyingContractId,
+                  poolId,
+                }
+              );
+
+              // Validate the underlyingContractId parameter
+              const marketId = token.underlyingContractId;
+              if (!marketId) {
+                throw new Error(
+                  `No underlyingContractId for token ${token.symbol}`
+                );
+              }
+
+              let getUserR, getMarketR;
+              try {
+                console.log(
+                  `🚀 Calling ci.get_user(${userAddress}, ${marketId}) and ci.get_market(${marketId})`
+                );
+                [getUserR, getMarketR] = await Promise.all([
+                  ci.get_user(userAddress, Number(marketId)),
+                  ci.get_market(Number(marketId)),
+                ]);
+                console.log(
+                  `✅ get_user and get_market calls completed for ${token.symbol}`
+                );
+                console.log({ getUserR, getMarketR });
+                console.log(`get_user result for ${token.symbol}:`, getUserR);
+                console.log(
+                  `get_market result for ${token.symbol}:`,
+                  getMarketR
+                );
+              } catch (getUserError) {
+                console.error(
+                  `❌ get_user call failed for ${token.symbol}:`,
+                  getUserError
+                );
+                throw getUserError; // Re-throw to be caught by outer try-catch
+              }
+
+              if (getUserR.success && getMarketR.success) {
+                const userData = getUserR.returnValue;
+                const marketData = getMarketR.returnValue;
+
+                console.log(`🔍 Raw userData for ${token.symbol}:`, {
+                  userData,
+                  userDataLength: userData?.length,
+                  userDataType: typeof userData,
+                  userDataArray: Array.isArray(userData),
+                });
+
+                console.log(`🔍 Raw marketData for ${token.symbol}:`, {
+                  marketData,
+                  marketDataLength: marketData?.length,
+                  marketDataType: typeof marketData,
+                  marketDataArray: Array.isArray(marketData),
+                });
+
+                // Log each field individually to see what we're getting
+                console.log(`🔍 Individual user fields for ${token.symbol}:`, {
+                  "[0] scaled_deposits": userData[0],
+                  "[1] scaled_borrows": userData[1],
+                  "[2] user_deposit_index": userData[2],
+                  "[3] user_borrow_index": userData[3],
+                  "[4] last_update_time": userData[4],
+                  "[5] last_price": userData[5],
+                });
+
+                console.log(
+                  `🔍 Individual market fields for ${token.symbol}:`,
+                  {
+                    "[8] current_deposit_index": marketData[8],
+                    "[9] current_borrow_index": marketData[9],
+                    "[13] current_price": marketData[13],
+                  }
+                );
+
+                // Store data using both token symbol and contract ID as keys for flexibility
+                // Use CURRENT market indices, not user's stored indices
+                userDataByMarket[marketId] = {
+                  scaled_deposits: userData[0].toString(),
+                  scaled_borrows: userData[1].toString(),
+                  user_deposit_index: userData[2].toString(), // User's stored index
+                  user_borrow_index: userData[3].toString(), // User's stored index
+                  current_deposit_index: marketData[8].toString(), // Current market index
+                  current_borrow_index: marketData[9].toString(), // Current market index
+                  last_update_time: Number(userData[4]),
+                  last_price: userData[5].toString(),
+                  current_price: marketData[13].toString(), // Current market price
+                };
+
+                // Also store using contract ID as key
+                userDataByMarket[token.underlyingContractId] = {
+                  scaled_deposits: userData[0].toString(),
+                  scaled_borrows: userData[1].toString(),
+                  user_deposit_index: userData[2].toString(), // User's stored index
+                  user_borrow_index: userData[3].toString(), // User's stored index
+                  current_deposit_index: marketData[8].toString(), // Current market index
+                  current_borrow_index: marketData[9].toString(), // Current market index
+                  last_update_time: Number(userData[4]),
+                  last_price: userData[5].toString(),
+                  current_price: marketData[13].toString(), // Current market price
+                };
+
+                console.log(`✅ Processed get_user data for ${token.symbol}:`, {
+                  scaled_deposits: userData[0].toString(),
+                  scaled_borrows: userData[1].toString(),
+                  deposit_index: userData[2].toString(),
+                  borrow_index: userData[3].toString(),
+                  last_update_time: Number(userData[4]),
+                  last_price: userData[5].toString(),
+                  rawScaledDeposits: userData[0],
+                  rawScaledDepositsType: typeof userData[0],
+                });
+              } else {
+                console.warn(
+                  `Failed to get user data for ${token.symbol}:`,
+                  getUserR
+                );
+                // Set default values
+                userDataByMarket[marketId] = {
+                  scaled_deposits: "0",
+                  scaled_borrows: "0",
+                  deposit_index: "1000000000000000000", // 1e18
+                  borrow_index: "1000000000000000000", // 1e18
+                  last_update_time: 0,
+                  last_price: "0",
+                };
+              }
+            } else {
+              console.warn(`❌ Conditions NOT met for ${token.symbol}:`, {
+                hasMarketInfo: !!marketInfo,
+                hasUnderlyingContractId: !!token.underlyingContractId,
+                underlyingContractId: token.underlyingContractId,
+              });
+            }
+          } catch (error) {
+            console.warn(
+              `Failed to fetch get_user data for ${token.symbol}:`,
+              error
+            );
+            // Set default values on error
+            const marketId = token.symbol.toLowerCase();
+            userDataByMarket[marketId] = {
+              scaled_deposits: "0",
+              scaled_borrows: "0",
+              deposit_index: "1000000000000000000", // 1e18
+              borrow_index: "1000000000000000000", // 1e18
+              last_update_time: 0,
+              last_price: "0",
+            };
+          }
+        }
+
+        console.log("✅ get_user data fetch completed:", userDataByMarket);
+        return userDataByMarket;
+      } catch (error) {
+        console.error("❌ Error fetching get_user data:", error);
+        return {};
+      }
+    },
+    [currentNetwork]
+  );
+
+  const fetchUserMarketData = useCallback(
+    async (userAddress: string) => {
+      console.log(
+        "📈 fetchUserMarketData called with:",
+        userAddress,
+        "on network:",
+        currentNetwork
+      );
+
+      if (!userAddress || !currentNetwork) {
+        console.warn(
+          "⚠️ Missing userAddress or currentNetwork for market data:",
+          { userAddress, currentNetwork }
+        );
+        return;
+      }
+
+      console.log("🔄 Starting market data fetch...");
+      try {
+        const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+        const marketsState: Record<string, any> = {};
+        const marketPrices: Record<string, number> = {};
+
+        // Fetch market data for each token
+        for (const token of tokens) {
+          try {
+            // Get market info for price data
+            const marketInfo = await fetchMarketInfo(
+              token.poolId || "1",
+              token.underlyingContractId || token.symbol,
+              currentNetwork
+            );
+
+            if (marketInfo) {
+              const marketId = token.symbol.toLowerCase();
+
+              // Fetch user-specific market balance data
+              let userMarketData = {
+                depositedBase: BigInt(0),
+                walletBalanceBase: BigInt(0),
+                totalStakeSecondsBase: BigInt(0),
+              };
+
+              try {
+                // Fetch REAL user balances from blockchain (mirroring PreFi.tsx getMarketBalance)
+                const networkConfig = getCurrentNetworkConfig();
+                const algorandClients = algorandService.initializeClients(
+                  networkConfig.walletNetworkId as AlgorandNetwork
+                );
+                ARC200Service.initialize(algorandClients);
+
+                // Determine asset type and token ID (same logic as PreFi.tsx)
+                const assetId = token.underlyingAssetId || "0";
+                const [assetType, tokenId] =
+                  assetId === "0"
+                    ? ["network", "0"]
+                    : !isNaN(Number(assetId))
+                    ? ["asa", assetId]
+                    : ["arc200", token.underlyingContractId];
+
+                // Get nTokenId for deposited balance
+                const nTokenId = marketInfo.ntokenId;
+
+                // Fetch wallet balance based on asset type
+                let balance = 0n;
+                if (assetType === "network") {
+                  // For network VOI, get account balance minus minimum balance
+                  const accInfo = await algorandClients.algod
+                    .accountInformation(userAddress)
+                    .do();
+                  balance = BigInt(
+                    Math.max(0, accInfo.amount - accInfo["min-balance"] - 1e6)
+                  );
+                } else if (assetType === "asa") {
+                  const accAssetInfo = await algorandClients.algod
+                    .accountAssetInformation(userAddress, Number(assetId))
+                    .do();
+                  balance = BigInt(accAssetInfo["asset-holding"].amount);
+                } else if (assetType === "arc200") {
+                  const tokenBalance = await ARC200Service.getBalance(
+                    userAddress,
+                    tokenId
+                  );
+                  balance = tokenBalance ? BigInt(tokenBalance) : 0n;
+                }
+
+                // Fetch deposited balance (nToken balance) - THIS IS THE KEY PART!
+                let deposited = 0n;
+                if (nTokenId) {
+                  const nTokenBalance = await ARC200Service.getBalance(
+                    userAddress,
+                    nTokenId
+                  );
+                  deposited = nTokenBalance ? BigInt(nTokenBalance) : 0n;
+                }
+
+                userMarketData = {
+                  depositedBase: deposited,
+                  walletBalanceBase: balance,
+                  totalStakeSecondsBase: BigInt(10_000_000), // Default value like in PreFi.tsx
+                };
+
+                console.log(`✅ REAL user market data for ${token.symbol}:`, {
+                  assetType,
+                  tokenId,
+                  nTokenId,
+                  deposited: fromBase(deposited, token.decimals || 6),
+                  walletBalance: fromBase(balance, token.decimals || 6),
+                  marketId,
+                });
+              } catch (userDataError) {
+                console.warn(
+                  `Failed to fetch REAL user data for ${token.symbol}:`,
+                  userDataError
+                );
+                // Fallback to zero balances on error
+                userMarketData = {
+                  depositedBase: BigInt(0),
+                  walletBalanceBase: BigInt(0),
+                  totalStakeSecondsBase: BigInt(10_000_000),
+                };
+              }
+
+              marketsState[marketId] = userMarketData;
+
+              // Set market price (scaled properly like in PreFi.tsx)
+              if (marketInfo.price) {
+                const partiallyScaledPrice = parseFloat(marketInfo.price);
+                const additionalScaling = Math.pow(10, 6); // Use consistent 6-decimal scaling for all tokens
+                const finalPrice = partiallyScaledPrice / additionalScaling;
+                marketPrices[marketId] = finalPrice;
+                console.log(
+                  `Market price for ${token.symbol}: $${finalPrice} (scaled by 10^6)`
+                );
+              }
+            }
+          } catch (error) {
+            console.warn(
+              `Failed to fetch market data for ${token.symbol}:`,
+              error
+            );
+          }
+        }
+
+        setUserMarketsState(marketsState);
+        setUserMarketPrices(marketPrices);
+        console.log("✅ Market data fetch completed:", {
+          marketsState,
+          marketPrices,
+        });
+      } catch (error) {
+        console.error("❌ Error fetching user market data:", error);
+      }
+    },
+    [currentNetwork]
+  );
+
+  // Envoi Functions
+  const fetchEnvoiData = useCallback(
+    async (userAddress: string) => {
+      console.log(
+        "🔗 fetchEnvoiData called with:",
+        userAddress,
+        "on network:",
+        currentNetwork
+      );
+
+      if (!userAddress || !currentNetwork) {
+        console.warn(
+          "⚠️ Missing userAddress or currentNetwork for Envoi data:",
+          { userAddress, currentNetwork }
+        );
+        setEnvoiData(null);
+        return;
+      }
+
+      console.log("🔄 Starting Envoi data fetch...");
+      setEnvoiLoading(true);
+      setEnvoiError(null);
+
+      try {
+        const nameData = await envoiService.resolveName(userAddress);
+        setEnvoiData(nameData);
+
+        if (nameData) {
+          console.log("✅ Envoi data fetched:", {
+            address: userAddress,
+            name: nameData.name,
+            tokenId: nameData.tokenId,
+            owner: nameData.owner,
+          });
+        } else {
+          console.log("ℹ️ No Envoi name found for address:", userAddress);
+        }
+      } catch (error) {
+        console.error("❌ Error fetching Envoi data:", error);
+        setEnvoiError(error instanceof Error ? error.message : "Unknown error");
+        setEnvoiData(null);
+      } finally {
+        setEnvoiLoading(false);
+      }
+    },
+    [currentNetwork]
+  );
+
+  const handleEnvoiSearch = useCallback(async (query: string) => {
+    if (!query?.trim()) {
+      setEnvoiSearchResults([]);
+      return;
+    }
+
+    console.log("🔍 Searching Envoi names for:", query);
+    setEnvoiSearchLoading(true);
+    try {
+      const results = await envoiService.searchNames(query);
+      console.log("📋 Search results:", results);
+      setEnvoiSearchResults(results?.results || []);
+    } catch (error) {
+      console.error("❌ Error searching Envoi names:", error);
+      setEnvoiSearchResults([]);
+    } finally {
+      setEnvoiSearchLoading(false);
+    }
+  }, []);
+
+  const handleEnvoiNameSelect = useCallback(
+    async (name: string) => {
+      console.log("🔍 Envoi name selected:", name);
+      try {
+        const addressData = await envoiService.resolveAddress(name);
+        console.log("📍 Address data resolved:", addressData);
+
+        if (addressData) {
+          console.log(
+            "✅ Setting address and starting analysis:",
+            addressData.address
+          );
+          console.log("🔍 Full addressData object:", addressData);
+
+          // The API should now return the correct format with address field
+          const resolvedAddress = addressData.address;
+          console.log("📍 Resolved address:", resolvedAddress);
+
+          if (resolvedAddress) {
+            setUserAnalysisAddress(resolvedAddress);
+            setEnvoiSearchQuery(name);
+            setEnvoiSearchResults([]);
+
+            // Show success message
+            console.log(`✅ Address resolved: ${name} → ${resolvedAddress}`);
+
+            // Automatically analyze the user with the resolved address
+            console.log("🚀 Starting analysis for address:", resolvedAddress);
+            try {
+              // Set loading state for both methods
+              setGlobalDataLoading(true);
+
+              await Promise.all([
+                fetchUserGlobalData(resolvedAddress),
+                fetchUserMarketData(resolvedAddress),
+                fetchEnvoiData(resolvedAddress),
+              ]);
+              console.log(
+                "✅ Analysis completed for address:",
+                resolvedAddress
+              );
+            } catch (analysisError) {
+              console.error(
+                "❌ Error during automatic analysis:",
+                analysisError
+              );
+              // Don't throw the error, just log it - the user can still manually analyze
+            } finally {
+              setGlobalDataLoading(false);
+            }
+          } else {
+            console.error("❌ No address found in response:", addressData);
+            alert(
+              "Failed to resolve address from the API response. Please check the console for details."
+            );
+          }
+        } else {
+          console.warn("⚠️ No address data returned for name:", name);
+          alert(
+            "Failed to resolve address for this VOI name. Please try again."
+          );
+        }
+      } catch (error) {
+        console.error("❌ Error resolving Envoi name:", error);
+        alert("Failed to resolve Envoi name. Please try again.");
+      }
+    },
+    [
+      fetchUserGlobalData,
+      fetchUserMarketData,
+      fetchUserGetUserData,
+      fetchEnvoiData,
+    ]
+  );
+
+  const handleAnalyzeUser = async () => {
+    console.log(
+      "🔍 handleAnalyzeUser called with address:",
+      userAnalysisAddress
+    );
+
+    if (!userAnalysisAddress?.trim()) {
+      console.warn("⚠️ No address provided for analysis");
+      alert("Please enter a user address");
+      return;
+    }
+
+    console.log(
+      "🚀 Starting manual analysis for address:",
+      userAnalysisAddress
+    );
+    try {
+      // Set loading state for both methods
+      setGlobalDataLoading(true);
+
+      await Promise.all([
+        fetchUserGlobalData(userAnalysisAddress),
+        fetchUserMarketData(userAnalysisAddress),
+        fetchUserGetUserData(userAnalysisAddress).then((data) => {
+          setUserGetUserData(data);
+        }),
+        fetchEnvoiData(userAnalysisAddress),
+      ]);
+      console.log(
+        "✅ Manual analysis completed for address:",
+        userAnalysisAddress
+      );
+    } catch (error) {
+      console.error("❌ Error in manual analysis:", error);
+    } finally {
+      setGlobalDataLoading(false);
+    }
+  };
+
+  // Method 1: Sum individual market deposits (mirroring PreFi.tsx logic)
+  const userGlobalDeposited = useMemo(() => {
+    let sum = 0;
+    const debugInfo: Array<{
+      symbol: string;
+      tokenAmount: number;
+      price: number;
+      usdValue: number;
+      depositedBase: bigint;
+    }> = [];
+
+    // Get markets from configuration (similar to PreFi.tsx)
+    const markets = getMarketsFromConfig(currentNetwork);
+
+    for (const market of markets) {
+      const marketId = market.symbol.toLowerCase();
+      const marketState = userMarketsState[marketId];
+      if (!marketState) continue;
+
+      const tokenAmount = fromBase(
+        marketState.depositedBase,
+        market.decimals || 6
+      ); // Use actual token decimals
+      const price = userMarketPrices[marketId] || 0;
+      const usdValue = tokenAmount * price;
+      sum += usdValue;
+
+      // Always include in breakdown for complete visibility
+      debugInfo.push({
+        symbol: market.symbol,
+        tokenAmount,
+        price,
+        usdValue,
+        depositedBase: marketState.depositedBase,
+      });
+    }
+
+    // Debug logging (similar to PreFi.tsx)
+    if (debugInfo.length > 0) {
+      console.log("📊 Method 1 (Sum) calculation:", {
+        totalUSD: sum,
+        breakdown: debugInfo,
+        marketsCount: markets.length,
+        activeMarkets: debugInfo.filter((m) => m.usdValue > 0).length,
+      });
+    }
+
+    return sum;
+  }, [userMarketsState, userMarketPrices, currentNetwork]);
+
+  // Store breakdown data for display
+  const method1Breakdown = useMemo(() => {
+    const markets = getMarketsFromConfig(currentNetwork);
+    return markets.map((market) => {
+      const marketId = market.symbol.toLowerCase();
+      const marketState = userMarketsState[marketId];
+      const price = userMarketPrices[marketId] || 0;
+
+      if (!marketState) {
+        return {
+          symbol: market.symbol,
+          tokenAmount: 0,
+          price: 0,
+          usdValue: 0,
+          depositedBase: BigInt(0),
+          decimals: market.decimals || 6,
+          status: "No Data",
+        };
+      }
+
+      const tokenAmount = fromBase(
+        marketState.depositedBase,
+        market.decimals || 6
+      );
+      const usdValue = tokenAmount * price;
+
+      return {
+        symbol: market.symbol,
+        tokenAmount,
+        price,
+        usdValue,
+        depositedBase: marketState.depositedBase,
+        decimals: market.decimals || 6,
+        status: usdValue > 0 ? "Active" : "No Deposits",
+      };
+    });
+  }, [userMarketsState, userMarketPrices, currentNetwork]);
+
+  // Method 2: Use totalCollateralValue from GlobalUserData
+  const userGlobalDepositedFromContract = useMemo(() => {
+    return userGlobalData?.totalCollateralValue || 0;
+  }, [userGlobalData]);
+
+  // Method 2 Breakdown - Show contract data details for each pool
+  const method2Breakdown = useMemo(() => {
+    if (!userGlobalData) {
+      return {
+        totalCollateralValue: 0,
+        totalBorrowValue: 0,
+        lastUpdateTime: 0,
+        scalingFactor: "1e18",
+        rawCollateralValue: "0",
+        rawBorrowValue: "0",
+        status: "No Data",
+        pools: [],
+      };
+    }
+
+    // Get lending pools for current network
+    const lendingPools = getLendingPools(currentNetwork);
+    const markets = getMarketsFromConfig(currentNetwork);
+
+    // Group markets by pool
+    const poolsData = lendingPools.map((poolId, index) => {
+      const classLabel = String.fromCharCode(65 + index); // A, B, C, etc.
+      const poolMarkets = markets.filter((market) => market.poolId === poolId);
+
+      return {
+        poolId,
+        classLabel,
+        markets: poolMarkets,
+        totalCollateralValue: 0, // Will be calculated from individual markets
+        totalBorrowValue: 0, // Will be calculated from individual markets
+        status: "No Data",
+      };
+    });
+
+    // Ensure we're working with numbers to prevent string concatenation
+    const collateralValue = Number(userGlobalData.totalCollateralValue) || 0;
+    const borrowValue = Number(userGlobalData.totalBorrowValue) || 0;
+
+    return {
+      totalCollateralValue: collateralValue,
+      totalBorrowValue: borrowValue,
+      lastUpdateTime: userGlobalData.lastUpdateTime,
+      scalingFactor: "1e18",
+      rawCollateralValue: (collateralValue * 1e18).toString(),
+      rawBorrowValue: (borrowValue * 1e18).toString(),
+      status: "Active",
+      pools: poolsData,
+    };
+  }, [userGlobalData, currentNetwork]);
+
+  // Method 3: Sum user market data (deposits + borrows from market state)
+  const userGlobalMarketData = useMemo(() => {
+    let totalDeposits = 0;
+    let totalBorrows = 0;
+    const debugInfo: Array<{
+      symbol: string;
+      depositedAmount: number;
+      borrowedAmount: number;
+      depositPrice: number;
+      borrowPrice: number;
+      depositUSD: number;
+      borrowUSD: number;
+      netPosition: number;
+    }> = [];
+
+    // Get markets from configuration
+    const markets = getMarketsFromConfig(currentNetwork);
+
+    for (const market of markets) {
+      const marketId = market.symbol.toLowerCase();
+      const marketState = userMarketsState[marketId];
+      const price = userMarketPrices[marketId] || 0;
+
+      if (!marketState) continue;
+
+      // Calculate deposited amount and USD value
+      const depositedAmount = fromBase(
+        marketState.depositedBase,
+        market.decimals || 6
+      );
+      const depositUSD = depositedAmount * price;
+
+      // For borrows, we need to check if there's borrow data in marketState
+      // This might need to be fetched separately or calculated differently
+      const borrowedAmount = 0; // Placeholder - need to determine how borrows are stored
+      const borrowUSD = borrowedAmount * price;
+
+      totalDeposits += depositUSD;
+      totalBorrows += borrowUSD;
+
+      debugInfo.push({
+        symbol: market.symbol,
+        depositedAmount,
+        borrowedAmount,
+        depositPrice: price,
+        borrowPrice: price,
+        depositUSD,
+        borrowUSD,
+        netPosition: depositUSD - borrowUSD,
+      });
+    }
+
+    // Debug logging
+    if (debugInfo.length > 0) {
+      console.log("📊 Method 3 (Market Data Sum) calculation:", {
+        totalDeposits,
+        totalBorrows,
+        netPosition: totalDeposits - totalBorrows,
+        breakdown: debugInfo,
+        marketsCount: markets.length,
+        activeMarkets: debugInfo.filter(
+          (m) => m.depositUSD > 0 || m.borrowUSD > 0
+        ).length,
+      });
+    }
+
+    return {
+      totalDeposits,
+      totalBorrows,
+      netPosition: totalDeposits - totalBorrows,
+    };
+  }, [userMarketsState, userMarketPrices, currentNetwork]);
+
+  // Method 3 Breakdown - Show detailed market data
+  const method3Breakdown = useMemo(() => {
+    const markets = getMarketsFromConfig(currentNetwork);
+    return markets.map((market) => {
+      const marketId = market.symbol.toLowerCase();
+      const marketState = userMarketsState[marketId];
+      const price = userMarketPrices[marketId] || 0;
+
+      if (!marketState) {
+        return {
+          symbol: market.symbol,
+          depositedAmount: 0,
+          borrowedAmount: 0,
+          depositPrice: 0,
+          borrowPrice: 0,
+          depositUSD: 0,
+          borrowUSD: 0,
+          netPosition: 0,
+          decimals: market.decimals || 6,
+          status: "No Data",
+        };
+      }
+
+      const depositedAmount = fromBase(
+        marketState.depositedBase,
+        market.decimals || 6
+      );
+      const depositUSD = depositedAmount * price;
+
+      // Placeholder for borrows - this needs to be implemented based on actual borrow data structure
+      const borrowedAmount = 0;
+      const borrowUSD = borrowedAmount * price;
+      const netPosition = depositUSD - borrowUSD;
+
+      return {
+        symbol: market.symbol,
+        depositedAmount,
+        borrowedAmount,
+        depositPrice: price,
+        borrowPrice: price,
+        depositUSD,
+        borrowUSD,
+        netPosition,
+        decimals: market.decimals || 6,
+        status: netPosition !== 0 ? "Active" : "No Position",
+      };
+    });
+  }, [userMarketsState, userMarketPrices, currentNetwork]);
+
+  // Method 4: Use get_user method to fetch individual user position data for each market
+  const userGlobalFromGetUser = useMemo(() => {
+    let totalDeposits = 0;
+    let totalBorrows = 0;
+    const debugInfo: Array<{
+      symbol: string;
+      marketId: string;
+      scaledDeposits: string;
+      scaledBorrows: string;
+      currentDepositIndex: string;
+      currentBorrowIndex: string;
+      actualDeposits: number;
+      actualBorrows: number;
+      currentPrice: number;
+      depositUSD: number;
+      borrowUSD: number;
+      netPosition: number;
+    }> = [];
+
+    const markets = getMarketsFromConfig(currentNetwork);
+    const SCALE = 1e18; // Precision scaling factor
+
+    for (const market of markets) {
+      const marketId = market.symbol.toLowerCase();
+      const contractId = market.underlyingContractId;
+
+      // Try to get data using both token symbol and contract ID
+      let getUserData =
+        userGetUserData[marketId] || userGetUserData[contractId];
+      const currentPrice = userMarketPrices[marketId] || 0;
+
+      console.log(
+        `🔍 Method 4 Calculation - Looking for data for ${market.symbol}:`,
+        {
+          marketId,
+          contractId,
+          hasGetUserDataBySymbol: !!userGetUserData[marketId],
+          hasGetUserDataByContractId: !!userGetUserData[contractId],
+          hasGetUserData: !!getUserData,
+          getUserDataKeys: Object.keys(userGetUserData),
+          currentPrice,
+        }
+      );
+
+      if (getUserData) {
+        console.log(`🔍 Processing getUserData for ${market.symbol}:`, {
+          getUserData,
+          marketId,
+        });
+
+        const scaledDeposits = Number(getUserData.scaled_deposits || "0");
+        const scaledBorrows = Number(getUserData.scaled_borrows || "0");
+        // Use CURRENT market indices, not user's stored indices
+        const currentDepositIndex =
+          getUserData.current_deposit_index || "1000000000000000000"; // 1e18
+        const currentBorrowIndex =
+          getUserData.current_borrow_index || "1000000000000000000"; // 1e18
+        const currentPrice =
+          parseFloat(getUserData.current_price || "0") / SCALE;
+        const lastPrice = parseFloat(getUserData.last_price || "0") / SCALE;
+
+        console.log(`🔍 Raw values for ${market.symbol}:`, {
+          scaledDeposits,
+          scaledBorrows,
+          currentDepositIndex,
+          currentBorrowIndex,
+          currentPrice,
+          lastPrice,
+          marketDecimals: market.decimals,
+        });
+
+        // Calculate actual amounts using the formula from the documentation:
+        // actual_deposits = (scaled_deposits * current_deposit_index) // SCALE
+        // actual_borrows = (scaled_borrows * current_borrow_index) // SCALE
+        const actualDepositsRaw =
+          (BigInt(scaledDeposits) * BigInt(currentDepositIndex)) /
+          BigInt(SCALE);
+
+        // Handle case where borrow_index is 0 (no borrows yet)
+        const actualBorrowsRaw =
+          BigInt(currentBorrowIndex) === 0n
+            ? 0n
+            : (BigInt(scaledBorrows) * BigInt(currentBorrowIndex)) /
+              BigInt(SCALE);
+
+        console.log(`🔍 BigInt calculations for ${market.symbol}:`, {
+          actualDepositsRaw: actualDepositsRaw.toString(),
+          actualBorrowsRaw: actualBorrowsRaw.toString(),
+          SCALE,
+          tokenDecimals: market.decimals || 0,
+        });
+
+        // Convert to numbers - the contract already returns amounts in correct units
+        // No need to apply decimal normalization as get_user returns the actual token amounts
+        const actualDepositsNum =
+          Number(actualDepositsRaw) / 10 ** (market.decimals || 0);
+        const actualBorrowsNum = Number(actualBorrowsRaw);
+
+        console.log(`🔍 Converted amounts for ${market.symbol}:`, {
+          actualDepositsNum,
+          actualBorrowsNum,
+          decimalsUsed: market.decimals || 6,
+        });
+
+        // Use last_price from contract if available, otherwise use current market price
+        const priceToUse = lastPrice > 0 ? lastPrice : currentPrice;
+        const depositUSD = actualDepositsNum * priceToUse;
+        const borrowUSD = actualBorrowsNum * priceToUse;
+
+        console.log(`🔍 USD calculations for ${market.symbol}:`, {
+          priceToUse,
+          depositUSD,
+          borrowUSD,
+        });
+
+        totalDeposits += depositUSD / 1e6;
+        totalBorrows += borrowUSD / 1e6;
+
+        debugInfo.push({
+          symbol: market.symbol,
+          marketId: market.underlyingContractId || market.symbol,
+          scaledDeposits: scaledDeposits.toString(),
+          scaledBorrows: scaledBorrows.toString(),
+          currentDepositIndex,
+          currentBorrowIndex,
+          actualDeposits: actualDepositsNum,
+          actualBorrows: actualBorrowsNum,
+          currentPrice: priceToUse,
+          depositUSD,
+          borrowUSD,
+          netPosition: depositUSD - borrowUSD,
+        });
+      } else {
+        // No data available for this market
+        debugInfo.push({
+          symbol: market.symbol,
+          marketId: market.underlyingContractId || market.symbol,
+          scaledDeposits: "0",
+          scaledBorrows: "0",
+          currentDepositIndex: "1000000000000000000",
+          currentBorrowIndex: "1000000000000000000",
+          actualDeposits: 0,
+          actualBorrows: 0,
+          currentPrice: currentPrice,
+          depositUSD: 0,
+          borrowUSD: 0,
+          netPosition: 0,
+        });
+      }
+    }
+
+    // Debug logging
+    if (debugInfo.length > 0) {
+      console.log("📊 Method 4 (get_user) calculation:", {
+        totalDeposits,
+        totalBorrows,
+        netPosition: totalDeposits - totalBorrows,
+        breakdown: debugInfo,
+        marketsCount: markets.length,
+        activeMarkets: debugInfo.filter(
+          (m) => m.depositUSD > 0 || m.borrowUSD > 0
+        ).length,
+        userGetUserData,
+      });
+    }
+
+    return {
+      totalDeposits,
+      totalBorrows,
+      netPosition: totalDeposits - totalBorrows,
+    };
+  }, [userGetUserData, userMarketPrices, currentNetwork]);
+
+  // Method 4 Breakdown - Show detailed get_user data
+  const method4Breakdown = useMemo(() => {
+    const markets = getMarketsFromConfig(currentNetwork);
+    const SCALE = 1e18; // Precision scaling factor
+
+    return markets.map((market) => {
+      const marketId = market.symbol.toLowerCase();
+      const contractId = market.underlyingContractId;
+
+      // Try to get data using both token symbol and contract ID
+      let getUserData =
+        userGetUserData[marketId] || userGetUserData[contractId];
+      const currentPrice = userMarketPrices[marketId] || 0;
+
+      console.log(
+        `🔍 Method 4 Breakdown - Looking for data for ${market.symbol}:`,
+        {
+          marketId,
+          contractId,
+          hasGetUserDataBySymbol: !!userGetUserData[marketId],
+          hasGetUserDataByContractId: !!userGetUserData[contractId],
+          hasGetUserData: !!getUserData,
+          getUserDataKeys: Object.keys(userGetUserData),
+          currentPrice,
+        }
+      );
+
+      if (getUserData) {
+        const scaledDeposits = getUserData.scaled_deposits || "0";
+        const scaledBorrows = getUserData.scaled_borrows || "0";
+        const depositIndex = getUserData.deposit_index || "1000000000000000000"; // 1e18
+        const borrowIndex = getUserData.borrow_index || "1000000000000000000"; // 1e18
+        const lastPrice = parseFloat(getUserData.last_price || "0") / SCALE;
+        const lastUpdateTime = getUserData.last_update_time || 0;
+
+        // Calculate actual amounts using the formula from the documentation:
+        // actual_deposits = (scaled_deposits * current_deposit_index) // SCALE
+        // actual_borrows = (scaled_borrows * current_borrow_index) // SCALE
+        const actualDepositsRaw =
+          (BigInt(scaledDeposits) * BigInt(depositIndex)) / BigInt(SCALE);
+
+        // Handle case where borrow_index is 0 (no borrows yet)
+        const actualBorrowsRaw =
+          BigInt(borrowIndex) === 0n
+            ? 0n
+            : (BigInt(scaledBorrows) * BigInt(borrowIndex)) / BigInt(SCALE);
+
+        // Convert to numbers - the contract already returns amounts in correct units
+        // No need to apply decimal normalization as get_user returns the actual token amounts
+        const actualDepositsNum =
+          Number(actualDepositsRaw) / 10 ** (market.decimals || 0);
+        const actualBorrowsNum =
+          Number(actualBorrowsRaw) / 10 ** (market.decimals || 0);
+
+        // Use current market price for accurate USD calculations
+        const priceToUse =
+          currentPrice > 0
+            ? currentPrice
+            : lastPrice > 0
+            ? lastPrice
+            : currentPrice;
+        const depositUSD = actualDepositsNum * priceToUse;
+        const borrowUSD = actualBorrowsNum * priceToUse;
+        const netPosition = depositUSD - borrowUSD;
+
+        return {
+          symbol: market.symbol,
+          marketId: market.underlyingContractId || market.symbol,
+          scaledDeposits: Number(scaledDeposits) / 10 ** (market.decimals || 0),
+          scaledBorrows: Number(scaledBorrows) / 10 ** (market.decimals || 0),
+          depositIndex,
+          borrowIndex,
+          actualDeposits: actualDepositsNum,
+          actualBorrows: actualBorrowsNum,
+          lastPrice: priceToUse,
+          lastUpdateTime,
+          depositUSD,
+          borrowUSD,
+          netPosition,
+          status: netPosition !== 0 ? "Active" : "No Position",
+        };
+      } else {
+        // No data available for this market
+        return {
+          symbol: market.symbol,
+          marketId: market.underlyingContractId || market.symbol,
+          scaledDeposits: "0",
+          scaledBorrows: "0",
+          depositIndex: "1000000000000000000",
+          borrowIndex: "1000000000000000000",
+          actualDeposits: 0,
+          actualBorrows: 0,
+          lastPrice: currentPrice,
+          lastUpdateTime: 0,
+          depositUSD: 0,
+          borrowUSD: 0,
+          netPosition: 0,
+          status: "No Data",
+        };
+      }
+    });
+  }, [userGetUserData, userMarketPrices, currentNetwork]);
+
   return (
     <div className="min-h-screen bg-background relative">
       {/* Light Mode Beach Background */}
@@ -911,7 +2223,7 @@ export default function AdminDashboard() {
           onValueChange={setActiveTab}
           className="space-y-6"
         >
-          <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:grid-cols-4">
+          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:grid-cols-5">
             <TabsTrigger value="overview" className="flex items-center gap-2">
               <BarChart3 className="h-4 w-4" />
               <span className="hidden sm:inline">Overview</span>
@@ -923,6 +2235,13 @@ export default function AdminDashboard() {
             <TabsTrigger value="operations" className="flex items-center gap-2">
               <Activity className="h-4 w-4" />
               <span className="hidden sm:inline">Operations</span>
+            </TabsTrigger>
+            <TabsTrigger
+              value="user-analysis"
+              className="flex items-center gap-2"
+            >
+              <Users className="h-4 w-4" />
+              <span className="hidden sm:inline">User Analysis</span>
             </TabsTrigger>
             <TabsTrigger value="settings" className="flex items-center gap-2">
               <Settings className="h-4 w-4" />
@@ -1539,6 +2858,1313 @@ export default function AdminDashboard() {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* User Analysis Tab */}
+          <TabsContent value="user-analysis" className="space-y-6">
+            <div className="flex justify-between items-center">
+              <H2>User Analysis</H2>
+              <div className="flex items-center gap-2">
+                <DorkFiButton
+                  variant="secondary"
+                  onClick={() => {
+                    setUserAnalysisAddress("");
+                    setUserGlobalData(null);
+                    setUserMarketsState({});
+                    setUserMarketPrices({});
+                    setGlobalDataError(null);
+                    setEnvoiData(null);
+                    setEnvoiError(null);
+                    setEnvoiSearchQuery("");
+                    setEnvoiSearchResults([]);
+                  }}
+                >
+                  <X className="h-4 w-4 mr-2" />
+                  Clear
+                </DorkFiButton>
+              </div>
+            </div>
+
+            {/* User Address Input */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Search className="h-5 w-5" />
+                  Analyze User
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <Label htmlFor="user-address">User Address</Label>
+                    <Input
+                      id="user-address"
+                      placeholder="Enter user address to analyze..."
+                      value={userAnalysisAddress}
+                      onChange={(e) =>
+                        setUserAnalysisAddress(e.target.value || "")
+                      }
+                      className="mt-1"
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <DorkFiButton
+                      onClick={handleAnalyzeUser}
+                      disabled={
+                        globalDataLoading || !userAnalysisAddress?.trim()
+                      }
+                    >
+                      {globalDataLoading ? (
+                        <>
+                          <RefreshCcw className="h-4 w-4 mr-2 animate-spin" />
+                          Analyzing...
+                        </>
+                      ) : (
+                        <>
+                          <Calculator className="h-4 w-4 mr-2" />
+                          Analyze
+                        </>
+                      )}
+                    </DorkFiButton>
+                  </div>
+                </div>
+
+                {/* Envoi Name Search */}
+                <div className="border-t pt-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Hash className="h-4 w-4 text-blue-500" />
+                    <Label className="text-sm font-medium">
+                      Envoi Name Search
+                    </Label>
+                    <Badge variant="outline" className="text-xs">
+                      enVoi Naming Service
+                    </Badge>
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="flex-1 relative">
+                      <Input
+                        placeholder="Search for VOI names (e.g., en.voi, test.voi)..."
+                        value={envoiSearchQuery}
+                        onChange={(e) => {
+                          const value = e.target.value || "";
+                          setEnvoiSearchQuery(value);
+                          if (value.trim()) {
+                            handleEnvoiSearch(value);
+                          } else {
+                            setEnvoiSearchResults([]);
+                          }
+                        }}
+                        className="pr-8"
+                      />
+                      {envoiSearchLoading && (
+                        <RefreshCcw className="absolute right-2 top-1/2 transform -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+                      )}
+
+                      {/* Search Results Dropdown */}
+                      {envoiSearchResults.length > 0 && (
+                        <div className="absolute z-10 w-full mt-1 bg-background border border-border rounded-md shadow-lg max-h-48 overflow-y-auto">
+                          {envoiSearchResults.map((result, index) => (
+                            <button
+                              key={index}
+                              className="w-full px-3 py-2 text-left hover:bg-muted/50 border-b border-border last:border-b-0"
+                              onClick={() => {
+                                console.log(
+                                  "🖱️ Button clicked for result:",
+                                  result
+                                );
+                                handleEnvoiNameSelect(result.name);
+                              }}
+                            >
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <div className="font-medium text-sm">
+                                    {result.name}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground font-mono truncate">
+                                    {result.address}
+                                  </div>
+                                </div>
+                                <ExternalLink className="h-3 w-3 text-muted-foreground" />
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Search for VOI names to automatically resolve addresses.
+                    Powered by enVoi Naming Service.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* User Analysis Results */}
+            {userGlobalData && (
+              <div className="space-y-6">
+                {/* Method Comparison */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Calculator className="h-5 w-5" />
+                      Method Comparison
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex items-center gap-3 rounded-2xl border border-orange-500/20 bg-gradient-to-br from-slate-900 to-slate-800 p-4 shadow-sm dark-glow-card">
+                      <div className="rounded-xl border border-orange-500/30 bg-slate-800/60 p-2">
+                        <Calculator className="h-5 w-5 text-orange-400" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="text-sm font-medium text-slate-300">
+                          Total Deposits Comparison
+                        </div>
+                        <div className="text-xs text-slate-400">
+                          Method 1 (Sum): $
+                          {userGlobalDeposited.toLocaleString()}
+                        </div>
+                        <div className="text-xs text-slate-400">
+                          Method 2 (Contract): $
+                          {userGlobalDepositedFromContract.toLocaleString()}
+                        </div>
+                        <div className="text-xs text-slate-400">
+                          Method 3 (Market Data): $
+                          {userGlobalMarketData.totalDeposits.toLocaleString()}
+                        </div>
+                        <div className="text-xs text-slate-400">
+                          Method 4 (get_user): $
+                          {userGlobalFromGetUser.totalDeposits.toLocaleString()}
+                        </div>
+                        <div className="text-xs text-slate-500 mt-1">
+                          Diff: $
+                          {Math.abs(
+                            userGlobalDeposited -
+                              userGlobalDepositedFromContract
+                          ).toLocaleString()}
+                          (
+                          {userGlobalDeposited > 0
+                            ? (
+                                (Math.abs(
+                                  userGlobalDeposited -
+                                    userGlobalDepositedFromContract
+                                ) /
+                                  userGlobalDeposited) *
+                                100
+                              ).toFixed(2)
+                            : "0"}
+                          %)
+                        </div>
+                        <div className="text-xs text-slate-600 mt-1">
+                          Last Updated:{" "}
+                          {new Date(
+                            userGlobalData.lastUpdateTime * 1000
+                          ).toLocaleTimeString()}
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <DorkFiButton
+                          onClick={async () => {
+                            if (!userAnalysisAddress) return;
+                            await Promise.all([
+                              fetchUserGlobalData(userAnalysisAddress),
+                              fetchUserMarketData(userAnalysisAddress),
+                            ]);
+                          }}
+                          disabled={globalDataLoading}
+                          variant="secondary"
+                          className="border-orange-500/30 text-orange-400 hover:bg-orange-500/10"
+                        >
+                          {globalDataLoading ? (
+                            <>
+                              <RefreshCcw className="h-3 w-3 mr-1 animate-spin" />
+                              Loading
+                            </>
+                          ) : (
+                            <>
+                              <Activity className="h-3 w-3 mr-1" />
+                              Refresh Both Methods
+                            </>
+                          )}
+                        </DorkFiButton>
+                        {globalDataError && (
+                          <div
+                            className="text-xs text-red-400 max-w-24 truncate"
+                            title={globalDataError}
+                          >
+                            Error: {globalDataError}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Method 1 User Deposit Breakdown */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Calculator className="h-5 w-5" />
+                      Method 1: User Deposit Breakdown
+                    </CardTitle>
+                    <p className="text-sm text-muted-foreground">
+                      Individual market deposits contributing to the total
+                      collateral value
+                    </p>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      {/* Summary Stats */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-muted/30 rounded-lg">
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-orange-400">
+                            {method1Breakdown.length}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            Total Markets
+                          </div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-green-400">
+                            {
+                              method1Breakdown.filter(
+                                (m) => m.status === "Active"
+                              ).length
+                            }
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            Active Deposits
+                          </div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-blue-400">
+                            ${userGlobalDeposited.toLocaleString()}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            Total Value
+                          </div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-purple-400">
+                            {
+                              method1Breakdown.filter(
+                                (m) => m.status === "No Data"
+                              ).length
+                            }
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            No Data
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Market Breakdown Table */}
+                      <div className="space-y-2">
+                        <h4 className="text-sm font-medium text-muted-foreground">
+                          Market Details
+                        </h4>
+                        <div className="space-y-2 max-h-96 overflow-y-auto">
+                          {method1Breakdown.map((market, index) => (
+                            <div
+                              key={market.symbol}
+                              className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
+                                market.status === "Active"
+                                  ? "border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/20"
+                                  : market.status === "No Deposits"
+                                  ? "border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950/20"
+                                  : "border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/20"
+                              }`}
+                            >
+                              <div className="flex items-center gap-3">
+                                <div
+                                  className={`w-3 h-3 rounded-full ${
+                                    market.status === "Active"
+                                      ? "bg-green-500"
+                                      : market.status === "No Deposits"
+                                      ? "bg-gray-400"
+                                      : "bg-red-500"
+                                  }`}
+                                />
+                                <div>
+                                  <div className="font-medium text-sm">
+                                    {market.symbol}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground">
+                                    {market.status}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="text-right space-y-1">
+                                <div className="text-sm font-medium">
+                                  ${market.usdValue.toLocaleString()}
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  {market.tokenAmount.toLocaleString()} tokens (
+                                  {market.decimals} decimals)
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  @ ${market.price.toFixed(6)}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Raw Data Display */}
+                      <details className="mt-4">
+                        <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground">
+                          Show Raw Data (Base Units)
+                        </summary>
+                        <div className="mt-2 p-3 bg-muted/50 rounded-lg">
+                          <div className="space-y-2 text-xs font-mono">
+                            {method1Breakdown.map((market) => (
+                              <div
+                                key={market.symbol}
+                                className="flex justify-between"
+                              >
+                                <span className="text-muted-foreground">
+                                  {market.symbol} ({market.decimals} decimals):
+                                </span>
+                                <span>
+                                  {market.depositedBase.toString()} base units
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </details>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Method 2 Contract Data Breakdown */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Database className="h-5 w-5" />
+                      Method 2: Contract Global Data Breakdown
+                    </CardTitle>
+                    <p className="text-sm text-muted-foreground">
+                      Global user data from the smart contract's global state
+                    </p>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      {/* Contract Data Summary */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-muted/30 rounded-lg">
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-blue-400">
+                            $
+                            {method2Breakdown.totalCollateralValue.toLocaleString()}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            Total Collateral
+                          </div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-red-400">
+                            $
+                            {method2Breakdown.totalBorrowValue.toLocaleString()}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            Total Borrows
+                          </div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-green-400">
+                            {method2Breakdown.scalingFactor}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            Scaling Factor
+                          </div>
+                        </div>
+                        <div className="text-center">
+                          <div
+                            className={`text-2xl font-bold ${
+                              method2Breakdown.status === "Active"
+                                ? "text-green-400"
+                                : "text-gray-400"
+                            }`}
+                          >
+                            {method2Breakdown.status}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            Status
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Pool-by-Pool Breakdown */}
+                      <div className="space-y-4">
+                        <h4 className="text-sm font-medium text-muted-foreground">
+                          Pool-by-Pool Breakdown
+                        </h4>
+
+                        <div className="space-y-3">
+                          {method2Breakdown.pools.map((pool) => (
+                            <div
+                              key={pool.poolId}
+                              className="p-4 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/20"
+                            >
+                              <div className="flex items-center justify-between mb-3">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-3 h-3 rounded-full bg-blue-500" />
+                                  <h5 className="font-medium text-sm">
+                                    {pool.classLabel} Pool ({pool.poolId})
+                                  </h5>
+                                </div>
+                                <Badge variant="outline" className="text-xs">
+                                  {pool.markets.length} markets
+                                </Badge>
+                              </div>
+
+                              <div className="space-y-2">
+                                <div className="text-xs text-muted-foreground">
+                                  Markets in this pool:
+                                </div>
+                                <div className="flex flex-wrap gap-1">
+                                  {pool.markets.map((market) => (
+                                    <Badge
+                                      key={market.symbol}
+                                      variant="secondary"
+                                      className="text-xs"
+                                    >
+                                      {market.symbol}
+                                    </Badge>
+                                  ))}
+                                </div>
+                                <div className="text-xs text-muted-foreground mt-2">
+                                  Note: This pool contributes to the global
+                                  collateral value shown above. Individual pool
+                                  breakdowns would require additional contract
+                                  calls.
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Global Contract Data Summary */}
+                      <div className="space-y-4">
+                        <h4 className="text-sm font-medium text-muted-foreground">
+                          Global Contract Data
+                        </h4>
+
+                        <div
+                          className={`p-4 rounded-lg border ${
+                            method2Breakdown.status === "Active"
+                              ? "border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/20"
+                              : "border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950/20"
+                          }`}
+                        >
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm font-medium">
+                                Total Collateral Value (USD)
+                              </span>
+                              <span className="text-sm font-mono">
+                                $
+                                {method2Breakdown.totalCollateralValue.toLocaleString()}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm font-medium">
+                                Total Borrow Value (USD)
+                              </span>
+                              <span className="text-sm font-mono">
+                                $
+                                {method2Breakdown.totalBorrowValue.toLocaleString()}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm font-medium">
+                                Last Updated
+                              </span>
+                              <span className="text-sm font-mono">
+                                {method2Breakdown.lastUpdateTime > 0
+                                  ? new Date(
+                                      method2Breakdown.lastUpdateTime * 1000
+                                    ).toLocaleString()
+                                  : "Never"}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm font-medium">
+                                Health Factor
+                              </span>
+                              <span className="text-sm font-mono">
+                                {method2Breakdown.totalBorrowValue > 0
+                                  ? (
+                                      method2Breakdown.totalCollateralValue /
+                                      method2Breakdown.totalBorrowValue
+                                    ).toFixed(2)
+                                  : "∞"}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Raw Contract Data */}
+                      <details className="mt-4">
+                        <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground">
+                          Show Raw Contract Data (Base Units)
+                        </summary>
+                        <div className="mt-2 p-3 bg-muted/50 rounded-lg">
+                          <div className="space-y-2 text-xs font-mono">
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">
+                                Raw Collateral Value:
+                              </span>
+                              <span>
+                                {method2Breakdown.rawCollateralValue} base units
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">
+                                Raw Borrow Value:
+                              </span>
+                              <span>
+                                {method2Breakdown.rawBorrowValue} base units
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">
+                                Scaling Factor:
+                              </span>
+                              <span>{method2Breakdown.scalingFactor}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">
+                                Calculation:
+                              </span>
+                              <span>
+                                rawValue / {method2Breakdown.scalingFactor} =
+                                USD
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </details>
+
+                      {/* Method 2 Explanation */}
+                      <div className="p-4 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                        <div className="flex items-start gap-3">
+                          <Database className="h-5 w-5 text-blue-600 dark:text-blue-400 mt-0.5" />
+                          <div>
+                            <h4 className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                              Method 2: Contract Global Data
+                            </h4>
+                            <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
+                              This method uses the smart contract's global user
+                              data, which aggregates all user positions across
+                              all markets into a single collateral and borrow
+                              value. The contract stores these values scaled by
+                              10^18, so we divide by 1e18 to get the USD
+                              equivalent.
+                            </p>
+                            <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">
+                              <strong>Formula:</strong> totalCollateralValue =
+                              contract_value / 1e18
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Method 3 Market Data Breakdown */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Calculator className="h-5 w-5" />
+                      Method 3: Market Data Breakdown
+                    </CardTitle>
+                    <p className="text-sm text-muted-foreground">
+                      Detailed breakdown of deposits and borrows from market
+                      state data
+                    </p>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      {/* Summary Stats */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-muted/30 rounded-lg">
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-orange-400">
+                            {method3Breakdown.length}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            Total Markets
+                          </div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-green-400">
+                            {
+                              method3Breakdown.filter(
+                                (m) => m.status === "Active"
+                              ).length
+                            }
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            Active Positions
+                          </div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-blue-400">
+                            $
+                            {userGlobalMarketData.totalDeposits.toLocaleString()}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            Total Deposits
+                          </div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-red-400">
+                            $
+                            {userGlobalMarketData.totalBorrows.toLocaleString()}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            Total Borrows
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Net Position Summary */}
+                      <div className="p-4 bg-gradient-to-r from-slate-800 to-slate-700 rounded-lg border border-slate-600">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="text-sm font-medium text-slate-300">
+                              Net Position
+                            </div>
+                            <div className="text-xs text-slate-400">
+                              Total Deposits - Total Borrows
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div
+                              className={`text-2xl font-bold ${
+                                userGlobalMarketData.netPosition >= 0
+                                  ? "text-green-400"
+                                  : "text-red-400"
+                              }`}
+                            >
+                              $
+                              {userGlobalMarketData.netPosition.toLocaleString()}
+                            </div>
+                            <div className="text-xs text-slate-400">
+                              {userGlobalMarketData.netPosition >= 0
+                                ? "Positive"
+                                : "Negative"}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Market Details Table */}
+                      <div className="space-y-2">
+                        <h4 className="text-sm font-medium">Market Details</h4>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-slate-700">
+                                <th className="text-left p-2">Market</th>
+                                <th className="text-right p-2">Deposited</th>
+                                <th className="text-right p-2">Borrowed</th>
+                                <th className="text-right p-2">Deposit USD</th>
+                                <th className="text-right p-2">Borrow USD</th>
+                                <th className="text-right p-2">Net Position</th>
+                                <th className="text-center p-2">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {method3Breakdown.map((market) => (
+                                <tr
+                                  key={market.symbol}
+                                  className="border-b border-slate-800"
+                                >
+                                  <td className="p-2 font-medium">
+                                    {market.symbol}
+                                  </td>
+                                  <td className="text-right p-2">
+                                    {market.depositedAmount.toLocaleString(
+                                      undefined,
+                                      {
+                                        maximumFractionDigits: 6,
+                                      }
+                                    )}
+                                  </td>
+                                  <td className="text-right p-2">
+                                    {market.borrowedAmount.toLocaleString(
+                                      undefined,
+                                      {
+                                        maximumFractionDigits: 6,
+                                      }
+                                    )}
+                                  </td>
+                                  <td className="text-right p-2">
+                                    $
+                                    {market.depositUSD.toLocaleString(
+                                      undefined,
+                                      {
+                                        maximumFractionDigits: 2,
+                                      }
+                                    )}
+                                  </td>
+                                  <td className="text-right p-2">
+                                    $
+                                    {market.borrowUSD.toLocaleString(
+                                      undefined,
+                                      {
+                                        maximumFractionDigits: 2,
+                                      }
+                                    )}
+                                  </td>
+                                  <td
+                                    className={`text-right p-2 font-medium ${
+                                      market.netPosition >= 0
+                                        ? "text-green-400"
+                                        : "text-red-400"
+                                    }`}
+                                  >
+                                    $
+                                    {market.netPosition.toLocaleString(
+                                      undefined,
+                                      {
+                                        maximumFractionDigits: 2,
+                                      }
+                                    )}
+                                  </td>
+                                  <td className="text-center p-2">
+                                    <Badge
+                                      variant={
+                                        market.status === "Active"
+                                          ? "default"
+                                          : "secondary"
+                                      }
+                                      className="text-xs"
+                                    >
+                                      {market.status}
+                                    </Badge>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      {/* Method 3 Explanation */}
+                      <div className="p-4 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
+                        <div className="flex items-start gap-3">
+                          <Calculator className="h-5 w-5 text-green-600 dark:text-green-400 mt-0.5" />
+                          <div>
+                            <h4 className="text-sm font-medium text-green-800 dark:text-green-200">
+                              Method 3: Market Data Sum
+                            </h4>
+                            <p className="text-sm text-green-700 dark:text-green-300 mt-1">
+                              This method calculates the total user position by
+                              summing individual market data from the user's
+                              market state. It includes both deposits and
+                              borrows for each market, providing a comprehensive
+                              view of the user's net position across all
+                              markets.
+                            </p>
+                            <p className="text-xs text-green-600 dark:text-green-400 mt-2">
+                              <strong>Formula:</strong> Net Position =
+                              Σ(Deposits × Price) - Σ(Borrows × Price)
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Method 4 get_user Breakdown */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Calculator className="h-5 w-5" />
+                      Method 4: get_user Breakdown
+                    </CardTitle>
+                    <p className="text-sm text-muted-foreground">
+                      Individual user position data fetched using the get_user
+                      contract method
+                    </p>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      {/* Summary Stats */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-muted/30 rounded-lg">
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-orange-400">
+                            {method4Breakdown.length}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            Total Markets
+                          </div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-green-400">
+                            {
+                              method4Breakdown.filter(
+                                (m) => m.status === "Active"
+                              ).length
+                            }
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            Active Positions
+                          </div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-blue-400">
+                            $
+                            {userGlobalFromGetUser.totalDeposits.toLocaleString()}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            Total Deposits
+                          </div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-red-400">
+                            $
+                            {userGlobalFromGetUser.totalBorrows.toLocaleString()}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            Total Borrows
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Net Position Summary */}
+                      <div className="p-4 bg-gradient-to-r from-slate-800 to-slate-700 rounded-lg border border-slate-600">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="text-sm font-medium text-slate-300">
+                              Net Position (get_user)
+                            </div>
+                            <div className="text-xs text-slate-400">
+                              Total Deposits - Total Borrows
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div
+                              className={`text-2xl font-bold ${
+                                userGlobalFromGetUser.netPosition >= 0
+                                  ? "text-green-400"
+                                  : "text-red-400"
+                              }`}
+                            >
+                              $
+                              {userGlobalFromGetUser.netPosition.toLocaleString()}
+                            </div>
+                            <div className="text-xs text-slate-400">
+                              {userGlobalFromGetUser.netPosition >= 0
+                                ? "Positive"
+                                : "Negative"}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Market Details Table */}
+                      <div className="space-y-2">
+                        <h4 className="text-sm font-medium">
+                          Market Details (get_user)
+                        </h4>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-slate-700">
+                                <th className="text-left p-2">Market</th>
+                                <th className="text-right p-2">
+                                  Scaled Deposits
+                                </th>
+                                <th className="text-right p-2">
+                                  Scaled Borrows
+                                </th>
+                                <th className="text-right p-2">
+                                  Deposit Index
+                                </th>
+                                <th className="text-right p-2">Borrow Index</th>
+                                <th className="text-right p-2">
+                                  Actual Deposits
+                                </th>
+                                <th className="text-right p-2">
+                                  Actual Borrows
+                                </th>
+                                <th className="text-right p-2">Last Price</th>
+                                <th className="text-right p-2">Net Position</th>
+                                <th className="text-center p-2">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {method4Breakdown.map((market) => (
+                                <tr
+                                  key={market.symbol}
+                                  className="border-b border-slate-800"
+                                >
+                                  <td className="p-2 font-medium">
+                                    {market.symbol}
+                                  </td>
+                                  <td className="text-right p-2 text-xs">
+                                    {market.scaledDeposits}
+                                  </td>
+                                  <td className="text-right p-2 text-xs">
+                                    {market.scaledBorrows}
+                                  </td>
+                                  <td className="text-right p-2 text-xs">
+                                    {market.depositIndex}
+                                  </td>
+                                  <td className="text-right p-2 text-xs">
+                                    {market.borrowIndex}
+                                  </td>
+                                  <td className="text-right p-2">
+                                    {market.actualDeposits.toLocaleString(
+                                      undefined,
+                                      {
+                                        maximumFractionDigits: 6,
+                                      }
+                                    )}
+                                  </td>
+                                  <td className="text-right p-2">
+                                    {market.actualBorrows.toLocaleString(
+                                      undefined,
+                                      {
+                                        maximumFractionDigits: 6,
+                                      }
+                                    )}
+                                  </td>
+                                  <td className="text-right p-2">
+                                    $
+                                    {market.lastPrice.toLocaleString(
+                                      undefined,
+                                      {
+                                        maximumFractionDigits: 6,
+                                      }
+                                    )}
+                                  </td>
+                                  <td
+                                    className={`text-right p-2 font-medium ${
+                                      market.netPosition >= 0
+                                        ? "text-green-400"
+                                        : "text-red-400"
+                                    }`}
+                                  >
+                                    $
+                                    {market.netPosition.toLocaleString(
+                                      undefined,
+                                      {
+                                        maximumFractionDigits: 2,
+                                      }
+                                    )}
+                                  </td>
+                                  <td className="text-center p-2">
+                                    <Badge
+                                      variant={
+                                        market.status === "Active"
+                                          ? "default"
+                                          : "secondary"
+                                      }
+                                      className="text-xs"
+                                    >
+                                      {market.status}
+                                    </Badge>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      {/* Method 4 Explanation */}
+                      <div className="p-4 bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 rounded-lg">
+                        <div className="flex items-start gap-3">
+                          <Calculator className="h-5 w-5 text-purple-600 dark:text-purple-400 mt-0.5" />
+                          <div>
+                            <h4 className="text-sm font-medium text-purple-800 dark:text-purple-200">
+                              Method 4: get_user Contract Method
+                            </h4>
+                            <p className="text-sm text-purple-700 dark:text-purple-300 mt-1">
+                              This method uses the smart contract's get_user
+                              method to fetch individual user position data for
+                              each market. It returns scaled deposits and
+                              borrows along with their respective indices,
+                              allowing for precise calculation of actual amounts
+                              including accrued interest.
+                            </p>
+                            <p className="text-xs text-purple-600 dark:text-purple-400 mt-2">
+                              <strong>Formula:</strong> actual_deposits =
+                              (scaled_deposits × current_deposit_index) ÷ SCALE
+                            </p>
+                            <p className="text-xs text-purple-600 dark:text-purple-400">
+                              <strong>Note:</strong> This is currently a
+                              placeholder implementation. Real implementation
+                              would require contract calls to get_user for each
+                              market.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Envoi Data Display */}
+                {(envoiData || envoiLoading || envoiError) && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Hash className="h-5 w-5 text-blue-500" />
+                        Envoi Name Service
+                        <Badge variant="outline" className="text-xs">
+                          enVoi
+                        </Badge>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      {envoiLoading ? (
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <RefreshCcw className="h-4 w-4 animate-spin" />
+                          Loading Envoi data...
+                        </div>
+                      ) : envoiError ? (
+                        <div className="flex items-center gap-2 text-red-600">
+                          <AlertTriangle className="h-4 w-4" />
+                          Error loading Envoi data: {envoiError}
+                        </div>
+                      ) : envoiData ? (
+                        <div className="space-y-4">
+                          <div className="flex items-center gap-3 rounded-2xl border border-blue-500/20 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-950/20 dark:to-blue-900/20 p-4 shadow-sm">
+                            <div className="rounded-xl border border-blue-500/30 bg-blue-100/60 dark:bg-blue-900/60 p-2">
+                              <Hash className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                            </div>
+                            <div className="flex-1">
+                              <div className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                                VOI Name Found
+                              </div>
+                              <div className="text-lg font-bold text-blue-900 dark:text-blue-100">
+                                {envoiData.name}
+                              </div>
+                              <div className="text-xs text-blue-700 dark:text-blue-300">
+                                Token ID: {envoiData.tokenId}
+                              </div>
+                              <div className="text-xs text-blue-600 dark:text-blue-400">
+                                Owner: {envoiData.owner}
+                              </div>
+                            </div>
+                            <div className="flex flex-col gap-2">
+                              <DorkFiButton
+                                onClick={() =>
+                                  fetchEnvoiData(userAnalysisAddress)
+                                }
+                                disabled={envoiLoading}
+                                variant="secondary"
+                                className="border-blue-500/30 text-blue-600 dark:text-blue-400 hover:bg-blue-500/10"
+                              >
+                                {envoiLoading ? (
+                                  <>
+                                    <RefreshCcw className="h-3 w-3 mr-1 animate-spin" />
+                                    Loading
+                                  </>
+                                ) : (
+                                  <>
+                                    <RefreshCcw className="h-3 w-3 mr-1" />
+                                    Refresh
+                                  </>
+                                )}
+                              </DorkFiButton>
+                            </div>
+                          </div>
+
+                          {envoiData.metadata && (
+                            <div className="p-3 bg-muted/50 rounded-lg">
+                              <h4 className="text-sm font-medium text-muted-foreground mb-2">
+                                Metadata
+                              </h4>
+                              {envoiData.metadata.description && (
+                                <div className="text-sm mb-2">
+                                  <span className="font-medium">
+                                    Description:
+                                  </span>{" "}
+                                  {envoiData.metadata.description}
+                                </div>
+                              )}
+                              {envoiData.metadata.image && (
+                                <div className="text-sm mb-2">
+                                  <span className="font-medium">Image:</span>
+                                  <a
+                                    href={envoiData.metadata.image}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="ml-1 text-blue-600 hover:underline"
+                                  >
+                                    View Image
+                                  </a>
+                                </div>
+                              )}
+                              {envoiData.metadata.attributes &&
+                                envoiData.metadata.attributes.length > 0 && (
+                                  <div className="text-sm">
+                                    <span className="font-medium">
+                                      Attributes:
+                                    </span>
+                                    <div className="mt-1 flex flex-wrap gap-1">
+                                      {envoiData.metadata.attributes.map(
+                                        (attr, index) => (
+                                          <Badge
+                                            key={index}
+                                            variant="secondary"
+                                            className="text-xs"
+                                          >
+                                            {attr.trait_type}: {attr.value}
+                                          </Badge>
+                                        )
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="text-center text-muted-foreground py-4">
+                          <Hash className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                          <p className="text-sm">
+                            No VOI name found for this address
+                          </p>
+                          <p className="text-xs">
+                            This address doesn't have an associated enVoi name
+                          </p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* User Global Data */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <TrendingUp className="h-5 w-5" />
+                        Total Collateral Value
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold text-green-600">
+                        ${userGlobalData.totalCollateralValue.toLocaleString()}
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Total value of all user deposits across all markets
+                      </p>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <AlertTriangle className="h-5 w-5" />
+                        Total Borrow Value
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold text-red-600">
+                        ${userGlobalData.totalBorrowValue.toLocaleString()}
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Total value of all user borrows across all markets
+                      </p>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* User Address Display */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Hash className="h-5 w-5" />
+                      User Information
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      <div>
+                        <Label className="text-sm font-medium">Address</Label>
+                        <p className="text-sm font-mono bg-muted p-2 rounded break-all">
+                          {userAnalysisAddress}
+                        </p>
+                      </div>
+                      {envoiData && (
+                        <div>
+                          <Label className="text-sm font-medium">
+                            VOI Name
+                          </Label>
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-semibold text-blue-600 dark:text-blue-400">
+                              {envoiData.name}
+                            </p>
+                            <Badge variant="outline" className="text-xs">
+                              enVoi
+                            </Badge>
+                          </div>
+                        </div>
+                      )}
+                      <div>
+                        <Label className="text-sm font-medium">Network</Label>
+                        <p className="text-sm">{currentNetwork}</p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium">
+                          Last Updated
+                        </Label>
+                        <p className="text-sm">
+                          {new Date(
+                            userGlobalData.lastUpdateTime * 1000
+                          ).toLocaleString()}
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
+            {/* Error State */}
+            {globalDataError && !userGlobalData && (
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="text-center text-red-600">
+                    <AlertTriangle className="h-12 w-12 mx-auto mb-4" />
+                    <p className="font-medium">Error Loading User Data</p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {globalDataError}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Empty State */}
+            {!userGlobalData && !globalDataError && !globalDataLoading && (
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="text-center text-muted-foreground">
+                    <Users className="h-12 w-12 mx-auto mb-4" />
+                    <p className="font-medium">No User Selected</p>
+                    <p className="text-sm mt-1">
+                      Enter a user address above to analyze their deposit data
+                      and compare calculation methods.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
 
           {/* Settings Tab */}
@@ -2808,8 +5434,7 @@ export default function AdminDashboard() {
                       {(() => {
                         const value =
                           parseFloat(marketViewData.maxTotalDeposits) *
-                          (parseFloat(marketViewData.price) /
-                            Math.pow(10, 6));
+                          (parseFloat(marketViewData.price) / Math.pow(10, 6));
                         if (value >= 1000000000) {
                           return `${(value / 1000000000).toFixed(2)}B`;
                         } else if (value >= 1000000) {

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   Wallet,
@@ -19,6 +19,8 @@ import {
   Wifi,
   WifiOff,
   Copy,
+  Calculator,
+  Activity,
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import DorkFiButton from "@/components/ui/DorkFiButton";
@@ -76,22 +78,26 @@ import { ARC200Service } from "@/services/arc200Service";
 import BigNumber from "bignumber.js";
 import { ARC200TokenService } from "@/services/mimirApi/arc200TokenService";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
+import { DorkFiLendingPoolClient } from "@/clients/DorkFiLendingPoolClient";
 import { abi, CONTRACT } from "ulujs";
 
 // Helper function to get network symbol for network type assets
 const getNetworkSymbol = (networkId: NetworkId): string => {
   const networkConfig = getNetworkConfig(networkId);
   const tokens = getAllTokens(networkId);
-  
+
   // Find the network token (tokenStandard: "network")
-  const networkToken = tokens.find(token => token.tokenStandard === "network");
-  
+  const networkToken = tokens.find(
+    (token) => token.tokenStandard === "network"
+  );
+
   if (networkToken) {
     // Use displaySymbol if available, otherwise use symbol, and convert to uppercase
-    const symbol = networkToken.marketOverride?.displaySymbol || networkToken.symbol;
+    const symbol =
+      networkToken.marketOverride?.displaySymbol || networkToken.symbol;
     return symbol.toUpperCase();
   }
-  
+
   // Fallback to network name if no network token found
   return networkConfig.name;
 };
@@ -198,69 +204,69 @@ const fmtPrecise = new Intl.NumberFormat(undefined, {
 const shortAddr = (a?: string) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "—");
 const nowSec = () => Math.floor(Date.now() / 1000);
 const copyToClipboard = async (text: string) => {
-  console.log('Attempting to copy:', text);
-  
+  console.log("Attempting to copy:", text);
+
   try {
     // Try modern clipboard API first
     if (navigator.clipboard && window.isSecureContext) {
       await navigator.clipboard.writeText(text);
-      console.log('Successfully copied using clipboard API');
+      console.log("Successfully copied using clipboard API");
       showCopyFeedback();
       return;
     }
-    
+
     // Fallback for older browsers or non-HTTPS
-    const textArea = document.createElement('textarea');
+    const textArea = document.createElement("textarea");
     textArea.value = text;
-    textArea.style.position = 'fixed';
-    textArea.style.left = '-999999px';
-    textArea.style.top = '-999999px';
+    textArea.style.position = "fixed";
+    textArea.style.left = "-999999px";
+    textArea.style.top = "-999999px";
     document.body.appendChild(textArea);
     textArea.focus();
     textArea.select();
-    
-    const successful = document.execCommand('copy');
+
+    const successful = document.execCommand("copy");
     document.body.removeChild(textArea);
-    
+
     if (successful) {
-      console.log('Successfully copied using fallback method');
+      console.log("Successfully copied using fallback method");
       showCopyFeedback();
     } else {
-      console.error('Failed to copy using fallback method');
+      console.error("Failed to copy using fallback method");
     }
   } catch (err) {
-    console.error('Failed to copy text:', err);
-    
+    console.error("Failed to copy text:", err);
+
     // Try fallback even if clipboard API fails
     try {
-      const textArea = document.createElement('textarea');
+      const textArea = document.createElement("textarea");
       textArea.value = text;
-      textArea.style.position = 'fixed';
-      textArea.style.left = '-999999px';
-      textArea.style.top = '-999999px';
+      textArea.style.position = "fixed";
+      textArea.style.left = "-999999px";
+      textArea.style.top = "-999999px";
       document.body.appendChild(textArea);
       textArea.focus();
       textArea.select();
-      
-      const successful = document.execCommand('copy');
+
+      const successful = document.execCommand("copy");
       document.body.removeChild(textArea);
-      
+
       if (successful) {
-        console.log('Successfully copied using fallback after error');
+        console.log("Successfully copied using fallback after error");
         showCopyFeedback();
       } else {
-        console.error('All copy methods failed');
+        console.error("All copy methods failed");
       }
     } catch (fallbackErr) {
-      console.error('Fallback copy also failed:', fallbackErr);
+      console.error("Fallback copy also failed:", fallbackErr);
     }
   }
 };
 
 const showCopyFeedback = () => {
   // Create a temporary toast notification
-  const toast = document.createElement('div');
-  toast.textContent = 'Copied to clipboard!';
+  const toast = document.createElement("div");
+  toast.textContent = "Copied to clipboard!";
   toast.style.cssText = `
     position: fixed;
     top: 20px;
@@ -275,12 +281,12 @@ const showCopyFeedback = () => {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     transition: opacity 0.3s ease;
   `;
-  
+
   document.body.appendChild(toast);
-  
+
   // Remove after 2 seconds
   setTimeout(() => {
-    toast.style.opacity = '0';
+    toast.style.opacity = "0";
     setTimeout(() => {
       if (document.body.contains(toast)) {
         document.body.removeChild(toast);
@@ -290,20 +296,25 @@ const showCopyFeedback = () => {
 };
 
 const getCopyValue = (market: Market): string | null => {
-  console.log('Getting copy value for market:', market.symbol, 'standard:', market.tokenStandard);
-  
+  console.log(
+    "Getting copy value for market:",
+    market.symbol,
+    "standard:",
+    market.tokenStandard
+  );
+
   switch (market.tokenStandard) {
     case "asa":
-      console.log('ASA token - assetId:', market.assetId);
+      console.log("ASA token - assetId:", market.assetId);
       return market.assetId || null;
     case "arc200":
-      console.log('ARC200 token - contractId:', market.contractId);
+      console.log("ARC200 token - contractId:", market.contractId);
       return market.contractId || null;
     case "network":
-      console.log('Network token - no copy value');
+      console.log("Network token - no copy value");
       return null; // Don't show copy for network tokens
     default:
-      console.log('Unknown token standard:', market.tokenStandard);
+      console.log("Unknown token standard:", market.tokenStandard);
       return null;
   }
 };
@@ -827,6 +838,7 @@ export default function PreFiDashboard() {
   >({});
   const [isBuyModalOpen, setIsBuyModalOpen] = useState(false);
 
+
   // Multi-network configuration - memoized to prevent recreation
   const enabledNetworks: NetworkId[] = useMemo(
     () => ["voi-mainnet", "algorand-mainnet"],
@@ -866,6 +878,7 @@ export default function PreFiDashboard() {
     }
   };
 
+
   const connect = async () => {
     const s = await chainApi.connectWalletMock();
     setWallet({ ...s, network: currentNetwork });
@@ -895,6 +908,7 @@ export default function PreFiDashboard() {
     setIsInitialLoad(true); // Reset initial load flag for new network
     setRefreshKey((k) => k + 1);
   }, [currentNetwork]);
+
 
   const loadMarket = async (m: Market, isInitialLoad = false) => {
     // Only show loading indicators on initial load
@@ -1394,7 +1408,8 @@ export default function PreFiDashboard() {
           )
         );
 
-        const algorandClients = await algorandService.getCurrentClientsForTransactions();
+        const algorandClients =
+          await algorandService.getCurrentClientsForTransactions();
 
         const res = await algorandClients.algod.sendRawTransaction(stxns).do();
 
@@ -1476,17 +1491,41 @@ export default function PreFiDashboard() {
     console.log("Modal should render:", isWithdrawModalOpen && selectedMarket);
   }, [isWithdrawModalOpen, selectedMarket]);
 
+  // Method 1: Current approach - sum individual market deposits
   const globalDeposited = useMemo(() => {
     let sum = 0;
+    const debugInfo: Array<{
+      symbol: string;
+      tokenAmount: number;
+      price: number;
+      usdValue: number;
+    }> = [];
+
     for (const m of markets) {
       const st = marketsState[m.id];
       if (!st) continue;
       const tokenAmount = fromBase(st.depositedBase, m.decimals);
       const price = marketPrices[m.id] || 0;
-      sum += tokenAmount * price;
+      const usdValue = tokenAmount * price;
+      sum += usdValue;
+
+      if (usdValue > 0) {
+        debugInfo.push({ symbol: m.symbol, tokenAmount, price, usdValue });
+      }
     }
+
+    // Debug logging
+    if (debugInfo.length > 0) {
+      console.log("🔍 Method 1 Debug:", {
+        totalSum: sum,
+        breakdown: debugInfo,
+        marketsCount: debugInfo.length,
+      });
+    }
+
     return sum;
   }, [marketsState, markets, marketPrices]);
+
 
   // Memoize pool progress calculations for better performance
   const poolProgressData = useMemo(() => {
@@ -1742,7 +1781,8 @@ export default function PreFiDashboard() {
       )
     );
 
-    const algorandClients = await algorandService.getCurrentClientsForTransactions();
+    const algorandClients =
+      await algorandService.getCurrentClientsForTransactions();
 
     const res = await algorandClients.algod.sendRawTransaction(stxns).do();
 
@@ -1923,6 +1963,7 @@ export default function PreFiDashboard() {
               </p>
             </TooltipContent>
           </Tooltip>
+
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -2113,14 +2154,18 @@ export default function PreFiDashboard() {
                             </span>
                             {(() => {
                               const isNetwork = m.tokenStandard === "network";
-                              const shouldShow = isNetwork && shouldShowNetworkTooltip(currentNetwork);
+                              const shouldShow =
+                                isNetwork &&
+                                shouldShowNetworkTooltip(currentNetwork);
                               return shouldShow ? (
                                 <Tooltip>
                                   <TooltipTrigger asChild>
                                     <InfoIcon className="h-3 w-3 text-muted-foreground cursor-help" />
                                   </TooltipTrigger>
                                   <TooltipContent>
-                                    <p>{getNetworkTooltipText(currentNetwork)}</p>
+                                    <p>
+                                      {getNetworkTooltipText(currentNetwork)}
+                                    </p>
                                   </TooltipContent>
                                 </Tooltip>
                               ) : null;
@@ -2131,7 +2176,11 @@ export default function PreFiDashboard() {
                                 <button
                                   onClick={() => copyToClipboard(copyValue)}
                                   className="p-1 hover:bg-secondary rounded transition-colors"
-                                  title={`Copy ${m.tokenStandard === "asa" ? "Asset ID" : "Contract ID"}`}
+                                  title={`Copy ${
+                                    m.tokenStandard === "asa"
+                                      ? "Asset ID"
+                                      : "Contract ID"
+                                  }`}
                                 >
                                   <Copy className="h-3 w-3 text-muted-foreground hover:text-foreground" />
                                 </button>
@@ -2140,27 +2189,37 @@ export default function PreFiDashboard() {
                           </div>
                           <div className="text-xs text-muted-foreground">
                             Balance:{" "}
-                            {loading ? "…" : (() => {
-                                const symbol = m.tokenStandard === "network" ? getNetworkSymbol(currentNetwork) : m.symbol;
-                                const shouldShowTooltip = m.tokenStandard === "network";
-                                
-                                if (shouldShowTooltip) {
-                                  return (
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <span className="cursor-help underline decoration-dotted">
-                                          {`${fmt.format(wal)} ${symbol}`}
-                                        </span>
-                                      </TooltipTrigger>
-                                      <TooltipContent>
-                                        <p>{getNetworkTooltipText(currentNetwork)}</p>
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  );
-                                }
-                                
-                                return `${fmt.format(wal)} ${symbol}`;
-                              })()}
+                            {loading
+                              ? "…"
+                              : (() => {
+                                  const symbol =
+                                    m.tokenStandard === "network"
+                                      ? getNetworkSymbol(currentNetwork)
+                                      : m.symbol;
+                                  const shouldShowTooltip =
+                                    m.tokenStandard === "network";
+
+                                  if (shouldShowTooltip) {
+                                    return (
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <span className="cursor-help underline decoration-dotted">
+                                            {`${fmt.format(wal)} ${symbol}`}
+                                          </span>
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                          <p>
+                                            {getNetworkTooltipText(
+                                              currentNetwork
+                                            )}
+                                          </p>
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    );
+                                  }
+
+                                  return `${fmt.format(wal)} ${symbol}`;
+                                })()}
                           </div>
                         </div>
                         <div className="text-xs font-medium text-accent">
@@ -2202,9 +2261,13 @@ export default function PreFiDashboard() {
                               : marketPrices[m.id]
                               ? `$${fmt.format(dep * marketPrices[m.id])}`
                               : (() => {
-                                  const symbol = m.tokenStandard === "network" ? getNetworkSymbol(currentNetwork) : m.symbol;
-                                  const shouldShowTooltip = m.tokenStandard === "network";
-                                  
+                                  const symbol =
+                                    m.tokenStandard === "network"
+                                      ? getNetworkSymbol(currentNetwork)
+                                      : m.symbol;
+                                  const shouldShowTooltip =
+                                    m.tokenStandard === "network";
+
                                   if (shouldShowTooltip) {
                                     return (
                                       <Tooltip>
@@ -2214,38 +2277,50 @@ export default function PreFiDashboard() {
                                           </span>
                                         </TooltipTrigger>
                                         <TooltipContent>
-                                          <p>{getNetworkTooltipText(currentNetwork)}</p>
+                                          <p>
+                                            {getNetworkTooltipText(
+                                              currentNetwork
+                                            )}
+                                          </p>
                                         </TooltipContent>
                                       </Tooltip>
                                     );
                                   }
-                                  
+
                                   return `${fmt.format(dep)} ${symbol}`;
                                 })()}
                           </div>
                           {!loading && dep > 0 && (
                             <div className="text-xs text-muted-foreground">
                               {(() => {
-                                  const symbol = m.tokenStandard === "network" ? getNetworkSymbol(currentNetwork) : m.symbol;
-                                  const shouldShowTooltip = m.tokenStandard === "network";
-                                  
-                                  if (shouldShowTooltip) {
-                                    return (
-                                      <Tooltip>
-                                        <TooltipTrigger asChild>
-                                          <span className="cursor-help underline decoration-dotted">
-                                            {`${fmt.format(dep)} ${symbol}`}
-                                          </span>
-                                        </TooltipTrigger>
-                                        <TooltipContent>
-                                          <p>{getNetworkTooltipText(currentNetwork)}</p>
-                                        </TooltipContent>
-                                      </Tooltip>
-                                    );
-                                  }
-                                  
-                                  return `${fmt.format(dep)} ${symbol}`;
-                                })()}
+                                const symbol =
+                                  m.tokenStandard === "network"
+                                    ? getNetworkSymbol(currentNetwork)
+                                    : m.symbol;
+                                const shouldShowTooltip =
+                                  m.tokenStandard === "network";
+
+                                if (shouldShowTooltip) {
+                                  return (
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <span className="cursor-help underline decoration-dotted">
+                                          {`${fmt.format(dep)} ${symbol}`}
+                                        </span>
+                                      </TooltipTrigger>
+                                      <TooltipContent>
+                                        <p>
+                                          {getNetworkTooltipText(
+                                            currentNetwork
+                                          )}
+                                        </p>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  );
+                                }
+
+                                return `${fmt.format(dep)} ${symbol}`;
+                              })()}
                             </div>
                           )}
                         </div>
@@ -2369,25 +2444,37 @@ export default function PreFiDashboard() {
                                           m.decimals
                                         )
                                       : 0;
-                                  const symbol = m.tokenStandard === "network" ? getNetworkSymbol(currentNetwork) : m.symbol;
-                                  const shouldShowTooltip = m.tokenStandard === "network";
-                                  
+                                  const symbol =
+                                    m.tokenStandard === "network"
+                                      ? getNetworkSymbol(currentNetwork)
+                                      : m.symbol;
+                                  const shouldShowTooltip =
+                                    m.tokenStandard === "network";
+
                                   if (shouldShowTooltip) {
                                     return (
                                       <Tooltip>
                                         <TooltipTrigger asChild>
                                           <span className="cursor-help underline decoration-dotted">
-                                            {`${fmt.format(oldNTokenBalance)} ${symbol}`}
+                                            {`${fmt.format(
+                                              oldNTokenBalance
+                                            )} ${symbol}`}
                                           </span>
                                         </TooltipTrigger>
                                         <TooltipContent>
-                                          <p>{getNetworkTooltipText(currentNetwork)}</p>
+                                          <p>
+                                            {getNetworkTooltipText(
+                                              currentNetwork
+                                            )}
+                                          </p>
                                         </TooltipContent>
                                       </Tooltip>
                                     );
                                   }
-                                  
-                                  return `${fmt.format(oldNTokenBalance)} ${symbol}`;
+
+                                  return `${fmt.format(
+                                    oldNTokenBalance
+                                  )} ${symbol}`;
                                 })()}
                           </DorkFiButton>
                         )}
@@ -2411,9 +2498,7 @@ export default function PreFiDashboard() {
                           </span>
                         </TooltipTrigger>
                         <TooltipContent>
-                          <p>
-                            Available tokens for PreFi deposits.
-                          </p>
+                          <p>Available tokens for PreFi deposits.</p>
                         </TooltipContent>
                       </Tooltip>
                     </th>
@@ -2525,15 +2610,22 @@ export default function PreFiDashboard() {
                                   {m.name}
                                 </span>
                                 {(() => {
-                                  const isNetwork = m.tokenStandard === "network";
-                                  const shouldShow = isNetwork && shouldShowNetworkTooltip(currentNetwork);
+                                  const isNetwork =
+                                    m.tokenStandard === "network";
+                                  const shouldShow =
+                                    isNetwork &&
+                                    shouldShowNetworkTooltip(currentNetwork);
                                   return shouldShow ? (
                                     <Tooltip>
                                       <TooltipTrigger asChild>
                                         <InfoIcon className="h-3 w-3 text-muted-foreground cursor-help" />
                                       </TooltipTrigger>
                                       <TooltipContent>
-                                        <p>{getNetworkTooltipText(currentNetwork)}</p>
+                                        <p>
+                                          {getNetworkTooltipText(
+                                            currentNetwork
+                                          )}
+                                        </p>
                                       </TooltipContent>
                                     </Tooltip>
                                   ) : null;
@@ -2544,7 +2636,11 @@ export default function PreFiDashboard() {
                                     <button
                                       onClick={() => copyToClipboard(copyValue)}
                                       className="p-1 hover:bg-secondary rounded transition-colors"
-                                      title={`Copy ${m.tokenStandard === "asa" ? "Asset ID" : "Contract ID"}`}
+                                      title={`Copy ${
+                                        m.tokenStandard === "asa"
+                                          ? "Asset ID"
+                                          : "Contract ID"
+                                      }`}
                                     >
                                       <Copy className="h-3 w-3 text-muted-foreground hover:text-foreground" />
                                     </button>
@@ -2556,9 +2652,13 @@ export default function PreFiDashboard() {
                                 {loading
                                   ? "…"
                                   : (() => {
-                                      const symbol = m.tokenStandard === "network" ? getNetworkSymbol(currentNetwork) : m.symbol;
-                                      const shouldShowTooltip = m.tokenStandard === "network";
-                                      
+                                      const symbol =
+                                        m.tokenStandard === "network"
+                                          ? getNetworkSymbol(currentNetwork)
+                                          : m.symbol;
+                                      const shouldShowTooltip =
+                                        m.tokenStandard === "network";
+
                                       if (shouldShowTooltip) {
                                         return (
                                           <Tooltip>
@@ -2568,12 +2668,16 @@ export default function PreFiDashboard() {
                                               </span>
                                             </TooltipTrigger>
                                             <TooltipContent>
-                                              <p>{getNetworkTooltipText(currentNetwork)}</p>
+                                              <p>
+                                                {getNetworkTooltipText(
+                                                  currentNetwork
+                                                )}
+                                              </p>
                                             </TooltipContent>
                                           </Tooltip>
                                         );
                                       }
-                                      
+
                                       return `${fmt.format(wal)} ${symbol}`;
                                     })()}
                               </div>
@@ -2590,9 +2694,13 @@ export default function PreFiDashboard() {
                                 : marketPrices[m.id]
                                 ? `$${fmt.format(dep * marketPrices[m.id])}`
                                 : (() => {
-                                    const symbol = m.tokenStandard === "network" ? getNetworkSymbol(currentNetwork) : m.symbol;
-                                    const shouldShowTooltip = m.tokenStandard === "network";
-                                    
+                                    const symbol =
+                                      m.tokenStandard === "network"
+                                        ? getNetworkSymbol(currentNetwork)
+                                        : m.symbol;
+                                    const shouldShowTooltip =
+                                      m.tokenStandard === "network";
+
                                     if (shouldShowTooltip) {
                                       return (
                                         <Tooltip>
@@ -2602,12 +2710,16 @@ export default function PreFiDashboard() {
                                             </span>
                                           </TooltipTrigger>
                                           <TooltipContent>
-                                            <p>{getNetworkTooltipText(currentNetwork)}</p>
+                                            <p>
+                                              {getNetworkTooltipText(
+                                                currentNetwork
+                                              )}
+                                            </p>
                                           </TooltipContent>
                                         </Tooltip>
                                       );
                                     }
-                                    
+
                                     return `${fmt.format(dep)} ${symbol}`;
                                   })()}
                             </div>
@@ -2615,26 +2727,34 @@ export default function PreFiDashboard() {
                               <div className="space-y-1">
                                 <div className="text-xs text-muted-foreground">
                                   {(() => {
-                                      const symbol = m.tokenStandard === "network" ? getNetworkSymbol(currentNetwork) : m.symbol;
-                                      const shouldShowTooltip = m.tokenStandard === "network";
-                                      
-                                      if (shouldShowTooltip) {
-                                        return (
-                                          <Tooltip>
-                                            <TooltipTrigger asChild>
-                                              <span className="cursor-help underline decoration-dotted">
-                                                {`${fmt.format(dep)} ${symbol}`}
-                                              </span>
-                                            </TooltipTrigger>
-                                            <TooltipContent>
-                                              <p>{getNetworkTooltipText(currentNetwork)}</p>
-                                            </TooltipContent>
-                                          </Tooltip>
-                                        );
-                                      }
-                                      
-                                      return `${fmt.format(dep)} ${symbol}`;
-                                    })()}
+                                    const symbol =
+                                      m.tokenStandard === "network"
+                                        ? getNetworkSymbol(currentNetwork)
+                                        : m.symbol;
+                                    const shouldShowTooltip =
+                                      m.tokenStandard === "network";
+
+                                    if (shouldShowTooltip) {
+                                      return (
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <span className="cursor-help underline decoration-dotted">
+                                              {`${fmt.format(dep)} ${symbol}`}
+                                            </span>
+                                          </TooltipTrigger>
+                                          <TooltipContent>
+                                            <p>
+                                              {getNetworkTooltipText(
+                                                currentNetwork
+                                              )}
+                                            </p>
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      );
+                                    }
+
+                                    return `${fmt.format(dep)} ${symbol}`;
+                                  })()}
                                 </div>
                                 {(() => {
                                   const poolData = poolProgressData.find(
@@ -2982,26 +3102,30 @@ export default function PreFiDashboard() {
                           )
                         : "0"}{" "}
                       {(() => {
-                          const symbol = selectedMarket.tokenStandard === "network" ? getNetworkSymbol(currentNetwork) : selectedMarket.symbol;
-                          const shouldShowTooltip = selectedMarket.tokenStandard === "network";
-                          
-                          if (shouldShowTooltip) {
-                            return (
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <span className="cursor-help underline decoration-dotted">
-                                    {symbol}
-                                  </span>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                  <p>{getNetworkTooltipText(currentNetwork)}</p>
-                                </TooltipContent>
-                              </Tooltip>
-                            );
-                          }
-                          
-                          return symbol;
-                        })()}
+                        const symbol =
+                          selectedMarket.tokenStandard === "network"
+                            ? getNetworkSymbol(currentNetwork)
+                            : selectedMarket.symbol;
+                        const shouldShowTooltip =
+                          selectedMarket.tokenStandard === "network";
+
+                        if (shouldShowTooltip) {
+                          return (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="cursor-help underline decoration-dotted">
+                                  {symbol}
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>{getNetworkTooltipText(currentNetwork)}</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          );
+                        }
+
+                        return symbol;
+                      })()}
                     </p>
                   </div>
 
@@ -3041,26 +3165,34 @@ export default function PreFiDashboard() {
                                     selectedMarket.decimals
                                   )
                                 )} ${(() => {
-                                    const symbol = selectedMarket.tokenStandard === "network" ? getNetworkSymbol(currentNetwork) : selectedMarket.symbol;
-                                    const shouldShowTooltip = selectedMarket.tokenStandard === "network";
-                                    
-                                    if (shouldShowTooltip) {
-                                      return (
-                                        <Tooltip>
-                                          <TooltipTrigger asChild>
-                                            <span className="cursor-help underline decoration-dotted">
-                                              {symbol}
-                                            </span>
-                                          </TooltipTrigger>
-                                          <TooltipContent>
-                                            <p>{getNetworkTooltipText(currentNetwork)}</p>
-                                          </TooltipContent>
-                                        </Tooltip>
-                                      );
-                                    }
-                                    
-                                    return symbol;
-                                  })()}`
+                                  const symbol =
+                                    selectedMarket.tokenStandard === "network"
+                                      ? getNetworkSymbol(currentNetwork)
+                                      : selectedMarket.symbol;
+                                  const shouldShowTooltip =
+                                    selectedMarket.tokenStandard === "network";
+
+                                  if (shouldShowTooltip) {
+                                    return (
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <span className="cursor-help underline decoration-dotted">
+                                            {symbol}
+                                          </span>
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                          <p>
+                                            {getNetworkTooltipText(
+                                              currentNetwork
+                                            )}
+                                          </p>
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    );
+                                  }
+
+                                  return symbol;
+                                })()}`
                             : "0"}
                         </span>
                       </div>
@@ -3079,27 +3211,33 @@ export default function PreFiDashboard() {
                     {loadingMap[selectedMarket.id] ? (
                       <RefreshCcw className="h-4 w-4 animate-spin mr-2" />
                     ) : null}
-                    Deposit {(() => {
-                        const symbol = selectedMarket.tokenStandard === "network" ? getNetworkSymbol(currentNetwork) : selectedMarket.symbol;
-                        const shouldShowTooltip = selectedMarket.tokenStandard === "network" && shouldShowNetworkTooltip(currentNetwork);
-                        
-                        if (shouldShowTooltip) {
-                          return (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span className="cursor-help underline decoration-dotted">
-                                  {symbol}
-                                </span>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p>{getNetworkTooltipText(currentNetwork)}</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          );
-                        }
-                        
-                        return symbol;
-                      })()}
+                    Deposit{" "}
+                    {(() => {
+                      const symbol =
+                        selectedMarket.tokenStandard === "network"
+                          ? getNetworkSymbol(currentNetwork)
+                          : selectedMarket.symbol;
+                      const shouldShowTooltip =
+                        selectedMarket.tokenStandard === "network" &&
+                        shouldShowNetworkTooltip(currentNetwork);
+
+                      if (shouldShowTooltip) {
+                        return (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="cursor-help underline decoration-dotted">
+                                {symbol}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>{getNetworkTooltipText(currentNetwork)}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        );
+                      }
+
+                      return symbol;
+                    })()}
                   </Button>
                 </div>
               )}
@@ -3123,10 +3261,18 @@ export default function PreFiDashboard() {
         <WithdrawModal
           isOpen={isWithdrawModalOpen}
           onClose={closeWithdrawModal}
-          tokenSymbol={selectedMarket.tokenStandard === "network" ? getNetworkSymbol(currentNetwork) : selectedMarket.symbol}
+          tokenSymbol={
+            selectedMarket.tokenStandard === "network"
+              ? getNetworkSymbol(currentNetwork)
+              : selectedMarket.symbol
+          }
           tokenIcon={getTokenImagePath(selectedMarket.symbol)}
           showTooltip={selectedMarket.tokenStandard === "network"}
-          tooltipText={selectedMarket.tokenStandard === "network" ? getNetworkTooltipText(currentNetwork) : ""}
+          tooltipText={
+            selectedMarket.tokenStandard === "network"
+              ? getNetworkTooltipText(currentNetwork)
+              : ""
+          }
           currentlyDeposited={
             marketsState[selectedMarket.id]
               ? fromBase(
@@ -3210,7 +3356,8 @@ export default function PreFiDashboard() {
                   )
                 );
 
-                const algorandClients = await algorandService.getCurrentClientsForTransactions();
+                const algorandClients =
+                  await algorandService.getCurrentClientsForTransactions();
 
                 const res = await algorandClients.algod
                   .sendRawTransaction(stxns)

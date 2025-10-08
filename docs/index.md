@@ -34,6 +34,18 @@ Deep dive into the APY calculation methodology:
 
 **Perfect for:** Developers, advanced users, those interested in the technical details of reward calculations
 
+### 💰 [Total Deposits Guide](TOTAL_DEPOSITS.md)
+**Comprehensive guide to understanding total deposits in PreFi**
+
+Detailed explanation of how total deposits work in the platform:
+- Your personal total deposits across all markets
+- Market-level total deposits and capacity limits
+- Cross-network aggregation and global competition
+- Real-time updates and technical implementation
+- Troubleshooting common deposit-related issues
+
+**Perfect for:** Users wanting to understand deposit tracking, developers working with deposit data, those analyzing market capacity
+
 ### 🔄 [Version Management](VERSION_MANAGEMENT.md)
 **Development documentation for version control**
 
@@ -52,6 +64,7 @@ Information about the automatic version management system:
 2. **Connect Wallet**: Use the wallet connection feature to get started
 3. **Make Deposits**: Choose markets and start earning VOI rewards
 4. **Monitor Progress**: Track your deposits and qualification status
+5. **Understand Totals**: Review the [Total Deposits Guide](TOTAL_DEPOSITS.md) to understand how deposit tracking works
 
 ### For Developers
 1. **Technical Details**: Review [APY Estimation Strategy](APY_ESTIMATION.md) for calculation methods
@@ -108,6 +121,7 @@ Information about the automatic version management system:
 
 ### Common Resources
 - **User Guide**: Comprehensive step-by-step instructions
+- **Total Deposits**: Understanding deposit tracking and calculations
 - **Troubleshooting**: Common issues and solutions
 - **APY Calculations**: Understanding reward estimates
 - **Security**: Best practices and safety tips
