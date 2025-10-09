@@ -1,6 +1,5 @@
 
 import { Button } from "@/components/ui/button";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 import { useState } from "react";
@@ -25,8 +24,6 @@ const Header = ({ activeTab, onTabChange }: HeaderProps) => {
     
     if (value === 'liquidations') {
       navigate('/liquidation-markets');
-    } else if (value === 'prefi') {
-      navigate('/prefi');
     } else if (value === 'gas-station') {
       navigate('/gas-station');
     } else {
@@ -47,12 +44,12 @@ const Header = ({ activeTab, onTabChange }: HeaderProps) => {
 
   const tabs = [
     { value: 'dashboard', label: 'Dashboard' },
+    { value: 'prefi', label: 'PreFi' },
     { value: 'markets', label: 'Markets' },
     { value: 'portfolio', label: 'Portfolio' },
     { value: 'liquidations', label: 'Liquidations' },
     { value: 'swap', label: 'Swap' },
     ...(hasGasStation ? [{ value: 'gas-station', label: 'Gas Station' }] : []),
-    { value: 'prefi', label: 'PreFi' },
   ];
 
   return (
@@ -108,13 +105,11 @@ const Header = ({ activeTab, onTabChange }: HeaderProps) => {
           
           {/* Desktop and Tablet Actions */}
           <div className="hidden md:flex items-center gap-2 md:gap-3">
-            <ThemeToggle />
             <WalletNetworkButton />
           </div>
 
           {/* Mobile Menu Button */}
           <div className="flex md:hidden items-center gap-2">
-            <ThemeToggle />
             <Button
               variant="ghost"
               size="icon"

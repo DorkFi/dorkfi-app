@@ -14,18 +14,15 @@ import {
   RefreshCcw,
   ExternalLink,
   InfoIcon,
-  ShoppingCart,
   ChevronDown,
   Wifi,
   WifiOff,
   Copy,
   Calculator,
   Activity,
-  Fuel,
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import DorkFiButton from "@/components/ui/DorkFiButton";
-import { Link } from "react-router-dom";
 import WalletNetworkButton from "@/components/WalletNetworkButton";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import { H1, Body } from "@/components/ui/Typography";
@@ -1799,82 +1796,11 @@ export default function PreFiDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-background relative">
-      {/* Light Mode Beach Background */}
-      <div className="absolute inset-0 light-mode-beach-bg dark:hidden" />
-      <div className="absolute inset-0 beach-overlay dark:hidden" />
+    <div className="relative">
 
-      {/* Dark Mode Surf Background */}
-      <div
-        className="absolute inset-0 z-0 bg-cover bg-center"
-        style={{
-          backgroundImage: "url('/lovable-uploads/dark_surf_prefi.png')",
-        }}
-      />
-
-      {/* Dark overlay */}
-      <div className="absolute inset-0 z-0 bg-black/40"></div>
-
-      {/* PreFi Header */}
-      <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-white/80 dark:header-nav-bg backdrop-blur-md supports-[backdrop-filter]:bg-white/70 dark:supports-[backdrop-filter]:header-nav-bg shadow-sm dark:shadow-none">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            {/* Logo */}
-            <Link
-              to="/"
-              className="flex items-center space-x-3 cursor-pointer hover:opacity-80 transition-opacity"
-              aria-label="Go to DorkFi dashboard"
-            >
-              <div className="flex flex-col">
-                <img
-                  src="/lovable-uploads/dork_fi_logo_edit1_light.png"
-                  alt="DorkFi logo"
-                  className="h-8 sm:h-9 md:h-10 lg:h-11 w-auto object-contain flex-shrink-0"
-                  fetchPriority="high"
-                  decoding="async"
-                  onError={(e) => {
-                    console.error("Logo failed to load, using placeholder");
-                    (e.currentTarget as HTMLImageElement).src =
-                      "/placeholder.svg";
-                  }}
-                />
-              </div>
-            </Link>
-
-            {/* Theme Toggle, Buy Button, Gas Station, Migration Link, and Wallet */}
-            <div className="flex items-center gap-2">
-              {activeAccount && (
-                <>
-                  <button
-                    className="p-2 rounded-lg bg-green-600 hover:bg-green-700 text-white transition-colors"
-                    onClick={() => {
-                      console.log("Buy tokens clicked from navigation");
-                      setIsBuyModalOpen(true);
-                    }}
-                    title="Buy Tokens"
-                  >
-                    <ShoppingCart className="h-5 w-5" />
-                  </button>
-                </>
-              )}
-              {/* Gas Station Button - only show if current network has gas stations */}
-              {getCurrentGasStationSymbols().length > 0 && (
-                <Link
-                  to="/gas-station"
-                  className="p-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors"
-                  title="Gas Station"
-                >
-                  <Fuel className="h-5 w-5" />
-                </Link>
-              )}
-              <WalletNetworkButton onNetworkChange={handleNetworkChange} />
-            </div>
-          </div>
-        </div>
-      </header>
 
       {/* Hero Section */}
-      <div className="mx-auto max-w-6xl px-4 pt-8 relative z-10">
+      <div className="mx-auto max-w-6xl px-4 pt-4 relative z-10">
         <DorkFiCard
           hoverable
           className="relative text-center overflow-hidden p-6 md:p-8 mb-8 !bg-gradient-to-br !from-slate-900 !to-slate-800 border-slate-700"
@@ -3009,17 +2935,6 @@ export default function PreFiDashboard() {
         </section>
       </main>
 
-      {/* Footer */}
-      <footer className="border-t border-border/40 mt-4 relative z-10">
-        <div className="max-w-6xl mx-auto px-4 py-4 md:py-6">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-center sm:text-left">
-            <div className="text-muted-foreground text-sm">
-              <p>© 2025 DorkFi Protocol. Dive into the depths of DeFi.</p>
-            </div>
-            <VersionDisplay />
-          </div>
-        </div>
-      </footer>
 
       {/* Deposit Modal */}
       <Dialog open={isDepositModalOpen} onOpenChange={closeDepositModal}>
