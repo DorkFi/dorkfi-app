@@ -43,7 +43,7 @@ const MarketCardView = ({
               <img src={market.icon} alt={market.asset} className="w-10 h-10 md:w-8 md:h-8 rounded-full flex-shrink-0" />
               <div className="flex flex-col items-center justify-center gap-1 text-center flex-1">
                 <div className="font-semibold text-lg leading-tight">{market.asset}</div>
-                <Badge variant="outline" className="text-xs">
+                <Badge variant="outline" className="text-xs px-1 py-0 h-4">
                   CF {market.collateralFactor}%
                 </Badge>
               </div>

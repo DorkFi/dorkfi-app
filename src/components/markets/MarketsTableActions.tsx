@@ -5,9 +5,10 @@ interface MarketsTableActionsProps {
   asset: string;
   onDepositClick: (asset: string) => void;
   onBorrowClick: (asset: string) => void;
+  isLoadingBalance?: boolean;
 }
 
-const MarketsTableActions = ({ asset, onDepositClick, onBorrowClick }: MarketsTableActionsProps) => {
+const MarketsTableActions = ({ asset, onDepositClick, onBorrowClick, isLoadingBalance = false }: MarketsTableActionsProps) => {
   return (
     <div className="flex space-x-2">
       <DorkFiButton
@@ -16,8 +17,9 @@ const MarketsTableActions = ({ asset, onDepositClick, onBorrowClick }: MarketsTa
           e.stopPropagation();
           onDepositClick(asset);
         }}
+        disabled={isLoadingBalance}
       >
-        Deposit
+        {isLoadingBalance ? "Loading..." : "Deposit"}
       </DorkFiButton>
       <DorkFiButton
         variant="borrow-outline"

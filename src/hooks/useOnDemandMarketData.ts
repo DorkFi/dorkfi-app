@@ -147,20 +147,34 @@ export const useOnDemandMarketData = ({
       if (marketInfo) {
         // Use the pool ID from the token config
         console.log(`Setting market data for ${token.symbol} with pool ID: ${poolId}`);
+        // Calculate USD values using the market price
+        const tokenPrice = parseFloat(marketInfo.price) || 0;
+        const totalSupplyAmount = parseFloat(marketInfo.totalDeposits) || 0;
+        const totalBorrowAmount = parseFloat(marketInfo.totalBorrows) || 0;
+        const supplyCapAmount = parseFloat(marketInfo.maxTotalDeposits) || 0;
+        
+        console.log(`USD calculations for ${token.symbol}:`, {
+          tokenPrice,
+          totalSupplyAmount,
+          totalSupplyUSD: totalSupplyAmount * tokenPrice,
+          totalBorrowAmount,
+          totalBorrowUSD: totalBorrowAmount * tokenPrice,
+        });
+        
         const marketData: OnDemandMarketData = {
           asset: token.symbol,
           icon: token.logoPath,
-          totalSupply: parseFloat(marketInfo.totalDeposits) || 0,
-          totalSupplyUSD: parseFloat(marketInfo.totalDeposits) || 0, // Assuming 1:1 for now
+          totalSupply: totalSupplyAmount,
+          totalSupplyUSD: totalSupplyAmount * tokenPrice,
           supplyAPY: marketInfo.supplyRate * 100,
-          totalBorrow: parseFloat(marketInfo.totalBorrows) || 0,
-          totalBorrowUSD: parseFloat(marketInfo.totalBorrows) || 0, // Assuming 1:1 for now
+          totalBorrow: totalBorrowAmount,
+          totalBorrowUSD: totalBorrowAmount * tokenPrice,
           borrowAPY: marketInfo.borrowRateCurrent * 100,
           utilization: marketInfo.utilizationRate * 100,
           collateralFactor: marketInfo.collateralFactor * 100,
           walletBalance: 0, // This would need wallet integration
-          supplyCap: parseFloat(marketInfo.maxTotalDeposits) || 0,
-          supplyCapUSD: parseFloat(marketInfo.maxTotalDeposits) || 0,
+          supplyCap: supplyCapAmount,
+          supplyCapUSD: supplyCapAmount * tokenPrice,
           maxLTV: marketInfo.collateralFactor * 100,
           liquidationThreshold: marketInfo.liquidationThreshold * 100,
           liquidationPenalty: marketInfo.liquidationBonus * 100,

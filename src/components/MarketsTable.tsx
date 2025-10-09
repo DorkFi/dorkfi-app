@@ -2,12 +2,18 @@
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, RefreshCw } from "lucide-react";
+import { useWallet } from "@txnlab/use-wallet-react";
+import { useNetwork } from "@/contexts/NetworkContext";
+import { getAllTokensWithDisplayInfo, getTokenConfig } from "@/config";
+import { ARC200Service } from "@/services/arc200Service";
+import algorandService from "@/services/algorandService";
 
 import { useOnDemandMarketData, SortField, SortOrder } from "@/hooks/useOnDemandMarketData";
 import MarketSearchFilters from "@/components/markets/MarketSearchFilters";
 import MarketPagination from "@/components/markets/MarketPagination";
 import SupplyBorrowModal from "@/components/SupplyBorrowModal";
+import WithdrawModal from "@/components/WithdrawModal";
 import MarketDetailModal from "@/components/MarketDetailModal";
 import MarketsHeroSection from "@/components/markets/MarketsHeroSection";
 import MarketsTableContent from "@/components/markets/MarketsTableContent";
@@ -17,8 +23,17 @@ const MarketsTable = () => {
   const [sortField, setSortField] = useState<SortField>("totalSupplyUSD");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [depositModal, setDepositModal] = useState({ isOpen: false, asset: null });
+  const [withdrawModal, setWithdrawModal] = useState({ isOpen: false, asset: null });
   const [borrowModal, setBorrowModal] = useState({ isOpen: false, asset: null });
   const [detailModal, setDetailModal] = useState({ isOpen: false, asset: null, marketData: null });
+  const [walletBalances, setWalletBalances] = useState<Record<string, { balance: number; balanceUSD: number }>>({});
+  const [isLoadingBalance, setIsLoadingBalance] = useState(false);
+  
+  // Mock user deposits - in real app, this would come from user's wallet/backend
+  const [userDeposits] = useState<Record<string, number>>({});
+  
+  const { activeAccount } = useWallet();
+  const { currentNetwork } = useNetwork();
 
   const {
     data: markets,
@@ -28,15 +43,18 @@ const MarketsTable = () => {
     setCurrentPage,
     handleSearchChange,
     handleSortChange,
+    loadMarketData,
+    loadMarketDataWithBypass,
     loadVisibleMarkets,
-    isLoading
+    loadAllMarkets,
+    isLoading,
+    marketsData
   } = useOnDemandMarketData({
     searchTerm,
     sortField,
     sortOrder,
     pageSize: 10,
-    autoLoad: true,
-    throttleMs: 60 * 1000 // 1 minute throttle
+    autoLoad: true
   });
 
   const handleSearchTermChange = (value: string) => {
@@ -50,16 +68,26 @@ const MarketsTable = () => {
     handleSortChange(field, order);
   };
 
-  // Load visible markets when component mounts or markets change
-  useEffect(() => {
-    if (markets.length > 0) {
-      const visibleMarketKeys = markets.map(market => market.asset.toLowerCase());
-      loadVisibleMarkets(visibleMarketKeys);
+  const handleDepositClick = async (asset: string) => {
+    setIsLoadingBalance(true);
+    
+    try {
+      // Fetch wallet balance before opening modal
+      await fetchWalletBalance(asset);
+      
+      // Open modal after balance is fetched
+      setDepositModal({ isOpen: true, asset });
+    } catch (error) {
+      console.error("Error fetching wallet balance for deposit:", error);
+      // Still open modal even if balance fetch fails
+      setDepositModal({ isOpen: true, asset });
+    } finally {
+      setIsLoadingBalance(false);
     }
-  }, [markets, loadVisibleMarkets]);
+  };
 
-  const handleDepositClick = (asset: string) => {
-    setDepositModal({ isOpen: true, asset });
+  const handleWithdrawClick = (asset: string) => {
+    setWithdrawModal({ isOpen: true, asset });
   };
 
   const handleBorrowClick = (asset: string) => {
@@ -67,11 +95,30 @@ const MarketsTable = () => {
   };
 
   const handleCloseDepositModal = () => {
+    const asset = depositModal.asset;
     setDepositModal({ isOpen: false, asset: null });
+    
+    // Refresh market data and wallet balance after deposit
+    if (asset) {
+      loadMarketDataWithBypass(asset.toLowerCase());
+      // Refresh wallet balance to show updated amount after deposit
+      refreshWalletBalance(asset);
+    }
+  };
+
+  const handleCloseWithdrawModal = () => {
+    setWithdrawModal({ isOpen: false, asset: null });
   };
 
   const handleCloseBorrowModal = () => {
+    const asset = borrowModal.asset;
     setBorrowModal({ isOpen: false, asset: null });
+    
+    // Refresh market data after borrow
+    if (asset) {
+      loadMarketDataWithBypass(asset.toLowerCase());
+      // Note: Borrowing doesn't affect wallet balance, but we could refresh if needed
+    }
   };
 
   const handleRowClick = (market: any) => {
@@ -85,6 +132,148 @@ const MarketsTable = () => {
 
   const handleCloseDetailModal = () => {
     setDetailModal({ isOpen: false, asset: null, marketData: null });
+  };
+
+  // Load all markets when component mounts
+  useEffect(() => {
+    loadAllMarkets();
+  }, [loadAllMarkets]);
+
+  // Clear wallet balance cache when wallet address changes
+  useEffect(() => {
+    setWalletBalances({});
+  }, [activeAccount?.address]);
+
+  // Handle refresh button click
+  const handleRefresh = () => {
+    loadAllMarkets();
+  };
+
+  // Refresh wallet balance for a specific asset (clears cache and refetches)
+  const refreshWalletBalance = async (asset: string) => {
+    // Clear the cached balance for this asset
+    setWalletBalances(prev => {
+      const newBalances = { ...prev };
+      delete newBalances[asset];
+      return newBalances;
+    });
+    
+    // Fetch fresh balance
+    await fetchWalletBalance(asset);
+  };
+
+  // Fetch wallet balance for a specific asset
+  const fetchWalletBalance = async (asset: string) => {
+    if (!activeAccount?.address) {
+      return { balance: 0, balanceUSD: 0 };
+    }
+
+    // Check if we already have this balance cached
+    if (walletBalances[asset]) {
+      return walletBalances[asset];
+    }
+
+    try {
+      const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+      const token = tokens.find(t => t.symbol === asset);
+      
+      if (!token) {
+        console.error(`Token ${asset} not found in network config`);
+        return { balance: 0, balanceUSD: 0 };
+      }
+
+      // Get the original token config to access tokenStandard
+      const originalTokenConfig = getTokenConfig(currentNetwork, asset);
+      if (!originalTokenConfig) {
+        console.error(`Original token config not found for ${asset}`);
+        return { balance: 0, balanceUSD: 0 };
+      }
+
+      // Initialize ARC200Service with current clients
+      const clients = await algorandService.getCurrentClientsForReads();
+      ARC200Service.initialize(clients);
+
+      let balance = 0;
+      
+      // Handle different token standards
+      if (originalTokenConfig.tokenStandard === "arc200" && token.underlyingContractId) {
+        // Fetch ARC200 token balance
+        console.log(`Fetching ARC200 balance for ${asset} (contract: ${token.underlyingContractId})`);
+        const arc200Balance = await ARC200Service.getBalance(
+          activeAccount.address,
+          token.underlyingContractId
+        );
+        
+        if (arc200Balance) {
+          // Convert from smallest units to human readable format
+          balance = parseFloat(ARC200Service.formatBalance(arc200Balance, originalTokenConfig.decimals));
+          console.log(`ARC200 balance for ${asset}: ${balance}`);
+        } else {
+          console.log(`No ARC200 balance found for ${asset}`);
+          balance = 0;
+        }
+      } else if (originalTokenConfig.tokenStandard === "network") {
+        // For network tokens (like VOI), fetch native balance
+        console.log(`Fetching network token balance for ${asset}`);
+        try {
+          const clients = await algorandService.getCurrentClientsForReads();
+          const accountInfo = await clients.algod.accountInformation(activeAccount.address).do();
+          // Convert from micro-units to units (divide by 1,000,000)
+          balance = accountInfo.amount / 1_000_000;
+          console.log(`Network token balance for ${asset}: ${balance}`);
+        } catch (error) {
+          console.error(`Error fetching network token balance for ${asset}:`, error);
+          balance = 0;
+        }
+      } else if (originalTokenConfig.tokenStandard === "asa" && token.underlyingAssetId) {
+        // For ASA tokens, fetch asset balance
+        console.log(`Fetching ASA balance for ${asset} (asset ID: ${token.underlyingAssetId})`);
+        try {
+          const clients = await algorandService.getCurrentClientsForReads();
+          const accountInfo = await clients.algod.accountInformation(activeAccount.address).do();
+          
+          // Find the asset in the account's assets
+          const assetId = parseInt(token.underlyingAssetId);
+          const assetHolding = accountInfo.assets?.find((asset: any) => asset['asset-id'] === assetId);
+          
+          if (assetHolding) {
+            // Convert from smallest units to human readable format
+            balance = assetHolding.amount / Math.pow(10, originalTokenConfig.decimals);
+            console.log(`ASA balance for ${asset}: ${balance}`);
+          } else {
+            console.log(`No ASA balance found for ${asset}`);
+            balance = 0;
+          }
+        } catch (error) {
+          console.error(`Error fetching ASA balance for ${asset}:`, error);
+          balance = 0;
+        }
+      } else {
+        console.log(`Unsupported token standard for ${asset}: ${originalTokenConfig.tokenStandard}`);
+        balance = 0;
+      }
+
+      // Calculate USD value
+      const market = markets.find(m => m.asset === asset);
+      const tokenPrice = market ? (market.totalSupplyUSD / market.totalSupply) || 1 : 1;
+      const balanceUSD = balance * tokenPrice;
+      
+      const balanceData = {
+        balance,
+        balanceUSD
+      };
+
+      setWalletBalances(prev => ({
+        ...prev,
+        [asset]: balanceData
+      }));
+
+      console.log(`Final balance data for ${asset}:`, balanceData);
+      return balanceData;
+    } catch (error) {
+      console.error("Error fetching wallet balance:", error);
+      return { balance: 0, balanceUSD: 0 };
+    }
   };
 
   const getAssetData = (asset: string) => {
@@ -125,17 +314,37 @@ const MarketsTable = () => {
         <Card className="card-hover bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 shadow-md border border-gray-200/50 dark:border-ocean-teal/20">
           <CardHeader className="pb-4">
             <div className="flex items-start justify-between gap-4">
-              <CardTitle className="text-xl md:text-2xl font-bold text-slate-800 dark:text-white">Market Overview</CardTitle>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => window.open('https://docs.dork.fi/markets', '_blank', 'noopener,noreferrer')}
-                className="flex items-center gap-2 bg-ocean-teal/5 border-ocean-teal/20 hover:bg-ocean-teal/10 text-ocean-teal"
-                aria-label="Learn more about markets (opens in new tab)"
-              >
-                Learn More
-                <ExternalLink className="h-3 w-3" />
-              </Button>
+              <CardTitle className="text-xl md:text-2xl font-bold text-slate-800 dark:text-white">
+                Market Overview
+                {isLoading && (
+                  <span className="ml-2 text-sm font-normal text-muted-foreground">
+                    (Loading...)
+                  </span>
+                )}
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRefresh}
+                  disabled={isLoading}
+                  className="flex items-center gap-2 bg-blue-50 border-blue-200 hover:bg-blue-100 text-blue-600 dark:bg-blue-950 dark:border-blue-800 dark:hover:bg-blue-900 dark:text-blue-400"
+                  aria-label="Refresh market data"
+                >
+                  <RefreshCw className={`h-3 w-3 ${isLoading ? 'animate-spin' : ''}`} />
+                  Refresh
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => window.open('https://docs.dork.fi', '_blank', 'noopener,noreferrer')}
+                  className="flex items-center gap-2 bg-ocean-teal/5 border-ocean-teal/20 hover:bg-ocean-teal/10 text-ocean-teal"
+                  aria-label="Learn more about markets (opens in new tab)"
+                >
+                  Learn More
+                  <ExternalLink className="h-3 w-3" />
+                </Button>
+              </div>
             </div>
           </CardHeader>
           <CardContent>
@@ -150,13 +359,21 @@ const MarketsTable = () => {
               </div>
             </section>
 
-            <MarketsTableContent
-              markets={markets}
-              onRowClick={handleRowClick}
-              onInfoClick={handleInfoClick}
-              onDepositClick={handleDepositClick}
-              onBorrowClick={handleBorrowClick}
-            />
+            {markets.length === 0 && !isLoading ? (
+              <div className="text-center py-8">
+                <p className="text-muted-foreground">No markets found. Try adjusting your search criteria.</p>
+              </div>
+            ) : (
+              <MarketsTableContent
+                markets={markets}
+                onRowClick={handleRowClick}
+                onInfoClick={handleInfoClick}
+                onDepositClick={handleDepositClick}
+                onWithdrawClick={handleWithdrawClick}
+                onBorrowClick={handleBorrowClick}
+                isLoadingBalance={isLoadingBalance}
+              />
+            )}
           </CardContent>
         </Card>
 
@@ -186,6 +403,31 @@ const MarketsTable = () => {
             asset={depositModal.asset}
             mode="deposit"
             assetData={getAssetData(depositModal.asset)}
+            walletBalance={walletBalances[depositModal.asset]?.balance || 0}
+            walletBalanceUSD={walletBalances[depositModal.asset]?.balanceUSD || 0}
+            onTransactionSuccess={() => {
+              // Refresh wallet balance immediately after successful transaction
+              if (depositModal.asset) {
+                refreshWalletBalance(depositModal.asset);
+              }
+            }}
+          />
+        )}
+
+        {/* Withdraw Modal */}
+        {withdrawModal.isOpen && withdrawModal.asset && getAssetData(withdrawModal.asset) && (
+          <WithdrawModal
+            isOpen={withdrawModal.isOpen}
+            onClose={handleCloseWithdrawModal}
+            tokenSymbol={withdrawModal.asset}
+            tokenIcon={getAssetData(withdrawModal.asset).icon}
+            currentlyDeposited={1000}
+            marketStats={{
+              supplyAPY: getAssetData(withdrawModal.asset).supplyAPY,
+              utilization: getAssetData(withdrawModal.asset).utilization,
+              collateralFactor: getAssetData(withdrawModal.asset).collateralFactor,
+              tokenPrice: 1.0,
+            }}
           />
         )}
 
@@ -197,6 +439,12 @@ const MarketsTable = () => {
             asset={borrowModal.asset}
             mode="borrow"
             assetData={getAssetData(borrowModal.asset)}
+            onTransactionSuccess={() => {
+              // Refresh market data after successful borrow
+              if (borrowModal.asset) {
+                loadMarketDataWithBypass(borrowModal.asset.toLowerCase());
+              }
+            }}
           />
         )}
       </div>

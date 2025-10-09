@@ -21,6 +21,7 @@ interface MarketsDesktopTableProps {
   onInfoClick: (e: React.MouseEvent, market: OnDemandMarketData) => void;
   onDepositClick: (asset: string) => void;
   onBorrowClick: (asset: string) => void;
+  isLoadingBalance?: boolean;
 }
 
 const headerTooltips = {
@@ -52,6 +53,7 @@ const MarketsDesktopTable = ({
   onInfoClick,
   onDepositClick,
   onBorrowClick,
+  isLoadingBalance = false,
 }: MarketsDesktopTableProps) => {
   if (markets.length === 0) {
     return (
@@ -194,7 +196,7 @@ const MarketsDesktopTable = ({
                       <div className="font-semibold text-base leading-tight">
                         {market.asset}
                       </div>
-                      <Badge variant="outline" className="text-xs">
+                      <Badge variant="outline" className="text-xs px-1 py-0 h-4">
                         CF {market.collateralFactor}%
                       </Badge>
                     </div>
@@ -283,6 +285,7 @@ const MarketsDesktopTable = ({
                     asset={market.asset}
                     onDepositClick={onDepositClick}
                     onBorrowClick={onBorrowClick}
+                    isLoadingBalance={isLoadingBalance}
                   />
                 </TableCell>
               </TableRow>
