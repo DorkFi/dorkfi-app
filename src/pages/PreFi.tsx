@@ -21,6 +21,7 @@ import {
   Copy,
   Calculator,
   Activity,
+  Fuel,
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import DorkFiButton from "@/components/ui/DorkFiButton";
@@ -68,6 +69,7 @@ import {
   TokenStandard,
   getEnabledNetworks,
   isMigrationEnabled,
+  getCurrentGasStationSymbols,
 } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { deposit, withdraw, fetchMarketInfo } from "@/services/lendingService";
@@ -841,7 +843,7 @@ export default function PreFiDashboard() {
 
   // Multi-network configuration - memoized to prevent recreation
   const enabledNetworks: NetworkId[] = useMemo(
-    () => ["voi-mainnet", "algorand-mainnet"],
+    () => getEnabledNetworks(),
     []
   );
 
@@ -1839,7 +1841,7 @@ export default function PreFiDashboard() {
               </div>
             </Link>
 
-            {/* Theme Toggle, Buy Button, Migration Link, and Wallet */}
+            {/* Theme Toggle, Buy Button, Gas Station, Migration Link, and Wallet */}
             <div className="flex items-center gap-2">
               {activeAccount && (
                 <>
@@ -1854,6 +1856,16 @@ export default function PreFiDashboard() {
                     <ShoppingCart className="h-5 w-5" />
                   </button>
                 </>
+              )}
+              {/* Gas Station Button - only show if current network has gas stations */}
+              {getCurrentGasStationSymbols().length > 0 && (
+                <Link
+                  to="/gas-station"
+                  className="p-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+                  title="Gas Station"
+                >
+                  <Fuel className="h-5 w-5" />
+                </Link>
               )}
               <WalletNetworkButton onNetworkChange={handleNetworkChange} />
             </div>

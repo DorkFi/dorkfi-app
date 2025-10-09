@@ -78,11 +78,13 @@ export interface NetworkConfig {
   rpcToken?: string;
   indexerUrl: string;
   explorerUrl: string;
+  faucetUrl?: string;
   contracts: ContractConfig;
   tokens: {
     [symbol: string]: TokenConfig;
   };
   preFiParameters?: PreFiParameters;
+  gasStation?: string[];
 }
 
 export interface GlobalConfig {
@@ -104,6 +106,287 @@ export interface GlobalConfig {
 /**
  * VOI Mainnet Configuration
  */
+const prefiTokens = {
+  VOI: {
+    assetId: "0",
+    poolId: "41760711",
+    contractId: "41877720",
+    nTokenId: "42125195",
+    decimals: 6,
+    name: "VOI",
+    symbol: "VOI",
+    logoPath: "/lovable-uploads/VOI.png",
+    tokenStandard: "network",
+    marketOverride: {
+      displayName: "Voi",
+      displaySymbol: "Voi",
+      isSmartContract: true,
+    },
+  },
+  aUSDC: {
+    assetId: "302190",
+    poolId: "41760711",
+    contractId: "395614",
+    nTokenId: "42577758",
+    decimals: 6,
+    name: "Aramid USDC",
+    symbol: "aUSDC",
+    logoPath: "/lovable-uploads/aUSDC.png",
+    tokenStandard: "asa",
+  },
+  UNIT: {
+    contractId: "420069",
+    poolId: "41760711",
+    nTokenId: "42638644",
+    decimals: 8,
+    name: "UNIT",
+    symbol: "UNIT",
+    logoPath: "/lovable-uploads/UNIT.png",
+    tokenStandard: "arc200",
+  },
+  aALGO: {
+    assetId: "302189",
+    contractId: "413153",
+    poolId: "41760711",
+    nTokenId: "42674504",
+    decimals: 6,
+    name: "Aramid Algorand",
+    symbol: "aALGO",
+    logoPath: "/lovable-uploads/aALGO.png",
+    tokenStandard: "asa",
+  },
+  aETH: {
+    assetId: "302193",
+    contractId: "40153308",
+    poolId: "41760711",
+    nTokenId: "42682188",
+    decimals: 6,
+    name: "Aramid ETH",
+    symbol: "aETH",
+    logoPath: "/lovable-uploads/aETH.png",
+    tokenStandard: "asa",
+  },
+  aBTC: {
+    assetId: "40152643",
+    contractId: "40153368",
+    poolId: "41760711",
+    nTokenId: "42701185",
+    decimals: 8,
+    name: "Wrapped BTC",
+    symbol: "aBTC",
+    logoPath: "/lovable-uploads/WrappedBTC.png",
+    tokenStandard: "asa",
+  },
+  acbBTC: {
+    assetId: "40152648",
+    contractId: "40153415",
+    poolId: "41760711",
+    nTokenId: "42706178",
+    decimals: 8,
+    name: "Coinbase BTC",
+    symbol: "acbBTC",
+    logoPath: "/lovable-uploads/cbBTC.png",
+    tokenStandard: "asa",
+  },
+  POW: {
+    assetId: "40152679",
+    contractId: "40153155",
+    poolId: "41760711",
+    nTokenId: "42702842",
+    decimals: 6,
+    name: "POW",
+    symbol: "POW",
+    logoPath: "/lovable-uploads/POW.png",
+    tokenStandard: "asa",
+  },
+  // Fountain VOI 770561 6
+  FV: {
+    assetId: "0",
+    contractId: "770561",
+    poolId: "44866061",
+    nTokenId: "45052343",
+    decimals: 6,
+    name: "Fountain VOI",
+    symbol: "FV",
+    logoPath: "https://asset-verification.nautilus.sh/icons/770561.png",
+    tokenStandard: "network",
+  },
+  NV: {
+    assetId: "0",
+    contractId: "8324600",
+    poolId: "44866061",
+    nTokenId: "45052477",
+    decimals: 6,
+    name: "Nautilus VOI",
+    symbol: "NV",
+    logoPath: "/lovable-uploads/NV.png",
+    tokenStandard: "network",
+  },
+  EV: {
+    assetId: "0",
+    contractId: "828295",
+    poolId: "44866061",
+    nTokenId: "45447486",
+    decimals: 6,
+    name: "enVOI",
+    symbol: "EV",
+    logoPath: "/lovable-uploads/EV.png",
+    tokenStandard: "network",
+  },
+  bVOI: {
+    assetId: "0",
+    contractId: "8471125",
+    poolId: "44866061",
+    nTokenId: "45052513",
+    decimals: 6,
+    name: "BUIDL VOI",
+    symbol: "bVOI",
+    logoPath: "/lovable-uploads/bVOI.png",
+    tokenStandard: "network",
+  },
+  // NODE 410811 6
+  NODE: {
+    contractId: "410811",
+    poolId: "44866061",
+    nTokenId: "44872392",
+    decimals: 6,
+    name: "NODE",
+    symbol: "NODE",
+    logoPath: "https://asset-verification.nautilus.sh/icons/410811.png",
+    tokenStandard: "arc200",
+  },
+  // BUIDL 419744 6
+  BUIDL: {
+    contractId: "419744",
+    poolId: "44866061",
+    nTokenId: "44872401",
+    decimals: 8,
+    name: "BUIDL",
+    symbol: "BUIDL",
+    logoPath: "https://asset-verification.nautilus.sh/icons/419744.png",
+    tokenStandard: "arc200",
+  },
+  // SHELLY 410111 8
+  SHELLY: {
+    contractId: "410111",
+    poolId: "44866061",
+    nTokenId: "44872410",
+    decimals: 8,
+    name: "SHELLY",
+    symbol: "SHELLY",
+    logoPath: "https://asset-verification.nautilus.sh/icons/410111.png",
+    tokenStandard: "arc200",
+  },
+  // AMMO 798968 6
+  AMMO: {
+    contractId: "798968",
+    poolId: "44866061",
+    nTokenId: "44872488",
+    decimals: 6,
+    name: "AMMO",
+    symbol: "AMMO",
+    logoPath: "https://asset-verification.nautilus.sh/icons/798968.png",
+    tokenStandard: "arc200",
+  },
+  // GM 300279 2
+  GM: {
+    contractId: "300279",
+    poolId: "44866061",
+    nTokenId: "44872696",
+    decimals: 2,
+    name: "GM",
+    symbol: "GM",
+    logoPath: "https://asset-verification.nautilus.sh/icons/300279.png",
+    tokenStandard: "arc200",
+  },
+  // CORN 412682 6
+  CORN: {
+    contractId: "412682",
+    poolId: "44866061",
+    nTokenId: "44872738",
+    decimals: 6,
+    name: "CORN",
+    symbol: "CORN",
+    logoPath: "https://asset-verification.nautilus.sh/icons/412682.png",
+    tokenStandard: "arc200",
+  },
+  // F 302222 6
+  F: {
+    contractId: "302222",
+    poolId: "44866061",
+    nTokenId: "44872864",
+    decimals: 6,
+    name: "F",
+    symbol: "F",
+    logoPath: "https://asset-verification.nautilus.sh/icons/302222.png",
+    tokenStandard: "arc200",
+  },
+  // IAT 420024 6
+  IAT: {
+    contractId: "420024",
+    poolId: "44866061",
+    nTokenId: "44872814",
+    decimals: 6,
+    name: "IAT",
+    symbol: "IAT",
+    logoPath: "https://asset-verification.nautilus.sh/icons/420024.png",
+    tokenStandard: "arc200",
+  },
+};
+const prefiLendingPools = ["41760711", "44866061"];
+const betaTokens: { [symbol: string]: TokenConfig } = {
+  VOI: {
+    contractId: "46504436",
+    poolId: "46505156",
+    nTokenId: "46505178",
+    decimals: 6,
+    name: "VOI",
+    symbol: "VOI",
+    logoPath: "/lovable-uploads/VOI.png",
+    tokenStandard: "arc200",
+  },
+  ALGO: {
+    contractId: "46524931",
+    poolId: "46505156",
+    nTokenId: "46524938",
+    decimals: 6,
+    name: "ALGO",
+    symbol: "ALGO",
+    logoPath: "/lovable-uploads/Algo.webp",
+    tokenStandard: "arc200",
+  },
+  USDC: {
+    contractId: "46528289",
+    poolId: "46505156",
+    nTokenId: "46528328",
+    decimals: 6,
+    name: "USDC",
+    symbol: "USDC",
+    logoPath: "/lovable-uploads/USDC.webp",
+    tokenStandard: "arc200",
+  },
+  ETH: {
+    contractId: "46528374",
+    poolId: "46505156",
+    nTokenId: "46528379",
+    decimals: 6,
+    name: "ETH",
+    symbol: "ETH",
+    logoPath: "/lovable-uploads/ETH.jpg",
+    tokenStandard: "arc200",
+  },
+  BTC: {
+    contractId: "46528407",
+    poolId: "46505156",
+    nTokenId: "46528426",
+    decimals: 8,
+    name: "BTC",
+    symbol: "BTC",
+    logoPath: "/lovable-uploads/WrappedBTC.png",
+    tokenStandard: "arc200",
+  },
+};
+const betaLendingPools = ["46505156"];
 const voiMainnetConfig: NetworkConfig = {
   networkId: "voi-mainnet",
   walletNetworkId: "voimain",
@@ -114,241 +397,17 @@ const voiMainnetConfig: NetworkConfig = {
   rpcToken: "",
   indexerUrl: "https://mainnet-idx.voi.nodely.dev",
   explorerUrl: "https://voi.observer",
+  faucetUrl: "https://faucet.voirewards.com/",
   contracts: {
-    lendingPools: ["41760711", "44866061"],
+    lendingPools: [...betaLendingPools],
     // Add other contract IDs as they become available
     priceOracle: undefined,
     liquidationEngine: undefined,
     governance: undefined,
     treasury: undefined,
   },
-  tokens: {
-    VOI: {
-      assetId: "0",
-      poolId: "41760711",
-      contractId: "41877720",
-      nTokenId: "42125195",
-      decimals: 6,
-      name: "VOI",
-      symbol: "VOI",
-      logoPath: "/lovable-uploads/VOI.png",
-      tokenStandard: "network",
-      marketOverride: {
-        displayName: "Voi",
-        displaySymbol: "Voi",
-        isSmartContract: true,
-      },
-    },
-    aUSDC: {
-      assetId: "302190",
-      poolId: "41760711",
-      contractId: "395614",
-      nTokenId: "42577758",
-      decimals: 6,
-      name: "Aramid USDC",
-      symbol: "aUSDC",
-      logoPath: "/lovable-uploads/aUSDC.png",
-      tokenStandard: "asa",
-    },
-    UNIT: {
-      contractId: "420069",
-      poolId: "41760711",
-      nTokenId: "42638644",
-      decimals: 8,
-      name: "UNIT",
-      symbol: "UNIT",
-      logoPath: "/lovable-uploads/UNIT.png",
-      tokenStandard: "arc200",
-    },
-    aALGO: {
-      assetId: "302189",
-      contractId: "413153",
-      poolId: "41760711",
-      nTokenId: "42674504",
-      decimals: 6,
-      name: "Aramid Algorand",
-      symbol: "aALGO",
-      logoPath: "/lovable-uploads/aALGO.png",
-      tokenStandard: "asa",
-    },
-    aETH: {
-      assetId: "302193",
-      contractId: "40153308",
-      poolId: "41760711",
-      nTokenId: "42682188",
-      decimals: 6,
-      name: "Aramid ETH",
-      symbol: "aETH",
-      logoPath: "/lovable-uploads/aETH.png",
-      tokenStandard: "asa",
-    },
-    aBTC: {
-      assetId: "40152643",
-      contractId: "40153368",
-      poolId: "41760711",
-      nTokenId: "42701185",
-      decimals: 8,
-      name: "Wrapped BTC",
-      symbol: "aBTC",
-      logoPath: "/lovable-uploads/WrappedBTC.png",
-      tokenStandard: "asa",
-    },
-    acbBTC: {
-      assetId: "40152648",
-      contractId: "40153415",
-      poolId: "41760711",
-      nTokenId: "42706178",
-      decimals: 8,
-      name: "Coinbase BTC",
-      symbol: "acbBTC",
-      logoPath: "/lovable-uploads/cbBTC.png",
-      tokenStandard: "asa",
-    },
-    POW: {
-      assetId: "40152679",
-      contractId: "40153155",
-      poolId: "41760711",
-      nTokenId: "42702842",
-      decimals: 6,
-      name: "POW",
-      symbol: "POW",
-      logoPath: "/lovable-uploads/POW.png",
-      tokenStandard: "asa",
-    },
-    // Fountain VOI 770561 6
-    FV: {
-      assetId: "0",
-      contractId: "770561",
-      poolId: "44866061",
-      nTokenId: "45052343",
-      decimals: 6,
-      name: "Fountain VOI",
-      symbol: "FV",
-      logoPath: "https://asset-verification.nautilus.sh/icons/770561.png",
-      tokenStandard: "network",
-    },
-    NV: {
-      assetId: "0",
-      contractId: "8324600",
-      poolId: "44866061",
-      nTokenId: "45052477",
-      decimals: 6,
-      name: "Nautilus VOI",
-      symbol: "NV",
-      logoPath: "/lovable-uploads/NV.png",
-      tokenStandard: "network",
-    },
-    EV: {
-      assetId: "0",
-      contractId: "828295",
-      poolId: "44866061",
-      nTokenId: "45447486",
-      decimals: 6,
-      name: "enVOI",
-      symbol: "EV",
-      logoPath: "/lovable-uploads/EV.png",
-      tokenStandard: "network",
-    },
-    bVOI: {
-      assetId: "0",
-      contractId: "8471125",
-      poolId: "44866061",
-      nTokenId: "45052513",
-      decimals: 6,
-      name: "BUIDL VOI",
-      symbol: "bVOI",
-      logoPath: "/lovable-uploads/bVOI.png",
-      tokenStandard: "network",
-    },
-    // NODE 410811 6
-    NODE: {
-      contractId: "410811",
-      poolId: "44866061",
-      nTokenId: "44872392",
-      decimals: 6,
-      name: "NODE",
-      symbol: "NODE",
-      logoPath: "https://asset-verification.nautilus.sh/icons/410811.png",
-      tokenStandard: "arc200",
-    },
-    // BUIDL 419744 6
-    BUIDL: {
-      contractId: "419744",
-      poolId: "44866061",
-      nTokenId: "44872401",
-      decimals: 8,
-      name: "BUIDL",
-      symbol: "BUIDL",
-      logoPath: "https://asset-verification.nautilus.sh/icons/419744.png",
-      tokenStandard: "arc200",
-    },
-    // SHELLY 410111 8
-    SHELLY: {
-      contractId: "410111",
-      poolId: "44866061",
-      nTokenId: "44872410",
-      decimals: 8,
-      name: "SHELLY",
-      symbol: "SHELLY",
-      logoPath: "https://asset-verification.nautilus.sh/icons/410111.png",
-      tokenStandard: "arc200",
-    },
-    // AMMO 798968 6
-    AMMO: {
-      contractId: "798968",
-      poolId: "44866061",
-      nTokenId: "44872488",
-      decimals: 6,
-      name: "AMMO",
-      symbol: "AMMO",
-      logoPath: "https://asset-verification.nautilus.sh/icons/798968.png",
-      tokenStandard: "arc200",
-    },
-    // GM 300279 2
-    GM: {
-      contractId: "300279",
-      poolId: "44866061",
-      nTokenId: "44872696",
-      decimals: 2,
-      name: "GM",
-      symbol: "GM",
-      logoPath: "https://asset-verification.nautilus.sh/icons/300279.png",
-      tokenStandard: "arc200",
-    },
-    // CORN 412682 6
-    CORN: {
-      contractId: "412682",
-      poolId: "44866061",
-      nTokenId: "44872738",
-      decimals: 6,
-      name: "CORN",
-      symbol: "CORN",
-      logoPath: "https://asset-verification.nautilus.sh/icons/412682.png",
-      tokenStandard: "arc200",
-    },
-    // F 302222 6
-    F: {
-      contractId: "302222",
-      poolId: "44866061",
-      nTokenId: "44872864",
-      decimals: 6,
-      name: "F",
-      symbol: "F",
-      logoPath: "https://asset-verification.nautilus.sh/icons/302222.png",
-      tokenStandard: "arc200",
-    },
-    // IAT 420024 6
-    IAT: {
-      contractId: "420024",
-      poolId: "44866061",
-      nTokenId: "44872814",
-      decimals: 6,
-      name: "IAT",
-      symbol: "IAT",
-      logoPath: "https://asset-verification.nautilus.sh/icons/420024.png",
-      tokenStandard: "arc200",
-    },
-  },
+  tokens: { ...betaTokens },
+  gasStation: ["VOI", "ALGO", "USDC", "ETH", "BTC"],
   preFiParameters: {
     collateral_factor: 780, // 78% = 780 bp
     liquidation_threshold: 825, // 82.5% = 825 bp
@@ -445,7 +504,7 @@ const algorandMainnetConfig: NetworkConfig = {
       decimals: 6,
       name: "USD Coin",
       symbol: "USDC",
-      logoPath: "/lovable-uploads/USDC.png",
+      logoPath: "/lovable-uploads/USDC.webp",
       tokenStandard: "asa",
     },
     aVOI: {
@@ -964,6 +1023,8 @@ const localnetConfig: NetworkConfig = {
 /**
  * Global Configuration Object
  */
+const prefiNetworks = ["voi-mainnet", "algorand-mainnet"];
+const betaNetworks = ["voi-mainnet"];
 export const config: GlobalConfig = {
   networks: {
     "voi-mainnet": voiMainnetConfig,
@@ -977,7 +1038,7 @@ export const config: GlobalConfig = {
     localnet: localnetConfig,
   },
   defaultNetwork: "voi-mainnet",
-  enabledNetworks: ["voi-mainnet", "algorand-mainnet"],
+  enabledNetworks: [...betaNetworks] as NetworkId[],
   version: "1.0.0",
   features: {
     enablePreFi: true,
@@ -1358,9 +1419,10 @@ export const getAlgorandConfigFromNetworkConfig = (
   }
 
   // Use public URL if available and requested, otherwise fall back to regular RPC URL
-  const rpcUrl = usePublicUrl && networkConfig.rpcPublicUrl 
-    ? networkConfig.rpcPublicUrl 
-    : networkConfig.rpcUrl;
+  const rpcUrl =
+    usePublicUrl && networkConfig.rpcPublicUrl
+      ? networkConfig.rpcPublicUrl
+      : networkConfig.rpcUrl;
   const indexerUrl = networkConfig.indexerUrl;
 
   // Parse server from URL (remove protocol)
@@ -1430,10 +1492,57 @@ export const getCurrentAlgorandConfigForReads = () => {
 };
 
 /**
+ * Get faucet URL for a specific network
+ */
+export const getFaucetUrl = (networkId: NetworkId): string | undefined => {
+  return config.networks[networkId].faucetUrl;
+};
+
+/**
+ * Get faucet URL for the current network
+ */
+export const getCurrentFaucetUrl = (): string | undefined => {
+  return getFaucetUrl(config.defaultNetwork);
+};
+
+/**
+ * Get gas station symbols for a specific network
+ */
+export const getGasStationSymbols = (networkId: NetworkId): string[] => {
+  return config.networks[networkId].gasStation || [];
+};
+
+/**
+ * Get gas station symbols for the current network
+ */
+export const getCurrentGasStationSymbols = (): string[] => {
+  return getGasStationSymbols(config.defaultNetwork);
+};
+
+/**
+ * Check if a token symbol is available in the gas station for a specific network
+ */
+export const isGasStationToken = (
+  networkId: NetworkId,
+  symbol: string
+): boolean => {
+  return getGasStationSymbols(networkId).includes(symbol);
+};
+
+/**
+ * Check if a token symbol is available in the gas station for the current network
+ */
+export const isCurrentGasStationToken = (symbol: string): boolean => {
+  return isGasStationToken(config.defaultNetwork, symbol);
+};
+
+/**
  * Initialize Algorand clients for the current network
  * This function bridges the gap between our network config and Algorand service
  */
-export const initializeAlgorandForCurrentNetwork = async (usePublicUrl: boolean = true) => {
+export const initializeAlgorandForCurrentNetwork = async (
+  usePublicUrl: boolean = true
+) => {
   const algorandConfig = getCurrentAlgorandConfig(usePublicUrl);
 
   // Import AlgorandService functions dynamically to avoid circular dependencies

@@ -375,18 +375,17 @@ export const createMarket = async (
       console.log("market", { market });
 
       // First, get the cost of creating a market
-      const costResult = await ci.create_market_cost();
+      //const costResult = await ci.create_market_cost();
+      //console.log("costResult", { costResult });
 
-      console.log("costResult", { costResult });
+      // if (!costResult.success) {
+      //   throw new Error("Failed to get market creation cost");
+      // }
 
-      if (!costResult.success) {
-        throw new Error("Failed to get market creation cost");
-      }
-
-      console.log("Market creation cost:", costResult.returnValue);
+      // console.log("Market creation cost:", costResult.returnValue);
 
       // Create the market with the provided parameters
-      ci.setPaymentAmount(costResult.returnValue);
+      ci.setPaymentAmount(2000000);
       ci.setFee(8000);
 
       console.log({

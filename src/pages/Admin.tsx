@@ -1,5 +1,11 @@
-import React, { useState } from "react";
-import { motion } from "framer-motion";
+import React, { act, useState } from "react";
+import {
+  ATokenClient,
+  APP_SPEC as ATokenAppSpec,
+} from "@/clients/ATokenClient";
+
+// Import Buffer polyfill for browser environment
+import "@/utils/bufferPolyfill";
 import {
   Settings,
   Plus,
@@ -26,9 +32,9 @@ import {
   ArrowRight,
   Calculator,
   Search,
+  Wrench,
 } from "lucide-react";
 import { Link } from "react-router-dom";
-import WalletButton from "@/components/WalletButton";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import DorkFiButton from "@/components/ui/DorkFiButton";
 import { H1, H2, H3, Body } from "@/components/ui/Typography";
@@ -44,11 +50,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -65,8 +66,6 @@ import VersionDisplay from "@/components/VersionDisplay";
 import {
   getCurrentNetworkConfig,
   getNetworkConfig,
-  getAllTokens,
-  getContractAddress,
   isCurrentNetworkAlgorandCompatible,
   isCurrentNetworkEVM,
   NetworkId,
@@ -75,14 +74,10 @@ import {
   getPreFiParameters,
 } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
-import {
-  APP_SPEC as LendingPoolAppSpec,
-  DorkFiLendingPoolClient,
-} from "@/clients/DorkFiLendingPoolClient";
+import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
 import algorandService, { AlgorandNetwork } from "@/services/algorandService";
-import { abi, CONTRACT } from "ulujs";
+import { CONTRACT } from "ulujs";
 import { fetchMarketInfo } from "@/services/lendingService";
-// import { fromBase } from "@/utils/fromBase"; // Commented out as it's not being used
 import { useCallback, useMemo } from "react";
 import {
   fetchPausedState,
@@ -99,15 +94,13 @@ import {
 } from "@/services/adminService";
 import { useOnDemandMarketData } from "@/hooks/useOnDemandMarketData";
 import WalletNetworkButton from "@/components/WalletNetworkButton";
-import { TokenAutocomplete } from "@/components/ui/TokenAutocomplete";
-import { TokenContractModal } from "@/components/ui/TokenContractModal";
 import { useWallet } from "@txnlab/use-wallet-react";
 import algosdk, { waitForConfirmation } from "algosdk";
-import { initializeAlgorandForCurrentNetwork } from "@/services/algorandExamples";
 import BigNumber from "bignumber.js";
 import envoiService, { type EnvoiNameResponse } from "@/services/envoiService";
 import { fromBase } from "@/utils/calculationUtils";
 import { ARC200Service } from "@/services/arc200Service";
+import { TokenContractModal } from "@/components/ui/TokenContractModal";
 
 // Get markets from configuration - now reactive to network changes
 const getMarketsFromConfig = (networkId: NetworkId) => {
@@ -133,7 +126,7 @@ const getMarketsFromConfig = (networkId: NetworkId) => {
 };
 
 export default function AdminDashboard() {
-  const { activeAccount, signTransactions } = useWallet();
+  const { activeAccount, signTransactions, transactionSigner } = useWallet();
   const { currentNetwork } = useNetwork();
 
   // Use on-demand market loading
@@ -214,6 +207,108 @@ export default function AdminDashboard() {
   const [isCreateMarketModalOpen, setIsCreateMarketModalOpen] = useState(false);
   const [isTokenContractModalOpen, setIsTokenContractModalOpen] =
     useState(false);
+
+  // Mint AToken state
+  const [mintName, setMintName] = useState("");
+  const [isMinting, setIsMinting] = useState(false);
+  const [mintResult, setMintResult] = useState<string | null>(null);
+  const [mintError, setMintError] = useState<string | null>(null);
+
+  // Mint AToken function
+  const handleMintAToken = async () => {
+    if (!mintName.trim()) {
+      setMintError("Please provide a name for the AToken");
+      return;
+    }
+
+    setIsMinting(true);
+    setMintError(null);
+    setMintResult(null);
+
+    try {
+      const clients = await algorandService.getCurrentClientsForTransactions();
+      const clientParams: any = {
+        resolveBy: "creatorAndName",
+        findExistingUsing: clients.indexer,
+        creatorAddress: activeAccount.address,
+        name: `AToken-${mintName.trim()}`,
+        sender: {
+          addr: activeAccount.address,
+          signer: transactionSigner,
+        },
+      };
+      // let appId = 46504436;
+      // const clientParams = {
+      //   resolveBy: "id",
+      //   id: 46504436,
+      //   sender: {
+      //     addr: activeAccount.address,
+      //     signer: transactionSigner,
+      //   },
+      // };
+      const appClient = new ATokenClient(clientParams, clients.algod);
+      console.log("appClient", { appClient });
+
+      // Call mint function
+      const result = await appClient.deploy({
+        deployTimeParams: {},
+        onUpdate: "update",
+        onSchemaBreak: "fail",
+      });
+      const appId = result.appId;
+
+      const ci = new CONTRACT(
+        Number(appId),
+        clients.algod,
+        undefined,
+        {
+          ...ATokenAppSpec.contract,
+          events: [],
+        },
+        {
+          addr: activeAccount.address,
+          sk: new Uint8Array(),
+        }
+      );
+
+      ci.setPaymentAmount(121300);
+      const bootstrapResult = await ci.bootstrap();
+
+      console.log("Bootstrap result:", bootstrapResult);
+
+      if (!bootstrapResult.success) {
+        throw new Error("Failed to bootstrap AToken");
+      }
+
+      const stxns = await signTransactions(
+        bootstrapResult.txns.map((txn: string) => {
+          const binaryString = atob(txn);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          return bytes;
+        }) as any
+      );
+
+      console.log("STXNS:", stxns);
+
+      const res = await clients.algod.sendRawTransaction(stxns).do();
+      await waitForConfirmation(clients.algod, res.txId, 4);
+
+      setMintResult(
+        `Successfully minted AToken "${mintName}". Transaction ID: ${res.txId}`
+      );
+    } catch (error) {
+      console.error("Mint error:", error);
+      setMintError(
+        error instanceof Error ? error.message : "Failed to mint AToken"
+      );
+    } finally {
+      setIsMinting(false);
+    }
+  };
+
   const [isOperationModalOpen, setIsOperationModalOpen] = useState(false);
   const [selectedOperation, setSelectedOperation] = useState<any>(null);
 
@@ -2223,7 +2318,7 @@ export default function AdminDashboard() {
           onValueChange={setActiveTab}
           className="space-y-6"
         >
-          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:grid-cols-5">
+          <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:grid-cols-6">
             <TabsTrigger value="overview" className="flex items-center gap-2">
               <BarChart3 className="h-4 w-4" />
               <span className="hidden sm:inline">Overview</span>
@@ -2242,6 +2337,10 @@ export default function AdminDashboard() {
             >
               <Users className="h-4 w-4" />
               <span className="hidden sm:inline">User Analysis</span>
+            </TabsTrigger>
+            <TabsTrigger value="tools" className="flex items-center gap-2">
+              <Wrench className="h-4 w-4" />
+              <span className="hidden sm:inline">Tools</span>
             </TabsTrigger>
             <TabsTrigger value="settings" className="flex items-center gap-2">
               <Settings className="h-4 w-4" />
@@ -4165,6 +4264,151 @@ export default function AdminDashboard() {
                 </CardContent>
               </Card>
             )}
+          </TabsContent>
+
+          {/* Tools Tab */}
+          <TabsContent value="tools" className="space-y-6">
+            <div className="flex justify-between items-center">
+              <H2>Admin Tools</H2>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Mint AToken Tool */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Zap className="h-5 w-5" />
+                    Mint AToken
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Mint aToken for testing and development purposes
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="token-name">Token Name</Label>
+                    <Input
+                      id="token-name"
+                      placeholder="Enter AToken name"
+                      className="w-full"
+                      value={mintName}
+                      onChange={(e) => setMintName(e.target.value)}
+                    />
+                  </div>
+                  <div className="text-center py-2">
+                    <p className="text-sm text-muted-foreground">
+                      Enter a name for the AToken and click the button below to
+                      mint it.
+                    </p>
+                  </div>
+
+                  {/* Success Message */}
+                  {mintResult && (
+                    <div className="p-3 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
+                      <div className="flex items-start gap-2">
+                        <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400 mt-0.5" />
+                        <div className="text-sm">
+                          <p className="font-medium text-green-800 dark:text-green-200">
+                            Mint Successful
+                          </p>
+                          <p className="text-green-700 dark:text-green-300 break-all">
+                            {mintResult}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Error Message */}
+                  {mintError && (
+                    <div className="p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="h-4 w-4 text-red-600 dark:text-red-400 mt-0.5" />
+                        <div className="text-sm">
+                          <p className="font-medium text-red-800 dark:text-red-200">
+                            Mint Failed
+                          </p>
+                          <p className="text-red-700 dark:text-red-300">
+                            {mintError}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex gap-2">
+                    <DorkFiButton
+                      variant="primary"
+                      className="flex-1"
+                      onClick={handleMintAToken}
+                      disabled={isMinting || !mintName.trim()}
+                    >
+                      {isMinting ? (
+                        <>
+                          <RefreshCcw className="h-4 w-4 mr-2 animate-spin" />
+                          Minting...
+                        </>
+                      ) : (
+                        <>
+                          <Zap className="h-4 w-4 mr-2" />
+                          Mint AToken
+                        </>
+                      )}
+                    </DorkFiButton>
+                    <DorkFiButton
+                      variant="secondary"
+                      onClick={() => {
+                        setMintName("");
+                        setMintResult(null);
+                        setMintError(null);
+                      }}
+                      disabled={isMinting}
+                    >
+                      <RefreshCcw className="h-4 w-4 mr-2" />
+                      Clear
+                    </DorkFiButton>
+                  </div>
+                  <div className="p-3 bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 text-yellow-600 dark:text-yellow-400 mt-0.5" />
+                      <div className="text-sm">
+                        <p className="font-medium text-yellow-800 dark:text-yellow-200">
+                          Development Tool
+                        </p>
+                        <p className="text-yellow-700 dark:text-yellow-300">
+                          This tool is for development and testing purposes
+                          only. Use with caution.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Additional Tools Placeholder */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Wrench className="h-5 w-5" />
+                    Additional Tools
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    More admin tools will be added here
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Wrench className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                    <p className="text-lg font-medium">
+                      More Tools Coming Soon
+                    </p>
+                    <p className="text-sm">
+                      Additional admin tools will be available here
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
 
           {/* Settings Tab */}

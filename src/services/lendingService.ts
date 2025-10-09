@@ -22,7 +22,7 @@ import { abi, CONTRACT } from "ulujs";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
 import algosdk from "algosdk";
 import BigNumber from "bignumber.js";
-import { TokenStandard } from "@/pages/PreFi";
+import { TokenStandard } from "@/config";
 
 export interface MarketInfo {
   networkId: NetworkId;
@@ -709,55 +709,49 @@ export const withdraw = async (
         ),
       };
 
+      console.log("builder", { builder });
+
       let customTx: any;
 
-      for (const p of [[0, 0]]) {
-        const [p1, p2] = p;
-        const buildN = [];
+      const buildN = [];
 
-        // Withdraw from lending pool
-        {
-          const txnO = (
-            await builder.lending.withdraw(
-              Number(marketId),
-              BigInt(amountInSmallestUnit)
-            )
-          ).obj as any;
-          buildN.push({
-            ...txnO,
-            note: new TextEncoder().encode("lending withdraw"),
-          });
-        }
-
-        // cond a token withdraw
-        if (tokenStandard != "arc200") {
-          const txnO = (
-            await builder.token.withdraw(BigInt(amountInSmallestUnit))
-          ).obj;
-          buildN.push({
-            ...txnO,
-            note: new TextEncoder().encode("atoken withdraw"),
-          });
-        }
-
-        console.log("buildN", { buildN });
-
-        // Create withdraw transaction
-        ci.setFee(4000);
-        ci.setEnableGroupResourceSharing(true);
-        ci.setExtraTxns(buildN);
-        if (networkConfig.networkId === "algorand-mainnet") {
-          ci.setBeaconId(3209233839); // TODO move this to ulujs
-        }
-
-        customTx = await ci.custom();
-
-        console.log("customTx", { customTx });
-
-        if (customTx.success) {
-          break;
-        }
+      // Withdraw from lending pool
+      {
+        const txnO = (
+          await builder.lending.withdraw(
+            Number(marketId),
+            BigInt(amountInSmallestUnit)
+          )
+        ).obj as any;
+        buildN.push({
+          ...txnO,
+          note: new TextEncoder().encode("lending withdraw"),
+          foreignApps: [46505155],
+        });
       }
+
+      // // cond a token withdraw
+      // if (tokenStandard != "arc200") {
+      //   const txnO = (
+      //     await builder.token.withdraw(BigInt(amountInSmallestUnit))
+      //   ).obj;
+      //   buildN.push({
+      //     ...txnO,
+      //     note: new TextEncoder().encode("atoken withdraw"),
+      //   });
+      // }
+
+      console.log("buildN", { buildN });
+
+      // Create withdraw transaction
+      ci.setFee(8000);
+      ci.setEnableGroupResourceSharing(true);
+      ci.setExtraTxns(buildN);
+      if (networkConfig.networkId === "algorand-mainnet") {
+        ci.setBeaconId(3209233839); // TODO move this to ulujs
+      }
+
+      customTx = await ci.custom();
 
       console.log("customTx", { customTx });
 
@@ -1021,13 +1015,14 @@ export const deposit = async (
             ...txnO,
             note: new TextEncoder().encode("lending deposit"),
             payment: depositCost,
+            foreignApps: [46505155],
           });
         }
 
         console.log("buildN", { buildN });
 
         // Create deposit transaction
-        ci.setFee(2000);
+        ci.setFee(20000);
         ci.setEnableGroupResourceSharing(true);
         ci.setExtraTxns(buildN);
         if (networkConfig.networkId === "algorand-mainnet") {

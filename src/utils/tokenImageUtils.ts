@@ -61,6 +61,8 @@ export const getTokenImagePath = (symbol: string): string => {
     GOLD$:
       "https://algorand-wallet-mainnet.b-cdn.net/media/assets-logo-png/2023/04/10/a5706bc6e41049a385d80468259ce1f4.png?width=200&quality=70",
     EV: "/lovable-uploads/EV.png",
+    aBTC: "/lovable-uploads/WrappedBTC.png",
+    acbBTC: "/lovable-uploads/cbBTC.png",
   };
 
   // First check for exact match (including prefixed tokens like aUSDC)

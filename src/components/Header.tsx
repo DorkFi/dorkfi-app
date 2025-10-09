@@ -5,6 +5,8 @@ import { useNavigate, useLocation, Link } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 import { useState } from "react";
 import WalletNetworkButton from "@/components/WalletNetworkButton";
+import { useNetwork } from "@/contexts/NetworkContext";
+import { getCurrentGasStationSymbols } from "@/config";
 
 interface HeaderProps {
   activeTab: string;
@@ -15,6 +17,7 @@ const Header = ({ activeTab, onTabChange }: HeaderProps) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const { currentNetwork } = useNetwork();
 
   const handleTabChange = (value: string) => {
     console.log("Header tab change:", value);
@@ -24,6 +27,8 @@ const Header = ({ activeTab, onTabChange }: HeaderProps) => {
       navigate('/liquidation-markets');
     } else if (value === 'prefi') {
       navigate('/prefi');
+    } else if (value === 'gas-station') {
+      navigate('/gas-station');
     } else {
       navigate('/');
     }
@@ -36,12 +41,17 @@ const Header = ({ activeTab, onTabChange }: HeaderProps) => {
     setIsMobileMenuOpen(false);
   };
 
+  // Check if current network has gas stations available
+  const gasStationSymbols = getCurrentGasStationSymbols();
+  const hasGasStation = gasStationSymbols.length > 0;
+
   const tabs = [
     { value: 'dashboard', label: 'Dashboard' },
     { value: 'markets', label: 'Markets' },
     { value: 'portfolio', label: 'Portfolio' },
     { value: 'liquidations', label: 'Liquidations' },
     { value: 'swap', label: 'Swap' },
+    ...(hasGasStation ? [{ value: 'gas-station', label: 'Gas Station' }] : []),
     { value: 'prefi', label: 'PreFi' },
   ];
 

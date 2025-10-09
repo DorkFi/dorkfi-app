@@ -6,6 +6,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import PreFi from "./pages/PreFi";
 import Admin from "./pages/Admin";
+import GasStation from "./pages/GasStation";
 import { NetworkProvider } from "./contexts/NetworkContext";
 //import CountdownPage from "./pages/Countdown";
 import AuthGuard from "./components/AuthGuard";
@@ -50,6 +51,7 @@ function App() {
                   </AuthGuard>
                 } 
               />
+              <Route path="/gas-station" element={<GasStation />} />
               {/*<Route path="/countdown" element={<CountdownPage />} />*/}
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
