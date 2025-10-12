@@ -67,7 +67,7 @@ const DepositsList = ({ deposits, onDepositClick, onWithdrawClick }: DepositsLis
             <div className="mt-2 md:mt-0 text-center flex-shrink-0 min-w-[110px]">
               <div className="font-semibold text-whale-gold">${deposit.value.toLocaleString()}</div>
               <div className="text-sm text-whale-gold flex flex-col items-center gap-1 mt-1">
-                <span>{deposit.apy}% APY</span>
+                <span>{deposit.apy.toFixed(2)}% APY</span>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Info className="w-3 h-3 cursor-help" />

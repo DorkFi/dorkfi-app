@@ -14,6 +14,8 @@ import { Info, Loader2 } from "lucide-react";
 import { OnDemandMarketData } from "@/hooks/useOnDemandMarketData";
 import MarketsTableActions from "./MarketsTableActions";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import APYDisplay from "@/components/APYDisplay";
+import BorrowAPYDisplay from "@/components/BorrowAPYDisplay";
 
 interface MarketsDesktopTableProps {
   markets: OnDemandMarketData[];
@@ -218,10 +220,10 @@ const MarketsDesktopTable = ({
                   ) : (
                     <div>
                       <div className="font-medium">
-                        ${market.totalSupplyUSD.toLocaleString()}
+                        ${(market.totalSupplyUSD / 1_000_000).toLocaleString()}
                       </div>
                       <div className="text-sm text-muted-foreground">
-                        {market.totalSupply.toLocaleString()} {market.asset}
+                        {market.totalSupply.toLocaleString(undefined, { maximumFractionDigits: 3 })} {market.asset}
                       </div>
                     </div>
                   )}
@@ -233,7 +235,11 @@ const MarketsDesktopTable = ({
                     <ErrorCell error={market.error} />
                   ) : (
                     <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-                      {market.supplyAPY.toFixed(2)}%
+                      <APYDisplay 
+                        apyCalculation={market.apyCalculation}
+                        fallbackAPY={market.supplyAPY}
+                        showTooltip={true}
+                      />
                     </Badge>
                   )}
                 </TableCell>
@@ -245,10 +251,10 @@ const MarketsDesktopTable = ({
                   ) : (
                     <div>
                       <div className="font-medium">
-                        ${market.totalBorrowUSD.toLocaleString()}
+                        ${(market.totalBorrowUSD / 1_000_000).toLocaleString()}
                       </div>
                       <div className="text-sm text-muted-foreground">
-                        {market.totalBorrow.toLocaleString()} {market.asset}
+                        {market.totalBorrow.toLocaleString(undefined, { maximumFractionDigits: 3 })} {market.asset}
                       </div>
                     </div>
                   )}
@@ -260,7 +266,11 @@ const MarketsDesktopTable = ({
                     <ErrorCell error={market.error} />
                   ) : (
                     <Badge className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
-                      {market.borrowAPY.toFixed(2)}%
+                      <BorrowAPYDisplay 
+                        apyCalculation={market.apyCalculation}
+                        fallbackAPY={market.borrowAPY}
+                        showTooltip={true}
+                      />
                     </Badge>
                   )}
                 </TableCell>

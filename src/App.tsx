@@ -39,15 +39,13 @@ function App() {
           <Sonner />
           <BrowserRouter>
             <Routes>
-              <Route path="/" element={<Index activeTab={activeTab} onTabChange={handleTabChange} />} />
               <Route
-                path="/admin"
+                path="/"
                 element={
-                  <AuthGuard>
-                    <Admin />
-                  </AuthGuard>
+                  <Index activeTab={activeTab} onTabChange={handleTabChange} />
                 }
               />
+              <Route path="/admin" element={<Admin />} />
               <Route path="/gas-station" element={<GasStation />} />
               {/*<Route path="/countdown" element={<CountdownPage />} />*/}
               <Route path="*" element={<Navigate to="/" replace />} />

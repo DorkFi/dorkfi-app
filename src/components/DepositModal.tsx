@@ -192,7 +192,7 @@ const DepositModal = ({
                       </Tooltip>
                     </div>
                     <span className="text-sm font-medium text-teal-600 dark:text-teal-400">
-                      {marketStats.supplyAPY}%
+                      {marketStats.supplyAPY.toFixed(2)}%
                     </span>
                   </div>
 
@@ -211,7 +211,7 @@ const DepositModal = ({
                       </Tooltip>
                     </div>
                     <span className="text-sm font-medium text-slate-800 dark:text-white">
-                      {marketStats.utilization}%
+                      {marketStats.utilization.toFixed(2)}%
                     </span>
                   </div>
 

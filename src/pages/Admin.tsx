@@ -1,4 +1,4 @@
-import React, { act, useState } from "react";
+import React, { act, useState, useEffect, useCallback } from "react";
 import {
   ATokenClient,
   APP_SPEC as ATokenAppSpec,
@@ -33,6 +33,10 @@ import {
   Calculator,
   Search,
   Wrench,
+  UserCheck,
+  Crown,
+  Key,
+  Loader2,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import DorkFiCard from "@/components/ui/DorkFiCard";
@@ -49,7 +53,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -77,8 +87,14 @@ import { useNetwork } from "@/contexts/NetworkContext";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
 import algorandService, { AlgorandNetwork } from "@/services/algorandService";
 import { CONTRACT } from "ulujs";
-import { fetchMarketInfo } from "@/services/lendingService";
-import { useCallback, useMemo } from "react";
+import {
+  decodeMarket,
+  decodeUser,
+  fetchMarketInfo,
+  fetchUserBorrowBalance,
+} from "@/services/lendingService";
+import { useMemo } from "react";
+import { toast } from "sonner";
 import {
   fetchPausedState,
   fetchSystemHealth,
@@ -91,6 +107,7 @@ import {
   CreateMarketParams,
   updateMarketPrice,
   updateMarketMaxDeposits,
+  updateMarketMaxBorrows,
 } from "@/services/adminService";
 import { useOnDemandMarketData } from "@/hooks/useOnDemandMarketData";
 import WalletNetworkButton from "@/components/WalletNetworkButton";
@@ -101,6 +118,11 @@ import envoiService, { type EnvoiNameResponse } from "@/services/envoiService";
 import { fromBase } from "@/utils/calculationUtils";
 import { ARC200Service } from "@/services/arc200Service";
 import { TokenContractModal } from "@/components/ui/TokenContractModal";
+import {
+  ROLE_PRICE_ORACLE,
+  ROLE_MARKET_CONTROLLER,
+  ROLE_PRICE_FEED_MANAGER,
+} from "@/constants/roles";
 
 // Get markets from configuration - now reactive to network changes
 const getMarketsFromConfig = (networkId: NetworkId) => {
@@ -213,6 +235,492 @@ export default function AdminDashboard() {
   const [isMinting, setIsMinting] = useState(false);
   const [mintResult, setMintResult] = useState<string | null>(null);
   const [mintError, setMintError] = useState<string | null>(null);
+
+  // Role management state
+  interface Role {
+    id: string;
+    name: string;
+    description: string;
+    permissions: string[];
+    color: string;
+    icon: string;
+  }
+
+  interface UserRole {
+    userId: string;
+    userAddress: string;
+    userName: string;
+    roleId: string;
+    assignedAt: string;
+    assignedBy: string;
+  }
+
+  const [roles, setRoles] = useState<Role[]>([
+    {
+      id: "price-oracle",
+      name: "PriceOracle",
+      description: "Manages price data and oracle operations for markets",
+      permissions: [],
+      color: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+      icon: "database",
+    },
+    {
+      id: "price-feed-manager",
+      name: "PriceFeedManager",
+      description: "Manages price feeds and data sources for the oracle",
+      permissions: [],
+      color:
+        "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+      icon: "trending-up",
+    },
+    {
+      id: "market-controller",
+      name: "MarketController",
+      description:
+        "Controls market operations, parameters, and lifecycle management",
+      permissions: [],
+      color:
+        "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
+      icon: "settings",
+    },
+  ]);
+
+  // Mapping between role IDs and role constants
+  const roleConstantsMap: Record<string, string> = {
+    "price-oracle": ROLE_PRICE_ORACLE,
+    "price-feed-manager": ROLE_PRICE_FEED_MANAGER,
+    "market-controller": ROLE_MARKET_CONTROLLER,
+  };
+
+  const [userRoles, setUserRoles] = useState<UserRole[]>([
+    {
+      userId: "user1",
+      userAddress: "G3MSA75OZEJTCCENOJDLDJK7UD7E2K5DNC7FVHCNOV7E3I4DTXTOWDUIFQ",
+      userName: "Price Oracle Admin",
+      roleId: "price-oracle",
+      assignedAt: "2025-01-20T10:00:00Z",
+      assignedBy: "system",
+    },
+    {
+      userId: "user2",
+      userAddress:
+        "ABC123DEF456GHI789JKL012MNO345PQR678STU901VWX234YZ5678901234",
+      userName: "Price Feed Manager",
+      roleId: "price-feed-manager",
+      assignedAt: "2025-01-22T14:30:00Z",
+      assignedBy: "Price Oracle Admin",
+    },
+    {
+      userId: "user3",
+      userAddress: "DEF456GHI789JKL012MNO345PQR678STU901VWX234YZ5678901234ABC",
+      userName: "Market Controller",
+      roleId: "market-controller",
+      assignedAt: "2025-01-25T09:15:00Z",
+      assignedBy: "Price Oracle Admin",
+    },
+  ]);
+
+  const [isAssignRoleModalOpen, setIsAssignRoleModalOpen] = useState(false);
+  const [isRevokeRoleModalOpen, setIsRevokeRoleModalOpen] = useState(false);
+  const [selectedRole, setSelectedRole] = useState<Role | null>(null);
+  const [assignAddress, setAssignAddress] = useState("");
+  const [envoiName, setEnvoiName] = useState("");
+  const [currentUserEnvoiName, setCurrentUserEnvoiName] = useState<
+    string | null
+  >(null);
+  const [showEnvoiSearch, setShowEnvoiSearch] = useState(false);
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+
+  // Separate Envoi state for revoke modal
+  const [revokeEnvoiName, setRevokeEnvoiName] = useState("");
+  const [revokeEnvoiSearchQuery, setRevokeEnvoiSearchQuery] = useState("");
+  const [revokeEnvoiSearchResults, setRevokeEnvoiSearchResults] = useState<
+    any[]
+  >([]);
+  const [revokeEnvoiLoading, setRevokeEnvoiLoading] = useState(false);
+  const [revokeEnvoiError, setRevokeEnvoiError] = useState<string | null>(null);
+  const [showRevokeEnvoiSearch, setShowRevokeEnvoiSearch] = useState(false);
+  const [revokeDebouncedSearchQuery, setRevokeDebouncedSearchQuery] =
+    useState("");
+  const [roleCheckAddress, setRoleCheckAddress] = useState("");
+  const [isCheckingRoles, setIsCheckingRoles] = useState(false);
+  const [currentUserRoles, setCurrentUserRoles] = useState<any[]>([]);
+  const [isLoadingCurrentUserRoles, setIsLoadingCurrentUserRoles] =
+    useState(false);
+
+  // Role management functions
+
+  // Function to check current user's roles
+  const checkCurrentUserRoles = async () => {
+    if (!activeAccount?.address) {
+      setCurrentUserRoles([]);
+      return;
+    }
+
+    setIsLoadingCurrentUserRoles(true);
+    try {
+      const roleChecks = await checkAllRoles(activeAccount.address);
+      setCurrentUserRoles(roleChecks);
+    } catch (error) {
+      console.error("Error checking current user roles:", error);
+      setCurrentUserRoles([]);
+    } finally {
+      setIsLoadingCurrentUserRoles(false);
+    }
+  };
+
+  // Function to revoke a role from an address
+  const revokeRole = async (address: string, roleId: string) => {
+    if (!address.trim()) {
+      toast.error("Please provide an address to revoke role from");
+      return;
+    }
+
+    try {
+      // get network clients
+      const networkConfig = getCurrentNetworkConfig();
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+      // get lending pool id from network config
+      const lendingPoolId = networkConfig.contracts.lendingPools[0];
+      // get lending pool contract
+      const ci = new CONTRACT(
+        Number(lendingPoolId),
+        clients.algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        { addr: activeAccount.address, sk: new Uint8Array() }
+      );
+      // get role key
+      ci.setEnableRawBytes(true);
+      const roleConstant = roleConstantsMap[roleId] || ROLE_PRICE_ORACLE;
+      const role_keyR = await ci.get_role_key(
+        address,
+        new Uint8Array(Buffer.from(roleConstant))
+      );
+      if (!role_keyR.success) {
+        toast.error("Failed to get role key", {
+          description: `Could not retrieve role key for ${
+            roles.find((r) => r.id === roleId)?.name || "selected role"
+          }. Please try again.`,
+        });
+        return;
+      }
+      // revoke role (set to false)
+      const set_roleR = await ci.set_role(role_keyR.returnValue, false);
+      if (!set_roleR.success) {
+        toast.error("Failed to revoke role", {
+          description: `Could not revoke role for ${
+            roles.find((r) => r.id === roleId)?.name || "selected role"
+          }. Please try again.`,
+        });
+        return;
+      }
+      const stxns = await signTransactions(
+        set_roleR.txns.map((txn: string) =>
+          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+        )
+      );
+      const res = await clients.algod.sendRawTransaction(stxns).do();
+      await waitForConfirmation(clients.algod, res.txId, 4);
+      toast.success("Role revoked successfully", {
+        description: `Successfully revoked ${
+          roles.find((r) => r.id === roleId)?.name || "selected role"
+        } role from ${address}.`,
+      });
+
+      // Refresh current user roles if the revoked role was for the current user
+      if (address === activeAccount?.address) {
+        await checkCurrentUserRoles();
+      }
+    } catch (error) {
+      console.error("Error revoking role:", error);
+      toast.error("Failed to revoke role", {
+        description:
+          error instanceof Error ? error.message : "Unknown error occurred",
+      });
+    }
+  };
+
+  // Function to check all predefined roles for a given address
+  const checkAllRoles = async (address: string) => {
+    if (!address.trim()) {
+      toast.error("Please provide an address to check roles");
+      return;
+    }
+
+    setIsCheckingRoles(true);
+    try {
+      // get network clients
+      const networkConfig = getCurrentNetworkConfig();
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+      // get lending pool id from network config
+      const lendingPoolId = networkConfig.contracts.lendingPools[0];
+      // get lending pool contract
+      const ci = new CONTRACT(
+        Number(lendingPoolId),
+        clients.algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        { addr: address, sk: new Uint8Array() }
+      );
+      ci.setEnableRawBytes(true);
+
+      const roleChecks = [];
+      const roleNames = [];
+
+      // Check each predefined role
+      for (const [roleId, roleConstant] of Object.entries(roleConstantsMap)) {
+        try {
+          // Get role key for this role
+          const role_keyR = await ci.get_role_key(
+            address,
+            new Uint8Array(Buffer.from(roleConstant))
+          );
+
+          if (role_keyR.success) {
+            // Check if user has this role
+            const hasRoleResult = await ci.has_role(role_keyR.returnValue);
+
+            if (hasRoleResult.success) {
+              roleChecks.push({
+                roleId,
+                roleConstant,
+                roleName: roles.find((r) => r.id === roleId)?.name || roleId,
+                hasRole: hasRoleResult.returnValue,
+              });
+              roleNames.push(roleId);
+            }
+          }
+        } catch (error) {
+          console.error(`Error checking role ${roleId}:`, error);
+          roleChecks.push({
+            roleId,
+            roleConstant,
+            roleName: roles.find((r) => r.id === roleId)?.name || roleId,
+            hasRole: false,
+            error: error instanceof Error ? error.message : "Unknown error",
+          });
+        }
+      }
+
+      // Display results
+      const hasAnyRole = roleChecks.some((check) => check.hasRole);
+      const roleSummary = roleChecks
+        .filter((check) => check.hasRole)
+        .map((check) => check.roleName)
+        .join(", ");
+
+      if (hasAnyRole) {
+        toast.success("Role Check Complete", {
+          description: `${address} has the following roles: ${roleSummary}`,
+        });
+      } else {
+        toast.info("Role Check Complete", {
+          description: `${address} does not have any of the predefined roles.`,
+        });
+      }
+
+      // Log detailed results to console for debugging
+      console.log("Detailed Role Check Results:", {
+        address,
+        roleChecks,
+      });
+
+      return roleChecks;
+    } catch (error) {
+      console.error("Error checking roles:", error);
+      toast.error("Failed to check roles", {
+        description:
+          error instanceof Error ? error.message : "Unknown error occurred",
+      });
+      return [];
+    } finally {
+      setIsCheckingRoles(false);
+    }
+  };
+
+  const handleEnvoiNameChange = async (name: string) => {
+    setEnvoiName(name);
+    setEnvoiError(null);
+
+    if (name.trim() && envoiService.isValidNameFormat(name)) {
+      setEnvoiLoading(true);
+      try {
+        const addressData = await envoiService.resolveAddress(name);
+        if (addressData) {
+          setAssignAddress(
+            addressData.address || addressData.addr || addressData.wallet || ""
+          );
+        } else {
+          setEnvoiError("Name not found in Envoi registry");
+        }
+      } catch (error) {
+        setEnvoiError("Failed to resolve Envoi name");
+        console.error("Envoi resolution error:", error);
+      } finally {
+        setEnvoiLoading(false);
+      }
+    } else if (name.trim()) {
+      setEnvoiError("Invalid Envoi name format");
+    }
+  };
+
+  const handleRevokeEnvoiNameChange = async (name: string) => {
+    setRevokeEnvoiName(name);
+    setRevokeEnvoiError(null);
+
+    if (name.trim() && envoiService.isValidNameFormat(name)) {
+      setRevokeEnvoiLoading(true);
+      try {
+        const addressData = await envoiService.resolveAddress(name);
+        if (addressData) {
+          setAssignAddress(
+            addressData.address || addressData.addr || addressData.wallet || ""
+          );
+        } else {
+          setRevokeEnvoiError("Name not found in Envoi registry");
+        }
+      } catch (error) {
+        setRevokeEnvoiError("Failed to resolve Envoi name");
+        console.error("Envoi resolution error:", error);
+      } finally {
+        setRevokeEnvoiLoading(false);
+      }
+    } else if (name.trim()) {
+      setRevokeEnvoiError("Invalid Envoi name format");
+    }
+  };
+
+  const handleAddressChange = async (address: string) => {
+    // Convert to uppercase for Algorand addresses
+    const upperAddress = address.toUpperCase();
+    setAssignAddress(upperAddress);
+    setEnvoiError(null);
+
+    if (
+      upperAddress.trim() &&
+      envoiService.isValidAddressFormat(upperAddress)
+    ) {
+      setEnvoiLoading(true);
+      try {
+        const nameData = await envoiService.resolveName(upperAddress);
+        if (nameData) {
+          setEnvoiName(nameData.name);
+        } else {
+          setEnvoiName("");
+        }
+      } catch (error) {
+        console.error("Envoi name resolution error:", error);
+      } finally {
+        setEnvoiLoading(false);
+      }
+    } else if (address.trim()) {
+      setEnvoiName("");
+    }
+  };
+
+  const getRoleIcon = (iconName: string) => {
+    switch (iconName) {
+      case "database":
+        return <Database className="h-4 w-4" />;
+      case "trending-up":
+        return <TrendingUp className="h-4 w-4" />;
+      case "settings":
+        return <Settings className="h-4 w-4" />;
+      case "crown":
+        return <Crown className="h-4 w-4" />;
+      case "shield":
+        return <Shield className="h-4 w-4" />;
+      case "eye":
+        return <Eye className="h-4 w-4" />;
+      default:
+        return <UserCheck className="h-4 w-4" />;
+    }
+  };
+
+  const getRoleById = (roleId: string) => {
+    return roles.find((role) => role.id === roleId);
+  };
+
+  // Role-based access control functions
+  const getCurrentUserRole = () => {
+    if (!activeAccount?.address) return null;
+    const userRole = userRoles.find(
+      (ur) => ur.userAddress === activeAccount.address
+    );
+    return userRole ? getRoleById(userRole.roleId) : null;
+  };
+
+  const hasPermission = (permission: string) => {
+    const currentRole = getCurrentUserRole();
+    return currentRole?.permissions.includes(permission) || false;
+  };
+
+  const canPerformAction = (action: string) => {
+    return hasPermission(action);
+  };
+
+  // Permission checks for UI elements
+  const canCreateMarkets = () => canPerformAction("market.create");
+  const canEditMarkets = () => canPerformAction("market.edit");
+  const canPauseSystem = () => canPerformAction("market.pause");
+  const canManageUsers = () => canPerformAction("user.manage");
+  const canAssignRoles = () => canPerformAction("role.assign");
+  const canUpdatePrices = () => canPerformAction("price.update");
+  const canViewAudit = () => canPerformAction("audit.view");
+  const canManageFeeds = () => canPerformAction("feed.manage");
+  const canConfigureOracle = () => canPerformAction("oracle.configure");
+  const canPauseOracle = () => canPerformAction("oracle.pause");
+
+  // Load current user's Envoi name
+  const loadCurrentUserEnvoiName = async () => {
+    if (!activeAccount?.address) return;
+
+    try {
+      const nameData = await envoiService.resolveName(activeAccount.address);
+      setCurrentUserEnvoiName(nameData?.name || null);
+    } catch (error) {
+      console.error("Failed to load current user's Envoi name:", error);
+    }
+  };
+
+  // Load Envoi name when component mounts or account changes
+  React.useEffect(() => {
+    loadCurrentUserEnvoiName();
+  }, [activeAccount?.address]);
+
+  // Check current user's roles when component mounts or account changes
+  React.useEffect(() => {
+    checkCurrentUserRoles();
+  }, [activeAccount?.address]);
+
+  // Debounced search for revoke modal Envoi names
+  React.useEffect(() => {
+    const timeoutId = setTimeout(async () => {
+      if (revokeDebouncedSearchQuery.trim()) {
+        setRevokeEnvoiLoading(true);
+        try {
+          const results = await envoiService.searchNames(
+            revokeDebouncedSearchQuery
+          );
+          setRevokeEnvoiSearchResults(results?.results || []);
+        } catch (error) {
+          console.error("Error searching Envoi names:", error);
+          setRevokeEnvoiSearchResults([]);
+        } finally {
+          setRevokeEnvoiLoading(false);
+        }
+      } else {
+        setRevokeEnvoiSearchResults([]);
+      }
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [revokeDebouncedSearchQuery]);
 
   // Mint AToken function
   const handleMintAToken = async () => {
@@ -338,6 +846,10 @@ export default function AdminDashboard() {
   const [userGetUserData, setUserGetUserData] = useState<Record<string, any>>(
     {}
   );
+  const [userMarketIndices, setUserMarketIndices] = useState<
+    Record<string, { depositIndex: string; borrowIndex: string }>
+  >({});
+  const [showRawData, setShowRawData] = useState(false);
   const [globalDataLoading, setGlobalDataLoading] = useState(false);
   const [globalDataError, setGlobalDataError] = useState<string | null>(null);
 
@@ -350,6 +862,28 @@ export default function AdminDashboard() {
     Array<{ name: string; address: string; tokenId: string }>
   >([]);
   const [envoiSearchLoading, setEnvoiSearchLoading] = useState(false);
+
+  // Debounce search query
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(envoiSearchQuery);
+    }, 300); // 300ms delay
+
+    return () => clearTimeout(timer);
+  }, [envoiSearchQuery]);
+
+  // Handle debounced search
+  useEffect(() => {
+    if (
+      debouncedSearchQuery.trim().length >= 2 &&
+      !debouncedSearchQuery.includes(".")
+    ) {
+      handleEnvoiSearch(debouncedSearchQuery);
+    } else {
+      setEnvoiSearchResults([]);
+      setShowEnvoiSearch(false);
+    }
+  }, [debouncedSearchQuery]);
 
   // Lending service state - using on-demand loading now
 
@@ -383,6 +917,19 @@ export default function AdminDashboard() {
     poolId: "",
     currentMaxDeposits: "",
     newMaxDeposits: "",
+  });
+  const [isMaxBorrowsUpdateModalOpen, setIsMaxBorrowsUpdateModalOpen] =
+    useState(false);
+  const [maxBorrowsUpdateData, setMaxBorrowsUpdateData] = useState<{
+    marketId: string;
+    poolId: string;
+    currentMaxBorrows: string;
+    newMaxBorrows: string;
+  }>({
+    marketId: "",
+    poolId: "",
+    currentMaxBorrows: "",
+    newMaxBorrows: "",
   });
   const [isLoadingMarketView, setIsLoadingMarketView] = useState(false);
   const [marketViewData, setMarketViewData] = useState<any>(null);
@@ -659,18 +1206,64 @@ export default function AdminDashboard() {
     );
     const contractId = token?.underlyingContractId || "";
 
+    // Format the current max deposits to show human-readable value
+    // Note: maxTotalDeposits is already scaled by token decimals in lendingService.ts
+    const currentMaxDepositsRaw = market.marketInfo?.maxTotalDeposits || "0";
+    const currentMaxDepositsFormatted = (() => {
+      const value = parseFloat(currentMaxDepositsRaw);
+      if (value >= 1000000000) {
+        return `${(value / 1000000000).toFixed(2)}B`;
+      } else if (value >= 1000000) {
+        return `${(value / 1000000).toFixed(2)}M`;
+      } else if (value >= 1000) {
+        return `${(value / 1000).toFixed(2)}K`;
+      } else {
+        return value.toFixed(0);
+      }
+    })();
+
     setMaxDepositsUpdateData({
       marketId: contractId, // Use the token's contract ID, not the market's tokenContractId
       poolId: market.marketInfo?.poolId || "",
-      currentMaxDeposits: market.marketInfo?.maxTotalDeposits
-        ? (
-            parseFloat(market.marketInfo.maxTotalDeposits) /
-            Math.pow(10, token?.decimals || 6)
-          ).toFixed(0)
-        : "0",
+      currentMaxDeposits: currentMaxDepositsFormatted,
       newMaxDeposits: "",
     });
     setIsMaxDepositsUpdateModalOpen(true);
+  };
+
+  const handleEditMaxBorrows = (market: any) => {
+    setSelectedMarket(market);
+
+    // Get the correct contract ID from the token configuration
+    const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+    const token = tokens.find(
+      (t) => t.symbol.toLowerCase() === market.asset?.toLowerCase()
+    );
+    const contractId = token?.underlyingContractId || "";
+
+    // Format the current max borrows to show human-readable value
+    // Note: maxTotalBorrows is already scaled by token decimals in lendingService.ts
+    const currentMaxBorrowsRaw = market.marketInfo?.maxTotalBorrows || "0";
+    const currentMaxBorrowsFormatted = (() => {
+      const value = parseFloat(currentMaxBorrowsRaw);
+      if (value >= 1000000000) {
+        return `${(value / 1000000000).toFixed(2)}B`;
+      } else if (value >= 1000000) {
+        return `${(value / 1000000).toFixed(2)}M`;
+      } else if (value >= 1000) {
+        return `${(value / 1000).toFixed(2)}K`;
+      } else {
+        return value.toFixed(0);
+      }
+    })();
+
+    setMaxBorrowsUpdateData({
+      marketId: contractId, // Use the token's contract ID, not the market's tokenContractId
+      poolId: market.marketInfo?.poolId || "",
+      currentMaxBorrows: currentMaxBorrowsFormatted,
+      newMaxBorrows: "",
+    });
+    setIsMaxBorrowsUpdateModalOpen(true);
   };
 
   const handleUpdatePrice = async () => {
@@ -800,6 +1393,75 @@ export default function AdminDashboard() {
     } catch (error) {
       console.error("Error updating max deposits:", error);
       alert("Failed to update max deposits. Please try again.");
+    }
+  };
+
+  const handleUpdateMaxBorrows = async () => {
+    if (!activeAccount) {
+      alert("Please connect your wallet first");
+      return;
+    }
+
+    if (
+      !maxBorrowsUpdateData.newMaxBorrows ||
+      parseFloat(maxBorrowsUpdateData.newMaxBorrows) <= 0
+    ) {
+      alert("Please enter a valid max borrows amount");
+      return;
+    }
+
+    try {
+      if (isCurrentNetworkAlgorandCompatible()) {
+        console.log("maxBorrowsUpdateData", maxBorrowsUpdateData);
+        const result = await updateMarketMaxBorrows({
+          poolId: maxBorrowsUpdateData.poolId,
+          marketId: maxBorrowsUpdateData.marketId,
+          newMaxBorrows: BigNumber(maxBorrowsUpdateData.newMaxBorrows)
+            .multipliedBy(
+              BigNumber(10).pow(selectedMarket.marketInfo?.decimals || 6)
+            )
+            .toFixed(0),
+          userAddress: activeAccount.address,
+          signer: transactionSigner,
+        });
+        console.log("result", result);
+        if (result.success) {
+          const networkConfig = getCurrentNetworkConfig();
+          const algorandClients = algorandService.initializeClients(
+            networkConfig.walletNetworkId as AlgorandNetwork
+          );
+          const stxn = await signTransactions(
+            result.txns.map((txn) =>
+              Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+            )
+          );
+
+          const res = await algorandClients.algod.sendRawTransaction(stxn).do();
+
+          await waitForConfirmation(algorandClients.algod, res.txId, 4);
+
+          console.log("Transaction confirmed:", res);
+          alert("Max borrows updated successfully!");
+          setIsMaxBorrowsUpdateModalOpen(false);
+          setMaxBorrowsUpdateData({
+            marketId: "",
+            poolId: "",
+            currentMaxBorrows: "",
+            newMaxBorrows: "",
+          });
+          // Refresh markets data
+          loadAllMarkets();
+        } else {
+          alert(`Failed to update max borrows: ${(result as any).error}`);
+        }
+      } else if (isCurrentNetworkEVM()) {
+        throw new Error("EVM networks are not supported yet");
+      } else {
+        throw new Error("Unsupported network");
+      }
+    } catch (error) {
+      console.error("Error updating max borrows:", error);
+      alert("Failed to update max borrows. Please try again.");
     }
   };
 
@@ -1018,7 +1680,7 @@ export default function AdminDashboard() {
             const poolCollateralValueUSD = new BigNumber(
               totalCollateralValueRaw
             )
-              .div(1e14) // TODO likely not correct need to check
+              .div(1e12)
               .toNumber();
             console.log(
               "poolCollateralValueUSD",
@@ -1026,9 +1688,9 @@ export default function AdminDashboard() {
               "type:",
               typeof poolCollateralValueUSD
             );
-            const poolBorrowValueUSD = new BigNumber(
-              globalUser[1].toString()
-            ).toNumber();
+            const poolBorrowValueUSD = new BigNumber(globalUser[1].toString())
+              .div(1e12)
+              .toNumber();
 
             // Ensure we're working with numbers, not strings
             const collateralValue = Number(poolCollateralValueUSD) || 0;
@@ -1229,77 +1891,75 @@ export default function AdminDashboard() {
               }
 
               if (getUserR.success && getMarketR.success) {
-                const userData = getUserR.returnValue;
-                const marketData = getMarketR.returnValue;
+                const userData = decodeUser(getUserR.returnValue);
+                const marketData = decodeMarket(getMarketR.returnValue);
 
                 console.log(`🔍 Raw userData for ${token.symbol}:`, {
                   userData,
-                  userDataLength: userData?.length,
                   userDataType: typeof userData,
                   userDataArray: Array.isArray(userData),
                 });
 
                 console.log(`🔍 Raw marketData for ${token.symbol}:`, {
                   marketData,
-                  marketDataLength: marketData?.length,
                   marketDataType: typeof marketData,
                   marketDataArray: Array.isArray(marketData),
                 });
 
                 // Log each field individually to see what we're getting
                 console.log(`🔍 Individual user fields for ${token.symbol}:`, {
-                  "[0] scaled_deposits": userData[0],
-                  "[1] scaled_borrows": userData[1],
-                  "[2] user_deposit_index": userData[2],
-                  "[3] user_borrow_index": userData[3],
-                  "[4] last_update_time": userData[4],
-                  "[5] last_price": userData[5],
+                  "[0] scaled_deposits": userData.scaledDeposits,
+                  "[1] scaled_borrows": userData.scaledBorrows,
+                  "[2] user_deposit_index": userData.depositIndex,
+                  "[3] user_borrow_index": userData.borrowIndex,
+                  "[4] last_update_time": userData.lastUpdateTime,
+                  "[5] last_price": userData.lastPrice,
                 });
 
                 console.log(
                   `🔍 Individual market fields for ${token.symbol}:`,
                   {
-                    "[8] current_deposit_index": marketData[8],
-                    "[9] current_borrow_index": marketData[9],
-                    "[13] current_price": marketData[13],
+                    "[8] current_deposit_index": marketData.depositIndex,
+                    "[9] current_borrow_index": marketData.borrowIndex,
+                    "[13] current_price": marketData.price,
                   }
                 );
 
                 // Store data using both token symbol and contract ID as keys for flexibility
                 // Use CURRENT market indices, not user's stored indices
                 userDataByMarket[marketId] = {
-                  scaled_deposits: userData[0].toString(),
-                  scaled_borrows: userData[1].toString(),
-                  user_deposit_index: userData[2].toString(), // User's stored index
-                  user_borrow_index: userData[3].toString(), // User's stored index
-                  current_deposit_index: marketData[8].toString(), // Current market index
-                  current_borrow_index: marketData[9].toString(), // Current market index
-                  last_update_time: Number(userData[4]),
-                  last_price: userData[5].toString(),
-                  current_price: marketData[13].toString(), // Current market price
+                  scaled_deposits: userData.scaledDeposits.toString(),
+                  scaled_borrows: userData.scaledBorrows.toString(),
+                  user_deposit_index: userData.depositIndex.toString(), // User's stored index
+                  user_borrow_index: userData.borrowIndex.toString(), // User's stored index
+                  current_deposit_index: marketData.depositIndex.toString(), // Current market index
+                  current_borrow_index: marketData.borrowIndex.toString(), // Current market index
+                  last_update_time: Number(userData.lastUpdateTime),
+                  last_price: userData.lastPrice.toString(),
+                  current_price: marketData.price.toString(),
                 };
 
                 // Also store using contract ID as key
                 userDataByMarket[token.underlyingContractId] = {
-                  scaled_deposits: userData[0].toString(),
-                  scaled_borrows: userData[1].toString(),
-                  user_deposit_index: userData[2].toString(), // User's stored index
-                  user_borrow_index: userData[3].toString(), // User's stored index
-                  current_deposit_index: marketData[8].toString(), // Current market index
-                  current_borrow_index: marketData[9].toString(), // Current market index
-                  last_update_time: Number(userData[4]),
-                  last_price: userData[5].toString(),
-                  current_price: marketData[13].toString(), // Current market price
+                  scaled_deposits: userData.scaledDeposits.toString(),
+                  scaled_borrows: userData.scaledBorrows.toString(),
+                  user_deposit_index: userData.depositIndex.toString(), // User's stored index
+                  user_borrow_index: userData.borrowIndex.toString(), // User's stored index
+                  current_deposit_index: marketData.depositIndex.toString(), // Current market index
+                  current_borrow_index: marketData.borrowIndex.toString(), // Current market index
+                  last_update_time: Number(userData.lastUpdateTime),
+                  last_price: userData.lastPrice.toString(),
+                  current_price: marketData.price.toString(),
                 };
 
                 console.log(`✅ Processed get_user data for ${token.symbol}:`, {
-                  scaled_deposits: userData[0].toString(),
-                  scaled_borrows: userData[1].toString(),
-                  deposit_index: userData[2].toString(),
-                  borrow_index: userData[3].toString(),
-                  last_update_time: Number(userData[4]),
-                  last_price: userData[5].toString(),
-                  rawScaledDeposits: userData[0],
+                  scaled_deposits: userData.scaledDeposits.toString(),
+                  scaled_borrows: userData.scaledBorrows.toString(),
+                  deposit_index: userData.depositIndex.toString(),
+                  borrow_index: userData.borrowIndex.toString(),
+                  last_update_time: Number(userData.lastUpdateTime),
+                  last_price: userData.lastPrice.toString(),
+                  rawScaledDeposits: userData.scaledDeposits,
                   rawScaledDepositsType: typeof userData[0],
                 });
               } else {
@@ -1374,6 +2034,10 @@ export default function AdminDashboard() {
         const tokens = getAllTokensWithDisplayInfo(currentNetwork);
         const marketsState: Record<string, any> = {};
         const marketPrices: Record<string, number> = {};
+        const marketIndices: Record<
+          string,
+          { depositIndex: string; borrowIndex: string }
+        > = {};
 
         // Fetch market data for each token
         for (const token of tokens) {
@@ -1388,11 +2052,18 @@ export default function AdminDashboard() {
             if (marketInfo) {
               const marketId = token.symbol.toLowerCase();
 
+              // Store current market indices for Method 4 calculations
+              marketIndices[marketId] = {
+                depositIndex: marketInfo.depositIndex,
+                borrowIndex: marketInfo.borrowIndex,
+              };
+
               // Fetch user-specific market balance data
               let userMarketData = {
                 depositedBase: BigInt(0),
                 walletBalanceBase: BigInt(0),
                 totalStakeSecondsBase: BigInt(0),
+                borrowedBase: BigInt(0),
               };
 
               try {
@@ -1448,10 +2119,36 @@ export default function AdminDashboard() {
                   deposited = nTokenBalance ? BigInt(nTokenBalance) : 0n;
                 }
 
+                // Fetch borrowed balance using the lending service
+                let borrowed = 0n;
+                try {
+                  const borrowBalance = await fetchUserBorrowBalance(
+                    userAddress,
+                    token.poolId || "1",
+                    token.underlyingContractId || token.symbol,
+                    currentNetwork
+                  );
+                  console.log("borrowBalance", borrowBalance);
+                  if (borrowBalance !== null && borrowBalance !== undefined) {
+                    // Convert to base units (considering token decimals)
+                    borrowed = BigInt(
+                      Math.floor(
+                        borrowBalance * Math.pow(10, token.decimals || 6)
+                      )
+                    );
+                  }
+                } catch (borrowError) {
+                  console.warn(
+                    `Failed to fetch borrow balance for ${token.symbol}:`,
+                    borrowError
+                  );
+                }
+
                 userMarketData = {
                   depositedBase: deposited,
                   walletBalanceBase: balance,
                   totalStakeSecondsBase: BigInt(10_000_000), // Default value like in PreFi.tsx
+                  borrowedBase: borrowed,
                 };
 
                 console.log(`✅ REAL user market data for ${token.symbol}:`, {
@@ -1460,6 +2157,7 @@ export default function AdminDashboard() {
                   nTokenId,
                   deposited: fromBase(deposited, token.decimals || 6),
                   walletBalance: fromBase(balance, token.decimals || 6),
+                  borrowed: fromBase(borrowed, token.decimals || 6),
                   marketId,
                 });
               } catch (userDataError) {
@@ -1472,6 +2170,7 @@ export default function AdminDashboard() {
                   depositedBase: BigInt(0),
                   walletBalanceBase: BigInt(0),
                   totalStakeSecondsBase: BigInt(10_000_000),
+                  borrowedBase: BigInt(0),
                 };
               }
 
@@ -1498,9 +2197,11 @@ export default function AdminDashboard() {
 
         setUserMarketsState(marketsState);
         setUserMarketPrices(marketPrices);
+        setUserMarketIndices(marketIndices);
         console.log("✅ Market data fetch completed:", {
           marketsState,
           marketPrices,
+          marketIndices,
         });
       } catch (error) {
         console.error("❌ Error fetching user market data:", error);
@@ -1691,6 +2392,8 @@ export default function AdminDashboard() {
     }
   };
 
+  console.log("🔍 userGetUserData:", userGetUserData);
+
   // Method 1: Sum individual market deposits (mirroring PreFi.tsx logic)
   const userGlobalDeposited = useMemo(() => {
     let sum = 0;
@@ -1866,9 +2569,11 @@ export default function AdminDashboard() {
       );
       const depositUSD = depositedAmount * price;
 
-      // For borrows, we need to check if there's borrow data in marketState
-      // This might need to be fetched separately or calculated differently
-      const borrowedAmount = 0; // Placeholder - need to determine how borrows are stored
+      // Calculate borrowed amount and USD value from marketState
+      const borrowedAmount = fromBase(
+        marketState.borrowedBase || BigInt(0),
+        market.decimals || 6
+      );
       const borrowUSD = borrowedAmount * price;
 
       totalDeposits += depositUSD;
@@ -1936,8 +2641,11 @@ export default function AdminDashboard() {
       );
       const depositUSD = depositedAmount * price;
 
-      // Placeholder for borrows - this needs to be implemented based on actual borrow data structure
-      const borrowedAmount = 0;
+      // Calculate borrowed amount from marketState
+      const borrowedAmount = fromBase(
+        marketState.borrowedBase || BigInt(0),
+        market.decimals || 6
+      );
       const borrowUSD = borrowedAmount * price;
       const netPosition = depositUSD - borrowUSD;
 
@@ -1985,6 +2693,7 @@ export default function AdminDashboard() {
       // Try to get data using both token symbol and contract ID
       let getUserData =
         userGetUserData[marketId] || userGetUserData[contractId];
+
       const currentPrice = userMarketPrices[marketId] || 0;
 
       console.log(
@@ -2009,10 +2718,16 @@ export default function AdminDashboard() {
         const scaledDeposits = Number(getUserData.scaled_deposits || "0");
         const scaledBorrows = Number(getUserData.scaled_borrows || "0");
         // Use CURRENT market indices, not user's stored indices
+
+        const userDepositIndex =
+          getUserData.user_deposit_index || "1000000000000000000"; // 1e18
+        const userBorrowIndex =
+          getUserData.user_borrow_index || "1000000000000000000"; // 1e18
+
         const currentDepositIndex =
-          getUserData.current_deposit_index || "1000000000000000000"; // 1e18
+          getUserData.deposit_index || "1000000000000000000"; // 1e18
         const currentBorrowIndex =
-          getUserData.current_borrow_index || "1000000000000000000"; // 1e18
+          getUserData.borrow_index || "1000000000000000000"; // 1e18
         const currentPrice =
           parseFloat(getUserData.current_price || "0") / SCALE;
         const lastPrice = parseFloat(getUserData.last_price || "0") / SCALE;
@@ -2031,15 +2746,17 @@ export default function AdminDashboard() {
         // actual_deposits = (scaled_deposits * current_deposit_index) // SCALE
         // actual_borrows = (scaled_borrows * current_borrow_index) // SCALE
         const actualDepositsRaw =
-          (BigInt(scaledDeposits) * BigInt(currentDepositIndex)) /
-          BigInt(SCALE);
+          BigInt(userDepositIndex) === 0n
+            ? 0n
+            : (BigInt(scaledDeposits) * BigInt(currentDepositIndex)) /
+              BigInt(userDepositIndex);
 
         // Handle case where borrow_index is 0 (no borrows yet)
         const actualBorrowsRaw =
-          BigInt(currentBorrowIndex) === 0n
+          BigInt(userBorrowIndex) === 0n
             ? 0n
             : (BigInt(scaledBorrows) * BigInt(currentBorrowIndex)) /
-              BigInt(SCALE);
+              BigInt(userBorrowIndex);
 
         console.log(`🔍 BigInt calculations for ${market.symbol}:`, {
           actualDepositsRaw: actualDepositsRaw.toString(),
@@ -2052,7 +2769,9 @@ export default function AdminDashboard() {
         // No need to apply decimal normalization as get_user returns the actual token amounts
         const actualDepositsNum =
           Number(actualDepositsRaw) / 10 ** (market.decimals || 0);
-        const actualBorrowsNum = Number(actualBorrowsRaw);
+
+        const actualBorrowsNum =
+          Number(actualBorrowsRaw) / 10 ** (market.decimals || 0);
 
         console.log(`🔍 Converted amounts for ${market.symbol}:`, {
           actualDepositsNum,
@@ -2129,7 +2848,7 @@ export default function AdminDashboard() {
     };
   }, [userGetUserData, userMarketPrices, currentNetwork]);
 
-  // Method 4 Breakdown - Show detailed get_user data
+  // Method 4 Breakdown - Show detailed get_user data with current market indices
   const method4Breakdown = useMemo(() => {
     const markets = getMarketsFromConfig(currentNetwork);
     const SCALE = 1e18; // Precision scaling factor
@@ -2142,6 +2861,8 @@ export default function AdminDashboard() {
       let getUserData =
         userGetUserData[marketId] || userGetUserData[contractId];
       const currentPrice = userMarketPrices[marketId] || 0;
+
+      console.log(`getUserData ${market.symbol}`, getUserData);
 
       console.log(
         `🔍 Method 4 Breakdown - Looking for data for ${market.symbol}:`,
@@ -2159,27 +2880,49 @@ export default function AdminDashboard() {
       if (getUserData) {
         const scaledDeposits = getUserData.scaled_deposits || "0";
         const scaledBorrows = getUserData.scaled_borrows || "0";
-        const depositIndex = getUserData.deposit_index || "1000000000000000000"; // 1e18
-        const borrowIndex = getUserData.borrow_index || "1000000000000000000"; // 1e18
+
+        // User's stored indices (snapshot from last interaction)
+        const userDepositIndex =
+          getUserData.user_deposit_index || "1000000000000000000"; // 1e18
+
+        const userBorrowIndex =
+          getUserData.user_borrow_index || "1000000000000000000"; // 1e18
+
+        // Current market indices (should be used for calculations)
+        // Get from market data, not user data
+        const marketIndices =
+          userMarketIndices[marketId] || userMarketIndices[contractId];
+
+        const currentDepositIndex =
+          marketIndices?.depositIndex || userDepositIndex;
+
+        const currentBorrowIndex =
+          marketIndices?.borrowIndex || userBorrowIndex;
+
         const lastPrice = parseFloat(getUserData.last_price || "0") / SCALE;
         const lastUpdateTime = getUserData.last_update_time || 0;
 
-        // Calculate actual amounts using the formula from the documentation:
+        // Calculate actual amounts using CURRENT market indices (correct approach):
         // actual_deposits = (scaled_deposits * current_deposit_index) // SCALE
         // actual_borrows = (scaled_borrows * current_borrow_index) // SCALE
         const actualDepositsRaw =
-          (BigInt(scaledDeposits) * BigInt(depositIndex)) / BigInt(SCALE);
+          BigInt(userDepositIndex) === 0n
+            ? 0n
+            : (BigInt(scaledDeposits) * BigInt(currentDepositIndex)) /
+              BigInt(userDepositIndex);
 
         // Handle case where borrow_index is 0 (no borrows yet)
         const actualBorrowsRaw =
-          BigInt(borrowIndex) === 0n
+          BigInt(userBorrowIndex) === 0n
             ? 0n
-            : (BigInt(scaledBorrows) * BigInt(borrowIndex)) / BigInt(SCALE);
+            : (BigInt(scaledBorrows) * BigInt(currentBorrowIndex)) /
+              BigInt(userBorrowIndex);
 
         // Convert to numbers - the contract already returns amounts in correct units
         // No need to apply decimal normalization as get_user returns the actual token amounts
         const actualDepositsNum =
           Number(actualDepositsRaw) / 10 ** (market.decimals || 0);
+
         const actualBorrowsNum =
           Number(actualBorrowsRaw) / 10 ** (market.decimals || 0);
 
@@ -2194,15 +2937,55 @@ export default function AdminDashboard() {
         const borrowUSD = actualBorrowsNum * priceToUse;
         const netPosition = depositUSD - borrowUSD;
 
+        console.log(`🔍 Net position for ${market.symbol}:`, {
+          depositUSD,
+          borrowUSD,
+          netPosition,
+        });
+
+        // Calculate interest earned/owed since last update
+        const depositInterestRaw =
+          BigInt(userDepositIndex) > 0n
+            ? (BigInt(scaledDeposits) *
+                (BigInt(currentDepositIndex) - BigInt(userDepositIndex))) /
+              BigInt(userDepositIndex)
+            : 0n;
+
+        const borrowInterestRaw =
+          BigInt(userBorrowIndex) > 0n
+            ? (BigInt(scaledBorrows) *
+                (BigInt(currentBorrowIndex) - BigInt(userBorrowIndex))) /
+              BigInt(userBorrowIndex)
+            : 0n;
+
+        const depositInterestNum =
+          Number(depositInterestRaw) / 10 ** (market.decimals || 0);
+        const borrowInterestNum =
+          Number(borrowInterestRaw) / 10 ** (market.decimals || 0);
+
+        // Calculate scaled deposits/borrows in USD for display
+        const scaledDepositsNum =
+          Number(scaledDeposits) / 10 ** (market.decimals || 0);
+        const scaledBorrowsNum =
+          Number(scaledBorrows) / 10 ** (market.decimals || 0);
+        const scaledDepositsUSD = scaledDepositsNum * priceToUse;
+        const scaledBorrowsUSD = scaledBorrowsNum * priceToUse;
+
         return {
           symbol: market.symbol,
           marketId: market.underlyingContractId || market.symbol,
-          scaledDeposits: Number(scaledDeposits) / 10 ** (market.decimals || 0),
-          scaledBorrows: Number(scaledBorrows) / 10 ** (market.decimals || 0),
-          depositIndex,
-          borrowIndex,
+          scaledDeposits: scaledDepositsNum,
+          scaledBorrows: scaledBorrowsNum,
+          scaledDepositsUSD,
+          scaledBorrowsUSD,
+          userDepositIndex,
+          userBorrowIndex,
+          currentDepositIndex,
+          currentBorrowIndex,
           actualDeposits: actualDepositsNum,
           actualBorrows: actualBorrowsNum,
+          depositInterest: depositInterestNum,
+          borrowInterest: borrowInterestNum,
           lastPrice: priceToUse,
           lastUpdateTime,
           depositUSD,
@@ -2215,12 +2998,18 @@ export default function AdminDashboard() {
         return {
           symbol: market.symbol,
           marketId: market.underlyingContractId || market.symbol,
-          scaledDeposits: "0",
-          scaledBorrows: "0",
-          depositIndex: "1000000000000000000",
-          borrowIndex: "1000000000000000000",
+          scaledDeposits: 0,
+          scaledBorrows: 0,
+          scaledDepositsUSD: 0,
+          scaledBorrowsUSD: 0,
+          userDepositIndex: "1000000000000000000",
+          userBorrowIndex: "1000000000000000000",
+          currentDepositIndex: "1000000000000000000",
+          currentBorrowIndex: "1000000000000000000",
           actualDeposits: 0,
           actualBorrows: 0,
+          depositInterest: 0,
+          borrowInterest: 0,
           lastPrice: currentPrice,
           lastUpdateTime: 0,
           depositUSD: 0,
@@ -2230,7 +3019,7 @@ export default function AdminDashboard() {
         };
       }
     });
-  }, [userGetUserData, userMarketPrices, currentNetwork]);
+  }, [userGetUserData, userMarketPrices, userMarketIndices, currentNetwork]);
 
   return (
     <div className="min-h-screen bg-background relative">
@@ -2318,7 +3107,7 @@ export default function AdminDashboard() {
           onValueChange={setActiveTab}
           className="space-y-6"
         >
-          <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:grid-cols-6">
+          <TabsList className="grid w-full grid-cols-7 lg:w-auto lg:grid-cols-7">
             <TabsTrigger value="overview" className="flex items-center gap-2">
               <BarChart3 className="h-4 w-4" />
               <span className="hidden sm:inline">Overview</span>
@@ -2337,6 +3126,10 @@ export default function AdminDashboard() {
             >
               <Users className="h-4 w-4" />
               <span className="hidden sm:inline">User Analysis</span>
+            </TabsTrigger>
+            <TabsTrigger value="roles" className="flex items-center gap-2">
+              <Shield className="h-4 w-4" />
+              <span className="hidden sm:inline">Roles</span>
             </TabsTrigger>
             <TabsTrigger value="tools" className="flex items-center gap-2">
               <Wrench className="h-4 w-4" />
@@ -2843,41 +3636,58 @@ export default function AdminDashboard() {
                         </p>
                       </div>
 
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="flex-1"
-                          onClick={() => handleViewMarket(market)}
-                        >
-                          <Eye className="h-3 w-3 mr-1" />
-                          View
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="flex-1"
-                          onClick={() => handleEditMarket(market)}
-                        >
-                          <Edit className="h-3 w-3 mr-1" />
-                          Edit Price
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="flex-1"
-                          onClick={() => handleEditMaxDeposits(market)}
-                        >
-                          <Edit className="h-3 w-3 mr-1" />
-                          Max Deposits
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="text-destructive hover:text-destructive"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
+                      <div className="space-y-2">
+                        {/* First row: Main actions */}
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="flex-1"
+                            onClick={() => handleViewMarket(market)}
+                          >
+                            <Eye className="h-3 w-3 mr-1" />
+                            View
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="flex-1"
+                            onClick={() => handleEditMarket(market)}
+                          >
+                            <Edit className="h-3 w-3 mr-1" />
+                            Edit Price
+                          </Button>
+                        </div>
+
+                        {/* Second row: Max limits and delete */}
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="flex-1"
+                            onClick={() => handleEditMaxDeposits(market)}
+                          >
+                            <Edit className="h-3 w-3 mr-1" />
+                            Max Deposits
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="flex-1"
+                            onClick={() => handleEditMaxBorrows(market)}
+                          >
+                            <Edit className="h-3 w-3 mr-1" />
+                            Max Borrows
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-destructive hover:text-destructive flex-1"
+                          >
+                            <Trash2 className="h-3 w-3 mr-1" />
+                            Delete
+                          </Button>
+                        </div>
                       </div>
                     </CardContent>
                   </Card>
@@ -3798,7 +4608,7 @@ export default function AdminDashboard() {
                   <CardContent>
                     <div className="space-y-4">
                       {/* Summary Stats */}
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-muted/30 rounded-lg">
+                      <div className="grid grid-cols-2 md:grid-cols-6 gap-4 p-4 bg-muted/30 rounded-lg">
                         <div className="text-center">
                           <div className="text-2xl font-bold text-orange-400">
                             {method4Breakdown.length}
@@ -3837,6 +4647,26 @@ export default function AdminDashboard() {
                             Total Borrows
                           </div>
                         </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-emerald-400">
+                            {method4Breakdown
+                              .reduce((sum, m) => sum + m.depositInterest, 0)
+                              .toFixed(6)}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            Deposit Interest
+                          </div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-amber-400">
+                            {method4Breakdown
+                              .reduce((sum, m) => sum + m.borrowInterest, 0)
+                              .toFixed(6)}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            Borrow Interest
+                          </div>
+                        </div>
                       </div>
 
                       {/* Net Position Summary */}
@@ -3870,10 +4700,66 @@ export default function AdminDashboard() {
                         </div>
                       </div>
 
+                      {/* Index Discrepancy Alert */}
+                      {method4Breakdown.some(
+                        (market) =>
+                          market.userDepositIndex !==
+                            market.currentDepositIndex ||
+                          market.userBorrowIndex !== market.currentBorrowIndex
+                      ) && (
+                        <div className="p-4 bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800 rounded-lg">
+                          <div className="flex items-start gap-3">
+                            <AlertTriangle className="h-5 w-5 text-orange-600 dark:text-orange-400 mt-0.5" />
+                            <div>
+                              <h4 className="text-sm font-medium text-orange-800 dark:text-orange-200">
+                                Index Discrepancies Detected
+                              </h4>
+                              <p className="text-sm text-orange-700 dark:text-orange-300 mt-1">
+                                Some markets show differences between user's
+                                stored indices and current market indices. This
+                                indicates accrued interest since the user's last
+                                interaction.
+                              </p>
+                              <div className="mt-2 text-xs text-orange-600 dark:text-orange-400">
+                                <p>
+                                  <strong>Markets with discrepancies:</strong>
+                                </p>
+                                <ul className="list-disc list-inside mt-1">
+                                  {method4Breakdown
+                                    .filter(
+                                      (market) =>
+                                        market.userDepositIndex !==
+                                          market.currentDepositIndex ||
+                                        market.userBorrowIndex !==
+                                          market.currentBorrowIndex
+                                    )
+                                    .map((market) => (
+                                      <li key={market.symbol}>
+                                        {market.symbol}: Deposit{" "}
+                                        {market.depositInterest > 0
+                                          ? `+${market.depositInterest.toFixed(
+                                              6
+                                            )}`
+                                          : "0"}
+                                        , Borrow{" "}
+                                        {market.borrowInterest > 0
+                                          ? `+${market.borrowInterest.toFixed(
+                                              6
+                                            )}`
+                                          : "0"}
+                                      </li>
+                                    ))}
+                                </ul>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Market Details Table */}
                       <div className="space-y-2">
                         <h4 className="text-sm font-medium">
-                          Market Details (get_user)
+                          Market Details (get_user) - Index Inspection
                         </h4>
                         <div className="overflow-x-auto">
                           <table className="w-full text-sm">
@@ -3881,22 +4767,35 @@ export default function AdminDashboard() {
                               <tr className="border-b border-slate-700">
                                 <th className="text-left p-2">Market</th>
                                 <th className="text-right p-2">
-                                  Scaled Deposits
+                                  Scaled Deposits (USD)
                                 </th>
                                 <th className="text-right p-2">
-                                  Scaled Borrows
+                                  Scaled Borrows (USD)
                                 </th>
                                 <th className="text-right p-2">
-                                  Deposit Index
+                                  User Deposit Index
                                 </th>
-                                <th className="text-right p-2">Borrow Index</th>
+                                <th className="text-right p-2">
+                                  Current Deposit Index
+                                </th>
+                                <th className="text-right p-2">
+                                  User Borrow Index
+                                </th>
+                                <th className="text-right p-2">
+                                  Current Borrow Index
+                                </th>
+                                <th className="text-right p-2">
+                                  Deposit Interest
+                                </th>
+                                <th className="text-right p-2">
+                                  Borrow Interest
+                                </th>
                                 <th className="text-right p-2">
                                   Actual Deposits
                                 </th>
                                 <th className="text-right p-2">
                                   Actual Borrows
                                 </th>
-                                <th className="text-right p-2">Last Price</th>
                                 <th className="text-right p-2">Net Position</th>
                                 <th className="text-center p-2">Status</th>
                               </tr>
@@ -3911,16 +4810,36 @@ export default function AdminDashboard() {
                                     {market.symbol}
                                   </td>
                                   <td className="text-right p-2 text-xs">
-                                    {market.scaledDeposits}
+                                    $
+                                    {market.scaledDepositsUSD?.toFixed(2) ||
+                                      "0.00"}
                                   </td>
                                   <td className="text-right p-2 text-xs">
-                                    {market.scaledBorrows}
+                                    $
+                                    {market.scaledBorrowsUSD?.toFixed(2) ||
+                                      "0.00"}
                                   </td>
-                                  <td className="text-right p-2 text-xs">
-                                    {market.depositIndex}
+                                  <td className="text-right p-2 text-xs font-mono">
+                                    {market.userDepositIndex}
                                   </td>
-                                  <td className="text-right p-2 text-xs">
-                                    {market.borrowIndex}
+                                  <td className="text-right p-2 text-xs font-mono text-green-400">
+                                    {market.currentDepositIndex}
+                                  </td>
+                                  <td className="text-right p-2 text-xs font-mono">
+                                    {market.userBorrowIndex}
+                                  </td>
+                                  <td className="text-right p-2 text-xs font-mono text-green-400">
+                                    {market.currentBorrowIndex}
+                                  </td>
+                                  <td className="text-right p-2 text-xs text-green-400">
+                                    {market.depositInterest > 0
+                                      ? `+${market.depositInterest.toFixed(6)}`
+                                      : "0"}
+                                  </td>
+                                  <td className="text-right p-2 text-xs text-red-400">
+                                    {market.borrowInterest > 0
+                                      ? `+${market.borrowInterest.toFixed(6)}`
+                                      : "0"}
                                   </td>
                                   <td className="text-right p-2">
                                     {market.actualDeposits.toLocaleString(
@@ -3932,15 +4851,6 @@ export default function AdminDashboard() {
                                   </td>
                                   <td className="text-right p-2">
                                     {market.actualBorrows.toLocaleString(
-                                      undefined,
-                                      {
-                                        maximumFractionDigits: 6,
-                                      }
-                                    )}
-                                  </td>
-                                  <td className="text-right p-2">
-                                    $
-                                    {market.lastPrice.toLocaleString(
                                       undefined,
                                       {
                                         maximumFractionDigits: 6,
@@ -3981,32 +4891,152 @@ export default function AdminDashboard() {
                         </div>
                       </div>
 
+                      {/* Raw Data Inspection */}
+                      <div className="p-4 bg-gray-50 dark:bg-gray-950/20 border border-gray-200 dark:border-gray-800 rounded-lg">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-3">
+                            <AlertTriangle className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+                            <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                              Raw Data Inspection
+                            </h4>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setShowRawData(!showRawData)}
+                            className="text-xs"
+                          >
+                            {showRawData ? "Hide" : "Show"} Raw Data
+                          </Button>
+                        </div>
+                        <p className="text-sm text-gray-700 dark:text-gray-300">
+                          Raw contract data for debugging and verification
+                        </p>
+
+                        {/* Quick Summary */}
+                        <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                          <div className="bg-gray-100 dark:bg-gray-900 p-2 rounded">
+                            <div className="font-medium text-gray-600 dark:text-gray-400">
+                              User Markets
+                            </div>
+                            <div className="text-gray-800 dark:text-gray-200">
+                              {Object.keys(userGetUserData).length} markets
+                            </div>
+                          </div>
+                          <div className="bg-gray-100 dark:bg-gray-900 p-2 rounded">
+                            <div className="font-medium text-gray-600 dark:text-gray-400">
+                              Market Indices
+                            </div>
+                            <div className="text-gray-800 dark:text-gray-200">
+                              {Object.keys(userMarketIndices).length} markets
+                            </div>
+                          </div>
+                          <div className="bg-gray-100 dark:bg-gray-900 p-2 rounded">
+                            <div className="font-medium text-gray-600 dark:text-gray-400">
+                              Market Prices
+                            </div>
+                            <div className="text-gray-800 dark:text-gray-200">
+                              {Object.keys(userMarketPrices).length} markets
+                            </div>
+                          </div>
+                        </div>
+
+                        {showRawData && (
+                          <div className="mt-4 space-y-4">
+                            {/* User Data */}
+                            <div>
+                              <h5 className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
+                                User Data (get_user):
+                              </h5>
+                              <div className="bg-gray-100 dark:bg-gray-900 p-3 rounded text-xs font-mono overflow-x-auto max-h-64">
+                                <pre className="whitespace-pre-wrap">
+                                  {JSON.stringify(userGetUserData, null, 2)}
+                                </pre>
+                              </div>
+                            </div>
+
+                            {/* Market Indices */}
+                            <div>
+                              <h5 className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
+                                Current Market Indices (get_market):
+                              </h5>
+                              <div className="bg-gray-100 dark:bg-gray-900 p-3 rounded text-xs font-mono overflow-x-auto max-h-64">
+                                <pre className="whitespace-pre-wrap">
+                                  {JSON.stringify(userMarketIndices, null, 2)}
+                                </pre>
+                              </div>
+                            </div>
+
+                            {/* Market Prices */}
+                            <div>
+                              <h5 className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
+                                Market Prices:
+                              </h5>
+                              <div className="bg-gray-100 dark:bg-gray-900 p-3 rounded text-xs font-mono overflow-x-auto max-h-64">
+                                <pre className="whitespace-pre-wrap">
+                                  {JSON.stringify(userMarketPrices, null, 2)}
+                                </pre>
+                              </div>
+                            </div>
+
+                            {/* Method 4 Breakdown Raw */}
+                            <div>
+                              <h5 className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
+                                Method 4 Breakdown (Calculated):
+                              </h5>
+                              <div className="bg-gray-100 dark:bg-gray-900 p-3 rounded text-xs font-mono overflow-x-auto max-h-96">
+                                <pre className="whitespace-pre-wrap">
+                                  {JSON.stringify(method4Breakdown, null, 2)}
+                                </pre>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
                       {/* Method 4 Explanation */}
                       <div className="p-4 bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 rounded-lg">
                         <div className="flex items-start gap-3">
                           <Calculator className="h-5 w-5 text-purple-600 dark:text-purple-400 mt-0.5" />
                           <div>
                             <h4 className="text-sm font-medium text-purple-800 dark:text-purple-200">
-                              Method 4: get_user Contract Method
+                              Method 4: get_user Contract Method - Index
+                              Inspection
                             </h4>
                             <p className="text-sm text-purple-700 dark:text-purple-300 mt-1">
                               This method uses the smart contract's get_user
                               method to fetch individual user position data for
-                              each market. It returns scaled deposits and
-                              borrows along with their respective indices,
-                              allowing for precise calculation of actual amounts
-                              including accrued interest.
+                              each market. It shows both user's stored indices
+                              (snapshot from last interaction) and current
+                              market indices to inspect potential index
+                              calculation issues.
                             </p>
-                            <p className="text-xs text-purple-600 dark:text-purple-400 mt-2">
-                              <strong>Formula:</strong> actual_deposits =
-                              (scaled_deposits × current_deposit_index) ÷ SCALE
-                            </p>
-                            <p className="text-xs text-purple-600 dark:text-purple-400">
-                              <strong>Note:</strong> This is currently a
-                              placeholder implementation. Real implementation
-                              would require contract calls to get_user for each
-                              market.
-                            </p>
+                            <div className="text-xs text-purple-600 dark:text-purple-400 mt-2 space-y-1">
+                              <p>
+                                <strong>Correct Formula:</strong>{" "}
+                                actual_deposits = (scaled_deposits ×
+                                current_deposit_index) ÷ SCALE
+                              </p>
+                              <p>
+                                <strong>Previous Issue:</strong> Used user's
+                                stored indices instead of current market indices
+                              </p>
+                              <p>
+                                <strong>Interest Calculation:</strong>{" "}
+                                deposit_interest = scaled_deposits ×
+                                (current_index - user_index) ÷ SCALE
+                              </p>
+                            </div>
+                            <div className="mt-2 p-2 bg-green-100 dark:bg-green-900/20 rounded border border-green-200 dark:border-green-800">
+                              <p className="text-xs text-green-800 dark:text-green-200">
+                                <strong>✅ Index Issue Fixed:</strong> Method 4
+                                now fetches current market indices from the
+                                contract's get_market method and uses them for
+                                calculations instead of user's stored indices,
+                                ensuring accurate position values including
+                                accrued interest.
+                              </p>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -4264,6 +5294,292 @@ export default function AdminDashboard() {
                 </CardContent>
               </Card>
             )}
+          </TabsContent>
+
+          {/* Roles Tab */}
+          <TabsContent value="roles" className="space-y-6">
+            <div className="flex justify-between items-center">
+              <H2>Role Management</H2>
+            </div>
+
+            {/* Role Checker */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <UserCheck className="h-5 w-5" />
+                  Check All Predefined Roles
+                </CardTitle>
+                <CardDescription>
+                  Enter an address to check which of the predefined roles they
+                  have: Price Oracle, Market Controller, and Price Feed Manager.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Enter address to check roles..."
+                    value={roleCheckAddress}
+                    onChange={(e) => setRoleCheckAddress(e.target.value)}
+                    className="flex-1"
+                  />
+                  <Button
+                    onClick={() => checkAllRoles(roleCheckAddress)}
+                    disabled={!roleCheckAddress.trim() || isCheckingRoles}
+                    className="min-w-[120px]"
+                  >
+                    {isCheckingRoles ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Checking...
+                      </>
+                    ) : (
+                      <>
+                        <Search className="h-4 w-4 mr-2" />
+                        Check Roles
+                      </>
+                    )}
+                  </Button>
+                  {activeAccount?.address && (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setRoleCheckAddress(activeAccount.address);
+                        checkCurrentUserRoles();
+                      }}
+                      disabled={isCheckingRoles || isLoadingCurrentUserRoles}
+                      className="min-w-[140px]"
+                    >
+                      <UserCheck className="h-4 w-4 mr-2" />
+                      Check My Roles
+                    </Button>
+                  )}
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  <p>
+                    <strong>Predefined Roles:</strong>
+                  </p>
+                  <ul className="list-disc list-inside mt-1 space-y-1">
+                    <li>
+                      <strong>Price Oracle (rpo):</strong> Manages price feeds
+                      and oracle data
+                    </li>
+                    <li>
+                      <strong>Market Controller (rmc):</strong> Controls market
+                      parameters and settings
+                    </li>
+                    <li>
+                      <strong>Price Feed Manager (rpm):</strong> Manages price
+                      feed configurations
+                    </li>
+                  </ul>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Current User Role Status */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2">
+                    <UserCheck className="h-5 w-5" />
+                    Your Current Roles
+                  </CardTitle>
+                  {activeAccount?.address && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={checkCurrentUserRoles}
+                      disabled={isLoadingCurrentUserRoles}
+                    >
+                      {isLoadingCurrentUserRoles ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCcw className="h-4 w-4" />
+                      )}
+                    </Button>
+                  )}
+                </div>
+                <CardDescription>
+                  Your actual roles from the smart contract
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {activeAccount?.address ? (
+                  <div className="space-y-4">
+                    {/* User Info */}
+                    <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
+                      <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
+                        <UserCheck className="h-5 w-5 text-primary" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-medium">Connected Account</p>
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          {currentUserEnvoiName && (
+                            <span className="text-blue-600 dark:text-blue-400 font-mono">
+                              {currentUserEnvoiName}
+                            </span>
+                          )}
+                          <span className="font-mono">
+                            {activeAccount.address.slice(0, 8)}...
+                            {activeAccount.address.slice(-8)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Roles Display */}
+                    {isLoadingCurrentUserRoles ? (
+                      <div className="flex items-center justify-center py-8">
+                        <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                        <span className="text-muted-foreground">
+                          Checking roles...
+                        </span>
+                      </div>
+                    ) : currentUserRoles.length > 0 ? (
+                      <div className="space-y-3">
+                        <h4 className="font-medium text-sm">
+                          Smart Contract Roles:
+                        </h4>
+                        <div className="grid gap-2">
+                          {currentUserRoles
+                            .filter((role) => role.hasRole)
+                            .map((role) => (
+                              <div
+                                key={role.roleId}
+                                className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <CheckCircle2 className="h-5 w-5 text-green-600" />
+                                  <div>
+                                    <p className="font-medium text-green-800 dark:text-green-200">
+                                      {role.roleName}
+                                    </p>
+                                    <p className="text-xs text-green-600 dark:text-green-400">
+                                      {role.roleConstant} • Smart Contract Role
+                                    </p>
+                                  </div>
+                                </div>
+                                <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                                  Active
+                                </Badge>
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center py-8">
+                        <AlertTriangle className="h-8 w-8 text-orange-500 mx-auto mb-2" />
+                        <p className="font-medium text-orange-600 dark:text-orange-400">
+                          No Smart Contract Roles
+                        </p>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          You don't have any of the predefined roles assigned
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Role Summary */}
+                    {currentUserRoles.length > 0 && (
+                      <div className="mt-4 p-3 bg-muted/30 rounded-lg">
+                        <p className="text-sm text-muted-foreground">
+                          <strong>Role Summary:</strong> You have{" "}
+                          {
+                            currentUserRoles.filter((role) => role.hasRole)
+                              .length
+                          }{" "}
+                          of {currentUserRoles.length} predefined roles
+                          assigned.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <UserCheck className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                    <p className="text-muted-foreground">
+                      Connect your wallet to view roles
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Predefined Roles */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Shield className="h-5 w-5" />
+                  Predefined Roles
+                </CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  System roles with predefined permissions
+                </p>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {roles.map((role) => (
+                    <Card key={role.id} className="relative">
+                      <CardHeader className="pb-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            {getRoleIcon(role.icon)}
+                            <CardTitle className="text-lg">
+                              {role.name}
+                            </CardTitle>
+                          </div>
+                          <Badge className={role.color}>System Role</Badge>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          {role.description}
+                        </p>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="mt-4 flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedRole(role);
+                              setAssignAddress("");
+                              setEnvoiName("");
+                              setEnvoiError(null);
+                              setEnvoiSearchQuery("");
+                              setDebouncedSearchQuery("");
+                              setEnvoiSearchResults([]);
+                              setShowEnvoiSearch(false);
+                              setIsAssignRoleModalOpen(true);
+                            }}
+                            className="flex-1"
+                          >
+                            <UserCheck className="h-3 w-3 mr-1" />
+                            Assign Role
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedRole(role);
+                              setAssignAddress("");
+                              setRevokeEnvoiName("");
+                              setRevokeEnvoiError(null);
+                              setRevokeEnvoiSearchQuery("");
+                              setRevokeDebouncedSearchQuery("");
+                              setRevokeEnvoiSearchResults([]);
+                              setShowRevokeEnvoiSearch(false);
+                              setIsRevokeRoleModalOpen(true);
+                            }}
+                            className="flex-1"
+                          >
+                            <X className="h-3 w-3 mr-1" />
+                            Revoke Role
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
           </TabsContent>
 
           {/* Tools Tab */}
@@ -4986,35 +6302,129 @@ export default function AdminDashboard() {
                         <Label htmlFor="max-total-deposits">
                           Max Total Deposits
                         </Label>
-                        <Input
-                          id="max-total-deposits"
-                          type="number"
-                          placeholder="1000000"
-                          value={newMarket.maxTotalDeposits}
-                          onChange={(e) =>
-                            setNewMarket((prev) => ({
-                              ...prev,
-                              maxTotalDeposits: e.target.value,
-                            }))
-                          }
-                        />
+                        <div className="flex gap-2">
+                          <Input
+                            id="max-total-deposits"
+                            type="number"
+                            placeholder="1000000"
+                            value={newMarket.maxTotalDeposits}
+                            onChange={(e) =>
+                              setNewMarket((prev) => ({
+                                ...prev,
+                                maxTotalDeposits: e.target.value,
+                              }))
+                            }
+                            className="flex-1"
+                          />
+                          <div className="flex gap-1">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                setNewMarket((prev) => ({
+                                  ...prev,
+                                  maxTotalDeposits: "1000000",
+                                }))
+                              }
+                              className="px-2"
+                            >
+                              1M
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                setNewMarket((prev) => ({
+                                  ...prev,
+                                  maxTotalDeposits: "10000000",
+                                }))
+                              }
+                              className="px-2"
+                            >
+                              10M
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                setNewMarket((prev) => ({
+                                  ...prev,
+                                  maxTotalDeposits: "100000000",
+                                }))
+                              }
+                              className="px-2"
+                            >
+                              100M
+                            </Button>
+                          </div>
+                        </div>
                       </div>
                       <div>
                         <Label htmlFor="max-total-borrows">
                           Max Total Borrows
                         </Label>
-                        <Input
-                          id="max-total-borrows"
-                          type="number"
-                          placeholder="800000"
-                          value={newMarket.maxTotalBorrows}
-                          onChange={(e) =>
-                            setNewMarket((prev) => ({
-                              ...prev,
-                              maxTotalBorrows: e.target.value,
-                            }))
-                          }
-                        />
+                        <div className="flex gap-2">
+                          <Input
+                            id="max-total-borrows"
+                            type="number"
+                            placeholder="800000"
+                            value={newMarket.maxTotalBorrows}
+                            onChange={(e) =>
+                              setNewMarket((prev) => ({
+                                ...prev,
+                                maxTotalBorrows: e.target.value,
+                              }))
+                            }
+                            className="flex-1"
+                          />
+                          <div className="flex gap-1">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                setNewMarket((prev) => ({
+                                  ...prev,
+                                  maxTotalBorrows: "800000",
+                                }))
+                              }
+                              className="px-2"
+                            >
+                              800K
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                setNewMarket((prev) => ({
+                                  ...prev,
+                                  maxTotalBorrows: "8000000",
+                                }))
+                              }
+                              className="px-2"
+                            >
+                              8M
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                setNewMarket((prev) => ({
+                                  ...prev,
+                                  maxTotalBorrows: "80000000",
+                                }))
+                              }
+                              className="px-2"
+                            >
+                              80M
+                            </Button>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
@@ -5674,11 +7084,10 @@ export default function AdminDashboard() {
                       Max Total Deposits:
                     </span>
                     <span>
-                      $
                       {(() => {
-                        const value =
-                          parseFloat(marketViewData.maxTotalDeposits) *
-                          (parseFloat(marketViewData.price) / Math.pow(10, 6));
+                        const value = parseFloat(
+                          marketViewData.maxTotalDeposits
+                        );
                         if (value >= 1000000000) {
                           return `${(value / 1000000000).toFixed(2)}B`;
                         } else if (value >= 1000000) {
@@ -5686,9 +7095,10 @@ export default function AdminDashboard() {
                         } else if (value >= 1000) {
                           return `${(value / 1000).toFixed(2)}K`;
                         } else {
-                          return value.toFixed(2);
+                          return value.toFixed(0);
                         }
-                      })()}
+                      })()}{" "}
+                      {marketViewData.symbol}
                     </span>
                   </div>
                   <div className="flex justify-between">
@@ -5696,7 +7106,6 @@ export default function AdminDashboard() {
                       Max Total Borrows:
                     </span>
                     <span>
-                      $
                       {(() => {
                         const value = parseFloat(
                           marketViewData.maxTotalBorrows
@@ -5708,9 +7117,10 @@ export default function AdminDashboard() {
                         } else if (value >= 1000) {
                           return `${(value / 1000).toFixed(2)}K`;
                         } else {
-                          return value.toFixed(2);
+                          return value.toFixed(0);
                         }
-                      })()}
+                      })()}{" "}
+                      {marketViewData.symbol}
                     </span>
                   </div>
                 </div>
@@ -5841,7 +7251,103 @@ export default function AdminDashboard() {
                       newMaxDeposits: e.target.value,
                     }))
                   }
+                  className="w-full"
                 />
+                <div className="flex gap-2 mt-2 flex-wrap">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setMaxDepositsUpdateData((prev) => ({
+                        ...prev,
+                        newMaxDeposits: "1000000",
+                      }))
+                    }
+                    className="px-3"
+                  >
+                    1M
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setMaxDepositsUpdateData((prev) => ({
+                        ...prev,
+                        newMaxDeposits: "10000000",
+                      }))
+                    }
+                    className="px-3"
+                  >
+                    10M
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setMaxDepositsUpdateData((prev) => ({
+                        ...prev,
+                        newMaxDeposits: "100000000",
+                      }))
+                    }
+                    className="px-3"
+                  >
+                    100M
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const currentValue =
+                        parseFloat(maxDepositsUpdateData.newMaxDeposits) || 0;
+                      const newValue = Math.floor(currentValue * 1.01);
+                      setMaxDepositsUpdateData((prev) => ({
+                        ...prev,
+                        newMaxDeposits: newValue.toString(),
+                      }));
+                    }}
+                    className="px-3"
+                  >
+                    +1%
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const currentValue =
+                        parseFloat(maxDepositsUpdateData.newMaxDeposits) || 0;
+                      const newValue = Math.floor(currentValue * 1.03);
+                      setMaxDepositsUpdateData((prev) => ({
+                        ...prev,
+                        newMaxDeposits: newValue.toString(),
+                      }));
+                    }}
+                    className="px-3"
+                  >
+                    +3%
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const currentValue =
+                        parseFloat(maxDepositsUpdateData.newMaxDeposits) || 0;
+                      const newValue = Math.floor(currentValue * 1.05);
+                      setMaxDepositsUpdateData((prev) => ({
+                        ...prev,
+                        newMaxDeposits: newValue.toString(),
+                      }));
+                    }}
+                    className="px-3"
+                  >
+                    +5%
+                  </Button>
+                </div>
               </div>
 
               <div className="text-sm text-muted-foreground">
@@ -5861,6 +7367,114 @@ export default function AdminDashboard() {
             <Button onClick={handleUpdateMaxDeposits}>
               Update Max Deposits
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Max Borrows Update Modal */}
+      <Dialog
+        open={isMaxBorrowsUpdateModalOpen}
+        onOpenChange={setIsMaxBorrowsUpdateModalOpen}
+      >
+        <DialogContent className="max-w-md p-8">
+          <DialogHeader className="pb-6">
+            <DialogTitle className="text-xl">
+              Update Market Max Borrows
+            </DialogTitle>
+            <DialogDescription>
+              Update the maximum total borrows allowed for the selected market.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6">
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="currentMaxBorrows">Current Max Borrows</Label>
+                <Input
+                  id="currentMaxBorrows"
+                  value={maxBorrowsUpdateData.currentMaxBorrows}
+                  disabled
+                  className="bg-muted"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="newMaxBorrows">New Max Borrows</Label>
+                <Input
+                  id="newMaxBorrows"
+                  type="number"
+                  step="1"
+                  placeholder="Enter new max borrows amount"
+                  value={maxBorrowsUpdateData.newMaxBorrows}
+                  onChange={(e) =>
+                    setMaxBorrowsUpdateData((prev) => ({
+                      ...prev,
+                      newMaxBorrows: e.target.value,
+                    }))
+                  }
+                  className="w-full"
+                />
+                <div className="flex gap-2 mt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setMaxBorrowsUpdateData((prev) => ({
+                        ...prev,
+                        newMaxBorrows: "800000",
+                      }))
+                    }
+                    className="px-3"
+                  >
+                    800K
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setMaxBorrowsUpdateData((prev) => ({
+                        ...prev,
+                        newMaxBorrows: "8000000",
+                      }))
+                    }
+                    className="px-3"
+                  >
+                    8M
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setMaxBorrowsUpdateData((prev) => ({
+                        ...prev,
+                        newMaxBorrows: "80000000",
+                      }))
+                    }
+                    className="px-3"
+                  >
+                    80M
+                  </Button>
+                </div>
+              </div>
+
+              <div className="text-sm text-muted-foreground">
+                <p>Market ID: {maxBorrowsUpdateData.marketId}</p>
+                <p>Pool ID: {maxBorrowsUpdateData.poolId}</p>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="pt-6">
+            <Button
+              variant="outline"
+              onClick={() => setIsMaxBorrowsUpdateModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleUpdateMaxBorrows}>Update Max Borrows</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -5948,6 +7562,390 @@ export default function AdminDashboard() {
             >
               <CheckCircle2 className="h-4 w-4 mr-2" />
               Continue
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Assign Role Modal */}
+      <Dialog
+        open={isAssignRoleModalOpen}
+        onOpenChange={setIsAssignRoleModalOpen}
+      >
+        <DialogContent className="max-w-lg p-6">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {selectedRole && getRoleIcon(selectedRole.icon)}
+              Assign {selectedRole?.name} Role
+            </DialogTitle>
+            <DialogDescription>
+              Grant this role to an address to provide system permissions.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedRole && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-lg font-semibold mb-2">Description</h3>
+                <p className="text-muted-foreground">
+                  {selectedRole.description}
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <Label htmlFor="envoi-name">VOI Name (Optional)</Label>
+                  <div className="relative">
+                    <Input
+                      id="envoi-name"
+                      placeholder="Search or enter VOI name (e.g., en.voi)"
+                      value={envoiSearchQuery}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setEnvoiSearchQuery(value);
+
+                        if (value.includes(".")) {
+                          // Direct name input - resolve immediately
+                          handleEnvoiNameChange(value);
+                        }
+                        // For search mode, the debounced effect will handle the search
+                      }}
+                      className="font-mono text-sm mt-2"
+                    />
+                    {(envoiLoading || envoiSearchLoading) && (
+                      <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                        <RefreshCcw className="h-4 w-4 animate-spin text-muted-foreground" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Search Results Dropdown */}
+                  {showEnvoiSearch && envoiSearchResults.length > 0 && (
+                    <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                      {envoiSearchResults.map((result, index) => (
+                        <div
+                          key={index}
+                          className="px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer border-b border-gray-100 dark:border-gray-700 last:border-b-0"
+                          onClick={() => {
+                            handleEnvoiNameSelect(result.name);
+                            setAssignAddress(result.address);
+                            setEnvoiName(result.name);
+                            setShowEnvoiSearch(false);
+                          }}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono text-sm text-blue-600 dark:text-blue-400">
+                              {result.name}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {result.address.slice(0, 8)}...
+                              {result.address.slice(-8)}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Search for VOI names or enter a complete name to resolve the
+                    address
+                  </p>
+                </div>
+
+                <div>
+                  <Label htmlFor="assign-address">User Address</Label>
+                  <div className="relative">
+                    <Input
+                      id="assign-address"
+                      placeholder="Enter user's wallet address"
+                      value={assignAddress}
+                      onChange={(e) => handleAddressChange(e.target.value)}
+                      className="font-mono text-sm mt-2"
+                    />
+                    {envoiLoading && (
+                      <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                        <RefreshCcw className="h-4 w-4 animate-spin text-muted-foreground" />
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Enter the wallet address of the user you want to assign this
+                    role to
+                  </p>
+                  {assignAddress.trim() &&
+                    !envoiService.isValidAddressFormat(assignAddress) && (
+                      <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                        Invalid address format. Please enter a valid Algorand
+                        address.
+                      </p>
+                    )}
+                </div>
+
+                {envoiName && assignAddress && (
+                  <div className="p-3 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-green-600" />
+                      <span className="text-sm font-medium text-green-800 dark:text-green-200">
+                        Envoi Resolution Successful
+                      </span>
+                    </div>
+                    <p className="text-xs text-green-700 dark:text-green-300 mt-1">
+                      {envoiName} → {assignAddress.slice(0, 8)}...
+                      {assignAddress.slice(-8)}
+                    </p>
+                  </div>
+                )}
+
+                {envoiError && (
+                  <div className="p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4 text-red-600" />
+                      <span className="text-sm font-medium text-red-800 dark:text-red-200">
+                        Envoi Error
+                      </span>
+                    </div>
+                    <p className="text-xs text-red-700 dark:text-red-300 mt-1">
+                      {envoiError}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsAssignRoleModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={async () => {
+                // get network clients
+                const networkConfig = getCurrentNetworkConfig();
+                const clients = algorandService.initializeClients(
+                  networkConfig.walletNetworkId as AlgorandNetwork
+                );
+                // get lending pool id from network config
+                const lendindPoolId = networkConfig.contracts.lendingPools[0];
+                // get lending pool contract
+                const ci = new CONTRACT(
+                  Number(lendindPoolId),
+                  clients.algod,
+                  undefined,
+                  { ...LendingPoolAppSpec.contract, events: [] },
+                  { addr: activeAccount.address, sk: new Uint8Array() }
+                );
+                // get role key
+                ci.setEnableRawBytes(true);
+                const roleConstant = selectedRole
+                  ? roleConstantsMap[selectedRole.id]
+                  : ROLE_PRICE_ORACLE;
+                const role_keyR = await ci.get_role_key(
+                  assignAddress,
+                  new Uint8Array(Buffer.from(roleConstant))
+                );
+                console.log("role_keyR", role_keyR);
+                if (!role_keyR.success) {
+                  toast.error("Failed to get role key", {
+                    description: `Could not retrieve role key for ${
+                      selectedRole?.name || "selected role"
+                    }. Please try again.`,
+                  });
+                  return;
+                }
+                // assign role
+                const set_roleR = await ci.set_role(
+                  role_keyR.returnValue,
+                  true
+                );
+                if (!set_roleR.success) {
+                  toast.error("Failed to set role", {
+                    description: `Could not set role for ${
+                      selectedRole?.name || "selected role"
+                    }. Please try again.`,
+                  });
+                  return;
+                }
+                const stxns = await signTransactions(
+                  set_roleR.txns.map((txn: string) =>
+                    Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+                  )
+                );
+                const res = await clients.algod.sendRawTransaction(stxns).do();
+                await waitForConfirmation(clients.algod, res.txId, 4);
+                toast.success("Role assigned successfully", {
+                  description: `Successfully assigned ${
+                    selectedRole?.name || "selected role"
+                  } role to ${assignAddress}.`,
+                });
+
+                setAssignAddress("");
+                setEnvoiName("");
+                setEnvoiError(null);
+                setEnvoiSearchQuery("");
+                setDebouncedSearchQuery("");
+                setEnvoiSearchResults([]);
+                setShowEnvoiSearch(false);
+                setIsAssignRoleModalOpen(false);
+              }}
+              disabled={
+                !assignAddress.trim() ||
+                !envoiService.isValidAddressFormat(assignAddress)
+              }
+            >
+              <UserCheck className="h-4 w-4 mr-2" />
+              Assign Role
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Revoke Role Modal */}
+      <Dialog
+        open={isRevokeRoleModalOpen}
+        onOpenChange={setIsRevokeRoleModalOpen}
+      >
+        <DialogContent className="max-w-lg p-6">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {selectedRole && getRoleIcon(selectedRole.icon)}
+              Revoke {selectedRole?.name} Role
+            </DialogTitle>
+            <DialogDescription>
+              Remove this role from an address to revoke system permissions.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedRole && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-lg font-semibold mb-2">Description</h3>
+                <p className="text-muted-foreground">
+                  {selectedRole.description}
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <Label htmlFor="envoi-name-revoke">VOI Name (Optional)</Label>
+                  <div className="relative">
+                    <Input
+                      id="envoi-name-revoke"
+                      placeholder="Search or enter VOI name (e.g., en.voi)"
+                      value={revokeEnvoiSearchQuery}
+                      onChange={(e) => {
+                        setRevokeEnvoiSearchQuery(e.target.value);
+                        setRevokeDebouncedSearchQuery(e.target.value);
+                      }}
+                      onFocus={() => setShowRevokeEnvoiSearch(true)}
+                      className="pr-10"
+                    />
+                    <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  </div>
+                  {showRevokeEnvoiSearch && (
+                    <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg max-h-60 overflow-auto">
+                      {revokeEnvoiLoading ? (
+                        <div className="p-3 text-center text-sm text-muted-foreground">
+                          Searching...
+                        </div>
+                      ) : revokeEnvoiSearchResults.length > 0 ? (
+                        revokeEnvoiSearchResults.map((result) => (
+                          <div
+                            key={result.name}
+                            className="p-3 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer border-b border-gray-100 dark:border-gray-600 last:border-b-0"
+                            onClick={() => {
+                              setRevokeEnvoiSearchQuery(result.name);
+                              setRevokeDebouncedSearchQuery(result.name);
+                              setAssignAddress(result.address);
+                              setShowRevokeEnvoiSearch(false);
+                            }}
+                          >
+                            <div className="font-medium text-sm">
+                              {result.name}
+                            </div>
+                            <div className="text-xs text-muted-foreground font-mono">
+                              {result.address.slice(0, 8)}...
+                              {result.address.slice(-8)}
+                            </div>
+                          </div>
+                        ))
+                      ) : revokeDebouncedSearchQuery ? (
+                        <div className="p-3 text-center text-sm text-muted-foreground">
+                          No results found
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <Label htmlFor="revoke-address">Address</Label>
+                  <Input
+                    id="revoke-address"
+                    placeholder="Enter address or use VOI name above"
+                    value={assignAddress}
+                    onChange={(e) =>
+                      setAssignAddress(e.target.value.toUpperCase())
+                    }
+                  />
+                  {assignAddress.trim() &&
+                    !envoiService.isValidAddressFormat(assignAddress) && (
+                      <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                        Invalid address format. Please enter a valid Algorand
+                        address.
+                      </p>
+                    )}
+                </div>
+
+                {revokeEnvoiError && (
+                  <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4 text-red-600 dark:text-red-400" />
+                      <span className="text-sm font-medium text-red-800 dark:text-red-200">
+                        Envoi Error
+                      </span>
+                    </div>
+                    <p className="text-xs text-red-700 dark:text-red-300 mt-1">
+                      {revokeEnvoiError}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsRevokeRoleModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (!selectedRole) return;
+                await revokeRole(assignAddress, selectedRole.id);
+                setAssignAddress("");
+                setRevokeEnvoiName("");
+                setRevokeEnvoiError(null);
+                setRevokeEnvoiSearchQuery("");
+                setRevokeDebouncedSearchQuery("");
+                setRevokeEnvoiSearchResults([]);
+                setShowRevokeEnvoiSearch(false);
+                setIsRevokeRoleModalOpen(false);
+              }}
+              disabled={
+                !assignAddress.trim() ||
+                !selectedRole ||
+                !envoiService.isValidAddressFormat(assignAddress)
+              }
+            >
+              <X className="h-4 w-4 mr-2" />
+              Revoke Role
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -249,7 +249,7 @@ const WithdrawModal = ({
                           </TooltipContent>
                         </Tooltip>
                       </div>
-                      <span className="text-sm font-medium text-slate-800 dark:text-white">{marketStats.utilization}%</span>
+                      <span className="text-sm font-medium text-slate-800 dark:text-white">{marketStats.utilization.toFixed(2)}%</span>
                     </div>
 
                     <div className="flex justify-between items-center">

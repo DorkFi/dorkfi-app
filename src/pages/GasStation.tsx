@@ -47,6 +47,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
+import { useTokenPrice } from "@/hooks/useTokenPrice";
 import WalletNetworkButton from "@/components/WalletNetworkButton";
 import {
   getCurrentNetworkConfig,
@@ -98,6 +99,12 @@ const GasStation: React.FC = () => {
   const [selectedToken, setSelectedToken] = useState<MintableToken | null>(
     null
   );
+  const [usdValue, setUsdValue] = useState(0);
+
+  // Get real-time token price for selected token
+  const { price: tokenPrice, isLoading: priceLoading } = useTokenPrice(
+    selectedToken?.symbol || ""
+  );
 
   // Get mintable tokens for current network from gasStation config
   const mintableTokens = useMemo(() => {
@@ -126,6 +133,16 @@ const GasStation: React.FC = () => {
       }));
     }
   }, [activeAddress, mintingForm.recipientAddress]);
+
+  // Calculate USD value based on amount and real-time price
+  useEffect(() => {
+    if (mintingForm.amount && tokenPrice > 0) {
+      const numAmount = parseFloat(mintingForm.amount);
+      setUsdValue(numAmount * tokenPrice);
+    } else {
+      setUsdValue(0);
+    }
+  }, [mintingForm.amount, tokenPrice]);
 
   const handleTokenSelect = (tokenSymbol: string) => {
     const token = mintableTokens.find((t) => t.symbol === tokenSymbol);
@@ -434,6 +451,14 @@ const GasStation: React.FC = () => {
                     }))
                   }
                 />
+                {usdValue > 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    ≈ ${usdValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {priceLoading && (
+                      <span className="ml-2 text-xs text-muted-foreground">(updating price...)</span>
+                    )}
+                  </p>
+                )}
               </div>
 
               {/* Recipient Address */}

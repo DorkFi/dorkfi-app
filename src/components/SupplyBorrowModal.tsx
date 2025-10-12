@@ -1,14 +1,27 @@
-
 import { useState, useEffect } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import SupplyBorrowCongrats from "./SupplyBorrowCongrats";
 import SupplyBorrowHeader from "./SupplyBorrowHeader";
 import SupplyBorrowForm from "./SupplyBorrowForm";
 import SupplyBorrowStats from "./SupplyBorrowStats";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { deposit } from "@/services/lendingService";
+import {
+  deposit,
+  borrow,
+  fetchUserGlobalData,
+} from "@/services/lendingService";
 import { getTokenConfig, getAllTokensWithDisplayInfo } from "@/config";
 import algorandService from "@/services/algorandService";
 import algosdk, { waitForConfirmation } from "algosdk";
@@ -31,21 +44,30 @@ interface SupplyBorrowModalProps {
     collateralFactor: number;
     liquidity: number;
     liquidityUSD: number;
+    maxTotalDeposits?: number;
   };
   walletBalance?: number;
   walletBalanceUSD?: number;
+  userGlobalData?: {
+    totalCollateralValue: number;
+    totalBorrowValue: number;
+    lastUpdateTime: number;
+  } | null;
+  userBorrowBalance?: number;
   onTransactionSuccess?: () => void;
 }
 
-const SupplyBorrowModal = ({ 
-  isOpen, 
-  onClose, 
-  asset, 
-  mode, 
-  assetData, 
-  walletBalance: propWalletBalance = 0, 
+const SupplyBorrowModal = ({
+  isOpen,
+  onClose,
+  asset,
+  mode,
+  assetData,
+  walletBalance: propWalletBalance = 0,
   walletBalanceUSD: propWalletBalanceUSD = 0,
-  onTransactionSuccess
+  userGlobalData,
+  userBorrowBalance = 0,
+  onTransactionSuccess,
 }: SupplyBorrowModalProps) => {
   const [amount, setAmount] = useState("");
   const [fiatValue, setFiatValue] = useState(0);
@@ -53,7 +75,8 @@ const SupplyBorrowModal = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [transactionId, setTransactionId] = useState<string | null>(null);
-  
+  const [retryCount, setRetryCount] = useState(0);
+
   const { activeAccount, signTransactions } = useWallet();
   const { currentNetwork } = useNetwork();
 
@@ -65,6 +88,7 @@ const SupplyBorrowModal = ({
       setFiatValue(0);
       setError(null);
       setTransactionId(null);
+      setRetryCount(0);
     }
   }, [isOpen]);
 
@@ -74,11 +98,6 @@ const SupplyBorrowModal = ({
   };
 
   const handleSubmit = async () => {
-    if (mode !== "deposit") {
-      console.log(`${mode} ${amount} ${asset} - Borrow functionality not implemented yet`);
-      return;
-    }
-
     if (!activeAccount?.address) {
       setError("Please connect your wallet first");
       return;
@@ -89,7 +108,8 @@ const SupplyBorrowModal = ({
       return;
     }
 
-    if (parseFloat(amount) > propWalletBalance) {
+    // For deposits, check wallet balance
+    if (mode === "deposit" && parseFloat(amount) > propWalletBalance) {
       setError("Insufficient wallet balance");
       return;
     }
@@ -99,14 +119,34 @@ const SupplyBorrowModal = ({
 
     try {
       const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-      const token = tokens.find(t => t.symbol === asset);
-      
+      const token = tokens.find((t) => t.symbol === asset);
+
       if (!token) {
         throw new Error(`Token ${asset} not found in network config`);
       }
 
       if (!token.poolId || !token.underlyingContractId) {
-        throw new Error(`Token ${asset} missing pool or contract configuration`);
+        throw new Error(
+          `Token ${asset} missing pool or contract configuration`
+        );
+      }
+
+      // For borrows, check market liquidity only
+      if (mode === "borrow") {
+        const borrowAmount = parseFloat(amount);
+
+        // Check market liquidity
+        if (borrowAmount > assetData.liquidity) {
+          setError("Insufficient liquidity available for borrowing");
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      // Get the original token config to access tokenStandard
+      const originalTokenConfig = getTokenConfig(currentNetwork, asset);
+      if (!originalTokenConfig) {
+        throw new Error(`Original token config not found for ${asset}`);
       }
 
       // Convert amount to atomic units (considering token decimals)
@@ -114,54 +154,96 @@ const SupplyBorrowModal = ({
         .multipliedBy(10 ** token.decimals)
         .toFixed(0);
 
-      console.log("Deposit parameters:", {
+      console.log(`${mode} parameters:`, {
         poolId: token.poolId,
         marketId: token.underlyingContractId,
-        tokenStandard: token.tokenStandard,
+        tokenStandard: originalTokenConfig.tokenStandard,
         amount: amountInAtomicUnits,
         userAddress: activeAccount.address,
         networkId: currentNetwork,
       });
 
-      // Call the lending service deposit method
-      const depositResult = await deposit(
-        token.poolId,
-        token.underlyingContractId,
-        token.tokenStandard,
-        amountInAtomicUnits,
-        activeAccount.address,
-        currentNetwork
-      );
+      let result;
 
-      if (!depositResult.success) {
-        throw new Error(depositResult.error || "Deposit failed");
+      if (mode === "deposit") {
+        // Call the lending service deposit method
+        result = await deposit(
+          token.poolId,
+          token.underlyingContractId,
+          originalTokenConfig.tokenStandard,
+          amountInAtomicUnits,
+          activeAccount.address,
+          currentNetwork
+        );
+      } else if (mode === "borrow") {
+        // Call the lending service borrow method
+        result = await borrow(
+          token.poolId,
+          token.underlyingContractId,
+          originalTokenConfig.tokenStandard,
+          amountInAtomicUnits,
+          activeAccount.address,
+          currentNetwork
+        );
+      } else {
+        throw new Error(`Unsupported mode: ${mode}`);
       }
 
-      console.log("Deposit result:", depositResult);
+      if (!result.success) {
+        throw new Error(result.error || `${mode} failed`);
+      }
+
+      console.log(`${mode} result:`, result);
 
       // Sign and send transactions
       const stxns = await signTransactions(
-        depositResult.txns.map((txn: string) =>
+        result.txns.map((txn: string) =>
           Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
         )
       );
 
-      const algorandClients = await algorandService.getCurrentClientsForTransactions();
+      const algorandClients =
+        await algorandService.getCurrentClientsForTransactions();
       const res = await algorandClients.algod.sendRawTransaction(stxns).do();
       await waitForConfirmation(algorandClients.algod, res.txId, 4);
 
       console.log("Transaction confirmed:", res);
       setTransactionId(res.txId);
       setShowSuccess(true);
-      
+
       // Call the success callback to refresh data
       if (onTransactionSuccess) {
         onTransactionSuccess();
       }
-      
     } catch (error) {
-      console.error("Deposit error:", error);
-      setError(error instanceof Error ? error.message : "Deposit failed");
+      console.error(`${mode} error:`, error);
+      
+      // Enhanced error handling with specific messages
+      let errorMessage = `${mode} failed`;
+      
+      if (error instanceof Error) {
+        const message = error.message.toLowerCase();
+        
+        if (message.includes('insufficient')) {
+          errorMessage = mode === "deposit" 
+            ? "Insufficient wallet balance for this transaction"
+            : "Insufficient liquidity or collateral for this transaction";
+        } else if (message.includes('network') || message.includes('connection')) {
+          errorMessage = "Network connection issue. Please check your internet connection and try again.";
+        } else if (message.includes('gas') || message.includes('fee')) {
+          errorMessage = "Transaction failed due to insufficient gas fees. Please ensure you have enough tokens for gas.";
+        } else if (message.includes('rejected') || message.includes('user')) {
+          errorMessage = "Transaction was rejected or cancelled by user.";
+        } else if (message.includes('timeout')) {
+          errorMessage = "Transaction timed out. Please try again.";
+        } else if (message.includes('invalid') || message.includes('malformed')) {
+          errorMessage = "Invalid transaction parameters. Please refresh and try again.";
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -169,9 +251,10 @@ const SupplyBorrowModal = ({
 
   const handleViewTransaction = () => {
     if (transactionId) {
-      const explorerUrl = currentNetwork === "voi-mainnet" 
-        ? "https://voi.observer" 
-        : "https://testnet.voi.observer";
+      const explorerUrl =
+        currentNetwork === "voi-mainnet"
+          ? "https://voi.observer"
+          : "https://testnet.voi.observer";
       window.open(`${explorerUrl}/tx/${transactionId}`, "_blank");
     } else {
       window.open("https://testnet.voi.observer", "_blank");
@@ -189,58 +272,108 @@ const SupplyBorrowModal = ({
     setFiatValue(0);
   };
 
+  const handleRetry = () => {
+    setError(null);
+    setRetryCount(prev => prev + 1);
+    handleSubmit();
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-white rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl card-hover hover:shadow-lg hover:border-ocean-teal/40 transition-all max-w-md p-6">
-          {showSuccess ? (
-            <SupplyBorrowCongrats
-              transactionType={mode}
-              asset={asset}
-              assetIcon={assetData.icon}
-              amount={amount}
-              onViewTransaction={handleViewTransaction}
-              onGoToPortfolio={handleGoToPortfolio}
-              onMakeAnother={handleMakeAnother}
-              onClose={onClose}
-            />
-          ) : (
-            <>
-              <DialogHeader className="pb-4">
-                <DialogTitle className="sr-only">{mode === 'deposit' ? 'Deposit' : 'Borrow'} {asset}</DialogTitle>
-                <SupplyBorrowHeader 
-                  mode={mode}
-                  asset={asset}
-                  assetIcon={assetData.icon}
-                />
-              </DialogHeader>
-              
-              <div className="space-y-6">
+      <DialogContent className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-white rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl card-hover hover:shadow-lg hover:border-ocean-teal/40 transition-all max-w-md p-6">
+        {showSuccess ? (
+          <SupplyBorrowCongrats
+            transactionType={mode}
+            asset={asset}
+            assetIcon={assetData.icon}
+            amount={amount}
+            onViewTransaction={handleViewTransaction}
+            onGoToPortfolio={handleGoToPortfolio}
+            onMakeAnother={handleMakeAnother}
+            onClose={onClose}
+          />
+        ) : (
+          <>
+            <DialogHeader className="pb-4">
+              <DialogTitle className="sr-only">
+                {mode === "deposit" ? "Deposit" : "Borrow"} {asset}
+              </DialogTitle>
+              <SupplyBorrowHeader
+                mode={mode}
+                asset={asset}
+                assetIcon={assetData.icon}
+              />
+            </DialogHeader>
+
+            <div className="space-y-6">
               {error && (
                 <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 mb-4">
-                  <p className="text-red-600 dark:text-red-400 text-sm">{error}</p>
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <p className="text-red-600 dark:text-red-400 text-sm font-medium mb-1">
+                        Transaction Failed
+                      </p>
+                      <p className="text-red-600 dark:text-red-400 text-sm">
+                        {error}
+                      </p>
+                      {retryCount > 0 && (
+                        <p className="text-red-500 dark:text-red-500 text-xs mt-1">
+                          Retry attempt: {retryCount}
+                        </p>
+                      )}
+                    </div>
+                    {retryCount < 3 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleRetry}
+                        disabled={isLoading}
+                        className="ml-2 text-red-600 border-red-300 hover:bg-red-50 dark:text-red-400 dark:border-red-600 dark:hover:bg-red-900/20"
+                      >
+                        Retry
+                      </Button>
+                    )}
+                  </div>
                 </div>
               )}
-              
-              <SupplyBorrowForm 
+
+              {mode === "borrow" && !userGlobalData && (
+                <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3 mb-4">
+                  <p className="text-yellow-600 dark:text-yellow-400 text-sm">
+                    Loading user data... Please wait before borrowing.
+                  </p>
+                </div>
+              )}
+
+              <SupplyBorrowForm
                 mode={mode}
                 asset={asset}
                 walletBalance={propWalletBalance}
                 walletBalanceUSD={propWalletBalanceUSD}
                 availableToSupplyOrBorrow={assetData.liquidity}
+                supplyAPY={assetData.supplyAPY}
+                totalSupply={assetData.totalSupply}
+                maxTotalDeposits={assetData.maxTotalDeposits}
+                userGlobalData={userGlobalData}
+                collateralFactor={assetData.collateralFactor}
                 onAmountChange={handleAmountChange}
                 onSubmit={handleSubmit}
                 isLoading={isLoading}
+                disabled={mode === "borrow" && !userGlobalData}
               />
 
-                <SupplyBorrowStats
-                  mode={mode}
-                  asset={asset}
-                  assetData={assetData}
-                />
-              </div>
-            </>
-          )}
-        </DialogContent>
+              <SupplyBorrowStats
+                mode={mode}
+                asset={asset}
+                assetData={assetData}
+                userGlobalData={userGlobalData}
+                depositAmount={mode === "deposit" ? parseFloat(amount) || 0 : 0}
+                userBorrowBalance={userBorrowBalance}
+              />
+            </div>
+          </>
+        )}
+      </DialogContent>
     </Dialog>
   );
 };

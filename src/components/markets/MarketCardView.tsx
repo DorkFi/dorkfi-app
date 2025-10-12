@@ -6,6 +6,9 @@ import { Info } from "lucide-react";
 import { OnDemandMarketData } from "@/hooks/useOnDemandMarketData";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import DorkFiButton from "@/components/ui/DorkFiButton";
+import APYDisplay from "@/components/APYDisplay";
+import BorrowAPYDisplay from "@/components/BorrowAPYDisplay";
+import { useNetwork } from "@/contexts/NetworkContext";
 
 interface MarketCardViewProps {
   markets: OnDemandMarketData[];
@@ -22,6 +25,7 @@ const MarketCardView = ({
   onDepositClick, 
   onBorrowClick 
 }: MarketCardViewProps) => {
+  const { currentNetwork } = useNetwork();
   if (markets.length === 0) {
     return (
       <div className="text-center py-8">
@@ -63,19 +67,27 @@ const MarketCardView = ({
             <div className="flex flex-col items-center md:items-start">
               <div className="text-sm text-muted-foreground mb-1">Deposit APY</div>
               <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-                {market.supplyAPY}%
+                <APYDisplay 
+                  apyCalculation={market.apyCalculation}
+                  fallbackAPY={market.supplyAPY}
+                  showTooltip={true}
+                />
               </Badge>
               <div className="text-xs text-muted-foreground mt-1">
-                ${market.totalSupplyUSD.toLocaleString()}
+                ${(market.totalSupplyUSD / 1_000_000).toLocaleString()}
               </div>
             </div>
             <div className="flex flex-col items-center md:items-start">
               <div className="text-sm text-muted-foreground mb-1">Borrow APY</div>
               <Badge className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
-                {market.borrowAPY}%
+                <BorrowAPYDisplay 
+                  apyCalculation={market.apyCalculation}
+                  fallbackAPY={market.borrowAPY}
+                  showTooltip={true}
+                />
               </Badge>
               <div className="text-xs text-muted-foreground mt-1">
-                ${market.totalBorrowUSD.toLocaleString()}
+                ${(market.totalBorrowUSD / 1_000_000).toLocaleString()}
               </div>
             </div>
           </div>
@@ -83,7 +95,7 @@ const MarketCardView = ({
           <div className="text-center">
             <div className="flex items-center justify-center md:justify-between mb-2">
               <span className="text-sm text-muted-foreground">Utilization</span>
-              <span className="text-sm font-medium ml-2 md:ml-0">{market.utilization}%</span>
+              <span className="text-sm font-medium ml-2 md:ml-0">{market.utilization.toFixed(2)}%</span>
             </div>
             <div className="flex justify-center md:justify-start">
               <Progress value={market.utilization} className="h-2 w-full max-w-[200px] md:max-w-none" />

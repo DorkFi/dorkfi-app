@@ -295,7 +295,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
             Borrowed: ${data.borrowed.toLocaleString()}
           </p>
           <p className="text-sm font-medium pt-1 border-t">
-            Utilization: {data.utilization}%
+            Utilization: {data.utilization.toFixed(2)}%
           </p>
         </div>
       </div>
@@ -368,7 +368,7 @@ const UtilizationProgressBar = ({ data }: { data: UtilizationData }) => {
             {/* Utilization percentage label */}
             <div className="absolute inset-0 flex items-center justify-center">
               <span className="text-xs font-semibold text-white mix-blend-difference">
-                {data.utilization}%
+                {data.utilization.toFixed(2)}%
               </span>
             </div>
           </div>

@@ -14,9 +14,10 @@ import {
   isCurrentNetworkAlgorand,
 } from "@/config";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
+import { APP_SPEC as MarketControllerAppSpec } from "@/clients/MarketControllerClient";
 import { CONTRACT } from "ulujs";
 import algorandService, { AlgorandNetwork } from "./algorandService";
-import algosdk from "algosdk";
+import algosdk, { TransactionSigner } from "algosdk";
 import { decodeMarket } from "./lendingService";
 
 export interface PausedState {
@@ -613,25 +614,38 @@ export const updateMarketMaxDeposits = async (
         networkConfig.walletNetworkId as AlgorandNetwork
       );
 
+      // Get MarketController contract address
+      const marketControllerAddress = getContractAddress(
+        networkConfig.networkId,
+        "marketController"
+      );
+
+      if (
+        !marketControllerAddress ||
+        typeof marketControllerAddress !== "string"
+      ) {
+        throw new Error("MarketController contract address not found");
+      }
+
       // Convert max deposits to proper units (assuming 6 decimals for the value)
       const maxDepositsInSmallestUnit = BigInt(newMaxDeposits);
 
+      // Use MarketController contract instead of lending pool contract
       const ci = new CONTRACT(
-        Number(poolId),
+        Number(marketControllerAddress),
         clients.algod,
         undefined,
-        { ...LendingPoolAppSpec.contract, events: [] },
+        { ...MarketControllerAppSpec.contract, events: [] },
         {
           addr: userAddress,
           sk: new Uint8Array(),
         }
       );
 
-      // Create update max deposits transaction
-      // Note: This assumes there's a set_market_max_deposits method in the contract
-      // If the method name is different, it should be updated accordingly
+      ci.setFee(10000);
       const updateMaxDepositsTx = await ci.set_market_max_total_deposits(
-        Number(marketId),
+        BigInt(poolId),
+        BigInt(marketId),
         maxDepositsInSmallestUnit
       );
 
@@ -651,22 +665,38 @@ export const updateMarketMaxDeposits = async (
         networkConfig.walletNetworkId as AlgorandNetwork
       );
 
+      // Get MarketController contract address
+      const marketControllerAddress = getContractAddress(
+        networkConfig.networkId,
+        "marketController"
+      );
+
+      if (
+        !marketControllerAddress ||
+        typeof marketControllerAddress !== "string"
+      ) {
+        throw new Error("MarketController contract address not found");
+      }
+
       // Convert max deposits to proper units
       const maxDepositsInSmallestUnit = BigInt(newMaxDeposits);
 
+      // Use MarketController contract instead of lending pool contract
       const ci = new CONTRACT(
-        Number(poolId),
+        Number(marketControllerAddress),
         clients.algod,
         undefined,
-        { ...LendingPoolAppSpec.contract, events: [] },
+        { ...MarketControllerAppSpec.contract, events: [] },
         {
           addr: userAddress,
           sk: new Uint8Array(),
         }
       );
 
+      ci.setFee(10000);
       const updateMaxDepositsTx = await ci.set_market_max_total_deposits(
-        Number(marketId),
+        BigInt(poolId),
+        BigInt(marketId),
         maxDepositsInSmallestUnit
       );
 
@@ -687,6 +717,141 @@ export const updateMarketMaxDeposits = async (
     }
   } catch (error) {
     console.error("Error updating market max deposits:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    };
+  }
+};
+
+/**
+ * Update max total borrows for a specific market
+ */
+export interface UpdateMarketMaxBorrowsParams {
+  poolId: string;
+  marketId: string;
+  newMaxBorrows: string;
+  userAddress: string;
+  signer?: TransactionSigner;
+}
+export const updateMarketMaxBorrows = async (
+  options: UpdateMarketMaxBorrowsParams
+): Promise<
+  { success: false; error: any } | { success: true; txns: string[] }
+> => {
+  console.log("updateMarketMaxBorrows", options);
+
+  try {
+    const networkConfig = getCurrentNetworkConfig();
+
+    if (isCurrentNetworkVOI()) {
+      // Use VOI-specific service for VOI networks
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      // Get MarketController contract address
+      const marketControllerAddress = getContractAddress(
+        networkConfig.networkId,
+        "marketController"
+      );
+
+      if (
+        !marketControllerAddress ||
+        typeof marketControllerAddress !== "string"
+      ) {
+        throw new Error("MarketController contract address not found");
+      }
+
+      // Convert max borrows to proper units (assuming 6 decimals for the value)
+      const maxBorrowsInSmallestUnit = BigInt(options.newMaxBorrows);
+
+      // Use MarketController contract instead of lending pool contract
+      const ci = new CONTRACT(
+        Number(marketControllerAddress),
+        clients.algod,
+        undefined,
+        { ...MarketControllerAppSpec.contract, events: [] },
+        {
+          addr: options.userAddress,
+          sk: new Uint8Array(),
+        }
+      );
+
+      ci.setFee(10000);
+      const updateMaxBorrowsTx = await ci.set_market_max_total_borrows(
+        BigInt(options.poolId),
+        BigInt(options.marketId),
+        maxBorrowsInSmallestUnit
+      );
+
+      console.log("updateMaxBorrowsTx", { updateMaxBorrowsTx });
+
+      if (!updateMaxBorrowsTx.success) {
+        throw new Error("Failed to update market max borrows");
+      }
+
+      return {
+        success: true,
+        txns: [...updateMaxBorrowsTx.txns],
+      };
+    } else if (isCurrentNetworkAlgorand()) {
+      // Use Algorand-specific service for Algorand networks
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      // Get MarketController contract address
+      const marketControllerAddress = getContractAddress(
+        networkConfig.networkId,
+        "marketController"
+      );
+
+      if (
+        !marketControllerAddress ||
+        typeof marketControllerAddress !== "string"
+      ) {
+        throw new Error("MarketController contract address not found");
+      }
+
+      // Convert max borrows to proper units
+      const maxBorrowsInSmallestUnit = BigInt(options.newMaxBorrows);
+
+      // Use MarketController contract instead of lending pool contract
+      const ci = new CONTRACT(
+        Number(marketControllerAddress),
+        clients.algod,
+        undefined,
+        { ...MarketControllerAppSpec.contract, events: [] },
+        {
+          addr: options.userAddress,
+          sk: new Uint8Array(),
+        }
+      );
+
+      const updateMaxBorrowsTx = await ci.set_market_max_total_borrows(
+        BigInt(options.poolId),
+        BigInt(options.marketId),
+        maxBorrowsInSmallestUnit
+      );
+
+      console.log("updateMaxBorrowsTx", { updateMaxBorrowsTx });
+
+      if (!updateMaxBorrowsTx.success) {
+        throw new Error("Failed to update market max borrows");
+      }
+
+      return {
+        success: true,
+        txns: [...updateMaxBorrowsTx.txns],
+      };
+    } else if (isCurrentNetworkEVM()) {
+      throw new Error("EVM networks are not supported yet");
+    } else {
+      throw new Error("Unsupported network");
+    }
+  } catch (error) {
+    console.error("Error updating market max borrows:", error);
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error occurred",

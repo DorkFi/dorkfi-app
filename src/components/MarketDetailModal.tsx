@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,6 +9,12 @@ import { LineChart, Line, XAxis, YAxis, ResponsiveContainer } from "recharts";
 import { ExternalLink, Info } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import SupplyBorrowModal from "@/components/SupplyBorrowModal";
+import BorrowAPYDisplay from "@/components/BorrowAPYDisplay";
+import { useWallet } from "@txnlab/use-wallet-react";
+import { useNetwork } from "@/contexts/NetworkContext";
+import { fetchUserGlobalData, fetchUserBorrowBalance } from "@/services/lendingService";
+import { getAllTokensWithDisplayInfo } from "@/config";
+import { APYCalculationResult } from "@/utils/apyCalculations";
 
 interface MarketDetailModalProps {
   isOpen: boolean;
@@ -31,6 +37,7 @@ interface MarketDetailModalProps {
     liquidationPenalty: number;
     reserveFactor: number;
     collectorContract: string;
+    apyCalculation?: APYCalculationResult;
   };
 }
 
@@ -56,13 +63,59 @@ const MarketDetailModal = ({ isOpen, onClose, asset, marketData }: MarketDetailM
   const [supplyModal, setSupplyModal] = useState({ isOpen: false, asset: null });
   const [borrowModal, setBorrowModal] = useState({ isOpen: false, asset: null });
   const [chartPeriod, setChartPeriod] = useState("6m");
+  const [userGlobalData, setUserGlobalData] = useState<{
+    totalCollateralValue: number;
+    totalBorrowValue: number;
+    lastUpdateTime: number;
+  } | null>(null);
+  const [userBorrowBalance, setUserBorrowBalance] = useState<number>(0);
+  const [isLoadingGlobalData, setIsLoadingGlobalData] = useState(false);
+  
+  const { activeAccount } = useWallet();
+  const { currentNetwork } = useNetwork();
 
   const handleSupplyClick = () => {
     setSupplyModal({ isOpen: true, asset });
   };
 
-  const handleBorrowClick = () => {
-    setBorrowModal({ isOpen: true, asset });
+  const handleBorrowClick = async () => {
+    if (!activeAccount?.address) {
+      console.error("No active account for borrowing");
+      return;
+    }
+
+    setIsLoadingGlobalData(true);
+    
+    try {
+      // Fetch user global data before opening modal
+      const globalData = await fetchUserGlobalData(activeAccount.address, currentNetwork);
+      setUserGlobalData(globalData);
+      
+      // Fetch user's current borrow balance for this specific asset
+      const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+      const token = tokens.find((t) => t.symbol === asset);
+      
+      if (token && token.poolId && token.underlyingContractId) {
+        const borrowBalance = await fetchUserBorrowBalance(
+          activeAccount.address,
+          token.poolId,
+          token.underlyingContractId,
+          currentNetwork
+        );
+        setUserBorrowBalance(borrowBalance || 0);
+      } else {
+        setUserBorrowBalance(0);
+      }
+      
+      // Open modal after data is fetched
+      setBorrowModal({ isOpen: true, asset });
+    } catch (error) {
+      console.error("Error fetching user data for borrow:", error);
+      // Still open modal even if data fetch fails
+      setBorrowModal({ isOpen: true, asset });
+    } finally {
+      setIsLoadingGlobalData(false);
+    }
   };
 
   const handleCloseSupplyModal = () => {
@@ -72,6 +125,11 @@ const MarketDetailModal = ({ isOpen, onClose, asset, marketData }: MarketDetailM
   const handleCloseBorrowModal = () => {
     setBorrowModal({ isOpen: false, asset: null });
   };
+
+  // Clear user global data when wallet address changes
+  useEffect(() => {
+    setUserGlobalData(null);
+  }, [activeAccount?.address]);
 
   const getAssetData = () => ({
     icon: marketData.icon,
@@ -147,7 +205,7 @@ const MarketDetailModal = ({ isOpen, onClose, asset, marketData }: MarketDetailM
                   </div>
                   <div className="text-center space-y-2">
                     <div className="text-sm font-semibold text-slate-800 dark:text-white flex items-center justify-center gap-1">
-                      ${marketData.totalSupplyUSD.toLocaleString()} / ${marketData.supplyCapUSD.toLocaleString()}
+                      ${(marketData.totalSupplyUSD / 1_000_000).toLocaleString()} / ${(marketData.supplyCapUSD / 1_000_000).toLocaleString()}
                       <Tooltip>
                         <TooltipTrigger>
                           <Info className="h-3 w-3 text-gray-500" />
@@ -159,7 +217,7 @@ const MarketDetailModal = ({ isOpen, onClose, asset, marketData }: MarketDetailM
                     </div>
                     <div className="flex items-center justify-center gap-1">
                       <Badge className="bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200">
-                        APY: {marketData.supplyAPY}%
+                        APY: {marketData.supplyAPY.toFixed(2)}%
                       </Badge>
                       <Tooltip>
                         <TooltipTrigger>
@@ -203,7 +261,7 @@ const MarketDetailModal = ({ isOpen, onClose, asset, marketData }: MarketDetailM
                       <div className="absolute inset-0 flex items-center justify-center">
                         <div className="text-center">
                            <div className="text-lg font-bold text-slate-800 dark:text-white">
-                             {marketData.utilization}%
+                             {marketData.utilization.toFixed(2)}%
                           </div>
                           <div className="text-xs text-slate-800 dark:text-white">Util</div>
                         </div>
@@ -224,7 +282,11 @@ const MarketDetailModal = ({ isOpen, onClose, asset, marketData }: MarketDetailM
                     </div>
                     <div className="flex items-center justify-center gap-1">
                       <Badge className="bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200">
-                        APY: {marketData.borrowAPY}%
+                        APY: <BorrowAPYDisplay 
+                          apyCalculation={marketData.apyCalculation}
+                          fallbackAPY={marketData.borrowAPY}
+                          showTooltip={false}
+                        />
                       </Badge>
                       <Tooltip>
                         <TooltipTrigger>
@@ -495,6 +557,8 @@ const MarketDetailModal = ({ isOpen, onClose, asset, marketData }: MarketDetailM
           asset={borrowModal.asset}
           mode="borrow"
           assetData={getAssetData()}
+          userGlobalData={userGlobalData}
+          userBorrowBalance={userBorrowBalance}
         />
       )}
      </>

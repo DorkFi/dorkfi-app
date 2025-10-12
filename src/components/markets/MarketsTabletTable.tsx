@@ -6,6 +6,8 @@ import { Info } from "lucide-react";
 import { OnDemandMarketData } from "@/hooks/useOnDemandMarketData";
 import MarketsTableActions from "./MarketsTableActions";
 import { Button } from "@/components/ui/button";
+import APYDisplay from "@/components/APYDisplay";
+import BorrowAPYDisplay from "@/components/BorrowAPYDisplay";
 
 interface MarketsTabletTableProps {
   markets: OnDemandMarketData[];
@@ -74,17 +76,25 @@ const MarketsTabletTable = ({
               </TableCell>
               <TableCell className="text-center">
                 <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-                  {market.supplyAPY}%
+                  <APYDisplay 
+                    apyCalculation={market.apyCalculation}
+                    fallbackAPY={market.supplyAPY}
+                    showTooltip={true}
+                  />
                 </Badge>
               </TableCell>
               <TableCell className="text-center">
                 <Badge className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
-                  {market.borrowAPY}%
+                  <BorrowAPYDisplay 
+                    apyCalculation={market.apyCalculation}
+                    fallbackAPY={market.borrowAPY}
+                    showTooltip={true}
+                  />
                 </Badge>
               </TableCell>
               <TableCell className="text-center">
                 <div className="flex flex-col items-center space-y-1">
-                  <span className="text-sm font-medium">{market.utilization}%</span>
+                  <span className="text-sm font-medium">{market.utilization.toFixed(2)}%</span>
                   <Progress value={market.utilization} className="h-2 w-16" />
                 </div>
               </TableCell>

@@ -203,9 +203,9 @@ class EnvoiService {
    * @returns boolean
    */
   isValidNameFormat(name: string): boolean {
-    // VOI names typically follow the pattern: [subdomain.]domain
-    // For example: en.voi, test.voi, etc.
-    const nameRegex = /^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]*\.[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]*$/;
+    // VOI names can have multiple subdomains: subdomain.subdomain.domain
+    // For example: en.voi, test.voi, alpha.wallet.voi, .voi, etc.
+    const nameRegex = /^([a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]*\.)*[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]*$|^\.[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]*$/;
     return nameRegex.test(name);
   }
 

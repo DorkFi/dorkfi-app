@@ -14,15 +14,26 @@ import {
   isEVMNetwork,
   NetworkId,
   getAllTokensWithDisplayInfo,
+  getTokenConfig,
   getLendingPools,
   getPreFiParameters,
 } from "@/config";
 import algorandService, { AlgorandNetwork } from "./algorandService";
+import { ARC200Service } from "./arc200Service";
 import { abi, CONTRACT } from "ulujs";
-import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
+import {
+  APP_SPEC as LendingPoolAppSpec,
+  UserData,
+  GlobalUserData,
+} from "@/clients/DorkFiLendingPoolClient";
 import algosdk from "algosdk";
 import BigNumber from "bignumber.js";
 import { TokenStandard } from "@/config";
+import {
+  calculateDepositAPY,
+  calculateBorrowAPY,
+  APYCalculationResult,
+} from "@/utils/apyCalculations";
 
 export interface MarketInfo {
   networkId: NetworkId;
@@ -52,6 +63,12 @@ export interface MarketInfo {
   isActive: boolean;
   isPaused: boolean;
   lastUpdated: string;
+  // Current market indices (for accurate position calculations)
+  depositIndex: string;
+  borrowIndex: string;
+  // APY calculation results
+  apyCalculation?: APYCalculationResult;
+  borrowApyCalculation?: APYCalculationResult;
 }
 
 export interface UserPosition {
@@ -126,6 +143,26 @@ export const decodeMarket = (market: any[]): Market => {
   } as Market;
 };
 
+interface User {
+  scaledDeposits: BigInt;
+  scaledBorrows: BigInt;
+  depositIndex: BigInt;
+  borrowIndex: BigInt;
+  lastUpdateTime: BigInt;
+  lastPrice: BigInt;
+}
+
+export const decodeUser = (user: any[]) => {
+  return {
+    scaledDeposits: user[0],
+    scaledBorrows: user[1],
+    depositIndex: user[2],
+    borrowIndex: user[3],
+    lastUpdateTime: user[4],
+    lastPrice: user[5],
+  } as User;
+};
+
 /**
  * Fetch market information for a specific market
  */
@@ -168,7 +205,19 @@ export const fetchMarketInfo = async (
         throw new Error("Failed to get market info");
       }
 
+      // Debug: Log raw market data to verify field order
+      console.log("Raw market data:", marketR.returnValue);
+      console.log("Field count:", marketR.returnValue.length);
+
       const market = decodeMarket(marketR.returnValue);
+
+      // Debug: Log decoded market data
+      console.log("Decoded market data:", {
+        depositIndex: market.depositIndex.toString(),
+        borrowIndex: market.borrowIndex.toString(),
+        maxTotalDeposits: market.maxTotalDeposits.toString(),
+        maxTotalBorrows: market.maxTotalBorrows.toString(),
+      });
 
       const utilizationRate =
         market.totalScaledDeposits.toString() == "0"
@@ -180,6 +229,7 @@ export const fetchMarketInfo = async (
       const supplyRate = new BigNumber(market.borrowRate.toString())
         .multipliedBy(utilizationRate)
         .multipliedBy(10000 - Number(market.reserveFactor.toString()))
+        .dividedBy(10000)
         .toNumber();
 
       const formatPrice = (price: string) => {
@@ -197,6 +247,34 @@ export const fetchMarketInfo = async (
       );
 
       const totalBorrows = formatDeposit(market.totalScaledBorrows.toString());
+
+      // Calculate APY using the new utility function
+      const apyCalculation = calculateDepositAPY(
+        {
+          borrowRate: parseFloat(market.borrowRate.toString()),
+          slope: parseFloat(market.slope.toString()),
+          reserveFactor: parseFloat(market.reserveFactor.toString()),
+        },
+        {
+          totalScaledDeposits: market.totalScaledDeposits.toString(),
+          totalScaledBorrows: market.totalScaledBorrows.toString(),
+          lastUpdateTime: Number(market.lastUpdateTime),
+        }
+      );
+
+      // Calculate borrow APY using the new utility function
+      const borrowApyCalculation = calculateBorrowAPY(
+        {
+          borrowRate: parseFloat(market.borrowRate.toString()),
+          slope: parseFloat(market.slope.toString()),
+          reserveFactor: parseFloat(market.reserveFactor.toString()),
+        },
+        {
+          totalScaledDeposits: market.totalScaledDeposits.toString(),
+          totalScaledBorrows: market.totalScaledBorrows.toString(),
+          lastUpdateTime: Number(market.lastUpdateTime),
+        }
+      );
 
       const marketInfo: MarketInfo = {
         networkId: networkId,
@@ -233,6 +311,11 @@ export const fetchMarketInfo = async (
         isPaused: market.paused,
         ntokenId: market.ntokenId.toString(),
         lastUpdated: new Date().toISOString(),
+        // Current market indices (for accurate position calculations)
+        depositIndex: market.depositIndex.toString(),
+        borrowIndex: market.borrowIndex.toString(),
+        apyCalculation,
+        borrowApyCalculation,
       };
 
       console.log("marketInfo", { marketInfo });
@@ -338,12 +421,27 @@ export const fetchAllMarkets = async (
         const supplyRate = utilizationRate * borrowRate * (1 - reserveFactor);
         const borrowRateCurrent = borrowRate + utilizationRate * slope;
 
+        // Calculate APY for mock data
+        const apyCalculation = calculateDepositAPY(
+          {
+            borrowRate: borrowRate * 10000, // Convert to basis points
+            slope: slope * 10000, // Convert to basis points
+            reserveFactor: reserveFactor * 10000, // Convert to basis points
+          },
+          {
+            totalScaledDeposits: totalDeposits,
+            totalScaledBorrows: totalBorrows,
+            lastUpdateTime: Date.now(),
+          }
+        );
+
         return {
           networkId,
           poolId,
           marketId,
           tokenId: token.underlyingAssetId || token.symbol,
           tokenContractId: token.underlyingContractId || token.symbol,
+          ntokenId: token.underlyingContractId || token.symbol,
           name: token.name,
           symbol: token.symbol,
           decimals: token.decimals,
@@ -361,9 +459,14 @@ export const fetchAllMarkets = async (
           utilizationRate,
           supplyRate,
           borrowRateCurrent,
+          price: "1.0", // Mock price
           isActive: true,
           isPaused: false,
           lastUpdated: new Date().toISOString(),
+          // Mock current market indices (starting at 1e18)
+          depositIndex: "1000000000000000000",
+          borrowIndex: "1000000000000000000",
+          apyCalculation,
         };
       });
 
@@ -397,12 +500,27 @@ export const fetchAllMarkets = async (
         const supplyRate = utilizationRate * borrowRate * (1 - reserveFactor);
         const borrowRateCurrent = borrowRate + utilizationRate * slope;
 
+        // Calculate APY for EVM mock data
+        const apyCalculation = calculateDepositAPY(
+          {
+            borrowRate: borrowRate * 10000, // Convert to basis points
+            slope: slope * 10000, // Convert to basis points
+            reserveFactor: reserveFactor * 10000, // Convert to basis points
+          },
+          {
+            totalScaledDeposits: totalDeposits,
+            totalScaledBorrows: totalBorrows,
+            lastUpdateTime: Date.now(),
+          }
+        );
+
         return {
           networkId,
           poolId,
           marketId,
           tokenId: token.underlyingAssetId || token.symbol,
           tokenContractId: token.underlyingContractId || token.symbol,
+          ntokenId: token.underlyingContractId || token.symbol,
           name: token.name,
           symbol: token.symbol,
           decimals: token.decimals,
@@ -420,9 +538,14 @@ export const fetchAllMarkets = async (
           utilizationRate,
           supplyRate,
           borrowRateCurrent,
+          price: "1.0", // Mock price
           isActive: true,
           isPaused: false,
           lastUpdated: new Date().toISOString(),
+          // Mock current market indices (starting at 1e18)
+          depositIndex: "1000000000000000000",
+          borrowIndex: "1000000000000000000",
+          apyCalculation,
         };
       });
 
@@ -436,6 +559,180 @@ export const fetchAllMarkets = async (
   } catch (error) {
     console.error("Error fetching all markets:", error);
     return [];
+  }
+};
+
+/**
+ * Fetch user global data (total collateral and borrow values)
+ */
+export const fetchUserGlobalData = async (
+  userAddress: string,
+  networkId: NetworkId
+): Promise<{
+  totalCollateralValue: number;
+  totalBorrowValue: number;
+  lastUpdateTime: number;
+} | null> => {
+  try {
+    const networkConfig = getNetworkConfig(networkId);
+
+    if (isAlgorandCompatibleNetwork(networkId)) {
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      // Initialize aggregate values
+      let totalCollateralValueUSD = 0;
+      let totalBorrowValueUSD = 0;
+      let lastUpdateTime = 0;
+
+      for (const poolId of networkConfig.contracts.lendingPools) {
+        const ci = new CONTRACT(
+          Number(poolId),
+          clients.algod,
+          undefined,
+          { ...LendingPoolAppSpec.contract, events: [] },
+          {
+            addr: algosdk.getApplicationAddress(Number(poolId)),
+            sk: new Uint8Array(),
+          }
+        );
+
+        const globalUserR = await ci.get_global_user(userAddress);
+        if (globalUserR.success) {
+          const globalUser = GlobalUserData(globalUserR.returnValue);
+          console.log(`Global user data for pool ${poolId}:`, globalUser);
+
+          // Contract stores totalCollateralValue with scaling: (deposit_amount * price) // SCALE
+          // Where SCALE = 1e18, so we need to divide by 1e18 to get USD value
+          const poolCollateralValueUSD = new BigNumber(
+            globalUser.totalCollateralValue.toString()
+          )
+            .div(1e12) // Correct scaling factor for collateral value
+            .toNumber();
+          const poolBorrowValueUSD = new BigNumber(
+            globalUser.totalBorrowValue.toString()
+          )
+            .div(1e12) // Correct scaling factor for borrow value
+            .toNumber();
+
+          console.log(`Pool ${poolId} values:`, {
+            collateralValueUSD: poolCollateralValueUSD,
+            borrowValueUSD: poolBorrowValueUSD,
+          });
+
+          // Aggregate values from all pools
+          totalCollateralValueUSD += poolCollateralValueUSD;
+          totalBorrowValueUSD += poolBorrowValueUSD;
+          // Use the latest update time from all pools
+          lastUpdateTime = Math.max(
+            lastUpdateTime,
+            Number(globalUser.lastUpdateTime)
+          );
+        } else {
+          console.warn(`Failed to get global user data for pool ${poolId}`);
+        }
+      }
+
+      return {
+        totalCollateralValue: totalCollateralValueUSD,
+        totalBorrowValue: totalBorrowValueUSD,
+        lastUpdateTime: lastUpdateTime,
+      };
+    } else if (isEVMNetwork(networkId)) {
+      throw new Error("EVM networks are not supported yet");
+    } else {
+      throw new Error("Unsupported network");
+    }
+  } catch (error) {
+    console.error("Error fetching user global data:", error);
+    return null;
+  }
+};
+
+/**
+ * Fetch user borrow balance for a specific market
+ * This gets the user's scaled borrows from the lending pool contract
+ */
+export const fetchUserBorrowBalance = async (
+  userAddress: string,
+  poolId: string,
+  marketId: string,
+  networkId: NetworkId
+): Promise<number | null> => {
+  try {
+    const networkConfig = getNetworkConfig(networkId);
+
+    if (isAlgorandCompatibleNetwork(networkId)) {
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      const ci = new CONTRACT(
+        Number(poolId),
+        clients.algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        {
+          addr: algosdk.getApplicationAddress(Number(poolId)),
+          sk: new Uint8Array(),
+        }
+      );
+
+      // Get user's position data from the lending pool contract
+      ci.setFee(2000);
+      const userDataR = await ci.get_user(userAddress, Number(marketId));
+      console.log(`get_user response for market ${marketId}:`, userDataR);
+
+      if (userDataR.success) {
+        const userData = UserData(userDataR.returnValue);
+        console.log(`User data for market ${marketId}:`, userData);
+
+        // Get token info to convert scaled borrows to actual amount
+        const tokens = getAllTokensWithDisplayInfo(networkId);
+        const token = tokens.find((t) => t.underlyingContractId === marketId);
+
+        if (!token) {
+          console.warn(`Token not found for market ${marketId}`);
+          return null;
+        }
+
+        // Check if scaledBorrows exists and is valid
+        if (!userData.scaledBorrows) {
+          console.log(
+            `No borrows found for user ${userAddress} in market ${marketId}`
+          );
+          return 0; // Return 0 instead of null for no borrows
+        }
+
+        // Convert scaled borrows to actual token amount
+        const scaledBorrows = new BigNumber(userData.scaledBorrows.toString());
+
+        // scaled_borrows is already in the correct units, just need to account for token decimals
+        const actualBorrowAmount = scaledBorrows
+          .dividedBy(new BigNumber(10).pow(token.decimals))
+          .toNumber();
+
+        console.log(`User borrow balance for ${token.symbol}:`, {
+          scaledBorrows: scaledBorrows.toString(),
+          actualBorrowAmount,
+          tokenDecimals: token.decimals,
+        });
+
+        return actualBorrowAmount;
+      } else {
+        console.warn(
+          `Failed to get user data for market ${marketId}:`,
+          userDataR
+        );
+        return null;
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.error("Error fetching user borrow balance:", error);
+    return null;
   }
 };
 
@@ -667,9 +964,17 @@ export const withdraw = async (
         }
       );
 
+      const contractIds = {
+        lending: Number(poolId),
+        token: Number(token.underlyingContractId),
+        ntoken: Number(marketInfo.ntokenId),
+      };
+
+      console.log("contractIds", { contractIds });
+
       const builder = {
         lending: new CONTRACT(
-          Number(poolId),
+          contractIds.lending,
           clients.algod,
           undefined,
           { ...LendingPoolAppSpec.contract, events: [] },
@@ -682,7 +987,7 @@ export const withdraw = async (
           true
         ),
         token: new CONTRACT(
-          Number(token.underlyingContractId),
+          contractIds.token,
           clients.algod,
           undefined,
           abi.nt200,
@@ -695,7 +1000,7 @@ export const withdraw = async (
           true
         ),
         ntoken: new CONTRACT(
-          Number(marketInfo.ntokenId),
+          contractIds.ntoken,
           clients.algod,
           undefined,
           abi.nt200,
@@ -834,6 +1139,8 @@ export const deposit = async (
 
       // Convert amount to proper units (considering decimals)
       const bigAmount = BigInt(amount);
+
+      console.log("bigAmount", { bigAmount });
 
       // Check if market is paused
       const marketPaused = await isMarketPaused(poolId, marketId, networkId);
@@ -1055,6 +1362,283 @@ export const deposit = async (
     }
   } catch (error) {
     console.error("Error depositing:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    };
+  }
+};
+
+/**
+ * Borrow tokens from a lending market
+ */
+export const borrow = async (
+  poolId: string,
+  marketId: string,
+  tokenStandard: TokenStandard,
+  amount: string,
+  userAddress: string,
+  networkId: NetworkId
+): Promise<
+  | { success: boolean; txId?: string; error?: string }
+  | { success: true; txns: string[] }
+> => {
+  console.log("borrow", { poolId, marketId, amount, userAddress, networkId });
+
+  try {
+    const networkConfig = getCurrentNetworkConfig();
+
+    if (isAlgorandCompatibleNetwork(networkId)) {
+      console.log({ networkConfig });
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      // Get token information
+      const allTokens = getAllTokensWithDisplayInfo(networkId);
+      console.log(
+        "All available tokens:",
+        allTokens.map((t) => ({
+          symbol: t.symbol,
+          underlyingContractId: t.underlyingContractId,
+          originalContractId: t.originalContractId,
+        }))
+      );
+      console.log("Looking for marketId:", marketId);
+
+      const token = allTokens.find(
+        (token) => token.underlyingContractId === marketId
+      );
+
+      console.log("Token found:", token);
+
+      if (!token) {
+        console.error("Token not found for marketId:", marketId);
+        console.error(
+          "Available underlyingContractIds:",
+          allTokens.map((t) => t.underlyingContractId)
+        );
+        throw new Error("Token not found");
+      }
+
+      // Convert amount to proper units (considering decimals)
+      const bigAmount = BigInt(amount);
+
+      // Check if market is paused
+      const marketPaused = await isMarketPaused(poolId, marketId, networkId);
+      if (marketPaused) {
+        throw new Error("Market is paused");
+      }
+
+      // Get market info and user global data to check borrowing capacity
+      console.log({
+        fetchMarketInfo: {
+          poolId,
+          marketId,
+          networkId,
+        },
+      });
+      const marketInfo = await fetchMarketInfo(poolId, marketId, networkId);
+      if (!marketInfo) {
+        throw new Error("Failed to fetch market info");
+      }
+
+      console.log("marketInfo", { marketInfo });
+
+      // Get user global data to check borrowing capacity
+      const userGlobalData = await fetchUserGlobalData(userAddress, networkId);
+      if (!userGlobalData) {
+        throw new Error("Failed to fetch user global data");
+      }
+
+      console.log("userGlobalData", { userGlobalData });
+
+      const borrowAmount = new BigNumber(amount);
+
+      // Check if borrow would exceed available liquidity in the market
+      const currentTotalDeposits = new BigNumber(marketInfo.totalDeposits);
+      const currentTotalBorrows = new BigNumber(marketInfo.totalBorrows);
+      const availableLiquidity =
+        currentTotalDeposits.minus(currentTotalBorrows);
+
+      if (borrowAmount.isGreaterThan(availableLiquidity)) {
+        //throw new Error("Insufficient liquidity available for borrowing");
+      }
+
+      // Check if borrow would exceed max total borrows for the market
+      const maxTotalBorrows = new BigNumber(marketInfo.maxTotalBorrows);
+      if (
+        currentTotalBorrows.plus(borrowAmount).isGreaterThan(maxTotalBorrows)
+      ) {
+        //throw new Error("Borrow would exceed maximum total borrows");
+      }
+
+      // Collateral-based validation removed
+
+      const ci = new CONTRACT(
+        Number(poolId),
+        clients.algod,
+        undefined,
+        abi.custom,
+        {
+          addr: userAddress,
+          sk: new Uint8Array(),
+        }
+      );
+
+      const builder = {
+        lending: new CONTRACT(
+          Number(poolId),
+          clients.algod,
+          undefined,
+          { ...LendingPoolAppSpec.contract, events: [] },
+          {
+            addr: userAddress,
+            sk: new Uint8Array(),
+          },
+          true,
+          false,
+          true
+        ),
+        token: new CONTRACT(
+          Number(token.underlyingContractId),
+          clients.algod,
+          undefined,
+          abi.nt200,
+          {
+            addr: userAddress,
+            sk: new Uint8Array(),
+          },
+          true,
+          false,
+          true
+        ),
+        ntoken: new CONTRACT(
+          Number(marketInfo.ntokenId),
+          clients.algod,
+          undefined,
+          abi.nt200,
+          {
+            addr: userAddress,
+            sk: new Uint8Array(),
+          }
+        ),
+      };
+
+      let customTx: any;
+
+      for (const p of [
+        [0, 0, 0],
+        [0, 1, 0],
+        [1, 1, 1],
+        [1, 0, 1],
+      ]) {
+        const [p1, p2, p3] = p;
+        const buildN = [];
+
+        // approve ntoken spending
+        // {
+        //   const txnO = (
+        //     await builder.ntoken.arc200_approve(
+        //       algosdk.getApplicationAddress(Number(poolId)),
+        //       BigInt(new BigNumber(amount).multipliedBy(1.1).toFixed(0)) // TODO only increase for NODE
+        //     )
+        //   ).obj;
+        //   buildN.push({
+        //     ...txnO,
+        //     payment: 28505,
+        //     note: new TextEncoder().encode("nt200 approve"),
+        //   });
+        // }
+
+        // Borrow from lending pool
+        {
+          const borrowCost = p3 > 0 ? 900000 : 0;
+          const txnO = (
+            await builder.lending.borrow(Number(marketId), BigInt(amount))
+          ).obj as any;
+          buildN.push({
+            ...txnO,
+            note: new TextEncoder().encode("lending borrow"),
+            payment: borrowCost,
+            foreignApps: [46505155],
+          });
+        }
+        // Withdraw borrowed tokens to user
+        if (tokenStandard == "network") {
+          if (p1 > 0) {
+            const txnO = (
+              await builder.token.createBalanceBox(
+                algosdk.getApplicationAddress(Number(poolId))
+              )
+            ).obj;
+            console.log("createBalanceBox", { txnO });
+            buildN.push({
+              ...txnO,
+              payment: 28500,
+              note: new TextEncoder().encode("nt200 createBalanceBox"),
+            });
+          }
+          if (p2 > 0) {
+            const txnO = (await builder.token.createBalanceBox(userAddress))
+              .obj;
+            buildN.push({
+              ...txnO,
+              payment: 28501,
+              note: new TextEncoder().encode("nt200 createBalanceBox"),
+            });
+          }
+          {
+            const txnO = (await builder.token.withdraw(BigInt(amount))).obj;
+            buildN.push({
+              ...txnO,
+              note: new TextEncoder().encode("nt200 withdraw"),
+            });
+          }
+        } else if (tokenStandard == "asa") {
+          const txnO = (await builder.token.withdraw(BigInt(amount))).obj;
+          buildN.push({
+            ...txnO,
+            note: new TextEncoder().encode("nt200 withdraw"),
+          });
+        }
+
+        console.log("buildN", { buildN });
+
+        // Create borrow transaction
+        ci.setFee(20000);
+        ci.setEnableGroupResourceSharing(true);
+        ci.setExtraTxns(buildN);
+        if (networkConfig.networkId === "algorand-mainnet") {
+          ci.setBeaconId(3209233839); // TODO move this to ulujs
+        }
+
+        customTx = await ci.custom();
+
+        console.log("customTx", { customTx });
+
+        if (customTx.success) {
+          break;
+        }
+      }
+
+      console.log("customTx", { customTx });
+
+      if (!customTx.success) {
+        throw new Error("Failed to create borrow transaction");
+      }
+
+      return {
+        success: true,
+        txns: [...customTx.txns],
+      };
+    } else if (isEVMNetwork(networkId)) {
+      throw new Error("EVM networks are not supported yet");
+    } else {
+      throw new Error("Unsupported network");
+    }
+  } catch (error) {
+    console.error("Error borrowing:", error);
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error occurred",

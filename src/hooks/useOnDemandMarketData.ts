@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useNetwork } from '@/contexts/NetworkContext';
 import { getAllTokensWithDisplayInfo, NetworkId, getCurrentNetworkConfig, getLendingPools } from '@/config';
 import { fetchMarketInfo, type MarketInfo } from '@/services/lendingService';
+import { APYCalculationResult } from '@/utils/apyCalculations';
 
 export interface OnDemandMarketData {
   asset: string;
@@ -27,6 +28,8 @@ export interface OnDemandMarketData {
   error?: string;
   marketInfo?: MarketInfo;
   lastFetched?: number; // Timestamp of last fetch
+  // APY calculation results
+  apyCalculation?: APYCalculationResult;
 }
 
 export type SortField = 'asset' | 'totalSupplyUSD' | 'supplyAPY' | 'totalBorrowUSD' | 'borrowAPY' | 'utilization';
@@ -166,10 +169,10 @@ export const useOnDemandMarketData = ({
           icon: token.logoPath,
           totalSupply: totalSupplyAmount,
           totalSupplyUSD: totalSupplyAmount * tokenPrice,
-          supplyAPY: marketInfo.supplyRate * 100,
+          supplyAPY: marketInfo.apyCalculation?.apy || marketInfo.supplyRate * 100,
           totalBorrow: totalBorrowAmount,
           totalBorrowUSD: totalBorrowAmount * tokenPrice,
-          borrowAPY: marketInfo.borrowRateCurrent * 100,
+          borrowAPY: marketInfo.borrowApyCalculation?.apy || marketInfo.borrowRateCurrent * 100,
           utilization: marketInfo.utilizationRate * 100,
           collateralFactor: marketInfo.collateralFactor * 100,
           walletBalance: 0, // This would need wallet integration
@@ -184,6 +187,7 @@ export const useOnDemandMarketData = ({
           isLoaded: true,
           marketInfo, // This contains the correct poolId for this market
           lastFetched: Date.now(),
+          apyCalculation: marketInfo.apyCalculation, // Include APY calculation results
         };
 
         setMarketsData(prev => ({

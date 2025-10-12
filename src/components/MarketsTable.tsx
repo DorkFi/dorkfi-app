@@ -17,6 +17,7 @@ import WithdrawModal from "@/components/WithdrawModal";
 import MarketDetailModal from "@/components/MarketDetailModal";
 import MarketsHeroSection from "@/components/markets/MarketsHeroSection";
 import MarketsTableContent from "@/components/markets/MarketsTableContent";
+import { fetchUserGlobalData, fetchUserBorrowBalance } from "@/services/lendingService";
 
 const MarketsTable = () => {
   const [searchTerm, setSearchTerm] = useState("");
@@ -28,6 +29,13 @@ const MarketsTable = () => {
   const [detailModal, setDetailModal] = useState({ isOpen: false, asset: null, marketData: null });
   const [walletBalances, setWalletBalances] = useState<Record<string, { balance: number; balanceUSD: number }>>({});
   const [isLoadingBalance, setIsLoadingBalance] = useState(false);
+  const [userGlobalData, setUserGlobalData] = useState<{
+    totalCollateralValue: number;
+    totalBorrowValue: number;
+    lastUpdateTime: number;
+  } | null>(null);
+  const [userBorrowBalance, setUserBorrowBalance] = useState<number>(0);
+  const [isLoadingGlobalData, setIsLoadingGlobalData] = useState(false);
   
   // Mock user deposits - in real app, this would come from user's wallet/backend
   const [userDeposits] = useState<Record<string, number>>({});
@@ -90,8 +98,44 @@ const MarketsTable = () => {
     setWithdrawModal({ isOpen: true, asset });
   };
 
-  const handleBorrowClick = (asset: string) => {
-    setBorrowModal({ isOpen: true, asset });
+  const handleBorrowClick = async (asset: string) => {
+    if (!activeAccount?.address) {
+      console.error("No active account for borrowing");
+      return;
+    }
+
+    setIsLoadingGlobalData(true);
+    
+    try {
+      // Fetch user global data before opening modal
+      const globalData = await fetchUserGlobalData(activeAccount.address, currentNetwork);
+      setUserGlobalData(globalData);
+      
+      // Fetch user's current borrow balance for this specific asset
+      const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+      const token = tokens.find((t) => t.symbol === asset);
+      
+      if (token && token.poolId && token.underlyingContractId) {
+        const borrowBalance = await fetchUserBorrowBalance(
+          activeAccount.address,
+          token.poolId,
+          token.underlyingContractId,
+          currentNetwork
+        );
+        setUserBorrowBalance(borrowBalance || 0);
+      } else {
+        setUserBorrowBalance(0);
+      }
+      
+      // Open modal after data is fetched
+      setBorrowModal({ isOpen: true, asset });
+    } catch (error) {
+      console.error("Error fetching user data for borrow:", error);
+      // Still open modal even if data fetch fails
+      setBorrowModal({ isOpen: true, asset });
+    } finally {
+      setIsLoadingGlobalData(false);
+    }
   };
 
   const handleCloseDepositModal = () => {
@@ -114,10 +158,13 @@ const MarketsTable = () => {
     const asset = borrowModal.asset;
     setBorrowModal({ isOpen: false, asset: null });
     
-    // Refresh market data after borrow
+    // Refresh market data and user global data after borrow
     if (asset) {
       loadMarketDataWithBypass(asset.toLowerCase());
-      // Note: Borrowing doesn't affect wallet balance, but we could refresh if needed
+      // Refresh user global data to show updated collateral/borrow values
+      if (activeAccount?.address) {
+        refreshUserGlobalData();
+      }
     }
   };
 
@@ -139,9 +186,10 @@ const MarketsTable = () => {
     loadAllMarkets();
   }, [loadAllMarkets]);
 
-  // Clear wallet balance cache when wallet address changes
+  // Clear wallet balance cache and user global data when wallet address changes
   useEffect(() => {
     setWalletBalances({});
+    setUserGlobalData(null);
   }, [activeAccount?.address]);
 
   // Handle refresh button click
@@ -160,6 +208,18 @@ const MarketsTable = () => {
     
     // Fetch fresh balance
     await fetchWalletBalance(asset);
+  };
+
+  // Refresh user global data (clears cache and refetches)
+  const refreshUserGlobalData = async () => {
+    if (!activeAccount?.address) return;
+    
+    try {
+      const globalData = await fetchUserGlobalData(activeAccount.address, currentNetwork);
+      setUserGlobalData(globalData);
+    } catch (error) {
+      console.error("Error refreshing user global data:", error);
+    }
   };
 
   // Fetch wallet balance for a specific asset
@@ -292,6 +352,9 @@ const MarketsTable = () => {
       collateralFactor: market.collateralFactor,
       liquidity: market.totalSupply - market.totalBorrow,
       liquidityUSD: market.totalSupplyUSD - market.totalBorrowUSD,
+      reserveFactor: market.reserveFactor,
+      apyCalculation: market.apyCalculation,
+      maxTotalDeposits: market.supplyCap,
     };
   };
 
@@ -439,6 +502,8 @@ const MarketsTable = () => {
             asset={borrowModal.asset}
             mode="borrow"
             assetData={getAssetData(borrowModal.asset)}
+            userGlobalData={userGlobalData}
+            userBorrowBalance={userBorrowBalance}
             onTransactionSuccess={() => {
               // Refresh market data after successful borrow
               if (borrowModal.asset) {

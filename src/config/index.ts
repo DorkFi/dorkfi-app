@@ -24,6 +24,7 @@ export interface ContractConfig {
   liquidationEngine?: string;
   governance?: string;
   treasury?: string;
+  marketController?: string;
   // Add more contracts as needed
 }
 
@@ -379,7 +380,7 @@ const betaTokens: { [symbol: string]: TokenConfig } = {
     contractId: "46528407",
     poolId: "46505156",
     nTokenId: "46528426",
-    decimals: 8,
+    decimals: 6,
     name: "BTC",
     symbol: "BTC",
     logoPath: "/lovable-uploads/WrappedBTC.png",
@@ -405,6 +406,7 @@ const voiMainnetConfig: NetworkConfig = {
     liquidationEngine: undefined,
     governance: undefined,
     treasury: undefined,
+    marketController: "46565930",
   },
   tokens: { ...betaTokens },
   gasStation: ["VOI", "ALGO", "USDC", "ETH", "BTC"],
