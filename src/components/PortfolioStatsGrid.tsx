@@ -26,8 +26,8 @@ const PortfolioStatsGrid: React.FC<PortfolioStatsGridProps> = ({ userStats }) =>
         </CardTitle>
       </CardHeader>
       <CardContent className="text-center">
-        <div className="text-lg md:text-2xl font-bold text-slate-800 dark:text-white">${userStats.totalDeposits.toLocaleString()}</div>
-        <p className="text-xs text-slate-500 dark:text-muted-foreground mt-1">+12.5% this month</p>
+        <div className="text-lg md:text-2xl font-bold text-slate-800 dark:text-white">${userStats.totalDeposits >= 1 ? Math.round(userStats.totalDeposits).toLocaleString() : userStats.totalDeposits.toFixed(2)}</div>
+        <p className="text-xs text-slate-500 dark:text-muted-foreground mt-1">Latest</p>
       </CardContent>
     </Card>
     <Card className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 border border-gray-200/50 dark:border-ocean-teal/20 hover:border-ocean-teal/40 transition-all hover:scale-105 shadow-md">
@@ -39,8 +39,8 @@ const PortfolioStatsGrid: React.FC<PortfolioStatsGridProps> = ({ userStats }) =>
         </CardTitle>
       </CardHeader>
       <CardContent className="text-center">
-        <div className="text-lg md:text-2xl font-bold text-slate-800 dark:text-white">${userStats.totalBorrows.toLocaleString()}</div>
-        <p className="text-xs text-slate-500 dark:text-muted-foreground mt-1">-3.2% this month</p>
+        <div className="text-lg md:text-2xl font-bold text-slate-800 dark:text-white">${userStats.totalBorrows >= 1 ? Math.round(userStats.totalBorrows).toLocaleString() : userStats.totalBorrows.toFixed(2)}</div>
+        <p className="text-xs text-slate-500 dark:text-muted-foreground mt-1">Latest</p>
       </CardContent>
     </Card>
     <Card className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 border border-gray-200/50 dark:border-ocean-teal/20 hover:border-ocean-teal/40 transition-all hover:scale-105 shadow-md">
@@ -61,7 +61,7 @@ const PortfolioStatsGrid: React.FC<PortfolioStatsGridProps> = ({ userStats }) =>
         </CardTitle>
       </CardHeader>
       <CardContent className="text-center">
-        <div className="text-lg md:text-2xl font-bold text-whale-gold">{userStats.healthFactor}</div>
+        <div className="text-lg md:text-2xl font-bold text-whale-gold">{userStats.healthFactor.toFixed(2)}</div>
         <p className="text-xs text-slate-500 dark:text-muted-foreground mt-1">Safe</p>
       </CardContent>
     </Card>
@@ -74,7 +74,7 @@ const PortfolioStatsGrid: React.FC<PortfolioStatsGridProps> = ({ userStats }) =>
         </CardTitle>
       </CardHeader>
       <CardContent className="text-center">
-        <div className="text-lg md:text-2xl font-bold text-whale-gold">{userStats.netAPY}%</div>
+        <div className="text-lg md:text-2xl font-bold text-whale-gold">{userStats.netAPY.toFixed(2)}%</div>
         <p className="text-xs text-slate-500 dark:text-muted-foreground mt-1">Current rate</p>
       </CardContent>
     </Card>
@@ -87,7 +87,7 @@ const PortfolioStatsGrid: React.FC<PortfolioStatsGridProps> = ({ userStats }) =>
         </CardTitle>
       </CardHeader>
       <CardContent className="text-center">
-        <div className="text-lg md:text-2xl font-bold text-whale-gold">${userStats.netWorth.toLocaleString()}</div>
+        <div className="text-lg md:text-2xl font-bold text-whale-gold">${userStats.netWorth >= 1 ? Math.round(userStats.netWorth).toLocaleString() : userStats.netWorth.toFixed(2)}</div>
         <p className="text-xs text-slate-500 dark:text-muted-foreground mt-1">Portfolio value</p>
       </CardContent>
     </Card>

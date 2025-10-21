@@ -26,6 +26,7 @@ interface SupplyBorrowFormProps {
   onSubmit: () => void;
   isLoading?: boolean;
   disabled?: boolean;
+  onRefreshWalletBalance?: () => void;
 }
 
 const SupplyBorrowForm = ({ 
@@ -42,7 +43,8 @@ const SupplyBorrowForm = ({
   onAmountChange, 
   onSubmit,
   isLoading = false,
-  disabled = false
+  disabled = false,
+  onRefreshWalletBalance
 }: SupplyBorrowFormProps) => {
   const [amount, setAmount] = useState("");
   const [fiatValue, setFiatValue] = useState(0);
@@ -260,23 +262,68 @@ const SupplyBorrowForm = ({
           </div>
         )}
         
-        <p className="text-xs text-slate-400 dark:text-slate-500">
-          {mode === "deposit" ? (
-            <>
-              Wallet Balance: {walletBalance.toLocaleString()} {asset} 
-              (${walletBalanceUSD.toLocaleString()})
-            </>
-          ) : (
-            <>
-              Max Borrowable: {calculateMaxBorrowable().toLocaleString()} {asset}
-              {userGlobalData && (
-                <span className="ml-2">
-                  (${(calculateMaxBorrowable() * (tokenPrice || 1)).toLocaleString()})
-                </span>
+        {/* Wallet Balance / Max Borrowable Display */}
+        <div className={`p-3 rounded-lg border ${
+          mode === "deposit" 
+            ? "bg-teal-50 dark:bg-teal-900/20 border-teal-200 dark:border-teal-800" 
+            : "bg-whale-gold/10 border-whale-gold/30"
+        }`}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${
+                mode === "deposit" ? "bg-teal-500" : "bg-whale-gold"
+              }`}></div>
+              <span className={`text-sm font-medium ${
+                mode === "deposit" 
+                  ? "text-teal-700 dark:text-teal-300" 
+                  : "text-whale-gold"
+              }`}>
+                {mode === "deposit" ? "Wallet Balance" : "Max Borrowable"}
+              </span>
+              {mode === "deposit" && onRefreshWalletBalance && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={onRefreshWalletBalance}
+                  className={`h-6 w-6 p-0 hover:bg-opacity-20 ${
+                    mode === "deposit" 
+                      ? "text-teal-600 hover:bg-teal-100 dark:text-teal-400 dark:hover:bg-teal-800" 
+                      : "text-whale-gold hover:bg-whale-gold/20"
+                  }`}
+                  title="Refresh wallet balance"
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                </Button>
               )}
-            </>
-          )}
-        </p>
+            </div>
+            <div className="text-right">
+              <div className={`text-sm font-semibold ${
+                mode === "deposit" 
+                  ? "text-teal-800 dark:text-teal-200" 
+                  : "text-whale-gold"
+              }`}>
+                {mode === "deposit" 
+                  ? `${walletBalance.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${asset}`
+                  : `${calculateMaxBorrowable().toLocaleString(undefined, { maximumFractionDigits: 6 })} ${asset}`
+                }
+              </div>
+              <div className={`text-xs ${
+                mode === "deposit" 
+                  ? "text-teal-600 dark:text-teal-400" 
+                  : "text-whale-gold/80"
+              }`}>
+                {mode === "deposit" 
+                  ? `≈ $${walletBalanceUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                  : userGlobalData 
+                    ? `≈ $${(calculateMaxBorrowable() * (tokenPrice || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    : "Connect wallet to see USD value"
+                }
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <Button

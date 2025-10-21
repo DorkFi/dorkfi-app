@@ -11,6 +11,7 @@ import CandlestickChart from "@/components/CandlestickChart";
 import CanvasBubbles from "@/components/CanvasBubbles";
 import PreFi from "@/pages/PreFi";
 import { useIsMobile } from "@/hooks/use-mobile";
+import LiquidationMonitor from "@/components/liquidation/LiquidationMonitor";
 
 interface Token {
   symbol: string;
@@ -65,6 +66,8 @@ const Index = ({ activeTab, onTabChange }: IndexProps) => {
         return <MarketsTable />;
       case "portfolio":
         return <Portfolio />;
+      case "liquidations":
+        return <LiquidationMonitor accounts={[]} />;
       case "swap":
         return (
           <>

@@ -7,7 +7,7 @@ import { DollarSign, AlertTriangle, Activity } from 'lucide-react';
 interface HorizontalSummaryCardsProps {
   totalLiquidated24h: number;
   atRiskWallets: number;
-  activeLiquidationEvents: number;
+  activeLiquidationEvents: number; // This now represents total active wallets
 }
 
 export default function HorizontalSummaryCards({ 
@@ -43,12 +43,12 @@ export default function HorizontalSummaryCards({
       glowColor: "shadow-amber-500/20"
     },
     {
-      title: "Total Active Wallets (24h)",
+      title: "Total Active Wallets",
       value: activeLiquidationEvents.toLocaleString(),
       icon: Activity,
       color: "bg-gradient-to-br from-ocean-teal/10 to-ocean-teal/20 border-ocean-teal/30",
       iconColor: "text-ocean-teal dark:text-ocean-teal",
-      trend: "+5.3%",
+      trend: "Live",
       trendColor: "text-ocean-teal",
       glowColor: "shadow-ocean-teal/20"
     }

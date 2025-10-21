@@ -1008,6 +1008,79 @@ export default function PreFiDashboard() {
     }
   };
 
+  // Sync user market data after deposit/withdraw operations
+  const syncUserMarket = async (market: Market) => {
+    console.log(`Syncing market data for ${market.symbol} after transaction`);
+    
+    try {
+      // Refresh market balance
+      const wb = await chainApi.getMarketBalance(
+        activeAccount?.address || "",
+        market
+      );
+
+      // Update market state with fresh balance data
+      setMarketsState((s) => ({
+        ...s,
+        [market.id]: {
+          ...s[market.id],
+          walletBalanceBase: wb.balance,
+          depositedBase: wb.deposited,
+          oldNTokenBalanceBase: wb.oldNTokenBalance,
+        },
+      }));
+
+      // Refresh market price and pool data
+      if (market.poolId && market.marketId) {
+        const marketInfo = await fetchMarketInfo(
+          market.poolId,
+          market.marketId,
+          currentNetwork
+        );
+
+        if (marketInfo) {
+          // Update price
+          if (marketInfo.price) {
+            const partiallyScaledPrice = parseFloat(marketInfo.price);
+            const additionalScaling = Math.pow(10, 6);
+            const finalPrice = partiallyScaledPrice / additionalScaling;
+            setMarketPrices((prev) => ({ ...prev, [market.id]: finalPrice }));
+            console.log(`Updated price for ${market.symbol}: $${finalPrice}`);
+          }
+
+          // Update total deposits
+          if (marketInfo.totalDeposits) {
+            const totalDeposits = parseFloat(marketInfo.totalDeposits);
+            setMarketTotalDeposits((prev) => ({
+              ...prev,
+              [market.id]: totalDeposits,
+            }));
+            console.log(`Updated total deposits for ${market.symbol}: ${totalDeposits}`);
+          }
+
+          // Update max total deposits
+          if (marketInfo.maxTotalDeposits) {
+            const maxTotalDeposits = parseFloat(marketInfo.maxTotalDeposits);
+            setMarketMaxTotalDeposits((prev) => ({
+              ...prev,
+              [market.id]: maxTotalDeposits,
+            }));
+            console.log(`Updated max deposits for ${market.symbol}: ${maxTotalDeposits}`);
+          }
+        }
+      }
+
+      // Refresh VOI price if this is a VOI market
+      if (market.symbol === "VOI" || market.symbol === "Voi") {
+        await fetchVoiPrice();
+      }
+
+      console.log(`Successfully synced market data for ${market.symbol}`);
+    } catch (error) {
+      console.error(`Error syncing market data for ${market.symbol}:`, error);
+    }
+  };
+
   // Load market data for connected users
   useEffect(() => {
     if (!activeAccount?.address) return;

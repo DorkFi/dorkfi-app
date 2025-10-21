@@ -55,6 +55,7 @@ interface SupplyBorrowModalProps {
   } | null;
   userBorrowBalance?: number;
   onTransactionSuccess?: () => void;
+  onRefreshWalletBalance?: () => void;
 }
 
 const SupplyBorrowModal = ({

@@ -1225,7 +1225,9 @@ export const getTokenDisplayInfo = (networkId: NetworkId, symbol: string) => {
  * Get all tokens with display information (considering market overrides)
  */
 export const getAllTokensWithDisplayInfo = (networkId: NetworkId) => {
+  const networkConfig = getNetworkConfig(networkId);
   const tokens = config.networks[networkId].tokens;
+  console.log("tokens", { tokens });
   return Object.entries(tokens).map(([symbol, tokenConfig]) => ({
     symbol,
     ...getTokenDisplayInfo(networkId, symbol)!,

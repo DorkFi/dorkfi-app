@@ -8,7 +8,7 @@ import { Progress } from '@/components/ui/progress';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Eye, ExternalLink, AlertTriangle, Shield, Users } from 'lucide-react';
 import { LiquidationAccount } from '@/hooks/useLiquidationData';
-import { shortenAddress } from '@/utils/liquidationUtils';
+import { shortenAddress, formatRelativeTime } from '@/utils/liquidationUtils';
 import { useIsMobile } from '@/hooks/use-mobile';
 import LiquidationMobileCard from '@/components/liquidation/LiquidationMobileCard';
 
@@ -96,16 +96,6 @@ export default function LiquidationQueueTable({ accounts, onAccountClick, onLiqu
             <Table>
               <TableHeader>
                 <TableRow className="border-gray-200/50 dark:border-ocean-teal/20">
-                  <TableHead className="text-slate-600 dark:text-muted-foreground text-left">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="cursor-help">Asset</span>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Primary collateral asset backing this position</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TableHead>
                   <TableHead className="text-slate-600 dark:text-muted-foreground text-center">
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -123,6 +113,16 @@ export default function LiquidationQueueTable({ accounts, onAccountClick, onLiqu
                       </TooltipTrigger>
                       <TooltipContent>
                         <p>Total USD value of all collateral assets</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TableHead>
+                  <TableHead className="text-slate-600 dark:text-muted-foreground text-right hidden md:table-cell">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="cursor-help">Borrow Value</span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>Total USD value of borrowed assets</p>
                       </TooltipContent>
                     </Tooltip>
                   </TableHead>
@@ -153,7 +153,6 @@ export default function LiquidationQueueTable({ accounts, onAccountClick, onLiqu
                   const risk = getRiskBadge(account.healthFactor);
                   const Icon = risk.icon;
                   const healthPercentage = Math.min(account.healthFactor * 50, 100);
-                  const primaryAsset = account.collateralAssets[0] || { symbol: 'VOI', amount: 0, valueUSD: 0 };
 
                   return (
                     <TableRow 
@@ -162,23 +161,6 @@ export default function LiquidationQueueTable({ accounts, onAccountClick, onLiqu
                       onClick={() => onAccountClick?.(account)}
                       style={{ animationDelay: `${index * 50}ms` }}
                     >
-                      <TableCell className="text-left">
-                        <div className="flex items-center gap-2 md:gap-3">
-                          <img 
-                            src={getTokenIcon(primaryAsset.symbol)}
-                            alt={primaryAsset.symbol}
-                            className="w-6 h-6 md:w-8 md:h-8 rounded-full shadow-sm"
-                          />
-                          <div>
-                            <p className="font-semibold text-sm md:text-base text-foreground">
-                              {primaryAsset.symbol}
-                            </p>
-                            <p className="text-xs text-muted-foreground hidden md:block">
-                              {primaryAsset.amount.toLocaleString()} tokens
-                            </p>
-                          </div>
-                        </div>
-                      </TableCell>
                       <TableCell className="text-center">
                         <div className="space-y-1 md:space-y-2">
                           <div className="flex items-center justify-center gap-1 md:gap-2">
@@ -212,13 +194,23 @@ export default function LiquidationQueueTable({ accounts, onAccountClick, onLiqu
                           </p>
                         </div>
                       </TableCell>
+                      <TableCell className="hidden md:table-cell text-right">
+                        <div className="text-right">
+                          <p className="font-semibold text-foreground">
+                            ${account.totalBorrowed.toLocaleString()}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Total Borrowed
+                          </p>
+                        </div>
+                      </TableCell>
                       <TableCell className="hidden md:table-cell text-left">
                         <div className="font-mono text-sm">
                           <p className="font-medium text-foreground">
                             {shortenAddress(account.walletAddress)}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            Updated {account.lastUpdated}
+                            Updated {formatRelativeTime(parseInt(account.lastUpdated))}
                           </p>
                         </div>
                       </TableCell>

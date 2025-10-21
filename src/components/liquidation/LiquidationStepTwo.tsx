@@ -53,7 +53,10 @@ export default function LiquidationStepTwo({
             <div className="flex justify-between items-center">
               <span className="text-slate-600 dark:text-slate-300">Debt Repayment:</span>
               <span className="text-slate-800 dark:text-white font-semibold">
-                ${liquidationParams.repayAmountUSD.toLocaleString()} {liquidationParams.repayToken}
+                {(liquidationParams.repayAmountUSD / liquidationParams.debtPrice).toFixed(6)} {liquidationParams.repayToken}
+                <span className="text-sm text-muted-foreground ml-2">
+                  (${liquidationParams.repayAmountUSD.toLocaleString()})
+                </span>
               </span>
             </div>
             <div className="flex justify-between items-center">
@@ -79,8 +82,8 @@ export default function LiquidationStepTwo({
             <div className="bg-ocean-teal/10 border border-ocean-teal/30 rounded-lg p-3">
               <p className="text-slate-800 dark:text-white text-lg">
                 You are repaying <span className="font-bold text-whale-gold">
-                  ${liquidationParams.repayAmountUSD.toLocaleString()}
-                </span> of this borrower's debt
+                  {(liquidationParams.repayAmountUSD / liquidationParams.debtPrice).toFixed(6)} {liquidationParams.repayToken}
+                </span> (${liquidationParams.repayAmountUSD.toLocaleString()}) of this borrower's debt
               </p>
               <p className="text-slate-600 dark:text-slate-300 mt-2">
                 In return, you'll receive <span className="font-bold text-ocean-teal">

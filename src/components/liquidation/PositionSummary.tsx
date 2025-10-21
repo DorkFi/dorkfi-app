@@ -6,6 +6,11 @@ import { LiquidationAccount } from '@/hooks/useLiquidationData';
 
 interface PositionSummaryProps {
   account: LiquidationAccount;
+  realTotalDepositValue?: number;
+  realTotalBorrowValue?: number;
+  realRiskLevel?: string;
+  realLiquidationThreshold?: number;
+  weightedCollateralValue?: number;
 }
 
 const getRiskBadgeVariant = (riskLevel: string) => {
@@ -22,7 +27,52 @@ const getRiskBadgeVariant = (riskLevel: string) => {
   }
 };
 
-export default function PositionSummary({ account }: PositionSummaryProps) {
+export default function PositionSummary({ 
+  account, 
+  realTotalDepositValue, 
+  realTotalBorrowValue, 
+  realRiskLevel,
+  realLiquidationThreshold,
+  weightedCollateralValue
+}: PositionSummaryProps) {
+  // Use real data if available, otherwise fall back to account data
+  const totalCollateral = realTotalDepositValue ?? account.totalSupplied;
+  const totalBorrowed = realTotalBorrowValue ?? account.totalBorrowed;
+  
+  // Calculate real LTV using weighted collateral value (correct calculation)
+  const realLTV = weightedCollateralValue && realTotalBorrowValue 
+    ? (realTotalBorrowValue / weightedCollateralValue) * 100 
+    : realTotalDepositValue && realTotalBorrowValue 
+    ? (realTotalBorrowValue / realTotalDepositValue) * 100  // Fallback to raw collateral if weighted not available
+    : account.ltv * 100;
+
+  // Use real liquidation threshold or default to 85%
+  const liquidationThreshold = realLiquidationThreshold ?? 85;
+  
+  // Calculate liquidation margin based on weighted collateral value
+  const liquidationMargin = weightedCollateralValue && realTotalBorrowValue
+    ? weightedCollateralValue * (liquidationThreshold / 100) - realTotalBorrowValue
+    : realTotalDepositValue && realTotalBorrowValue
+    ? realTotalDepositValue * (liquidationThreshold / 100) - realTotalBorrowValue  // Fallback to raw collateral
+    : account.liquidationMargin;
+
+  // Debug logging to verify calculations
+  console.log('PositionSummary Debug:', {
+    realTotalDepositValue,
+    realTotalBorrowValue,
+    weightedCollateralValue,
+    liquidationThreshold,
+    calculatedLTV: weightedCollateralValue && realTotalBorrowValue 
+      ? (realTotalBorrowValue / weightedCollateralValue) * 100 
+      : 'N/A',
+    calculatedMargin: weightedCollateralValue && realTotalBorrowValue
+      ? weightedCollateralValue * (liquidationThreshold / 100) - realTotalBorrowValue
+      : 'N/A'
+  });
+
+  // Use real risk level or fall back to account risk level
+  const riskLevel = realRiskLevel ?? account.riskLevel;
+  
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <Card>
@@ -32,20 +82,20 @@ export default function PositionSummary({ account }: PositionSummaryProps) {
         <CardContent className="space-y-3">
           <div className="flex justify-between">
             <span className="text-sm text-muted-foreground">Total Collateral</span>
-            <span className="font-semibold">${account.totalSupplied.toLocaleString()}</span>
+            <span className="font-semibold">${totalCollateral.toLocaleString()}</span>
           </div>
           <div className="flex justify-between">
             <span className="text-sm text-muted-foreground">Total Borrowed</span>
-            <span className="font-semibold">${account.totalBorrowed.toLocaleString()}</span>
+            <span className="font-semibold">${totalBorrowed.toLocaleString()}</span>
           </div>
           <div className="flex justify-between">
             <span className="text-sm text-muted-foreground">Loan-to-Value</span>
-            <span className="font-semibold">{(account.ltv * 100).toFixed(1)}%</span>
+            <span className="font-semibold">{realLTV.toFixed(1)}%</span>
           </div>
           <div className="flex justify-between">
             <span className="text-sm text-muted-foreground">Liquidation Margin</span>
             <span className="font-semibold text-whale-gold">
-              ${account.liquidationMargin.toLocaleString()}
+              ${liquidationMargin.toLocaleString()}
             </span>
           </div>
         </CardContent>
@@ -58,22 +108,22 @@ export default function PositionSummary({ account }: PositionSummaryProps) {
         <CardContent className="space-y-3">
           <div className="flex justify-between">
             <span className="text-sm text-muted-foreground">Risk Level</span>
-            <Badge variant={getRiskBadgeVariant(account.riskLevel)}>
-              {account.riskLevel}
+            <Badge variant={getRiskBadgeVariant(riskLevel)}>
+              {riskLevel}
             </Badge>
           </div>
           <div className="flex justify-between">
             <span className="text-sm text-muted-foreground">Liquidation Threshold</span>
-            <span className="font-semibold">85%</span>
+            <span className="font-semibold">{liquidationThreshold.toFixed(1)}%</span>
           </div>
           <div className="flex justify-between">
             <span className="text-sm text-muted-foreground">Current LTV</span>
-            <span className="font-semibold">{(account.ltv * 100).toFixed(1)}%</span>
+            <span className="font-semibold">{realLTV.toFixed(1)}%</span>
           </div>
           <div className="flex justify-between">
             <span className="text-sm text-muted-foreground">Buffer</span>
             <span className="font-semibold text-ocean-teal">
-              {(85 - account.ltv * 100).toFixed(1)}%
+              {(liquidationThreshold - realLTV).toFixed(1)}%
             </span>
           </div>
         </CardContent>

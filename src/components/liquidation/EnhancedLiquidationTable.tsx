@@ -8,7 +8,7 @@ import { Progress } from '@/components/ui/progress';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ExternalLink, Eye, AlertTriangle, Shield, Users } from 'lucide-react';
 import { LiquidationAccount } from '@/hooks/useLiquidationData';
-import { shortenAddress } from '@/utils/liquidationUtils';
+import { shortenAddress, formatRelativeTime } from '@/utils/liquidationUtils';
 
 interface EnhancedLiquidationTableProps {
   accounts: LiquidationAccount[];
@@ -81,7 +81,7 @@ export default function EnhancedLiquidationTable({ accounts, onAccountClick }: E
                           {shortenAddress(account.walletAddress)}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          Updated {account.lastUpdated}
+                          Updated {formatRelativeTime(parseInt(account.lastUpdated))}
                         </p>
                       </div>
                     </div>

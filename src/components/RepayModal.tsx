@@ -22,12 +22,14 @@ interface RepayModalProps {
     currentLTV: number;
     tokenPrice: number;
   };
+  onSubmit: (amount: string) => Promise<void>;
 }
 
-const RepayModal = ({ isOpen, onClose, tokenSymbol, tokenIcon, currentBorrow, walletBalance, marketStats }: RepayModalProps) => {
+const RepayModal = ({ isOpen, onClose, tokenSymbol, tokenIcon, currentBorrow, walletBalance, marketStats, onSubmit }: RepayModalProps) => {
   const [amount, setAmount] = useState("");
   const [fiatValue, setFiatValue] = useState(0);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   // Reset states when modal opens/closes
   useEffect(() => {
@@ -35,6 +37,7 @@ const RepayModal = ({ isOpen, onClose, tokenSymbol, tokenIcon, currentBorrow, wa
       setShowSuccess(false);
       setAmount("");
       setFiatValue(0);
+      setIsLoading(false);
     }
   }, [isOpen]);
 
@@ -53,12 +56,23 @@ const RepayModal = ({ isOpen, onClose, tokenSymbol, tokenIcon, currentBorrow, wa
     setAmount(maxRepayAmount.toString());
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     console.log(`Repay ${amount} ${tokenSymbol}`);
     
-    setTimeout(() => {
+    try {
+      setIsLoading(true);
+      
+      // Call the onSubmit prop with the amount and wait for it to complete
+      await onSubmit(amount);
+      
+      // Only show success modal after transaction is actually completed
       setShowSuccess(true);
-    }, 500);
+    } catch (error) {
+      console.error("Repay transaction failed:", error);
+      // You might want to show an error message to the user here
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleViewTransaction = () => {
@@ -221,10 +235,10 @@ const RepayModal = ({ isOpen, onClose, tokenSymbol, tokenIcon, currentBorrow, wa
 
                 <Button
                   onClick={handleSubmit}
-                  disabled={!isValidAmount}
+                  disabled={!isValidAmount || isLoading}
                   className="w-full font-semibold h-12 bg-whale-gold hover:bg-whale-gold/90 text-black disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Repay {tokenSymbol}
+                  {isLoading ? "Processing..." : `Repay ${tokenSymbol}`}
                 </Button>
               </div>
             </>

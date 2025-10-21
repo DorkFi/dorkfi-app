@@ -51,7 +51,10 @@ const LiquidationCongrats: React.FC<LiquidationCongratsProps> = ({
           <div className="flex justify-between items-center">
             <span className="text-slate-300">Debt Repaid:</span>
             <span className="text-white font-semibold">
-              ${liquidationParams.repayAmountUSD.toLocaleString()} {liquidationParams.repayToken}
+              {(liquidationParams.repayAmountUSD / liquidationParams.debtPrice).toFixed(6)} {liquidationParams.repayToken}
+              <span className="text-sm text-slate-400 ml-2">
+                (${liquidationParams.repayAmountUSD.toLocaleString()})
+              </span>
             </span>
           </div>
           <div className="flex justify-between items-center">

@@ -6,6 +6,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Admin from "./pages/Admin";
 import GasStation from "./pages/GasStation";
+import LiquidationMarkets from "./pages/LiquidationMarkets";
 import { NetworkProvider } from "./contexts/NetworkContext";
 import Index from "./pages/Index";
 import AuthGuard from "./components/AuthGuard";
@@ -48,6 +49,15 @@ function App() {
               <Route path="/admin" element={<Admin />} />
               <Route path="/gas-station" element={<GasStation />} />
               {/*<Route path="/countdown" element={<CountdownPage />} />*/}
+              <Route
+                path="/liquidation-markets"
+                element={
+                  <LiquidationMarkets
+                    activeTab={activeTab}
+                    onTabChange={setActiveTab}
+                  />
+                }
+              />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </BrowserRouter>

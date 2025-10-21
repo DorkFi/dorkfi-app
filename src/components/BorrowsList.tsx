@@ -2,7 +2,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ArrowUp, Info } from "lucide-react";
+import { ArrowUp, Info, RefreshCw } from "lucide-react";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import DorkFiButton from "@/components/ui/DorkFiButton";
 
@@ -19,13 +19,28 @@ interface BorrowsListProps {
   borrows: Borrow[];
   onBorrowClick: (asset: string) => void;
   onRepayClick: (asset: string) => void;
+  onRefresh?: () => void;
+  isLoading?: boolean;
 }
 
-const BorrowsList = ({ borrows, onBorrowClick, onRepayClick }: BorrowsListProps) => {
+const BorrowsList = ({ borrows, onBorrowClick, onRepayClick, onRefresh, isLoading }: BorrowsListProps) => {
   return (
     <DorkFiCard className="card-hover dorkfi-mb-lg">
-      <div className="flex items-center gap-2 dorkfi-text-primary mb-4 text-lg font-bold">
-        <ArrowUp className="w-5 h-5 text-red-400" /> Your Borrows
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2 dorkfi-text-primary text-lg font-bold">
+          <ArrowUp className="w-5 h-5 text-red-400" /> Your Borrows
+        </div>
+        {onRefresh && (
+          <button
+            onClick={onRefresh}
+            disabled={isLoading}
+            className="flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Refresh borrows data"
+          >
+            <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        )}
       </div>
       <div className="space-y-4">
         {borrows.map((borrow) => (
@@ -68,7 +83,7 @@ const BorrowsList = ({ borrows, onBorrowClick, onRepayClick }: BorrowsListProps)
             <div className="mt-2 md:mt-0 text-center flex-shrink-0 min-w-[110px]">
               <div className="font-semibold text-red-400">${borrow.value.toLocaleString()}</div>
               <div className="text-sm text-red-400 flex flex-col items-center gap-1 mt-1">
-                <span>{borrow.apy}% APY</span>
+                <span>{borrow.apy.toFixed(2)}% APY</span>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Info className="w-3 h-3 cursor-help" />

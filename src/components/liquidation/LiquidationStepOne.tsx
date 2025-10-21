@@ -1,14 +1,14 @@
 
 import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import DorkFiButton from '@/components/ui/DorkFiButton';
-import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Label } from '@/components/ui/label';
-import { Calculator, DollarSign, Info } from 'lucide-react';
+import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { LiquidationAccount } from '@/hooks/useLiquidationData';
+import { useUserAssets } from '@/hooks/useUserAssets';
 import { LiquidationParams } from './EnhancedAccountDetailModal';
+import LiquidationStepNavigation from './LiquidationStepNavigation';
+import CollateralSelectionStep from './CollateralSelectionStep';
+import DebtSelectionStep from './DebtSelectionStep';
+import AmountInputStep from './AmountInputStep';
 
 interface LiquidationStepOneProps {
   account: LiquidationAccount;
@@ -16,32 +16,80 @@ interface LiquidationStepOneProps {
   onCancel: () => void;
 }
 
-// Mock prices for demonstration
-const MOCK_PRICES: Record<string, number> = {
-  'ETH': 2000,
-  'BTC': 45000,
-  'USDC': 1,
-  'VOI': 0.5,
-  'ALGO': 0.25,
-  'UNIT': 0.1,
-};
-
 export default function LiquidationStepOne({ account, onComplete, onCancel }: LiquidationStepOneProps) {
+  const [currentStep, setCurrentStep] = useState(1);
   const [selectedCollateral, setSelectedCollateral] = useState<string>('');
+  const [selectedDebt, setSelectedDebt] = useState<string>('');
   const [repayAmountUSD, setRepayAmountUSD] = useState<string>('');
   const [calculations, setCalculations] = useState<{
     collateralNeeded: number;
     liquidationBonus: number;
     newLTV: number;
     collateralPrice: number;
+    debtPrice: number;
   } | null>(null);
 
   const liquidationBonusRate = 0.05; // 5% bonus
 
+  // Get real-time asset data
+  const { assets } = useUserAssets(account.walletAddress);
+  
+  // Filter assets into collateral and borrowed categories
+  const collateralAssets = assets.filter(asset => asset.depositBalance > 0);
+  const borrowedAssets = assets.filter(asset => asset.borrowBalance > 0);
+
+  // Calculate completed steps
+  const completedSteps = [];
+  if (selectedCollateral) completedSteps.push(1);
+  if (selectedDebt) completedSteps.push(2);
+  if (repayAmountUSD && parseFloat(repayAmountUSD) > 0) completedSteps.push(3);
+
+  // Calculate disabled steps
+  const disabledSteps = [];
+  if (!selectedCollateral) disabledSteps.push(2, 3);
+  if (!selectedDebt) disabledSteps.push(3);
+
+  // Reset subsequent steps when earlier steps change
   useEffect(() => {
-    if (selectedCollateral && repayAmountUSD && parseFloat(repayAmountUSD) > 0) {
+    if (currentStep === 1) {
+      setSelectedDebt('');
+      setRepayAmountUSD('');
+      setCalculations(null);
+    } else if (currentStep === 2) {
+      setRepayAmountUSD('');
+      setCalculations(null);
+    }
+  }, [currentStep]);
+
+  // Reset debt selection when collateral changes
+  useEffect(() => {
+    if (selectedCollateral) {
+      setSelectedDebt('');
+      setRepayAmountUSD('');
+      setCalculations(null);
+    }
+  }, [selectedCollateral]);
+
+  // Reset repay amount when debt changes
+  useEffect(() => {
+    if (selectedDebt) {
+      setRepayAmountUSD('');
+      setCalculations(null);
+    }
+  }, [selectedDebt]);
+
+  // Calculate liquidation details
+  useEffect(() => {
+    if (selectedCollateral && selectedDebt && repayAmountUSD && parseFloat(repayAmountUSD) > 0) {
       const repayAmount = parseFloat(repayAmountUSD);
-      const collateralPrice = MOCK_PRICES[selectedCollateral] || 1;
+      
+      // Get real prices from market data
+      const selectedCollateralAsset = collateralAssets?.find(a => a.symbol === selectedCollateral);
+      const selectedDebtAsset = borrowedAssets?.find(a => a.symbol === selectedDebt);
+      
+      const collateralPrice = selectedCollateralAsset?.tokenPrice || 1;
+      const debtPrice = selectedDebtAsset?.tokenPrice || 1;
+      
       const liquidationBonus = repayAmount * liquidationBonusRate;
       const totalCollateralValue = repayAmount + liquidationBonus;
       const collateralNeeded = totalCollateralValue / collateralPrice;
@@ -55,189 +103,172 @@ export default function LiquidationStepOne({ account, onComplete, onCancel }: Li
         liquidationBonus,
         newLTV,
         collateralPrice,
+        debtPrice,
       });
     } else {
       setCalculations(null);
     }
-  }, [selectedCollateral, repayAmountUSD, account.totalBorrowed, account.totalSupplied]);
+  }, [selectedCollateral, selectedDebt, repayAmountUSD, account.totalBorrowed, account.totalSupplied]);
+
+  const handleStepChange = (step: number) => {
+    setCurrentStep(step);
+  };
+
+  const handleNext = () => {
+    if (currentStep < 3) {
+      setCurrentStep(currentStep + 1);
+    }
+  };
+
+  const handlePrevious = () => {
+    if (currentStep > 1) {
+      setCurrentStep(currentStep - 1);
+    }
+  };
 
   const handleContinue = () => {
-    if (!selectedCollateral || !repayAmountUSD || !calculations) return;
+    if (!selectedCollateral || !selectedDebt || !repayAmountUSD || !calculations) return;
 
     const params: LiquidationParams = {
       repayAmountUSD: parseFloat(repayAmountUSD),
-      repayToken: account.borrowedAssets[0]?.symbol || 'USDC', // Assuming first borrowed asset
+      repayToken: selectedDebt,
       collateralToken: selectedCollateral,
       collateralAmount: calculations.collateralNeeded,
       liquidationBonus: calculations.liquidationBonus,
+      debtPrice: calculations.debtPrice,
     };
 
     onComplete(params);
   };
 
-  const maxRepayAmount = Math.min(
-    account.totalBorrowed * 0.5, // Max 50% of debt
-    selectedCollateral ? (account.collateralAssets.find(a => a.symbol === selectedCollateral)?.valueUSD || 0) : 0
-  );
+  const canProceedToNext = () => {
+    switch (currentStep) {
+      case 1:
+        return !!selectedCollateral;
+      case 2:
+        return !!selectedDebt;
+      case 3:
+        if (!repayAmountUSD || !calculations) return false;
+        const amount = parseFloat(repayAmountUSD);
+        if (amount <= 0) return false;
+        
+        // Check if amount exceeds maximum repayable using corrected close factor logic
+        const selectedCollateralAsset = collateralAssets?.find(a => a.symbol === selectedCollateral);
+        const selectedDebtAsset = borrowedAssets?.find(a => a.symbol === selectedDebt);
+        
+        // Calculate max liquidatable amount based on collateral (limited by close factor)
+        const maxLiquidatableAmount = selectedCollateralAsset 
+          ? selectedCollateralAsset.depositValueUSD * (selectedCollateralAsset.closeFactor || 0.5)
+          : (account.collateralAssets.find(a => a.symbol === selectedCollateral)?.valueUSD || 0) * 0.5; // Default 50% close factor
+        
+        // Calculate max repay for selected debt
+        const maxRepayForSelectedDebt = selectedDebtAsset 
+          ? selectedDebtAsset.borrowValueUSD 
+          : (account.borrowedAssets.find(a => a.symbol === selectedDebt)?.valueUSD || 0);
+        
+        // Final max amount is the minimum of max liquidatable (with close factor) and debt borrow value
+        const finalMaxAmount = Math.min(maxLiquidatableAmount, maxRepayForSelectedDebt);
+        
+        return amount <= finalMaxAmount;
+      default:
+        return false;
+    }
+  };
+
+  const renderCurrentStep = () => {
+    switch (currentStep) {
+      case 1:
+        return (
+          <CollateralSelectionStep
+            account={account}
+            selectedCollateral={selectedCollateral}
+            onCollateralChange={setSelectedCollateral}
+          />
+        );
+      case 2:
+        return (
+          <DebtSelectionStep
+            account={account}
+            selectedDebt={selectedDebt}
+            onDebtChange={setSelectedDebt}
+            selectedCollateral={selectedCollateral}
+          />
+        );
+      case 3:
+        return (
+          <AmountInputStep
+            account={account}
+            repayAmountUSD={repayAmountUSD}
+            onAmountChange={setRepayAmountUSD}
+            selectedCollateral={selectedCollateral}
+            selectedDebt={selectedDebt}
+            calculations={calculations}
+            collateralAssets={collateralAssets}
+            borrowedAssets={borrowedAssets}
+          />
+        );
+      default:
+        return null;
+    }
+  };
 
   return (
-    <div className="space-y-4">
-      {/* Collateral Selection */}
-      <Card className="bg-white/50 dark:bg-slate-800 border-gray-200 dark:border-slate-700">
-        <CardHeader className="p-4 pb-2">
-          <div className="flex items-center gap-2">
-            <CardTitle className="text-base md:text-lg text-slate-800 dark:text-white flex items-center gap-2">
-              <Calculator className="h-4 w-4" />
-              Select Collateral Asset
-            </CardTitle>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Info className="h-4 w-4 text-muted-foreground cursor-help" />
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                Choose which collateral will be seized to cover the debt. You'll receive a liquidation bonus.
-              </TooltipContent>
-            </Tooltip>
-          </div>
-        </CardHeader>
-        <CardContent className="p-4 pt-0 space-y-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <Label htmlFor="collateral-select" className="text-slate-600 dark:text-slate-300">
-                Available Collateral Assets
-              </Label>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Info className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  Only assets with sufficient value are shown.
-                </TooltipContent>
-              </Tooltip>
-            </div>
-            <Select value={selectedCollateral} onValueChange={setSelectedCollateral}>
-              <SelectTrigger className="bg-background border border-border text-foreground">
-                <SelectValue placeholder="Choose collateral asset" />
-              </SelectTrigger>
-              <SelectContent className="bg-popover text-popover-foreground border border-border z-50">
-                {account.collateralAssets.map((asset) => (
-                  <SelectItem key={asset.symbol} value={asset.symbol} className="text-slate-800 dark:text-white">
-                    {asset.symbol} - {asset.amount.toLocaleString()} (${asset.valueUSD.toLocaleString()})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
+    <div className="space-y-6">
+      {/* Step Navigation */}
+      <LiquidationStepNavigation
+        currentStep={currentStep}
+        onStepChange={handleStepChange}
+        completedSteps={completedSteps}
+        disabledSteps={disabledSteps}
+      />
 
-      {/* Repayment Amount */}
-      <Card className="bg-white/50 dark:bg-slate-800 border-gray-200 dark:border-slate-700">
-        <CardHeader className="p-4 pb-2">
-          <div className="flex items-center gap-2">
-            <CardTitle className="text-base md:text-lg text-slate-800 dark:text-white flex items-center gap-2">
-              <DollarSign className="h-4 w-4" />
-              Debt Repayment Amount
-            </CardTitle>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Info className="h-4 w-4 text-muted-foreground cursor-help" />
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                Enter the amount of debt you'll repay in USD. The protocol will take collateral equal to the repay amount plus the liquidation bonus.
-              </TooltipContent>
-            </Tooltip>
-          </div>
-        </CardHeader>
-        <CardContent className="p-4 pt-0 space-y-3">
-          <div>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Label htmlFor="repay-amount" className="text-slate-600 dark:text-slate-300">
-                  Amount to Repay (USD)
-                </Label>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Info className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
-                  </TooltipTrigger>
-                  <TooltipContent side="top">
-                    Max is the lesser of 50% of current debt or the selected collateral's value.
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-              <Tooltip>
-                <TooltipTrigger className="text-xs text-muted-foreground">
-                  Max repayable: ${maxRepayAmount.toLocaleString()}
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  Calculated as min(50% of total debt, selected collateral value).
-                </TooltipContent>
-              </Tooltip>
-            </div>
-            <Input
-              id="repay-amount"
-              type="number"
-              placeholder="0.00"
-              value={repayAmountUSD}
-              onChange={(e) => setRepayAmountUSD(e.target.value)}
-              className="bg-white/80 dark:bg-slate-700 border-gray-200 dark:border-slate-600 text-slate-800 dark:text-white"
-              max={maxRepayAmount}
-            />
-          </div>
-        </CardContent>
-      </Card>
+      {/* Current Step Content */}
+      <div className="min-h-[400px]">
+        {renderCurrentStep()}
+      </div>
 
-      {/* Calculations */}
-      {calculations && (
-        <Card className="bg-white/50 dark:bg-slate-800 border-gray-200 dark:border-slate-700">
-          <CardHeader className="p-4 pb-2">
-            <CardTitle className="text-base md:text-lg text-whale-gold">Liquidation Preview</CardTitle>
-          </CardHeader>
-          <CardContent className="p-4 pt-0 space-y-3">
-            <div className="flex justify-between items-center">
-              <span className="text-slate-600 dark:text-slate-300">Collateral Price:</span>
-              <span className="text-slate-800 dark:text-white font-semibold">
-                ${calculations.collateralPrice.toLocaleString()}
-              </span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-slate-600 dark:text-slate-300">Liquidation Bonus (5%):</span>
-              <span className="text-ocean-teal font-semibold">
-                ${calculations.liquidationBonus.toLocaleString()}
-              </span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-slate-600 dark:text-slate-300">Collateral Needed:</span>
-              <span className="text-slate-800 dark:text-white font-semibold">
-                {calculations.collateralNeeded.toFixed(4)} {selectedCollateral}
-              </span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-slate-600 dark:text-slate-300">New LTV After Liquidation:</span>
-              <span className="text-whale-gold font-semibold">
-                {(calculations.newLTV * 100).toFixed(1)}%
-              </span>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      {/* Navigation Buttons */}
+      <div className="flex justify-between items-center pt-6 border-t border-border">
+        <div className="flex gap-3">
+          <DorkFiButton
+            variant="secondary"
+            onClick={onCancel}
+            className="min-h-[44px] min-w-[100px] font-semibold"
+          >
+            Cancel
+          </DorkFiButton>
+          {currentStep > 1 && (
+            <DorkFiButton
+              variant="secondary"
+              onClick={handlePrevious}
+              className="min-h-[44px] min-w-[120px] font-semibold flex items-center gap-2"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Previous
+            </DorkFiButton>
+          )}
+        </div>
 
-      {/* Action Buttons */}
-      <div className="flex gap-3 justify-end">
-        <DorkFiButton
-          variant="secondary"
-          onClick={onCancel}
-          className="min-h-[40px] min-w-[92px] font-semibold text-sm"
-        >
-          Cancel
-        </DorkFiButton>
-        <DorkFiButton
-          onClick={handleContinue}
-          disabled={!selectedCollateral || !repayAmountUSD || !calculations}
-          className="min-h-[40px] min-w-[140px] font-semibold text-sm"
-        >
-          Continue to Confirmation
-        </DorkFiButton>
+        <div className="flex gap-3">
+          {currentStep < 3 ? (
+            <DorkFiButton
+              onClick={handleNext}
+              disabled={!canProceedToNext()}
+              className="min-h-[44px] min-w-[120px] font-semibold flex items-center gap-2"
+            >
+              Next
+              <ArrowRight className="h-4 w-4" />
+            </DorkFiButton>
+          ) : (
+            <DorkFiButton
+              onClick={handleContinue}
+              disabled={!canProceedToNext()}
+              className="min-h-[44px] min-w-[180px] font-semibold"
+            >
+              Continue to Confirmation
+            </DorkFiButton>
+          )}
+        </div>
       </div>
     </div>
   );

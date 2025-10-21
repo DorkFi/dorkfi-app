@@ -18,7 +18,8 @@ export const getRiskColor = (riskLevel: string, theme: 'light' | 'dark' = 'light
   return colors[theme][riskLevel as keyof typeof colors.light] || colors[theme].safe;
 };
 
-export const getHealthFactorColorClass = (healthFactor: number): string => {
+export const getHealthFactorColorClass = (healthFactor: number | null): string => {
+  if (healthFactor === null) return 'text-gray-500';
   if (healthFactor <= 1.05) return 'text-destructive';
   if (healthFactor <= 1.2) return 'text-orange-500';
   if (healthFactor <= 1.5) return 'text-yellow-500';

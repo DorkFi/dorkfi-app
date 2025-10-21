@@ -18,6 +18,7 @@ interface DorkFiButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement
   variant?: Variant;
   children: React.ReactNode;
   className?: string;
+  size?: 'sm' | 'md' | 'lg';
 }
 
 const variantClasses: Record<Variant, string> = {
@@ -35,11 +36,12 @@ const variantClasses: Record<Variant, string> = {
 
 // All buttons standardized: min-h-[44px] min-w-[92px] px-4 py-2 text-sm font-semibold rounded-lg btn-hover-lift shadow-sm/hover:shadow-md transition-all, flex/center content, gap-1
 const DorkFiButton = React.forwardRef<HTMLButtonElement, DorkFiButtonProps>(
-  ({ variant = "primary", className, children, ...props }, ref) => (
+  ({ variant = "primary", size = 'md', className, children, ...props }, ref) => (
     <button
       ref={ref}
       className={cn(
-        "rounded-lg font-semibold px-4 py-2 min-h-[44px] min-w-[92px] text-sm btn-hover-lift shadow-sm hover:shadow-md transition-all flex items-center justify-center gap-1",
+        "rounded-lg font-semibold min-h-[44px] min-w-[92px] btn-hover-lift shadow-sm hover:shadow-md transition-all flex items-center justify-center gap-1",
+        size === 'sm' ? 'px-3 py-1.5 text-xs' : size === 'lg' ? 'px-5 py-3 text-base' : 'px-4 py-2 text-sm',
         variantClasses[variant],
         className
       )}

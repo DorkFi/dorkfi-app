@@ -1,5 +1,6 @@
 import React from 'react';
 import { LiquidationAccount } from '../../hooks/useLiquidationData';
+import { formatRelativeTime } from '../../utils/liquidationUtils';
 import { ComponentThemeProps, ThemeConfig } from '../../types/themeConfig';
 import { getTheme } from '../../themes/liquidationThemes';
 import { useRiskCalculations } from '../../hooks/useRiskCalculations';
@@ -202,7 +203,7 @@ const LiquidationTable: React.FC<LiquidationTableProps> = ({
                       )}
                       style={{ color: theme.colors.text.secondary }}
                     >
-                      Last updated: {new Date(account.lastUpdated).toLocaleDateString()}
+                      Last updated: {formatRelativeTime(parseInt(account.lastUpdated))}
                     </p>
                   </div>
                 </div>

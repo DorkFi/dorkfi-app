@@ -2,6 +2,7 @@
 import React from 'react';
 import { Badge } from '@/components/ui/badge';
 import { LiquidationAccount } from '@/hooks/useLiquidationData';
+import { formatRelativeTime } from '@/utils/liquidationUtils';
 
 interface AccountHeaderProps {
   account: LiquidationAccount;
@@ -30,7 +31,7 @@ export default function AccountHeader({ account }: AccountHeaderProps) {
             {account.walletAddress}
           </h3>
           <p className="text-sm text-muted-foreground">
-            Last updated: {new Date(account.lastUpdated).toLocaleString()}
+            Last updated: {formatRelativeTime(parseInt(account.lastUpdated))}
           </p>
         </div>
         <Badge variant={getRiskBadgeVariant(account.riskLevel)} className="w-fit">

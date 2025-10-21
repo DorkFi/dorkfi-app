@@ -7,7 +7,7 @@ import { DollarSign, AlertTriangle, Activity } from 'lucide-react';
 interface VerticalSummaryCardsProps {
   totalLiquidated24h: number;
   atRiskWallets: number;
-  activeLiquidationEvents: number;
+  activeLiquidationEvents: number; // This now represents total active wallets
 }
 
 export default function VerticalSummaryCards({ 
@@ -43,7 +43,7 @@ export default function VerticalSummaryCards({
       glowColor: "shadow-amber-500/20"
     },
     {
-      title: "Active Liquidation Events",
+      title: "Total Active Wallets",
       value: activeLiquidationEvents.toLocaleString(),
       icon: Activity,
       color: "bg-gradient-to-br from-ocean-teal/10 to-ocean-teal/20 border-ocean-teal/30",

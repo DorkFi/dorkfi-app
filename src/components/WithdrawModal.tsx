@@ -24,6 +24,7 @@ interface WithdrawModalProps {
   tokenSymbol: string;
   tokenIcon: string;
   currentlyDeposited: number;
+  nTokenBalance?: number;
   marketStats: {
     supplyAPY: number;
     utilization: number;
@@ -34,6 +35,7 @@ interface WithdrawModalProps {
   isLoading?: boolean;
   showTooltip?: boolean;
   tooltipText?: string;
+  onRefreshBalance?: () => void;
 }
 
 const WithdrawModal = ({
@@ -42,11 +44,13 @@ const WithdrawModal = ({
   tokenSymbol,
   tokenIcon,
   currentlyDeposited,
+  nTokenBalance = 0,
   marketStats,
   onSubmit,
   isLoading = false,
   showTooltip = false,
   tooltipText = "",
+  onRefreshBalance,
 }: WithdrawModalProps) => {
   const [amount, setAmount] = useState("");
   const [fiatValue, setFiatValue] = useState(0);
@@ -194,29 +198,60 @@ const WithdrawModal = ({
                     })}
                   </p>
                 )}
-                <div className="space-y-2">
-                  <p className="text-xs text-slate-400 dark:text-slate-500">
-                    Currently Deposited: {currentlyDeposited.toLocaleString()}{" "}
-                    {showTooltip ? (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span className="cursor-help underline decoration-dotted">
-                            {tokenSymbol}
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>{tooltipText}</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    ) : (
-                      tokenSymbol
-                    )}
-                    ($
-                    {(
-                      currentlyDeposited * marketStats.tokenPrice
-                    ).toLocaleString()}
-                    )
-                  </p>
+                {/* Balance Information */}
+                <div className="space-y-3">
+                  {/* nToken Balance Display */}
+                  <div className="p-3 rounded-lg border bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                        <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                          nToken Balance
+                        </span>
+                        {onRefreshBalance && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={onRefreshBalance}
+                            className="h-6 w-6 p-0 text-blue-600 hover:bg-blue-100 dark:text-blue-400 dark:hover:bg-blue-800"
+                            title="Refresh nToken balance"
+                          >
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                          </Button>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <div className="text-sm font-semibold text-blue-800 dark:text-blue-200">
+                          {nTokenBalance.toLocaleString(undefined, { maximumFractionDigits: 6 })} n{tokenSymbol}
+                        </div>
+                        <div className="text-xs text-blue-600 dark:text-blue-400">
+                          ≈ {currentlyDeposited.toLocaleString(undefined, { maximumFractionDigits: 6 })} {tokenSymbol}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Currently Deposited Summary */}
+                  <div className="p-3 rounded-lg border bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-slate-500"></div>
+                        <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                          Total Deposited Value
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                          {currentlyDeposited.toLocaleString(undefined, { maximumFractionDigits: 6 })} {tokenSymbol}
+                        </div>
+                        <div className="text-xs text-slate-600 dark:text-slate-400">
+                          ≈ ${(currentlyDeposited * marketStats.tokenPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
