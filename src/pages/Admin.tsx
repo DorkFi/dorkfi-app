@@ -3,6 +3,10 @@ import {
   ATokenClient,
   APP_SPEC as ATokenAppSpec,
 } from "@/clients/ATokenClient";
+import {
+  STokenClient,
+  APP_SPEC as STokenAppSpec,
+} from "@/clients/STokenClient";
 
 // Import Buffer polyfill for browser environment
 import "@/utils/bufferPolyfill";
@@ -37,6 +41,7 @@ import {
   Crown,
   Key,
   Loader2,
+  DollarSign,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import DorkFiCard from "@/components/ui/DorkFiCard";
@@ -108,7 +113,11 @@ import {
   updateMarketMaxDeposits,
   updateMarketMaxBorrows,
 } from "@/services/adminService";
-import { fetchAllMarkets, fetchMarketInfo, type MarketInfo } from "@/services/lendingService";
+import {
+  fetchAllMarkets,
+  fetchMarketInfo,
+  type MarketInfo,
+} from "@/services/lendingService";
 import { useOnDemandMarketData } from "@/hooks/useOnDemandMarketData";
 import WalletNetworkButton from "@/components/WalletNetworkButton";
 import { useWallet } from "@txnlab/use-wallet-react";
@@ -165,7 +174,10 @@ export default function AdminDashboard() {
   });
 
   // Get markets for current network (for backward compatibility with existing UI)
-  const markets = useMemo(() => getMarketsFromConfig(currentNetwork), [currentNetwork]);
+  const markets = useMemo(
+    () => getMarketsFromConfig(currentNetwork),
+    [currentNetwork]
+  );
 
   // Generate pool options with class labels
   const getPoolOptions = () => {
@@ -236,17 +248,58 @@ export default function AdminDashboard() {
   const [mintResult, setMintResult] = useState<string | null>(null);
   const [mintError, setMintError] = useState<string | null>(null);
 
+  // SToken state
+  const [stokenInfo, setStokenInfo] = useState<any>(null);
+  const [isLoadingStokenInfo, setIsLoadingStokenInfo] = useState(false);
+  const [stokenError, setStokenError] = useState<string | null>(null);
+  const [minterAddress, setMinterAddress] = useState("");
+  const [isApprovingMinter, setIsApprovingMinter] = useState(false);
+  const [isRevokingMinter, setIsRevokingMinter] = useState(false);
+  const [minterApprovalResult, setMinterApprovalResult] = useState<
+    string | null
+  >(null);
+  const [minterRevocationResult, setMinterRevocationResult] = useState<
+    string | null
+  >(null);
+  const [minterApprovalError, setMinterApprovalError] = useState<string | null>(
+    null
+  );
+  const [minterRevocationError, setMinterRevocationError] = useState<
+    string | null
+  >(null);
+  const [approvedMinters, setApprovedMinters] = useState<string[]>([]);
+  const [isSettingStoken, setIsSettingStoken] = useState(false);
+  const [setStokenResult, setSetStokenResult] = useState<string | null>(null);
+  const [setStokenOperationError, setSetStokenOperationError] = useState<
+    string | null
+  >(null);
+  const [isCreatingStokenMarket, setIsCreatingStokenMarket] = useState(false);
+  const [stokenMarketCreationResult, setStokenMarketCreationResult] = useState<
+    string | null
+  >(null);
+  const [stokenMarketCreationError, setStokenMarketCreationError] = useState<
+    string | null
+  >(null);
+  const [stokenMarketExists, setStokenMarketExists] = useState<boolean | null>(
+    null
+  );
+  const [stokenMarketInfo, setStokenMarketInfo] = useState<any>(null);
+
   // Market Analysis state
   const [marketAnalysisData, setMarketAnalysisData] = useState<any>(null);
   const [isLoadingMarketAnalysis, setIsLoadingMarketAnalysis] = useState(false);
-  const [marketAnalysisError, setMarketAnalysisError] = useState<string | null>(null);
+  const [marketAnalysisError, setMarketAnalysisError] = useState<string | null>(
+    null
+  );
   const [selectedTimeRange, setSelectedTimeRange] = useState("7d");
-  const [selectedMarketForAnalysis, setSelectedMarketForAnalysis] = useState<string>("all");
+  const [selectedMarketForAnalysis, setSelectedMarketForAnalysis] =
+    useState<string>("all");
   const marketAnalysisFetchRef = useRef<boolean>(false);
-  
+
   // Individual Market View state
   const [selectedMarketDetails, setSelectedMarketDetails] = useState<any>(null);
-  const [isMarketDetailsModalOpen, setIsMarketDetailsModalOpen] = useState(false);
+  const [isMarketDetailsModalOpen, setIsMarketDetailsModalOpen] =
+    useState(false);
   const [isLoadingMarketDetails, setIsLoadingMarketDetails] = useState(false);
 
   // Role management state
@@ -827,6 +880,462 @@ export default function AdminDashboard() {
       );
     } finally {
       setIsMinting(false);
+    }
+  };
+
+  // SToken functions
+  const loadStokenInfo = async () => {
+    setIsLoadingStokenInfo(true);
+    setStokenError(null);
+
+    try {
+      const networkConfig = getCurrentNetworkConfig();
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      // Get SToken contract ID from network config
+      const stokenContractId = networkConfig.contracts.sToken;
+      if (!stokenContractId) {
+        throw new Error("SToken contract not configured for this network");
+      }
+
+      const ci = new CONTRACT(
+        Number(stokenContractId),
+        clients.algod,
+        undefined,
+        { ...STokenAppSpec.contract, events: [] },
+        { addr: activeAccount.address, sk: new Uint8Array() }
+      );
+
+      // Get SToken info
+      const nameR = await ci.arc200_name();
+      const symbolR = await ci.arc200_symbol();
+      const decimalsR = await ci.arc200_decimals();
+      const totalSupplyR = await ci.arc200_totalSupply();
+      const pausedR = await ci.is_paused();
+
+      if (
+        !nameR.success ||
+        !symbolR.success ||
+        !decimalsR.success ||
+        !totalSupplyR.success ||
+        !pausedR.success
+      ) {
+        throw new Error("Failed to fetch SToken information");
+      }
+
+      console.log("SToken info:", {
+        nameR,
+        symbolR,
+        decimalsR,
+        totalSupplyR,
+        pausedR,
+      });
+
+      setStokenInfo({
+        name: Buffer.from(nameR.returnValue).toString(),
+        symbol: Buffer.from(symbolR.returnValue).toString(),
+        decimals: decimalsR.returnValue.toString(),
+        totalSupply: totalSupplyR.returnValue.toString(),
+        paused: pausedR.returnValue,
+        contractId: stokenContractId,
+        contractAddress: algosdk.getApplicationAddress(
+          Number(stokenContractId)
+        ),
+      });
+
+      // Load approved minters
+      await loadApprovedMinters();
+    } catch (error) {
+      console.error("Error loading SToken info:", error);
+      setStokenError(
+        error instanceof Error ? error.message : "Failed to load SToken info"
+      );
+    } finally {
+      setIsLoadingStokenInfo(false);
+    }
+  };
+
+  const loadApprovedMinters = async () => {
+    try {
+      const networkConfig = getCurrentNetworkConfig();
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      const stokenContractId = networkConfig.contracts.sToken;
+      if (!stokenContractId) {
+        return;
+      }
+
+      const ci = new CONTRACT(
+        Number(stokenContractId),
+        clients.algod,
+        undefined,
+        { ...STokenAppSpec.contract, events: [] },
+        { addr: activeAccount.address, sk: new Uint8Array() }
+      );
+
+      // Get lending pools to check which ones are approved minters
+      const lendingPools = getLendingPools(currentNetwork);
+      const approvedMinters: string[] = [];
+
+      for (const poolId of lendingPools) {
+        try {
+          // Convert pool ID to application address
+          const poolAddress = algosdk.getApplicationAddress(Number(poolId));
+          const isMinterR = await ci.is_minter(poolAddress);
+          if (isMinterR.success && isMinterR.returnValue) {
+            approvedMinters.push(poolId);
+          }
+        } catch (error) {
+          console.error(
+            `Error checking minter status for pool ${poolId}:`,
+            error
+          );
+        }
+      }
+
+      setApprovedMinters(approvedMinters);
+    } catch (error) {
+      console.error("Error loading approved minters:", error);
+    }
+  };
+
+  const handleApproveMinter = async () => {
+    if (!minterAddress.trim()) {
+      setMinterApprovalError("Please provide a minter address");
+      return;
+    }
+
+    setIsApprovingMinter(true);
+    setMinterApprovalError(null);
+    setMinterApprovalResult(null);
+
+    try {
+      const networkConfig = getCurrentNetworkConfig();
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      const stokenContractId = networkConfig.contracts.sToken;
+      if (!stokenContractId) {
+        throw new Error("SToken contract not configured for this network");
+      }
+
+      const ci = new CONTRACT(
+        Number(stokenContractId),
+        clients.algod,
+        undefined,
+        { ...STokenAppSpec.contract, events: [] },
+        { addr: activeAccount.address, sk: new Uint8Array() }
+      );
+
+      // Check if minterAddress is a number (application ID) and convert to address
+      let actualMinterAddress = minterAddress.trim();
+      const appId = parseInt(minterAddress.trim());
+
+      if (!isNaN(appId) && appId > 0) {
+        // Convert application ID to application address
+        actualMinterAddress = algosdk.getApplicationAddress(appId);
+        console.log(
+          `Converted app ID ${appId} to address: ${actualMinterAddress}`
+        );
+      }
+
+      ci.setPaymentAmount(1000);
+      const result = await ci.approve_minter(actualMinterAddress);
+      if (!result.success) {
+        console.log({ approve_minterR: result });
+        throw new Error("Failed to approve minter");
+      }
+
+      const stxns = await signTransactions(
+        result.txns.map((txn: string) =>
+          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+        )
+      );
+      const algorandClients =
+        await algorandService.getCurrentClientsForTransactions();
+      const res = await algorandClients.algod.sendRawTransaction(stxns).do();
+      await waitForConfirmation(algorandClients.algod, res.txId, 4);
+
+      setMinterApprovalResult(
+        `Minter approval successful! Transaction ID: ${result.txId}${
+          !isNaN(appId) && appId > 0
+            ? ` (App ID ${appId} → ${actualMinterAddress})`
+            : ""
+        }`
+      );
+      setMinterAddress("");
+
+      // Reload approved minters
+      await loadApprovedMinters();
+
+      toast.success("Minter approved successfully");
+    } catch (error) {
+      console.error("Error approving minter:", error);
+      setMinterApprovalError(
+        error instanceof Error ? error.message : "Failed to approve minter"
+      );
+    } finally {
+      setIsApprovingMinter(false);
+    }
+  };
+
+  const handleRevokeMinter = async (minterAddress: string) => {
+    setIsRevokingMinter(true);
+    setMinterRevocationError(null);
+    setMinterRevocationResult(null);
+
+    try {
+      const networkConfig = getCurrentNetworkConfig();
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      const stokenContractId = networkConfig.contracts.sToken;
+      if (!stokenContractId) {
+        throw new Error("SToken contract not configured for this network");
+      }
+
+      const ci = new CONTRACT(
+        Number(stokenContractId!),
+        clients.algod,
+        undefined,
+        { ...STokenAppSpec.contract, events: [] },
+        { addr: activeAccount.address, sk: new Uint8Array() }
+      );
+
+      // Check if minterAddress is a number (application ID) and convert to address
+      let actualMinterAddress = minterAddress.trim();
+      const appId = parseInt(minterAddress.trim());
+
+      if (!isNaN(appId) && appId > 0) {
+        // Convert application ID to application address
+        actualMinterAddress = algosdk.getApplicationAddress(appId);
+        console.log(
+          `Converted app ID ${appId} to address: ${actualMinterAddress}`
+        );
+      }
+
+      ci.setPaymentAmount(1000);
+      const result = await ci.revoke_minter(actualMinterAddress);
+      if (!result.success) {
+        console.log({ revoke_minterR: result });
+        throw new Error("Failed to revoke minter");
+      }
+
+      const stxns = await signTransactions(
+        result.txns.map((txn: string) =>
+          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+        )
+      );
+      const algorandClients =
+        await algorandService.getCurrentClientsForTransactions();
+      const res = await algorandClients.algod.sendRawTransaction(stxns).do();
+      await waitForConfirmation(algorandClients.algod, res.txId, 4);
+
+      setMinterRevocationResult(
+        `Minter revocation successful! Transaction ID: ${res.txId}${
+          !isNaN(appId) && appId > 0
+            ? ` (App ID ${appId} → ${actualMinterAddress})`
+            : ""
+        }`
+      );
+
+      // Reload approved minters
+      await loadApprovedMinters();
+
+      toast.success("Minter revoked successfully");
+    } catch (error) {
+      console.error("Error revoking minter:", error);
+      setMinterRevocationError(
+        error instanceof Error ? error.message : "Failed to revoke minter"
+      );
+    } finally {
+      setIsRevokingMinter(false);
+    }
+  };
+
+  const handleSetStoken = async (poolId: string) => {
+    setIsSettingStoken(true);
+    setSetStokenOperationError(null);
+    setSetStokenResult(null);
+
+    try {
+      const networkConfig = getCurrentNetworkConfig();
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      const stokenContractId = networkConfig.contracts.sToken;
+      if (!stokenContractId) {
+        throw new Error("SToken contract not configured for this network");
+      }
+
+      const ci = new CONTRACT(
+        Number(poolId),
+        clients.algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        { addr: activeAccount.address, sk: new Uint8Array() }
+      );
+
+      // Convert SToken contract ID to address
+      const stokenAddress = algosdk.getApplicationAddress(
+        Number(stokenContractId)
+      );
+
+      ci.setFee(2000);
+      ci.setPaymentAmount(1000);
+      const result = await ci.set_stoken_app_id(Number(stokenContractId));
+      if (!result.success) {
+        console.log({ set_stoken_app_idR: result });
+        throw new Error("Failed to set SToken for lending pool");
+      }
+
+      const stxns = await signTransactions(
+        result.txns.map((txn: string) =>
+          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+        )
+      );
+      const algorandClients =
+        await algorandService.getCurrentClientsForTransactions();
+      const res = await algorandClients.algod.sendRawTransaction(stxns).do();
+      await waitForConfirmation(algorandClients.algod, res.txId, 4);
+
+      setSetStokenResult(
+        `SToken set successfully! Transaction ID: ${res.txId} (Pool ${poolId} → SToken ${stokenContractId})`
+      );
+
+      toast.success("SToken set successfully for lending pool");
+    } catch (error) {
+      console.error("Error setting SToken:", error);
+      setSetStokenOperationError(
+        error instanceof Error ? error.message : "Failed to set SToken"
+      );
+    } finally {
+      setIsSettingStoken(false);
+    }
+  };
+
+  const checkStokenMarketExists = async () => {
+    try {
+      const networkConfig = getCurrentNetworkConfig();
+      const stokenContractId = networkConfig.contracts.sToken;
+      if (!stokenContractId) {
+        setStokenMarketExists(false);
+        return;
+      }
+
+      // Get all markets for the current network
+      const markets = getMarketsFromConfig(currentNetwork);
+
+      // Check if any market has the SToken contract ID as its token contract
+      const stokenMarket = markets.find(
+        (market) => market.underlyingContractId === stokenContractId
+      );
+
+      setStokenMarketExists(!!stokenMarket);
+      
+      if (stokenMarket) {
+        // Fetch detailed market information
+        try {
+          const marketInfo = await fetchMarketInfo(
+            stokenMarket.poolId || "1",
+            stokenContractId,
+            currentNetwork
+          );
+          setStokenMarketInfo({
+            ...stokenMarket,
+            marketInfo: marketInfo
+          });
+        } catch (error) {
+          console.error("Error fetching SToken market info:", error);
+          setStokenMarketInfo(stokenMarket);
+        }
+      } else {
+        setStokenMarketInfo(null);
+      }
+    } catch (error) {
+      console.error("Error checking SToken market:", error);
+      setStokenMarketExists(false);
+    }
+  };
+
+  const handleCreateStokenMarket = async () => {
+    if (!activeAccount) {
+      alert("Please connect your wallet first");
+      return;
+    }
+
+    setIsCreatingStokenMarket(true);
+    setStokenMarketCreationError(null);
+    setStokenMarketCreationResult(null);
+
+    try {
+      const networkConfig = getCurrentNetworkConfig();
+      const stokenContractId = networkConfig.contracts.sToken;
+      const lendingPools = getLendingPools(currentNetwork);
+
+      if (!stokenContractId || lendingPools.length === 0) {
+        throw new Error(
+          "SToken contract or lending pools not configured for this network"
+        );
+      }
+
+      // Use the first lending pool for the market
+      const poolId = lendingPools[0];
+      const decimals = Number(stokenInfo?.decimals) || 6;
+
+      const createMarketParams: CreateMarketParams = {
+        tokenId: Number(stokenContractId),
+        collateralFactor: BigInt(8000), // 0.8 (80%)
+        liquidationThreshold: BigInt(8500), // 0.85 (85%)
+        reserveFactor: BigInt(1000), // 0.1 (10%)
+        borrowRate: BigInt(500), // 0.05 (5%)
+        slope: BigInt(1000), // 0.1 (10%)
+        maxTotalDeposits: BigInt(1000000 * 10 ** decimals), // 1M tokens
+        maxTotalBorrows: BigInt(800000 * 10 ** decimals), // 800K tokens
+        liquidationBonus: BigInt(500), // 0.05 (5%)
+        closeFactor: BigInt(5000), // 0.5 (50%)
+      };
+
+      const createMarketResult = await createMarket(
+        Number(poolId),
+        createMarketParams,
+        activeAccount.address
+      );
+
+      if (createMarketResult.success) {
+        const stxns = await signTransactions(
+          createMarketResult.txns.map((txn: string) =>
+            Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+          )
+        );
+        const algorandClients =
+          await algorandService.getCurrentClientsForTransactions();
+        const res = await algorandClients.algod.sendRawTransaction(stxns).do();
+        await waitForConfirmation(algorandClients.algod, res.txId, 4);
+        setStokenMarketCreationResult(
+          `SToken market created successfully! Market ID: ${createMarketResult.marketId}`
+        );
+        setStokenMarketExists(true);
+        toast.success("SToken market created successfully");
+      } else {
+        throw new Error("Failed to create SToken market");
+      }
+    } catch (error) {
+      console.error("Error creating SToken market:", error);
+      setStokenMarketCreationError(
+        error instanceof Error
+          ? error.message
+          : "Failed to create SToken market"
+      );
+    } finally {
+      setIsCreatingStokenMarket(false);
     }
   };
 
@@ -3061,7 +3570,7 @@ export default function AdminDashboard() {
 
     try {
       console.log("🔄 Fetching real market data from blockchain...");
-      
+
       // Fetch real market data from the blockchain
       const realMarkets = await fetchAllMarkets(currentNetwork);
       console.log("📊 Fetched real market data:", realMarkets);
@@ -3083,12 +3592,15 @@ export default function AdminDashboard() {
         return sum + borrowed;
       }, 0);
 
-      const avgUtilizationRate = realMarkets.reduce((sum, market) => sum + market.utilizationRate, 0) / realMarkets.length;
-      
-      const avgAPY = realMarkets.reduce((sum, market) => {
-        const depositAPY = market.apyCalculation?.apy || 0;
-        return sum + depositAPY;
-      }, 0) / realMarkets.length;
+      const avgUtilizationRate =
+        realMarkets.reduce((sum, market) => sum + market.utilizationRate, 0) /
+        realMarkets.length;
+
+      const avgAPY =
+        realMarkets.reduce((sum, market) => {
+          const depositAPY = market.apyCalculation?.apy || 0;
+          return sum + depositAPY;
+        }, 0) / realMarkets.length;
 
       // Debug overview calculations
       console.log("📊 Overview Calculations Debug:", {
@@ -3099,13 +3611,17 @@ export default function AdminDashboard() {
         avgUtilizationRatePercent: Math.round(avgUtilizationRate * 100),
         avgAPY: avgAPY,
         liquidityUtilization: Math.round((totalBorrowed / totalTVL) * 100),
-        marketBreakdown: realMarkets.map(market => ({
+        marketBreakdown: realMarkets.map((market) => ({
           symbol: market.symbol,
-          tvl: parseFloat(market.totalDeposits) * (parseFloat(market.price) / Math.pow(10, 6)),
-          borrowed: parseFloat(market.totalBorrows) * (parseFloat(market.price) / Math.pow(10, 6)),
+          tvl:
+            parseFloat(market.totalDeposits) *
+            (parseFloat(market.price) / Math.pow(10, 6)),
+          borrowed:
+            parseFloat(market.totalBorrows) *
+            (parseFloat(market.price) / Math.pow(10, 6)),
           utilizationRate: market.utilizationRate,
           depositAPY: market.apyCalculation?.apy || 0,
-        }))
+        })),
       });
 
       // Process market performance data
@@ -3113,7 +3629,7 @@ export default function AdminDashboard() {
         const scaledPrice = parseFloat(market.price) / Math.pow(10, 6);
         const tvl = parseFloat(market.totalDeposits) * scaledPrice;
         const borrowed = parseFloat(market.totalBorrows) * scaledPrice;
-        
+
         // Determine risk level based on utilization rate
         let riskLevel: "High" | "Medium" | "Low" = "Low";
         if (market.utilizationRate > 0.8) {
@@ -3163,7 +3679,7 @@ export default function AdminDashboard() {
             isActive: market.isActive,
             isPaused: market.isPaused,
             lastUpdated: market.lastUpdated,
-          }
+          },
         });
 
         return {
@@ -3174,7 +3690,9 @@ export default function AdminDashboard() {
           utilizationRate: Math.round(market.utilizationRate * 100),
           depositAPY: market.apyCalculation?.apy || 0,
           borrowAPY: market.borrowApyCalculation?.apy || 0,
-          price: parseFloat((parseFloat(market.price) / Math.pow(10, 6)).toFixed(6)),
+          price: parseFloat(
+            (parseFloat(market.price) / Math.pow(10, 6)).toFixed(6)
+          ),
           priceChange24h: 0, // TODO: Implement price change tracking
           volume24h: 0, // TODO: Implement volume tracking
           users: 0, // TODO: Implement user count tracking
@@ -3185,12 +3703,23 @@ export default function AdminDashboard() {
       });
 
       // Categorize markets by risk
-      const highRiskMarkets = marketPerformance.filter(m => m.riskLevel === "High").map(m => m.symbol);
-      const mediumRiskMarkets = marketPerformance.filter(m => m.riskLevel === "Medium").map(m => m.symbol);
-      const lowRiskMarkets = marketPerformance.filter(m => m.riskLevel === "Low").map(m => m.symbol);
+      const highRiskMarkets = marketPerformance
+        .filter((m) => m.riskLevel === "High")
+        .map((m) => m.symbol);
+      const mediumRiskMarkets = marketPerformance
+        .filter((m) => m.riskLevel === "Medium")
+        .map((m) => m.symbol);
+      const lowRiskMarkets = marketPerformance
+        .filter((m) => m.riskLevel === "Low")
+        .map((m) => m.symbol);
 
       // Calculate overall risk score (0-10 scale)
-      const overallRiskScore = Math.min(10, (highRiskMarkets.length * 3 + mediumRiskMarkets.length * 1.5) / realMarkets.length * 10);
+      const overallRiskScore = Math.min(
+        10,
+        ((highRiskMarkets.length * 3 + mediumRiskMarkets.length * 1.5) /
+          realMarkets.length) *
+          10
+      );
 
       // Debug risk analysis
       console.log("⚠️ Risk Analysis Debug:", {
@@ -3207,12 +3736,12 @@ export default function AdminDashboard() {
           calculation: `(${highRiskMarkets.length} * 3 + ${mediumRiskMarkets.length} * 1.5) / ${realMarkets.length} * 10`,
           maxScore: 10,
         },
-        marketRiskBreakdown: marketPerformance.map(market => ({
+        marketRiskBreakdown: marketPerformance.map((market) => ({
           symbol: market.symbol,
           utilizationRate: market.utilizationRate,
           riskLevel: market.riskLevel,
           healthFactor: market.healthFactor,
-        }))
+        })),
       });
 
       const realAnalysisData = {
@@ -3229,31 +3758,124 @@ export default function AdminDashboard() {
         trends: {
           // TODO: Implement historical data tracking
           tvlGrowth: [
-            { date: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], value: totalTVL * 0.9 },
-            { date: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], value: totalTVL * 0.92 },
-            { date: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], value: totalTVL * 0.95 },
-            { date: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], value: totalTVL * 0.97 },
-            { date: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], value: totalTVL * 0.98 },
-            { date: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], value: totalTVL * 0.99 },
-            { date: new Date().toISOString().split('T')[0], value: totalTVL },
+            {
+              date: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split("T")[0],
+              value: totalTVL * 0.9,
+            },
+            {
+              date: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split("T")[0],
+              value: totalTVL * 0.92,
+            },
+            {
+              date: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split("T")[0],
+              value: totalTVL * 0.95,
+            },
+            {
+              date: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split("T")[0],
+              value: totalTVL * 0.97,
+            },
+            {
+              date: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split("T")[0],
+              value: totalTVL * 0.98,
+            },
+            {
+              date: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split("T")[0],
+              value: totalTVL * 0.99,
+            },
+            { date: new Date().toISOString().split("T")[0], value: totalTVL },
           ],
           utilizationRate: [
-            { date: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], value: avgUtilizationRate * 100 * 0.9 },
-            { date: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], value: avgUtilizationRate * 100 * 0.92 },
-            { date: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], value: avgUtilizationRate * 100 * 0.95 },
-            { date: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], value: avgUtilizationRate * 100 * 0.97 },
-            { date: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], value: avgUtilizationRate * 100 * 0.98 },
-            { date: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], value: avgUtilizationRate * 100 * 0.99 },
-            { date: new Date().toISOString().split('T')[0], value: avgUtilizationRate * 100 },
+            {
+              date: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split("T")[0],
+              value: avgUtilizationRate * 100 * 0.9,
+            },
+            {
+              date: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split("T")[0],
+              value: avgUtilizationRate * 100 * 0.92,
+            },
+            {
+              date: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split("T")[0],
+              value: avgUtilizationRate * 100 * 0.95,
+            },
+            {
+              date: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split("T")[0],
+              value: avgUtilizationRate * 100 * 0.97,
+            },
+            {
+              date: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split("T")[0],
+              value: avgUtilizationRate * 100 * 0.98,
+            },
+            {
+              date: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split("T")[0],
+              value: avgUtilizationRate * 100 * 0.99,
+            },
+            {
+              date: new Date().toISOString().split("T")[0],
+              value: avgUtilizationRate * 100,
+            },
           ],
           avgAPY: [
-            { date: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], value: avgAPY * 0.9 },
-            { date: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], value: avgAPY * 0.92 },
-            { date: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], value: avgAPY * 0.95 },
-            { date: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], value: avgAPY * 0.97 },
-            { date: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], value: avgAPY * 0.98 },
-            { date: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], value: avgAPY * 0.99 },
-            { date: new Date().toISOString().split('T')[0], value: avgAPY },
+            {
+              date: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split("T")[0],
+              value: avgAPY * 0.9,
+            },
+            {
+              date: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split("T")[0],
+              value: avgAPY * 0.92,
+            },
+            {
+              date: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split("T")[0],
+              value: avgAPY * 0.95,
+            },
+            {
+              date: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split("T")[0],
+              value: avgAPY * 0.97,
+            },
+            {
+              date: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split("T")[0],
+              value: avgAPY * 0.98,
+            },
+            {
+              date: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split("T")[0],
+              value: avgAPY * 0.99,
+            },
+            { date: new Date().toISOString().split("T")[0], value: avgAPY },
           ],
         },
         riskAnalysis: {
@@ -3262,8 +3884,14 @@ export default function AdminDashboard() {
           lowRiskMarkets: lowRiskMarkets,
           overallRiskScore: Math.round(overallRiskScore * 10) / 10,
           recommendations: [
-            highRiskMarkets.length > 0 ? `Monitor ${highRiskMarkets.join(', ')} markets closely due to high utilization rates` : "All markets have healthy utilization rates",
-            avgUtilizationRate > 0.7 ? "Consider increasing interest rates to manage high utilization" : "Utilization rates are within normal ranges",
+            highRiskMarkets.length > 0
+              ? `Monitor ${highRiskMarkets.join(
+                  ", "
+                )} markets closely due to high utilization rates`
+              : "All markets have healthy utilization rates",
+            avgUtilizationRate > 0.7
+              ? "Consider increasing interest rates to manage high utilization"
+              : "Utilization rates are within normal ranges",
             "Regularly review collateral factors and liquidation thresholds",
           ],
         },
@@ -3279,7 +3907,7 @@ export default function AdminDashboard() {
       };
 
       setMarketAnalysisData(realAnalysisData);
-      
+
       // Final debug summary
       console.log("✅ Market Analysis Data Processing Complete:", {
         summary: {
@@ -3295,13 +3923,14 @@ export default function AdminDashboard() {
         },
         dataStructure: {
           overview: Object.keys(realAnalysisData.overview),
-          marketPerformance: realAnalysisData.marketPerformance.length + " markets",
+          marketPerformance:
+            realAnalysisData.marketPerformance.length + " markets",
           riskAnalysis: Object.keys(realAnalysisData.riskAnalysis),
           liquidityAnalysis: Object.keys(realAnalysisData.liquidityAnalysis),
         },
         timestamp: new Date().toISOString(),
       });
-      
+
       console.log("✅ Real market analysis data loaded successfully");
     } catch (error) {
       console.error("❌ Failed to fetch market analysis data:", error);
@@ -3319,164 +3948,192 @@ export default function AdminDashboard() {
   }, [fetchMarketAnalysisData]);
 
   // Individual Market Details Functions
-  const fetchMarketDetails = useCallback(async (marketSymbol: string) => {
-    console.log("📊 Fetching detailed data for market:", marketSymbol);
+  const fetchMarketDetails = useCallback(
+    async (marketSymbol: string) => {
+      console.log("📊 Fetching detailed data for market:", marketSymbol);
 
-    setIsLoadingMarketDetails(true);
-    setSelectedMarketDetails(null);
+      setIsLoadingMarketDetails(true);
+      setSelectedMarketDetails(null);
 
-    try {
-      // Find the market in the current analysis data
-      const marketPerformance = marketAnalysisData?.marketPerformance;
-      const marketData = marketPerformance?.find((m: any) => m.symbol === marketSymbol);
-      
-      if (!marketData || !marketData.marketInfo) {
-        throw new Error(`Market ${marketSymbol} not found in current data`);
-      }
+      try {
+        // Find the market in the current analysis data
+        const marketPerformance = marketAnalysisData?.marketPerformance;
+        const marketData = marketPerformance?.find(
+          (m: any) => m.symbol === marketSymbol
+        );
 
-      const marketInfo: MarketInfo = marketData.marketInfo;
-      const configMarket = markets.find(m => m.symbol === marketSymbol);
-
-      if (!configMarket) {
-        throw new Error(`Market ${marketSymbol} not found in configuration`);
-      }
-
-      // Calculate real metrics
-      const scaledPrice = parseFloat(marketInfo.price) / Math.pow(10, 6);
-      const tvl = parseFloat(marketInfo.totalDeposits) * scaledPrice;
-      const borrowed = parseFloat(marketInfo.totalBorrows) * scaledPrice;
-      const utilizationRate = marketInfo.utilizationRate * 100;
-
-      // Debug individual market details
-      console.log(`🔍 Individual Market Details Debug for ${marketSymbol}:`, {
-        marketSymbol: marketSymbol,
-        configMarket: configMarket,
-        marketInfo: {
-          symbol: marketInfo.symbol,
-          name: marketInfo.name,
-          poolId: marketInfo.poolId,
-          marketId: marketInfo.marketId,
-          decimals: marketInfo.decimals,
-          price: marketInfo.price,
-          totalDeposits: marketInfo.totalDeposits,
-          totalBorrows: marketInfo.totalBorrows,
-          utilizationRate: marketInfo.utilizationRate,
-          collateralFactor: marketInfo.collateralFactor,
-          liquidationThreshold: marketInfo.liquidationThreshold,
-          reserveFactor: marketInfo.reserveFactor,
-          borrowRate: marketInfo.borrowRate,
-          slope: marketInfo.slope,
-          isActive: marketInfo.isActive,
-          isPaused: marketInfo.isPaused,
-          lastUpdated: marketInfo.lastUpdated,
-        },
-        calculations: {
-          scaledPrice: scaledPrice,
-          tvl: tvl,
-          borrowed: borrowed,
-          utilizationRatePercent: utilizationRate,
-          healthFactor: 1 - marketInfo.utilizationRate,
-        },
-        apyCalculations: {
-          depositAPY: marketInfo.apyCalculation?.apy || 0,
-          borrowAPY: marketInfo.borrowApyCalculation?.apy || 0,
-          depositAPYCalculation: marketInfo.apyCalculation,
-          borrowAPYCalculation: marketInfo.borrowApyCalculation,
+        if (!marketData || !marketData.marketInfo) {
+          throw new Error(`Market ${marketSymbol} not found in current data`);
         }
-      });
-      
-      // Determine risk level
-      let riskLevel: "High" | "Medium" | "Low" = "Low";
-      if (marketInfo.utilizationRate > 0.8) {
-        riskLevel = "High";
-      } else if (marketInfo.utilizationRate > 0.6) {
-        riskLevel = "Medium";
+
+        const marketInfo: MarketInfo = marketData.marketInfo;
+        const configMarket = markets.find((m) => m.symbol === marketSymbol);
+
+        if (!configMarket) {
+          throw new Error(`Market ${marketSymbol} not found in configuration`);
+        }
+
+        // Calculate real metrics
+        const scaledPrice = parseFloat(marketInfo.price) / Math.pow(10, 6);
+        const tvl = parseFloat(marketInfo.totalDeposits) * scaledPrice;
+        const borrowed = parseFloat(marketInfo.totalBorrows) * scaledPrice;
+        const utilizationRate = marketInfo.utilizationRate * 100;
+
+        // Debug individual market details
+        console.log(`🔍 Individual Market Details Debug for ${marketSymbol}:`, {
+          marketSymbol: marketSymbol,
+          configMarket: configMarket,
+          marketInfo: {
+            symbol: marketInfo.symbol,
+            name: marketInfo.name,
+            poolId: marketInfo.poolId,
+            marketId: marketInfo.marketId,
+            decimals: marketInfo.decimals,
+            price: marketInfo.price,
+            totalDeposits: marketInfo.totalDeposits,
+            totalBorrows: marketInfo.totalBorrows,
+            utilizationRate: marketInfo.utilizationRate,
+            collateralFactor: marketInfo.collateralFactor,
+            liquidationThreshold: marketInfo.liquidationThreshold,
+            reserveFactor: marketInfo.reserveFactor,
+            borrowRate: marketInfo.borrowRate,
+            slope: marketInfo.slope,
+            isActive: marketInfo.isActive,
+            isPaused: marketInfo.isPaused,
+            lastUpdated: marketInfo.lastUpdated,
+          },
+          calculations: {
+            scaledPrice: scaledPrice,
+            tvl: tvl,
+            borrowed: borrowed,
+            utilizationRatePercent: utilizationRate,
+            healthFactor: 1 - marketInfo.utilizationRate,
+          },
+          apyCalculations: {
+            depositAPY: marketInfo.apyCalculation?.apy || 0,
+            borrowAPY: marketInfo.borrowApyCalculation?.apy || 0,
+            depositAPYCalculation: marketInfo.apyCalculation,
+            borrowAPYCalculation: marketInfo.borrowApyCalculation,
+          },
+        });
+
+        // Determine risk level
+        let riskLevel: "High" | "Medium" | "Low" = "Low";
+        if (marketInfo.utilizationRate > 0.8) {
+          riskLevel = "High";
+        } else if (marketInfo.utilizationRate > 0.6) {
+          riskLevel = "Medium";
+        }
+
+        const detailedMarketData = {
+          basicInfo: {
+            symbol: marketInfo.symbol,
+            name: marketInfo.name,
+            contractId: configMarket.underlyingContractId,
+            assetId: configMarket.underlyingAssetId,
+            decimals: marketInfo.decimals,
+            isSmartContract: configMarket.isSmartContract,
+            poolId: marketInfo.poolId,
+          },
+          currentMetrics: {
+            tvl: tvl,
+            borrowed: borrowed,
+            utilizationRate: Math.round(utilizationRate),
+            depositAPY: marketInfo.apyCalculation?.apy || 0,
+            borrowAPY: marketInfo.borrowApyCalculation?.apy || 0,
+            price: parseFloat(
+              (parseFloat(marketInfo.price) / Math.pow(10, 6)).toFixed(6)
+            ),
+            priceChange24h: 0, // TODO: Implement price change tracking
+            volume24h: 0, // TODO: Implement volume tracking
+            users: 0, // TODO: Implement user tracking
+            healthFactor: 1 - marketInfo.utilizationRate,
+            riskLevel: riskLevel,
+          },
+          historicalData: {
+            // TODO: Implement real historical data tracking
+            tvlHistory: Array.from({ length: 30 }, (_, i) => ({
+              date: new Date(Date.now() - (29 - i) * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split("T")[0],
+              value: tvl * (0.8 + Math.random() * 0.4), // Simulate historical variation
+            })),
+            utilizationHistory: Array.from({ length: 30 }, (_, i) => ({
+              date: new Date(Date.now() - (29 - i) * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split("T")[0],
+              value: utilizationRate * (0.7 + Math.random() * 0.6), // Simulate historical variation
+            })),
+            apyHistory: Array.from({ length: 30 }, (_, i) => ({
+              date: new Date(Date.now() - (29 - i) * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split("T")[0],
+              depositAPY:
+                (marketInfo.apyCalculation?.apy || 0) *
+                (0.8 + Math.random() * 0.4),
+              borrowAPY:
+                (marketInfo.borrowApyCalculation?.apy || 0) *
+                (0.8 + Math.random() * 0.4),
+            })),
+            priceHistory: Array.from({ length: 30 }, (_, i) => ({
+              date: new Date(Date.now() - (29 - i) * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split("T")[0],
+              value: scaledPrice * (0.9 + Math.random() * 0.2), // Simulate historical variation
+            })),
+          },
+          userActivity: {
+            // TODO: Implement real user activity tracking
+            totalUsers: 0,
+            activeUsers24h: 0,
+            newUsers7d: 0,
+            topDepositors: [], // TODO: Implement real depositor tracking
+            topBorrowers: [], // TODO: Implement real borrower tracking
+          },
+          riskMetrics: {
+            liquidationThreshold: marketInfo.liquidationThreshold * 100,
+            currentLiquidationRisk:
+              marketInfo.utilizationRate > 0.8
+                ? marketInfo.utilizationRate * 100
+                : 0,
+            collateralFactor: marketInfo.collateralFactor * 100,
+            maxLTV: marketInfo.collateralFactor * 100, // Using collateral factor as max LTV
+            volatility: 0, // TODO: Implement volatility calculation
+            correlationWithETH: 0, // TODO: Implement correlation calculation
+          },
+          protocolParameters: {
+            reserveFactor: marketInfo.reserveFactor * 100,
+            interestRateModel: "Jump Rate Model", // TODO: Get from contract
+            kinkUtilizationRate: 80, // TODO: Get from contract
+            baseRate: marketInfo.borrowRate * 100,
+            multiplier: marketInfo.slope * 100,
+            jumpMultiplier: 10, // TODO: Get from contract
+          },
+          lastUpdated: marketInfo.lastUpdated,
+        };
+
+        setSelectedMarketDetails(detailedMarketData);
+        console.log(
+          "✅ Real market details loaded successfully for:",
+          marketSymbol
+        );
+      } catch (error) {
+        console.error("❌ Failed to fetch market details:", error);
+        toast.error(`Failed to load details for ${marketSymbol}`);
+      } finally {
+        setIsLoadingMarketDetails(false);
       }
+    },
+    [markets, marketAnalysisData]
+  );
 
-      const detailedMarketData = {
-        basicInfo: {
-          symbol: marketInfo.symbol,
-          name: marketInfo.name,
-          contractId: configMarket.underlyingContractId,
-          assetId: configMarket.underlyingAssetId,
-          decimals: marketInfo.decimals,
-          isSmartContract: configMarket.isSmartContract,
-          poolId: marketInfo.poolId,
-        },
-        currentMetrics: {
-          tvl: tvl,
-          borrowed: borrowed,
-          utilizationRate: Math.round(utilizationRate),
-          depositAPY: marketInfo.apyCalculation?.apy || 0,
-          borrowAPY: marketInfo.borrowApyCalculation?.apy || 0,
-          price: parseFloat((parseFloat(marketInfo.price) / Math.pow(10, 6)).toFixed(6)),
-          priceChange24h: 0, // TODO: Implement price change tracking
-          volume24h: 0, // TODO: Implement volume tracking
-          users: 0, // TODO: Implement user tracking
-          healthFactor: 1 - marketInfo.utilizationRate,
-          riskLevel: riskLevel,
-        },
-        historicalData: {
-          // TODO: Implement real historical data tracking
-          tvlHistory: Array.from({ length: 30 }, (_, i) => ({
-            date: new Date(Date.now() - (29 - i) * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-            value: tvl * (0.8 + Math.random() * 0.4), // Simulate historical variation
-          })),
-          utilizationHistory: Array.from({ length: 30 }, (_, i) => ({
-            date: new Date(Date.now() - (29 - i) * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-            value: utilizationRate * (0.7 + Math.random() * 0.6), // Simulate historical variation
-          })),
-          apyHistory: Array.from({ length: 30 }, (_, i) => ({
-            date: new Date(Date.now() - (29 - i) * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-            depositAPY: (marketInfo.apyCalculation?.apy || 0) * (0.8 + Math.random() * 0.4),
-            borrowAPY: (marketInfo.borrowApyCalculation?.apy || 0) * (0.8 + Math.random() * 0.4),
-          })),
-          priceHistory: Array.from({ length: 30 }, (_, i) => ({
-            date: new Date(Date.now() - (29 - i) * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-            value: scaledPrice * (0.9 + Math.random() * 0.2), // Simulate historical variation
-          })),
-        },
-        userActivity: {
-          // TODO: Implement real user activity tracking
-          totalUsers: 0,
-          activeUsers24h: 0,
-          newUsers7d: 0,
-          topDepositors: [], // TODO: Implement real depositor tracking
-          topBorrowers: [], // TODO: Implement real borrower tracking
-        },
-        riskMetrics: {
-          liquidationThreshold: marketInfo.liquidationThreshold * 100,
-          currentLiquidationRisk: marketInfo.utilizationRate > 0.8 ? marketInfo.utilizationRate * 100 : 0,
-          collateralFactor: marketInfo.collateralFactor * 100,
-          maxLTV: marketInfo.collateralFactor * 100, // Using collateral factor as max LTV
-          volatility: 0, // TODO: Implement volatility calculation
-          correlationWithETH: 0, // TODO: Implement correlation calculation
-        },
-        protocolParameters: {
-          reserveFactor: marketInfo.reserveFactor * 100,
-          interestRateModel: "Jump Rate Model", // TODO: Get from contract
-          kinkUtilizationRate: 80, // TODO: Get from contract
-          baseRate: marketInfo.borrowRate * 100,
-          multiplier: marketInfo.slope * 100,
-          jumpMultiplier: 10, // TODO: Get from contract
-        },
-        lastUpdated: marketInfo.lastUpdated,
-      };
-
-      setSelectedMarketDetails(detailedMarketData);
-      console.log("✅ Real market details loaded successfully for:", marketSymbol);
-    } catch (error) {
-      console.error("❌ Failed to fetch market details:", error);
-      toast.error(`Failed to load details for ${marketSymbol}`);
-    } finally {
-      setIsLoadingMarketDetails(false);
-    }
-  }, [markets, marketAnalysisData]);
-
-  const handleViewMarketDetails = useCallback((marketSymbol: string) => {
-    setIsMarketDetailsModalOpen(true);
-    fetchMarketDetails(marketSymbol);
-  }, [fetchMarketDetails]);
+  const handleViewMarketDetails = useCallback(
+    (marketSymbol: string) => {
+      setIsMarketDetailsModalOpen(true);
+      fetchMarketDetails(marketSymbol);
+    },
+    [fetchMarketDetails]
+  );
 
   // Load market analysis data when component mounts or dependencies change
   React.useEffect(() => {
@@ -3484,6 +4141,14 @@ export default function AdminDashboard() {
       fetchMarketAnalysisData();
     }
   }, [activeTab, selectedTimeRange, selectedMarketForAnalysis, currentNetwork]);
+
+  // Load SToken info when SToken tab is active
+  React.useEffect(() => {
+    if (activeTab === "stoken") {
+      loadStokenInfo();
+      checkStokenMarketExists();
+    }
+  }, [activeTab, currentNetwork]);
 
   return (
     <div className="min-h-screen bg-background relative">
@@ -3571,7 +4236,7 @@ export default function AdminDashboard() {
           onValueChange={setActiveTab}
           className="space-y-6"
         >
-          <TabsList className="grid w-full grid-cols-8 lg:w-auto lg:grid-cols-8">
+          <TabsList className="grid w-full grid-cols-9 lg:w-auto lg:grid-cols-9">
             <TabsTrigger value="overview" className="flex items-center gap-2">
               <BarChart3 className="h-4 w-4" />
               <span className="hidden sm:inline">Overview</span>
@@ -3580,7 +4245,10 @@ export default function AdminDashboard() {
               <Coins className="h-4 w-4" />
               <span className="hidden sm:inline">Markets</span>
             </TabsTrigger>
-            <TabsTrigger value="market-analysis" className="flex items-center gap-2">
+            <TabsTrigger
+              value="market-analysis"
+              className="flex items-center gap-2"
+            >
               <TrendingUp className="h-4 w-4" />
               <span className="hidden sm:inline">Market Analysis</span>
             </TabsTrigger>
@@ -3594,6 +4262,10 @@ export default function AdminDashboard() {
             >
               <Users className="h-4 w-4" />
               <span className="hidden sm:inline">User Analysis</span>
+            </TabsTrigger>
+            <TabsTrigger value="stoken" className="flex items-center gap-2">
+              <DollarSign className="h-4 w-4" />
+              <span className="hidden sm:inline">SToken</span>
             </TabsTrigger>
             <TabsTrigger value="roles" className="flex items-center gap-2">
               <Shield className="h-4 w-4" />
@@ -4179,7 +4851,10 @@ export default function AdminDashboard() {
             <div className="flex justify-between items-center">
               <H2>Market Analysis</H2>
               <div className="flex items-center gap-2">
-                <Select value={selectedTimeRange} onValueChange={setSelectedTimeRange}>
+                <Select
+                  value={selectedTimeRange}
+                  onValueChange={setSelectedTimeRange}
+                >
                   <SelectTrigger className="w-32">
                     <SelectValue />
                   </SelectTrigger>
@@ -4190,7 +4865,10 @@ export default function AdminDashboard() {
                     <SelectItem value="90d">90d</SelectItem>
                   </SelectContent>
                 </Select>
-                <Select value={selectedMarketForAnalysis} onValueChange={setSelectedMarketForAnalysis}>
+                <Select
+                  value={selectedMarketForAnalysis}
+                  onValueChange={setSelectedMarketForAnalysis}
+                >
                   <SelectTrigger className="w-40">
                     <SelectValue />
                   </SelectTrigger>
@@ -4229,7 +4907,9 @@ export default function AdminDashboard() {
               <div className="flex items-center justify-center py-12">
                 <div className="text-center">
                   <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-                  <p className="text-red-600 dark:text-red-400">{marketAnalysisError}</p>
+                  <p className="text-red-600 dark:text-red-400">
+                    {marketAnalysisError}
+                  </p>
                   <DorkFiButton
                     onClick={refreshMarketAnalysis}
                     className="mt-4"
@@ -4244,12 +4924,18 @@ export default function AdminDashboard() {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                   <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">Total TVL</CardTitle>
+                      <CardTitle className="text-sm font-medium">
+                        Total TVL
+                      </CardTitle>
                       <TrendingUp className="h-4 w-4 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
                       <div className="text-2xl font-bold">
-                        ${(marketAnalysisData.overview.totalTVL / 1000000).toFixed(2)}M
+                        $
+                        {(
+                          marketAnalysisData.overview.totalTVL / 1000000
+                        ).toFixed(2)}
+                        M
                       </div>
                       <p className="text-xs text-muted-foreground">
                         +12.5% from last period
@@ -4258,21 +4944,30 @@ export default function AdminDashboard() {
                   </Card>
                   <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">Total Borrowed</CardTitle>
+                      <CardTitle className="text-sm font-medium">
+                        Total Borrowed
+                      </CardTitle>
                       <Coins className="h-4 w-4 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
                       <div className="text-2xl font-bold">
-                        ${(marketAnalysisData.overview.totalBorrowed / 1000000).toFixed(2)}M
+                        $
+                        {(
+                          marketAnalysisData.overview.totalBorrowed / 1000000
+                        ).toFixed(2)}
+                        M
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        Utilization: {marketAnalysisData.overview.utilizationRate}%
+                        Utilization:{" "}
+                        {marketAnalysisData.overview.utilizationRate}%
                       </p>
                     </CardContent>
                   </Card>
                   <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">Avg APY</CardTitle>
+                      <CardTitle className="text-sm font-medium">
+                        Avg APY
+                      </CardTitle>
                       <BarChart3 className="h-4 w-4 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
@@ -4286,7 +4981,9 @@ export default function AdminDashboard() {
                   </Card>
                   <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">Active Users</CardTitle>
+                      <CardTitle className="text-sm font-medium">
+                        Active Users
+                      </CardTitle>
                       <Users className="h-4 w-4 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
@@ -4294,7 +4991,11 @@ export default function AdminDashboard() {
                         {marketAnalysisData.overview.activeUsers.toLocaleString()}
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        Daily volume: ${(marketAnalysisData.overview.dailyVolume / 1000000).toFixed(1)}M
+                        Daily volume: $
+                        {(
+                          marketAnalysisData.overview.dailyVolume / 1000000
+                        ).toFixed(1)}
+                        M
                       </p>
                     </CardContent>
                   </Card>
@@ -4327,81 +5028,105 @@ export default function AdminDashboard() {
                           </tr>
                         </thead>
                         <tbody>
-                          {marketAnalysisData.marketPerformance.map((market: any, index: number) => (
-                            <tr key={market.symbol} className="border-b hover:bg-muted/50">
-                              <td className="p-2">
-                                <div className="flex items-center gap-2">
-                                  <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-sm font-medium">
-                                    {market.symbol.charAt(0)}
+                          {marketAnalysisData.marketPerformance.map(
+                            (market: any, index: number) => (
+                              <tr
+                                key={market.symbol}
+                                className="border-b hover:bg-muted/50"
+                              >
+                                <td className="p-2">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-sm font-medium">
+                                      {market.symbol.charAt(0)}
+                                    </div>
+                                    <div>
+                                      <div className="font-medium">
+                                        {market.symbol}
+                                      </div>
+                                      <div className="text-xs text-muted-foreground">
+                                        {market.name}
+                                      </div>
+                                    </div>
                                   </div>
-                                  <div>
-                                    <div className="font-medium">{market.symbol}</div>
-                                    <div className="text-xs text-muted-foreground">{market.name}</div>
+                                </td>
+                                <td className="text-right p-2">
+                                  ${(market.tvl / 1000000).toFixed(2)}M
+                                </td>
+                                <td className="text-right p-2">
+                                  ${(market.borrowed / 1000000).toFixed(2)}M
+                                </td>
+                                <td className="text-right p-2">
+                                  <div className="flex items-center justify-end gap-1">
+                                    <span>{market.utilizationRate}%</span>
+                                    <div
+                                      className={`w-2 h-2 rounded-full ${
+                                        market.utilizationRate > 80
+                                          ? "bg-red-500"
+                                          : market.utilizationRate > 60
+                                          ? "bg-yellow-500"
+                                          : "bg-green-500"
+                                      }`}
+                                    />
                                   </div>
-                                </div>
-                              </td>
-                              <td className="text-right p-2">
-                                ${(market.tvl / 1000000).toFixed(2)}M
-                              </td>
-                              <td className="text-right p-2">
-                                ${(market.borrowed / 1000000).toFixed(2)}M
-                              </td>
-                              <td className="text-right p-2">
-                                <div className="flex items-center justify-end gap-1">
-                                  <span>{market.utilizationRate}%</span>
-                                  <div className={`w-2 h-2 rounded-full ${
-                                    market.utilizationRate > 80 ? 'bg-red-500' :
-                                    market.utilizationRate > 60 ? 'bg-yellow-500' : 'bg-green-500'
-                                  }`} />
-                                </div>
-                              </td>
-                              <td className="text-right p-2">
-                                <span className="text-green-600 dark:text-green-400">
-                                  {market.depositAPY.toFixed(2)}%
-                                </span>
-                              </td>
-                              <td className="text-right p-2">
-                                <span className="text-red-600 dark:text-red-400">
-                                  {market.borrowAPY.toFixed(2)}%
-                                </span>
-                              </td>
-                              <td className="text-right p-2">
-                                ${market.price.toFixed(6)}
-                              </td>
-                              <td className="text-right p-2">
-                                <span className={`${
-                                  market.priceChange24h >= 0 
-                                    ? 'text-green-600 dark:text-green-400' 
-                                    : 'text-red-600 dark:text-red-400'
-                                }`}>
-                                  {market.priceChange24h >= 0 ? '+' : ''}{market.priceChange24h.toFixed(2)}%
-                                </span>
-                              </td>
-                              <td className="text-right p-2">
-                                ${(market.volume24h / 1000).toFixed(0)}K
-                              </td>
-                              <td className="text-center p-2">
-                                <Badge 
-                                  variant={
-                                    market.riskLevel === 'High' ? 'destructive' :
-                                    market.riskLevel === 'Medium' ? 'default' : 'secondary'
-                                  }
-                                  className="text-xs"
-                                >
-                                  {market.riskLevel}
-                                </Badge>
-                              </td>
-                              <td className="text-center p-2">
-                                <DorkFiButton
-                                  onClick={() => handleViewMarketDetails(market.symbol)}
-                                  className="flex items-center gap-1 text-xs px-2 py-1"
-                                >
-                                  <Eye className="h-3 w-3" />
-                                  <span className="hidden sm:inline">Details</span>
-                                </DorkFiButton>
-                              </td>
-                            </tr>
-                          ))}
+                                </td>
+                                <td className="text-right p-2">
+                                  <span className="text-green-600 dark:text-green-400">
+                                    {market.depositAPY.toFixed(2)}%
+                                  </span>
+                                </td>
+                                <td className="text-right p-2">
+                                  <span className="text-red-600 dark:text-red-400">
+                                    {market.borrowAPY.toFixed(2)}%
+                                  </span>
+                                </td>
+                                <td className="text-right p-2">
+                                  ${market.price.toFixed(6)}
+                                </td>
+                                <td className="text-right p-2">
+                                  <span
+                                    className={`${
+                                      market.priceChange24h >= 0
+                                        ? "text-green-600 dark:text-green-400"
+                                        : "text-red-600 dark:text-red-400"
+                                    }`}
+                                  >
+                                    {market.priceChange24h >= 0 ? "+" : ""}
+                                    {market.priceChange24h.toFixed(2)}%
+                                  </span>
+                                </td>
+                                <td className="text-right p-2">
+                                  ${(market.volume24h / 1000).toFixed(0)}K
+                                </td>
+                                <td className="text-center p-2">
+                                  <Badge
+                                    variant={
+                                      market.riskLevel === "High"
+                                        ? "destructive"
+                                        : market.riskLevel === "Medium"
+                                        ? "default"
+                                        : "secondary"
+                                    }
+                                    className="text-xs"
+                                  >
+                                    {market.riskLevel}
+                                  </Badge>
+                                </td>
+                                <td className="text-center p-2">
+                                  <DorkFiButton
+                                    onClick={() =>
+                                      handleViewMarketDetails(market.symbol)
+                                    }
+                                    className="flex items-center gap-1 text-xs px-2 py-1"
+                                  >
+                                    <Eye className="h-3 w-3" />
+                                    <span className="hidden sm:inline">
+                                      Details
+                                    </span>
+                                  </DorkFiButton>
+                                </td>
+                              </tr>
+                            )
+                          )}
                         </tbody>
                       </table>
                     </div>
@@ -4419,37 +5144,56 @@ export default function AdminDashboard() {
                     </CardHeader>
                     <CardContent className="space-y-4">
                       <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium">Overall Risk Score</span>
+                        <span className="text-sm font-medium">
+                          Overall Risk Score
+                        </span>
                         <div className="flex items-center gap-2">
                           <div className="w-24 bg-muted rounded-full h-2">
-                            <div 
-                              className="bg-red-500 h-2 rounded-full" 
-                              style={{ width: `${(marketAnalysisData.riskAnalysis.overallRiskScore / 10) * 100}%` }}
+                            <div
+                              className="bg-red-500 h-2 rounded-full"
+                              style={{
+                                width: `${
+                                  (marketAnalysisData.riskAnalysis
+                                    .overallRiskScore /
+                                    10) *
+                                  100
+                                }%`,
+                              }}
                             />
                           </div>
                           <span className="text-sm font-bold">
-                            {marketAnalysisData.riskAnalysis.overallRiskScore}/10
+                            {marketAnalysisData.riskAnalysis.overallRiskScore}
+                            /10
                           </span>
                         </div>
                       </div>
-                      
+
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
                           <span className="text-sm">High Risk Markets</span>
                           <Badge variant="destructive" className="text-xs">
-                            {marketAnalysisData.riskAnalysis.highRiskMarkets.length}
+                            {
+                              marketAnalysisData.riskAnalysis.highRiskMarkets
+                                .length
+                            }
                           </Badge>
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-sm">Medium Risk Markets</span>
                           <Badge variant="default" className="text-xs">
-                            {marketAnalysisData.riskAnalysis.mediumRiskMarkets.length}
+                            {
+                              marketAnalysisData.riskAnalysis.mediumRiskMarkets
+                                .length
+                            }
                           </Badge>
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-sm">Low Risk Markets</span>
                           <Badge variant="secondary" className="text-xs">
-                            {marketAnalysisData.riskAnalysis.lowRiskMarkets.length}
+                            {
+                              marketAnalysisData.riskAnalysis.lowRiskMarkets
+                                .length
+                            }
                           </Badge>
                         </div>
                       </div>
@@ -4457,12 +5201,17 @@ export default function AdminDashboard() {
                       <div className="space-y-2">
                         <h4 className="text-sm font-medium">Recommendations</h4>
                         <ul className="text-sm text-muted-foreground space-y-1">
-                          {marketAnalysisData.riskAnalysis.recommendations.map((rec: string, index: number) => (
-                            <li key={index} className="flex items-start gap-2">
-                              <span className="text-primary">•</span>
-                              <span>{rec}</span>
-                            </li>
-                          ))}
+                          {marketAnalysisData.riskAnalysis.recommendations.map(
+                            (rec: string, index: number) => (
+                              <li
+                                key={index}
+                                className="flex items-start gap-2"
+                              >
+                                <span className="text-primary">•</span>
+                                <span>{rec}</span>
+                              </li>
+                            )
+                          )}
                         </ul>
                       </div>
                     </CardContent>
@@ -4480,34 +5229,57 @@ export default function AdminDashboard() {
                         <div className="flex items-center justify-between">
                           <span className="text-sm">Total Liquidity</span>
                           <span className="font-medium">
-                            ${(marketAnalysisData.liquidityAnalysis.totalLiquidity / 1000000).toFixed(2)}M
+                            $
+                            {(
+                              marketAnalysisData.liquidityAnalysis
+                                .totalLiquidity / 1000000
+                            ).toFixed(2)}
+                            M
                           </span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-sm">Available Liquidity</span>
                           <span className="font-medium text-green-600 dark:text-green-400">
-                            ${(marketAnalysisData.liquidityAnalysis.availableLiquidity / 1000000).toFixed(2)}M
+                            $
+                            {(
+                              marketAnalysisData.liquidityAnalysis
+                                .availableLiquidity / 1000000
+                            ).toFixed(2)}
+                            M
                           </span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-sm">Locked Liquidity</span>
                           <span className="font-medium text-orange-600 dark:text-orange-400">
-                            ${(marketAnalysisData.liquidityAnalysis.lockedLiquidity / 1000000).toFixed(2)}M
+                            $
+                            {(
+                              marketAnalysisData.liquidityAnalysis
+                                .lockedLiquidity / 1000000
+                            ).toFixed(2)}
+                            M
                           </span>
                         </div>
                       </div>
 
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
-                          <span className="text-sm font-medium">Liquidity Utilization</span>
+                          <span className="text-sm font-medium">
+                            Liquidity Utilization
+                          </span>
                           <span className="font-bold">
-                            {marketAnalysisData.liquidityAnalysis.liquidityUtilization}%
+                            {
+                              marketAnalysisData.liquidityAnalysis
+                                .liquidityUtilization
+                            }
+                            %
                           </span>
                         </div>
                         <div className="w-full bg-muted rounded-full h-2">
-                          <div 
-                            className="bg-primary h-2 rounded-full" 
-                            style={{ width: `${marketAnalysisData.liquidityAnalysis.liquidityUtilization}%` }}
+                          <div
+                            className="bg-primary h-2 rounded-full"
+                            style={{
+                              width: `${marketAnalysisData.liquidityAnalysis.liquidityUtilization}%`,
+                            }}
                           />
                         </div>
                       </div>
@@ -4515,15 +5287,27 @@ export default function AdminDashboard() {
                       <div className="grid grid-cols-2 gap-4 pt-2">
                         <div className="text-center">
                           <div className="text-2xl font-bold">
-                            {marketAnalysisData.liquidityAnalysis.liquidityProviders}
+                            {
+                              marketAnalysisData.liquidityAnalysis
+                                .liquidityProviders
+                            }
                           </div>
-                          <div className="text-xs text-muted-foreground">Providers</div>
+                          <div className="text-xs text-muted-foreground">
+                            Providers
+                          </div>
                         </div>
                         <div className="text-center">
                           <div className="text-2xl font-bold">
-                            ${(marketAnalysisData.liquidityAnalysis.avgLiquidityPerProvider / 1000).toFixed(0)}K
+                            $
+                            {(
+                              marketAnalysisData.liquidityAnalysis
+                                .avgLiquidityPerProvider / 1000
+                            ).toFixed(0)}
+                            K
                           </div>
-                          <div className="text-xs text-muted-foreground">Avg per Provider</div>
+                          <div className="text-xs text-muted-foreground">
+                            Avg per Provider
+                          </div>
                         </div>
                       </div>
                     </CardContent>
@@ -4532,23 +5316,29 @@ export default function AdminDashboard() {
 
                 {/* Last Updated */}
                 <div className="text-center text-sm text-muted-foreground">
-                  Last updated: {new Date(marketAnalysisData.lastUpdated).toLocaleString()}
+                  Last updated:{" "}
+                  {new Date(marketAnalysisData.lastUpdated).toLocaleString()}
                 </div>
               </div>
             ) : null}
 
             {/* Individual Market Details Modal */}
-            <Dialog open={isMarketDetailsModalOpen} onOpenChange={setIsMarketDetailsModalOpen}>
+            <Dialog
+              open={isMarketDetailsModalOpen}
+              onOpenChange={setIsMarketDetailsModalOpen}
+            >
               <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-sm font-medium">
-                      {selectedMarketDetails?.basicInfo?.symbol?.charAt(0) || '?'}
+                      {selectedMarketDetails?.basicInfo?.symbol?.charAt(0) ||
+                        "?"}
                     </div>
                     {selectedMarketDetails?.basicInfo?.symbol} Market Details
                   </DialogTitle>
                   <DialogDescription>
-                    Comprehensive analysis and metrics for {selectedMarketDetails?.basicInfo?.name}
+                    Comprehensive analysis and metrics for{" "}
+                    {selectedMarketDetails?.basicInfo?.name}
                   </DialogDescription>
                 </DialogHeader>
 
@@ -4569,31 +5359,49 @@ export default function AdminDashboard() {
                       <CardContent>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                           <div>
-                            <Label className="text-sm font-medium">Symbol</Label>
-                            <p className="text-lg font-bold">{selectedMarketDetails.basicInfo.symbol}</p>
+                            <Label className="text-sm font-medium">
+                              Symbol
+                            </Label>
+                            <p className="text-lg font-bold">
+                              {selectedMarketDetails.basicInfo.symbol}
+                            </p>
                           </div>
                           <div>
                             <Label className="text-sm font-medium">Name</Label>
-                            <p className="text-lg">{selectedMarketDetails.basicInfo.name}</p>
+                            <p className="text-lg">
+                              {selectedMarketDetails.basicInfo.name}
+                            </p>
                           </div>
                           <div>
-                            <Label className="text-sm font-medium">Decimals</Label>
-                            <p className="text-lg">{selectedMarketDetails.basicInfo.decimals}</p>
+                            <Label className="text-sm font-medium">
+                              Decimals
+                            </Label>
+                            <p className="text-lg">
+                              {selectedMarketDetails.basicInfo.decimals}
+                            </p>
                           </div>
                           <div>
-                            <Label className="text-sm font-medium">Pool ID</Label>
-                            <p className="text-lg">{selectedMarketDetails.basicInfo.poolId}</p>
+                            <Label className="text-sm font-medium">
+                              Pool ID
+                            </Label>
+                            <p className="text-lg">
+                              {selectedMarketDetails.basicInfo.poolId}
+                            </p>
                           </div>
                         </div>
                         <div className="mt-4 space-y-2">
                           <div>
-                            <Label className="text-sm font-medium">Contract ID</Label>
+                            <Label className="text-sm font-medium">
+                              Contract ID
+                            </Label>
                             <p className="text-sm font-mono bg-muted p-2 rounded">
                               {selectedMarketDetails.basicInfo.contractId}
                             </p>
                           </div>
                           <div>
-                            <Label className="text-sm font-medium">Asset ID</Label>
+                            <Label className="text-sm font-medium">
+                              Asset ID
+                            </Label>
                             <p className="text-sm font-mono bg-muted p-2 rounded">
                               {selectedMarketDetails.basicInfo.assetId}
                             </p>
@@ -4606,62 +5414,106 @@ export default function AdminDashboard() {
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                       <Card>
                         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                          <CardTitle className="text-sm font-medium">Total Value Locked</CardTitle>
+                          <CardTitle className="text-sm font-medium">
+                            Total Value Locked
+                          </CardTitle>
                           <TrendingUp className="h-4 w-4 text-muted-foreground" />
                         </CardHeader>
                         <CardContent>
                           <div className="text-2xl font-bold">
-                            ${(selectedMarketDetails.currentMetrics.tvl / 1000000).toFixed(2)}M
+                            $
+                            {(
+                              selectedMarketDetails.currentMetrics.tvl / 1000000
+                            ).toFixed(2)}
+                            M
                           </div>
                           <p className="text-xs text-muted-foreground">
-                            Utilization: {selectedMarketDetails.currentMetrics.utilizationRate}%
+                            Utilization:{" "}
+                            {
+                              selectedMarketDetails.currentMetrics
+                                .utilizationRate
+                            }
+                            %
                           </p>
                         </CardContent>
                       </Card>
                       <Card>
                         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                          <CardTitle className="text-sm font-medium">Total Borrowed</CardTitle>
+                          <CardTitle className="text-sm font-medium">
+                            Total Borrowed
+                          </CardTitle>
                           <Coins className="h-4 w-4 text-muted-foreground" />
                         </CardHeader>
                         <CardContent>
                           <div className="text-2xl font-bold">
-                            ${(selectedMarketDetails.currentMetrics.borrowed / 1000000).toFixed(2)}M
+                            $
+                            {(
+                              selectedMarketDetails.currentMetrics.borrowed /
+                              1000000
+                            ).toFixed(2)}
+                            M
                           </div>
                           <p className="text-xs text-muted-foreground">
-                            Health Factor: {selectedMarketDetails.currentMetrics.healthFactor.toFixed(2)}
+                            Health Factor:{" "}
+                            {selectedMarketDetails.currentMetrics.healthFactor.toFixed(
+                              2
+                            )}
                           </p>
                         </CardContent>
                       </Card>
                       <Card>
                         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                          <CardTitle className="text-sm font-medium">Deposit APY</CardTitle>
+                          <CardTitle className="text-sm font-medium">
+                            Deposit APY
+                          </CardTitle>
                           <BarChart3 className="h-4 w-4 text-muted-foreground" />
                         </CardHeader>
                         <CardContent>
                           <div className="text-2xl font-bold text-green-600 dark:text-green-400">
-                            {selectedMarketDetails.currentMetrics.depositAPY.toFixed(2)}%
+                            {selectedMarketDetails.currentMetrics.depositAPY.toFixed(
+                              2
+                            )}
+                            %
                           </div>
                           <p className="text-xs text-muted-foreground">
-                            Borrow APY: {selectedMarketDetails.currentMetrics.borrowAPY.toFixed(2)}%
+                            Borrow APY:{" "}
+                            {selectedMarketDetails.currentMetrics.borrowAPY.toFixed(
+                              2
+                            )}
+                            %
                           </p>
                         </CardContent>
                       </Card>
                       <Card>
                         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                          <CardTitle className="text-sm font-medium">Current Price</CardTitle>
+                          <CardTitle className="text-sm font-medium">
+                            Current Price
+                          </CardTitle>
                           <Activity className="h-4 w-4 text-muted-foreground" />
                         </CardHeader>
                         <CardContent>
                           <div className="text-2xl font-bold">
-                            ${selectedMarketDetails.currentMetrics.price.toFixed(6)}
+                            $
+                            {selectedMarketDetails.currentMetrics.price.toFixed(
+                              6
+                            )}
                           </div>
-                          <p className={`text-xs ${
-                            selectedMarketDetails.currentMetrics.priceChange24h >= 0 
-                              ? 'text-green-600 dark:text-green-400' 
-                              : 'text-red-600 dark:text-red-400'
-                          }`}>
-                            {selectedMarketDetails.currentMetrics.priceChange24h >= 0 ? '+' : ''}
-                            {selectedMarketDetails.currentMetrics.priceChange24h.toFixed(2)}% (24h)
+                          <p
+                            className={`text-xs ${
+                              selectedMarketDetails.currentMetrics
+                                .priceChange24h >= 0
+                                ? "text-green-600 dark:text-green-400"
+                                : "text-red-600 dark:text-red-400"
+                            }`}
+                          >
+                            {selectedMarketDetails.currentMetrics
+                              .priceChange24h >= 0
+                              ? "+"
+                              : ""}
+                            {selectedMarketDetails.currentMetrics.priceChange24h.toFixed(
+                              2
+                            )}
+                            % (24h)
                           </p>
                         </CardContent>
                       </Card>
@@ -4676,45 +5528,96 @@ export default function AdminDashboard() {
                         <CardContent className="space-y-4">
                           <div className="grid grid-cols-2 gap-4">
                             <div>
-                              <Label className="text-sm font-medium">Liquidation Threshold</Label>
-                              <p className="text-lg font-bold">{selectedMarketDetails.riskMetrics.liquidationThreshold}%</p>
-                            </div>
-                            <div>
-                              <Label className="text-sm font-medium">Current Liquidation Risk</Label>
-                              <p className="text-lg font-bold text-red-600 dark:text-red-400">
-                                {selectedMarketDetails.riskMetrics.currentLiquidationRisk.toFixed(1)}%
+                              <Label className="text-sm font-medium">
+                                Liquidation Threshold
+                              </Label>
+                              <p className="text-lg font-bold">
+                                {
+                                  selectedMarketDetails.riskMetrics
+                                    .liquidationThreshold
+                                }
+                                %
                               </p>
                             </div>
                             <div>
-                              <Label className="text-sm font-medium">Collateral Factor</Label>
-                              <p className="text-lg font-bold">{selectedMarketDetails.riskMetrics.collateralFactor}%</p>
+                              <Label className="text-sm font-medium">
+                                Current Liquidation Risk
+                              </Label>
+                              <p className="text-lg font-bold text-red-600 dark:text-red-400">
+                                {selectedMarketDetails.riskMetrics.currentLiquidationRisk.toFixed(
+                                  1
+                                )}
+                                %
+                              </p>
                             </div>
                             <div>
-                              <Label className="text-sm font-medium">Max LTV</Label>
-                              <p className="text-lg font-bold">{selectedMarketDetails.riskMetrics.maxLTV}%</p>
+                              <Label className="text-sm font-medium">
+                                Collateral Factor
+                              </Label>
+                              <p className="text-lg font-bold">
+                                {
+                                  selectedMarketDetails.riskMetrics
+                                    .collateralFactor
+                                }
+                                %
+                              </p>
+                            </div>
+                            <div>
+                              <Label className="text-sm font-medium">
+                                Max LTV
+                              </Label>
+                              <p className="text-lg font-bold">
+                                {selectedMarketDetails.riskMetrics.maxLTV}%
+                              </p>
                             </div>
                           </div>
                           <div className="space-y-2">
                             <div className="flex items-center justify-between">
-                              <Label className="text-sm font-medium">Volatility</Label>
-                              <span className="font-bold">{selectedMarketDetails.riskMetrics.volatility.toFixed(1)}%</span>
+                              <Label className="text-sm font-medium">
+                                Volatility
+                              </Label>
+                              <span className="font-bold">
+                                {selectedMarketDetails.riskMetrics.volatility.toFixed(
+                                  1
+                                )}
+                                %
+                              </span>
                             </div>
                             <div className="w-full bg-muted rounded-full h-2">
-                              <div 
-                                className="bg-yellow-500 h-2 rounded-full" 
-                                style={{ width: `${Math.min(selectedMarketDetails.riskMetrics.volatility, 100)}%` }}
+                              <div
+                                className="bg-yellow-500 h-2 rounded-full"
+                                style={{
+                                  width: `${Math.min(
+                                    selectedMarketDetails.riskMetrics
+                                      .volatility,
+                                    100
+                                  )}%`,
+                                }}
                               />
                             </div>
                           </div>
                           <div className="space-y-2">
                             <div className="flex items-center justify-between">
-                              <Label className="text-sm font-medium">Correlation with ETH</Label>
-                              <span className="font-bold">{(selectedMarketDetails.riskMetrics.correlationWithETH * 100).toFixed(1)}%</span>
+                              <Label className="text-sm font-medium">
+                                Correlation with ETH
+                              </Label>
+                              <span className="font-bold">
+                                {(
+                                  selectedMarketDetails.riskMetrics
+                                    .correlationWithETH * 100
+                                ).toFixed(1)}
+                                %
+                              </span>
                             </div>
                             <div className="w-full bg-muted rounded-full h-2">
-                              <div 
-                                className="bg-blue-500 h-2 rounded-full" 
-                                style={{ width: `${selectedMarketDetails.riskMetrics.correlationWithETH * 100}%` }}
+                              <div
+                                className="bg-blue-500 h-2 rounded-full"
+                                style={{
+                                  width: `${
+                                    selectedMarketDetails.riskMetrics
+                                      .correlationWithETH * 100
+                                  }%`,
+                                }}
                               />
                             </div>
                           </div>
@@ -4728,26 +5631,63 @@ export default function AdminDashboard() {
                         <CardContent className="space-y-4">
                           <div className="grid grid-cols-2 gap-4">
                             <div>
-                              <Label className="text-sm font-medium">Reserve Factor</Label>
-                              <p className="text-lg font-bold">{selectedMarketDetails.protocolParameters.reserveFactor}%</p>
+                              <Label className="text-sm font-medium">
+                                Reserve Factor
+                              </Label>
+                              <p className="text-lg font-bold">
+                                {
+                                  selectedMarketDetails.protocolParameters
+                                    .reserveFactor
+                                }
+                                %
+                              </p>
                             </div>
                             <div>
-                              <Label className="text-sm font-medium">Kink Utilization</Label>
-                              <p className="text-lg font-bold">{selectedMarketDetails.protocolParameters.kinkUtilizationRate}%</p>
+                              <Label className="text-sm font-medium">
+                                Kink Utilization
+                              </Label>
+                              <p className="text-lg font-bold">
+                                {
+                                  selectedMarketDetails.protocolParameters
+                                    .kinkUtilizationRate
+                                }
+                                %
+                              </p>
                             </div>
                             <div>
-                              <Label className="text-sm font-medium">Base Rate</Label>
-                              <p className="text-lg font-bold">{selectedMarketDetails.protocolParameters.baseRate}%</p>
+                              <Label className="text-sm font-medium">
+                                Base Rate
+                              </Label>
+                              <p className="text-lg font-bold">
+                                {
+                                  selectedMarketDetails.protocolParameters
+                                    .baseRate
+                                }
+                                %
+                              </p>
                             </div>
                             <div>
-                              <Label className="text-sm font-medium">Multiplier</Label>
-                              <p className="text-lg font-bold">{selectedMarketDetails.protocolParameters.multiplier}x</p>
+                              <Label className="text-sm font-medium">
+                                Multiplier
+                              </Label>
+                              <p className="text-lg font-bold">
+                                {
+                                  selectedMarketDetails.protocolParameters
+                                    .multiplier
+                                }
+                                x
+                              </p>
                             </div>
                           </div>
                           <div>
-                            <Label className="text-sm font-medium">Interest Rate Model</Label>
+                            <Label className="text-sm font-medium">
+                              Interest Rate Model
+                            </Label>
                             <p className="text-sm bg-muted p-2 rounded">
-                              {selectedMarketDetails.protocolParameters.interestRateModel}
+                              {
+                                selectedMarketDetails.protocolParameters
+                                  .interestRateModel
+                              }
                             </p>
                           </div>
                         </CardContent>
@@ -4763,16 +5703,31 @@ export default function AdminDashboard() {
                         <CardContent className="space-y-4">
                           <div className="grid grid-cols-3 gap-4">
                             <div className="text-center">
-                              <div className="text-2xl font-bold">{selectedMarketDetails.userActivity.totalUsers}</div>
-                              <div className="text-xs text-muted-foreground">Total Users</div>
+                              <div className="text-2xl font-bold">
+                                {selectedMarketDetails.userActivity.totalUsers}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                Total Users
+                              </div>
                             </div>
                             <div className="text-center">
-                              <div className="text-2xl font-bold">{selectedMarketDetails.userActivity.activeUsers24h}</div>
-                              <div className="text-xs text-muted-foreground">Active (24h)</div>
+                              <div className="text-2xl font-bold">
+                                {
+                                  selectedMarketDetails.userActivity
+                                    .activeUsers24h
+                                }
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                Active (24h)
+                              </div>
                             </div>
                             <div className="text-center">
-                              <div className="text-2xl font-bold">{selectedMarketDetails.userActivity.newUsers7d}</div>
-                              <div className="text-xs text-muted-foreground">New (7d)</div>
+                              <div className="text-2xl font-bold">
+                                {selectedMarketDetails.userActivity.newUsers7d}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                New (7d)
+                              </div>
                             </div>
                           </div>
                         </CardContent>
@@ -4784,24 +5739,32 @@ export default function AdminDashboard() {
                         </CardHeader>
                         <CardContent>
                           <div className="space-y-2">
-                            {selectedMarketDetails.userActivity.topDepositors.map((depositor: any, index: number) => (
-                              <div key={index} className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-sm font-medium">#{index + 1}</span>
-                                  <span className="text-xs font-mono">
-                                    {depositor.address.slice(0, 6)}...{depositor.address.slice(-4)}
-                                  </span>
-                                </div>
-                                <div className="text-right">
-                                  <div className="text-sm font-bold">
-                                    ${(depositor.amount / 1000).toFixed(0)}K
+                            {selectedMarketDetails.userActivity.topDepositors.map(
+                              (depositor: any, index: number) => (
+                                <div
+                                  key={index}
+                                  className="flex items-center justify-between"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm font-medium">
+                                      #{index + 1}
+                                    </span>
+                                    <span className="text-xs font-mono">
+                                      {depositor.address.slice(0, 6)}...
+                                      {depositor.address.slice(-4)}
+                                    </span>
                                   </div>
-                                  <div className="text-xs text-muted-foreground">
-                                    {depositor.percentage.toFixed(1)}%
+                                  <div className="text-right">
+                                    <div className="text-sm font-bold">
+                                      ${(depositor.amount / 1000).toFixed(0)}K
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">
+                                      {depositor.percentage.toFixed(1)}%
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
-                            ))}
+                              )
+                            )}
                           </div>
                         </CardContent>
                       </Card>
@@ -4809,7 +5772,10 @@ export default function AdminDashboard() {
 
                     {/* Last Updated */}
                     <div className="text-center text-sm text-muted-foreground">
-                      Last updated: {new Date(selectedMarketDetails.lastUpdated).toLocaleString()}
+                      Last updated:{" "}
+                      {new Date(
+                        selectedMarketDetails.lastUpdated
+                      ).toLocaleString()}
                     </div>
                   </div>
                 ) : null}
@@ -6405,6 +7371,549 @@ export default function AdminDashboard() {
                 </CardContent>
               </Card>
             )}
+          </TabsContent>
+
+          {/* SToken Tab */}
+          <TabsContent value="stoken" className="space-y-6">
+            <div className="flex justify-between items-center">
+              <H2>SToken Management</H2>
+              <DorkFiButton
+                onClick={loadStokenInfo}
+                disabled={isLoadingStokenInfo}
+                className="flex items-center gap-2"
+              >
+                <RefreshCcw
+                  className={`h-4 w-4 ${
+                    isLoadingStokenInfo ? "animate-spin" : ""
+                  }`}
+                />
+                Refresh
+              </DorkFiButton>
+            </div>
+
+            {/* SToken Info */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <DollarSign className="h-5 w-5" />
+                  SToken Information
+                </CardTitle>
+                <CardDescription>
+                  View SToken contract details and status
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {isLoadingStokenInfo ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-8 w-8 animate-spin" />
+                    <span className="ml-2">Loading SToken info...</span>
+                  </div>
+                ) : stokenError ? (
+                  <div className="text-red-500 p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                    <AlertTriangle className="h-5 w-5 inline mr-2" />
+                    {stokenError}
+                  </div>
+                ) : stokenInfo ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-muted-foreground">
+                        Name
+                      </Label>
+                      <div className="text-lg font-semibold">
+                        {stokenInfo.name}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-muted-foreground">
+                        Symbol
+                      </Label>
+                      <div className="text-lg font-semibold">
+                        {stokenInfo.symbol}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-muted-foreground">
+                        Decimals
+                      </Label>
+                      <div className="text-lg font-semibold">
+                        {stokenInfo.decimals}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-muted-foreground">
+                        Total Supply
+                      </Label>
+                      <div className="text-lg font-semibold">
+                        {new BigNumber(stokenInfo.totalSupply)
+                          .dividedBy(Math.pow(10, Number(stokenInfo.decimals)))
+                          .toFixed(2)}{" "}
+                        {stokenInfo.symbol}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-muted-foreground">
+                        Contract ID
+                      </Label>
+                      <div className="text-sm font-mono break-all">
+                        {stokenInfo.contractId}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-muted-foreground">
+                        Contract Address
+                      </Label>
+                      <div className="text-sm font-mono break-all">
+                        {stokenInfo.contractAddress}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-muted-foreground">
+                        Status
+                      </Label>
+                      <Badge
+                        variant={stokenInfo.paused ? "destructive" : "default"}
+                      >
+                        {stokenInfo.paused ? "Paused" : "Active"}
+                      </Badge>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    No SToken information available. Click refresh to load.
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Minter Management */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Key className="h-5 w-5" />
+                  Minter Management
+                </CardTitle>
+                <CardDescription>
+                  Approve or revoke minter permissions for lending pools
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Approve Minter */}
+                <div className="space-y-4">
+                  <div>
+                    <Label htmlFor="minter-address">
+                      Minter Address or Application ID
+                    </Label>
+                    <div className="flex gap-2 mt-2">
+                      <Input
+                        id="minter-address"
+                        placeholder="Enter lending pool contract ID or application ID"
+                        value={minterAddress}
+                        onChange={(e) => setMinterAddress(e.target.value)}
+                        className="flex-1"
+                      />
+                      <DorkFiButton
+                        onClick={handleApproveMinter}
+                        disabled={isApprovingMinter || !minterAddress.trim()}
+                        className="flex items-center gap-2"
+                      >
+                        {isApprovingMinter ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="h-4 w-4" />
+                        )}
+                        Approve Minter
+                      </DorkFiButton>
+                    </div>
+                    {minterApprovalError && (
+                      <div className="text-red-500 text-sm mt-2">
+                        <AlertTriangle className="h-4 w-4 inline mr-1" />
+                        {minterApprovalError}
+                      </div>
+                    )}
+                    {minterApprovalResult && (
+                      <div className="text-green-500 text-sm mt-2">
+                        <CheckCircle2 className="h-4 w-4 inline mr-1" />
+                        {minterApprovalResult}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Approved Minters List */}
+                <div className="space-y-4">
+                  <Label className="text-base font-semibold">
+                    Approved Minters
+                  </Label>
+                  {approvedMinters.length > 0 ? (
+                    <div className="space-y-2">
+                      {approvedMinters.map((minter, index) => (
+                        <div
+                          key={index}
+                          className="flex items-center justify-between p-3 bg-muted rounded-lg"
+                        >
+                          <div className="flex items-center gap-2">
+                            <Key className="h-4 w-4 text-muted-foreground" />
+                            <span className="font-mono text-sm">{minter}</span>
+                            <Badge variant="default">Approved</Badge>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <DorkFiButton
+                              variant="primary"
+                              size="sm"
+                              onClick={() => handleSetStoken(minter)}
+                              disabled={isSettingStoken}
+                              className="flex items-center gap-1"
+                            >
+                              {isSettingStoken ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <Settings className="h-3 w-3" />
+                              )}
+                              Set SToken
+                            </DorkFiButton>
+                            <DorkFiButton
+                              variant="critical"
+                              size="sm"
+                              onClick={() => handleRevokeMinter(minter)}
+                              disabled={isRevokingMinter}
+                              className="flex items-center gap-1"
+                            >
+                              {isRevokingMinter ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <X className="h-3 w-3" />
+                              )}
+                              Revoke
+                            </DorkFiButton>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-4 text-muted-foreground">
+                      No approved minters found
+                    </div>
+                  )}
+                  {minterRevocationError && (
+                    <div className="text-red-500 text-sm">
+                      <AlertTriangle className="h-4 w-4 inline mr-1" />
+                      {minterRevocationError}
+                    </div>
+                  )}
+                  {minterRevocationResult && (
+                    <div className="text-green-500 text-sm">
+                      <CheckCircle2 className="h-4 w-4 inline mr-1" />
+                      {minterRevocationResult}
+                    </div>
+                  )}
+                  {setStokenOperationError && (
+                    <div className="text-red-500 text-sm">
+                      <AlertTriangle className="h-4 w-4 inline mr-1" />
+                      {setStokenOperationError}
+                    </div>
+                  )}
+                  {setStokenResult && (
+                    <div className="text-green-500 text-sm">
+                      <CheckCircle2 className="h-4 w-4 inline mr-1" />
+                      {setStokenResult}
+                    </div>
+                  )}
+                </div>
+
+                {/* Available Lending Pools */}
+                <div className="space-y-4">
+                  <Label className="text-base font-semibold">
+                    Available Lending Pools
+                  </Label>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {poolOptions.map((pool) => (
+                      <div
+                        key={pool.value}
+                        className="flex items-center justify-between p-2 border rounded-lg"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Coins className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-sm">{pool.label}</span>
+                        </div>
+                        <Badge
+                          variant={
+                            approvedMinters.includes(pool.value)
+                              ? "default"
+                              : "secondary"
+                          }
+                        >
+                          {approvedMinters.includes(pool.value)
+                            ? "Approved"
+                            : "Not Approved"}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* SToken Market Creation */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <TrendingUp className="h-5 w-5" />
+                  SToken Market
+                </CardTitle>
+                <CardDescription>
+                  Create a market for the SToken if it doesn't exist yet
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {stokenMarketExists === null ? (
+                  <div className="text-center py-4 text-muted-foreground">
+                    Checking if SToken market exists...
+                  </div>
+                ) : stokenMarketExists ? (
+                  <div className="space-y-4">
+                    <div className="text-center py-2">
+                      <div className="flex items-center justify-center gap-2 text-green-500 mb-2">
+                        <CheckCircle2 className="h-5 w-5" />
+                        <span className="font-medium">SToken Market Active</span>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        A market for the SToken is configured and available for trading.
+                      </p>
+                    </div>
+
+                    {stokenMarketInfo && (
+                      <div className="bg-muted/50 p-4 rounded-lg space-y-4">
+                        <h4 className="font-medium">Market Information</h4>
+                        
+                        {/* Basic Market Info */}
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          <div>
+                            <span className="text-muted-foreground">Market ID:</span>
+                            <span className="ml-2 font-mono">{stokenMarketInfo.id}</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Pool ID:</span>
+                            <span className="ml-2 font-mono">{stokenMarketInfo.poolId}</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Symbol:</span>
+                            <span className="ml-2 font-medium">{stokenMarketInfo.symbol}</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Status:</span>
+                            <Badge variant="default" className="ml-2">
+                              {stokenMarketInfo.status}
+                            </Badge>
+                          </div>
+                        </div>
+
+                        {/* Market Parameters */}
+                        {stokenMarketInfo.marketInfo && (
+                          <>
+                            <div className="border-t pt-4">
+                              <h5 className="font-medium mb-2">Market Parameters</h5>
+                              <div className="grid grid-cols-2 gap-4 text-sm">
+                                <div>
+                                  <span className="text-muted-foreground">Collateral Factor:</span>
+                                  <span className="ml-2 font-mono">
+                                    {stokenMarketInfo.marketInfo.collateralFactor 
+                                      ? `${(Number(stokenMarketInfo.marketInfo.collateralFactor) / 10000 * 100).toFixed(1)}%`
+                                      : 'N/A'
+                                    }
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">Liquidation Threshold:</span>
+                                  <span className="ml-2 font-mono">
+                                    {stokenMarketInfo.marketInfo.liquidationThreshold 
+                                      ? `${(Number(stokenMarketInfo.marketInfo.liquidationThreshold) / 10000 * 100).toFixed(1)}%`
+                                      : 'N/A'
+                                    }
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">Reserve Factor:</span>
+                                  <span className="ml-2 font-mono">
+                                    {stokenMarketInfo.marketInfo.reserveFactor 
+                                      ? `${(Number(stokenMarketInfo.marketInfo.reserveFactor) / 10000 * 100).toFixed(1)}%`
+                                      : 'N/A'
+                                    }
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">Borrow Rate:</span>
+                                  <span className="ml-2 font-mono">
+                                    {stokenMarketInfo.marketInfo.borrowRate 
+                                      ? `${(Number(stokenMarketInfo.marketInfo.borrowRate) / 10000 * 100).toFixed(2)}%`
+                                      : 'N/A'
+                                    }
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Market Limits */}
+                            <div className="border-t pt-4">
+                              <h5 className="font-medium mb-2">Market Limits</h5>
+                              <div className="grid grid-cols-2 gap-4 text-sm">
+                                <div>
+                                  <span className="text-muted-foreground">Max Total Deposits:</span>
+                                  <span className="ml-2 font-mono">
+                                    {stokenMarketInfo.marketInfo.maxTotalDeposits 
+                                      ? `${new BigNumber(stokenMarketInfo.marketInfo.maxTotalDeposits).dividedBy(Math.pow(10, Number(stokenInfo?.decimals) || 6)).toFixed(0)} ${stokenInfo?.symbol || 'SToken'}`
+                                      : 'N/A'
+                                    }
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">Max Total Borrows:</span>
+                                  <span className="ml-2 font-mono">
+                                    {stokenMarketInfo.marketInfo.maxTotalBorrows 
+                                      ? `${new BigNumber(stokenMarketInfo.marketInfo.maxTotalBorrows).dividedBy(Math.pow(10, Number(stokenInfo?.decimals) || 6)).toFixed(0)} ${stokenInfo?.symbol || 'SToken'}`
+                                      : 'N/A'
+                                    }
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Market Statistics */}
+                            <div className="border-t pt-4">
+                              <h5 className="font-medium mb-2">Market Statistics</h5>
+                              <div className="grid grid-cols-2 gap-4 text-sm">
+                                <div>
+                                  <span className="text-muted-foreground">Total Deposits:</span>
+                                  <span className="ml-2 font-mono">
+                                    {stokenMarketInfo.marketInfo.totalDeposits 
+                                      ? `${new BigNumber(stokenMarketInfo.marketInfo.totalDeposits).dividedBy(Math.pow(10, Number(stokenInfo?.decimals) || 6)).toFixed(2)} ${stokenInfo?.symbol || 'SToken'}`
+                                      : 'N/A'
+                                    }
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">Total Borrows:</span>
+                                  <span className="ml-2 font-mono">
+                                    {stokenMarketInfo.marketInfo.totalBorrows 
+                                      ? `${new BigNumber(stokenMarketInfo.marketInfo.totalBorrows).dividedBy(Math.pow(10, Number(stokenInfo?.decimals) || 6)).toFixed(2)} ${stokenInfo?.symbol || 'SToken'}`
+                                      : 'N/A'
+                                    }
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">Utilization Rate:</span>
+                                  <span className="ml-2 font-mono">
+                                    {stokenMarketInfo.marketInfo.totalDeposits && stokenMarketInfo.marketInfo.totalBorrows
+                                      ? `${(Number(stokenMarketInfo.marketInfo.totalBorrows) / Number(stokenMarketInfo.marketInfo.totalDeposits) * 100).toFixed(2)}%`
+                                      : 'N/A'
+                                    }
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">Price:</span>
+                                  <span className="ml-2 font-mono">
+                                    {stokenMarketInfo.marketInfo.price 
+                                      ? `$${Number(stokenMarketInfo.marketInfo.price).toFixed(4)}`
+                                      : 'N/A'
+                                    }
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="text-center py-4">
+                      <div className="flex items-center justify-center gap-2 text-orange-500 mb-2">
+                        <AlertTriangle className="h-5 w-5" />
+                        <span className="font-medium">
+                          No SToken Market Found
+                        </span>
+                      </div>
+                      <p className="text-sm text-muted-foreground mb-4">
+                        No market exists for the SToken yet. Create one to
+                        enable SToken trading.
+                      </p>
+                    </div>
+
+                    <div className="bg-muted/50 p-4 rounded-lg">
+                      <h4 className="font-medium mb-2">Market Parameters</h4>
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <span className="text-muted-foreground">
+                            Collateral Factor:
+                          </span>
+                          <span className="ml-2 font-mono">80%</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">
+                            Liquidation Threshold:
+                          </span>
+                          <span className="ml-2 font-mono">85%</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">
+                            Reserve Factor:
+                          </span>
+                          <span className="ml-2 font-mono">10%</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">
+                            Borrow Rate:
+                          </span>
+                          <span className="ml-2 font-mono">5%</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">
+                            Max Deposits:
+                          </span>
+                          <span className="ml-2 font-mono">
+                            1M {stokenInfo?.symbol || "SToken"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">
+                            Max Borrows:
+                          </span>
+                          <span className="ml-2 font-mono">
+                            800K {stokenInfo?.symbol || "SToken"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <DorkFiButton
+                      onClick={handleCreateStokenMarket}
+                      disabled={isCreatingStokenMarket || !activeAccount}
+                      className="w-full flex items-center justify-center gap-2"
+                    >
+                      {isCreatingStokenMarket ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Plus className="h-4 w-4" />
+                      )}
+                      Create SToken Market
+                    </DorkFiButton>
+
+                    {stokenMarketCreationError && (
+                      <div className="text-red-500 text-sm">
+                        <AlertTriangle className="h-4 w-4 inline mr-1" />
+                        {stokenMarketCreationError}
+                      </div>
+                    )}
+                    {stokenMarketCreationResult && (
+                      <div className="text-green-500 text-sm">
+                        <CheckCircle2 className="h-4 w-4 inline mr-1" />
+                        {stokenMarketCreationResult}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
 
           {/* Roles Tab */}

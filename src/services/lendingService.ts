@@ -224,6 +224,10 @@ export const fetchMarketInfo = async (
         throw new Error(`Token ${token.symbol} missing underlyingContractId`);
       }
 
+      // Get the original token config to access isStoken property
+      const tokenConfig = networkConfig.tokens[token.symbol];
+      const isSToken = tokenConfig?.isStoken || false;
+
       const marketR = await ci.get_market(Number(marketId));
 
       console.log("marketR", { marketR });
@@ -318,7 +322,8 @@ export const fetchMarketInfo = async (
           totalScaledDeposits: market.totalScaledDeposits.toString(),
           totalScaledBorrows: market.totalScaledBorrows.toString(),
           lastUpdateTime: Number(market.lastUpdateTime),
-        }
+        },
+        isSToken // Pass isSToken flag
       );
 
       const marketInfo: MarketInfo = {
@@ -2095,6 +2100,92 @@ export const repay = async (
     return {
       success: false,
       error: error instanceof Error ? error.message : "Repay failed",
+    };
+  }
+};
+
+export const mint = async (
+  userAddress: string,
+  poolId: string,
+  marketId: string,
+  amount: string,
+  networkId: NetworkId,
+  clients: any,
+  signTransactions: any
+): Promise<{ success: boolean; txId?: string; error?: string }> => {
+  console.log("mint", { poolId, marketId, amount, userAddress, networkId });
+
+  try {
+    const networkConfig = getCurrentNetworkConfig();
+
+    if (isAlgorandCompatibleNetwork(networkId)) {
+      console.log({ networkConfig });
+
+      // Get token information
+      const allTokens = getAllTokensWithDisplayInfo(networkId);
+      console.log(
+        "All available tokens:",
+        allTokens.map((t) => ({
+          symbol: t.symbol,
+          underlyingContractId: t.underlyingContractId,
+          originalContractId: t.originalContractId,
+        }))
+      );
+      console.log("Looking for marketId:", marketId);
+
+      const token = allTokens.find(
+        (token) => token.underlyingContractId === marketId
+      );
+
+      console.log("Token found:", token);
+
+      if (!token) {
+        console.error("Token not found for marketId:", marketId);
+        console.error(
+          "Available underlyingContractIds:",
+          allTokens.map((t) => t.underlyingContractId)
+        );
+        throw new Error("Token not found");
+      }
+
+      // Get the original token config to access tokenStandard
+      const originalTokenConfig = getTokenConfig(networkId, token.symbol);
+      if (!originalTokenConfig) {
+        throw new Error(`Token config not found for ${token.symbol}`);
+      }
+
+      console.log("Original token config:", originalTokenConfig);
+
+      // For now, we'll use the same logic as borrow but call it "mint"
+      // In a real implementation, this would call a different contract method
+      const result = await borrow(
+        poolId,
+        marketId,
+        originalTokenConfig.tokenStandard,
+        amount,
+        userAddress,
+        networkId
+      );
+
+      if (result.success) {
+        return {
+          success: true,
+          txId: 'txId' in result ? result.txId : undefined,
+        };
+      } else {
+        return {
+          success: false,
+          error: result.error || "Minting failed",
+        };
+      }
+    } else {
+      throw new Error("Unsupported network for minting");
+    }
+  } catch (error: any) {
+    console.error("Minting error:", error);
+    return {
+      success: false,
+      error: error.message || "An error occurred during minting",
     };
   }
 };

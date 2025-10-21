@@ -25,6 +25,8 @@ export interface ContractConfig {
   governance?: string;
   treasury?: string;
   marketController?: string;
+  sToken?: string;
+  beacon?: string;
   // Add more contracts as needed
 }
 
@@ -51,6 +53,7 @@ export interface TokenConfig {
   oldPoolId?: string;
   oldContractId?: string;
   oldNTokenId?: string;
+  isStoken?: boolean;
 }
 
 export interface PreFiParameters {
@@ -68,18 +71,21 @@ export interface PreFiParameters {
   };
 }
 
-export interface NetworkConfig {
+export interface BaseNetworkConfig {
   networkId: NetworkId;
   walletNetworkId: string;
   name: string;
   networkType: NetworkType;
   rpcUrl: string;
-  rpcPublicUrl?: string;
   rpcPort?: number;
   rpcToken?: string;
   indexerUrl: string;
   explorerUrl: string;
   faucetUrl?: string;
+}
+
+export interface NetworkConfig extends BaseNetworkConfig {
+  rpcPublicUrl?: string;
   contracts: ContractConfig;
   tokens: {
     [symbol: string]: TokenConfig;
@@ -386,9 +392,44 @@ const betaTokens: { [symbol: string]: TokenConfig } = {
     logoPath: "/lovable-uploads/WrappedBTC.png",
     tokenStandard: "arc200",
   },
+  WAD: {
+    contractId: "46820876",
+    poolId: "46505156",
+    nTokenId: "46822098",
+    decimals: 6,
+    name: "WAD",
+    symbol: "WAD",
+    logoPath: "/lovable-uploads/WAD.png",
+    tokenStandard: "arc200",
+    isStoken: true,
+  },
 };
 const betaLendingPools = ["46505156"];
-const voiMainnetConfig: NetworkConfig = {
+const betaContracts = {
+  lendingPools: [...betaLendingPools],
+  priceOracle: undefined,
+  liquidationEngine: undefined,
+  governance: undefined,
+  treasury: undefined,
+  marketController: "46565930",
+  sToken: "46820876",
+};
+const betaPreFiParameters = {
+  collateral_factor: 780, // 78% = 780 bp
+  liquidation_threshold: 825, // 82.5% = 825 bp
+  reserve_factor: 100, // 10% = 100 bp
+  borrow_rate_base: 50, // 5% = 50 bp
+  slope: 100, // 10% = 100 bp
+  liquidation_bonus: 50, // 5% = 50 bp
+  close_factor: 350, // 35% = 350 bps
+  max_borrow_caps: {
+    stablecoins: "100000",
+    majors: "50000",
+    volatile: "10000",
+  },
+};
+const betaGasStation = [...Object.keys(betaTokens)];
+const baseVoiMainnetConfig: BaseNetworkConfig = {
   networkId: "voi-mainnet",
   walletNetworkId: "voimain",
   name: "VOI Mainnet",
@@ -399,32 +440,15 @@ const voiMainnetConfig: NetworkConfig = {
   indexerUrl: "https://mainnet-idx.voi.nodely.dev",
   explorerUrl: "https://voi.observer",
   faucetUrl: "https://faucet.voirewards.com/",
-  contracts: {
-    lendingPools: [...betaLendingPools],
-    // Add other contract IDs as they become available
-    priceOracle: undefined,
-    liquidationEngine: undefined,
-    governance: undefined,
-    treasury: undefined,
-    marketController: "46565930",
-  },
-  tokens: { ...betaTokens },
-  gasStation: ["VOI", "ALGO", "USDC", "ETH", "BTC"],
-  preFiParameters: {
-    collateral_factor: 780, // 78% = 780 bp
-    liquidation_threshold: 825, // 82.5% = 825 bp
-    reserve_factor: 100, // 10% = 100 bp
-    borrow_rate_base: 50, // 5% = 50 bp
-    slope: 100, // 10% = 100 bp
-    liquidation_bonus: 50, // 5% = 50 bp
-    close_factor: 350, // 35% = 350 bp
-    max_borrow_caps: {
-      stablecoins: "100000",
-      majors: "50000",
-      volatile: "10000",
-    },
-  },
 };
+const betaVoiMainnetConfig: NetworkConfig = {
+  ...baseVoiMainnetConfig,
+  contracts: { ...betaContracts },
+  tokens: { ...betaTokens },
+  gasStation: { ...betaGasStation },
+  preFiParameters: { ...betaPreFiParameters },
+};
+const voiMainnetConfig: NetworkConfig = { ...betaVoiMainnetConfig };
 
 /**
  * VOI Testnet Configuration
@@ -445,6 +469,7 @@ const voiTestnetConfig: NetworkConfig = {
     liquidationEngine: undefined,
     governance: undefined,
     treasury: undefined,
+    sToken: undefined, // TODO: Add actual sToken app ID
   },
   tokens: {
     VOI: {
@@ -480,6 +505,8 @@ const algorandMainnetConfig: NetworkConfig = {
     liquidationEngine: undefined,
     governance: undefined,
     treasury: undefined,
+    sToken: undefined, // TODO: Add actual sToken app ID
+    beacon: "3209233839",
   },
   tokens: {
     ALGO: {
@@ -815,6 +842,7 @@ const algorandTestnetConfig: NetworkConfig = {
     liquidationEngine: undefined,
     governance: undefined,
     treasury: undefined,
+    sToken: undefined, // TODO: Add actual sToken app ID
   },
   tokens: {
     ALGO: {
@@ -851,6 +879,7 @@ const baseMainnetConfig: NetworkConfig = {
     liquidationEngine: undefined,
     governance: undefined,
     treasury: undefined,
+    sToken: undefined, // TODO: Add actual sToken contract address
   },
   tokens: {
     ETH: {
@@ -893,6 +922,7 @@ const baseTestnetConfig: NetworkConfig = {
     liquidationEngine: undefined,
     governance: undefined,
     treasury: undefined,
+    sToken: undefined, // TODO: Add actual sToken contract address
   },
   tokens: {
     ETH: {
@@ -926,6 +956,7 @@ const ethereumMainnetConfig: NetworkConfig = {
     liquidationEngine: undefined,
     governance: undefined,
     treasury: undefined,
+    sToken: undefined, // TODO: Add actual sToken contract address
   },
   tokens: {
     ETH: {
@@ -967,6 +998,7 @@ const ethereumTestnetConfig: NetworkConfig = {
     liquidationEngine: undefined,
     governance: undefined,
     treasury: undefined,
+    sToken: undefined, // TODO: Add actual sToken contract address
   },
   tokens: {
     ETH: {
@@ -1000,6 +1032,7 @@ const localnetConfig: NetworkConfig = {
     liquidationEngine: undefined,
     governance: undefined,
     treasury: undefined,
+    sToken: undefined, // TODO: Add actual sToken app ID
   },
   tokens: {
     ALGO: {

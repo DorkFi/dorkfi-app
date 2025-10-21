@@ -166,25 +166,27 @@ const getMarketsFromConfig = (networkId: NetworkId): Market[] => {
   const networkConfig = getNetworkConfig(networkId);
   const tokens = getAllTokens(networkId);
 
-  return tokens.map((token) => {
-    // Use token standard from config
-    const tokenStandard = token.tokenStandard;
+  return tokens
+    .filter((token) => !token.isStoken)
+    .map((token) => {
+      // Use token standard from config
+      const tokenStandard = token.tokenStandard;
 
-    return {
-      id: token.symbol.toLowerCase(),
-      poolId: token.poolId,
-      marketId: token.contractId,
-      contractId: token.contractId,
-      nTokenId: token.nTokenId,
-      oldNTokenId: token.oldNTokenId, // Add old nToken ID for migration
-      name: token.name,
-      symbol: token.symbol,
-      tokenStandard,
-      assetId: token.assetId,
-      contractAddress: `APP_ID_${token.symbol}_PREFUND`, // TODO: Get from config when available
-      decimals: token.decimals,
-    };
-  });
+      return {
+        id: token.symbol.toLowerCase(),
+        poolId: token.poolId,
+        marketId: token.contractId,
+        contractId: token.contractId,
+        nTokenId: token.nTokenId,
+        oldNTokenId: token.oldNTokenId, // Add old nToken ID for migration
+        name: token.name,
+        symbol: token.symbol,
+        tokenStandard,
+        assetId: token.assetId,
+        contractAddress: `APP_ID_${token.symbol}_PREFUND`, // TODO: Get from config when available
+        decimals: token.decimals,
+      };
+    });
 };
 
 /*************************
@@ -837,12 +839,8 @@ export default function PreFiDashboard() {
   >({});
   const [isBuyModalOpen, setIsBuyModalOpen] = useState(false);
 
-
   // Multi-network configuration - memoized to prevent recreation
-  const enabledNetworks: NetworkId[] = useMemo(
-    () => getEnabledNetworks(),
-    []
-  );
+  const enabledNetworks: NetworkId[] = useMemo(() => getEnabledNetworks(), []);
 
   const launchTs = PROGRAM.LAUNCH_TIMESTAMP;
 
@@ -877,7 +875,6 @@ export default function PreFiDashboard() {
     }
   };
 
-
   const connect = async () => {
     const s = await chainApi.connectWalletMock();
     setWallet({ ...s, network: currentNetwork });
@@ -907,7 +904,6 @@ export default function PreFiDashboard() {
     setIsInitialLoad(true); // Reset initial load flag for new network
     setRefreshKey((k) => k + 1);
   }, [currentNetwork]);
-
 
   const loadMarket = async (m: Market, isInitialLoad = false) => {
     // Only show loading indicators on initial load
@@ -1011,7 +1007,7 @@ export default function PreFiDashboard() {
   // Sync user market data after deposit/withdraw operations
   const syncUserMarket = async (market: Market) => {
     console.log(`Syncing market data for ${market.symbol} after transaction`);
-    
+
     try {
       // Refresh market balance
       const wb = await chainApi.getMarketBalance(
@@ -1055,7 +1051,9 @@ export default function PreFiDashboard() {
               ...prev,
               [market.id]: totalDeposits,
             }));
-            console.log(`Updated total deposits for ${market.symbol}: ${totalDeposits}`);
+            console.log(
+              `Updated total deposits for ${market.symbol}: ${totalDeposits}`
+            );
           }
 
           // Update max total deposits
@@ -1065,7 +1063,9 @@ export default function PreFiDashboard() {
               ...prev,
               [market.id]: maxTotalDeposits,
             }));
-            console.log(`Updated max deposits for ${market.symbol}: ${maxTotalDeposits}`);
+            console.log(
+              `Updated max deposits for ${market.symbol}: ${maxTotalDeposits}`
+            );
           }
         }
       }
@@ -1598,7 +1598,6 @@ export default function PreFiDashboard() {
     return sum;
   }, [marketsState, markets, marketPrices]);
 
-
   // Memoize pool progress calculations for better performance
   const poolProgressData = useMemo(() => {
     // Fallback max deposits map for when real data isn't available yet
@@ -1870,8 +1869,6 @@ export default function PreFiDashboard() {
 
   return (
     <div className="relative">
-
-
       {/* Hero Section */}
       <div className="mx-auto max-w-6xl px-4 pt-4 relative z-10">
         <DorkFiCard
@@ -1974,7 +1971,6 @@ export default function PreFiDashboard() {
               </p>
             </TooltipContent>
           </Tooltip>
-
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -3007,7 +3003,6 @@ export default function PreFiDashboard() {
           </div>
         </section>
       </main>
-
 
       {/* Deposit Modal */}
       <Dialog open={isDepositModalOpen} onOpenChange={closeDepositModal}>

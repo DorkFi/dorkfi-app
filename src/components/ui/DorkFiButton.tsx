@@ -12,7 +12,8 @@ type Variant =
   | "moderate"
   | "safe"
   | "borrow"
-  | "borrow-outline";
+  | "borrow-outline"
+  | "mint";
 
 interface DorkFiButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant;
@@ -31,7 +32,8 @@ const variantClasses: Record<Variant, string> = {
   moderate: "bg-whale-gold text-white hover:bg-whale-gold/90 border-none",
   safe: "bg-ocean-teal text-white hover:bg-ocean-teal/90 border-none",
   borrow: "bg-whale-gold text-white hover:bg-whale-gold/90 border-none",
-  "borrow-outline": "border border-whale-gold text-whale-gold hover:bg-whale-gold hover:text-white"
+  "borrow-outline": "border border-whale-gold text-whale-gold hover:bg-whale-gold hover:text-white",
+  mint: "border border-pink-500 text-pink-500 hover:bg-pink-500 hover:text-white"
 };
 
 // All buttons standardized: min-h-[44px] min-w-[92px] px-4 py-2 text-sm font-semibold rounded-lg btn-hover-lift shadow-sm/hover:shadow-md transition-all, flex/center content, gap-1

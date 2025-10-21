@@ -146,7 +146,7 @@ const SupplyBorrowForm = ({
       setAmount(maxDepositable.toFixed(decimals));
     } else {
       // For borrow mode, use the calculated max borrowable amount
-      const maxBorrowAmount = calculateMaxBorrowable() * 0.95; // Scale down by 5% for safety
+      const maxBorrowAmount = calculateMaxBorrowable(); // Use actual value
       setAmount(maxBorrowAmount.toFixed(decimals));
     }
   };
@@ -168,7 +168,7 @@ const SupplyBorrowForm = ({
       setAmount(quickAmount);
     } else {
       // For borrow mode, use the calculated max borrowable amount
-      const maxBorrowAmount = calculateMaxBorrowable() * 0.95; // Scale down by 5% for safety
+      const maxBorrowAmount = calculateMaxBorrowable(); // Use actual value
       const quickAmount = (maxBorrowAmount * percentage).toFixed(decimals);
       setAmount(quickAmount);
     }

@@ -1,0 +1,121 @@
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import {
+  TableCell,
+  TableRow,
+} from "@/components/ui/table";
+import { Info } from "lucide-react";
+import { OnDemandMarketData } from "@/hooks/useOnDemandMarketData";
+import MarketsTableActions from "./MarketsTableActions";
+import APYDisplay from "@/components/APYDisplay";
+import BorrowAPYDisplay from "@/components/BorrowAPYDisplay";
+
+interface STokenTabletRowProps {
+  market: OnDemandMarketData;
+  onRowClick: (market: OnDemandMarketData) => void;
+  onInfoClick: (e: React.MouseEvent, market: OnDemandMarketData) => void;
+  onDepositClick: (asset: string) => void;
+  onBorrowClick: (asset: string) => void;
+  onMintClick?: (asset: string) => void;
+  isLoadingBalance?: boolean;
+}
+
+const LoadingCell = ({ children }: { children: React.ReactNode }) => (
+  <div className="flex items-center justify-center gap-2 text-muted-foreground">
+    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-500"></div>
+    <span className="text-sm">Loading...</span>
+  </div>
+);
+
+const ErrorCell = ({ error }: { error: string }) => (
+  <div className="flex items-center justify-center text-red-500 text-sm">
+    Error: {error}
+  </div>
+);
+
+const STokenTabletRow = ({
+  market,
+  onRowClick,
+  onInfoClick,
+  onDepositClick,
+  onBorrowClick,
+  onMintClick,
+  isLoadingBalance = false,
+}: STokenTabletRowProps) => {
+  return (
+    <TableRow
+      key={market.asset}
+      className="hover:bg-gradient-to-r hover:from-purple-50 hover:to-pink-50 dark:hover:from-purple-900/20 dark:hover:to-pink-900/20 cursor-pointer transition-all duration-300 border-l-4 border-l-purple-500 bg-gradient-to-r from-purple-50/30 to-pink-50/30 dark:from-purple-900/10 dark:to-pink-900/10"
+      onClick={() => onRowClick(market)}
+    >
+      <TableCell className="text-center">
+        <div className="flex items-center justify-center gap-2">
+          <img
+            src={market.icon}
+            alt={market.asset}
+            className="w-6 h-6 rounded-full flex-shrink-0"
+          />
+          <div className="flex flex-col items-start gap-0.5">
+            <span className="font-semibold text-sm leading-tight">{market.asset}</span>
+            <Badge variant="outline" className="text-xs px-1 py-0 h-4">CF {market.collateralFactor}%</Badge>
+          </div>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={(e) => { e.stopPropagation(); onInfoClick(e, market); }}
+            className="p-1 h-auto"
+          >
+            <Info className="w-4 h-4 text-ocean-teal" />
+          </Button>
+        </div>
+      </TableCell>
+      <TableCell className="text-center">
+        {market.isLoading ? (
+          <LoadingCell />
+        ) : market.error ? (
+          <ErrorCell error={market.error} />
+        ) : (
+          <Badge className="bg-gradient-to-r from-red-100 to-pink-100 text-red-800 dark:from-red-900 dark:to-pink-900 dark:text-red-200 border border-red-300 dark:border-red-600">
+            <BorrowAPYDisplay 
+              apyCalculation={market.apyCalculation}
+              fallbackAPY={market.borrowAPY}
+              showTooltip={true}
+            />
+          </Badge>
+        )}
+      </TableCell>
+      <TableCell className="text-center">
+        {market.isLoading ? (
+          <LoadingCell />
+        ) : market.error ? (
+          <ErrorCell error={market.error} />
+        ) : (
+          <div className="flex flex-col items-center space-y-1">
+            <div className="text-sm font-medium text-purple-700 dark:text-purple-300">
+              100.0%
+            </div>
+            <div className="flex justify-center w-full">
+              <Progress 
+                value={100} 
+                className="h-2 w-16 [&>div]:bg-gradient-to-r [&>div]:from-purple-500 [&>div]:to-pink-500" 
+              />
+            </div>
+          </div>
+        )}
+      </TableCell>
+      <TableCell className="text-center">
+        <MarketsTableActions
+          asset={market.asset}
+          onDepositClick={onDepositClick}
+          onBorrowClick={onBorrowClick}
+          onMintClick={onMintClick}
+          isLoadingBalance={isLoadingBalance}
+          isSToken={true}
+        />
+      </TableCell>
+    </TableRow>
+  );
+};
+
+export default STokenTabletRow;

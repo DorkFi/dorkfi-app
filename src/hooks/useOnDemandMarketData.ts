@@ -30,6 +30,9 @@ export interface OnDemandMarketData {
   lastFetched?: number; // Timestamp of last fetch
   // APY calculation results
   apyCalculation?: APYCalculationResult;
+  borrowApyCalculation?: APYCalculationResult;
+  // S-token flag
+  isSToken?: boolean;
 }
 
 export type SortField = 'asset' | 'totalSupplyUSD' | 'supplyAPY' | 'totalBorrowUSD' | 'borrowAPY' | 'utilization';
@@ -70,6 +73,10 @@ export const useOnDemandMarketData = ({
     tokens.forEach((token) => {
       const key = token.symbol.toLowerCase();
       if (!marketsData[key]) {
+        // Get the original token config to access isStoken property
+        const networkConfig = getCurrentNetworkConfig(currentNetwork);
+        const tokenConfig = networkConfig.tokens[token.symbol];
+        
         initialData[key] = {
           asset: token.symbol,
           icon: token.logoPath,
@@ -91,6 +98,7 @@ export const useOnDemandMarketData = ({
           collectorContract: '',
           isLoading: false,
           isLoaded: false,
+          isSToken: tokenConfig?.isStoken || false,
         };
       }
     });
@@ -164,6 +172,10 @@ export const useOnDemandMarketData = ({
           totalBorrowUSD: totalBorrowAmount * tokenPrice,
         });
         
+        // Get the original token config to access isStoken property
+        const networkConfig = getCurrentNetworkConfig(currentNetwork);
+        const tokenConfig = networkConfig.tokens[token.symbol];
+        
         const marketData: OnDemandMarketData = {
           asset: token.symbol,
           icon: token.logoPath,
@@ -188,6 +200,8 @@ export const useOnDemandMarketData = ({
           marketInfo, // This contains the correct poolId for this market
           lastFetched: Date.now(),
           apyCalculation: marketInfo.apyCalculation, // Include APY calculation results
+          borrowApyCalculation: marketInfo.borrowApyCalculation, // Include borrow APY calculation results
+          isSToken: tokenConfig?.isStoken || false,
         };
 
         setMarketsData(prev => ({

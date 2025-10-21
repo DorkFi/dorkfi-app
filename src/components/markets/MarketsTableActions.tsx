@@ -5,30 +5,46 @@ interface MarketsTableActionsProps {
   asset: string;
   onDepositClick: (asset: string) => void;
   onBorrowClick: (asset: string) => void;
+  onMintClick?: (asset: string) => void;
   isLoadingBalance?: boolean;
+  isSToken?: boolean;
 }
 
-const MarketsTableActions = ({ asset, onDepositClick, onBorrowClick, isLoadingBalance = false }: MarketsTableActionsProps) => {
+const MarketsTableActions = ({ 
+  asset, 
+  onDepositClick, 
+  onBorrowClick, 
+  onMintClick,
+  isLoadingBalance = false,
+  isSToken = false 
+}: MarketsTableActionsProps) => {
   return (
     <div className="flex space-x-2">
+      {!isSToken && (
+        <DorkFiButton
+          variant="secondary"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDepositClick(asset);
+          }}
+          disabled={isLoadingBalance}
+        >
+          {isLoadingBalance ? "Loading..." : "Deposit"}
+        </DorkFiButton>
+      )}
       <DorkFiButton
-        variant="secondary"
+        variant={isSToken ? "mint" : "borrow-outline"}
         onClick={(e) => {
           e.stopPropagation();
-          onDepositClick(asset);
+          if (isSToken && onMintClick) {
+            onMintClick(asset);
+          } else {
+            onBorrowClick(asset);
+          }
         }}
-        disabled={isLoadingBalance}
+        className={isSToken ? "w-full" : ""}
       >
-        {isLoadingBalance ? "Loading..." : "Deposit"}
-      </DorkFiButton>
-      <DorkFiButton
-        variant="borrow-outline"
-        onClick={(e) => {
-          e.stopPropagation();
-          onBorrowClick(asset);
-        }}
-      >
-        Borrow
+        {isSToken ? "Mint" : "Borrow"}
       </DorkFiButton>
     </div>
   );

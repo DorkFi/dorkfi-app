@@ -16,6 +16,7 @@ import MarketsTableActions from "./MarketsTableActions";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import APYDisplay from "@/components/APYDisplay";
 import BorrowAPYDisplay from "@/components/BorrowAPYDisplay";
+import STokenRow from "./STokenRow";
 
 interface MarketsDesktopTableProps {
   markets: OnDemandMarketData[];
@@ -23,6 +24,7 @@ interface MarketsDesktopTableProps {
   onInfoClick: (e: React.MouseEvent, market: OnDemandMarketData) => void;
   onDepositClick: (asset: string) => void;
   onBorrowClick: (asset: string) => void;
+  onMintClick?: (asset: string) => void;
   isLoadingBalance?: boolean;
 }
 
@@ -55,6 +57,7 @@ const MarketsDesktopTable = ({
   onInfoClick,
   onDepositClick,
   onBorrowClick,
+  onMintClick,
   isLoadingBalance = false,
 }: MarketsDesktopTableProps) => {
   if (markets.length === 0) {
@@ -181,125 +184,146 @@ const MarketsDesktopTable = ({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {markets.map((market) => (
-              <TableRow
-                key={market.asset}
-                className="hover:bg-ocean-teal/5 cursor-pointer transition-colors"
-                onClick={() => onRowClick(market)}
-              >
-                <TableCell className="text-center">
-                  <div className="flex items-center justify-center gap-3">
-                    <img
-                      src={market.icon}
-                      alt={market.asset}
-                      className="w-8 h-8 rounded-full flex-shrink-0"
-                    />
-                    <div className="flex flex-col items-center justify-center gap-1 text-center">
-                      <div className="font-semibold text-base leading-tight">
-                        {market.asset}
-                      </div>
-                      <Badge variant="outline" className="text-xs px-1 py-0 h-4">
-                        CF {market.collateralFactor}%
-                      </Badge>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={(e) => onInfoClick(e, market)}
-                      className="p-1 h-auto"
-                    >
-                      <Info className="w-4 h-4 text-ocean-teal" />
-                    </Button>
-                  </div>
-                </TableCell>
-                <TableCell className="text-center">
-                  {market.isLoading ? (
-                    <LoadingCell />
-                  ) : market.error ? (
-                    <ErrorCell error={market.error} />
-                  ) : (
-                    <div>
-                      <div className="font-medium">
-                        ${(market.totalSupplyUSD / 1_000_000).toLocaleString()}
-                      </div>
-                      <div className="text-sm text-muted-foreground">
-                        {market.totalSupply.toLocaleString(undefined, { maximumFractionDigits: 3 })} {market.asset}
-                      </div>
-                    </div>
-                  )}
-                </TableCell>
-                <TableCell className="text-center">
-                  {market.isLoading ? (
-                    <LoadingCell />
-                  ) : market.error ? (
-                    <ErrorCell error={market.error} />
-                  ) : (
-                    <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-                      <APYDisplay 
-                        apyCalculation={market.apyCalculation}
-                        fallbackAPY={market.supplyAPY}
-                        showTooltip={true}
-                      />
-                    </Badge>
-                  )}
-                </TableCell>
-                <TableCell className="text-center">
-                  {market.isLoading ? (
-                    <LoadingCell />
-                  ) : market.error ? (
-                    <ErrorCell error={market.error} />
-                  ) : (
-                    <div>
-                      <div className="font-medium">
-                        ${(market.totalBorrowUSD / 1_000_000).toLocaleString()}
-                      </div>
-                      <div className="text-sm text-muted-foreground">
-                        {market.totalBorrow.toLocaleString(undefined, { maximumFractionDigits: 3 })} {market.asset}
-                      </div>
-                    </div>
-                  )}
-                </TableCell>
-                <TableCell className="text-center">
-                  {market.isLoading ? (
-                    <LoadingCell />
-                  ) : market.error ? (
-                    <ErrorCell error={market.error} />
-                  ) : (
-                    <Badge className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
-                      <BorrowAPYDisplay 
-                        apyCalculation={market.apyCalculation}
-                        fallbackAPY={market.borrowAPY}
-                        showTooltip={true}
-                      />
-                    </Badge>
-                  )}
-                </TableCell>
-                <TableCell className="text-center">
-                  {market.isLoading ? (
-                    <LoadingCell />
-                  ) : market.error ? (
-                    <ErrorCell error={market.error} />
-                  ) : (
-                    <div className="flex flex-col items-center space-y-1">
-                      <div className="text-sm font-medium">
-                        {market.utilization.toFixed(1)}%
-                      </div>
-                      <div className="flex justify-center w-full">
-                        <Progress value={market.utilization} className="h-2 w-20" />
-                      </div>
-                    </div>
-                  )}
-                </TableCell>
-                <TableCell className="text-center">
-                  <MarketsTableActions
-                    asset={market.asset}
+            {markets.map((market) => {
+              // Render special row for s-tokens
+              if (market.isSToken) {
+                return (
+                  <STokenRow
+                    key={market.asset}
+                    market={market}
+                    onRowClick={onRowClick}
+                    onInfoClick={onInfoClick}
                     onDepositClick={onDepositClick}
                     onBorrowClick={onBorrowClick}
+                    onMintClick={onMintClick}
                     isLoadingBalance={isLoadingBalance}
                   />
-                </TableCell>
-              </TableRow>
-            ))}
+                );
+              }
+
+              // Render regular row for non-s-tokens
+              return (
+                <TableRow
+                  key={market.asset}
+                  className="hover:bg-ocean-teal/5 cursor-pointer transition-colors"
+                  onClick={() => onRowClick(market)}
+                >
+                  <TableCell className="text-center">
+                    <div className="flex items-center justify-center gap-3">
+                      <img
+                        src={market.icon}
+                        alt={market.asset}
+                        className="w-8 h-8 rounded-full flex-shrink-0"
+                      />
+                      <div className="flex flex-col items-center justify-center gap-1 text-center">
+                        <div className="font-semibold text-base leading-tight">
+                          {market.asset}
+                        </div>
+                        <Badge variant="outline" className="text-xs px-1 py-0 h-4">
+                          CF {market.collateralFactor}%
+                        </Badge>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={(e) => onInfoClick(e, market)}
+                        className="p-1 h-auto"
+                      >
+                        <Info className="w-4 h-4 text-ocean-teal" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {market.isLoading ? (
+                      <LoadingCell />
+                    ) : market.error ? (
+                      <ErrorCell error={market.error} />
+                    ) : (
+                      <div>
+                        <div className="font-medium">
+                          ${(market.totalSupplyUSD / 1_000_000).toLocaleString()}
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          {market.totalSupply.toLocaleString(undefined, { maximumFractionDigits: 3 })} {market.asset}
+                        </div>
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {market.isLoading ? (
+                      <LoadingCell />
+                    ) : market.error ? (
+                      <ErrorCell error={market.error} />
+                    ) : (
+                      <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                        <APYDisplay 
+                          apyCalculation={market.apyCalculation}
+                          fallbackAPY={market.supplyAPY}
+                          showTooltip={true}
+                        />
+                      </Badge>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {market.isLoading ? (
+                      <LoadingCell />
+                    ) : market.error ? (
+                      <ErrorCell error={market.error} />
+                    ) : (
+                      <div>
+                        <div className="font-medium">
+                          ${(market.totalBorrowUSD / 1_000_000).toLocaleString()}
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          {market.totalBorrow.toLocaleString(undefined, { maximumFractionDigits: 3 })} {market.asset}
+                        </div>
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {market.isLoading ? (
+                      <LoadingCell />
+                    ) : market.error ? (
+                      <ErrorCell error={market.error} />
+                    ) : (
+                      <Badge className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
+                        <BorrowAPYDisplay 
+                          apyCalculation={market.apyCalculation}
+                          fallbackAPY={market.borrowAPY}
+                          showTooltip={true}
+                        />
+                      </Badge>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {market.isLoading ? (
+                      <LoadingCell />
+                    ) : market.error ? (
+                      <ErrorCell error={market.error} />
+                    ) : (
+                      <div className="flex flex-col items-center space-y-1">
+                        <div className="text-sm font-medium">
+                          {market.isSToken ? "100.0" : market.utilization.toFixed(1)}%
+                        </div>
+                        <div className="flex justify-center w-full">
+                          <Progress value={market.isSToken ? 100 : market.utilization} className="h-2 w-20" />
+                        </div>
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    <MarketsTableActions
+                      asset={market.asset}
+                      onDepositClick={onDepositClick}
+                      onBorrowClick={onBorrowClick}
+                      onMintClick={onMintClick}
+                      isLoadingBalance={isLoadingBalance}
+                      isSToken={market.isSToken}
+                    />
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </div>

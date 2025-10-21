@@ -11,6 +11,7 @@ import { APYCalculationResult, formatAPY, getAPYColorClass } from '@/utils/apyCa
 
 interface BorrowAPYDisplayProps {
   apyCalculation?: APYCalculationResult;
+  borrowApyCalculation?: APYCalculationResult; // Add this for borrow-specific calculation
   fallbackAPY?: number;
   showTooltip?: boolean;
   className?: string;
@@ -18,6 +19,7 @@ interface BorrowAPYDisplayProps {
 
 export const BorrowAPYDisplay: React.FC<BorrowAPYDisplayProps> = ({
   apyCalculation,
+  borrowApyCalculation,
   fallbackAPY = 0,
   showTooltip = true,
   className = ''
@@ -28,7 +30,10 @@ export const BorrowAPYDisplay: React.FC<BorrowAPYDisplayProps> = ({
   const formattedAPY = formatAPY(borrowAPY);
   const colorClass = getAPYColorClass(borrowAPY);
 
-  if (!showTooltip || !apyCalculation) {
+  // Use borrowApyCalculation for tooltip if available, otherwise fall back to apyCalculation
+  const tooltipCalculation = borrowApyCalculation || apyCalculation;
+
+  if (!showTooltip || !tooltipCalculation) {
     return (
       <span className={`font-medium ${colorClass} ${className}`}>
         {formattedAPY}
@@ -44,14 +49,14 @@ export const BorrowAPYDisplay: React.FC<BorrowAPYDisplayProps> = ({
         <div className="flex justify-between">
           <span className="text-gray-300">Utilization Rate:</span>
           <span className="text-white font-mono">
-            {(apyCalculation.utilizationRate * 100).toFixed(1)}%
+            {(tooltipCalculation.utilizationRate * 100).toFixed(1)}%
           </span>
         </div>
         
         <div className="flex justify-between">
           <span className="text-gray-300">Base Borrow Rate:</span>
           <span className="text-white font-mono">
-            {(apyCalculation.borrowRate * 100).toFixed(2)}%
+            {(tooltipCalculation.borrowRate * 100).toFixed(2)}%
           </span>
         </div>
         

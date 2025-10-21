@@ -284,6 +284,7 @@ const MarketDetailModal = ({ isOpen, onClose, asset, marketData }: MarketDetailM
                       <Badge className="bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200">
                         APY: <BorrowAPYDisplay 
                           apyCalculation={marketData.apyCalculation}
+                          borrowApyCalculation={marketData.borrowApyCalculation}
                           fallbackAPY={marketData.borrowAPY}
                           showTooltip={false}
                         />

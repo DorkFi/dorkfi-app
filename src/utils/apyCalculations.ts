@@ -103,14 +103,20 @@ export function convertBorrowRateToAPY(borrowRate: number): number {
  */
 export function calculateBorrowAPY(
   parameters: MarketParameters,
-  state: MarketState
+  state: MarketState,
+  isSToken: boolean = false
 ): APYCalculationResult {
   try {
     // Calculate utilization rate
-    const utilizationRate = calculateUtilizationRate(
+    let utilizationRate = calculateUtilizationRate(
       state.totalScaledDeposits,
       state.totalScaledBorrows
     );
+    
+    // For s-tokens, use 100% utilization
+    if (isSToken) {
+      utilizationRate = 1.0; // 100% utilization
+    }
     
     // Calculate current borrow rate
     const borrowRate = calculateBorrowRate(

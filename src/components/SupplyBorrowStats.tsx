@@ -34,9 +34,10 @@ interface SupplyBorrowStatsProps {
   } | null;
   depositAmount?: number;
   userBorrowBalance?: number;
+  isSToken?: boolean;
 }
 
-const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmount = 0, userBorrowBalance = 0 }: SupplyBorrowStatsProps) => {
+const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmount = 0, userBorrowBalance = 0, isSToken = false }: SupplyBorrowStatsProps) => {
   // Calculate adjusted utilization and APY based on deposit amount
   const calculateAdjustedMetrics = () => {
     if (mode === "deposit" && depositAmount > 0 && assetData.apyCalculation) {
@@ -224,7 +225,7 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
               </div>
             ) : (
               <span className="text-sm font-medium text-slate-800 dark:text-white">
-                {assetData.utilization.toFixed(2)}%
+                {isSToken ? "100.00" : assetData.utilization.toFixed(2)}%
               </span>
             )}
           </div>
@@ -365,9 +366,9 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
                 <span className="text-sm font-medium text-teal-600 dark:text-teal-400">
                   ${(() => {
                     // Calculate max borrowable amount based on collateral
-                    // Formula: totalCollateralValue * collateralFactor
+                    // Formula: max(0, collateral * cf - borrows)
                     const collateralFactorDecimal = assetData.collateralFactor / 100; // Convert percentage to decimal
-                    const maxBorrowable = userGlobalData.totalCollateralValue * collateralFactorDecimal;
+                    const maxBorrowable = Math.max(0, (userGlobalData.totalCollateralValue * collateralFactorDecimal) - userGlobalData.totalBorrowValue);
                     return maxBorrowable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                   })()}
                 </span>
@@ -376,18 +377,18 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
 
             <div className="flex justify-between items-center">
               <div className="flex items-center gap-2">
-                <span className="text-sm text-slate-500 dark:text-slate-400">Market Liquidity</span>
+                <span className="text-sm text-slate-500 dark:text-slate-400">Total Supply</span>
                 <Tooltip>
                   <TooltipTrigger>
                     <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
                   </TooltipTrigger>
                   <TooltipContent>
-                    <p>Total liquidity available for borrowing in this market</p>
+                    <p>Total amount borrowed (minted) from this market</p>
                   </TooltipContent>
                 </Tooltip>
               </div>
               <span className="text-sm font-medium text-slate-600 dark:text-slate-400">
-                {assetData.liquidity.toLocaleString()} {asset}
+                {Math.abs(assetData.totalBorrow).toLocaleString()} {asset}
               </span>
             </div>
           </>

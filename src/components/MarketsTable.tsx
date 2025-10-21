@@ -15,6 +15,7 @@ import MarketPagination from "@/components/markets/MarketPagination";
 import SupplyBorrowModal from "@/components/SupplyBorrowModal";
 import WithdrawModal from "@/components/WithdrawModal";
 import MarketDetailModal from "@/components/MarketDetailModal";
+import MintModal from "@/components/MintModal";
 import MarketsHeroSection from "@/components/markets/MarketsHeroSection";
 import MarketsTableContent from "@/components/markets/MarketsTableContent";
 import { fetchUserGlobalData, fetchUserBorrowBalance } from "@/services/lendingService";
@@ -26,6 +27,7 @@ const MarketsTable = () => {
   const [depositModal, setDepositModal] = useState({ isOpen: false, asset: null });
   const [withdrawModal, setWithdrawModal] = useState({ isOpen: false, asset: null });
   const [borrowModal, setBorrowModal] = useState({ isOpen: false, asset: null });
+  const [mintModal, setMintModal] = useState({ isOpen: false, asset: null });
   const [detailModal, setDetailModal] = useState({ isOpen: false, asset: null, marketData: null });
   const [walletBalances, setWalletBalances] = useState<Record<string, { balance: number; balanceUSD: number }>>({});
   const [isLoadingBalance, setIsLoadingBalance] = useState(false);
@@ -138,6 +140,46 @@ const MarketsTable = () => {
     }
   };
 
+  const handleMintClick = async (asset: string) => {
+    if (!activeAccount?.address) {
+      console.error("No active account for minting");
+      return;
+    }
+
+    setIsLoadingGlobalData(true);
+    
+    try {
+      // Fetch user global data before opening modal
+      const globalData = await fetchUserGlobalData(activeAccount.address, currentNetwork);
+      setUserGlobalData(globalData);
+      
+      // Fetch user's current borrow balance for this specific asset
+      const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+      const token = tokens.find((t) => t.symbol === asset);
+      
+      if (token && token.poolId && token.underlyingContractId) {
+        const borrowBalance = await fetchUserBorrowBalance(
+          activeAccount.address,
+          token.poolId,
+          token.underlyingContractId,
+          currentNetwork
+        );
+        setUserBorrowBalance(borrowBalance || 0);
+      } else {
+        setUserBorrowBalance(0);
+      }
+      
+      // Open modal after data is fetched
+      setMintModal({ isOpen: true, asset });
+    } catch (error) {
+      console.error("Error fetching user data for mint:", error);
+      // Still open modal even if data fetch fails
+      setMintModal({ isOpen: true, asset });
+    } finally {
+      setIsLoadingGlobalData(false);
+    }
+  };
+
   const handleCloseDepositModal = () => {
     const asset = depositModal.asset;
     setDepositModal({ isOpen: false, asset: null });
@@ -159,6 +201,20 @@ const MarketsTable = () => {
     setBorrowModal({ isOpen: false, asset: null });
     
     // Refresh market data and user global data after borrow
+    if (asset) {
+      loadMarketDataWithBypass(asset.toLowerCase());
+      // Refresh user global data to show updated collateral/borrow values
+      if (activeAccount?.address) {
+        refreshUserGlobalData();
+      }
+    }
+  };
+
+  const handleCloseMintModal = () => {
+    const asset = mintModal.asset;
+    setMintModal({ isOpen: false, asset: null });
+    
+    // Refresh market data and user global data after mint
     if (asset) {
       loadMarketDataWithBypass(asset.toLowerCase());
       // Refresh user global data to show updated collateral/borrow values
@@ -355,6 +411,7 @@ const MarketsTable = () => {
       reserveFactor: market.reserveFactor,
       apyCalculation: market.apyCalculation,
       maxTotalDeposits: market.supplyCap,
+      isSToken: market.isSToken,
     };
   };
 
@@ -434,6 +491,7 @@ const MarketsTable = () => {
                 onDepositClick={handleDepositClick}
                 onWithdrawClick={handleWithdrawClick}
                 onBorrowClick={handleBorrowClick}
+                onMintClick={handleMintClick}
                 isLoadingBalance={isLoadingBalance}
               />
             )}
@@ -508,6 +566,24 @@ const MarketsTable = () => {
               // Refresh market data after successful borrow
               if (borrowModal.asset) {
                 loadMarketDataWithBypass(borrowModal.asset.toLowerCase());
+              }
+            }}
+          />
+        )}
+
+        {/* Mint Modal */}
+        {mintModal.isOpen && mintModal.asset && getAssetData(mintModal.asset) && (
+          <MintModal
+            isOpen={mintModal.isOpen}
+            onClose={handleCloseMintModal}
+            asset={mintModal.asset}
+            assetData={getAssetData(mintModal.asset)}
+            userGlobalData={userGlobalData}
+            userBorrowBalance={userBorrowBalance}
+            onTransactionSuccess={() => {
+              // Refresh market data after successful mint
+              if (mintModal.asset) {
+                loadMarketDataWithBypass(mintModal.asset.toLowerCase());
               }
             }}
           />
