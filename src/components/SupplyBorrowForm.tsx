@@ -156,8 +156,7 @@ const SupplyBorrowForm = ({
         const remainingCapacity = Math.max(0, maxTotalDeposits - totalSupply);
         maxDepositable = Math.min(walletBalance, remainingCapacity);
 
-        // Scale down by 5% to handle edge cases and rounding errors
-        maxDepositable = maxDepositable * 0.95;
+        // TODO adjust when network token and borrow mode accordingly
       }
 
       setAmount(maxDepositable.toFixed(decimals));
