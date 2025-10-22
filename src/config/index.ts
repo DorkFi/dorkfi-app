@@ -113,6 +113,8 @@ export interface GlobalConfig {
 /**
  * VOI Mainnet Configuration
  */
+// prefi
+const prefiLendingPools = ["41760711", "44866061"];
 const prefiTokens = {
   VOI: {
     assetId: "0",
@@ -340,7 +342,7 @@ const prefiTokens = {
     tokenStandard: "arc200",
   },
 };
-const prefiLendingPools = ["41760711", "44866061"];
+// beta
 const betaTokens: { [symbol: string]: TokenConfig } = {
   VOI: {
     contractId: "46504436",
@@ -362,6 +364,16 @@ const betaTokens: { [symbol: string]: TokenConfig } = {
     logoPath: "/lovable-uploads/Algo.webp",
     tokenStandard: "arc200",
   },
+  UNIT: {
+    contractId: "46828654",
+    poolId: "46505156",
+    nTokenId: "46828659",
+    decimals: 6,
+    name: "UNIT",
+    symbol: "UNIT",
+    logoPath: "/lovable-uploads/UNIT.png",
+    tokenStandard: "arc200",
+  },
   USDC: {
     contractId: "46528289",
     poolId: "46505156",
@@ -370,6 +382,16 @@ const betaTokens: { [symbol: string]: TokenConfig } = {
     name: "USDC",
     symbol: "USDC",
     logoPath: "/lovable-uploads/USDC.webp",
+    tokenStandard: "arc200",
+  },
+  aUSDC: {
+    contractId: "46828606",
+    poolId: "46505156",
+    nTokenId: "46828612",
+    decimals: 6,
+    name: "aUSDC",
+    symbol: "aUSDC",
+    logoPath: "/lovable-uploads/aUSDC.png",
     tokenStandard: "arc200",
   },
   ETH: {
@@ -407,7 +429,7 @@ const betaTokens: { [symbol: string]: TokenConfig } = {
 const betaLendingPools = ["46505156"];
 const betaContracts = {
   lendingPools: [...betaLendingPools],
-  priceOracle: undefined,
+  priceOracle: "46826662", // Gooch
   liquidationEngine: undefined,
   governance: undefined,
   treasury: undefined,
@@ -445,7 +467,7 @@ const betaVoiMainnetConfig: NetworkConfig = {
   ...baseVoiMainnetConfig,
   contracts: { ...betaContracts },
   tokens: { ...betaTokens },
-  gasStation: { ...betaGasStation },
+  gasStation: [...betaGasStation],
   preFiParameters: { ...betaPreFiParameters },
 };
 const voiMainnetConfig: NetworkConfig = { ...betaVoiMainnetConfig };

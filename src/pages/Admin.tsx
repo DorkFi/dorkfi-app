@@ -19,12 +19,12 @@ import {
   AlertTriangle,
   CheckCircle2,
   RefreshCcw,
+  RefreshCw,
   ExternalLink,
   InfoIcon,
   Coins,
   TrendingUp,
   Activity,
-  Database,
   Zap,
   Eye,
   Edit,
@@ -38,10 +38,13 @@ import {
   Search,
   Wrench,
   UserCheck,
+  UserPlus,
   Crown,
   Key,
   Loader2,
   DollarSign,
+  Database,
+  Download,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import DorkFiCard from "@/components/ui/DorkFiCard";
@@ -59,6 +62,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Card,
   CardContent,
   CardHeader,
@@ -69,13 +79,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import CanvasBubbles from "@/components/CanvasBubbles";
 import VersionDisplay from "@/components/VersionDisplay";
 import {
@@ -90,6 +93,7 @@ import {
 } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
+import { APP_SPEC as PriceOracleAppSpec } from "@/clients/PriceOracleClient";
 import algorandService, { AlgorandNetwork } from "@/services/algorandService";
 import { CONTRACT } from "ulujs";
 import {
@@ -742,6 +746,852 @@ export default function AdminDashboard() {
   const canConfigureOracle = () => canPerformAction("oracle.configure");
   const canPauseOracle = () => canPerformAction("oracle.pause");
 
+  // Check if current user has price feed manager role
+  const hasPriceFeedManagerRole = () => {
+    return currentUserRoles.some(
+      (role) => role.roleId === "price-feed-manager" && role.hasRole
+    );
+  };
+
+  // Check if current user has price oracle role using the price oracle contract address
+  const hasPriceOracleRole = async () => {
+    if (!activeAccount?.address || !oracleContractInfo.contractId) {
+      return false;
+    }
+
+    try {
+      const networkConfig = getCurrentNetworkConfig();
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      // Use the price oracle contract address for role checking
+      const priceOracleAddress = algosdk.getApplicationAddress(
+        Number(oracleContractInfo.contractId)
+      );
+
+      const ci = new CONTRACT(
+        Number(oracleContractInfo.contractId),
+        clients.algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        { addr: priceOracleAddress, sk: new Uint8Array() }
+      );
+      ci.setEnableRawBytes(true);
+
+      // Check if the current user has the price oracle role
+      const role_keyR = await ci.get_role_key(
+        activeAccount.address,
+        new Uint8Array(Buffer.from(ROLE_PRICE_ORACLE))
+      );
+
+      if (role_keyR.success) {
+        const hasRoleResult = await ci.has_role(role_keyR.returnValue);
+        return hasRoleResult.success && hasRoleResult.returnValue;
+      }
+      return false;
+    } catch (error) {
+      console.error("Error checking price oracle role:", error);
+      return false;
+    }
+  };
+
+  // Check if a price feed is attached for a given token
+  const checkPriceFeedStatus = async (
+    tokenId: string | number,
+    poolId?: string
+  ) => {
+    try {
+      const networkConfig = getCurrentNetworkConfig();
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+      const lendingPoolId =
+        poolId ||
+        selectedLendingPool ||
+        networkConfig.contracts.lendingPools[0];
+
+      const ci = new CONTRACT(
+        Number(lendingPoolId),
+        clients.algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        { addr: activeAccount?.address || "", sk: new Uint8Array() }
+      );
+      ci.setEnableRawBytes(true);
+
+      const result = await ci.get_price_feed(Number(tokenId));
+      if (result.success) {
+        // providerAppId of 0 means no price feed is attached
+        return result.returnValue.providerAppId !== 0n;
+      }
+      return false;
+    } catch (error) {
+      console.error(`Error checking price feed for token ${tokenId}:`, error);
+      return false;
+    }
+  };
+
+  // Load price feed status for all markets
+  const loadPriceFeedStatus = async () => {
+    if (!selectedLendingPool) return;
+
+    try {
+      const markets = getMarketsFromConfig(currentNetwork);
+      const statusPromises = markets.map(async (market) => {
+        const tokenId = market.underlyingAssetId || market.underlyingContractId;
+        if (tokenId) {
+          const hasPriceFeed = await checkPriceFeedStatus(
+            tokenId,
+            selectedLendingPool
+          );
+          return { marketId: market.id, hasPriceFeed };
+        }
+        return { marketId: market.id, hasPriceFeed: false };
+      });
+
+      const results = await Promise.all(statusPromises);
+      const statusMap: Record<string, boolean> = {};
+      results.forEach(({ marketId, hasPriceFeed }) => {
+        statusMap[marketId] = hasPriceFeed;
+      });
+
+      setPriceFeedStatus(statusMap);
+    } catch (error) {
+      console.error("Error loading price feed status:", error);
+    }
+  };
+
+  // Load price data for each asset from the oracle contract
+  const loadAssetPrices = async () => {
+    if (!oracleContractInfo.contractId || !oracleContractInfo.isDeployed) {
+      return;
+    }
+
+    try {
+      const networkConfig = getCurrentNetworkConfig();
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      // Create oracle contract instance
+      const ci = new CONTRACT(
+        Number(oracleContractInfo.contractId),
+        clients.algod,
+        undefined,
+        { ...PriceOracleAppSpec.contract, events: [] },
+        { addr: activeAccount?.address || "", sk: new Uint8Array() }
+      );
+      ci.setEnableRawBytes(true);
+
+      const markets = getMarketsFromConfig(currentNetwork);
+      const pricePromises = markets.map(async (market) => {
+        const tokenId = market.underlyingAssetId || market.underlyingContractId;
+        if (tokenId) {
+          try {
+            const result = await ci.get_price_with_timestamp(Number(tokenId));
+            console.log(
+              `get_price_with_timestamp result for token ${tokenId}:`,
+              { result }
+            );
+            if (result.success) {
+              // Return value is [price, timestamp] array
+              const [price, timestamp] = result.returnValue;
+              console.log(`Parsed values for token ${tokenId}:`, {
+                price: price.toString(),
+                timestamp: timestamp.toString(),
+                priceUSD: (Number(price) / 1e6).toFixed(6),
+                timestampDate: new Date(
+                  Number(timestamp) * 1000
+                ).toLocaleString(),
+              });
+
+              // Check if both values are zero (no price data)
+              if (price === 0n && timestamp === 0n) {
+                console.log(
+                  `No price data available for token ${tokenId} - both values are zero`
+                );
+                return { marketId: market.id, priceData: null };
+              }
+
+              return {
+                marketId: market.id,
+                priceData: {
+                  price: price,
+                  timestamp: timestamp,
+                },
+              };
+            }
+          } catch (error) {
+            console.error(`Error getting price for token ${tokenId}:`, error);
+          }
+        }
+        return { marketId: market.id, priceData: null };
+      });
+
+      const results = await Promise.all(pricePromises);
+      const priceMap: Record<
+        string,
+        { price: bigint; timestamp: bigint } | null
+      > = {};
+      results.forEach(({ marketId, priceData }) => {
+        priceMap[marketId] = priceData;
+      });
+
+      setAssetPrices(priceMap);
+    } catch (error) {
+      console.error("Error loading asset prices:", error);
+    }
+  };
+
+  // Load market data for each asset from the lending pool
+  const loadMarketData = async () => {
+    console.log("🔄 loadMarketData called", { selectedLendingPool });
+    if (!selectedLendingPool) {
+      console.log("❌ No lending pool selected, skipping market data load");
+      return;
+    }
+
+    try {
+      console.log(
+        "✅ Starting market data load for lending pool:",
+        selectedLendingPool
+      );
+      const networkConfig = getCurrentNetworkConfig();
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      const markets = getMarketsFromConfig(currentNetwork);
+      console.log("📊 Markets to process:", markets.length);
+      const results = await Promise.all(
+        markets.map(async (market) => {
+          try {
+            const ci = new CONTRACT(
+              Number(selectedLendingPool),
+              clients.algod,
+              undefined,
+              { ...LendingPoolAppSpec.contract, events: [] },
+              { addr: activeAccount?.address || "", sk: new Uint8Array() }
+            );
+
+            const tokenId =
+              market.underlyingAssetId || market.underlyingContractId;
+
+            console.log(`🔍 Processing market ${market.id}:`, {
+              marketId: market.id,
+              underlyingAssetId: market.underlyingAssetId,
+              underlyingContractId: market.underlyingContractId,
+              tokenId: tokenId,
+              tokenIdNumber: Number(tokenId),
+              marketName: market.name,
+              marketSymbol: market.symbol,
+            });
+
+            // Check if tokenId is valid
+            if (!tokenId || isNaN(Number(tokenId))) {
+              console.error(
+                `❌ Invalid tokenId for market ${market.id}:`,
+                tokenId
+              );
+              return { marketId: market.id, marketData: null };
+            }
+
+            const result = await ci.get_market(Number(tokenId));
+            console.log(`get_market result for token ${tokenId}:`, { result });
+
+            if (result.success) {
+              const marketData = decodeMarket(result.returnValue);
+              console.log("marketData", marketData);
+              console.log(`Market data for token ${tokenId}:`, {
+                price: marketData.price.toString(),
+                paused: marketData.paused,
+                lastUpdateTime: marketData.lastUpdateTime.toString(),
+                priceUSD: (Number(marketData.price) / 1e24).toFixed(6),
+                lastUpdateDate: new Date(
+                  Number(marketData.lastUpdateTime) * 1000
+                ).toLocaleString(),
+              });
+
+              return {
+                marketId: market.id,
+                marketData: {
+                  price: BigInt(marketData.price.toString()),
+                  paused: marketData.paused,
+                  lastUpdateTime: BigInt(marketData.lastUpdateTime.toString()),
+                },
+              };
+            }
+            console.log(
+              `❌ No market data found for token ${tokenId} (market ${market.id})`
+            );
+            return { marketId: market.id, marketData: null };
+          } catch (error) {
+            console.error(
+              `❌ Error loading market data for ${market.id}:`,
+              error
+            );
+            return { marketId: market.id, marketData: null };
+          }
+        })
+      );
+
+      const marketMap: Record<
+        string,
+        { price: bigint; paused: boolean; lastUpdateTime: bigint } | null
+      > = {};
+      results.forEach(({ marketId, marketData }) => {
+        marketMap[marketId] = marketData;
+      });
+
+      console.log("📈 Market data results:", marketMap);
+      setMarketData(marketMap);
+      console.log("✅ Market data state updated");
+    } catch (error) {
+      console.error("❌ Error loading market data:", error);
+    }
+  };
+
+  // Load price feed data from lending pool
+  const loadLendingPoolPriceFeeds = async () => {
+    if (!selectedLendingPool) {
+      return;
+    }
+
+    try {
+      const networkConfig = getCurrentNetworkConfig();
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      // Create lending pool contract instance
+      const ci = new CONTRACT(
+        Number(selectedLendingPool),
+        clients.algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        { addr: activeAccount?.address || "", sk: new Uint8Array() }
+      );
+      ci.setEnableRawBytes(true);
+
+      const markets = getMarketsFromConfig(currentNetwork);
+      const priceFeedPromises = markets.map(async (market) => {
+        const tokenId = market.underlyingAssetId || market.underlyingContractId;
+        if (tokenId) {
+          try {
+            const result = await ci.get_price_feed(Number(tokenId));
+            if (result.success) {
+              console.log("get_price_feed result", result);
+              const [marketId, providerAppId, [price, timestamp]] =
+                result.returnValue;
+              return {
+                marketId: market.id,
+                priceFeedData: {
+                  marketId: Number(marketId),
+                  providerAppId: Number(providerAppId),
+                  priceWithTimestamp: {
+                    price: BigInt(Number(price)),
+                    timestamp: BigInt(Number(timestamp)),
+                  },
+                },
+              };
+            }
+          } catch (error) {
+            console.error(
+              `Error getting price feed for token ${tokenId}:`,
+              error
+            );
+          }
+        }
+        return { marketId: market.id, priceFeedData: null };
+      });
+
+      const results = await Promise.all(priceFeedPromises);
+      const priceFeedMap: Record<
+        string,
+        {
+          marketId: bigint;
+          providerAppId: bigint;
+          priceWithTimestamp: { price: bigint; timestamp: bigint };
+        } | null
+      > = {};
+      results.forEach(({ marketId, priceFeedData }) => {
+        priceFeedMap[marketId] = priceFeedData;
+      });
+
+      setLendingPoolPriceFeeds(priceFeedMap);
+    } catch (error) {
+      console.error("Error loading lending pool price feeds:", error);
+    }
+  };
+
+  // Approve or revoke feeder permissions
+  const handleApproveFeeder = async () => {
+    if (!oracleContractInfo.contractId || !oracleContractInfo.isDeployed) {
+      toast.error("Oracle contract not available", {
+        description: "Cannot approve feeder: Oracle contract is not deployed.",
+      });
+      return;
+    }
+
+    if (!feederAddress.trim() || !selectedTokenForFeeder) {
+      toast.error("Missing information", {
+        description: "Please provide both feeder address and token selection.",
+      });
+      return;
+    }
+
+    try {
+      const networkConfig = getCurrentNetworkConfig();
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      // Create oracle contract instance
+      const ci = new CONTRACT(
+        Number(oracleContractInfo.contractId),
+        clients.algod,
+        undefined,
+        { ...PriceOracleAppSpec.contract, events: [] }, // NOTE: Should be PriceOracleAppSpec when available
+        { addr: activeAccount?.address || "", sk: new Uint8Array() }
+      );
+      ci.setEnableRawBytes(true);
+
+      // Get token ID from selected market
+      const markets = getMarketsFromConfig(currentNetwork);
+      const selectedMarket = markets.find(
+        (market) => market.id === selectedTokenForFeeder
+      );
+      const tokenId =
+        selectedMarket?.underlyingAssetId ||
+        selectedMarket?.underlyingContractId;
+
+      if (!tokenId) {
+        toast.error("Invalid token selection", {
+          description: "Could not find token ID for selected market.",
+        });
+        return;
+      }
+
+      ci.setPaymentAmount(124500);
+      const result = await ci.approve_feeder(
+        Number(tokenId),
+        feederAddress,
+        feederApproval
+      );
+
+      console.log("approve_feeder result", { result });
+
+      if (!result.success) {
+        toast.error("Failed to approve feeder", {
+          description: `Could not ${
+            feederApproval ? "approve" : "revoke"
+          } feeder permissions. Please try again.`,
+        });
+        return;
+      }
+
+      const stxns = await signTransactions(
+        result.txns.map((txn: string) =>
+          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+        )
+      );
+      const res = await clients.algod.sendRawTransaction(stxns).do();
+      await waitForConfirmation(clients.algod, res.txId, 4);
+
+      toast.success("Feeder permissions updated", {
+        description: `Successfully ${
+          feederApproval ? "approved" : "revoked"
+        } feeder permissions for ${feederAddress} on token ${tokenId}.`,
+      });
+
+      // Reset form
+      setFeederAddress("");
+      setSelectedTokenForFeeder("");
+      setFeederApproval(true);
+      setIsApproveFeederModalOpen(false);
+    } catch (error) {
+      console.error("Error approving feeder:", error);
+      toast.error("Failed to approve feeder", {
+        description: "An unexpected error occurred. Please try again.",
+      });
+    }
+  };
+
+  // Set price for a specific token
+  const handleSetPrice = async () => {
+    if (!oracleContractInfo.contractId || !oracleContractInfo.isDeployed) {
+      toast.error("Oracle contract not available", {
+        description: "Cannot set price: Oracle contract is not deployed.",
+      });
+      return;
+    }
+
+    if (!selectedTokenForPrice || !priceValue.trim()) {
+      toast.error("Missing information", {
+        description: "Please provide both token selection and price value.",
+      });
+      return;
+    }
+
+    const price = parseFloat(priceValue);
+    if (isNaN(price) || price <= 0) {
+      toast.error("Invalid price", {
+        description: "Please enter a valid positive price value.",
+      });
+      return;
+    }
+
+    try {
+      const networkConfig = getCurrentNetworkConfig();
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      // Create oracle contract instance
+      const ci = new CONTRACT(
+        Number(oracleContractInfo.contractId),
+        clients.algod,
+        undefined,
+        { ...PriceOracleAppSpec.contract, events: [] },
+        { addr: activeAccount?.address || "", sk: new Uint8Array() }
+      );
+      ci.setEnableRawBytes(true);
+
+      // Get token ID from selected market
+      const markets = getMarketsFromConfig(currentNetwork);
+      const selectedMarket = markets.find(
+        (market) => market.id === selectedTokenForPrice
+      );
+      const tokenId =
+        selectedMarket?.underlyingAssetId ||
+        selectedMarket?.underlyingContractId;
+
+      if (!tokenId) {
+        toast.error("Invalid token selection", {
+          description: "Could not find token ID for selected market.",
+        });
+        return;
+      }
+
+      // Convert price to micro-units (multiply by 1e6)
+      const priceInMicroUnits = BigInt(Math.floor(price * 1e6));
+
+      // Call post_price method
+      ci.setPaymentAmount(124500);
+      const result = await ci.post_price(Number(tokenId), priceInMicroUnits);
+
+      console.log("post_price result", { result });
+
+      if (!result.success) {
+        toast.error("Failed to set price", {
+          description:
+            "Could not set price. Please check if you have feeder permissions and try again.",
+        });
+        return;
+      }
+
+      const stxns = await signTransactions(
+        result.txns.map((txn: string) =>
+          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+        )
+      );
+      const res = await clients.algod.sendRawTransaction(stxns).do();
+      await waitForConfirmation(clients.algod, res.txId, 4);
+
+      toast.success("Price updated successfully", {
+        description: `Successfully set price for ${
+          selectedMarket?.symbol
+        } to $${price.toFixed(6)}.`,
+      });
+
+      // Refresh price data
+      await loadAssetPrices();
+
+      // Reset form
+      setSelectedTokenForPrice("");
+      setPriceValue("");
+      setIsSetPriceModalOpen(false);
+    } catch (error) {
+      console.error("Error setting price:", error);
+      toast.error("Failed to set price", {
+        description: "An unexpected error occurred. Please try again.",
+      });
+    }
+  };
+
+  // Attach price feed to lending pool
+  const handleAttachPriceFeed = async () => {
+    if (!selectedLendingPool) {
+      toast.error("No lending pool selected", {
+        description: "Please select a lending pool first.",
+      });
+      return;
+    }
+
+    if (!selectedTokenForAttach) {
+      toast.error("No token selected", {
+        description: "Please select a token to attach price feed for.",
+      });
+      return;
+    }
+
+    if (!oracleContractInfo.contractId || !oracleContractInfo.isDeployed) {
+      toast.error("Oracle contract not available", {
+        description:
+          "Cannot attach price feed: Oracle contract is not deployed.",
+      });
+      return;
+    }
+
+    try {
+      const networkConfig = getCurrentNetworkConfig();
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      // Create lending pool contract instance
+      const ci = new CONTRACT(
+        Number(selectedLendingPool),
+        clients.algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        { addr: activeAccount?.address || "", sk: new Uint8Array() }
+      );
+      ci.setEnableRawBytes(true);
+
+      // Get token ID from selected market
+      const markets = getMarketsFromConfig(currentNetwork);
+      const selectedMarket = markets.find(
+        (market) => market.id === selectedTokenForAttach
+      );
+      const tokenId =
+        selectedMarket?.underlyingAssetId ||
+        selectedMarket?.underlyingContractId;
+
+      if (!tokenId) {
+        toast.error("Invalid token selection", {
+          description: "Could not find token ID for selected market.",
+        });
+        return;
+      }
+
+      // Call attach_price_feed method
+      //ci.setPaymentAmount(124500);
+      const result = await ci.attach_price_feed(
+        Number(tokenId),
+        Number(oracleContractInfo.contractId)
+      );
+
+      console.log("attach_price_feed result", { result });
+
+      if (!result.success) {
+        toast.error("Failed to attach price feed", {
+          description:
+            "Could not attach price feed. Please check if you have the required role and try again.",
+        });
+        return;
+      }
+
+      const stxns = await signTransactions(
+        result.txns.map((txn: string) =>
+          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+        )
+      );
+      const res = await clients.algod.sendRawTransaction(stxns).do();
+      await waitForConfirmation(clients.algod, res.txId, 4);
+
+      toast.success("Price feed attached successfully", {
+        description: `Successfully attached price feed for ${selectedMarket?.symbol} to oracle contract.`,
+      });
+
+      // Refresh price feed status
+      await loadPriceFeedStatus();
+      await loadLendingPoolPriceFeeds();
+
+      // Reset form
+      setSelectedTokenForAttach("");
+      setIsAttachPriceFeedModalOpen(false);
+    } catch (error) {
+      console.error("Error attaching price feed:", error);
+      toast.error("Failed to attach price feed", {
+        description: "An unexpected error occurred. Please try again.",
+      });
+    }
+  };
+
+  // Export oracle data to JSON
+  const handleExportOracleData = () => {
+    try {
+      const markets = getMarketsFromConfig(currentNetwork);
+      const networkConfig = getCurrentNetworkConfig();
+      const exportData = {
+        metadata: {
+          network: currentNetwork,
+          exportDate: new Date().toISOString(),
+          contractId: oracleContractInfo.contractId,
+          isDeployed: oracleContractInfo.isDeployed,
+          hasPriceOracleRole: oracleContractInfo.hasPriceOracleRole,
+        },
+        networkConfig: networkConfig,
+        supportedAssets: markets.map(market => ({
+          id: market.id,
+          symbol: market.symbol,
+          name: market.name,
+          underlyingAssetId: market.underlyingAssetId,
+          decimals: market.decimals,
+          icon: market.icon,
+          color: market.color,
+        })),
+        contractState: oracleContractInfo.contractState,
+        assetPrices: Object.keys(assetPrices).reduce((acc, marketId) => {
+          const market = markets.find(m => m.id === marketId);
+          const priceData = assetPrices[marketId];
+          if (market && priceData) {
+            acc[marketId] = {
+              symbol: market.symbol,
+              name: market.name,
+              underlyingAssetId: market.underlyingAssetId,
+              price: Number(priceData.price) / 1e6, // Convert from micro units
+              timestamp: Number(priceData.timestamp),
+              lastUpdated: new Date(Number(priceData.timestamp) * 1000).toISOString(),
+            };
+          }
+          return acc;
+        }, {} as Record<string, any>),
+        priceFeedStatus: Object.keys(priceFeedStatus).reduce((acc, marketId) => {
+          const market = markets.find(m => m.id === marketId);
+          const isAttached = priceFeedStatus[marketId];
+          if (market) {
+            acc[marketId] = {
+              symbol: market.symbol,
+              name: market.name,
+              underlyingAssetId: market.underlyingAssetId,
+              isAttached: isAttached,
+            };
+          }
+          return acc;
+        }, {} as Record<string, any>),
+      };
+
+      // Create and download the JSON file
+      const jsonString = JSON.stringify(exportData, null, 2);
+      const blob = new Blob([jsonString], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `oracle-data-${currentNetwork}-${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      URL.revokeObjectURL(url);
+      
+      toast.success("Oracle data exported successfully", {
+        description: "Oracle data has been downloaded as JSON file.",
+      });
+    } catch (error) {
+      console.error("Error exporting oracle data:", error);
+      toast.error("Failed to export oracle data", {
+        description: "An unexpected error occurred while exporting data.",
+      });
+    }
+  };
+
+  // Fetch price feed for a specific token
+  const handleFetchPriceFeed = async (marketId: string) => {
+    if (!selectedLendingPool) {
+      toast.error("No lending pool selected", {
+        description: "Please select a lending pool first.",
+      });
+      return;
+    }
+
+    try {
+      const networkConfig = getCurrentNetworkConfig();
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      // Create lending pool contract instance
+      const ci = new CONTRACT(
+        Number(selectedLendingPool),
+        clients.algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        { addr: activeAccount?.address || "", sk: new Uint8Array() }
+      );
+      ci.setEnableRawBytes(true);
+
+      // Get token ID from market
+      const markets = getMarketsFromConfig(currentNetwork);
+      const selectedMarket = markets.find((market) => market.id === marketId);
+      const tokenId =
+        selectedMarket?.underlyingAssetId ||
+        selectedMarket?.underlyingContractId;
+
+      console.log(`🔄 Fetching price feed for market ${marketId}:`, {
+        selectedMarket,
+        tokenId,
+        tokenIdNumber: Number(tokenId),
+        marketsCount: markets.length,
+        allMarketIds: markets.map((m) => m.id),
+      });
+
+      if (!tokenId) {
+        console.error(`❌ No tokenId found for market ${marketId}`);
+        toast.error("Invalid market selection", {
+          description: "Could not find token ID for selected market.",
+        });
+        return;
+      }
+
+      if (isNaN(Number(tokenId))) {
+        console.error(`❌ Invalid tokenId for market ${marketId}:`, tokenId);
+        toast.error("Invalid token ID", {
+          description: `Invalid token ID: ${tokenId}`,
+        });
+        return;
+      }
+
+      ci.setFee(3000);
+      ci.setPaymentAmount(1e5);
+      const result = await ci.fetch_price_feed(Number(tokenId));
+
+      console.log("fetch_price_feed result", { result });
+
+      if (!result.success) {
+        toast.error("Failed to fetch price feed", {
+          description:
+            "Could not fetch price feed. Please check if price feed is attached and try again.",
+        });
+        return;
+      }
+
+      const stxns = await signTransactions(
+        result.txns.map((txn: string) =>
+          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+        )
+      );
+      const res = await clients.algod.sendRawTransaction(stxns).do();
+      await waitForConfirmation(clients.algod, res.txId, 4);
+
+      toast.success("Price feed fetched successfully", {
+        description: `Successfully fetched latest price for ${selectedMarket?.symbol}.`,
+      });
+
+      // Refresh price feed data
+      await loadPriceFeedStatus();
+      await loadLendingPoolPriceFeeds();
+    } catch (error) {
+      console.error("Error fetching price feed:", error);
+      toast.error("Failed to fetch price feed", {
+        description: "An unexpected error occurred. Please try again.",
+      });
+    }
+  };
+
   // Load current user's Envoi name
   const loadCurrentUserEnvoiName = async () => {
     if (!activeAccount?.address) return;
@@ -1239,7 +2089,7 @@ export default function AdminDashboard() {
       );
 
       setStokenMarketExists(!!stokenMarket);
-      
+
       if (stokenMarket) {
         // Fetch detailed market information
         try {
@@ -1250,7 +2100,7 @@ export default function AdminDashboard() {
           );
           setStokenMarketInfo({
             ...stokenMarket,
-            marketInfo: marketInfo
+            marketInfo: marketInfo,
           });
         } catch (error) {
           console.error("Error fetching SToken market info:", error);
@@ -1384,6 +2234,73 @@ export default function AdminDashboard() {
     Array<{ name: string; address: string; tokenId: string }>
   >([]);
   const [envoiSearchLoading, setEnvoiSearchLoading] = useState(false);
+
+  // Price Oracle state
+  const [oracleContractInfo, setOracleContractInfo] = useState<{
+    contractId: string | undefined;
+    isDeployed: boolean;
+    hasPriceOracleRole: boolean;
+    contractState: any;
+  }>({
+    contractId: undefined,
+    isDeployed: false,
+    hasPriceOracleRole: false,
+    contractState: null,
+  });
+  const [oracleLoading, setOracleLoading] = useState(false);
+
+  // State to track price feed status for each market
+  const [priceFeedStatus, setPriceFeedStatus] = useState<
+    Record<string, boolean>
+  >({});
+
+  // State to store price data for each asset
+  const [assetPrices, setAssetPrices] = useState<
+    Record<string, { price: bigint; timestamp: bigint } | null>
+  >({});
+
+  // State to store market data for each asset
+  const [marketData, setMarketData] = useState<
+    Record<
+      string,
+      { price: bigint; paused: boolean; lastUpdateTime: bigint } | null
+    >
+  >({});
+
+  // State to store price feed data from lending pool
+  const [lendingPoolPriceFeeds, setLendingPoolPriceFeeds] = useState<
+    Record<
+      string,
+      {
+        marketId: bigint;
+        providerAppId: bigint;
+        priceWithTimestamp: { price: bigint; timestamp: bigint };
+      } | null
+    >
+  >({});
+
+  // State for approve feeder modal
+  const [isApproveFeederModalOpen, setIsApproveFeederModalOpen] =
+    useState(false);
+  const [feederAddress, setFeederAddress] = useState("");
+  const [selectedTokenForFeeder, setSelectedTokenForFeeder] =
+    useState<string>("");
+  const [feederApproval, setFeederApproval] = useState<boolean>(true);
+
+  // State for set price modal
+  const [isSetPriceModalOpen, setIsSetPriceModalOpen] = useState(false);
+  const [selectedTokenForPrice, setSelectedTokenForPrice] =
+    useState<string>("");
+  const [priceValue, setPriceValue] = useState<string>("");
+
+  // State for attach price feed modal
+  const [isAttachPriceFeedModalOpen, setIsAttachPriceFeedModalOpen] =
+    useState(false);
+  const [selectedTokenForAttach, setSelectedTokenForAttach] =
+    useState<string>("");
+
+  // State for selected lending pool
+  const [selectedLendingPool, setSelectedLendingPool] = useState<string>("");
 
   // Debounce search query
   useEffect(() => {
@@ -2915,6 +3832,68 @@ export default function AdminDashboard() {
     }
   };
 
+  // Load Oracle Contract Information
+  const loadOracleContractInfo = async () => {
+    if (!activeAccount) return;
+
+    setOracleLoading(true);
+    try {
+      const networkConfig = getCurrentNetworkConfig();
+      const contractId = networkConfig.contracts.priceOracle;
+
+      if (!contractId) {
+        setOracleContractInfo({
+          contractId: undefined,
+          isDeployed: false,
+          hasPriceOracleRole: false,
+          contractState: null,
+        });
+        return;
+      }
+
+      // Check if user has PriceOracle role using the price oracle contract
+      const userHasPriceOracleRole = await hasPriceOracleRole();
+
+      // Try to get contract state (if deployed)
+      let contractState = null;
+      let isDeployed = false;
+
+      if (isCurrentNetworkAlgorandCompatible()) {
+        try {
+          const clients = algorandService.initializeClients(
+            networkConfig.walletNetworkId as AlgorandNetwork
+          );
+
+          // Try to get application info to check if deployed
+          const appInfo = await clients.algod
+            .getApplicationByID(Number(contractId))
+            .do();
+          isDeployed = true;
+          contractState = {
+            appId: appInfo.id,
+            creator: appInfo.params.creator,
+            globalState: appInfo.params["global-state"] || [],
+            localState: appInfo.params["local-state"] || [],
+          };
+        } catch (error) {
+          console.log("Contract not deployed or error fetching:", error);
+          isDeployed = false;
+        }
+      }
+
+      setOracleContractInfo({
+        contractId,
+        isDeployed,
+        hasPriceOracleRole: userHasPriceOracleRole,
+        contractState,
+      });
+    } catch (error) {
+      console.error("Error loading oracle contract info:", error);
+    } finally {
+      setOracleLoading(false);
+    }
+  };
+
   console.log("🔍 userGetUserData:", userGetUserData);
 
   // Method 1: Sum individual market deposits (mirroring PreFi.tsx logic)
@@ -4150,6 +5129,37 @@ export default function AdminDashboard() {
     }
   }, [activeTab, currentNetwork]);
 
+  // Initialize selected lending pool when network changes
+  React.useEffect(() => {
+    const lendingPools = getLendingPools(currentNetwork);
+    if (lendingPools.length > 0 && !selectedLendingPool) {
+      setSelectedLendingPool(lendingPools[0]);
+    }
+  }, [currentNetwork, selectedLendingPool]);
+
+  // Load Oracle contract info when PriceOracle or PriceFeedManager tab is active
+  React.useEffect(() => {
+    if (activeTab === "price-oracle" || activeTab === "price-feed-manager") {
+      loadOracleContractInfo();
+      if (selectedLendingPool && activeTab === "price-feed-manager") {
+        loadPriceFeedStatus();
+        loadLendingPoolPriceFeeds();
+        loadMarketData();
+      }
+      // Load asset prices when oracle contract is available
+      if (oracleContractInfo.contractId && oracleContractInfo.isDeployed) {
+        loadAssetPrices();
+      }
+    }
+  }, [
+    activeTab,
+    currentNetwork,
+    activeAccount?.address,
+    selectedLendingPool,
+    oracleContractInfo.contractId,
+    oracleContractInfo.isDeployed,
+  ]);
+
   return (
     <div className="min-h-screen bg-background relative">
       {/* Light Mode Beach Background */}
@@ -4236,50 +5246,73 @@ export default function AdminDashboard() {
           onValueChange={setActiveTab}
           className="space-y-6"
         >
-          <TabsList className="grid w-full grid-cols-9 lg:w-auto lg:grid-cols-9">
-            <TabsTrigger value="overview" className="flex items-center gap-2">
-              <BarChart3 className="h-4 w-4" />
-              <span className="hidden sm:inline">Overview</span>
-            </TabsTrigger>
-            <TabsTrigger value="markets" className="flex items-center gap-2">
-              <Coins className="h-4 w-4" />
-              <span className="hidden sm:inline">Markets</span>
-            </TabsTrigger>
-            <TabsTrigger
-              value="market-analysis"
-              className="flex items-center gap-2"
-            >
-              <TrendingUp className="h-4 w-4" />
-              <span className="hidden sm:inline">Market Analysis</span>
-            </TabsTrigger>
-            <TabsTrigger value="operations" className="flex items-center gap-2">
-              <Activity className="h-4 w-4" />
-              <span className="hidden sm:inline">Operations</span>
-            </TabsTrigger>
-            <TabsTrigger
-              value="user-analysis"
-              className="flex items-center gap-2"
-            >
-              <Users className="h-4 w-4" />
-              <span className="hidden sm:inline">User Analysis</span>
-            </TabsTrigger>
-            <TabsTrigger value="stoken" className="flex items-center gap-2">
-              <DollarSign className="h-4 w-4" />
-              <span className="hidden sm:inline">SToken</span>
-            </TabsTrigger>
-            <TabsTrigger value="roles" className="flex items-center gap-2">
-              <Shield className="h-4 w-4" />
-              <span className="hidden sm:inline">Roles</span>
-            </TabsTrigger>
-            <TabsTrigger value="tools" className="flex items-center gap-2">
-              <Wrench className="h-4 w-4" />
-              <span className="hidden sm:inline">Tools</span>
-            </TabsTrigger>
-            <TabsTrigger value="settings" className="flex items-center gap-2">
-              <Settings className="h-4 w-4" />
-              <span className="hidden sm:inline">Settings</span>
-            </TabsTrigger>
-          </TabsList>
+          <div className="space-y-0">
+            <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:grid-cols-6">
+              <TabsTrigger value="overview" className="flex items-center gap-2">
+                <BarChart3 className="h-4 w-4" />
+                <span className="hidden sm:inline">Overview</span>
+              </TabsTrigger>
+              <TabsTrigger value="markets" className="flex items-center gap-2">
+                <Coins className="h-4 w-4" />
+                <span className="hidden sm:inline">Markets</span>
+              </TabsTrigger>
+              <TabsTrigger
+                value="operations"
+                className="flex items-center gap-2"
+              >
+                <Activity className="h-4 w-4" />
+                <span className="hidden sm:inline">Operations</span>
+              </TabsTrigger>
+              <TabsTrigger value="roles" className="flex items-center gap-2">
+                <Shield className="h-4 w-4" />
+                <span className="hidden sm:inline">Roles</span>
+              </TabsTrigger>
+              <TabsTrigger value="tools" className="flex items-center gap-2">
+                <Wrench className="h-4 w-4" />
+                <span className="hidden sm:inline">Tools</span>
+              </TabsTrigger>
+              <TabsTrigger value="settings" className="flex items-center gap-2">
+                <Settings className="h-4 w-4" />
+                <span className="hidden sm:inline">Settings</span>
+              </TabsTrigger>
+            </TabsList>
+
+            {/* Second row for Market Analysis, User Analysis, SToken, Price Feed Manager and Price Oracle */}
+            <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:grid-cols-5">
+              <TabsTrigger
+                value="market-analysis"
+                className="flex items-center gap-2"
+              >
+                <TrendingUp className="h-4 w-4" />
+                <span>Market Analysis</span>
+              </TabsTrigger>
+              <TabsTrigger
+                value="user-analysis"
+                className="flex items-center gap-2"
+              >
+                <Users className="h-4 w-4" />
+                <span>User Analysis</span>
+              </TabsTrigger>
+              <TabsTrigger value="stoken" className="flex items-center gap-2">
+                <DollarSign className="h-4 w-4" />
+                <span>SToken</span>
+              </TabsTrigger>
+              <TabsTrigger
+                value="price-feed-manager"
+                className="flex items-center gap-2"
+              >
+                <Zap className="h-4 w-4" />
+                <span>Price Feed Manager</span>
+              </TabsTrigger>
+              <TabsTrigger
+                value="price-oracle"
+                className="flex items-center gap-2"
+              >
+                <Database className="h-4 w-4" />
+                <span>Price Oracle</span>
+              </TabsTrigger>
+            </TabsList>
+          </div>
 
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6">
@@ -7674,33 +8707,50 @@ export default function AdminDashboard() {
                     <div className="text-center py-2">
                       <div className="flex items-center justify-center gap-2 text-green-500 mb-2">
                         <CheckCircle2 className="h-5 w-5" />
-                        <span className="font-medium">SToken Market Active</span>
+                        <span className="font-medium">
+                          SToken Market Active
+                        </span>
                       </div>
                       <p className="text-sm text-muted-foreground">
-                        A market for the SToken is configured and available for trading.
+                        A market for the SToken is configured and available for
+                        trading.
                       </p>
                     </div>
 
                     {stokenMarketInfo && (
                       <div className="bg-muted/50 p-4 rounded-lg space-y-4">
                         <h4 className="font-medium">Market Information</h4>
-                        
+
                         {/* Basic Market Info */}
                         <div className="grid grid-cols-2 gap-4 text-sm">
                           <div>
-                            <span className="text-muted-foreground">Market ID:</span>
-                            <span className="ml-2 font-mono">{stokenMarketInfo.id}</span>
+                            <span className="text-muted-foreground">
+                              Market ID:
+                            </span>
+                            <span className="ml-2 font-mono">
+                              {stokenMarketInfo.id}
+                            </span>
                           </div>
                           <div>
-                            <span className="text-muted-foreground">Pool ID:</span>
-                            <span className="ml-2 font-mono">{stokenMarketInfo.poolId}</span>
+                            <span className="text-muted-foreground">
+                              Pool ID:
+                            </span>
+                            <span className="ml-2 font-mono">
+                              {stokenMarketInfo.poolId}
+                            </span>
                           </div>
                           <div>
-                            <span className="text-muted-foreground">Symbol:</span>
-                            <span className="ml-2 font-medium">{stokenMarketInfo.symbol}</span>
+                            <span className="text-muted-foreground">
+                              Symbol:
+                            </span>
+                            <span className="ml-2 font-medium">
+                              {stokenMarketInfo.symbol}
+                            </span>
                           </div>
                           <div>
-                            <span className="text-muted-foreground">Status:</span>
+                            <span className="text-muted-foreground">
+                              Status:
+                            </span>
                             <Badge variant="default" className="ml-2">
                               {stokenMarketInfo.status}
                             </Badge>
@@ -7711,42 +8761,78 @@ export default function AdminDashboard() {
                         {stokenMarketInfo.marketInfo && (
                           <>
                             <div className="border-t pt-4">
-                              <h5 className="font-medium mb-2">Market Parameters</h5>
+                              <h5 className="font-medium mb-2">
+                                Market Parameters
+                              </h5>
                               <div className="grid grid-cols-2 gap-4 text-sm">
                                 <div>
-                                  <span className="text-muted-foreground">Collateral Factor:</span>
+                                  <span className="text-muted-foreground">
+                                    Collateral Factor:
+                                  </span>
                                   <span className="ml-2 font-mono">
-                                    {stokenMarketInfo.marketInfo.collateralFactor 
-                                      ? `${(Number(stokenMarketInfo.marketInfo.collateralFactor) / 10000 * 100).toFixed(1)}%`
-                                      : 'N/A'
-                                    }
+                                    {stokenMarketInfo.marketInfo
+                                      .collateralFactor
+                                      ? `${(
+                                          (Number(
+                                            stokenMarketInfo.marketInfo
+                                              .collateralFactor
+                                          ) /
+                                            10000) *
+                                          100
+                                        ).toFixed(1)}%`
+                                      : "N/A"}
                                   </span>
                                 </div>
                                 <div>
-                                  <span className="text-muted-foreground">Liquidation Threshold:</span>
+                                  <span className="text-muted-foreground">
+                                    Liquidation Threshold:
+                                  </span>
                                   <span className="ml-2 font-mono">
-                                    {stokenMarketInfo.marketInfo.liquidationThreshold 
-                                      ? `${(Number(stokenMarketInfo.marketInfo.liquidationThreshold) / 10000 * 100).toFixed(1)}%`
-                                      : 'N/A'
-                                    }
+                                    {stokenMarketInfo.marketInfo
+                                      .liquidationThreshold
+                                      ? `${(
+                                          (Number(
+                                            stokenMarketInfo.marketInfo
+                                              .liquidationThreshold
+                                          ) /
+                                            10000) *
+                                          100
+                                        ).toFixed(1)}%`
+                                      : "N/A"}
                                   </span>
                                 </div>
                                 <div>
-                                  <span className="text-muted-foreground">Reserve Factor:</span>
+                                  <span className="text-muted-foreground">
+                                    Reserve Factor:
+                                  </span>
                                   <span className="ml-2 font-mono">
-                                    {stokenMarketInfo.marketInfo.reserveFactor 
-                                      ? `${(Number(stokenMarketInfo.marketInfo.reserveFactor) / 10000 * 100).toFixed(1)}%`
-                                      : 'N/A'
-                                    }
+                                    {stokenMarketInfo.marketInfo.reserveFactor
+                                      ? `${(
+                                          (Number(
+                                            stokenMarketInfo.marketInfo
+                                              .reserveFactor
+                                          ) /
+                                            10000) *
+                                          100
+                                        ).toFixed(1)}%`
+                                      : "N/A"}
                                   </span>
                                 </div>
                                 <div>
-                                  <span className="text-muted-foreground">Borrow Rate:</span>
+                                  <span className="text-muted-foreground">
+                                    Borrow Rate:
+                                  </span>
                                   <span className="ml-2 font-mono">
-                                    {stokenMarketInfo.marketInfo.borrowRate 
-                                      ? `${(Number(stokenMarketInfo.marketInfo.borrowRate) / 10000 * 100).toFixed(2)}%`
-                                      : 'N/A'
-                                    }
+                                    {stokenMarketInfo.marketInfo.borrowRate
+                                      ? `${(
+                                          (Number(
+                                            stokenMarketInfo.marketInfo
+                                              .borrowRate
+                                          ) /
+                                            10000) *
+                                          100
+                                        ).toFixed(2)}%`
+                                      : "N/A"}
                                   </span>
                                 </div>
                               </div>
@@ -7754,24 +8840,51 @@ export default function AdminDashboard() {
 
                             {/* Market Limits */}
                             <div className="border-t pt-4">
-                              <h5 className="font-medium mb-2">Market Limits</h5>
+                              <h5 className="font-medium mb-2">
+                                Market Limits
+                              </h5>
                               <div className="grid grid-cols-2 gap-4 text-sm">
                                 <div>
-                                  <span className="text-muted-foreground">Max Total Deposits:</span>
+                                  <span className="text-muted-foreground">
+                                    Max Total Deposits:
+                                  </span>
                                   <span className="ml-2 font-mono">
-                                    {stokenMarketInfo.marketInfo.maxTotalDeposits 
-                                      ? `${new BigNumber(stokenMarketInfo.marketInfo.maxTotalDeposits).dividedBy(Math.pow(10, Number(stokenInfo?.decimals) || 6)).toFixed(0)} ${stokenInfo?.symbol || 'SToken'}`
-                                      : 'N/A'
-                                    }
+                                    {stokenMarketInfo.marketInfo
+                                      .maxTotalDeposits
+                                      ? `${new BigNumber(
+                                          stokenMarketInfo.marketInfo.maxTotalDeposits
+                                        )
+                                          .dividedBy(
+                                            Math.pow(
+                                              10,
+                                              Number(stokenInfo?.decimals) || 6
+                                            )
+                                          )
+                                          .toFixed(0)} ${
+                                          stokenInfo?.symbol || "SToken"
+                                        }`
+                                      : "N/A"}
                                   </span>
                                 </div>
                                 <div>
-                                  <span className="text-muted-foreground">Max Total Borrows:</span>
+                                  <span className="text-muted-foreground">
+                                    Max Total Borrows:
+                                  </span>
                                   <span className="ml-2 font-mono">
-                                    {stokenMarketInfo.marketInfo.maxTotalBorrows 
-                                      ? `${new BigNumber(stokenMarketInfo.marketInfo.maxTotalBorrows).dividedBy(Math.pow(10, Number(stokenInfo?.decimals) || 6)).toFixed(0)} ${stokenInfo?.symbol || 'SToken'}`
-                                      : 'N/A'
-                                    }
+                                    {stokenMarketInfo.marketInfo.maxTotalBorrows
+                                      ? `${new BigNumber(
+                                          stokenMarketInfo.marketInfo.maxTotalBorrows
+                                        )
+                                          .dividedBy(
+                                            Math.pow(
+                                              10,
+                                              Number(stokenInfo?.decimals) || 6
+                                            )
+                                          )
+                                          .toFixed(0)} ${
+                                          stokenInfo?.symbol || "SToken"
+                                        }`
+                                      : "N/A"}
                                   </span>
                                 </div>
                               </div>
@@ -7779,42 +8892,84 @@ export default function AdminDashboard() {
 
                             {/* Market Statistics */}
                             <div className="border-t pt-4">
-                              <h5 className="font-medium mb-2">Market Statistics</h5>
+                              <h5 className="font-medium mb-2">
+                                Market Statistics
+                              </h5>
                               <div className="grid grid-cols-2 gap-4 text-sm">
                                 <div>
-                                  <span className="text-muted-foreground">Total Deposits:</span>
+                                  <span className="text-muted-foreground">
+                                    Total Deposits:
+                                  </span>
                                   <span className="ml-2 font-mono">
-                                    {stokenMarketInfo.marketInfo.totalDeposits 
-                                      ? `${new BigNumber(stokenMarketInfo.marketInfo.totalDeposits).dividedBy(Math.pow(10, Number(stokenInfo?.decimals) || 6)).toFixed(2)} ${stokenInfo?.symbol || 'SToken'}`
-                                      : 'N/A'
-                                    }
+                                    {stokenMarketInfo.marketInfo.totalDeposits
+                                      ? `${new BigNumber(
+                                          stokenMarketInfo.marketInfo.totalDeposits
+                                        )
+                                          .dividedBy(
+                                            Math.pow(
+                                              10,
+                                              Number(stokenInfo?.decimals) || 6
+                                            )
+                                          )
+                                          .toFixed(2)} ${
+                                          stokenInfo?.symbol || "SToken"
+                                        }`
+                                      : "N/A"}
                                   </span>
                                 </div>
                                 <div>
-                                  <span className="text-muted-foreground">Total Borrows:</span>
+                                  <span className="text-muted-foreground">
+                                    Total Borrows:
+                                  </span>
                                   <span className="ml-2 font-mono">
-                                    {stokenMarketInfo.marketInfo.totalBorrows 
-                                      ? `${new BigNumber(stokenMarketInfo.marketInfo.totalBorrows).dividedBy(Math.pow(10, Number(stokenInfo?.decimals) || 6)).toFixed(2)} ${stokenInfo?.symbol || 'SToken'}`
-                                      : 'N/A'
-                                    }
+                                    {stokenMarketInfo.marketInfo.totalBorrows
+                                      ? `${new BigNumber(
+                                          stokenMarketInfo.marketInfo.totalBorrows
+                                        )
+                                          .dividedBy(
+                                            Math.pow(
+                                              10,
+                                              Number(stokenInfo?.decimals) || 6
+                                            )
+                                          )
+                                          .toFixed(2)} ${
+                                          stokenInfo?.symbol || "SToken"
+                                        }`
+                                      : "N/A"}
                                   </span>
                                 </div>
                                 <div>
-                                  <span className="text-muted-foreground">Utilization Rate:</span>
+                                  <span className="text-muted-foreground">
+                                    Utilization Rate:
+                                  </span>
                                   <span className="ml-2 font-mono">
-                                    {stokenMarketInfo.marketInfo.totalDeposits && stokenMarketInfo.marketInfo.totalBorrows
-                                      ? `${(Number(stokenMarketInfo.marketInfo.totalBorrows) / Number(stokenMarketInfo.marketInfo.totalDeposits) * 100).toFixed(2)}%`
-                                      : 'N/A'
-                                    }
+                                    {stokenMarketInfo.marketInfo
+                                      .totalDeposits &&
+                                    stokenMarketInfo.marketInfo.totalBorrows
+                                      ? `${(
+                                          (Number(
+                                            stokenMarketInfo.marketInfo
+                                              .totalBorrows
+                                          ) /
+                                            Number(
+                                              stokenMarketInfo.marketInfo
+                                                .totalDeposits
+                                            )) *
+                                          100
+                                        ).toFixed(2)}%`
+                                      : "N/A"}
                                   </span>
                                 </div>
                                 <div>
-                                  <span className="text-muted-foreground">Price:</span>
+                                  <span className="text-muted-foreground">
+                                    Price:
+                                  </span>
                                   <span className="ml-2 font-mono">
-                                    {stokenMarketInfo.marketInfo.price 
-                                      ? `$${Number(stokenMarketInfo.marketInfo.price).toFixed(4)}`
-                                      : 'N/A'
-                                    }
+                                    {stokenMarketInfo.marketInfo.price
+                                      ? `$${Number(
+                                          stokenMarketInfo.marketInfo.price
+                                        ).toFixed(4)}`
+                                      : "N/A"}
                                   </span>
                                 </div>
                               </div>
@@ -8345,6 +9500,1082 @@ export default function AdminDashboard() {
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
+
+          {/* Price Feed Manager Tab */}
+          <TabsContent value="price-feed-manager" className="space-y-6">
+            <div className="flex justify-between items-center">
+              <H2>Price Feed Manager</H2>
+              <div className="flex items-center gap-2">
+                {oracleLoading ? (
+                  <Badge
+                    variant="outline"
+                    className="text-blue-600 border-blue-600"
+                  >
+                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                    Loading...
+                  </Badge>
+                ) : oracleContractInfo.isDeployed ? (
+                  <Badge
+                    variant="outline"
+                    className="text-green-600 border-green-600"
+                  >
+                    <Zap className="h-3 w-3 mr-1" />
+                    Deployed
+                  </Badge>
+                ) : (
+                  <Badge
+                    variant="outline"
+                    className="text-red-600 border-red-600"
+                  >
+                    <AlertTriangle className="h-3 w-3 mr-1" />
+                    Not Deployed
+                  </Badge>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Contract Information Card */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Zap className="h-5 w-5" />
+                    Contract Information
+                  </CardTitle>
+                  <CardDescription>
+                    Price oracle contract details and deployment status
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">Contract ID</span>
+                    <div className="flex items-center gap-2">
+                      {oracleContractInfo.contractId ? (
+                        <>
+                          <span className="text-sm font-mono text-muted-foreground">
+                            {oracleContractInfo.contractId}
+                          </span>
+                          <ExternalLink
+                            className="h-3 w-3 text-muted-foreground hover:text-primary cursor-pointer"
+                            onClick={() => {
+                              const explorerUrl =
+                                getCurrentNetworkConfig().explorerUrl;
+                              window.open(
+                                `${explorerUrl}/application/${oracleContractInfo.contractId}`,
+                                "_blank"
+                              );
+                            }}
+                          />
+                        </>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">
+                          Not configured
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">Network</span>
+                    <span className="text-sm text-muted-foreground">
+                      {currentNetwork.includes("mainnet")
+                        ? "Mainnet"
+                        : "Testnet"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">
+                      Deployment Status
+                    </span>
+                    <Badge
+                      variant="outline"
+                      className={
+                        oracleContractInfo.isDeployed
+                          ? "text-green-600 border-green-600"
+                          : "text-red-600 border-red-600"
+                      }
+                    >
+                      {oracleContractInfo.isDeployed ? (
+                        <>
+                          <CheckCircle2 className="h-3 w-3 mr-1" />
+                          Deployed
+                        </>
+                      ) : (
+                        <>
+                          <AlertTriangle className="h-3 w-3 mr-1" />
+                          Not Deployed
+                        </>
+                      )}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">Your Role</span>
+                    <Badge
+                      variant="outline"
+                      className={
+                        hasPriceFeedManagerRole()
+                          ? "text-green-600 border-green-600"
+                          : "text-orange-600 border-orange-600"
+                      }
+                    >
+                      {hasPriceFeedManagerRole() ? (
+                        <>
+                          <Shield className="h-3 w-3 mr-1" />
+                          Price Feed Manager
+                        </>
+                      ) : (
+                        <>
+                          <UserCheck className="h-3 w-3 mr-1" />
+                          No Role
+                        </>
+                      )}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">
+                      Price Oracle Role
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <Badge
+                        variant="outline"
+                        className={
+                          oracleContractInfo.hasPriceOracleRole
+                            ? "text-green-600 border-green-600"
+                            : "text-orange-600 border-orange-600"
+                        }
+                      >
+                        {oracleContractInfo.hasPriceOracleRole ? (
+                          <>
+                            <Shield className="h-3 w-3 mr-1" />
+                            Price Oracle
+                          </>
+                        ) : (
+                          <>
+                            <UserCheck className="h-3 w-3 mr-1" />
+                            No Role
+                          </>
+                        )}
+                      </Badge>
+                      {/*<Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          // Set the role to assign to Price Oracle
+                          const priceOracleRole = roles.find(role => role.id === "price-oracle");
+                          if (priceOracleRole) {
+                            setSelectedRole(priceOracleRole);
+                            setIsAssignRoleModalOpen(true);
+                          }
+                        }}
+                        className="h-6 px-2 text-xs"
+                      >
+                        <Plus className="h-3 w-3 mr-1" />
+                        Assign Role
+                      </Button>
+                      */}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Contract State Card */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Settings className="h-5 w-5" />
+                    Contract State
+                  </CardTitle>
+                  <CardDescription>
+                    Current state and configuration of the price oracle
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {oracleContractInfo.contractState ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">App ID</span>
+                        <span className="text-sm font-mono text-muted-foreground">
+                          {oracleContractInfo.contractState.appId}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">Creator</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-mono text-muted-foreground">
+                            {oracleContractInfo.contractState.creator?.slice(
+                              0,
+                              8
+                            )}
+                            ...
+                          </span>
+                          <ExternalLink
+                            className="h-3 w-3 text-muted-foreground hover:text-primary cursor-pointer"
+                            onClick={() => {
+                              const explorerUrl =
+                                getCurrentNetworkConfig().explorerUrl;
+                              window.open(
+                                `${explorerUrl}/address/${oracleContractInfo.contractState.creator}`,
+                                "_blank"
+                              );
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">
+                          Global State Keys
+                        </span>
+                        <span className="text-sm text-muted-foreground">
+                          {oracleContractInfo.contractState.globalState
+                            ?.length || 0}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">
+                          Local State Keys
+                        </span>
+                        <span className="text-sm text-muted-foreground">
+                          {oracleContractInfo.contractState.localState
+                            ?.length || 0}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <Database className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p className="text-lg font-medium">
+                        {oracleContractInfo.contractId
+                          ? "Contract Not Deployed"
+                          : "No Contract Configured"}
+                      </p>
+                      <p className="text-sm">
+                        {oracleContractInfo.contractId
+                          ? "The price oracle contract is not deployed on this network"
+                          : "Price oracle contract ID is not configured for this network"}
+                      </p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Lending Pool Selector */}
+              <Card className="lg:col-span-2">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Database className="h-5 w-5" />
+                    Lending Pool Selection
+                  </CardTitle>
+                  <CardDescription>
+                    Select a lending pool to check price feed status for its
+                    markets
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-4">
+                    <div className="flex-1">
+                      <Label htmlFor="lending-pool-select">Lending Pool</Label>
+                      <Select
+                        value={selectedLendingPool}
+                        onValueChange={(value) => {
+                          setSelectedLendingPool(value);
+                          setPriceFeedStatus({}); // Clear previous status
+                        }}
+                      >
+                        <SelectTrigger id="lending-pool-select">
+                          <SelectValue placeholder="Select a lending pool" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {getLendingPools(currentNetwork).map(
+                            (poolId, index) => {
+                              const classLabel = String.fromCharCode(
+                                65 + index
+                              ); // A, B, C, etc.
+                              return (
+                                <SelectItem key={poolId} value={poolId}>
+                                  Pool {classLabel} ({poolId})
+                                </SelectItem>
+                              );
+                            }
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Button
+                      onClick={loadPriceFeedStatus}
+                      disabled={!selectedLendingPool}
+                      className="mt-6"
+                    >
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Check Price Feeds
+                    </Button>
+                    <Button
+                      onClick={loadAssetPrices}
+                      disabled={
+                        !oracleContractInfo.contractId ||
+                        !oracleContractInfo.isDeployed
+                      }
+                      variant="outline"
+                      className="mt-6 ml-2"
+                    >
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Refresh Prices
+                    </Button>
+                    <Button
+                      onClick={loadLendingPoolPriceFeeds}
+                      disabled={!selectedLendingPool}
+                      variant="outline"
+                      className="mt-6 ml-2"
+                    >
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Refresh Price Feeds
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        console.log("🔄 Refresh Market Data button clicked");
+                        loadMarketData();
+                      }}
+                      disabled={!selectedLendingPool}
+                      variant="outline"
+                      className="mt-6 ml-2"
+                    >
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Refresh Market Data
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Supported Assets Card */}
+              <Card className="lg:col-span-2">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Coins className="h-5 w-5" />
+                    Supported Assets
+                  </CardTitle>
+                  <CardDescription>
+                    Assets currently tracked by the price oracle
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {getMarketsFromConfig(currentNetwork).map((market) => {
+                      const hasPriceFeed = priceFeedStatus[market.id] || false;
+                      const priceData = assetPrices[market.id];
+                      const lendingPoolPriceFeed =
+                        lendingPoolPriceFeeds[market.id];
+                      const currentMarketData = marketData[market.id];
+
+                      console.log(`🔍 Market ${market.id} data:`, {
+                        hasPriceFeed,
+                        priceData,
+                        lendingPoolPriceFeed,
+                        currentMarketData,
+                        marketDataKeys: Object.keys(marketData),
+                      });
+
+                      return (
+                        <div
+                          key={market.id}
+                          className="p-3 bg-muted/50 rounded-lg space-y-3"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
+                                <span className="text-xs font-bold text-primary">
+                                  {market.symbol.charAt(0)}
+                                </span>
+                              </div>
+                              <div>
+                                <p className="font-medium text-sm">
+                                  {market.symbol}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  {market.name}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Badge
+                                variant="outline"
+                                className="text-blue-600 border-blue-600"
+                              >
+                                <Hash className="h-3 w-3 mr-1" />
+                                {market.underlyingAssetId || "Native"}
+                              </Badge>
+                              <Badge
+                                variant="outline"
+                                className={
+                                  hasPriceFeed
+                                    ? "text-green-600 border-green-600"
+                                    : "text-gray-600 border-gray-600"
+                                }
+                              >
+                                <CheckCircle2 className="h-3 w-3 mr-1" />
+                                {hasPriceFeed ? "Feed Attached" : "No Feed"}
+                              </Badge>
+                              <Badge
+                                variant="outline"
+                                className={
+                                  priceData
+                                    ? "text-blue-600 border-blue-600"
+                                    : "text-orange-600 border-orange-600"
+                                }
+                              >
+                                <Database className="h-3 w-3 mr-1" />
+                                {priceData
+                                  ? "Price Available"
+                                  : "No Price Data"}
+                              </Badge>
+                              <Badge
+                                variant="outline"
+                                className={
+                                  marketData[market.id]?.price &&
+                                  marketData[market.id]!.price > 0n
+                                    ? "text-purple-600 border-purple-600"
+                                    : "text-gray-600 border-gray-600"
+                                }
+                              >
+                                <DollarSign className="h-3 w-3 mr-1" />
+                                {marketData[market.id]?.price &&
+                                marketData[market.id]!.price > 0n
+                                  ? `$${(
+                                      Number(marketData[market.id]!.price) /
+                                      1e24
+                                    ).toFixed(6)}`
+                                  : "No Market Price"}
+                              </Badge>
+                              {!hasPriceFeed && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => {
+                                    setSelectedTokenForAttach(market.id);
+                                    setIsAttachPriceFeedModalOpen(true);
+                                  }}
+                                  className="h-6 px-2 text-xs"
+                                  disabled={
+                                    !selectedLendingPool ||
+                                    !oracleContractInfo.contractId ||
+                                    !oracleContractInfo.isDeployed
+                                  }
+                                >
+                                  <Plus className="h-3 w-3 mr-1" />
+                                  Attach Feed
+                                </Button>
+                              )}
+                              {hasPriceFeed && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() =>
+                                    handleFetchPriceFeed(market.id)
+                                  }
+                                  className="h-6 px-2 text-xs"
+                                  disabled={!selectedLendingPool}
+                                >
+                                  <RefreshCw className="h-3 w-3 mr-1" />
+                                  Fetch Feed
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Price Feed Attachment Status */}
+                          {lendingPoolPriceFeed && (
+                            <div className="border-t pt-3">
+                              <h4 className="text-sm font-medium text-green-600 mb-2">
+                                Price Feed Configuration
+                              </h4>
+                              <div className="grid grid-cols-2 gap-4 text-sm">
+                                <div>
+                                  <span className="text-muted-foreground">
+                                    Provider App ID:
+                                  </span>
+                                  <span className="ml-2 font-mono">
+                                    {lendingPoolPriceFeed.providerAppId.toString()}
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">
+                                    Market ID:
+                                  </span>
+                                  <span className="ml-2 font-mono">
+                                    {lendingPoolPriceFeed.marketId.toString()}
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">
+                                    Status:
+                                  </span>
+                                  <span className="ml-2">
+                                    {lendingPoolPriceFeed.providerAppId ===
+                                    0n ? (
+                                      <Badge
+                                        variant="outline"
+                                        className="text-gray-600 border-gray-600"
+                                      >
+                                        No Feed Attached
+                                      </Badge>
+                                    ) : (
+                                      <Badge
+                                        variant="outline"
+                                        className="text-green-600 border-green-600"
+                                      >
+                                        Feed Attached
+                                      </Badge>
+                                    )}
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">
+                                    Feed Price:
+                                  </span>
+                                  <span className="ml-2 font-mono font-medium">
+                                    $
+                                    {(
+                                      Number(
+                                        lendingPoolPriceFeed.priceWithTimestamp
+                                          .price
+                                      ) / 1e6
+                                    ).toFixed(6)}
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">
+                                    Feed Last Updated:
+                                  </span>
+                                  <span className="ml-2 font-mono">
+                                    {new Date(
+                                      Number(
+                                        lendingPoolPriceFeed.priceWithTimestamp
+                                          .timestamp
+                                      ) * 1000
+                                    ).toLocaleString()}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Price Data Section */}
+                          {priceData && (
+                            <div className="border-t pt-3">
+                              <h4 className="text-sm font-medium text-blue-600 mb-2">
+                                Oracle Contract Price Data
+                              </h4>
+                              <div className="grid grid-cols-2 gap-4 text-sm">
+                                <div>
+                                  <span className="text-muted-foreground">
+                                    Price:
+                                  </span>
+                                  <span className="ml-2 font-mono font-medium">
+                                    $
+                                    {(Number(priceData.price) / 1e6).toFixed(6)}
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">
+                                    Last Updated:
+                                  </span>
+                                  <span className="ml-2 font-mono">
+                                    {new Date(
+                                      Number(priceData.timestamp) * 1000
+                                    ).toLocaleString()}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {!priceData && !lendingPoolPriceFeed && (
+                            <div className="border-t pt-3">
+                              <div className="flex items-center gap-2 text-muted-foreground">
+                                <AlertTriangle className="h-4 w-4" />
+                                <span className="text-sm">
+                                  No price feed or price data available
+                                </span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                    <div className="flex items-start gap-3">
+                      <InfoIcon className="h-5 w-5 text-blue-600 mt-0.5" />
+                      <div>
+                        <h4 className="font-medium text-blue-900 dark:text-blue-100">
+                          Price Feed Manager Status
+                        </h4>
+                        <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
+                          {oracleContractInfo.contractId &&
+                          oracleContractInfo.isDeployed
+                            ? `The price oracle contract (${oracleContractInfo.contractId}) is deployed and operational. ` +
+                              `It automatically aggregates price data from multiple sources to ensure accurate pricing. ` +
+                              `${
+                                hasPriceFeedManagerRole()
+                                  ? "You have Price Feed Manager role permissions."
+                                  : "You do not have Price Feed Manager role permissions."
+                              }`
+                            : oracleContractInfo.contractId
+                            ? `The price oracle contract (${oracleContractInfo.contractId}) is configured but not deployed on this network.`
+                            : "No price oracle contract is configured for this network. Price updates are handled directly through the lending pool contracts."}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          {/* Price Oracle Tab */}
+          <TabsContent value="price-oracle" className="space-y-6">
+            <div className="flex justify-between items-center">
+              <H2>Price Oracle</H2>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExportOracleData}
+                  className="h-8 px-3 text-sm"
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Export JSON
+                </Button>
+                {oracleLoading ? (
+                  <Badge
+                    variant="outline"
+                    className="text-blue-600 border-blue-600"
+                  >
+                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                    Loading...
+                  </Badge>
+                ) : oracleContractInfo.isDeployed ? (
+                  <Badge
+                    variant="outline"
+                    className="text-green-600 border-green-600"
+                  >
+                    <Zap className="h-3 w-3 mr-1" />
+                    Deployed
+                  </Badge>
+                ) : (
+                  <Badge
+                    variant="outline"
+                    className="text-red-600 border-red-600"
+                  >
+                    <AlertTriangle className="h-3 w-3 mr-1" />
+                    Not Deployed
+                  </Badge>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Contract Information Card */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Database className="h-5 w-5" />
+                    Contract Information
+                  </CardTitle>
+                  <CardDescription>
+                    Oracle contract deployment and configuration details
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">Contract ID</span>
+                    {oracleContractInfo.contractId ? (
+                      <>
+                        <span className="text-sm font-mono">
+                          {oracleContractInfo.contractId}
+                        </span>
+                        <ExternalLink
+                          className="h-3 w-3 text-muted-foreground hover:text-primary cursor-pointer"
+                          onClick={() => {
+                            const explorerUrl =
+                              getCurrentNetworkConfig().explorerUrl;
+                            window.open(
+                              `${explorerUrl}/application/${oracleContractInfo.contractId}`,
+                              "_blank"
+                            );
+                          }}
+                        />
+                      </>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">
+                        Not configured
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">Network</span>
+                    <span className="text-sm text-muted-foreground">
+                      {currentNetwork.includes("mainnet")
+                        ? "Mainnet"
+                        : "Testnet"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">
+                      Deployment Status
+                    </span>
+                    <Badge
+                      variant="outline"
+                      className={
+                        oracleContractInfo.isDeployed
+                          ? "text-green-600 border-green-600"
+                          : "text-red-600 border-red-600"
+                      }
+                    >
+                      {oracleContractInfo.isDeployed ? (
+                        <>
+                          <CheckCircle2 className="h-3 w-3 mr-1" />
+                          Deployed
+                        </>
+                      ) : (
+                        <>
+                          <AlertTriangle className="h-3 w-3 mr-1" />
+                          Not Deployed
+                        </>
+                      )}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">Your Role</span>
+                    <Badge
+                      variant="outline"
+                      className={
+                        hasPriceFeedManagerRole()
+                          ? "text-green-600 border-green-600"
+                          : "text-orange-600 border-orange-600"
+                      }
+                    >
+                      {hasPriceFeedManagerRole() ? (
+                        <>
+                          <Shield className="h-3 w-3 mr-1" />
+                          Price Feed Manager
+                        </>
+                      ) : (
+                        <>
+                          <UserCheck className="h-3 w-3 mr-1" />
+                          No Role
+                        </>
+                      )}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">
+                      Price Oracle Role
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <Badge
+                        variant="outline"
+                        className={
+                          oracleContractInfo.hasPriceOracleRole
+                            ? "text-green-600 border-green-600"
+                            : "text-orange-600 border-orange-600"
+                        }
+                      >
+                        {oracleContractInfo.hasPriceOracleRole ? (
+                          <>
+                            <Shield className="h-3 w-3 mr-1" />
+                            Price Oracle
+                          </>
+                        ) : (
+                          <>
+                            <UserCheck className="h-3 w-3 mr-1" />
+                            No Role
+                          </>
+                        )}
+                      </Badge>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          // Set the role to assign to Price Oracle
+                          const priceOracleRole = roles.find(
+                            (role) => role.id === "price-oracle"
+                          );
+                          if (priceOracleRole) {
+                            setSelectedRole(priceOracleRole);
+                            setIsAssignRoleModalOpen(true);
+                          }
+                        }}
+                        className="h-6 px-2 text-xs"
+                      >
+                        <Plus className="h-3 w-3 mr-1" />
+                        Assign Role
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Approve Feeder Section */}
+                  <div className="border-t pt-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-sm font-medium">
+                        Feeder Management
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setIsApproveFeederModalOpen(true)}
+                        className="h-6 px-2 text-xs"
+                      >
+                        <UserPlus className="h-3 w-3 mr-1" />
+                        Approve Feeder
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Manage price feeder permissions for specific tokens
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Contract State Card */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Settings className="h-5 w-5" />
+                    Contract State
+                  </CardTitle>
+                  <CardDescription>
+                    Oracle contract state and configuration
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {oracleContractInfo.contractState ? (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">App ID</span>
+                        <span className="text-sm font-mono">
+                          {oracleContractInfo.contractState.appId}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">Creator</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-mono text-muted-foreground">
+                            {oracleContractInfo.contractState.creator?.slice(
+                              0,
+                              8
+                            )}
+                            ...
+                          </span>
+                          <ExternalLink
+                            className="h-3 w-3 text-muted-foreground hover:text-primary cursor-pointer"
+                            onClick={() => {
+                              const explorerUrl =
+                                getCurrentNetworkConfig().explorerUrl;
+                              window.open(
+                                `${explorerUrl}/address/${oracleContractInfo.contractState.creator}`,
+                                "_blank"
+                              );
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">
+                          Global State Keys
+                        </span>
+                        <span className="text-sm text-muted-foreground">
+                          {oracleContractInfo.contractState.globalState
+                            ?.length || 0}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">
+                          Local State Keys
+                        </span>
+                        <span className="text-sm text-muted-foreground">
+                          {oracleContractInfo.contractState.localState
+                            ?.length || 0}
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-center py-8">
+                      <Database className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p className="text-lg font-medium">
+                        {oracleContractInfo.contractId
+                          ? "Contract Not Deployed"
+                          : "No Contract Configured"}
+                      </p>
+                      <p className="text-sm">
+                        {oracleContractInfo.contractId
+                          ? "The price oracle contract is not deployed on this network"
+                          : "Price oracle contract ID is not configured for this network"}
+                      </p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Supported Assets Card */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Coins className="h-5 w-5" />
+                  Supported Assets
+                </CardTitle>
+                <CardDescription>
+                  Assets currently tracked by the price oracle
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {getMarketsFromConfig(currentNetwork).map((market) => {
+                    const priceData = assetPrices[market.id];
+
+                    return (
+                      <div
+                        key={market.id}
+                        className="p-3 bg-muted/50 rounded-lg space-y-3"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
+                              <span className="text-xs font-bold text-primary">
+                                {market.symbol.charAt(0)}
+                              </span>
+                            </div>
+                            <div>
+                              <p className="font-medium text-sm">
+                                {market.symbol}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {market.name}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge
+                              variant="outline"
+                              className="text-blue-600 border-blue-600"
+                            >
+                              <Hash className="h-3 w-3 mr-1" />
+                              {market.underlyingAssetId || "Native"}
+                            </Badge>
+                            <Badge
+                              variant="outline"
+                              className={
+                                priceData
+                                  ? "text-blue-600 border-blue-600"
+                                  : "text-orange-600 border-orange-600"
+                              }
+                            >
+                              <Database className="h-3 w-3 mr-1" />
+                              {priceData ? "Price Available" : "No Price Data"}
+                            </Badge>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setSelectedTokenForPrice(market.id);
+                                setIsSetPriceModalOpen(true);
+                              }}
+                              className="h-6 px-2 text-xs"
+                              disabled={
+                                !oracleContractInfo.contractId ||
+                                !oracleContractInfo.isDeployed
+                              }
+                            >
+                              <DollarSign className="h-3 w-3 mr-1" />
+                              Set Price
+                            </Button>
+                          </div>
+                        </div>
+
+                        {/* Price Data Section */}
+                        {priceData && (
+                          <div className="border-t pt-3">
+                            <h4 className="text-sm font-medium text-blue-600 mb-2">
+                              Oracle Contract Price Data
+                            </h4>
+                            <div className="grid grid-cols-2 gap-4 text-sm">
+                              <div>
+                                <span className="text-muted-foreground">
+                                  Price:
+                                </span>
+                                <span className="ml-2 font-mono font-medium">
+                                  ${(Number(priceData.price) / 1e6).toFixed(6)}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">
+                                  Last Updated:
+                                </span>
+                                <span className="ml-2 font-mono">
+                                  {new Date(
+                                    Number(priceData.timestamp) * 1000
+                                  ).toLocaleString()}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {!priceData && oracleContractInfo.isDeployed && (
+                          <div className="border-t pt-3">
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                              <AlertTriangle className="h-4 w-4" />
+                              <span className="text-sm">
+                                No price data available
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-6 flex gap-2">
+                  <Button
+                    onClick={loadAssetPrices}
+                    disabled={
+                      !oracleContractInfo.contractId ||
+                      !oracleContractInfo.isDeployed
+                    }
+                    className="mt-6"
+                  >
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Refresh Prices
+                  </Button>
+                </div>
+
+                <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                  <div className="flex items-start gap-3">
+                    <InfoIcon className="h-5 w-5 text-blue-600 mt-0.5" />
+                    <div>
+                      <h4 className="font-medium text-blue-900 dark:text-blue-100">
+                        Price Oracle Status
+                      </h4>
+                      <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
+                        {oracleContractInfo.contractId &&
+                        oracleContractInfo.isDeployed
+                          ? `The price oracle contract (${oracleContractInfo.contractId}) is deployed and operational. ` +
+                            `It provides centralized price data for all supported assets. ` +
+                            `${
+                              hasPriceFeedManagerRole()
+                                ? "You have Price Feed Manager role permissions."
+                                : "You do not have Price Feed Manager role permissions."
+                            }`
+                          : oracleContractInfo.contractId
+                          ? `The price oracle contract (${oracleContractInfo.contractId}) is configured but not deployed on this network.`
+                          : "No price oracle contract is configured for this network."}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
           </TabsContent>
 
           {/* Settings Tab */}
@@ -10273,51 +12504,82 @@ export default function AdminDashboard() {
                   </p>
                 </div>
 
-                <div>
-                  <Label htmlFor="assign-address">User Address</Label>
-                  <div className="relative">
-                    <Input
-                      id="assign-address"
-                      placeholder="Enter user's wallet address"
-                      value={assignAddress}
-                      onChange={(e) => handleAddressChange(e.target.value)}
-                      className="font-mono text-sm mt-2"
-                    />
-                    {envoiLoading && (
-                      <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-                        <RefreshCcw className="h-4 w-4 animate-spin text-muted-foreground" />
-                      </div>
-                    )}
+                {selectedRole?.id !== "price-oracle" && (
+                  <div>
+                    <Label htmlFor="assign-address">User Address</Label>
+                    <div className="relative">
+                      <Input
+                        id="assign-address"
+                        placeholder="Enter user's wallet address"
+                        value={assignAddress}
+                        onChange={(e) => handleAddressChange(e.target.value)}
+                        className="font-mono text-sm mt-2"
+                      />
+                      {envoiLoading && (
+                        <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                          <RefreshCcw className="h-4 w-4 animate-spin text-muted-foreground" />
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Enter the wallet address of the user you want to assign
+                      this role to
+                    </p>
+                    {assignAddress.trim() &&
+                      !envoiService.isValidAddressFormat(assignAddress) && (
+                        <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                          Invalid address format. Please enter a valid Algorand
+                          address.
+                        </p>
+                      )}
                   </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Enter the wallet address of the user you want to assign this
-                    role to
-                  </p>
-                  {assignAddress.trim() &&
-                    !envoiService.isValidAddressFormat(assignAddress) && (
-                      <p className="text-xs text-red-600 dark:text-red-400 mt-1">
-                        Invalid address format. Please enter a valid Algorand
-                        address.
-                      </p>
-                    )}
-                </div>
+                )}
 
-                {envoiName && assignAddress && (
-                  <div className="p-3 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
+                {selectedRole?.id === "price-oracle" && (
+                  <div className="p-3 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg">
                     <div className="flex items-center gap-2">
-                      <CheckCircle2 className="h-4 w-4 text-green-600" />
-                      <span className="text-sm font-medium text-green-800 dark:text-green-200">
-                        Envoi Resolution Successful
+                      <Shield className="h-4 w-4 text-blue-600" />
+                      <span className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                        Price Oracle Role Assignment
                       </span>
                     </div>
-                    <p className="text-xs text-green-700 dark:text-green-300 mt-1">
-                      {envoiName} → {assignAddress.slice(0, 8)}...
-                      {assignAddress.slice(-8)}
+                    <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
+                      This role will be assigned to the Oracle Contract address:{" "}
+                      {oracleContractInfo.contractId
+                        ? algosdk
+                            .getApplicationAddress(
+                              Number(oracleContractInfo.contractId)
+                            )
+                            .slice(0, 8) +
+                          "..." +
+                          algosdk
+                            .getApplicationAddress(
+                              Number(oracleContractInfo.contractId)
+                            )
+                            .slice(-8)
+                        : "N/A"}
                     </p>
                   </div>
                 )}
 
-                {envoiError && (
+                {selectedRole?.id !== "price-oracle" &&
+                  envoiName &&
+                  assignAddress && (
+                    <div className="p-3 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="h-4 w-4 text-green-600" />
+                        <span className="text-sm font-medium text-green-800 dark:text-green-200">
+                          Envoi Resolution Successful
+                        </span>
+                      </div>
+                      <p className="text-xs text-green-700 dark:text-green-300 mt-1">
+                        {envoiName} → {assignAddress.slice(0, 8)}...
+                        {assignAddress.slice(-8)}
+                      </p>
+                    </div>
+                  )}
+
+                {selectedRole?.id !== "price-oracle" && envoiError && (
                   <div className="p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg">
                     <div className="flex items-center gap-2">
                       <AlertTriangle className="h-4 w-4 text-red-600" />
@@ -10343,77 +12605,135 @@ export default function AdminDashboard() {
             </Button>
             <Button
               onClick={async () => {
-                // get network clients
-                const networkConfig = getCurrentNetworkConfig();
-                const clients = algorandService.initializeClients(
-                  networkConfig.walletNetworkId as AlgorandNetwork
-                );
-                // get lending pool id from network config
-                const lendindPoolId = networkConfig.contracts.lendingPools[0];
-                // get lending pool contract
-                const ci = new CONTRACT(
-                  Number(lendindPoolId),
-                  clients.algod,
-                  undefined,
-                  { ...LendingPoolAppSpec.contract, events: [] },
-                  { addr: activeAccount.address, sk: new Uint8Array() }
-                );
-                // get role key
-                ci.setEnableRawBytes(true);
-                const roleConstant = selectedRole
-                  ? roleConstantsMap[selectedRole.id]
-                  : ROLE_PRICE_ORACLE;
-                const role_keyR = await ci.get_role_key(
-                  assignAddress,
-                  new Uint8Array(Buffer.from(roleConstant))
-                );
-                console.log("role_keyR", role_keyR);
-                if (!role_keyR.success) {
-                  toast.error("Failed to get role key", {
-                    description: `Could not retrieve role key for ${
-                      selectedRole?.name || "selected role"
-                    }. Please try again.`,
-                  });
-                  return;
-                }
-                // assign role
-                const set_roleR = await ci.set_role(
-                  role_keyR.returnValue,
-                  true
-                );
-                if (!set_roleR.success) {
-                  toast.error("Failed to set role", {
-                    description: `Could not set role for ${
-                      selectedRole?.name || "selected role"
-                    }. Please try again.`,
-                  });
-                  return;
-                }
-                const stxns = await signTransactions(
-                  set_roleR.txns.map((txn: string) =>
-                    Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
-                  )
-                );
-                const res = await clients.algod.sendRawTransaction(stxns).do();
-                await waitForConfirmation(clients.algod, res.txId, 4);
-                toast.success("Role assigned successfully", {
-                  description: `Successfully assigned ${
-                    selectedRole?.name || "selected role"
-                  } role to ${assignAddress}.`,
-                });
+                try {
+                  // get network clients
+                  const networkConfig = getCurrentNetworkConfig();
+                  const clients = algorandService.initializeClients(
+                    networkConfig.walletNetworkId as AlgorandNetwork
+                  );
 
-                setAssignAddress("");
-                setEnvoiName("");
-                setEnvoiError(null);
-                setEnvoiSearchQuery("");
-                setDebouncedSearchQuery("");
-                setEnvoiSearchResults([]);
-                setShowEnvoiSearch(false);
-                setIsAssignRoleModalOpen(false);
+                  // Check if this is a Price Oracle role assignment
+                  const isPriceOracleRole = selectedRole?.id === "price-oracle";
+
+                  let contractId: number;
+                  let targetAddress: string;
+                  let contractSpec: any;
+
+                  if (isPriceOracleRole) {
+                    // For Price Oracle role, use the oracle contract and assign to oracle contract address
+                    if (!oracleContractInfo.contractId) {
+                      toast.error("Oracle contract not deployed", {
+                        description:
+                          "Cannot assign Price Oracle role: Oracle contract is not deployed.",
+                      });
+                      return;
+                    }
+                    contractId = Number(oracleContractInfo.contractId);
+                    targetAddress = algosdk.getApplicationAddress(contractId);
+                    contractSpec = {
+                      ...LendingPoolAppSpec.contract,
+                      events: [],
+                    }; // NOTE: Should be PriceOracleAppSpec when available
+                  } else {
+                    // For other roles, use the lending pool contract and assign to user address
+                    contractId = Number(
+                      networkConfig.contracts.lendingPools[0]
+                    );
+                    targetAddress = assignAddress;
+                    contractSpec = {
+                      ...LendingPoolAppSpec.contract,
+                      events: [],
+                    };
+                  }
+
+                  // get contract instance
+                  const ci = new CONTRACT(
+                    contractId,
+                    clients.algod,
+                    undefined,
+                    contractSpec,
+                    { addr: activeAccount.address, sk: new Uint8Array() }
+                  );
+                  ci.setEnableRawBytes(true);
+
+                  // get role key
+                  const roleConstant = selectedRole
+                    ? roleConstantsMap[selectedRole.id]
+                    : ROLE_PRICE_ORACLE;
+                  const role_keyR = await ci.get_role_key(
+                    targetAddress,
+                    new Uint8Array(Buffer.from(roleConstant))
+                  );
+
+                  console.log("role_keyR", role_keyR);
+                  if (!role_keyR.success) {
+                    toast.error("Failed to get role key", {
+                      description: `Could not retrieve role key for ${
+                        selectedRole?.name || "selected role"
+                      }. Please try again.`,
+                    });
+                    return;
+                  }
+
+                  // assign role
+                  const set_roleR = await ci.set_role(
+                    role_keyR.returnValue,
+                    true
+                  );
+                  if (!set_roleR.success) {
+                    toast.error("Failed to set role", {
+                      description: `Could not set role for ${
+                        selectedRole?.name || "selected role"
+                      }. Please try again.`,
+                    });
+                    return;
+                  }
+
+                  const stxns = await signTransactions(
+                    set_roleR.txns.map((txn: string) =>
+                      Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+                    )
+                  );
+                  const res = await clients.algod
+                    .sendRawTransaction(stxns)
+                    .do();
+                  await waitForConfirmation(clients.algod, res.txId, 4);
+
+                  toast.success("Role assigned successfully", {
+                    description: `Successfully assigned ${
+                      selectedRole?.name || "selected role"
+                    } role to ${
+                      isPriceOracleRole ? "Oracle Contract" : targetAddress
+                    }.`,
+                  });
+
+                  // Refresh oracle contract info if this was a Price Oracle role assignment
+                  if (isPriceOracleRole) {
+                    await loadOracleContractInfo();
+                  }
+
+                  // Reset form state
+                  setAssignAddress("");
+                  setEnvoiName("");
+                  setEnvoiError(null);
+                  setEnvoiSearchQuery("");
+                  setDebouncedSearchQuery("");
+                  setEnvoiSearchResults([]);
+                  setShowEnvoiSearch(false);
+                  setIsAssignRoleModalOpen(false);
+                } catch (error) {
+                  console.error("Error assigning role:", error);
+                  toast.error("Failed to assign role", {
+                    description:
+                      "An unexpected error occurred. Please try again.",
+                  });
+                }
               }}
               disabled={
-                !assignAddress.trim() ||
-                !envoiService.isValidAddressFormat(assignAddress)
+                selectedRole?.id === "price-oracle"
+                  ? !oracleContractInfo.contractId // For Price Oracle role, only need oracle contract to be deployed
+                  : !assignAddress.trim() ||
+                    !envoiService.isValidAddressFormat(assignAddress) // For other roles, need valid user address
               }
             >
               <UserCheck className="h-4 w-4 mr-2" />
@@ -10566,6 +12886,421 @@ export default function AdminDashboard() {
             >
               <X className="h-4 w-4 mr-2" />
               Revoke Role
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Approve Feeder Modal */}
+      <Dialog
+        open={isApproveFeederModalOpen}
+        onOpenChange={setIsApproveFeederModalOpen}
+      >
+        <DialogContent className="max-w-lg p-6">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UserPlus className="h-5 w-5" />
+              Approve Price Feeder
+            </DialogTitle>
+            <DialogDescription>
+              Approve or revoke price feeder permissions for specific tokens.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-lg font-semibold mb-2">Feeder Management</h3>
+              <p className="text-muted-foreground">
+                Authorize addresses to post price data for specific tokens in
+                the Price Oracle contract.
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="feeder-address">Feeder Address</Label>
+                <Input
+                  id="feeder-address"
+                  placeholder="Enter feeder wallet address"
+                  value={feederAddress}
+                  onChange={(e) =>
+                    setFeederAddress(e.target.value.toUpperCase())
+                  }
+                  className="font-mono text-sm mt-2"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Enter the wallet address of the price feeder
+                </p>
+                {feederAddress.trim() &&
+                  !envoiService.isValidAddressFormat(feederAddress) && (
+                    <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                      Invalid address format. Please enter a valid Algorand
+                      address.
+                    </p>
+                  )}
+              </div>
+
+              <div>
+                <Label htmlFor="token-selection">Token Selection</Label>
+                <Select
+                  value={selectedTokenForFeeder}
+                  onValueChange={setSelectedTokenForFeeder}
+                >
+                  <SelectTrigger className="mt-2">
+                    <SelectValue placeholder="Select a token" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {getMarketsFromConfig(currentNetwork).map((market) => (
+                      <SelectItem key={market.id} value={market.id}>
+                        {market.symbol} - {market.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Select the token this feeder will provide prices for
+                </p>
+              </div>
+
+              <div>
+                <Label htmlFor="approval-status">Approval Status</Label>
+                <div className="flex items-center space-x-4 mt-2">
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="radio"
+                      id="approve-true"
+                      name="approval"
+                      checked={feederApproval === true}
+                      onChange={() => setFeederApproval(true)}
+                    />
+                    <Label htmlFor="approve-true">Approve</Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="radio"
+                      id="approve-false"
+                      name="approval"
+                      checked={feederApproval === false}
+                      onChange={() => setFeederApproval(false)}
+                    />
+                    <Label htmlFor="approve-false">Revoke</Label>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {feederApproval ? "Grant" : "Remove"} feeder permissions for
+                  this token
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsApproveFeederModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleApproveFeeder}
+              disabled={
+                !feederAddress.trim() ||
+                !selectedTokenForFeeder ||
+                !envoiService.isValidAddressFormat(feederAddress) ||
+                !oracleContractInfo.contractId ||
+                !oracleContractInfo.isDeployed
+              }
+            >
+              <UserPlus className="h-4 w-4 mr-2" />
+              {feederApproval ? "Approve" : "Revoke"} Feeder
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Set Price Modal */}
+      <Dialog open={isSetPriceModalOpen} onOpenChange={setIsSetPriceModalOpen}>
+        <DialogContent className="max-w-lg p-6">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <DollarSign className="h-5 w-5" />
+              Set Asset Price
+            </DialogTitle>
+            <DialogDescription>
+              Set the current price for a specific asset in the Price Oracle
+              contract.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-lg font-semibold mb-2">Price Management</h3>
+              <p className="text-muted-foreground">
+                Update the price for an asset. This will be validated against
+                rate limits and price deviation rules.
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="price-token-selection">Asset Selection</Label>
+                <Select
+                  value={selectedTokenForPrice}
+                  onValueChange={setSelectedTokenForPrice}
+                >
+                  <SelectTrigger className="mt-2">
+                    <SelectValue placeholder="Select an asset" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {getMarketsFromConfig(currentNetwork).map((market) => (
+                      <SelectItem key={market.id} value={market.id}>
+                        {market.symbol} - {market.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Select the asset to set the price for
+                </p>
+              </div>
+
+              <div>
+                <Label htmlFor="price-value">Price (USD)</Label>
+                <Input
+                  id="price-value"
+                  type="number"
+                  step="0.000001"
+                  placeholder="Enter price in USD (e.g., 1.234567)"
+                  value={priceValue}
+                  onChange={(e) => setPriceValue(e.target.value)}
+                  className="mt-2"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Enter the current price in USD. Supports up to 6 decimal
+                  places.
+                </p>
+                {priceValue.trim() &&
+                  (isNaN(parseFloat(priceValue)) ||
+                    parseFloat(priceValue) <= 0) && (
+                    <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                      Please enter a valid positive price value.
+                    </p>
+                  )}
+              </div>
+
+              {selectedTokenForPrice && (
+                <div className="p-3 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                  <h4 className="text-sm font-medium text-blue-600 mb-2">
+                    Current Price Information
+                  </h4>
+                  {assetPrices[selectedTokenForPrice] ? (
+                    <div className="text-sm">
+                      <p className="text-muted-foreground">
+                        Current Price:{" "}
+                        <span className="font-mono font-medium text-blue-600">
+                          $
+                          {(
+                            Number(assetPrices[selectedTokenForPrice]!.price) /
+                            1e6
+                          ).toFixed(6)}
+                        </span>
+                      </p>
+                      <p className="text-muted-foreground">
+                        Last Updated:{" "}
+                        <span className="font-mono">
+                          {new Date(
+                            Number(
+                              assetPrices[selectedTokenForPrice]!.timestamp
+                            ) * 1000
+                          ).toLocaleString()}
+                        </span>
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-orange-600">
+                      No current price data available
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsSetPriceModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSetPrice}
+              disabled={
+                !selectedTokenForPrice ||
+                !priceValue.trim() ||
+                isNaN(parseFloat(priceValue)) ||
+                parseFloat(priceValue) <= 0 ||
+                !oracleContractInfo.contractId ||
+                !oracleContractInfo.isDeployed
+              }
+            >
+              <DollarSign className="h-4 w-4 mr-2" />
+              Set Price
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Attach Price Feed Modal */}
+      <Dialog
+        open={isAttachPriceFeedModalOpen}
+        onOpenChange={setIsAttachPriceFeedModalOpen}
+      >
+        <DialogContent className="max-w-lg p-6">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Plus className="h-5 w-5" />
+              Attach Price Feed
+            </DialogTitle>
+            <DialogDescription>
+              Attach a price feed from the Price Oracle to a lending pool
+              market.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-lg font-semibold mb-2">
+                Price Feed Attachment
+              </h3>
+              <p className="text-muted-foreground">
+                Connect a market in the lending pool to the Price Oracle
+                contract for automated price updates.
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="attach-token-selection">Market Selection</Label>
+                <Select
+                  value={selectedTokenForAttach}
+                  onValueChange={setSelectedTokenForAttach}
+                >
+                  <SelectTrigger className="mt-2">
+                    <SelectValue placeholder="Select a market" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {getMarketsFromConfig(currentNetwork).map((market) => (
+                      <SelectItem key={market.id} value={market.id}>
+                        {market.symbol} - {market.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Select the market to attach price feed for
+                </p>
+              </div>
+
+              <div className="p-3 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                <h4 className="text-sm font-medium text-blue-600 mb-2">
+                  Configuration Details
+                </h4>
+                <div className="text-sm space-y-1">
+                  <p className="text-muted-foreground">
+                    <span className="font-medium">Lending Pool:</span>{" "}
+                    {selectedLendingPool}
+                  </p>
+                  <p className="text-muted-foreground">
+                    <span className="font-medium">Price Oracle:</span>{" "}
+                    {oracleContractInfo.contractId}
+                  </p>
+                  <p className="text-muted-foreground">
+                    <span className="font-medium">Required Role:</span> Price
+                    Feed Manager
+                  </p>
+                </div>
+              </div>
+
+              {selectedTokenForAttach && (
+                <div className="p-3 bg-green-50 dark:bg-green-950/20 rounded-lg border border-green-200 dark:border-green-800">
+                  <h4 className="text-sm font-medium text-green-600 mb-2">
+                    Market Information
+                  </h4>
+                  {(() => {
+                    const markets = getMarketsFromConfig(currentNetwork);
+                    const selectedMarket = markets.find(
+                      (market) => market.id === selectedTokenForAttach
+                    );
+                    const tokenId =
+                      selectedMarket?.underlyingAssetId ||
+                      selectedMarket?.underlyingContractId;
+                    const priceData = assetPrices[selectedTokenForAttach];
+                    return (
+                      <div className="text-sm space-y-1">
+                        <p className="text-muted-foreground">
+                          <span className="font-medium">Symbol:</span>{" "}
+                          {selectedMarket?.symbol}
+                        </p>
+                        <p className="text-muted-foreground">
+                          <span className="font-medium">Name:</span>{" "}
+                          {selectedMarket?.name}
+                        </p>
+                        <p className="text-muted-foreground">
+                          <span className="font-medium">Token ID:</span>{" "}
+                          {tokenId || "Native"}
+                        </p>
+                        {priceData ? (
+                          <>
+                            <p className="text-muted-foreground">
+                              <span className="font-medium">
+                                Current Price:
+                              </span>{" "}
+                              <span className="font-mono font-medium text-green-600">
+                                ${(Number(priceData.price) / 1e6).toFixed(6)}
+                              </span>
+                            </p>
+                            <p className="text-muted-foreground">
+                              <span className="font-medium">Last Updated:</span>{" "}
+                              <span className="font-mono">
+                                {new Date(
+                                  Number(priceData.timestamp) * 1000
+                                ).toLocaleString()}
+                              </span>
+                            </p>
+                          </>
+                        ) : (
+                          <p className="text-orange-600">
+                            <span className="font-medium">Price Status:</span>{" "}
+                            No price data available
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsAttachPriceFeedModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAttachPriceFeed}
+              disabled={
+                !selectedTokenForAttach ||
+                !selectedLendingPool ||
+                !oracleContractInfo.contractId ||
+                !oracleContractInfo.isDeployed
+              }
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Attach Price Feed
             </Button>
           </DialogFooter>
         </DialogContent>
