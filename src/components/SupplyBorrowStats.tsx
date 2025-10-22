@@ -34,10 +34,11 @@ interface SupplyBorrowStatsProps {
   } | null;
   depositAmount?: number;
   userBorrowBalance?: number;
+  userDepositBalance?: number;
   isSToken?: boolean;
 }
 
-const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmount = 0, userBorrowBalance = 0, isSToken = false }: SupplyBorrowStatsProps) => {
+const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmount = 0, userBorrowBalance = 0, userDepositBalance = 0, isSToken = false }: SupplyBorrowStatsProps) => {
   // Calculate adjusted utilization and APY based on deposit amount
   const calculateAdjustedMetrics = () => {
     if (mode === "deposit" && depositAmount > 0 && assetData.apyCalculation) {
@@ -127,109 +128,115 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
   return (
     <Card className="bg-white/50 dark:bg-slate-800 border-gray-200 dark:border-slate-700">
       <CardContent className="p-4 space-y-3">
-        <div className="flex justify-between items-center">
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-slate-500 dark:text-slate-400">
-              {mode === "deposit" ? "Deposit" : "Borrow"} APY
-            </span>
-            <Tooltip>
-              <TooltipTrigger>
-                <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>
-                  {mode === "deposit" && depositAmount > 0 
-                    ? "APY after your deposit (based on adjusted utilization)"
-                    : `Annual percentage yield for ${mode === "deposit" ? "depositing" : "borrowing"} ${asset}`
-                  }
-                </p>
-              </TooltipContent>
-            </Tooltip>
-          </div>
-          <div className="text-right">
-            {mode === "deposit" && depositAmount > 0 ? (
-              <div className="space-y-1">
-                <div className={`text-sm font-medium ${mode === "deposit" ? "text-teal-600 dark:text-teal-400" : "text-red-600 dark:text-red-400"}`}>
-                  {adjustedMetrics.apy.adjusted.toFixed(2)}%
-                </div>
-                <div className={`text-xs flex items-center justify-end gap-1 ${
-                  Math.abs(adjustedMetrics.apy.changePercent) > 0.1 
-                    ? (adjustedMetrics.apy.changePercent > 0 
-                        ? "text-green-600 dark:text-green-400" 
-                        : "text-orange-600 dark:text-orange-400")
-                    : "text-slate-500 dark:text-slate-400"
-                }`}>
-                  {Math.abs(adjustedMetrics.apy.changePercent) > 0.1 ? (
-                    <>
-                      <span>{adjustedMetrics.apy.changePercent > 0 ? "↑" : "↓"}</span>
-                      <span>
-                        {adjustedMetrics.apy.changePercent > 0 ? "+" : ""}
-                        {adjustedMetrics.apy.changePercent.toFixed(1)}%
-                      </span>
-                    </>
-                  ) : (
-                    <span>No significant change</span>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <span className={`text-sm font-medium ${mode === "deposit" ? "text-teal-600 dark:text-teal-400" : "text-red-600 dark:text-red-400"}`}>
-                {(mode === "deposit" ? assetData.supplyAPY : assetData.borrowAPY).toFixed(2)}%
+        {/* Only show deposit APY if user has existing deposits or is in borrow mode */}
+        {(mode === "borrow" || (mode === "deposit" && userDepositBalance > 0)) && (
+          <div className="flex justify-between items-center">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-slate-500 dark:text-slate-400">
+                {mode === "deposit" ? "Deposit" : "Borrow"} APY
               </span>
-            )}
+              <Tooltip>
+                <TooltipTrigger>
+                  <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>
+                    {mode === "deposit" && depositAmount > 0 
+                      ? "APY after your deposit (based on adjusted utilization)"
+                      : `Annual percentage yield for ${mode === "deposit" ? "depositing" : "borrowing"} ${asset}`
+                    }
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </div>
+            <div className="text-right">
+              {mode === "deposit" && depositAmount > 0 ? (
+                <div className="space-y-1">
+                  <div className={`text-sm font-medium ${mode === "deposit" ? "text-teal-600 dark:text-teal-400" : "text-red-600 dark:text-red-400"}`}>
+                    {adjustedMetrics.apy.adjusted.toFixed(2)}%
+                  </div>
+                  <div className={`text-xs flex items-center justify-end gap-1 ${
+                    Math.abs(adjustedMetrics.apy.changePercent) > 0.1 
+                      ? (adjustedMetrics.apy.changePercent > 0 
+                          ? "text-green-600 dark:text-green-400" 
+                          : "text-orange-600 dark:text-orange-400")
+                      : "text-slate-500 dark:text-slate-400"
+                  }`}>
+                    {Math.abs(adjustedMetrics.apy.changePercent) > 0.1 ? (
+                      <>
+                        <span>{adjustedMetrics.apy.changePercent > 0 ? "↑" : "↓"}</span>
+                        <span>
+                          {adjustedMetrics.apy.changePercent > 0 ? "+" : ""}
+                          {adjustedMetrics.apy.changePercent.toFixed(1)}%
+                        </span>
+                      </>
+                    ) : (
+                      <span>No significant change</span>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <span className={`text-sm font-medium ${mode === "deposit" ? "text-teal-600 dark:text-teal-400" : "text-red-600 dark:text-red-400"}`}>
+                  {(mode === "deposit" ? assetData.supplyAPY : assetData.borrowAPY).toFixed(2)}%
+                </span>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
-        <div className="flex justify-between items-center">
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-slate-500 dark:text-slate-400">Utilization</span>
-            <Tooltip>
-              <TooltipTrigger>
-                <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>
-                  {mode === "deposit" && depositAmount > 0 
-                    ? "Utilization after your deposit (borrowed / total supplied)"
-                    : "Percentage of deposited assets being borrowed"
-                  }
-                </p>
-              </TooltipContent>
-            </Tooltip>
-          </div>
-          <div className="text-right">
-            {mode === "deposit" && depositAmount > 0 ? (
-              <div className="space-y-1">
-                <div className="text-sm font-medium text-slate-800 dark:text-white">
-                  {adjustedMetrics.utilization.adjusted.toFixed(2)}%
+        {/* Only show utilization if it's greater than 0 */}
+        {assetData.utilization > 0 && (
+          <div className="flex justify-between items-center">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-slate-500 dark:text-slate-400">Utilization</span>
+              <Tooltip>
+                <TooltipTrigger>
+                  <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>
+                    {mode === "deposit" && depositAmount > 0 
+                      ? "Utilization after your deposit (borrowed / total supplied)"
+                      : "Percentage of deposited assets being borrowed"
+                    }
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </div>
+            <div className="text-right">
+              {mode === "deposit" && depositAmount > 0 ? (
+                <div className="space-y-1">
+                  <div className="text-sm font-medium text-slate-800 dark:text-white">
+                    {adjustedMetrics.utilization.adjusted.toFixed(2)}%
+                  </div>
+                  <div className={`text-xs flex items-center justify-end gap-1 ${
+                    Math.abs(adjustedMetrics.utilization.change) > 0.1 
+                      ? (adjustedMetrics.utilization.change < 0 
+                          ? "text-green-600 dark:text-green-400" 
+                          : "text-orange-600 dark:text-orange-400")
+                      : "text-slate-500 dark:text-slate-400"
+                  }`}>
+                    {Math.abs(adjustedMetrics.utilization.change) > 0.1 ? (
+                      <>
+                        <span>{adjustedMetrics.utilization.change < 0 ? "↓" : "↑"}</span>
+                        <span>
+                          {adjustedMetrics.utilization.change < 0 ? "Decreases by " : "Increases by "}
+                          {Math.abs(adjustedMetrics.utilization.change).toFixed(1)}%
+                        </span>
+                      </>
+                    ) : (
+                      <span>No significant change</span>
+                    )}
+                  </div>
                 </div>
-                <div className={`text-xs flex items-center justify-end gap-1 ${
-                  Math.abs(adjustedMetrics.utilization.change) > 0.1 
-                    ? (adjustedMetrics.utilization.change < 0 
-                        ? "text-green-600 dark:text-green-400" 
-                        : "text-orange-600 dark:text-orange-400")
-                    : "text-slate-500 dark:text-slate-400"
-                }`}>
-                  {Math.abs(adjustedMetrics.utilization.change) > 0.1 ? (
-                    <>
-                      <span>{adjustedMetrics.utilization.change < 0 ? "↓" : "↑"}</span>
-                      <span>
-                        {adjustedMetrics.utilization.change < 0 ? "Decreases by " : "Increases by "}
-                        {Math.abs(adjustedMetrics.utilization.change).toFixed(1)}%
-                      </span>
-                    </>
-                  ) : (
-                    <span>No significant change</span>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <span className="text-sm font-medium text-slate-800 dark:text-white">
-                {isSToken ? "100.00" : assetData.utilization.toFixed(2)}%
-              </span>
-            )}
+              ) : (
+                <span className="text-sm font-medium text-slate-800 dark:text-white">
+                  {isSToken ? "100.00" : assetData.utilization.toFixed(2)}%
+                </span>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-2">

@@ -54,6 +54,7 @@ interface SupplyBorrowModalProps {
     lastUpdateTime: number;
   } | null;
   userBorrowBalance?: number;
+  userDepositBalance?: number;
   onTransactionSuccess?: () => void;
   onRefreshWalletBalance?: () => void;
 }
@@ -68,6 +69,7 @@ const SupplyBorrowModal = ({
   walletBalanceUSD: propWalletBalanceUSD = 0,
   userGlobalData,
   userBorrowBalance = 0,
+  userDepositBalance = 0,
   onTransactionSuccess,
 }: SupplyBorrowModalProps) => {
   const [amount, setAmount] = useState("");
@@ -370,6 +372,7 @@ const SupplyBorrowModal = ({
                 userGlobalData={userGlobalData}
                 depositAmount={mode === "deposit" ? parseFloat(amount) || 0 : 0}
                 userBorrowBalance={userBorrowBalance}
+                userDepositBalance={userDepositBalance}
               />
             </div>
           </>
@@ -379,4 +382,4 @@ const SupplyBorrowModal = ({
   );
 };
 
-export default SupplyBorrowModal;
+export default SupplyBorrowModal; // Updated with userDepositBalance prop

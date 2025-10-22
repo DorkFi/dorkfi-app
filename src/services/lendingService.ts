@@ -1364,6 +1364,24 @@ export const deposit = async (
         }
       );
 
+      const ciLending = new CONTRACT(
+        Number(poolId),
+        clients.algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        {
+          addr: userAddress,
+          sk: new Uint8Array(),
+        }
+      );
+
+      ciLending.setFee(5000);
+      ciLending.setPaymentAmount(1e5);
+      const fetch_price_feedR = await ciLending.fetch_price_feed(
+        Number(marketId)
+      );
+      const doFetchPriceFeed = fetch_price_feedR.success;
+
       const builder = {
         lending: new CONTRACT(
           Number(poolId),
@@ -1412,9 +1430,22 @@ export const deposit = async (
         [1, 0, 1],
       ]) {
         const [p1, p2, p3] = p;
+
         const buildN = [];
 
         // TODO fund ntoken
+
+        // fetch market price
+        if (doFetchPriceFeed) {
+          const txnO = (
+            await builder.lending.fetch_price_feed(Number(marketId))
+          ).obj;
+          buildN.push({
+            ...txnO,
+            payment: 1e5,
+            note: new TextEncoder().encode("lending fetch_price_feed"),
+          });
+        }
 
         // conditionally deposit to token
         if (tokenStandard == "network") {
@@ -1687,6 +1718,14 @@ export const borrow = async (
         { addr: userAddress, sk: new Uint8Array() }
       );
 
+      ciLending.setFee(5000);
+      ciLending.setPaymentAmount(1e5);
+      const fetch_price_feedR = await ciLending.fetch_price_feed(
+        Number(marketId)
+      );
+      console.log("fetch_price_feedR", { fetch_price_feedR });
+      const doFetchPriceFeed = fetch_price_feedR.success;
+
       const builder = {
         lending: new CONTRACT(
           Number(poolId),
@@ -1754,6 +1793,17 @@ export const borrow = async (
       ]) {
         const [p1, p2, p3] = p;
         const buildN = [];
+
+        if (doFetchPriceFeed) {
+          const txnO = (
+            await builder.lending.fetch_price_feed(Number(marketId))
+          ).obj;
+          buildN.push({
+            ...txnO,
+            payment: 1e5,
+            note: new TextEncoder().encode("lending fetch_price_feed"),
+          });
+        }
 
         // approve ntoken spending
         // {
@@ -2170,7 +2220,7 @@ export const mint = async (
       if (result.success) {
         return {
           success: true,
-          txId: 'txId' in result ? result.txId : undefined,
+          txId: "txId" in result ? result.txId : undefined,
         };
       } else {
         return {

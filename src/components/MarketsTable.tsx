@@ -18,7 +18,7 @@ import MarketDetailModal from "@/components/MarketDetailModal";
 import MintModal from "@/components/MintModal";
 import MarketsHeroSection from "@/components/markets/MarketsHeroSection";
 import MarketsTableContent from "@/components/markets/MarketsTableContent";
-import { fetchUserGlobalData, fetchUserBorrowBalance } from "@/services/lendingService";
+import { fetchUserGlobalData, fetchUserBorrowBalance, fetchUserDepositBalance } from "@/services/lendingService";
 
 const MarketsTable = () => {
   const [searchTerm, setSearchTerm] = useState("");
@@ -37,6 +37,7 @@ const MarketsTable = () => {
     lastUpdateTime: number;
   } | null>(null);
   const [userBorrowBalance, setUserBorrowBalance] = useState<number>(0);
+  const [userDepositBalance, setUserDepositBalance] = useState<number>(0);
   const [isLoadingGlobalData, setIsLoadingGlobalData] = useState(false);
   
   // Mock user deposits - in real app, this would come from user's wallet/backend
@@ -84,6 +85,26 @@ const MarketsTable = () => {
     try {
       // Fetch wallet balance before opening modal
       await fetchWalletBalance(asset);
+      
+      // Fetch user's existing deposit balance for this asset
+      if (activeAccount?.address) {
+        const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+        const token = tokens.find((t) => t.symbol === asset);
+        
+        if (token && token.poolId && token.underlyingContractId) {
+          const depositBalance = await fetchUserDepositBalance(
+            activeAccount.address,
+            token.poolId,
+            token.underlyingContractId,
+            currentNetwork
+          );
+          setUserDepositBalance(depositBalance || 0);
+        } else {
+          setUserDepositBalance(0);
+        }
+      } else {
+        setUserDepositBalance(0);
+      }
       
       // Open modal after balance is fetched
       setDepositModal({ isOpen: true, asset });
@@ -526,6 +547,7 @@ const MarketsTable = () => {
             assetData={getAssetData(depositModal.asset)}
             walletBalance={walletBalances[depositModal.asset]?.balance || 0}
             walletBalanceUSD={walletBalances[depositModal.asset]?.balanceUSD || 0}
+            userDepositBalance={userDepositBalance}
             onTransactionSuccess={() => {
               // Refresh wallet balance immediately after successful transaction
               if (depositModal.asset) {

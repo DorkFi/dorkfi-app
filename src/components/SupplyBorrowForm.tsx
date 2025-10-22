@@ -153,15 +153,16 @@ const SupplyBorrowForm = ({
 
   const handleQuickAmount = (percentage: number) => {
     if (mode === "deposit") {
-      // Use minimum of wallet balance and maximum depositable amount
+      // Use 100% of wallet balance for all tokens
       let maxDepositable = walletBalance;
       
       if (maxTotalDeposits && maxTotalDeposits > 0 && totalSupply !== undefined) {
         const remainingCapacity = Math.max(0, maxTotalDeposits - totalSupply);
         maxDepositable = Math.min(walletBalance, remainingCapacity);
         
+        // TODO adjust by min balance + buffer if network token (gas)
         // Scale down by 5% to handle edge cases and rounding errors
-        maxDepositable = maxDepositable * 0.95;
+        //maxDepositable = maxDepositable
       }
       
       const quickAmount = (maxDepositable * percentage).toFixed(decimals);
