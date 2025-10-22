@@ -38,7 +38,7 @@ interface PortfolioModalsProps {
   repayModal: { isOpen: boolean; asset: string | null };
   deposits: Deposit[];
   borrows: Borrow[];
-  walletBalances: Record<string, number>;
+  walletBalances: Record<string, { balance: number; balanceUSD: number }>;
   marketData: any[];
   userGlobalData?: {
     totalCollateralValue: number;
@@ -155,7 +155,7 @@ const PortfolioModals = ({
 
       console.log("Withdraw parameters:", {
         poolId: token.poolId,
-        marketId: token.marketId || token.underlyingContractId,
+        marketId: token.underlyingContractId,
         tokenStandard: originalTokenConfig.tokenStandard,
         amount: amount,
         userAddress: activeAccount.address,
@@ -165,7 +165,7 @@ const PortfolioModals = ({
       // Call the lending service withdraw method (pass amount as string like PreFi)
       const result = await withdraw(
         token.poolId,
-        token.marketId || token.underlyingContractId,
+        token.underlyingContractId,
         originalTokenConfig.tokenStandard,
         amount,
         activeAccount.address,
@@ -173,14 +173,14 @@ const PortfolioModals = ({
       );
 
       if (!result.success) {
-        throw new Error(result.error || "Withdraw failed");
+        throw new Error((result as any).error || "Withdraw failed");
       }
 
       console.log("Withdraw result:", result);
 
       // Sign and send transactions
       const stxns = await signTransactions(
-        result.txns.map((txn: string) =>
+        (result as any).txns.map((txn: string) =>
           Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
         )
       );
@@ -236,7 +236,7 @@ const PortfolioModals = ({
 
       console.log("Repay parameters:", {
         poolId: token.poolId,
-        marketId: token.marketId || token.underlyingContractId, // Use marketId first like PreFi
+        marketId: token.underlyingContractId, // Use marketId first like PreFi
         tokenStandard: originalTokenConfig.tokenStandard,
         amount: amount, // Pass amount as string (not atomic units)
         userAddress: activeAccount.address,
@@ -246,7 +246,7 @@ const PortfolioModals = ({
       // Call the lending service repay method (pass amount as string like PreFi)
       const result = await repay(
         token.poolId,
-        token.marketId || token.underlyingContractId, // Use marketId first
+        token.underlyingContractId, // Use underlyingContractId
         originalTokenConfig.tokenStandard,
         amount, // Pass amount as string
         activeAccount.address,
@@ -254,14 +254,14 @@ const PortfolioModals = ({
       );
 
       if (!result.success) {
-        throw new Error(result.error || "Repay failed");
+        throw new Error((result as any).error || "Repay failed");
       }
 
       console.log("Repay result:", result);
 
       // Sign and send transactions
       const stxns = await signTransactions(
-        result.txns.map((txn: string) =>
+        (result as any).txns.map((txn: string) =>
           Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
         )
       );
@@ -301,8 +301,8 @@ const PortfolioModals = ({
           asset={depositModal.asset}
           mode="deposit"
           assetData={getAssetData(depositModal.asset)}
-          walletBalance={walletBalances[depositModal.asset] || 0}
-          walletBalanceUSD={(walletBalances[depositModal.asset] || 0) * (getAssetData(depositModal.asset)?.totalSupplyUSD / getAssetData(depositModal.asset)?.totalSupply || 1)}
+          walletBalance={walletBalances[depositModal.asset]?.balance || 0}
+          walletBalanceUSD={walletBalances[depositModal.asset]?.balanceUSD || 0}
           onTransactionSuccess={() => {
             // Refresh wallet balance immediately after successful transaction
             if (depositModal.asset && onRefreshWalletBalance) {
@@ -325,7 +325,6 @@ const PortfolioModals = ({
           tokenSymbol={withdrawModal.asset}
           tokenIcon={getTokenImagePath(withdrawModal.asset)}
           currentlyDeposited={deposits.find(d => d.asset === withdrawModal.asset)?.balance || 0}
-          nTokenBalance={deposits.find(d => d.asset === withdrawModal.asset)?.nTokenBalance || 0}
           marketStats={getMarketStatsForDeposit(withdrawModal.asset)}
           onSubmit={handleWithdrawSubmit}
           onRefreshBalance={() => {
@@ -364,7 +363,7 @@ const PortfolioModals = ({
           tokenSymbol={repayModal.asset}
           tokenIcon={getTokenImagePath(repayModal.asset)}
           currentBorrow={borrows.find(b => b.asset === repayModal.asset)?.balance || 0}
-          walletBalance={walletBalances[repayModal.asset] || 0}
+          walletBalance={walletBalances[repayModal.asset]?.balance || 0}
           marketStats={getMarketStatsForBorrow(repayModal.asset)}
           onSubmit={handleRepaySubmit}
         />

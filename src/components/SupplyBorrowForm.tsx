@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,30 +28,30 @@ interface SupplyBorrowFormProps {
   onRefreshWalletBalance?: () => void;
 }
 
-const SupplyBorrowForm = ({ 
-  mode, 
-  asset, 
+const SupplyBorrowForm = ({
+  mode,
+  asset,
   walletBalance,
-  walletBalanceUSD, 
+  walletBalanceUSD,
   availableToSupplyOrBorrow,
   supplyAPY = 0,
   totalSupply = 0,
   maxTotalDeposits = 0,
   userGlobalData,
   collateralFactor = 0,
-  onAmountChange, 
+  onAmountChange,
   onSubmit,
   isLoading = false,
   disabled = false,
-  onRefreshWalletBalance
+  onRefreshWalletBalance,
 }: SupplyBorrowFormProps) => {
   const [amount, setAmount] = useState("");
   const [fiatValue, setFiatValue] = useState(0);
   const [validationError, setValidationError] = useState<string | null>(null);
-  
+
   const { currentNetwork } = useNetwork();
   const { price: tokenPrice, isLoading: priceLoading } = useTokenPrice(asset);
-  
+
   // Get token config for decimal precision
   const tokenConfig = getTokenConfig(currentNetwork, asset);
   const decimals = tokenConfig?.decimals || 6;
@@ -61,53 +60,58 @@ const SupplyBorrowForm = ({
   // Input validation function
   const validateAmount = (value: string): string | null => {
     if (!value) return null;
-    
+
     const numValue = parseFloat(value);
-    
+
     // Check if it's a valid number
     if (isNaN(numValue) || numValue < 0) {
       return "Please enter a valid amount";
     }
-    
+
     // Check minimum deposit amount
     if (mode === "deposit" && numValue < minDepositAmount) {
       return `Minimum deposit amount is ${minDepositAmount} ${asset}`;
     }
-    
+
     // Check wallet balance for deposits
     if (mode === "deposit" && numValue > walletBalance) {
       return "Insufficient wallet balance";
     }
-    
+
     // Check available liquidity for borrows
     if (mode === "borrow" && numValue > availableToSupplyOrBorrow) {
       return "Insufficient liquidity available";
     }
-    
+
     // Check market capacity for deposits
     if (mode === "deposit" && maxTotalDeposits > 0) {
       const projectedTotalSupply = totalSupply + numValue;
       if (projectedTotalSupply > maxTotalDeposits) {
         const maxDeposit = Math.max(0, maxTotalDeposits - totalSupply);
-        return `Deposit would exceed market capacity. Maximum deposit: ${maxDeposit.toFixed(decimals)} ${asset}`;
+        return `Deposit would exceed market capacity. Maximum deposit: ${maxDeposit.toFixed(
+          decimals
+        )} ${asset}`;
       }
-      
+
       // Warning when approaching capacity (within 5% of limit)
       const capacityThreshold = maxTotalDeposits * 0.95;
       if (projectedTotalSupply > capacityThreshold) {
         const remainingCapacity = maxTotalDeposits - totalSupply;
-        const warningMessage = `Warning: This deposit will use ${((numValue / remainingCapacity) * 100).toFixed(1)}% of remaining market capacity`;
+        const warningMessage = `Warning: This deposit will use ${(
+          (numValue / remainingCapacity) *
+          100
+        ).toFixed(1)}% of remaining market capacity`;
         // Don't block the transaction, just show warning
         console.warn(warningMessage);
       }
     }
-    
+
     // Check decimal precision
-    const decimalPlaces = value.split('.')[1]?.length || 0;
+    const decimalPlaces = value.split(".")[1]?.length || 0;
     if (decimalPlaces > decimals) {
       return `Maximum ${decimals} decimal places allowed`;
     }
-    
+
     return null;
   };
 
@@ -115,7 +119,7 @@ const SupplyBorrowForm = ({
   useEffect(() => {
     const error = validateAmount(amount);
     setValidationError(error);
-    
+
     if (amount && tokenPrice > 0) {
       const numAmount = parseFloat(amount);
       setFiatValue(numAmount * tokenPrice);
@@ -123,7 +127,16 @@ const SupplyBorrowForm = ({
       setFiatValue(0);
     }
     onAmountChange(amount, fiatValue);
-  }, [amount, tokenPrice, fiatValue, onAmountChange, walletBalance, availableToSupplyOrBorrow, decimals, mode]);
+  }, [
+    amount,
+    tokenPrice,
+    fiatValue,
+    onAmountChange,
+    walletBalance,
+    availableToSupplyOrBorrow,
+    decimals,
+    mode,
+  ]);
 
   // Calculate max borrowable amount based on market liquidity only
   const calculateMaxBorrowable = () => {
@@ -134,15 +147,19 @@ const SupplyBorrowForm = ({
     if (mode === "deposit") {
       // Use minimum of wallet balance and maximum depositable amount
       let maxDepositable = walletBalance;
-      
-      if (maxTotalDeposits && maxTotalDeposits > 0 && totalSupply !== undefined) {
+
+      if (
+        maxTotalDeposits &&
+        maxTotalDeposits > 0 &&
+        totalSupply !== undefined
+      ) {
         const remainingCapacity = Math.max(0, maxTotalDeposits - totalSupply);
         maxDepositable = Math.min(walletBalance, remainingCapacity);
-        
+
         // Scale down by 5% to handle edge cases and rounding errors
         maxDepositable = maxDepositable * 0.95;
       }
-      
+
       setAmount(maxDepositable.toFixed(decimals));
     } else {
       // For borrow mode, use the calculated max borrowable amount
@@ -155,16 +172,20 @@ const SupplyBorrowForm = ({
     if (mode === "deposit") {
       // Use 100% of wallet balance for all tokens
       let maxDepositable = walletBalance;
-      
-      if (maxTotalDeposits && maxTotalDeposits > 0 && totalSupply !== undefined) {
+
+      if (
+        maxTotalDeposits &&
+        maxTotalDeposits > 0 &&
+        totalSupply !== undefined
+      ) {
         const remainingCapacity = Math.max(0, maxTotalDeposits - totalSupply);
         maxDepositable = Math.min(walletBalance, remainingCapacity);
-        
+
         // TODO adjust by min balance + buffer if network token (gas)
         // Scale down by 5% to handle edge cases and rounding errors
         //maxDepositable = maxDepositable
       }
-      
+
       const quickAmount = (maxDepositable * percentage).toFixed(decimals);
       setAmount(quickAmount);
     } else {
@@ -176,18 +197,23 @@ const SupplyBorrowForm = ({
   };
 
   const isValidAmount = amount && parseFloat(amount) > 0 && !validationError;
-  
+
   // Calculate projected earnings for deposits
-  const projectedEarnings = mode === "deposit" && amount && supplyAPY > 0 ? 
-    (parseFloat(amount) * supplyAPY / 100) : 0;
+  const projectedEarnings =
+    mode === "deposit" && amount && supplyAPY > 0
+      ? (parseFloat(amount) * supplyAPY) / 100
+      : 0;
 
   return (
     <div className="space-y-6">
       <div className="space-y-3">
-        <Label htmlFor="amount" className="text-sm font-medium text-slate-600 dark:text-slate-300">
+        <Label
+          htmlFor="amount"
+          className="text-sm font-medium text-slate-600 dark:text-slate-300"
+        >
           Amount
         </Label>
-        
+
         <div className="relative">
           <Input
             id="amount"
@@ -196,7 +222,7 @@ const SupplyBorrowForm = ({
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             className={`bg-white/70 dark:bg-slate-800 border-gray-300 dark:border-slate-600 text-slate-800 dark:text-white pr-16 text-lg h-12 ${
-              validationError ? 'border-red-300 dark:border-red-600' : ''
+              validationError ? "border-red-300 dark:border-red-600" : ""
             }`}
             step={1 / Math.pow(10, decimals)}
           />
@@ -209,16 +235,17 @@ const SupplyBorrowForm = ({
             MAX
           </Button>
         </div>
-        
+
         {/* Validation Error */}
         {validationError && (
           <p className="text-sm text-red-600 dark:text-red-400">
             {validationError}
           </p>
         )}
-        
+
         {/* Quick Amount Buttons */}
-        {((mode === "deposit" && walletBalance > 0) || (mode === "borrow" && calculateMaxBorrowable() > 0)) && (
+        {((mode === "deposit" && walletBalance > 0) ||
+          (mode === "borrow" && calculateMaxBorrowable() > 0)) && (
           <div className="flex gap-2">
             {[0.25, 0.5, 0.75, 1].map((percentage) => (
               <Button
@@ -227,7 +254,7 @@ const SupplyBorrowForm = ({
                 variant="outline"
                 onClick={() => handleQuickAmount(percentage)}
                 className={`flex-1 text-xs h-8 ${
-                  mode === "deposit" 
+                  mode === "deposit"
                     ? "border-teal-200 text-teal-600 hover:bg-teal-50 dark:border-teal-800 dark:text-teal-400 dark:hover:bg-teal-900/20"
                     : "border-whale-gold/30 text-whale-gold hover:bg-whale-gold/10 dark:border-whale-gold/50 dark:text-whale-gold dark:hover:bg-whale-gold/20"
                 }`}
@@ -237,19 +264,25 @@ const SupplyBorrowForm = ({
             ))}
           </div>
         )}
-        
+
         {/* USD Value */}
         {fiatValue > 0 && (
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            ≈ ${fiatValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ≈ $
+            {fiatValue.toLocaleString(undefined, {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
             {priceLoading && (
-              <span className="ml-2 text-xs text-slate-400">(updating price...)</span>
+              <span className="ml-2 text-xs text-slate-400">
+                (updating price...)
+              </span>
             )}
           </p>
         )}
-        
+
         {/* Projected Earnings for Deposits */}
-        {mode === "deposit" && projectedEarnings > 0 && (
+        {/*mode === "deposit" && projectedEarnings > 0 && (
           <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3">
             <p className="text-sm text-green-700 dark:text-green-300 font-medium">
               💰 Projected Annual Earnings
@@ -261,24 +294,30 @@ const SupplyBorrowForm = ({
               Based on {supplyAPY.toFixed(2)}% APY
             </p>
           </div>
-        )}
-        
+        )*/}
+
         {/* Wallet Balance / Max Borrowable Display */}
-        <div className={`p-3 rounded-lg border ${
-          mode === "deposit" 
-            ? "bg-teal-50 dark:bg-teal-900/20 border-teal-200 dark:border-teal-800" 
-            : "bg-whale-gold/10 border-whale-gold/30"
-        }`}>
+        <div
+          className={`p-3 rounded-lg border ${
+            mode === "deposit"
+              ? "bg-teal-50 dark:bg-teal-900/20 border-teal-200 dark:border-teal-800"
+              : "bg-whale-gold/10 border-whale-gold/30"
+          }`}
+        >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${
-                mode === "deposit" ? "bg-teal-500" : "bg-whale-gold"
-              }`}></div>
-              <span className={`text-sm font-medium ${
-                mode === "deposit" 
-                  ? "text-teal-700 dark:text-teal-300" 
-                  : "text-whale-gold"
-              }`}>
+              <div
+                className={`w-2 h-2 rounded-full ${
+                  mode === "deposit" ? "bg-teal-500" : "bg-whale-gold"
+                }`}
+              ></div>
+              <span
+                className={`text-sm font-medium ${
+                  mode === "deposit"
+                    ? "text-teal-700 dark:text-teal-300"
+                    : "text-whale-gold"
+                }`}
+              >
                 {mode === "deposit" ? "Wallet Balance" : "Max Borrowable"}
               </span>
               {mode === "deposit" && onRefreshWalletBalance && (
@@ -287,40 +326,64 @@ const SupplyBorrowForm = ({
                   variant="ghost"
                   onClick={onRefreshWalletBalance}
                   className={`h-6 w-6 p-0 hover:bg-opacity-20 ${
-                    mode === "deposit" 
-                      ? "text-teal-600 hover:bg-teal-100 dark:text-teal-400 dark:hover:bg-teal-800" 
+                    mode === "deposit"
+                      ? "text-teal-600 hover:bg-teal-100 dark:text-teal-400 dark:hover:bg-teal-800"
                       : "text-whale-gold hover:bg-whale-gold/20"
                   }`}
                   title="Refresh wallet balance"
                 >
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  <svg
+                    className="w-3 h-3"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                    />
                   </svg>
                 </Button>
               )}
             </div>
             <div className="text-right">
-              <div className={`text-sm font-semibold ${
-                mode === "deposit" 
-                  ? "text-teal-800 dark:text-teal-200" 
-                  : "text-whale-gold"
-              }`}>
-                {mode === "deposit" 
-                  ? `${walletBalance.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${asset}`
-                  : `${calculateMaxBorrowable().toLocaleString(undefined, { maximumFractionDigits: 6 })} ${asset}`
-                }
+              <div
+                className={`text-sm font-semibold ${
+                  mode === "deposit"
+                    ? "text-teal-800 dark:text-teal-200"
+                    : "text-whale-gold"
+                }`}
+              >
+                {mode === "deposit"
+                  ? `${walletBalance.toLocaleString(undefined, {
+                      maximumFractionDigits: 6,
+                    })} ${asset}`
+                  : `${calculateMaxBorrowable().toLocaleString(undefined, {
+                      maximumFractionDigits: 6,
+                    })} ${asset}`}
               </div>
-              <div className={`text-xs ${
-                mode === "deposit" 
-                  ? "text-teal-600 dark:text-teal-400" 
-                  : "text-whale-gold/80"
-              }`}>
-                {mode === "deposit" 
-                  ? `≈ $${walletBalanceUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                  : userGlobalData 
-                    ? `≈ $${(calculateMaxBorrowable() * (tokenPrice || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                    : "Connect wallet to see USD value"
-                }
+              <div
+                className={`text-xs ${
+                  mode === "deposit"
+                    ? "text-teal-600 dark:text-teal-400"
+                    : "text-whale-gold/80"
+                }`}
+              >
+                {mode === "deposit"
+                  ? `≈ $${walletBalanceUSD.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}`
+                  : userGlobalData
+                  ? `≈ $${(
+                      calculateMaxBorrowable() * (tokenPrice || 1)
+                    ).toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}`
+                  : "Connect wallet to see USD value"}
               </div>
             </div>
           </div>
@@ -331,8 +394,8 @@ const SupplyBorrowForm = ({
         onClick={onSubmit}
         disabled={!isValidAmount || isLoading || disabled}
         className={`w-full font-semibold text-white h-12 transition-all hover:scale-105 ${
-          mode === "deposit" 
-            ? "bg-teal-600 hover:bg-teal-700" 
+          mode === "deposit"
+            ? "bg-teal-600 hover:bg-teal-700"
             : "bg-whale-gold hover:bg-whale-gold/90 text-black"
         } disabled:opacity-50 disabled:cursor-not-allowed`}
       >

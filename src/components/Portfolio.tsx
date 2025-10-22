@@ -49,7 +49,7 @@ const Portfolio = () => {
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [isLoadingPositions, setIsLoadingPositions] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
-  const [walletBalances, setWalletBalances] = useState<Record<string, number>>({});
+  const [walletBalances, setWalletBalances] = useState<Record<string, { balance: number; balanceUSD: number }>>({});
   const [isLoadingWalletBalance, setIsLoadingWalletBalance] = useState(false);
   const [userBorrowBalance, setUserBorrowBalance] = useState<number>(0);
   const [isLoadingBorrowData, setIsLoadingBorrowData] = useState(false);
@@ -403,7 +403,7 @@ const Portfolio = () => {
 
       setWalletBalances(prev => ({
         ...prev,
-        [asset]: balanceData.balance // Store just the balance number for compatibility
+        [asset]: balanceData // Store the full balance object with balance and balanceUSD
       }));
 
       console.log(`Final balance data for ${asset}:`, balanceData);
