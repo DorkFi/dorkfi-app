@@ -166,9 +166,15 @@ describe('GasStationService', () => {
   describe('getAvailableGasStationTokens', () => {
     it('should return gas station tokens for VOI mainnet', () => {
       const tokens = GasStationService.getAvailableGasStationTokens('voi-mainnet');
-      expect(tokens).toHaveLength(1);
-      expect(tokens[0].symbol).toBe('VOI');
-      expect(tokens[0].isMintable).toBe(true);
+      expect(tokens.length).toBeGreaterThan(0);
+      expect(tokens.some(token => token.symbol === 'VOI')).toBe(true);
+      expect(tokens.every(token => token.isMintable)).toBe(true);
+    });
+
+    it('should filter out s tokens from gas station', () => {
+      const tokens = GasStationService.getAvailableGasStationTokens('voi-mainnet');
+      // WAD is marked as isStoken: true and should be filtered out
+      expect(tokens.some(token => token.symbol === 'WAD')).toBe(false);
     });
 
     it('should return empty array for networks without gas station config', () => {

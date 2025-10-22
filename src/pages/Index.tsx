@@ -89,8 +89,8 @@ const Index = ({ activeTab, onTabChange }: IndexProps) => {
             </div>
           </>
         );
-      case "prefi":
-        return <PreFi />;
+      //case "prefi":
+      //  return <PreFi />;
       default:
         return <Dashboard onTabChange={onTabChange} />;
     }

@@ -427,6 +427,7 @@ export class GasStationService {
 
     return allTokens
       .filter((token) => gasStationSymbols.includes(token.symbol))
+      .filter((token) => !token.isStoken) // Filter out s tokens
       .map((token) => {
         return this.getTokenMintingInfo(
           token.symbol,
