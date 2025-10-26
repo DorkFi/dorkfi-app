@@ -200,6 +200,14 @@ const GasStation: React.FC = () => {
       
       // Handle different minting result types
       if (result.txns && result.txns.length > 0) {
+        // Show toast notification to prompt user to open wallet
+        const walletName = activeWallet?.metadata?.name || "your wallet";
+        toast({
+          title: "Please Sign Transaction",
+          description: `Please open ${walletName} and sign the transaction`,
+          duration: 10000,
+        });
+
         // For tokens that require transaction signing (ARC200, etc.)
         const stxns = await signTransactions(
           result.txns.map((txn) => new Uint8Array(Buffer.from(txn, "base64")))

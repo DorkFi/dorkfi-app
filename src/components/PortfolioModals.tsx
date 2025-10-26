@@ -12,6 +12,7 @@ import algorandService from "@/services/algorandService";
 import algosdk, { waitForConfirmation } from "algosdk";
 import BigNumber from "bignumber.js";
 import { getTokenImagePath } from "@/utils/tokenImageUtils";
+import { useToast } from "@/hooks/use-toast";
 
 interface Deposit {
   asset: string;
@@ -72,8 +73,9 @@ const PortfolioModals = ({
   onRefreshWalletBalance,
   onRefreshMarket
 }: PortfolioModalsProps) => {
-  const { activeAccount, signTransactions } = useWallet();
+  const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
+  const { toast } = useToast();
   const getMarketStatsForDeposit = (asset: string) => {
     const market = marketData.find(m => m.symbol === asset);
     const deposit = deposits.find(d => d.asset === asset);
@@ -178,6 +180,14 @@ const PortfolioModals = ({
 
       console.log("Withdraw result:", result);
 
+      // Show toast notification to prompt user to open wallet
+      const walletName = activeWallet?.metadata?.name || "your wallet";
+      toast({
+        title: "Please Sign Transaction",
+        description: `Please open ${walletName} and sign the transaction`,
+        duration: 10000,
+      });
+
       // Sign and send transactions
       const stxns = await signTransactions(
         (result as any).txns.map((txn: string) =>
@@ -258,6 +268,14 @@ const PortfolioModals = ({
       }
 
       console.log("Repay result:", result);
+
+      // Show toast notification to prompt user to open wallet
+      const walletName = activeWallet?.metadata?.name || "your wallet";
+      toast({
+        title: "Please Sign Transaction",
+        description: `Please open ${walletName} and sign the transaction`,
+        duration: 10000,
+      });
 
       // Sign and send transactions
       const stxns = await signTransactions(

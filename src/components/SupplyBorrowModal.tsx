@@ -26,6 +26,7 @@ import { getTokenConfig, getAllTokensWithDisplayInfo } from "@/config";
 import algorandService from "@/services/algorandService";
 import algosdk, { waitForConfirmation } from "algosdk";
 import BigNumber from "bignumber.js";
+import { useToast } from "@/hooks/use-toast";
 
 interface SupplyBorrowModalProps {
   isOpen: boolean;
@@ -80,8 +81,9 @@ const SupplyBorrowModal = ({
   const [transactionId, setTransactionId] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
 
-  const { activeAccount, signTransactions } = useWallet();
+  const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
+  const { toast } = useToast();
 
   // Reset states when modal opens/closes
   useEffect(() => {
@@ -197,6 +199,14 @@ const SupplyBorrowModal = ({
       }
 
       console.log(`${mode} result:`, result);
+
+      // Show toast notification to prompt user to open wallet
+      const walletName = activeWallet?.metadata?.name || "your wallet";
+      toast({
+        title: "Please Sign Transaction",
+        description: `Please open ${walletName} and sign the transaction`,
+        duration: 10000,
+      });
 
       // Sign and send transactions
       const stxns = await signTransactions(

@@ -22,6 +22,7 @@ import {
   Activity,
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useToast } from "@/hooks/use-toast";
 import DorkFiButton from "@/components/ui/DorkFiButton";
 import WalletNetworkButton from "@/components/WalletNetworkButton";
 import DorkFiCard from "@/components/ui/DorkFiCard";
@@ -795,6 +796,7 @@ export default function PreFiDashboard() {
   const { activeAccount, activeWallet, signTransactions } = useWallet();
   const isMobile = useIsMobile();
   const { currentNetwork, switchNetwork } = useNetwork();
+  const { toast } = useToast();
 
   // Get markets for current network
   const markets = useMemo(() => {
@@ -1474,6 +1476,14 @@ export default function PreFiDashboard() {
 
         console.log("depositResult", { depositResult });
 
+        // Show toast notification to prompt user to open wallet
+        const walletName = activeWallet?.metadata?.name || "your wallet";
+        toast({
+          title: "Please Sign Transaction",
+          description: `Please open ${walletName} and sign the transaction`,
+          duration: 10000,
+        });
+
         const stxns = await signTransactions(
           depositResult.txns.map((txn: string) =>
             Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
@@ -1846,6 +1856,15 @@ export default function PreFiDashboard() {
     if (!customR.success) {
       throw new Error("Failed to create withdraw transaction");
     }
+
+    // Show toast notification to prompt user to open wallet
+    const walletName = activeWallet?.metadata?.name || "your wallet";
+    toast({
+      title: "Please Sign Transaction",
+      description: `Please open ${walletName} and sign the transaction`,
+      duration: 10000,
+    });
+
     const stxns = await signTransactions(
       customR.txns.map((txn: string) =>
         Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
@@ -3333,7 +3352,7 @@ export default function PreFiDashboard() {
                 withdrawResult = await withdraw(
                   selectedMarket.poolId || "", // poolId - use token's poolId or fallback
                   selectedMarket.marketId || "", // marketId
-                  selectedMarket.tokenStandard || "", // tokenStandard
+                  selectedMarket.tokenStandard, // tokenStandard
                   amount, // amount as string
                   activeAccount.address, // userAddress
                   currentNetwork // networkId
@@ -3344,6 +3363,14 @@ export default function PreFiDashboard() {
                 }
 
                 console.log("withdrawResult", { withdrawResult });
+
+                // Show toast notification to prompt user to open wallet
+                const walletName = activeWallet?.metadata?.name || "your wallet";
+                toast({
+                  title: "Please Sign Transaction",
+                  description: `Please open ${walletName} and sign the transaction`,
+                  duration: 10000,
+                });
 
                 const stxns = await signTransactions(
                   withdrawResult.txns.map((txn: string) =>

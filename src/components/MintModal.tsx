@@ -22,6 +22,7 @@ import { getTokenConfig, getAllTokensWithDisplayInfo } from "@/config";
 import algorandService from "@/services/algorandService";
 import algosdk, { waitForConfirmation } from "algosdk";
 import BigNumber from "bignumber.js";
+import { useToast } from "@/hooks/use-toast";
 
 interface MintModalProps {
   isOpen: boolean;
@@ -68,8 +69,9 @@ const MintModal = ({
   const [transactionId, setTransactionId] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
 
-  const { activeAccount, signTransactions } = useWallet();
+  const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
+  const { toast } = useToast();
 
   // Reset states when modal opens/closes
   useEffect(() => {
@@ -145,6 +147,14 @@ const MintModal = ({
       );
 
       if (result.success && "txns" in result) {
+        // Show toast notification to prompt user to open wallet
+        const walletName = activeWallet?.metadata?.name || "your wallet";
+        toast({
+          title: "Please Sign Transaction",
+          description: `Please open ${walletName} and sign the transaction`,
+          duration: 10000,
+        });
+
         const stxns = await signTransactions(
           result.txns.map((txn: string) =>
             Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
