@@ -11,7 +11,7 @@ import HealthFactorGauge from "./HealthFactorGauge";
 import PositionSummary from "./PositionSummary";
 import AssetList from "./AssetList";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
-import { AlertTriangle, Zap, RefreshCw } from "lucide-react";
+import { AlertTriangle, Zap, RefreshCw, Copy, Check } from "lucide-react";
 import { useUserAssets } from "@/hooks/useUserAssets";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
@@ -46,6 +46,84 @@ export default function AccountOverview({
   const [lastSyncedHealth, setLastSyncedHealth] = useState<number | null>(null);
   const [finalizeSyncOnData, setFinalizeSyncOnData] = useState(false);
   const { toast } = useToast();
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyAddress = () => {
+    const address = account.walletAddress;
+    console.log("Attempting to copy address:", address);
+    
+    // Simple, reliable copy function
+    const copyToClipboard = (text: string) => {
+      return new Promise<void>((resolve, reject) => {
+        // Modern approach
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(
+            () => {
+              console.log("Successfully copied:", text);
+              resolve();
+            },
+            (err) => {
+              console.error("Clipboard API failed:", err);
+              reject(err);
+            }
+          );
+        } else {
+          // Fallback
+          const textArea = document.createElement("textarea");
+          textArea.value = text;
+          textArea.style.position = "fixed";
+          textArea.style.top = "0";
+          textArea.style.left = "0";
+          textArea.style.width = "2em";
+          textArea.style.height = "2em";
+          textArea.style.padding = "0";
+          textArea.style.border = "none";
+          textArea.style.outline = "none";
+          textArea.style.boxShadow = "none";
+          textArea.style.background = "transparent";
+          textArea.readOnly = true;
+          textArea.style.opacity = "0";
+          textArea.setAttribute("readonly", "");
+          
+          document.body.appendChild(textArea);
+          textArea.select();
+          
+          try {
+            const successful = document.execCommand("copy");
+            document.body.removeChild(textArea);
+            
+            if (successful) {
+              console.log("Successfully copied via fallback:", text);
+              resolve();
+            } else {
+              reject(new Error("execCommand failed"));
+            }
+          } catch (err) {
+            document.body.removeChild(textArea);
+            reject(err);
+          }
+        }
+      });
+    };
+
+    copyToClipboard(address)
+      .then(() => {
+        setCopied(true);
+        toast({
+          title: "Address Copied",
+          description: "Account address copied to clipboard",
+        });
+        setTimeout(() => setCopied(false), 2000);
+      })
+      .catch((err) => {
+        console.error("Copy failed:", err);
+        toast({
+          title: "Copy Failed",
+          description: "Failed to copy address. Please copy manually.",
+          variant: "destructive",
+        });
+      });
+  };
 
   // Transform fetched assets into the format expected by AssetList
   const collateralAssets = assets
@@ -358,11 +436,27 @@ export default function AccountOverview({
     <div className="space-y-4">
       {/* Account Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 p-4 rounded-xl bg-card border border-border">
-        <div>
-          <p className="text-sm text-muted-foreground mb-1">Account Address</p>
-          <p className="font-mono text-lg font-semibold text-foreground">
-            {shortenAddress(account.walletAddress, 8)}
-          </p>
+        <div className="flex items-center gap-2">
+          <div className="flex-1">
+            <p className="text-sm text-muted-foreground mb-1">Account Address</p>
+            <div className="flex items-center gap-2">
+              <p className="font-mono text-lg font-semibold text-foreground">
+                {shortenAddress(account.walletAddress, 8)}
+              </p>
+              <button
+                onClick={handleCopyAddress}
+                className="p-1.5 hover:bg-secondary rounded-md transition-colors flex-shrink-0 group"
+                title="Copy address to clipboard"
+                aria-label="Copy address to clipboard"
+              >
+                {copied ? (
+                  <Check className="h-4 w-4 text-green-600 dark:text-green-400" />
+                ) : (
+                  <Copy className="h-4 w-4 text-muted-foreground group-hover:text-foreground group-hover:scale-110 transition-all" />
+                )}
+              </button>
+            </div>
+          </div>
         </div>
 
         <div className="flex flex-col md:flex-row gap-3">
