@@ -79,8 +79,22 @@ const SupplyBorrowForm = ({
     }
 
     // Check available liquidity for borrows
-    if (mode === "borrow" && numValue > availableToSupplyOrBorrow) {
-      return "Insufficient liquidity available";
+    if (mode === "borrow") {
+      // Round and apply buffer to availableToSupplyOrBorrow to avoid precision issues
+      const buffer = 0.1;
+      const maxBorrowable = availableToSupplyOrBorrow * (1 - buffer);
+      const roundedMaxBorrowable = Number(maxBorrowable.toFixed(decimals));
+
+      if (numValue > roundedMaxBorrowable) {
+        console.log({
+          availableToSupplyOrBorrow,
+          maxBorrowable,
+          roundedMaxBorrowable,
+          numValue,
+          decimals,
+        });
+        return "Insufficient liquidity available";
+      }
     }
 
     // Check market capacity for deposits
@@ -140,7 +154,9 @@ const SupplyBorrowForm = ({
 
   // Calculate max borrowable amount based on market liquidity only
   const calculateMaxBorrowable = () => {
-    return availableToSupplyOrBorrow; // Use market liquidity only
+    // Add a 0.1% buffer to prevent precision edge cases
+    const buffer = 0.1;
+    return availableToSupplyOrBorrow * (1 - buffer);
   };
 
   const handleMaxClick = () => {
