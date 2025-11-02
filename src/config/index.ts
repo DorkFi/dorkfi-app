@@ -516,7 +516,7 @@ const algorandMainnetConfig: NetworkConfig = {
   name: "Algorand Mainnet",
   networkType: "avm",
   rpcUrl: "https://mainnet-api.4160.nodely.dev",
-  rpcPublicUrl: "https://mainnet-api.algorand.nautilus.sh",
+  rpcPublicUrl: "https://dork-algo-api.nautilus.sh",
   rpcPort: 443,
   rpcToken: undefined, // Public endpoint, no token required
   indexerUrl: "https://mainnet-idx.4160.nodely.dev",
