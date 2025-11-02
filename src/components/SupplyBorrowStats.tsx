@@ -12,6 +12,8 @@ interface AssetData {
   liquidity: number;
   totalSupply?: number;
   totalSupplyUSD?: number;
+  totalBorrow?: number;
+  totalBorrowUSD?: number;
   reserveFactor?: number;
   maxTotalDeposits?: number;
   apyCalculation?: {
@@ -127,12 +129,12 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
   const adjustedMetrics = calculateAdjustedMetrics();
   return (
     <Card className="bg-white/50 dark:bg-slate-800 border-gray-200 dark:border-slate-700">
-      <CardContent className="p-4 space-y-3">
+      <CardContent className="p-3 space-y-2">
         {/* Only show deposit APY if user has existing deposits or is in borrow mode */}
         {(mode === "borrow" || (mode === "deposit" && userDepositBalance > 0)) && (
           <div className="flex justify-between items-center">
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-slate-500 dark:text-slate-400">
+            <div className="flex items-center gap-1 md:gap-2">
+              <span className="text-[10px] md:text-sm text-slate-500 dark:text-slate-400">
                 {mode === "deposit" ? "Deposit" : "Borrow"} APY
               </span>
               <Tooltip>
@@ -187,8 +189,8 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
         {/* Only show utilization if it's greater than 0 */}
         {assetData.utilization > 0 && (
           <div className="flex justify-between items-center">
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-slate-500 dark:text-slate-400">Utilization</span>
+            <div className="flex items-center gap-1.5 md:gap-2">
+              <span className="text-[10px] md:text-sm text-slate-500 dark:text-slate-400">Utilization</span>
               <Tooltip>
                 <TooltipTrigger>
                   <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
@@ -239,11 +241,11 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
         )}
 
         <div className="flex justify-between items-center">
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-slate-500 dark:text-slate-400">Collateral Factor</span>
-            <Tooltip>
-              <TooltipTrigger>
-                <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+            <div className="flex items-center gap-1.5 md:gap-2">
+              <span className="text-[10px] md:text-sm text-slate-500 dark:text-slate-400">Collateral Factor</span>
+              <Tooltip>
+                <TooltipTrigger>
+                  <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
               </TooltipTrigger>
               <TooltipContent>
                 <p>Maximum borrowing power from this collateral</p>
@@ -255,8 +257,8 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
 
         {mode === "deposit" && assetData.totalSupply !== undefined && (
           <div className="flex justify-between items-center">
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-slate-500 dark:text-slate-400">Total Deposits</span>
+            <div className="flex items-center gap-1.5 md:gap-2">
+              <span className="text-[10px] md:text-sm text-slate-500 dark:text-slate-400">Total Deposits</span>
               <Tooltip>
                 <TooltipTrigger>
                   <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
@@ -292,8 +294,8 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
 
         {mode === "deposit" && assetData.maxTotalDeposits && assetData.maxTotalDeposits > 0 && (
           <div className="flex justify-between items-center">
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-slate-500 dark:text-slate-400">Market Capacity</span>
+            <div className="flex items-center gap-1.5 md:gap-2">
+              <span className="text-[10px] md:text-sm text-slate-500 dark:text-slate-400">Market Capacity</span>
               <Tooltip>
                 <TooltipTrigger>
                   <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
@@ -321,8 +323,8 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
           <>
             {userGlobalData && (
               <div className="flex justify-between items-center">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-slate-500 dark:text-slate-400">Total Collateral Value</span>
+                <div className="flex items-center gap-1.5 md:gap-2">
+                  <span className="text-[10px] md:text-sm text-slate-500 dark:text-slate-400">Total Collateral Value</span>
                   <Tooltip>
                     <TooltipTrigger>
                       <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
@@ -340,8 +342,8 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
             
             {userGlobalData && (
               <div className="flex justify-between items-center">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-slate-500 dark:text-slate-400">Current Borrowed</span>
+                <div className="flex items-center gap-1.5 md:gap-2">
+                  <span className="text-[10px] md:text-sm text-slate-500 dark:text-slate-400">Current Borrowed</span>
                   <Tooltip>
                     <TooltipTrigger>
                       <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
@@ -359,8 +361,8 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
 
             {userGlobalData && (
               <div className="flex justify-between items-center">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-slate-500 dark:text-slate-400">Max Borrowable</span>
+                <div className="flex items-center gap-1.5 md:gap-2">
+                  <span className="text-[10px] md:text-sm text-slate-500 dark:text-slate-400">Max Borrowable</span>
                   <Tooltip>
                     <TooltipTrigger>
                       <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
@@ -383,8 +385,8 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
             )}
 
             <div className="flex justify-between items-center">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-slate-500 dark:text-slate-400">Total Supply</span>
+              <div className="flex items-center gap-1.5 md:gap-2">
+                <span className="text-[10px] md:text-sm text-slate-500 dark:text-slate-400">Total Supply</span>
                 <Tooltip>
                   <TooltipTrigger>
                     <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
@@ -395,7 +397,7 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
                 </Tooltip>
               </div>
               <span className="text-sm font-medium text-slate-600 dark:text-slate-400">
-                {Math.abs(assetData.totalBorrow).toLocaleString()} {asset}
+                {Math.abs(assetData.totalBorrow || 0).toLocaleString()} {asset}
               </span>
             </div>
           </>

@@ -94,9 +94,9 @@ const RepayModal = ({ isOpen, onClose, tokenSymbol, tokenIcon, currentBorrow, wa
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="bg-card dark:bg-slate-900 rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl card-hover hover:shadow-lg hover:border-ocean-teal/40 transition-all max-w-md px-0 py-0">
+        <DialogContent className="bg-card dark:bg-slate-900 rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl card-hover hover:shadow-lg hover:border-ocean-teal/40 transition-all max-w-[95vw] md:max-w-md h-[90vh] max-h-[90vh] overflow-hidden flex flex-col px-0 py-0">
           {showSuccess ? (
-            <div className="p-6">
+            <div className="p-6 overflow-y-auto">
               <SupplyBorrowCongrats
                 transactionType="repay"
                 asset={tokenSymbol}
@@ -109,25 +109,27 @@ const RepayModal = ({ isOpen, onClose, tokenSymbol, tokenIcon, currentBorrow, wa
               />
             </div>
           ) : (
-            <>
-              <DialogHeader className="pt-6 px-8 pb-1">
-                <DialogTitle className="text-2xl font-bold text-center text-slate-800 dark:text-white">
-                  Repay
-                </DialogTitle>
-                <DialogDescription className="text-center mt-1 text-sm text-slate-400 dark:text-slate-400">
-                  Enter the amount to repay. Your borrow and balance info are below.
-                </DialogDescription>
-                <div className="flex items-center justify-center gap-3 pb-2 mt-3">
-                  <img 
-                    src={tokenIcon} 
-                    alt={tokenSymbol}
-                    className="w-12 h-12 rounded-full shadow"
-                  />
-                  <span className="text-xl font-semibold text-slate-800 dark:text-white">{tokenSymbol}</span>
-                </div>
-              </DialogHeader>
+            <div className="flex flex-col h-full">
+              <div className="sticky top-0 z-20 bg-card dark:bg-slate-900 pt-6 px-8 pb-4">
+                <DialogHeader className="pb-0">
+                  <DialogTitle className="text-2xl font-bold text-center text-slate-800 dark:text-white">
+                    Repay
+                  </DialogTitle>
+                  <DialogDescription className="text-center mt-1 text-sm text-slate-400 dark:text-slate-400">
+                    Enter the amount to repay. Your borrow and balance info are below.
+                  </DialogDescription>
+                  <div className="flex items-center justify-center gap-3 pb-2 mt-3">
+                    <img 
+                      src={tokenIcon} 
+                      alt={tokenSymbol}
+                      className="w-12 h-12 rounded-full"
+                    />
+                    <span className="text-xl font-semibold text-slate-800 dark:text-white">{tokenSymbol}</span>
+                  </div>
+                </DialogHeader>
+              </div>
               
-              <div className="space-y-6 pt-2 px-8 pb-8">
+              <div className="flex-1 overflow-y-auto overscroll-contain space-y-6 pt-2 px-8 pb-8 touch-pan-y">
                 <div className="space-y-3">
                   <Label htmlFor="amount" className="text-sm font-medium text-slate-600 dark:text-slate-300">
                     Amount
@@ -241,7 +243,7 @@ const RepayModal = ({ isOpen, onClose, tokenSymbol, tokenIcon, currentBorrow, wa
                   {isLoading ? "Processing..." : `Repay ${tokenSymbol}`}
                 </Button>
               </div>
-            </>
+            </div>
           )}
         </DialogContent>
     </Dialog>

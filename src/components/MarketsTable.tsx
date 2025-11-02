@@ -144,38 +144,39 @@ const MarketsTable = () => {
   };
 
   const handleBorrowClick = async (asset: string) => {
-    if (!activeAccount?.address) {
-      console.error("No active account for borrowing");
-      return;
-    }
-
     setIsLoadingGlobalData(true);
 
     try {
-      // Fetch user global data before opening modal
-      const globalData = await fetchUserGlobalData(
-        activeAccount.address,
-        currentNetwork
-      );
-      setUserGlobalData(globalData);
-
-      // Fetch user's current borrow balance for this specific asset
-      const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-      const token = tokens.find((t) => t.symbol === asset);
-
-      if (token && token.poolId && token.underlyingContractId) {
-        const borrowBalance = await fetchUserBorrowBalance(
+      // Fetch user global data before opening modal (only if wallet is connected)
+      if (activeAccount?.address) {
+        const globalData = await fetchUserGlobalData(
           activeAccount.address,
-          token.poolId,
-          token.underlyingContractId,
           currentNetwork
         );
-        setUserBorrowBalance(borrowBalance || 0);
+        setUserGlobalData(globalData);
+
+        // Fetch user's current borrow balance for this specific asset
+        const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+        const token = tokens.find((t) => t.symbol === asset);
+
+        if (token && token.poolId && token.underlyingContractId) {
+          const borrowBalance = await fetchUserBorrowBalance(
+            activeAccount.address,
+            token.poolId,
+            token.underlyingContractId,
+            currentNetwork
+          );
+          setUserBorrowBalance(borrowBalance || 0);
+        } else {
+          setUserBorrowBalance(0);
+        }
       } else {
+        // Not connected, set empty data
+        setUserGlobalData(null);
         setUserBorrowBalance(0);
       }
 
-      // Open modal after data is fetched
+      // Open modal regardless of connection status
       setBorrowModal({ isOpen: true, asset });
     } catch (error) {
       console.error("Error fetching user data for borrow:", error);
@@ -187,38 +188,39 @@ const MarketsTable = () => {
   };
 
   const handleMintClick = async (asset: string) => {
-    if (!activeAccount?.address) {
-      console.error("No active account for minting");
-      return;
-    }
-
     setIsLoadingGlobalData(true);
 
     try {
-      // Fetch user global data before opening modal
-      const globalData = await fetchUserGlobalData(
-        activeAccount.address,
-        currentNetwork
-      );
-      setUserGlobalData(globalData);
-
-      // Fetch user's current borrow balance for this specific asset
-      const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-      const token = tokens.find((t) => t.symbol === asset);
-
-      if (token && token.poolId && token.underlyingContractId) {
-        const borrowBalance = await fetchUserBorrowBalance(
+      // Fetch user global data before opening modal (only if wallet is connected)
+      if (activeAccount?.address) {
+        const globalData = await fetchUserGlobalData(
           activeAccount.address,
-          token.poolId,
-          token.underlyingContractId,
           currentNetwork
         );
-        setUserBorrowBalance(borrowBalance || 0);
+        setUserGlobalData(globalData);
+
+        // Fetch user's current borrow balance for this specific asset
+        const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+        const token = tokens.find((t) => t.symbol === asset);
+
+        if (token && token.poolId && token.underlyingContractId) {
+          const borrowBalance = await fetchUserBorrowBalance(
+            activeAccount.address,
+            token.poolId,
+            token.underlyingContractId,
+            currentNetwork
+          );
+          setUserBorrowBalance(borrowBalance || 0);
+        } else {
+          setUserBorrowBalance(0);
+        }
       } else {
+        // Not connected, set empty data
+        setUserGlobalData(null);
         setUserBorrowBalance(0);
       }
 
-      // Open modal after data is fetched
+      // Open modal regardless of connection status
       setMintModal({ isOpen: true, asset });
     } catch (error) {
       console.error("Error fetching user data for mint:", error);
@@ -258,6 +260,64 @@ const MarketsTable = () => {
       }
     }
   };
+
+  // Fetch user data when wallet connects while borrow modal is open
+  useEffect(() => {
+    if (borrowModal.isOpen && borrowModal.asset && activeAccount?.address) {
+      const fetchData = async () => {
+        try {
+          const globalData = await fetchUserGlobalData(activeAccount.address, currentNetwork);
+          setUserGlobalData(globalData);
+          
+          const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+          const token = tokens.find((t) => t.symbol === borrowModal.asset);
+          
+          if (token && token.poolId && token.underlyingContractId) {
+            const borrowBalance = await fetchUserBorrowBalance(
+              activeAccount.address,
+              token.poolId,
+              token.underlyingContractId,
+              currentNetwork
+            );
+            setUserBorrowBalance(borrowBalance || 0);
+          }
+        } catch (error) {
+          console.error("Error fetching user data:", error);
+        }
+      };
+      
+      fetchData();
+    }
+  }, [activeAccount?.address, borrowModal.isOpen, borrowModal.asset, currentNetwork]);
+
+  // Fetch user data when wallet connects while mint modal is open
+  useEffect(() => {
+    if (mintModal.isOpen && mintModal.asset && activeAccount?.address) {
+      const fetchData = async () => {
+        try {
+          const globalData = await fetchUserGlobalData(activeAccount.address, currentNetwork);
+          setUserGlobalData(globalData);
+          
+          const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+          const token = tokens.find((t) => t.symbol === mintModal.asset);
+          
+          if (token && token.poolId && token.underlyingContractId) {
+            const borrowBalance = await fetchUserBorrowBalance(
+              activeAccount.address,
+              token.poolId,
+              token.underlyingContractId,
+              currentNetwork
+            );
+            setUserBorrowBalance(borrowBalance || 0);
+          }
+        } catch (error) {
+          console.error("Error fetching user data:", error);
+        }
+      };
+      
+      fetchData();
+    }
+  }, [activeAccount?.address, mintModal.isOpen, mintModal.asset, currentNetwork]);
 
   const handleCloseMintModal = () => {
     const asset = mintModal.asset;

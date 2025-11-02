@@ -185,7 +185,7 @@ export const useOnDemandMarketData = ({
           totalBorrow: totalBorrowAmount,
           totalBorrowUSD: totalBorrowAmount * tokenPrice,
           borrowAPY: marketInfo.borrowApyCalculation?.apy || marketInfo.borrowRateCurrent * 100,
-          utilization: marketInfo.utilizationRate * 100,
+          utilization: tokenConfig?.isStoken ? 100.0 : marketInfo.utilizationRate * 100,
           collateralFactor: marketInfo.collateralFactor * 100,
           walletBalance: 0, // This would need wallet integration
           supplyCap: supplyCapAmount,

@@ -66,9 +66,9 @@ const BorrowModal = ({ isOpen, onClose, tokenSymbol, tokenIcon, availableToBorro
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="bg-card dark:bg-slate-900 rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl card-hover hover:shadow-lg hover:border-ocean-teal/40 transition-all max-w-md px-0 py-0">
+        <DialogContent className="bg-card dark:bg-slate-900 rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl card-hover hover:shadow-lg hover:border-ocean-teal/40 transition-all max-w-[95vw] md:max-w-md h-[90vh] max-h-[90vh] overflow-hidden flex flex-col px-0 py-0">
           {showSuccess ? (
-            <div className="p-6">
+            <div className="p-6 overflow-y-auto">
               <SupplyBorrowCongrats
                 transactionType="borrow"
                 asset={tokenSymbol}
@@ -81,16 +81,18 @@ const BorrowModal = ({ isOpen, onClose, tokenSymbol, tokenIcon, availableToBorro
               />
             </div>
           ) : (
-            <>
-              <DialogHeader className="pt-6 px-8 pb-1">
-                <DialogTitle className="sr-only">Borrow {tokenSymbol}</DialogTitle>
-                <BorrowHeader 
-                  tokenSymbol={tokenSymbol}
-                  tokenIcon={tokenIcon}
-                />
-              </DialogHeader>
+            <div className="flex flex-col h-full">
+              <div className="sticky top-0 z-20 bg-card dark:bg-slate-900 pt-6 px-8 pb-4">
+                <DialogHeader className="pb-0">
+                  <DialogTitle className="sr-only">Borrow {tokenSymbol}</DialogTitle>
+                  <BorrowHeader 
+                    tokenSymbol={tokenSymbol}
+                    tokenIcon={tokenIcon}
+                  />
+                </DialogHeader>
+              </div>
               
-              <div className="space-y-6 pt-2 px-8 pb-8">
+              <div className="flex-1 overflow-y-auto overscroll-contain space-y-6 pt-2 px-8 pb-8 touch-pan-y">
                 <BorrowForm
                   tokenSymbol={tokenSymbol}
                   availableToBorrow={availableToBorrow}
@@ -104,7 +106,7 @@ const BorrowModal = ({ isOpen, onClose, tokenSymbol, tokenIcon, availableToBorro
                   marketStats={marketStats}
                 />
               </div>
-            </>
+            </div>
           )}
         </DialogContent>
     </Dialog>

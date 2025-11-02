@@ -46,6 +46,7 @@ interface SupplyBorrowModalProps {
     liquidity: number;
     liquidityUSD: number;
     maxTotalDeposits?: number;
+    isSToken?: boolean;
   };
   walletBalance?: number;
   walletBalanceUSD?: number;
@@ -293,32 +294,36 @@ const SupplyBorrowModal = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-white rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl card-hover hover:shadow-lg hover:border-ocean-teal/40 transition-all max-w-md p-6">
+      <DialogContent className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-white rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl card-hover hover:shadow-lg hover:border-ocean-teal/40 transition-all max-w-[95vw] md:max-w-md h-[90vh] md:h-auto max-h-[90vh] md:max-h-[85vh] overflow-hidden flex flex-col p-0">
         {showSuccess ? (
-          <SupplyBorrowCongrats
-            transactionType={mode}
-            asset={asset}
-            assetIcon={assetData.icon}
-            amount={amount}
-            onViewTransaction={handleViewTransaction}
-            onGoToPortfolio={handleGoToPortfolio}
-            onMakeAnother={handleMakeAnother}
-            onClose={onClose}
-          />
+          <div className="p-6 overflow-y-auto">
+            <SupplyBorrowCongrats
+              transactionType={mode}
+              asset={asset}
+              assetIcon={assetData.icon}
+              amount={amount}
+              onViewTransaction={handleViewTransaction}
+              onGoToPortfolio={handleGoToPortfolio}
+              onMakeAnother={handleMakeAnother}
+              onClose={onClose}
+            />
+          </div>
         ) : (
-          <>
-            <DialogHeader className="pb-4">
-              <DialogTitle className="sr-only">
-                {mode === "deposit" ? "Deposit" : "Borrow"} {asset}
-              </DialogTitle>
-              <SupplyBorrowHeader
-                mode={mode}
-                asset={asset}
-                assetIcon={assetData.icon}
-              />
-            </DialogHeader>
+          <div className="flex flex-col h-full">
+            <div className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 px-6 pt-4 pb-2 shrink-0">
+              <DialogHeader className="pb-0">
+                <DialogTitle className="sr-only">
+                  {mode === "deposit" ? "Deposit" : "Borrow"} {asset}
+                </DialogTitle>
+                <SupplyBorrowHeader
+                  mode={mode}
+                  asset={asset}
+                  assetIcon={assetData.icon}
+                />
+              </DialogHeader>
+            </div>
 
-            <div className="space-y-6">
+            <div className="flex-1 overflow-y-auto overscroll-contain px-6 pt-2 pb-4 md:pb-3 space-y-3 touch-pan-y min-h-0">
               {error && (
                 <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 mb-4">
                   <div className="flex items-start justify-between">
@@ -350,7 +355,7 @@ const SupplyBorrowModal = ({
                 </div>
               )}
 
-              {mode === "borrow" && !userGlobalData && (
+              {mode === "borrow" && !userGlobalData && activeAccount?.address && (
                 <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3 mb-4">
                   <p className="text-yellow-600 dark:text-yellow-400 text-sm">
                     Loading user data... Please wait before borrowing.
@@ -373,6 +378,7 @@ const SupplyBorrowModal = ({
                 onSubmit={handleSubmit}
                 isLoading={isLoading}
                 disabled={mode === "borrow" && !userGlobalData}
+                hideButton={true}
               />
 
               <SupplyBorrowStats
@@ -383,9 +389,40 @@ const SupplyBorrowModal = ({
                 depositAmount={mode === "deposit" ? parseFloat(amount) || 0 : 0}
                 userBorrowBalance={userBorrowBalance}
                 userDepositBalance={userDepositBalance}
+                isSToken={assetData.isSToken || false}
               />
             </div>
-          </>
+
+            {/* Action Buttons */}
+            <div className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 border-t border-gray-200 dark:border-slate-700 px-6 py-3 flex gap-3 shrink-0">
+              <Button
+                variant="outline"
+                onClick={onClose}
+                disabled={isLoading}
+                className="flex-1"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSubmit}
+                disabled={!amount || parseFloat(amount) <= 0 || isLoading || (mode === "borrow" && !userGlobalData)}
+                className={`flex-1 font-semibold h-11 ${
+                  mode === "deposit"
+                    ? "bg-teal-600 hover:bg-teal-700 text-white"
+                    : "bg-whale-gold hover:bg-whale-gold/90 text-black"
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
+              >
+                {isLoading ? (
+                  <div className="flex items-center gap-2 justify-center">
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    Processing...
+                  </div>
+                ) : (
+                  `${mode === "deposit" ? "Deposit" : "Borrow"} ${asset}`
+                )}
+              </Button>
+            </div>
+          </div>
         )}
       </DialogContent>
     </Dialog>

@@ -79,35 +79,36 @@ const MarketDetailModal = ({ isOpen, onClose, asset, marketData }: MarketDetailM
   };
 
   const handleBorrowClick = async () => {
-    if (!activeAccount?.address) {
-      console.error("No active account for borrowing");
-      return;
-    }
-
     setIsLoadingGlobalData(true);
     
     try {
-      // Fetch user global data before opening modal
-      const globalData = await fetchUserGlobalData(activeAccount.address, currentNetwork);
-      setUserGlobalData(globalData);
-      
-      // Fetch user's current borrow balance for this specific asset
-      const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-      const token = tokens.find((t) => t.symbol === asset);
-      
-      if (token && token.poolId && token.underlyingContractId) {
-        const borrowBalance = await fetchUserBorrowBalance(
-          activeAccount.address,
-          token.poolId,
-          token.underlyingContractId,
-          currentNetwork
-        );
-        setUserBorrowBalance(borrowBalance || 0);
+      // Fetch user global data before opening modal (only if wallet is connected)
+      if (activeAccount?.address) {
+        const globalData = await fetchUserGlobalData(activeAccount.address, currentNetwork);
+        setUserGlobalData(globalData);
+        
+        // Fetch user's current borrow balance for this specific asset
+        const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+        const token = tokens.find((t) => t.symbol === asset);
+        
+        if (token && token.poolId && token.underlyingContractId) {
+          const borrowBalance = await fetchUserBorrowBalance(
+            activeAccount.address,
+            token.poolId,
+            token.underlyingContractId,
+            currentNetwork
+          );
+          setUserBorrowBalance(borrowBalance || 0);
+        } else {
+          setUserBorrowBalance(0);
+        }
       } else {
+        // Not connected, set empty data
+        setUserGlobalData(null);
         setUserBorrowBalance(0);
       }
       
-      // Open modal after data is fetched
+      // Open modal regardless of connection status
       setBorrowModal({ isOpen: true, asset });
     } catch (error) {
       console.error("Error fetching user data for borrow:", error);

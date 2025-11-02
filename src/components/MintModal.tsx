@@ -258,61 +258,67 @@ const MintModal = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader className="pt-6">
-          <DialogTitle className="text-center">
-            <div className="space-y-4">
-              <h2 className="text-3xl font-bold text-center text-slate-800 dark:text-white capitalize">
-                Mint
-              </h2>
-              <div className="flex items-center justify-center gap-3 pb-2">
-                <img
-                  src={assetData.icon}
-                  alt={asset}
-                  className="w-12 h-12 rounded-full"
-                />
-                <span className="text-2xl font-bold text-slate-800 dark:text-white">
-                  {asset}
-                </span>
-              </div>
-            </div>
-          </DialogTitle>
-        </DialogHeader>
+      <DialogContent className="max-w-[95vw] md:max-w-md h-[90vh] md:h-auto max-h-[90vh] md:max-h-[85vh] overflow-hidden flex flex-col p-0">
+        <div className="flex flex-col h-full">
+          <div className="bg-card dark:bg-slate-900 px-6 pt-4 pb-2 shrink-0">
+            <DialogHeader className="pt-0">
+              <DialogTitle className="text-center">
+                <div className="space-y-1">
+                  <h2 className="text-xl font-bold text-center text-slate-800 dark:text-white capitalize">
+                    Mint
+                  </h2>
+                  <div className="flex items-center justify-center gap-2">
+                    <img
+                      src={assetData.icon}
+                      alt={asset}
+                      className="w-8 h-8 rounded-full"
+                    />
+                    <span className="text-lg font-bold text-slate-800 dark:text-white">
+                      {asset}
+                    </span>
+                  </div>
+                </div>
+              </DialogTitle>
+            </DialogHeader>
+          </div>
 
-        <div className="space-y-6 px-6 pt-6 pb-6">
-          <SupplyBorrowForm
-            mode="borrow"
-            asset={asset}
-            walletBalance={0}
-            walletBalanceUSD={0}
-            availableToSupplyOrBorrow={(() => {
-              if (!userGlobalData) return 0;
-              // Calculate max borrowable: max(0, collateral * cf - borrows)
-              const collateralFactorDecimal = assetData.collateralFactor / 100;
-              return Math.max(0, (userGlobalData.totalCollateralValue * collateralFactorDecimal) - userGlobalData.totalBorrowValue);
-            })()}
-            supplyAPY={assetData.supplyAPY}
-            totalSupply={assetData.totalSupply}
-            maxTotalDeposits={assetData.maxTotalDeposits}
-            userGlobalData={userGlobalData}
-            collateralFactor={assetData.collateralFactor}
-            onAmountChange={handleAmountChange}
-            onSubmit={handleSubmit}
-            isLoading={isLoading}
-            disabled={!userGlobalData}
-          />
+          <div className="flex-1 overflow-y-auto overscroll-contain px-6 pt-2 pb-4 md:pb-3 space-y-3 touch-pan-y min-h-0">
+            <SupplyBorrowForm
+              mode="borrow"
+              asset={asset}
+              walletBalance={0}
+              walletBalanceUSD={0}
+              availableToSupplyOrBorrow={(() => {
+                if (!userGlobalData) return 0;
+                // Calculate max borrowable: max(0, collateral * cf - borrows)
+                const collateralFactorDecimal = assetData.collateralFactor / 100;
+                return Math.max(0, (userGlobalData.totalCollateralValue * collateralFactorDecimal) - userGlobalData.totalBorrowValue);
+              })()}
+              supplyAPY={assetData.supplyAPY}
+              totalSupply={assetData.totalSupply}
+              maxTotalDeposits={assetData.maxTotalDeposits}
+              userGlobalData={userGlobalData}
+              collateralFactor={assetData.collateralFactor}
+              onAmountChange={handleAmountChange}
+              onSubmit={handleSubmit}
+              isLoading={isLoading}
+              disabled={!userGlobalData}
+              hideButton={true}
+            />
 
-          <SupplyBorrowStats
-            mode="borrow"
-            asset={asset}
-            assetData={assetData}
-            userGlobalData={userGlobalData}
-            userBorrowBalance={userBorrowBalance}
-            depositAmount={0}
-            isSToken={assetData.isSToken || false}
-          />
+            <SupplyBorrowStats
+              mode="borrow"
+              asset={asset}
+              assetData={assetData}
+              userGlobalData={userGlobalData}
+              userBorrowBalance={userBorrowBalance}
+              depositAmount={0}
+              isSToken={assetData.isSToken || false}
+            />
+          </div>
 
-          <div className="flex gap-3">
+          {/* Action Buttons */}
+          <div className="bg-card dark:bg-slate-900 border-t border-gray-200 dark:border-slate-700 px-6 py-3 flex gap-3 shrink-0">
             <Button
               variant="outline"
               onClick={handleClose}
@@ -323,10 +329,10 @@ const MintModal = ({
             </Button>
             <Button
               onClick={handleSubmit}
-              disabled={isLoading || !amount || parseFloat(amount) <= 0}
-              className="flex-1 bg-ocean-teal hover:bg-ocean-teal/90 text-white"
+              disabled={isLoading || !amount || parseFloat(amount) <= 0 || !userGlobalData}
+              className="flex-1 font-semibold h-11 bg-whale-gold hover:bg-whale-gold/90 text-black disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isLoading ? "Minting..." : "Mint"}
+              {isLoading ? "Processing..." : `Mint ${asset}`}
             </Button>
           </div>
         </div>

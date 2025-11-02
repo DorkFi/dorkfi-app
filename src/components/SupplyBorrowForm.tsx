@@ -26,6 +26,7 @@ interface SupplyBorrowFormProps {
   isLoading?: boolean;
   disabled?: boolean;
   onRefreshWalletBalance?: () => void;
+  hideButton?: boolean;
 }
 
 const SupplyBorrowForm = ({
@@ -44,6 +45,7 @@ const SupplyBorrowForm = ({
   isLoading = false,
   disabled = false,
   onRefreshWalletBalance,
+  hideButton = false,
 }: SupplyBorrowFormProps) => {
   const [amount, setAmount] = useState("");
   const [fiatValue, setFiatValue] = useState(0);
@@ -220,7 +222,7 @@ const SupplyBorrowForm = ({
       : 0;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3">
       <div className="space-y-3">
         <Label
           htmlFor="amount"
@@ -405,24 +407,26 @@ const SupplyBorrowForm = ({
         </div>
       </div>
 
-      <Button
-        onClick={onSubmit}
-        disabled={!isValidAmount || isLoading || disabled}
-        className={`w-full font-semibold text-white h-12 transition-all hover:scale-105 ${
-          mode === "deposit"
-            ? "bg-teal-600 hover:bg-teal-700"
-            : "bg-whale-gold hover:bg-whale-gold/90 text-black"
-        } disabled:opacity-50 disabled:cursor-not-allowed`}
-      >
-        {isLoading ? (
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-            Processing...
-          </div>
-        ) : (
-          `${mode === "deposit" ? "Deposit" : "Borrow"} ${asset}`
-        )}
-      </Button>
+      {!hideButton && (
+        <Button
+          onClick={onSubmit}
+          disabled={!isValidAmount || isLoading || disabled}
+          className={`w-full font-semibold text-white h-12 transition-all hover:scale-105 ${
+            mode === "deposit"
+              ? "bg-teal-600 hover:bg-teal-700"
+              : "bg-whale-gold hover:bg-whale-gold/90 text-black"
+          } disabled:opacity-50 disabled:cursor-not-allowed`}
+        >
+          {isLoading ? (
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+              Processing...
+            </div>
+          ) : (
+            `${mode === "deposit" ? "Deposit" : "Borrow"} ${asset}`
+          )}
+        </Button>
+      )}
     </div>
   );
 };
