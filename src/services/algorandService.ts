@@ -37,7 +37,7 @@ const NETWORK_CONFIGS: Record<
 > = {
   mainnet: {
     algodToken: "",
-    algodServer: "https://mainnet-api.algorand.nautilus.sh",
+    algodServer: "https://dork-algo-api.nautilus.sh", // TODO use public rpc url from config
     algodPort: 443,
     indexerToken: "",
     indexerServer: "https://mainnet-idx.4160.nodely.dev",
