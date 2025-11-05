@@ -10,6 +10,7 @@ import LiquidationMarkets from "./pages/LiquidationMarkets";
 import { NetworkProvider } from "./contexts/NetworkContext";
 import Index from "./pages/Index";
 import AuthGuard from "./components/AuthGuard";
+import { isFeatureEnabled } from "./config";
 
 const LAUNCH_TIMESTAMP = Date.UTC(2025, 8, 13, 0, 29, 0); // Sep 12, 2025 5:29 PM PDT
 
@@ -47,17 +48,21 @@ function App() {
                 }
               />
               <Route path="/admin" element={<Admin />} />
-              <Route path="/gas-station" element={<GasStation />} />
+              {isFeatureEnabled("enableGasStation") && (
+                <Route path="/gas-station" element={<GasStation />} />
+              )}
               {/*<Route path="/countdown" element={<CountdownPage />} />*/}
-              <Route
-                path="/liquidation-markets"
-                element={
-                  <LiquidationMarkets
-                    activeTab={activeTab}
-                    onTabChange={setActiveTab}
-                  />
-                }
-              />
+              {isFeatureEnabled("enableLiquidations") && (
+                <Route
+                  path="/liquidation-markets"
+                  element={
+                    <LiquidationMarkets
+                      activeTab={activeTab}
+                      onTabChange={setActiveTab}
+                    />
+                  }
+                />
+              )}
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </BrowserRouter>

@@ -5,7 +5,8 @@ import { Menu, X } from "lucide-react";
 import { useState } from "react";
 import WalletNetworkButton from "@/components/WalletNetworkButton";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { getCurrentGasStationSymbols } from "@/config";
+import { getCurrentGasStationSymbols, isFeatureEnabled } from "@/config";
+import { useWallet } from "@txnlab/use-wallet-react";
 
 interface HeaderProps {
   activeTab: string;
@@ -17,6 +18,7 @@ const Header = ({ activeTab, onTabChange }: HeaderProps) => {
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { currentNetwork } = useNetwork();
+  const { activeAccount } = useWallet();
 
   const handleTabChange = (value: string) => {
     console.log("Header tab change:", value);
@@ -44,12 +46,12 @@ const Header = ({ activeTab, onTabChange }: HeaderProps) => {
 
   const tabs = [
     { value: 'dashboard', label: 'Dashboard' },
-    //{ value: 'prefi', label: 'PreFi' },
+    ...(isFeatureEnabled("enablePreFi") ? [{ value: 'prefi', label: 'PreFi' }] : []),
     { value: 'markets', label: 'Markets' },
-    { value: 'portfolio', label: 'Portfolio' },
-    { value: 'liquidations', label: 'Liquidations' },
+    ...(activeAccount ? [{ value: 'portfolio', label: 'Portfolio' }] : []),
+    ...(isFeatureEnabled("enableLiquidations") ? [{ value: 'liquidations', label: 'Liquidations' }] : []),
     //{ value: 'swap', label: 'Swap' },
-    ...(hasGasStation ? [{ value: 'gas-station', label: 'Gas Station' }] : []),
+    ...(isFeatureEnabled("enableGasStation") && hasGasStation ? [{ value: 'gas-station', label: 'Gas Station' }] : []),
   ];
 
   return (

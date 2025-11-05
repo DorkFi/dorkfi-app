@@ -9,7 +9,7 @@ import {
 } from "@/services/lendingService";
 import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
-import { getTokenConfig } from "@/config";
+import { getTokenConfig, isFeatureEnabled } from "@/config";
 import { getAllTokensWithDisplayInfo } from "@/config";
 import EnhancedHealthFactor from "./EnhancedHealthFactor";
 import DepositsList from "./DepositsList";
@@ -831,7 +831,7 @@ const Portfolio = () => {
       />
 
       {/* At Risk Positions Section - Show when health factor < 1.5 and there are borrows */}
-      {healthFactor !== null && healthFactor < 1.5 && healthFactor > 0 && totalBorrowed > 0 && !isLoadingData && (
+      {isFeatureEnabled("enableLiquidations") && healthFactor !== null && healthFactor < 1.5 && healthFactor > 0 && totalBorrowed > 0 && !isLoadingData && (
         <DorkFiCard className="border-red-500/30 bg-red-500/5">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">

@@ -107,6 +107,7 @@ export interface GlobalConfig {
     enableSwap: boolean;
     enableGovernance: boolean;
     enableMigration: boolean;
+    enableGasStation: boolean;
   };
 }
 
@@ -1098,11 +1099,12 @@ export const config: GlobalConfig = {
   enabledNetworks: [...betaNetworks] as NetworkId[],
   version: "1.0.0",
   features: {
-    enablePreFi: true,
-    enableLiquidations: true,
-    enableSwap: true,
+    enablePreFi: false,
+    enableLiquidations: false,
+    enableSwap: false,
     enableGovernance: false, // Disabled until governance contracts are deployed
     enableMigration: true, // Enable asset migration feature
+    enableGasStation: true,
   },
 };
 

@@ -12,6 +12,7 @@ import CanvasBubbles from "@/components/CanvasBubbles";
 import PreFi from "@/pages/PreFi";
 import { useIsMobile } from "@/hooks/use-mobile";
 import LiquidationMonitor from "@/components/liquidation/LiquidationMonitor";
+import { isFeatureEnabled } from "@/config";
 
 interface Token {
   symbol: string;
@@ -67,7 +68,10 @@ const Index = ({ activeTab, onTabChange }: IndexProps) => {
       case "portfolio":
         return <Portfolio />;
       case "liquidations":
-        return <LiquidationMonitor accounts={[]} />;
+        if (isFeatureEnabled("enableLiquidations")) {
+          return <LiquidationMonitor accounts={[]} />;
+        }
+        return <Dashboard onTabChange={onTabChange} />;
       case "swap":
         return (
           <>
@@ -89,8 +93,11 @@ const Index = ({ activeTab, onTabChange }: IndexProps) => {
             </div>
           </>
         );
-      //case "prefi":
-      //  return <PreFi />;
+      case "prefi":
+        if (isFeatureEnabled("enablePreFi")) {
+          return <PreFi />;
+        }
+        return <Dashboard onTabChange={onTabChange} />;
       default:
         return <Dashboard onTabChange={onTabChange} />;
     }
