@@ -77,7 +77,7 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
           token: "",
         },
       })
-      .addNetwork("voi-mainnet", {
+      .addNetwork("voimain", {
         algod: {
           token: "",
           baseServer: "https://mainnet-api.voi.dork.fi",
