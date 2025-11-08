@@ -10,6 +10,7 @@ import {
   NetworkId,
   WalletId,
   WalletProvider,
+  NetworkConfigBuilder,
 } from "@txnlab/use-wallet-react";
 import {
   getCurrentNetworkConfig,
@@ -55,18 +56,32 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
     // Then get the updated config
     const networkConfig = getCurrentNetworkConfig();
 
+    const networks = getNetworks();
+
     // Determine wallet configuration based on network type
     const wallets = getWalletsForNetwork(networkId);
 
     return new WalletManager({
       wallets,
-      algod: {
-        baseServer: networkConfig.rpcUrl,
-        port: networkConfig.rpcPort,
-        token: networkConfig.rpcToken,
-      },
-      network: networkConfig.walletNetworkId as NetworkId,
+      networks,
+      defaultNetwork: networkConfig.walletNetworkId as NetworkId,
     });
+  };
+
+  const getNetworks = () => {
+    return new NetworkConfigBuilder()
+      .addNetwork("voi-mainnet", {
+        algod: {
+          token: "",
+          baseServer: "https://mainnet-api.voi.nodely.dev",
+          port: "",
+        },
+        isTestnet: false,
+        genesisHash: "r20fSQI8gWe/kFZziNonSPCXLwcQmH/nxROvnnueWOk=",
+        genesisId: "voimain-v1.0",
+        caipChainId: "algorand:r20fSQI8gWe_kFZziNonSPCXLwcQmH_n",
+      })
+      .build();
   };
 
   // Get appropriate wallets for the network type

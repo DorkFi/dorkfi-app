@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -9,7 +9,6 @@ import GasStation from "./pages/GasStation";
 import LiquidationMarkets from "./pages/LiquidationMarkets";
 import { NetworkProvider } from "./contexts/NetworkContext";
 import Index from "./pages/Index";
-import AuthGuard from "./components/AuthGuard";
 import { isFeatureEnabled } from "./config";
 
 const LAUNCH_TIMESTAMP = Date.UTC(2025, 8, 13, 0, 29, 0); // Sep 12, 2025 5:29 PM PDT
