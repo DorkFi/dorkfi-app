@@ -37,7 +37,7 @@ const NETWORK_CONFIGS: Record<
 > = {
   mainnet: {
     algodToken: "",
-    algodServer: "https://dork-algo-api.nautilus.sh", // TODO use public rpc url from config
+    algodServer: "https://mainnet-api.algorand.dork.fi",
     algodPort: 443,
     indexerToken: "",
     indexerServer: "https://mainnet-idx.4160.nodely.dev",
@@ -63,7 +63,7 @@ const NETWORK_CONFIGS: Record<
   },
   voimain: {
     algodToken: "",
-    algodServer: "https://mainnet-api.voi.nodely.dev",
+    algodServer: "https://mainnet-api.voi.dork.fi",
     algodPort: 443,
     indexerToken: "",
     indexerServer: "https://mainnet-idx.voi.nodely.dev",
@@ -111,7 +111,16 @@ class AlgorandService {
       ...customConfig,
     };
 
-    console.log("initializeClients - network:", network, "baseConfig:", baseConfig, "customConfig:", customConfig, "final config:", config);
+    console.log(
+      "initializeClients - network:",
+      network,
+      "baseConfig:",
+      baseConfig,
+      "customConfig:",
+      customConfig,
+      "final config:",
+      config
+    );
 
     // Create Algod client
     const algod = new Algodv2(
@@ -148,15 +157,22 @@ class AlgorandService {
   ): Promise<AlgorandClients> {
     // Import config functions dynamically to avoid circular dependencies
     const { getAlgorandConfigForReads } = await import("@/config");
- 
+
     // Convert AlgorandNetwork to NetworkId
     const networkId = this.algorandNetworkToNetworkId(network);
-    
+
     // Get the read-optimized config
     const readConfig = getAlgorandConfigForReads(networkId as any);
-    
-    console.log("initializeClientsForReads - network:", network, "networkId:", networkId, "readConfig:", readConfig);
- 
+
+    console.log(
+      "initializeClientsForReads - network:",
+      network,
+      "networkId:",
+      networkId,
+      "readConfig:",
+      readConfig
+    );
+
     // Merge with any custom config provided
     const finalConfig = {
       ...readConfig,
@@ -175,13 +191,15 @@ class AlgorandService {
   ): Promise<AlgorandClients> {
     // Import config functions dynamically to avoid circular dependencies
     const { getAlgorandConfigForTransactions } = await import("@/config");
- 
+
     // Convert AlgorandNetwork to NetworkId
     const networkId = this.algorandNetworkToNetworkId(network);
-    
+
     // Get the transaction-optimized config
-    const transactionConfig = getAlgorandConfigForTransactions(networkId as any);
- 
+    const transactionConfig = getAlgorandConfigForTransactions(
+      networkId as any
+    );
+
     // Merge with any custom config provided
     const finalConfig = {
       ...transactionConfig,

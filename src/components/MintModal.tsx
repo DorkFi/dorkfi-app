@@ -163,9 +163,9 @@ const MintModal = ({
         const algorandClients =
           await algorandService.getCurrentClientsForTransactions();
         const res = await algorandClients.algod.sendRawTransaction(stxns).do();
-        await waitForConfirmation(algorandClients.algod, res.txId, 4);
+        await waitForConfirmation(algorandClients.algod, res.txid, 4);
 
-        setTransactionId(res.txId || "Unknown");
+        setTransactionId(res.txid || "Unknown");
         setIsLoading(false); // Set loading to false before showing success modal
         setShowSuccess(true);
         // Call onTransactionSuccess after a brief delay to ensure success modal is displayed
