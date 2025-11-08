@@ -70,11 +70,18 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
 
   const getNetworks = () => {
     return new NetworkConfigBuilder()
+      .mainnet({
+        algod: {
+          baseServer: "https://mainnet-api.voi.dork.fi",
+          port: "443",
+          token: "",
+        },
+      })
       .addNetwork("voi-mainnet", {
         algod: {
           token: "",
-          baseServer: "https://mainnet-api.voi.nodely.dev",
-          port: "",
+          baseServer: "https://mainnet-api.voi.dork.fi",
+          port: "443",
         },
         isTestnet: false,
         genesisHash: "r20fSQI8gWe/kFZziNonSPCXLwcQmH/nxROvnnueWOk=",
