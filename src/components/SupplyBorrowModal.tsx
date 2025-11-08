@@ -219,10 +219,10 @@ const SupplyBorrowModal = ({
       const algorandClients =
         await algorandService.getCurrentClientsForTransactions();
       const res = await algorandClients.algod.sendRawTransaction(stxns).do();
-      await waitForConfirmation(algorandClients.algod, res.txId, 4);
+      await waitForConfirmation(algorandClients.algod, res.txid, 4);
 
       console.log("Transaction confirmed:", res);
-      setTransactionId(res.txId);
+      setTransactionId(res.txid);
       setShowSuccess(true);
 
       // Call the success callback to refresh data

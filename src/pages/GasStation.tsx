@@ -217,7 +217,7 @@ const GasStation: React.FC = () => {
           networkConfig.walletNetworkId as AlgorandNetwork
         );
         const res = await algod.sendRawTransaction(stxns).do();
-        await algosdk.waitForConfirmation(algod, res.txId, 3);
+        await algosdk.waitForConfirmation(algod, res.txid, 4);
       }
       // For network tokens and simulated minting, no additional transaction handling needed
       

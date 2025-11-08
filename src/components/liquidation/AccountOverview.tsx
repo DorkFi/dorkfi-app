@@ -408,7 +408,7 @@ export default function AccountOverview({
       const algorandClients =
         await algorandService.getCurrentClientsForTransactions();
       const res = await algorandClients.algod.sendRawTransaction(stxns).do();
-      await algosdk.waitForConfirmation(algorandClients.algod, res.txId, 4);
+      await algosdk.waitForConfirmation(algorandClients.algod, res.txid, 4);
 
       // Refresh the user assets data after syncing
       await refetch();

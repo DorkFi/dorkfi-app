@@ -493,7 +493,7 @@ export default function AdminDashboard() {
         )
       );
       const res = await clients.algod.sendRawTransaction(stxns).do();
-      await waitForConfirmation(clients.algod, res.txId, 4);
+      await waitForConfirmation(clients.algod, res.txid, 4);
       toast.success("Role revoked successfully", {
         description: `Successfully revoked ${
           roles.find((r) => r.id === roleId)?.name || "selected role"
@@ -1197,7 +1197,7 @@ export default function AdminDashboard() {
         )
       );
       const res = await clients.algod.sendRawTransaction(stxns).do();
-      await waitForConfirmation(clients.algod, res.txId, 4);
+      await waitForConfirmation(clients.algod, res.txid, 4);
 
       toast.success("Feeder permissions updated", {
         description: `Successfully ${
@@ -1297,7 +1297,7 @@ export default function AdminDashboard() {
         )
       );
       const res = await clients.algod.sendRawTransaction(stxns).do();
-      await waitForConfirmation(clients.algod, res.txId, 4);
+      await waitForConfirmation(clients.algod, res.txid, 4);
 
       toast.success("Price updated successfully", {
         description: `Successfully set price for ${
@@ -1399,7 +1399,7 @@ export default function AdminDashboard() {
         )
       );
       const res = await clients.algod.sendRawTransaction(stxns).do();
-      await waitForConfirmation(clients.algod, res.txId, 4);
+      await waitForConfirmation(clients.algod, res.txid, 4);
 
       toast.success("Price feed attached successfully", {
         description: `Successfully attached price feed for ${selectedMarket?.symbol} to oracle contract.`,
@@ -1575,7 +1575,7 @@ export default function AdminDashboard() {
         )
       );
       const res = await clients.algod.sendRawTransaction(stxns).do();
-      await waitForConfirmation(clients.algod, res.txId, 4);
+      await waitForConfirmation(clients.algod, res.txid, 4);
 
       toast.success("Price feed fetched successfully", {
         description: `Successfully fetched latest price for ${selectedMarket?.symbol}.`,
@@ -1718,10 +1718,10 @@ export default function AdminDashboard() {
       console.log("STXNS:", stxns);
 
       const res = await clients.algod.sendRawTransaction(stxns).do();
-      await waitForConfirmation(clients.algod, res.txId, 4);
+      await waitForConfirmation(clients.algod, res.txid, 4);
 
       setMintResult(
-        `Successfully minted AToken "${mintName}". Transaction ID: ${res.txId}`
+        `Successfully minted AToken "${mintName}". Transaction ID: ${res.txid}`
       );
     } catch (error) {
       console.error("Mint error:", error);
@@ -1909,10 +1909,10 @@ export default function AdminDashboard() {
       const algorandClients =
         await algorandService.getCurrentClientsForTransactions();
       const res = await algorandClients.algod.sendRawTransaction(stxns).do();
-      await waitForConfirmation(algorandClients.algod, res.txId, 4);
+      await waitForConfirmation(algorandClients.algod, res.txid, 4);
 
       setMinterApprovalResult(
-        `Minter approval successful! Transaction ID: ${result.txId}${
+        `Minter approval successful! Transaction ID: ${res.txid}${
           !isNaN(appId) && appId > 0
             ? ` (App ID ${appId} → ${actualMinterAddress})`
             : ""
@@ -1985,10 +1985,10 @@ export default function AdminDashboard() {
       const algorandClients =
         await algorandService.getCurrentClientsForTransactions();
       const res = await algorandClients.algod.sendRawTransaction(stxns).do();
-      await waitForConfirmation(algorandClients.algod, res.txId, 4);
+      await waitForConfirmation(algorandClients.algod, res.txid, 4);
 
       setMinterRevocationResult(
-        `Minter revocation successful! Transaction ID: ${res.txId}${
+        `Minter revocation successful! Transaction ID: ${res.txid}${
           !isNaN(appId) && appId > 0
             ? ` (App ID ${appId} → ${actualMinterAddress})`
             : ""
@@ -2054,10 +2054,10 @@ export default function AdminDashboard() {
       const algorandClients =
         await algorandService.getCurrentClientsForTransactions();
       const res = await algorandClients.algod.sendRawTransaction(stxns).do();
-      await waitForConfirmation(algorandClients.algod, res.txId, 4);
+      await waitForConfirmation(algorandClients.algod, res.txid, 4);
 
       setSetStokenResult(
-        `SToken set successfully! Transaction ID: ${res.txId} (Pool ${poolId} → SToken ${stokenContractId})`
+        `SToken set successfully! Transaction ID: ${res.txid} (Pool ${poolId} → SToken ${stokenContractId})`
       );
 
       toast.success("SToken set successfully for lending pool");
@@ -2168,7 +2168,7 @@ export default function AdminDashboard() {
         const algorandClients =
           await algorandService.getCurrentClientsForTransactions();
         const res = await algorandClients.algod.sendRawTransaction(stxns).do();
-        await waitForConfirmation(algorandClients.algod, res.txId, 4);
+        await waitForConfirmation(algorandClients.algod, res.txid, 4);
         setStokenMarketCreationResult(
           `SToken market created successfully! Market ID: ${createMarketResult.marketId}`
         );
@@ -2545,7 +2545,7 @@ export default function AdminDashboard() {
 
           console.log("Transaction sent:", res);
 
-          await waitForConfirmation(algorandClients.algod, res.txId, 4);
+          await waitForConfirmation(algorandClients.algod, res.txid, 4);
 
           console.log("Transaction confirmed:", res);
         }
@@ -2743,8 +2743,8 @@ export default function AdminDashboard() {
           const res = await algorandClients.algod
             .sendRawTransaction(stxns)
             .do();
-          await waitForConfirmation(algorandClients.algod, res.txId, 4);
-          alert(`Price updated successfully! Transaction ID: ${res.txId}`);
+          await waitForConfirmation(algorandClients.algod, res.txid, 4);
+          alert(`Price updated successfully! Transaction ID: ${res.txid}`);
           setIsPriceUpdateModalOpen(false);
           setPriceUpdateData({
             marketId: "",
@@ -2808,7 +2808,7 @@ export default function AdminDashboard() {
 
           const res = await algorandClients.algod.sendRawTransaction(stxn).do();
 
-          await waitForConfirmation(algorandClients.algod, res.txId, 4);
+          await waitForConfirmation(algorandClients.algod, res.txid, 4);
 
           console.log("Transaction confirmed:", res);
           alert("Max deposits updated successfully!");
@@ -2877,7 +2877,7 @@ export default function AdminDashboard() {
 
           const res = await algorandClients.algod.sendRawTransaction(stxn).do();
 
-          await waitForConfirmation(algorandClients.algod, res.txId, 4);
+          await waitForConfirmation(algorandClients.algod, res.txid, 4);
 
           console.log("Transaction confirmed:", res);
           alert("Max borrows updated successfully!");
@@ -2986,7 +2986,7 @@ export default function AdminDashboard() {
 
           console.log("Transaction sent:", res);
 
-          await waitForConfirmation(algorandClients.algod, res.txId, 4);
+          await waitForConfirmation(algorandClients.algod, res.txid, 4);
 
           console.log("Transaction confirmed:", res);
 
@@ -12697,7 +12697,7 @@ export default function AdminDashboard() {
                   const res = await clients.algod
                     .sendRawTransaction(stxns)
                     .do();
-                  await waitForConfirmation(clients.algod, res.txId, 4);
+                  await waitForConfirmation(clients.algod, res.txid, 4);
 
                   toast.success("Role assigned successfully", {
                     description: `Successfully assigned ${

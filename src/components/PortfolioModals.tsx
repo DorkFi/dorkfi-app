@@ -198,7 +198,7 @@ const PortfolioModals = ({
       const algorandClients =
         await algorandService.getCurrentClientsForTransactions();
       const res = await algorandClients.algod.sendRawTransaction(stxns).do();
-      await waitForConfirmation(algorandClients.algod, res.txId, 4);
+      await waitForConfirmation(algorandClients.algod, res.txid, 4);
 
       console.log("Withdraw transaction confirmed:", res);
 
@@ -287,7 +287,7 @@ const PortfolioModals = ({
       const algorandClients =
         await algorandService.getCurrentClientsForTransactions();
       const res = await algorandClients.algod.sendRawTransaction(stxns).do();
-      await waitForConfirmation(algorandClients.algod, res.txId, 4);
+      await waitForConfirmation(algorandClients.algod, res.txid, 4);
 
       console.log("Repay transaction confirmed:", res);
 

@@ -1495,7 +1495,7 @@ export default function PreFiDashboard() {
 
         const res = await algorandClients.algod.sendRawTransaction(stxns).do();
 
-        await waitForConfirmation(algorandClients.algod, res.txId, 4);
+        await waitForConfirmation(algorandClients.algod, res.txid, 4);
 
         console.log("Transaction confirmed:", res);
       } else if (isCurrentNetworkEVM()) {
@@ -1876,7 +1876,7 @@ export default function PreFiDashboard() {
 
     const res = await algorandClients.algod.sendRawTransaction(stxns).do();
 
-    await waitForConfirmation(algorandClients.algod, res.txId, 4);
+    await waitForConfirmation(algorandClients.algod, res.txid, 4);
 
     console.log("Transaction confirmed:", res);
 
@@ -3385,7 +3385,7 @@ export default function PreFiDashboard() {
                   .sendRawTransaction(stxns)
                   .do();
 
-                await waitForConfirmation(algorandClients.algod, res.txId, 4);
+                await waitForConfirmation(algorandClients.algod, res.txid, 4);
 
                 console.log("Transaction confirmed:", res);
               } else if (isCurrentNetworkEVM()) {
