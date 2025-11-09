@@ -58,28 +58,24 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
           description: "Connect with Lute wallet (Algorand/VOI)",
           isInstalled: true,
         },
+        {
+          id: "vera",
+          name: "Voi Wallet",
+          icon: "/lovable-uploads/verwallet.png",
+          description: "Connect with Voi Wallet (Algorand/VOI)",
+          isInstalled: true,
+        },
       ];
 
       // Add VOI-specific wallets
       if (currentNetwork === "voi-mainnet") {
-        baseWallets.push(
-          {
-            id: "biatec",
-            name: "Biatec Wallet",
-            icon: wallets.find((w) => w.id === "biatec")?.metadata.icon || "🔗",
-            description: "Connect with Biatec wallet (VOI Network)",
-            isInstalled: true,
-            downloadUrl: "https://biatec.io/",
-          },
-          {
-            id: "vera",
-            name: "Vera Wallet",
-            icon: "/lovable-uploads/verwallet.png",
-            description: "Connect with Vera Wallet (VOI Network)",
-            isInstalled: true,
-            downloadUrl: "https://getvera.app/",
-          }
-        );
+        baseWallets.push({
+          id: "biatec",
+          name: "Biatec Wallet",
+          icon: wallets.find((w) => w.id === "biatec")?.metadata.icon || "🔗",
+          description: "Connect with Biatec wallet (VOI Network)",
+          isInstalled: true,
+        });
       }
 
       // Add other wallets based on network
@@ -91,7 +87,6 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
             icon: wallets.find((w) => w.id === "pera")?.metadata.icon || "🔗",
             description: "Connect with Pera wallet (Algorand)",
             isInstalled: true,
-            downloadUrl: "https://perawallet.app/",
           },
           {
             id: "defly",
@@ -99,7 +94,6 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
             icon: wallets.find((w) => w.id === "defly")?.metadata.icon || "🔗",
             description: "Connect with Defly wallet (Algorand)",
             isInstalled: true,
-            downloadUrl: "https://defly.app/",
           }
         );
       }
