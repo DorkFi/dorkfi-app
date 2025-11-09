@@ -185,7 +185,7 @@ const RepayModal = ({ isOpen, onClose, tokenSymbol, tokenIcon, currentBorrow, wa
                           </TooltipContent>
                         </Tooltip>
                       </div>
-                      <span className="text-sm font-medium text-red-600 dark:text-red-400">{marketStats.borrowAPY}%</span>
+                      <span className="text-sm font-medium text-red-600 dark:text-red-400">{marketStats.borrowAPY.toFixed(2)}%</span>
                     </div>
 
                     <div className="flex justify-between items-center">
