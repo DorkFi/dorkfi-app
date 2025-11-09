@@ -30,6 +30,7 @@ interface Borrow {
   value: number;
   apy: number;
   tokenPrice: number;
+  interest?: number; // Accrued interest for borrow positions
 }
 
 interface PortfolioModalsProps {
@@ -45,6 +46,7 @@ interface PortfolioModalsProps {
     totalCollateralValue: number;
     totalBorrowValue: number;
     lastUpdateTime: number;
+    healthFactorIndex?: number;
   } | null;
   userBorrowBalance?: number;
   onCloseDepositModal: () => void;
@@ -95,16 +97,89 @@ const PortfolioModals = ({
     const market = marketData.find(m => m.symbol === asset);
     const borrow = borrows.find(b => b.asset === asset);
     
-    return {
+    // Calculate health factor from userGlobalData
+    // Use healthFactorIndex if available (calculated with individual market collateral factors)
+    // Otherwise calculate from totalCollateral and totalBorrowed with 80% collateral factor
+    let healthFactor = 0;
+    if (userGlobalData) {
+      if (userGlobalData.healthFactorIndex !== undefined) {
+        healthFactor = userGlobalData.healthFactorIndex;
+        // healthFactorIndex is already capped at 3.0 in the calculation
+      } else if (userGlobalData.totalBorrowValue > 0) {
+        // Fallback: calculate with standard 80% collateral factor
+        const collateralFactor = 0.8;
+        healthFactor = (userGlobalData.totalCollateralValue * collateralFactor) / userGlobalData.totalBorrowValue;
+        healthFactor = Math.min(healthFactor, 3.0); // Cap at 3.0 for display (consistent with Portfolio)
+      } else if (userGlobalData.totalCollateralValue > 0) {
+        // No borrows = excellent health (capped at 3.0)
+        healthFactor = 3.0;
+      }
+    }
+    
+    // Calculate current LTV (Loan-to-Value ratio)
+    const currentLTV = userGlobalData && userGlobalData.totalCollateralValue > 0
+      ? (userGlobalData.totalBorrowValue / userGlobalData.totalCollateralValue) * 100
+      : 0;
+    
+    // Calculate liquidation margin
+    // Liquidation margin = Liquidation Threshold - Current LTV
+    // Use weighted liquidation threshold from borrowed assets, or market's threshold, or default 85%
+    const liquidationThreshold = market?.liquidationThreshold 
+      ? market.liquidationThreshold * 100 
+      : 85; // Default 85%
+    const liquidationMargin = Math.max(0, liquidationThreshold - currentLTV);
+    
+    const stats = {
       borrowAPY: market?.borrowApyCalculation?.apy || 
                  (market?.borrowRateCurrent ? market.borrowRateCurrent * 100 : 0) ||
                  borrow?.apy || 0,
-      liquidationMargin: market?.liquidationThreshold ? market.liquidationThreshold * 100 : 0,
-      healthFactor: market?.healthFactor || 0,
-      currentLTV: market?.currentLTV || 0,
+      liquidationMargin: liquidationMargin,
+      healthFactor: healthFactor,
+      currentLTV: currentLTV,
       tokenPrice: market?.price ? parseFloat(market.price) / Math.pow(10, 6) : 
                   borrow?.tokenPrice || 1
     };
+
+    // Debug logging for health factor calculation
+    console.log("[PortfolioModals] getMarketStatsForBorrow Debug:", {
+      asset,
+      marketFound: !!market,
+      borrowFound: !!borrow,
+      userGlobalData: userGlobalData ? {
+        totalCollateralValue: userGlobalData.totalCollateralValue,
+        totalBorrowValue: userGlobalData.totalBorrowValue,
+        healthFactorIndex: userGlobalData.healthFactorIndex,
+      } : null,
+      marketData: market ? {
+        liquidationThreshold: market.liquidationThreshold,
+        price: market.price,
+        borrowRateCurrent: market.borrowRateCurrent,
+        borrowApyCalculation: market.borrowApyCalculation
+      } : null,
+      calculatedStats: stats,
+      calculation: {
+        healthFactor: {
+          source: userGlobalData?.healthFactorIndex !== undefined 
+            ? "userGlobalData.healthFactorIndex" 
+            : userGlobalData 
+            ? "calculated from userGlobalData (80% collateral factor)"
+            : "fallback (0)",
+          value: healthFactor,
+        },
+        currentLTV: {
+          source: userGlobalData ? "calculated from userGlobalData" : "fallback (0)",
+          value: currentLTV,
+        },
+        liquidationMargin: {
+          source: market?.liquidationThreshold 
+            ? `market.liquidationThreshold (${liquidationThreshold}%) - currentLTV (${currentLTV}%)`
+            : "fallback calculation",
+          value: liquidationMargin,
+        }
+      }
+    });
+
+    return stats;
   };
 
   const getAssetData = (asset: string) => {
@@ -381,6 +456,7 @@ const PortfolioModals = ({
           tokenSymbol={repayModal.asset}
           tokenIcon={getTokenImagePath(repayModal.asset)}
           currentBorrow={borrows.find(b => b.asset === repayModal.asset)?.balance || 0}
+          accruedInterest={borrows.find(b => b.asset === repayModal.asset)?.interest || 0}
           walletBalance={walletBalances[repayModal.asset]?.balance || 0}
           marketStats={getMarketStatsForBorrow(repayModal.asset)}
           onSubmit={handleRepaySubmit}

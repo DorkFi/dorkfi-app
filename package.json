@@ -1,7 +1,7 @@
 {
   "name": "vite_react_shadcn_ts",
   "private": true,
-  "version": "0.1.387",
+  "version": "0.1.388",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -72,7 +72,7 @@
     "sonner": "^1.5.0",
     "tailwind-merge": "^2.5.2",
     "tailwindcss-animate": "^1.0.7",
-    "ulujs": "^1.0.0",
+    "ulujs": "^3.0.1",
     "vaul": "^0.9.3",
     "zod": "^3.23.8"
   },

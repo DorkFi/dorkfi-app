@@ -3562,12 +3562,13 @@ export default function AdminDashboard() {
                 // Fetch borrowed balance using the lending service
                 let borrowed = 0n;
                 try {
-                  const borrowBalance = await fetchUserBorrowBalance(
+                  const borrowData = await fetchUserBorrowBalance(
                     userAddress,
                     token.poolId || "1",
                     token.underlyingContractId || token.symbol,
                     currentNetwork
                   );
+                  const borrowBalance = borrowData?.balance || 0;
                   console.log("borrowBalance", borrowBalance);
                   if (borrowBalance !== null && borrowBalance !== undefined) {
                     // Convert to base units (considering token decimals)

@@ -21,6 +21,7 @@ export interface PortfolioPosition {
   apy: number;
   tokenPrice: number;
   type: "deposit" | "borrow";
+  interest?: number; // Accrued interest for borrow positions
 }
 
 export interface PortfolioData {
@@ -28,6 +29,7 @@ export interface PortfolioData {
     totalCollateralValue: number;
     totalBorrowValue: number;
     lastUpdateTime: number;
+    healthFactorIndex?: number;
   } | null;
   marketData: any[];
   userPositions: PortfolioPosition[];
@@ -112,7 +114,7 @@ export const usePortfolioData = () => {
             const market = markets.find((m) => m.symbol === token.symbol);
 
             // Fetch both deposit and borrow balances for this token
-            const [depositBalance, borrowBalance] = await Promise.all([
+            const [depositBalance, borrowData] = await Promise.all([
               fetchUserDepositBalance(
                 userAddress,
                 "46505156", // Pool ID - should be dynamic
@@ -126,6 +128,10 @@ export const usePortfolioData = () => {
                 networkId as any
               ),
             ]);
+
+            // Extract borrow balance and interest from the new return type
+            const borrowBalance = borrowData?.balance || 0;
+            const borrowInterest = borrowData?.interest || 0;
 
             // Add deposit position if user has deposits
             if (depositBalance && depositBalance > 0) {
@@ -179,6 +185,7 @@ export const usePortfolioData = () => {
             if (borrowBalance && borrowBalance > 0) {
               console.log(`Borrow position for ${token.symbol}:`, {
                 borrowBalance,
+                borrowInterest,
                 marketPrice: market?.price,
                 tokenPrice: market?.price
                   ? parseFloat(market.price) / Math.pow(10, 6)
@@ -207,6 +214,7 @@ export const usePortfolioData = () => {
                   ? parseFloat(market.price) / Math.pow(10, 6)
                   : 1,
                 type: "borrow",
+                interest: borrowInterest,
               });
             }
           }
@@ -411,6 +419,8 @@ export const usePortfolioData = () => {
         freshMarketData
       );
 
+      console.log("freshGlobalData", freshGlobalData);
+
       setMarketData(freshMarketData);
       setUserPositions(freshPositions);
       setUserGlobalData(freshGlobalData);
@@ -444,11 +454,9 @@ export const usePortfolioData = () => {
           currentNetwork
         );
 
-        // Fetch global data and markets first
-        const [globalData, markets] = await Promise.all([
-          fetchUserGlobalData(activeAccount.address, currentNetwork),
-          fetchAllMarkets(currentNetwork),
-        ]);
+        // Fetch markets first, then global data (so we can pass marketData for healthFactorIndex calculation)
+        const markets = await fetchAllMarkets(currentNetwork);
+        const globalData = await fetchUserGlobalData(activeAccount.address, currentNetwork, markets);
 
         // Then fetch user positions with market data
         const positions = await fetchUserPositions(

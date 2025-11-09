@@ -92,13 +92,13 @@ const MarketDetailModal = ({ isOpen, onClose, asset, marketData }: MarketDetailM
         const token = tokens.find((t) => t.symbol === asset);
         
         if (token && token.poolId && token.underlyingContractId) {
-          const borrowBalance = await fetchUserBorrowBalance(
+          const borrowData = await fetchUserBorrowBalance(
             activeAccount.address,
             token.poolId,
             token.underlyingContractId,
             currentNetwork
           );
-          setUserBorrowBalance(borrowBalance || 0);
+          setUserBorrowBalance(borrowData?.balance || 0);
         } else {
           setUserBorrowBalance(0);
         }

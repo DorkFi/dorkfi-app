@@ -98,7 +98,7 @@ const Portfolio = () => {
           const market = markets.find((m) => m.symbol === token.symbol);
           
           // Fetch both deposit and borrow balances for this token
-          const [depositBalance, borrowBalance] = await Promise.all([
+          const [depositBalance, borrowData] = await Promise.all([
             fetchUserDepositBalance(
               userAddress,
               "46505156", // Pool ID - should be dynamic
@@ -112,6 +112,10 @@ const Portfolio = () => {
               networkId as any
             )
           ]);
+
+          // Extract borrow balance and interest from the new return type
+          const borrowBalance = borrowData?.balance || 0;
+          const borrowInterest = borrowData?.interest || 0;
 
           // Add deposit position if user has deposits
           if (depositBalance && depositBalance > 0) {
@@ -151,6 +155,7 @@ const Portfolio = () => {
           if (borrowBalance && borrowBalance > 0) {
             console.log(`Borrow position for ${token.symbol}:`, {
               borrowBalance,
+              borrowInterest,
               marketPrice: market?.price,
               tokenPrice: market?.price ? parseFloat(market.price) / Math.pow(10, 6) : 1,
               calculatedValue: (borrowBalance * (market?.price ? parseFloat(market.price) : 1)) / Math.pow(10, 6),
@@ -168,7 +173,8 @@ const Portfolio = () => {
               apy: market?.borrowApyCalculation?.apy || 
                    (market?.borrowRateCurrent ? market.borrowRateCurrent * 100 : 0),
               tokenPrice: market?.price ? parseFloat(market.price) / Math.pow(10, 6) : 1,
-              type: 'borrow'
+              type: 'borrow',
+              interest: borrowInterest,
             });
           }
         }
@@ -357,7 +363,7 @@ const Portfolio = () => {
           const clients = await algorandService.getCurrentClientsForReads();
           const accountInfo = await clients.algod.accountInformation(activeAccount.address).do();
           // Convert from micro-units to units (divide by 1,000,000)
-          balance = accountInfo.amount / 1_000_000;
+          balance = Number(accountInfo.amount) / 1_000_000;
           console.log(`Network token balance for ${asset}: ${balance}`);
         } catch (error) {
           console.error(`Error fetching network token balance for ${asset}:`, error);
@@ -376,7 +382,7 @@ const Portfolio = () => {
           
           if (assetHolding) {
             // Convert from smallest units to human readable format
-            balance = assetHolding.amount / Math.pow(10, originalTokenConfig.decimals);
+            balance = Number(assetHolding.amount) / Math.pow(10, originalTokenConfig.decimals);
             console.log(`ASA balance for ${asset}: ${balance}`);
           } else {
             console.log(`No ASA balance found for ${asset}`);
@@ -442,10 +448,8 @@ const Portfolio = () => {
     setIsLoadingPositions(true);
     try {
       // Fetch fresh market data and global data first
-      const [freshMarketData, freshGlobalData] = await Promise.all([
-        fetchAllMarkets(currentNetwork),
-        fetchUserGlobalData(activeAccount.address, currentNetwork),
-      ]);
+      const freshMarketData = await fetchAllMarkets(currentNetwork);
+      const freshGlobalData = await fetchUserGlobalData(activeAccount.address, currentNetwork, freshMarketData);
 
       // Then fetch fresh user positions with market data
       const freshPositions = await fetchUserPositions(activeAccount.address, currentNetwork, freshMarketData);
@@ -481,11 +485,9 @@ const Portfolio = () => {
           currentNetwork
         );
 
-        // Fetch global data and markets first
-        const [globalData, markets] = await Promise.all([
-          fetchUserGlobalData(activeAccount.address, currentNetwork),
-          fetchAllMarkets(currentNetwork),
-        ]);
+        // Fetch markets first, then global data (so we can pass marketData for healthFactorIndex calculation)
+        const markets = await fetchAllMarkets(currentNetwork);
+        const globalData = await fetchUserGlobalData(activeAccount.address, currentNetwork, markets);
 
         // Then fetch user positions with market data
         const positions = await fetchUserPositions(activeAccount.address, currentNetwork, markets);
@@ -560,7 +562,9 @@ const Portfolio = () => {
     try {
       // Fetch user global data before opening modal (only if wallet is connected)
       if (activeAccount?.address) {
-        const globalData = await fetchUserGlobalData(activeAccount.address, currentNetwork);
+        // Fetch markets to pass for healthFactorIndex calculation
+        const markets = await fetchAllMarkets(currentNetwork);
+        const globalData = await fetchUserGlobalData(activeAccount.address, currentNetwork, markets);
         setUserGlobalData(globalData);
         
         // Fetch user's current borrow balance for this specific asset
@@ -568,12 +572,13 @@ const Portfolio = () => {
         const token = tokens.find((t) => t.symbol === asset);
         
         if (token && token.poolId && token.underlyingContractId) {
-          const borrowBalance = await fetchUserBorrowBalance(
+          const borrowData = await fetchUserBorrowBalance(
             activeAccount.address,
             token.poolId,
             token.underlyingContractId,
             currentNetwork
           );
+          const borrowBalance = borrowData?.balance || 0;
           setUserBorrowBalance(borrowBalance || 0);
         } else {
           setUserBorrowBalance(0);
