@@ -428,6 +428,7 @@ const betaTokens: { [symbol: string]: TokenConfig } = {
   },
 };
 const betaLendingPools = ["46505156"];
+
 const betaContracts = {
   lendingPools: [...betaLendingPools],
   priceOracle: "46826662", // Gooch

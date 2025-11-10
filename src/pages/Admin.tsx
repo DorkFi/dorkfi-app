@@ -766,8 +766,9 @@ export default function AdminDashboard() {
       );
 
       // Use the price oracle contract address for role checking
-      const priceOracleAddress = algosdk.getApplicationAddress(
-        Number(oracleContractInfo.contractId)
+      const priceOracleAddress = algosdk.encodeAddress(
+        algosdk.getApplicationAddress(Number(oracleContractInfo.contractId))
+          .publicKey
       );
 
       const ci = new CONTRACT(
@@ -1434,7 +1435,7 @@ export default function AdminDashboard() {
           hasPriceOracleRole: oracleContractInfo.hasPriceOracleRole,
         },
         networkConfig: networkConfig,
-        supportedAssets: markets.map(market => ({
+        supportedAssets: markets.map((market) => ({
           id: market.id,
           symbol: market.symbol,
           name: market.name,
@@ -1445,7 +1446,7 @@ export default function AdminDashboard() {
         })),
         contractState: oracleContractInfo.contractState,
         assetPrices: Object.keys(assetPrices).reduce((acc, marketId) => {
-          const market = markets.find(m => m.id === marketId);
+          const market = markets.find((m) => m.id === marketId);
           const priceData = assetPrices[marketId];
           if (market && priceData) {
             acc[marketId] = {
@@ -1454,40 +1455,47 @@ export default function AdminDashboard() {
               underlyingAssetId: market.underlyingAssetId,
               price: Number(priceData.price) / 1e6, // Convert from micro units
               timestamp: Number(priceData.timestamp),
-              lastUpdated: new Date(Number(priceData.timestamp) * 1000).toISOString(),
+              lastUpdated: new Date(
+                Number(priceData.timestamp) * 1000
+              ).toISOString(),
             };
           }
           return acc;
         }, {} as Record<string, any>),
-        priceFeedStatus: Object.keys(priceFeedStatus).reduce((acc, marketId) => {
-          const market = markets.find(m => m.id === marketId);
-          const isAttached = priceFeedStatus[marketId];
-          if (market) {
-            acc[marketId] = {
-              symbol: market.symbol,
-              name: market.name,
-              underlyingAssetId: market.underlyingAssetId,
-              isAttached: isAttached,
-            };
-          }
-          return acc;
-        }, {} as Record<string, any>),
+        priceFeedStatus: Object.keys(priceFeedStatus).reduce(
+          (acc, marketId) => {
+            const market = markets.find((m) => m.id === marketId);
+            const isAttached = priceFeedStatus[marketId];
+            if (market) {
+              acc[marketId] = {
+                symbol: market.symbol,
+                name: market.name,
+                underlyingAssetId: market.underlyingAssetId,
+                isAttached: isAttached,
+              };
+            }
+            return acc;
+          },
+          {} as Record<string, any>
+        ),
       };
 
       // Create and download the JSON file
       const jsonString = JSON.stringify(exportData, null, 2);
-      const blob = new Blob([jsonString], { type: 'application/json' });
+      const blob = new Blob([jsonString], { type: "application/json" });
       const url = URL.createObjectURL(blob);
-      
-      const link = document.createElement('a');
+
+      const link = document.createElement("a");
       link.href = url;
-      link.download = `oracle-data-${currentNetwork}-${new Date().toISOString().split('T')[0]}.json`;
+      link.download = `oracle-data-${currentNetwork}-${
+        new Date().toISOString().split("T")[0]
+      }.json`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      
+
       URL.revokeObjectURL(url);
-      
+
       toast.success("Oracle data exported successfully", {
         description: "Oracle data has been downloaded as JSON file.",
       });
@@ -1790,8 +1798,8 @@ export default function AdminDashboard() {
         totalSupply: totalSupplyR.returnValue.toString(),
         paused: pausedR.returnValue,
         contractId: stokenContractId,
-        contractAddress: algosdk.getApplicationAddress(
-          Number(stokenContractId)
+        contractAddress: algosdk.encodeAddress(
+          algosdk.getApplicationAddress(Number(stokenContractId)).publicKey
         ),
       });
 
@@ -1834,7 +1842,9 @@ export default function AdminDashboard() {
       for (const poolId of lendingPools) {
         try {
           // Convert pool ID to application address
-          const poolAddress = algosdk.getApplicationAddress(Number(poolId));
+          const poolAddress = algosdk.encodeAddress(
+            algosdk.getApplicationAddress(Number(poolId)).publicKey
+          );
           const isMinterR = await ci.is_minter(poolAddress);
           if (isMinterR.success && isMinterR.returnValue) {
             approvedMinters.push(poolId);
@@ -1888,7 +1898,9 @@ export default function AdminDashboard() {
 
       if (!isNaN(appId) && appId > 0) {
         // Convert application ID to application address
-        actualMinterAddress = algosdk.getApplicationAddress(appId);
+        actualMinterAddress = algosdk.encodeAddress(
+          algosdk.getApplicationAddress(appId).publicKey
+        );
         console.log(
           `Converted app ID ${appId} to address: ${actualMinterAddress}`
         );
@@ -1964,7 +1976,9 @@ export default function AdminDashboard() {
 
       if (!isNaN(appId) && appId > 0) {
         // Convert application ID to application address
-        actualMinterAddress = algosdk.getApplicationAddress(appId);
+        actualMinterAddress = algosdk.encodeAddress(
+          algosdk.getApplicationAddress(appId).publicKey
+        );
         console.log(
           `Converted app ID ${appId} to address: ${actualMinterAddress}`
         );
@@ -2034,8 +2048,8 @@ export default function AdminDashboard() {
       );
 
       // Convert SToken contract ID to address
-      const stokenAddress = algosdk.getApplicationAddress(
-        Number(stokenContractId)
+      const stokenAddress = algosdk.encodeAddress(
+        algosdk.getApplicationAddress(Number(stokenContractId)).publicKey
       );
 
       ci.setFee(2000);
@@ -3103,7 +3117,9 @@ export default function AdminDashboard() {
             undefined,
             { ...LendingPoolAppSpec.contract, events: [] },
             {
-              addr: algosdk.getApplicationAddress(Number(poolId)),
+              addr: algosdk.encodeAddress(
+                algosdk.getApplicationAddress(Number(poolId)).publicKey
+              ),
               sk: new Uint8Array(),
             }
           );
@@ -3272,7 +3288,9 @@ export default function AdminDashboard() {
                 undefined,
                 { ...LendingPoolAppSpec.contract, events: [] },
                 {
-                  addr: algosdk.getApplicationAddress(Number(poolId)),
+                  addr: algosdk.encodeAddress(
+                    algosdk.getApplicationAddress(Number(poolId)).publicKey
+                  ),
                   sk: new Uint8Array(),
                 }
               );
@@ -3869,12 +3887,12 @@ export default function AdminDashboard() {
           const appInfo = await clients.algod
             .getApplicationByID(Number(contractId))
             .do();
+          console.log("appInfo", appInfo);
           isDeployed = true;
           contractState = {
             appId: appInfo.id,
-            creator: appInfo.params.creator,
-            globalState: appInfo.params["global-state"] || [],
-            localState: appInfo.params["local-state"] || [],
+            creator: algosdk.encodeAddress(appInfo.params.creator.publicKey),
+            globalState: appInfo.params.globalState,
           };
         } catch (error) {
           console.log("Contract not deployed or error fetching:", error);
@@ -9731,15 +9749,6 @@ export default function AdminDashboard() {
                             ?.length || 0}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium">
-                          Local State Keys
-                        </span>
-                        <span className="text-sm text-muted-foreground">
-                          {oracleContractInfo.contractState.localState
-                            ?.length || 0}
-                        </span>
-                      </div>
                     </div>
                   ) : (
                     <div className="text-center py-8 text-muted-foreground">
@@ -10386,15 +10395,6 @@ export default function AdminDashboard() {
                         </span>
                         <span className="text-sm text-muted-foreground">
                           {oracleContractInfo.contractState.globalState
-                            ?.length || 0}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium">
-                          Local State Keys
-                        </span>
-                        <span className="text-sm text-muted-foreground">
-                          {oracleContractInfo.contractState.localState
                             ?.length || 0}
                         </span>
                       </div>
@@ -12548,14 +12548,18 @@ export default function AdminDashboard() {
                       This role will be assigned to the Oracle Contract address:{" "}
                       {oracleContractInfo.contractId
                         ? algosdk
-                            .getApplicationAddress(
-                              Number(oracleContractInfo.contractId)
+                            .encodeAddress(
+                              algosdk.getApplicationAddress(
+                                Number(oracleContractInfo.contractId)
+                              ).publicKey
                             )
                             .slice(0, 8) +
                           "..." +
                           algosdk
-                            .getApplicationAddress(
-                              Number(oracleContractInfo.contractId)
+                            .encodeAddress(
+                              algosdk.getApplicationAddress(
+                                Number(oracleContractInfo.contractId)
+                              ).publicKey
                             )
                             .slice(-8)
                         : "N/A"}
@@ -12630,7 +12634,9 @@ export default function AdminDashboard() {
                       return;
                     }
                     contractId = Number(oracleContractInfo.contractId);
-                    targetAddress = algosdk.getApplicationAddress(contractId);
+                    targetAddress = algosdk.encodeAddress(
+                      algosdk.getApplicationAddress(contractId).publicKey
+                    );
                     contractSpec = {
                       ...LendingPoolAppSpec.contract,
                       events: [],

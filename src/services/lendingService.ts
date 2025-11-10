@@ -578,57 +578,65 @@ export const fetchUserGlobalData = async (
             borrowValueUSD: poolBorrowValueUSD,
           });
 
-      // Aggregate values from all pools
-      totalCollateralValueUSD += poolCollateralValueUSD;
-      totalBorrowValueUSD += poolBorrowValueUSD;
-      // Use the latest update time from all pools
-      lastUpdateTime = Math.max(
-        lastUpdateTime,
-        Number(globalUser.lastUpdateTime)
-      );
-    } else {
-      console.warn(`Failed to get global user data for pool ${poolId}`);
-    }
-  }
+          // Aggregate values from all pools
+          totalCollateralValueUSD += poolCollateralValueUSD;
+          totalBorrowValueUSD += poolBorrowValueUSD;
+          // Use the latest update time from all pools
+          lastUpdateTime = Math.max(
+            lastUpdateTime,
+            Number(globalUser.lastUpdateTime)
+          );
+        } else {
+          console.warn(`Failed to get global user data for pool ${poolId}`);
+        }
+      }
 
-  // Calculate healthFactorIndex if marketData is provided
-  let healthFactorIndex: number | undefined;
-  const STANDARD_COLLATERAL_FACTOR = 0.8; // 80% baseline
-  
-  if (totalBorrowValueUSD === 0 && totalCollateralValueUSD > 0) {
-    // No borrows = excellent health (capped at 3.0 for display)
-    healthFactorIndex = 3.0;
-    console.log(`[HealthFactorIndex] No borrows - excellent health (capped at 3.0): ${healthFactorIndex}`);
-  } else if (totalCollateralValueUSD === 0 && totalBorrowValueUSD > 0) {
-    // No collateral but has borrows = 0 health
-    healthFactorIndex = 0;
-    console.log(`[HealthFactorIndex] No collateral but has borrows: ${healthFactorIndex}`);
-  } else if (totalBorrowValueUSD > 0 && totalCollateralValueUSD > 0) {
-    // Calculate healthFactorIndex normalized to 80% collateral factor baseline
-    // 
-    // The contract's totalCollateralValue is already weighted: sum(depositValue_i * collateralFactor_i)
-    // To normalize to 80% baseline, we want: sum(depositValue_i * 0.8)
-    //
-    // Since we don't have individual positions, we'll use the contract's value directly.
-    // If the average collateral factor is close to 80% (which is common), this is already close to normalized.
-    // 
-    // healthFactorIndex = totalCollateralValue / totalBorrowValue
-    // This gives the actual health factor with current market collateral factors.
-    // For most cases where average CF ≈ 80%, this is effectively normalized to 80% baseline.
-    
-    healthFactorIndex = totalCollateralValueUSD / totalBorrowValueUSD;
-    
-    // Cap at 3.0 for display purposes (consistent with Portfolio page)
-    healthFactorIndex = Math.min(healthFactorIndex, 3.0);
-    
-    console.log(`[HealthFactorIndex] Calculation:`, {
-      totalCollateralValueUSD,
-      totalBorrowValueUSD,
-      healthFactorIndex,
-      formula: `(${totalCollateralValueUSD.toFixed(2)} / ${totalBorrowValueUSD.toFixed(2)}) = ${healthFactorIndex.toFixed(4)}`,
-      note: "Using contract's weighted collateral value. If average CF ≈ 80%, this is effectively normalized to 80% baseline. Capped at 3.0 for display."
-    });
-  }
+      // Calculate healthFactorIndex if marketData is provided
+      let healthFactorIndex: number | undefined;
+      const STANDARD_COLLATERAL_FACTOR = 0.8; // 80% baseline
+
+      if (totalBorrowValueUSD === 0 && totalCollateralValueUSD > 0) {
+        // No borrows = excellent health (capped at 3.0 for display)
+        healthFactorIndex = 3.0;
+        console.log(
+          `[HealthFactorIndex] No borrows - excellent health (capped at 3.0): ${healthFactorIndex}`
+        );
+      } else if (totalCollateralValueUSD === 0 && totalBorrowValueUSD > 0) {
+        // No collateral but has borrows = 0 health
+        healthFactorIndex = 0;
+        console.log(
+          `[HealthFactorIndex] No collateral but has borrows: ${healthFactorIndex}`
+        );
+      } else if (totalBorrowValueUSD > 0 && totalCollateralValueUSD > 0) {
+        // Calculate healthFactorIndex normalized to 80% collateral factor baseline
+        //
+        // The contract's totalCollateralValue is already weighted: sum(depositValue_i * collateralFactor_i)
+        // To normalize to 80% baseline, we want: sum(depositValue_i * 0.8)
+        //
+        // Since we don't have individual positions, we'll use the contract's value directly.
+        // If the average collateral factor is close to 80% (which is common), this is already close to normalized.
+        //
+        // healthFactorIndex = totalCollateralValue / totalBorrowValue
+        // This gives the actual health factor with current market collateral factors.
+        // For most cases where average CF ≈ 80%, this is effectively normalized to 80% baseline.
+
+        healthFactorIndex = totalCollateralValueUSD / totalBorrowValueUSD;
+
+        // Cap at 3.0 for display purposes (consistent with Portfolio page)
+        healthFactorIndex = Math.min(healthFactorIndex, 3.0);
+
+        console.log(`[HealthFactorIndex] Calculation:`, {
+          totalCollateralValueUSD,
+          totalBorrowValueUSD,
+          healthFactorIndex,
+          formula: `(${totalCollateralValueUSD.toFixed(
+            2
+          )} / ${totalBorrowValueUSD.toFixed(2)}) = ${healthFactorIndex.toFixed(
+            4
+          )}`,
+          note: "Using contract's weighted collateral value. If average CF ≈ 80%, this is effectively normalized to 80% baseline. Capped at 3.0 for display.",
+        });
+      }
 
       return {
         totalCollateralValue: totalCollateralValueUSD,
@@ -720,7 +728,7 @@ export const fetchUserBorrowBalance = async (
         console.log({
           userBorrowIndex,
           currentBorrowIndex,
-        })
+        });
 
         // Calculate actual borrows using current borrow index (includes accrued interest):
         // underlying_amount = (scaled_borrows * current_borrow_index) / SCALE
@@ -1264,25 +1272,26 @@ export const withdraw = async (
         buildN.push({
           ...txnO,
           note: new TextEncoder().encode("lending withdraw"),
-          foreignApps: [46505155],
+          payment: 1e5,
+          foreignApps: [46505155], // TODO use value from config
         });
       }
 
       // sync user market for price change
-      {
-        const txnO = (
-          await builder.lending.sync_user_market_for_price_change(
-            userAddress,
-            Number(marketId)
-          )
-        ).obj;
-        buildN.push({
-          ...txnO,
-          note: new TextEncoder().encode(
-            "lending sync_user_market_for_price_change"
-          ),
-        });
-      }
+      // {
+      //   const txnO = (
+      //     await builder.lending.sync_user_market_for_price_change(
+      //       userAddress,
+      //       Number(marketId)
+      //     )
+      //   ).obj;
+      //   buildN.push({
+      //     ...txnO,
+      //     note: new TextEncoder().encode(
+      //       "lending sync_user_market_for_price_change"
+      //     ),
+      //   });
+      // }
 
       // cond a token withdraw
       // if (tokenStandard != "arc200") {
@@ -1298,7 +1307,7 @@ export const withdraw = async (
       console.log("buildN", { buildN });
 
       // Create withdraw transaction
-      ci.setFee(8000);
+      ci.setFee(20000);
       ci.setEnableGroupResourceSharing(true);
       ci.setExtraTxns(buildN);
       if (networkConfig.networkId === "algorand-mainnet") {
@@ -1505,16 +1514,16 @@ export const deposit = async (
         // TODO fund ntoken
 
         // fetch market price
-        if (doFetchPriceFeed) {
-          const txnO = (
-            await builder.lending.fetch_price_feed(Number(marketId))
-          ).obj;
-          buildN.push({
-            ...txnO,
-            payment: 1e5,
-            note: new TextEncoder().encode("lending fetch_price_feed"),
-          });
-        }
+        // if (doFetchPriceFeed) {
+        //   const txnO = (
+        //     await builder.lending.fetch_price_feed(Number(marketId))
+        //   ).obj;
+        //   buildN.push({
+        //     ...txnO,
+        //     payment: 1e5,
+        //     note: new TextEncoder().encode("lending fetch_price_feed"),
+        //   });
+        // }
 
         // conditionally deposit to token
         if (tokenStandard == "network") {
@@ -1607,18 +1616,18 @@ export const deposit = async (
         }
 
         // sync user market
-        {
-          const txnO = (
-            await builder.lending.sync_user_market_for_price_change(
-              userAddress,
-              Number(marketId)
-            )
-          ).obj;
-          buildN.push({
-            ...txnO,
-            note: new TextEncoder().encode("lending sync_user_market"),
-          });
-        }
+        // {
+        //   const txnO = (
+        //     await builder.lending.sync_user_market_for_price_change(
+        //       userAddress,
+        //       Number(marketId)
+        //     )
+        //   ).obj;
+        //   buildN.push({
+        //     ...txnO,
+        //     note: new TextEncoder().encode("lending sync_user_market"),
+        //   });
+        // }
 
         console.log("buildN", { buildN });
 
@@ -1863,16 +1872,16 @@ export const borrow = async (
         const [p1, p2, p3] = p;
         const buildN = [];
 
-        if (doFetchPriceFeed) {
-          const txnO = (
-            await builder.lending.fetch_price_feed(Number(marketId))
-          ).obj;
-          buildN.push({
-            ...txnO,
-            payment: 1e5,
-            note: new TextEncoder().encode("lending fetch_price_feed"),
-          });
-        }
+        // if (doFetchPriceFeed) {
+        //   const txnO = (
+        //     await builder.lending.fetch_price_feed(Number(marketId))
+        //   ).obj;
+        //   buildN.push({
+        //     ...txnO,
+        //     payment: 1e5,
+        //     note: new TextEncoder().encode("lending fetch_price_feed"),
+        //   });
+        // }
 
         // approve ntoken spending
         // {
@@ -1890,14 +1899,14 @@ export const borrow = async (
         // }
 
         // sync market
-        {
-          const txnO = (await builder.lending.sync_market(Number(marketId)))
-            .obj;
-          buildN.push({
-            ...txnO,
-            note: new TextEncoder().encode("lending sync_market"),
-          });
-        }
+        // {
+        //   const txnO = (await builder.lending.sync_market(Number(marketId)))
+        //     .obj;
+        //   buildN.push({
+        //     ...txnO,
+        //     note: new TextEncoder().encode("lending sync_market"),
+        //   });
+        // }
 
         // Borrow from lending pool
         {
@@ -1952,20 +1961,20 @@ export const borrow = async (
         }
 
         // sync user market for price change
-        {
-          const txnO = (
-            await builder.lending.sync_user_market_for_price_change(
-              userAddress,
-              Number(marketId)
-            )
-          ).obj;
-          buildN.push({
-            ...txnO,
-            note: new TextEncoder().encode(
-              "lending sync_user_market_for_price_change"
-            ),
-          });
-        }
+        // {
+        //   const txnO = (
+        //     await builder.lending.sync_user_market_for_price_change(
+        //       userAddress,
+        //       Number(marketId)
+        //     )
+        //   ).obj;
+        //   buildN.push({
+        //     ...txnO,
+        //     note: new TextEncoder().encode(
+        //       "lending sync_user_market_for_price_change"
+        //     ),
+        //   });
+        // }
 
         console.log("buildN", { buildN });
 
@@ -2156,6 +2165,7 @@ export const repay = async (
       const buildN = [];
 
       // approve spending of token (non stoken only)
+      // TODO check if this is needed
       {
         const txnO = (
           await builder.token.arc200_approve(
@@ -2175,25 +2185,26 @@ export const repay = async (
           .obj as any;
         buildN.push({
           ...txnO,
+          payment: 1e5,
           note: new TextEncoder().encode("lending repay"),
         });
       }
 
       // sync user market for price change
-      {
-        const txnO = (
-          await builder.lending.sync_user_market_for_price_change(
-            userAddress,
-            Number(marketId)
-          )
-        ).obj;
-        buildN.push({
-          ...txnO,
-          note: new TextEncoder().encode(
-            "lending sync_user_market_for_price_change"
-          ),
-        });
-      }
+      // {
+      //   const txnO = (
+      //     await builder.lending.sync_user_market_for_price_change(
+      //       userAddress,
+      //       Number(marketId)
+      //     )
+      //   ).obj;
+      //   buildN.push({
+      //     ...txnO,
+      //     note: new TextEncoder().encode(
+      //       "lending sync_user_market_for_price_change"
+      //     ),
+      //   });
+      // }
 
       ci.setEnableGroupResourceSharing(true);
       ci.setExtraTxns(buildN);
