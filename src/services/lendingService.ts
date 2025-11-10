@@ -2044,6 +2044,13 @@ export const repay = async (
         networkConfig.walletNetworkId as AlgorandNetwork
       );
 
+      const arc200Service = ARC200Service.initialize(clients);
+      console.log("arc200Service", { arc200Service });
+      const balance = await ARC200Service.getBalance(userAddress, marketId);
+      console.log("balance", { balance });
+      const tokenInfo = await ARC200Service.getTokenInfo(marketId);
+      console.log("tokenInfo", { tokenInfo });
+
       // Get token information
       const allTokens = getAllTokensWithDisplayInfo(networkId);
       console.log(
@@ -2092,6 +2099,13 @@ export const repay = async (
       if (!marketInfo) {
         throw new Error("Failed to fetch market info");
       }
+      console.log("marketInfo", { marketInfo });
+      const userPosition = await fetchUserPosition(
+        userAddress,
+        marketId,
+        networkId
+      );
+      console.log("userPosition", { userPosition });
 
       const ci = new CONTRACT(
         Number(poolId),

@@ -6,13 +6,14 @@ import RepayModal from "./RepayModal";
 import SupplyBorrowModal from "./SupplyBorrowModal";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { withdraw, repay } from "@/services/lendingService";
+import { withdraw, repay, fetchUserWalletBalance } from "@/services/lendingService";
 import { getTokenConfig, getAllTokensWithDisplayInfo } from "@/config";
 import algorandService from "@/services/algorandService";
 import algosdk, { waitForConfirmation } from "algosdk";
 import BigNumber from "bignumber.js";
 import { getTokenImagePath } from "@/utils/tokenImageUtils";
 import { useToast } from "@/hooks/use-toast";
+import { getUserFriendlyError } from "@/utils/errorUtils";
 
 interface Deposit {
   asset: string;
@@ -293,7 +294,18 @@ const PortfolioModals = ({
       onCloseWithdrawModal();
     } catch (error) {
       console.error("Withdraw error:", error);
-      // You might want to show an error message to the user
+      const errorMessage = getUserFriendlyError(error);
+      
+      // Show error toast to the user
+      toast({
+        title: "Withdraw Failed",
+        description: errorMessage,
+        variant: "destructive",
+        duration: 5000,
+      });
+      
+      // Re-throw the error so WithdrawModal can catch it and not show success modal
+      throw error;
     }
   };
 
@@ -381,7 +393,18 @@ const PortfolioModals = ({
       // Don't close the modal here - let RepayModal handle the success state
     } catch (error) {
       console.error("Repay error:", error);
-      // You might want to show an error message to the user
+      const errorMessage = getUserFriendlyError(error);
+      
+      // Show error toast to the user
+      toast({
+        title: "Repay Failed",
+        description: errorMessage,
+        variant: "destructive",
+        duration: 5000,
+      });
+      
+      // Re-throw the error so RepayModal can catch it and not show success modal
+      throw error;
     }
   };
 
@@ -459,6 +482,7 @@ const PortfolioModals = ({
           accruedInterest={borrows.find(b => b.asset === repayModal.asset)?.interest || 0}
           walletBalance={walletBalances[repayModal.asset]?.balance || 0}
           marketStats={getMarketStatsForBorrow(repayModal.asset)}
+          lastUpdateTime={userGlobalData?.lastUpdateTime}
           onSubmit={handleRepaySubmit}
         />
       )}

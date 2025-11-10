@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { InfoIcon, ChevronDown, ChevronUp } from "lucide-react";
 import SupplyBorrowCongrats from "./SupplyBorrowCongrats";
+import { formatRelativeTime } from "@/utils/timeUtils";
 
 interface RepayModalProps {
   isOpen: boolean;
@@ -22,10 +23,11 @@ interface RepayModalProps {
     currentLTV: number;
     tokenPrice: number;
   };
+  lastUpdateTime?: number;
   onSubmit: (amount: string) => Promise<void>;
 }
 
-const RepayModal = ({ isOpen, onClose, tokenSymbol, tokenIcon, currentBorrow, accruedInterest, walletBalance, marketStats, onSubmit }: RepayModalProps) => {
+const RepayModal = ({ isOpen, onClose, tokenSymbol, tokenIcon, currentBorrow, accruedInterest, walletBalance, marketStats, lastUpdateTime, onSubmit }: RepayModalProps) => {
   const [amount, setAmount] = useState("");
   const [fiatValue, setFiatValue] = useState(0);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -240,6 +242,11 @@ const RepayModal = ({ isOpen, onClose, tokenSymbol, tokenIcon, currentBorrow, ac
                               </p>
                               <p className="text-xs text-amber-600 dark:text-amber-500 mt-1">
                                 This is the interest that has accrued on your borrow since you borrowed. It's included in your current borrow amount.
+                                {lastUpdateTime && (
+                                  <span className="block mt-1 text-amber-500 dark:text-amber-400">
+                                    Last updated: {formatRelativeTime(lastUpdateTime)}
+                                  </span>
+                                )}
                               </p>
                             </div>
                           )}
@@ -320,6 +327,11 @@ const RepayModal = ({ isOpen, onClose, tokenSymbol, tokenIcon, currentBorrow, ac
                                   <p className="text-slate-500 dark:text-slate-400">
                                     USD Value: ${(accruedInterest * marketStats.tokenPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </p>
+                                  {lastUpdateTime && (
+                                    <p className="text-slate-500 dark:text-slate-400 mt-1">
+                                      Last updated: {formatRelativeTime(lastUpdateTime)}
+                                    </p>
+                                  )}
                                 </div>
                               </div>
                             )}

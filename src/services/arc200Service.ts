@@ -80,14 +80,45 @@ export class ARC200Service {
       // 1. Call the ARC200 contract's global state
       // 2. Parse the token metadata
       // 3. Return structured token info
+      const ci = new CONTRACT(
+        Number(contractId),
+        this.clients.algod,
+        undefined,
+        abi.nt200,
+        undefined
+      );
+
+      const symbolR = await ci.arc200_symbol();
+      if (!symbolR.success) {
+        throw new Error("Failed to get ARC200 symbol");
+      }
+      const symbol = symbolR.returnValue;
+
+      const nameR = await ci.arc200_name();
+      if (!nameR.success) {
+        throw new Error("Failed to get ARC200 name");
+      }
+      const name = nameR.returnValue;
+
+      const decimalsR = await ci.arc200_decimals();
+      if (!decimalsR.success) {
+        throw new Error("Failed to get ARC200 decimals");
+      }
+      const decimals = decimalsR.returnValue;
+
+      const totalSupplyR = await ci.arc200_totalSupply();
+      if (!totalSupplyR.success) {
+        throw new Error("Failed to get ARC200 total supply");
+      }
+      const totalSupply = totalSupplyR.returnValue;
 
       // Mock implementation for testing
       const mockTokenInfo: ARC200TokenInfo = {
         contractId,
-        symbol: this.getSymbolFromContractId(contractId),
-        name: this.getNameFromContractId(contractId),
-        decimals: this.getDecimalsFromContractId(contractId),
-        totalSupply: "1000000000000000",
+        symbol,
+        name,
+        decimals,
+        totalSupply,
         creator: "MOCK_CREATOR",
         verified: true,
       };
