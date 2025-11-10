@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -26,11 +26,16 @@ interface WalletProvider {
   downloadUrl?: string;
 }
 
+// Connection timeout in milliseconds (60 seconds)
+const CONNECTION_TIMEOUT = 60000;
+
 const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
   const { wallets, activeAccount } = useWallet();
   const { toast } = useToast();
   const { currentNetwork } = useNetwork();
   const [isConnecting, setIsConnecting] = useState<string | null>(null);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const connectionAbortRef = useRef<AbortController | null>(null);
 
   // Get network configuration
   const networkConfig = getNetworkConfig(currentNetwork);
@@ -182,9 +187,66 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
 
   const walletProviders = getAvailableWalletProviders();
 
+  // Reset connecting state when modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      // Clear any ongoing connection state when modal closes
+      setIsConnecting(null);
+      // Clear timeout if it exists
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      // Abort any ongoing connection attempts
+      if (connectionAbortRef.current) {
+        connectionAbortRef.current.abort();
+        connectionAbortRef.current = null;
+      }
+    }
+  }, [isOpen]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      if (connectionAbortRef.current) {
+        connectionAbortRef.current.abort();
+      }
+    };
+  }, []);
+
   const handleConnectWallet = async (providerId: string) => {
+    // Clear any existing timeout
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+
+    // Create abort controller for this connection attempt
+    const abortController = new AbortController();
+    connectionAbortRef.current = abortController;
+
     try {
       setIsConnecting(providerId);
+
+      // Set timeout to cancel loading after CONNECTION_TIMEOUT
+      // Use closure to capture the providerId at the time of timeout creation
+      timeoutRef.current = setTimeout(() => {
+        // Check if we're still connecting this specific provider
+        setIsConnecting((current) => {
+          if (current === providerId && !abortController.signal.aborted) {
+            connectionAbortRef.current = null;
+            toast({
+              title: "Connection Timeout",
+              description: "Wallet connection timed out. Please try again.",
+              variant: "destructive",
+            });
+            return null;
+          }
+          return current;
+        });
+      }, CONNECTION_TIMEOUT);
 
       // For AVM networks, find the wallet from the wallets array
       if (isAVM) {
@@ -198,8 +260,24 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
             throw new Error("WalletConnect wallet not found");
           }
 
+          // Check if connection was aborted
+          if (abortController.signal.aborted) {
+            return;
+          }
+
           // Connect to WalletConnect (which will show Vera Wallet in the modal)
           await walletConnectWallet.connect();
+
+          // Check again after connection
+          if (abortController.signal.aborted) {
+            return;
+          }
+
+          // Clear timeout on success
+          if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+            timeoutRef.current = null;
+          }
 
           toast({
             title: "Vera Wallet Connected",
@@ -213,8 +291,24 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
             throw new Error("Wallet provider not found");
           }
 
+          // Check if connection was aborted
+          if (abortController.signal.aborted) {
+            return;
+          }
+
           // Connect to the wallet
           await wallet.connect();
+
+          // Check again after connection
+          if (abortController.signal.aborted) {
+            return;
+          }
+
+          // Clear timeout on success
+          if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+            timeoutRef.current = null;
+          }
 
           toast({
             title: "Wallet Connected",
@@ -224,26 +318,51 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
       } else if (isEVM) {
         // For EVM networks, we would need to implement EVM wallet connection
         // For now, show a message that EVM wallets are not yet implemented
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current);
+          timeoutRef.current = null;
+        }
         toast({
           title: "EVM Wallets Coming Soon",
           description:
             "EVM wallet integration is not yet implemented. Please switch to an AVM network.",
           variant: "destructive",
         });
+        setIsConnecting(null);
+        connectionAbortRef.current = null;
         return;
       }
 
-      onClose();
+      // Only close modal if connection wasn't aborted
+      if (!abortController.signal.aborted) {
+        onClose();
+      }
     } catch (error) {
-      console.error("Failed to connect wallet:", error);
-      toast({
-        title: "Connection Failed",
-        description:
-          error instanceof Error ? error.message : "Failed to connect wallet",
-        variant: "destructive",
-      });
+      // Clear timeout on error
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+
+      // Only show error if connection wasn't aborted
+      if (!abortController.signal.aborted) {
+        console.error("Failed to connect wallet:", error);
+        toast({
+          title: "Connection Failed",
+          description:
+            error instanceof Error ? error.message : "Failed to connect wallet",
+          variant: "destructive",
+        });
+      }
     } finally {
-      setIsConnecting(null);
+      // Only reset connecting state if it's still for this provider
+      setIsConnecting((current) => {
+        if (current === providerId && !abortController.signal.aborted) {
+          return null;
+        }
+        return current;
+      });
+      connectionAbortRef.current = null;
     }
   };
 
