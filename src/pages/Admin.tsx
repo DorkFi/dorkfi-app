@@ -116,6 +116,7 @@ import {
   updateMarketPrice,
   updateMarketMaxDeposits,
   updateMarketMaxBorrows,
+  calculateMaxBorrowAmount,
 } from "@/services/adminService";
 import {
   fetchAllMarkets,
@@ -2235,6 +2236,9 @@ export default function AdminDashboard() {
   const [userMarketIndices, setUserMarketIndices] = useState<
     Record<string, { depositIndex: string; borrowIndex: string }>
   >({});
+  const [userMaxBorrowAmounts, setUserMaxBorrowAmounts] = useState<
+    Record<string, { maxBorrow: bigint | null; loading: boolean; error: string | null }>
+  >({});
   const [showRawData, setShowRawData] = useState(false);
   const [globalDataLoading, setGlobalDataLoading] = useState(false);
   const [globalDataError, setGlobalDataError] = useState<string | null>(null);
@@ -3669,6 +3673,117 @@ export default function AdminDashboard() {
     [currentNetwork]
   );
 
+  // Fetch max borrow amounts for all markets
+  const fetchUserMaxBorrowAmounts = useCallback(
+    async (userAddress: string) => {
+      console.log(
+        "💰 fetchUserMaxBorrowAmounts called with:",
+        userAddress,
+        "on network:",
+        currentNetwork
+      );
+
+      if (!userAddress || !currentNetwork) {
+        console.warn(
+          "⚠️ Missing userAddress or currentNetwork for max borrow amounts:",
+          { userAddress, currentNetwork }
+        );
+        return;
+      }
+
+      console.log("🔄 Starting max borrow amounts fetch...");
+      try {
+        const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+        const networkConfig = getCurrentNetworkConfig();
+        const maxBorrowAmounts: Record<
+          string,
+          { maxBorrow: bigint | null; loading: boolean; error: string | null }
+        > = {};
+
+        // Initialize all markets as loading
+        for (const token of tokens) {
+          const marketId = token.symbol.toLowerCase();
+          maxBorrowAmounts[marketId] = {
+            maxBorrow: null,
+            loading: true,
+            error: null,
+          };
+        }
+        setUserMaxBorrowAmounts(maxBorrowAmounts);
+
+        // Fetch max borrow amount for each market
+        for (const token of tokens) {
+          const marketId = token.symbol.toLowerCase();
+          try {
+            const marketInfo = await fetchMarketInfo(
+              token.poolId || "1",
+              token.underlyingContractId || token.symbol,
+              currentNetwork
+            );
+
+            if (marketInfo && token.underlyingContractId) {
+              const poolId = token.poolId || networkConfig.contracts.lendingPools[0];
+              const actualMarketId = Number(token.underlyingContractId);
+
+              console.log(
+                `🔄 Fetching max borrow for ${token.symbol}:`,
+                { poolId, userId: userAddress, marketId: actualMarketId }
+              );
+
+              const maxBorrow = await calculateMaxBorrowAmount(
+                poolId,
+                userAddress,
+                actualMarketId,
+                47015119 // TODO get this from config
+              );
+
+              setUserMaxBorrowAmounts((prev) => ({
+                ...prev,
+                [marketId]: {
+                  maxBorrow,
+                  loading: false,
+                  error: null,
+                },
+              }));
+
+              console.log(
+                `✅ Max borrow for ${token.symbol}:`,
+                maxBorrow?.toString() || "null"
+              );
+            } else {
+              setUserMaxBorrowAmounts((prev) => ({
+                ...prev,
+                [marketId]: {
+                  maxBorrow: null,
+                  loading: false,
+                  error: "Market info not available",
+                },
+              }));
+            }
+          } catch (error) {
+            console.warn(
+              `Failed to fetch max borrow amount for ${token.symbol}:`,
+              error
+            );
+            setUserMaxBorrowAmounts((prev) => ({
+              ...prev,
+              [marketId]: {
+                maxBorrow: null,
+                loading: false,
+                error: error instanceof Error ? error.message : "Unknown error",
+              },
+            }));
+          }
+        }
+
+        console.log("✅ Max borrow amounts fetch completed");
+      } catch (error) {
+        console.error("❌ Error fetching max borrow amounts:", error);
+      }
+    },
+    [currentNetwork]
+  );
+
   // Envoi Functions
   const fetchEnvoiData = useCallback(
     async (userAddress: string) => {
@@ -3839,6 +3954,7 @@ export default function AdminDashboard() {
           setUserGetUserData(data);
         }),
         fetchEnvoiData(userAnalysisAddress),
+        fetchUserMaxBorrowAmounts(userAnalysisAddress),
       ]);
       console.log(
         "✅ Manual analysis completed for address:",
@@ -6910,6 +7026,7 @@ export default function AdminDashboard() {
                     setUserGlobalData(null);
                     setUserMarketsState({});
                     setUserMarketPrices({});
+                    setUserMaxBorrowAmounts({});
                     setGlobalDataError(null);
                     setEnvoiData(null);
                     setEnvoiError(null);
@@ -7107,6 +7224,7 @@ export default function AdminDashboard() {
                             await Promise.all([
                               fetchUserGlobalData(userAnalysisAddress),
                               fetchUserMarketData(userAnalysisAddress),
+                              fetchUserMaxBorrowAmounts(userAnalysisAddress),
                             ]);
                           }}
                           disabled={globalDataLoading}
@@ -7273,6 +7391,126 @@ export default function AdminDashboard() {
                           </div>
                         </div>
                       </details>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Max Borrow Amounts */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <TrendingUp className="h-5 w-5" />
+                      Maximum Borrow Amounts by Market
+                    </CardTitle>
+                    <CardDescription>
+                      Maximum borrowable amount for each market calculated using the LendingPoolStorage contract
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      {markets.length === 0 ? (
+                        <div className="text-center py-8 text-muted-foreground">
+                          No markets available
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {markets.map((market) => {
+                            const marketId = market.symbol.toLowerCase();
+                            const maxBorrowData = userMaxBorrowAmounts[marketId];
+                            const price = userMarketPrices[marketId] || 0;
+                            
+                            // Calculate USD value if we have max borrow and price
+                            let maxBorrowUSD = 0;
+                            let maxBorrowFormatted = "0";
+                            
+                            if (maxBorrowData?.maxBorrow && maxBorrowData.maxBorrow > 0n) {
+                              const maxBorrowInTokens = fromBase(
+                                maxBorrowData.maxBorrow,
+                                market.decimals || 6
+                              );
+                              maxBorrowFormatted = maxBorrowInTokens.toLocaleString(undefined, {
+                                maximumFractionDigits: 6,
+                              });
+                              maxBorrowUSD = maxBorrowInTokens * price;
+                            }
+
+                            return (
+                              <div
+                                key={market.symbol}
+                                className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
+                                  maxBorrowData?.loading
+                                    ? "border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-950/20"
+                                    : maxBorrowData?.error
+                                    ? "border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/20"
+                                    : maxBorrowData?.maxBorrow && maxBorrowData.maxBorrow > 0n
+                                    ? "border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/20"
+                                    : "border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950/20"
+                                }`}
+                              >
+                                <div className="flex items-center gap-3">
+                                  <div
+                                    className={`w-3 h-3 rounded-full ${
+                                      maxBorrowData?.loading
+                                        ? "bg-yellow-500 animate-pulse"
+                                        : maxBorrowData?.error
+                                        ? "bg-red-500"
+                                        : maxBorrowData?.maxBorrow && maxBorrowData.maxBorrow > 0n
+                                        ? "bg-green-500"
+                                        : "bg-gray-400"
+                                    }`}
+                                  />
+                                  <div>
+                                    <div className="font-medium text-sm">
+                                      {market.symbol}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">
+                                      {maxBorrowData?.loading
+                                        ? "Loading..."
+                                        : maxBorrowData?.error
+                                        ? `Error: ${maxBorrowData.error}`
+                                        : maxBorrowData?.maxBorrow === null
+                                        ? "No data"
+                                        : maxBorrowData.maxBorrow === 0n
+                                        ? "No borrow capacity"
+                                        : "Available"}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="text-right space-y-1">
+                                  {maxBorrowData?.loading ? (
+                                    <div className="text-sm text-muted-foreground">
+                                      <Loader2 className="h-4 w-4 animate-spin inline" />
+                                    </div>
+                                  ) : maxBorrowData?.error ? (
+                                    <div className="text-xs text-red-400">
+                                      Error
+                                    </div>
+                                  ) : (
+                                    <>
+                                      <div className="text-sm font-medium">
+                                        {maxBorrowFormatted} {market.symbol}
+                                      </div>
+                                      {maxBorrowUSD > 0 && (
+                                        <div className="text-xs text-muted-foreground">
+                                          ${maxBorrowUSD.toLocaleString(undefined, {
+                                            maximumFractionDigits: 2,
+                                          })}
+                                        </div>
+                                      )}
+                                      {maxBorrowData?.maxBorrow && (
+                                        <div className="text-xs text-muted-foreground font-mono">
+                                          {maxBorrowData.maxBorrow.toString()} base
+                                        </div>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>

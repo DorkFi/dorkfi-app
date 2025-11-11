@@ -10,6 +10,8 @@ interface BorrowFormProps {
   tokenPrice: number;
   onAmountChange: (amount: string, fiatValue: number) => void;
   onSubmit: () => void;
+  isLoadingMaxBorrow?: boolean;
+  maxBorrowError?: string | null;
 }
 
 const BorrowForm = ({ 
@@ -17,7 +19,9 @@ const BorrowForm = ({
   availableToBorrow, 
   tokenPrice, 
   onAmountChange, 
-  onSubmit 
+  onSubmit,
+  isLoadingMaxBorrow = false,
+  maxBorrowError = null
 }: BorrowFormProps) => {
   const [amount, setAmount] = useState("");
   const [fiatValue, setFiatValue] = useState(0);
@@ -58,9 +62,10 @@ const BorrowForm = ({
           size="sm"
           variant="ghost"
           onClick={handleMaxClick}
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-pink-400 hover:bg-pink-400/10 h-8 px-3"
+          disabled={isLoadingMaxBorrow}
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-pink-400 hover:bg-pink-400/10 h-8 px-3 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          MAX
+          {isLoadingMaxBorrow ? "..." : "MAX"}
         </Button>
       </div>
       {fiatValue > 0 && (
@@ -69,8 +74,18 @@ const BorrowForm = ({
         </p>
       )}
       <p className="text-xs text-slate-400 dark:text-slate-500">
-        Available to Borrow: {availableToBorrow.toLocaleString()} {tokenSymbol} 
-        (${(availableToBorrow * tokenPrice).toLocaleString()})
+        {isLoadingMaxBorrow ? (
+          "Calculating available to borrow..."
+        ) : maxBorrowError ? (
+          <span className="text-red-500 dark:text-red-400">
+            Error: {maxBorrowError}
+          </span>
+        ) : (
+          <>
+            Available to Borrow: {availableToBorrow.toLocaleString()} {tokenSymbol} 
+            (${(availableToBorrow * tokenPrice).toLocaleString()})
+          </>
+        )}
       </p>
       
       <Button

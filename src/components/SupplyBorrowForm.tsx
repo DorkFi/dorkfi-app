@@ -27,6 +27,8 @@ interface SupplyBorrowFormProps {
   disabled?: boolean;
   onRefreshWalletBalance?: () => void;
   hideButton?: boolean;
+  isLoadingMaxBorrow?: boolean;
+  maxBorrowError?: string | null;
 }
 
 const SupplyBorrowForm = ({
@@ -46,6 +48,8 @@ const SupplyBorrowForm = ({
   disabled = false,
   onRefreshWalletBalance,
   hideButton = false,
+  isLoadingMaxBorrow = false,
+  maxBorrowError = null,
 }: SupplyBorrowFormProps) => {
   const [amount, setAmount] = useState("");
   const [fiatValue, setFiatValue] = useState(0);
@@ -247,9 +251,10 @@ const SupplyBorrowForm = ({
             size="sm"
             variant="ghost"
             onClick={handleMaxClick}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-teal-400 hover:bg-teal-400/10 h-8 px-3"
+            disabled={mode === "borrow" && isLoadingMaxBorrow}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-teal-400 hover:bg-teal-400/10 h-8 px-3 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            MAX
+            {mode === "borrow" && isLoadingMaxBorrow ? "..." : "MAX"}
           </Button>
         </div>
 
@@ -377,10 +382,19 @@ const SupplyBorrowForm = ({
                   ? `${walletBalance.toLocaleString(undefined, {
                       maximumFractionDigits: 6,
                     })} ${asset}`
+                  : isLoadingMaxBorrow
+                  ? "Calculating..."
+                  : maxBorrowError
+                  ? "Error"
                   : `${calculateMaxBorrowable().toLocaleString(undefined, {
                       maximumFractionDigits: 6,
                     })} ${asset}`}
               </div>
+              {mode === "borrow" && maxBorrowError && (
+                <div className="text-xs text-red-500 dark:text-red-400 mt-1">
+                  {maxBorrowError}
+                </div>
+              )}
               <div
                 className={`text-xs ${
                   mode === "deposit"

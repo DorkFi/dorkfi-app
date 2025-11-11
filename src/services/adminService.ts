@@ -15,6 +15,7 @@ import {
 } from "@/config";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
 import { APP_SPEC as MarketControllerAppSpec } from "@/clients/MarketControllerClient";
+import { APP_SPEC as LendingPoolStorageAppSpec } from "@/clients/LendingPoolStorageClient";
 import { CONTRACT } from "ulujs";
 import algorandService, { AlgorandNetwork } from "./algorandService";
 import algosdk, { TransactionSigner } from "algosdk";
@@ -856,5 +857,71 @@ export const updateMarketMaxBorrows = async (
       success: false,
       error: error instanceof Error ? error.message : "Unknown error occurred",
     };
+  }
+};
+
+/**
+ * Calculate the maximum borrow amount for a user in a specific market
+ *
+ * @param poolId The lending pool ID
+ * @param userId The user address
+ * @param marketId The market ID
+ * @param storageContractAppId The LendingPoolStorage contract app ID (optional, defaults to poolId if not provided)
+ * @returns The maximum borrow amount as a bigint, or null if the call fails
+ */
+export const calculateMaxBorrowAmount = async (
+  poolId: number | string,
+  userId: string,
+  marketId: number | string,
+  storageContractAppId?: number | string
+): Promise<bigint | null> => {
+  try {
+    const networkConfig = getCurrentNetworkConfig();
+
+    if (!isCurrentNetworkVOI() && !isCurrentNetworkAlgorand()) {
+      throw new Error(
+        "This method is only supported on VOI and Algorand networks"
+      );
+    }
+
+    const clients = algorandService.initializeClients(
+      networkConfig.walletNetworkId as AlgorandNetwork
+    );
+
+    // Use provided storage contract app ID or default to poolId
+    const storageAppId = storageContractAppId
+      ? Number(storageContractAppId)
+      : Number(poolId);
+
+    // Initialize the LendingPoolStorageClient
+    const storageClient = new CONTRACT(
+      Number(storageAppId),
+      clients.algod,
+      undefined,
+      { ...LendingPoolStorageAppSpec.contract, events: [] },
+      {
+        addr: userId,
+        sk: new Uint8Array(),
+      }
+    );
+
+    // Call the calculate_max_borrow_amount method
+    storageClient.setFee(10000);
+    const result = await storageClient.calculate_max_borrow_amount(
+      Number(poolId),
+      userId,
+      Number(marketId),
+    );
+
+    if (result.success) {
+      return result.returnValue as bigint;
+    }
+
+    console.log("calculateMaxBorrowAmount result", { result });
+
+    return BigInt(0);
+  } catch (error) {
+    console.error("Error calculating max borrow amount:", error);
+    return null;
   }
 };

@@ -27,6 +27,7 @@ import algorandService from "@/services/algorandService";
 import algosdk, { waitForConfirmation } from "algosdk";
 import BigNumber from "bignumber.js";
 import { useToast } from "@/hooks/use-toast";
+import { calculateMaxBorrowAmount } from "@/services/adminService";
 
 interface SupplyBorrowModalProps {
   isOpen: boolean;
@@ -43,6 +44,7 @@ interface SupplyBorrowModalProps {
     borrowAPY: number;
     utilization: number;
     collateralFactor: number;
+    liquidationThreshold?: number;
     liquidity: number;
     liquidityUSD: number;
     maxTotalDeposits?: number;
@@ -81,10 +83,148 @@ const SupplyBorrowModal = ({
   const [error, setError] = useState<string | null>(null);
   const [transactionId, setTransactionId] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+  const [calculatedMaxBorrow, setCalculatedMaxBorrow] = useState<number | null>(null);
+  const [isLoadingMaxBorrow, setIsLoadingMaxBorrow] = useState(false);
+  const [maxBorrowError, setMaxBorrowError] = useState<string | null>(null);
 
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
   const { toast } = useToast();
+
+  // Calculate max borrow amount when modal opens in borrow mode
+  useEffect(() => {
+    const fetchMaxBorrowAmount = async () => {
+      // Only calculate for borrow mode
+      if (mode !== "borrow" || !isOpen || !activeAccount?.address) {
+        setCalculatedMaxBorrow(null);
+        setIsLoadingMaxBorrow(false);
+        setMaxBorrowError(null);
+        return;
+      }
+
+      console.log("SupplyBorrowModal: Calculating max borrow amount", {
+        isOpen,
+        mode,
+        address: activeAccount.address,
+        asset,
+        currentNetwork,
+      });
+
+      setIsLoadingMaxBorrow(true);
+      setMaxBorrowError(null);
+
+      try {
+        const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+        const token = tokens.find((t) => t.symbol === asset);
+
+        if (!token) {
+          throw new Error(`Token ${asset} not found in network config`);
+        }
+
+        if (!token.poolId || !token.underlyingContractId) {
+          throw new Error(
+            `Token ${asset} missing pool or contract configuration`
+          );
+        }
+
+        const tokenConfig = getTokenConfig(currentNetwork, asset);
+        if (!tokenConfig) {
+          throw new Error(`Token config not found for ${asset}`);
+        }
+
+        const poolId = token.poolId;
+        const marketId = token.underlyingContractId;
+        const decimals = tokenConfig.decimals;
+
+        console.log("SupplyBorrowModal: Calling calculateMaxBorrowAmount", {
+          poolId,
+          userId: activeAccount.address,
+          marketId,
+          asset,
+        });
+
+        const maxBorrowBigInt = await calculateMaxBorrowAmount(
+          poolId,
+          activeAccount.address,
+          marketId,
+          47015119 // TODO get this from config
+        );
+
+        console.log("SupplyBorrowModal: maxBorrowBigInt result", {
+          maxBorrowBigInt,
+          isZero: maxBorrowBigInt === BigInt(0),
+          isNull: maxBorrowBigInt === null,
+        });
+
+        // Get total deposits and total borrowed from assetData
+        const totalDeposits = assetData.totalSupply;
+        const totalBorrowed = assetData.totalBorrow;
+        
+        // Calculate total deposits - total borrowed
+        const depositsMinusBorrowed = totalDeposits - totalBorrowed;
+
+        console.log("SupplyBorrowModal: Market totals", {
+          totalDeposits,
+          totalBorrowed,
+          depositsMinusBorrowed,
+        });
+
+        if (maxBorrowBigInt !== null && maxBorrowBigInt !== BigInt(0)) {
+          // Convert from bigint (atomic units) to number (human-readable)
+          const maxBorrowBN = new BigNumber(maxBorrowBigInt.toString());
+          const divisor = new BigNumber(10).pow(decimals);
+          const maxBorrowNumber = maxBorrowBN.dividedBy(divisor).toNumber();
+          
+          // Calculate buffer based on liquidation factor and collateral factor
+          // If liquidation factor is 85 and collateral factor is 80, buffer is 5%
+          // Add this buffer as 100% borrow value (multiply by 1 + buffer/100)
+          let adjustedMaxBorrow = maxBorrowNumber;
+          if (assetData.liquidationThreshold && assetData.collateralFactor) {
+            const liquidationFactor = assetData.liquidationThreshold; // Already in percentage
+            const collateralFactor = assetData.collateralFactor; // Already in percentage
+            const buffer = liquidationFactor - collateralFactor; // e.g., 85 - 80 = 5
+            if (buffer > 0) {
+              // Add buffer as percentage: multiply by (1 + buffer/100)
+              adjustedMaxBorrow = maxBorrowNumber * (1 + buffer / 100);
+              console.log("SupplyBorrowModal: Buffer calculation", {
+                liquidationFactor,
+                collateralFactor,
+                buffer,
+                originalMaxBorrow: maxBorrowNumber,
+                adjustedMaxBorrow,
+              });
+            }
+          }
+          
+          // Take minimum of (total deposits - total borrowed) and current borrowable value
+          const finalMaxBorrow = Math.max(0, Math.min(adjustedMaxBorrow, depositsMinusBorrowed));
+          
+          setCalculatedMaxBorrow(finalMaxBorrow);
+          console.log("SupplyBorrowModal: Max borrow amount calculated:", {
+            maxBorrowNumber,
+            adjustedMaxBorrow,
+            depositsMinusBorrowed,
+            finalMaxBorrow,
+          });
+        } else {
+          // Even if maxBorrowBigInt is 0, we should still check deposits - borrowed
+          const finalMaxBorrow = Math.max(0, depositsMinusBorrowed);
+          setCalculatedMaxBorrow(finalMaxBorrow);
+          console.log("SupplyBorrowModal: Max borrow amount (deposits - borrowed):", finalMaxBorrow);
+        }
+      } catch (error) {
+        console.error("SupplyBorrowModal: Error calculating max borrow amount:", error);
+        setMaxBorrowError(
+          error instanceof Error ? error.message : "Unknown error occurred"
+        );
+        setCalculatedMaxBorrow(null);
+      } finally {
+        setIsLoadingMaxBorrow(false);
+      }
+    };
+
+    fetchMaxBorrowAmount();
+  }, [isOpen, mode, activeAccount?.address, asset, currentNetwork]);
 
   // Reset states when modal opens/closes
   useEffect(() => {
@@ -95,8 +235,12 @@ const SupplyBorrowModal = ({
       setError(null);
       setTransactionId(null);
       setRetryCount(0);
+      if (mode !== "borrow") {
+        setCalculatedMaxBorrow(null);
+        setMaxBorrowError(null);
+      }
     }
-  }, [isOpen]);
+  }, [isOpen, mode]);
 
   const handleAmountChange = (newAmount: string, newFiatValue: number) => {
     setAmount(newAmount);
@@ -368,7 +512,11 @@ const SupplyBorrowModal = ({
                 asset={asset}
                 walletBalance={propWalletBalance}
                 walletBalanceUSD={propWalletBalanceUSD}
-                availableToSupplyOrBorrow={assetData.liquidity}
+                availableToSupplyOrBorrow={
+                  mode === "borrow" && calculatedMaxBorrow !== null
+                    ? calculatedMaxBorrow
+                    : assetData.liquidity
+                }
                 supplyAPY={assetData.supplyAPY}
                 totalSupply={assetData.totalSupply}
                 maxTotalDeposits={assetData.maxTotalDeposits}
@@ -379,6 +527,8 @@ const SupplyBorrowModal = ({
                 isLoading={isLoading}
                 disabled={mode === "borrow" && !userGlobalData}
                 hideButton={true}
+                isLoadingMaxBorrow={isLoadingMaxBorrow}
+                maxBorrowError={maxBorrowError}
               />
 
               <SupplyBorrowStats
