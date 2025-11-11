@@ -23,6 +23,7 @@ import algorandService from "@/services/algorandService";
 import algosdk, { waitForConfirmation } from "algosdk";
 import BigNumber from "bignumber.js";
 import { useToast } from "@/hooks/use-toast";
+import { calculateMaxBorrowAmount } from "@/services/adminService";
 
 interface MintModalProps {
   isOpen: boolean;
@@ -68,10 +69,95 @@ const MintModal = ({
   const [error, setError] = useState<string | null>(null);
   const [transactionId, setTransactionId] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+  const [calculatedMaxBorrow, setCalculatedMaxBorrow] = useState<number | null>(null);
+  const [isLoadingMaxBorrow, setIsLoadingMaxBorrow] = useState(false);
+  const [maxBorrowError, setMaxBorrowError] = useState<string | null>(null);
 
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
   const { toast } = useToast();
+
+  // Calculate max borrow amount when modal opens
+  useEffect(() => {
+    console.log("useEffect triggered", { isOpen, hasAddress: !!activeAccount?.address, asset, currentNetwork });
+    
+    const fetchMaxBorrowAmount = async () => {
+      if (!isOpen || !activeAccount?.address) {
+        console.log("Early return - conditions not met", { isOpen, hasAddress: !!activeAccount?.address });
+        setCalculatedMaxBorrow(null);
+        setIsLoadingMaxBorrow(false);
+        return;
+      }
+
+      console.log("fetchMaxBorrowAmount called", { isOpen, address: activeAccount?.address, asset, currentNetwork });
+
+      setIsLoadingMaxBorrow(true);
+      setMaxBorrowError(null);
+
+      try {
+        const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+        const token = tokens.find((t) => t.symbol === asset);
+
+        if (!token) {
+          throw new Error(`Token ${asset} not found in network config`);
+        }
+
+        if (!token.poolId || !token.underlyingContractId) {
+          throw new Error(
+            `Token ${asset} missing pool or contract configuration`
+          );
+        }
+
+        const tokenConfig = getTokenConfig(currentNetwork, asset);
+        if (!tokenConfig) {
+          throw new Error(`Token config not found for ${asset}`);
+        }
+
+        const poolId = token.poolId;
+        const marketId = token.underlyingContractId;
+        const decimals = tokenConfig.decimals;
+
+        console.log("Calculating max borrow amount:", {
+          poolId,
+          userId: activeAccount.address,
+          marketId,
+          asset,
+        });
+
+        const maxBorrowBigInt = await calculateMaxBorrowAmount(
+          poolId,
+          activeAccount.address,
+          marketId,
+          47015119 // TODO get this from config
+        );
+
+        console.log("maxBorrowBigInt", { maxBorrowBigInt });
+
+        if (maxBorrowBigInt !== null && maxBorrowBigInt !== BigInt(0)) {
+          // Convert from bigint (atomic units) to number (human-readable)
+          const maxBorrowBN = new BigNumber(maxBorrowBigInt.toString());
+          const divisor = new BigNumber(10).pow(decimals);
+          const maxBorrowNumber = maxBorrowBN.dividedBy(divisor).toNumber();
+          
+          setCalculatedMaxBorrow(Math.max(0, maxBorrowNumber));
+          console.log("Max borrow amount calculated:", maxBorrowNumber);
+        } else {
+          setCalculatedMaxBorrow(0);
+          console.log("Max borrow amount is 0");
+        }
+      } catch (error) {
+        console.error("Error calculating max borrow amount:", error);
+        setMaxBorrowError(
+          error instanceof Error ? error.message : "Unknown error occurred"
+        );
+        setCalculatedMaxBorrow(null);
+      } finally {
+        setIsLoadingMaxBorrow(false);
+      }
+    };
+
+    fetchMaxBorrowAmount();
+  }, [isOpen, activeAccount?.address, asset, currentNetwork]);
 
   // Reset states when modal opens/closes
   useEffect(() => {
@@ -82,6 +168,8 @@ const MintModal = ({
       setError(null);
       setTransactionId(null);
       setRetryCount(0);
+      setCalculatedMaxBorrow(null);
+      setMaxBorrowError(null);
     }
   }, [isOpen]);
 
@@ -288,12 +376,16 @@ const MintModal = ({
               asset={asset}
               walletBalance={0}
               walletBalanceUSD={0}
-              availableToSupplyOrBorrow={(() => {
-                if (!userGlobalData) return 0;
-                // Calculate max borrowable: max(0, collateral * cf - borrows)
-                const collateralFactorDecimal = assetData.collateralFactor / 100;
-                return Math.max(0, (userGlobalData.totalCollateralValue * collateralFactorDecimal) - userGlobalData.totalBorrowValue);
-              })()}
+              availableToSupplyOrBorrow={
+                calculatedMaxBorrow !== null
+                  ? calculatedMaxBorrow
+                  : (() => {
+                      if (!userGlobalData) return 0;
+                      // Calculate max borrowable: max(0, collateral * cf - borrows)
+                      const collateralFactorDecimal = assetData.collateralFactor / 100;
+                      return Math.max(0, (userGlobalData.totalCollateralValue * collateralFactorDecimal) - userGlobalData.totalBorrowValue);
+                    })()
+              }
               supplyAPY={assetData.supplyAPY}
               totalSupply={assetData.totalSupply}
               maxTotalDeposits={assetData.maxTotalDeposits}
@@ -304,6 +396,8 @@ const MintModal = ({
               isLoading={isLoading}
               disabled={!userGlobalData}
               hideButton={true}
+              isLoadingMaxBorrow={isLoadingMaxBorrow}
+              maxBorrowError={maxBorrowError}
             />
 
             <SupplyBorrowStats
