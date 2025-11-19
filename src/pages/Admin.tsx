@@ -6918,8 +6918,7 @@ export default function AdminDashboard() {
                                       #{index + 1}
                                     </span>
                                     <span className="text-xs font-mono">
-                                      {depositor.address.slice(0, 6)}...
-                                      {depositor.address.slice(-4)}
+                                      {depositor.address ? `${depositor.address.slice(0, 6)}...${depositor.address.slice(-4)}` : 'N/A'}
                                     </span>
                                   </div>
                                   <div className="text-right">
@@ -9452,8 +9451,7 @@ export default function AdminDashboard() {
                             </span>
                           )}
                           <span className="font-mono">
-                            {activeAccount.address.slice(0, 8)}...
-                            {activeAccount.address.slice(-8)}
+                            {activeAccount?.address ? `${activeAccount.address.slice(0, 8)}...${activeAccount.address.slice(-8)}` : 'N/A'}
                           </span>
                         </div>
                       </div>
@@ -12728,8 +12726,7 @@ export default function AdminDashboard() {
                               {result.name}
                             </span>
                             <span className="text-xs text-muted-foreground">
-                              {result.address.slice(0, 8)}...
-                              {result.address.slice(-8)}
+                              {result.address ? `${result.address.slice(0, 8)}...${result.address.slice(-8)}` : 'N/A'}
                             </span>
                           </div>
                         </div>
@@ -12816,8 +12813,7 @@ export default function AdminDashboard() {
                         </span>
                       </div>
                       <p className="text-xs text-green-700 dark:text-green-300 mt-1">
-                        {envoiName} → {assignAddress.slice(0, 8)}...
-                        {assignAddress.slice(-8)}
+                        {envoiName} → {assignAddress ? `${assignAddress.slice(0, 8)}...${assignAddress.slice(-8)}` : 'N/A'}
                       </p>
                     </div>
                   )}
@@ -13052,8 +13048,7 @@ export default function AdminDashboard() {
                               {result.name}
                             </div>
                             <div className="text-xs text-muted-foreground font-mono">
-                              {result.address.slice(0, 8)}...
-                              {result.address.slice(-8)}
+                              {result.address ? `${result.address.slice(0, 8)}...${result.address.slice(-8)}` : 'N/A'}
                             </div>
                           </div>
                         ))
