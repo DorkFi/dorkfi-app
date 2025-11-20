@@ -226,9 +226,11 @@ const PortfolioModals = ({
         throw new Error(`Token not found for ${withdrawModal.asset}`);
       }
 
-      const originalTokenConfig = getTokenConfig(currentNetwork, withdrawModal.asset);
+      // Use originalSymbol to look up the config, as asset might be a display symbol
+      const originalSymbol = 'originalSymbol' in token ? (token as any).originalSymbol : withdrawModal.asset;
+      const originalTokenConfig = getTokenConfig(currentNetwork, originalSymbol);
       if (!originalTokenConfig) {
-        throw new Error(`Token config not found for ${withdrawModal.asset}`);
+        throw new Error(`Token config not found for ${withdrawModal.asset} (originalSymbol: ${originalSymbol})`);
       }
 
       console.log("Withdraw parameters:", {
@@ -326,9 +328,11 @@ const PortfolioModals = ({
         throw new Error(`Token not found for ${repayModal.asset}`);
       }
 
-      const originalTokenConfig = getTokenConfig(currentNetwork, repayModal.asset);
+      // Use originalSymbol to look up the config, as asset might be a display symbol
+      const originalSymbol = 'originalSymbol' in token ? (token as any).originalSymbol : repayModal.asset;
+      const originalTokenConfig = getTokenConfig(currentNetwork, originalSymbol);
       if (!originalTokenConfig) {
-        throw new Error(`Token config not found for ${repayModal.asset}`);
+        throw new Error(`Token config not found for ${repayModal.asset} (originalSymbol: ${originalSymbol})`);
       }
 
       console.log("Repay parameters:", {

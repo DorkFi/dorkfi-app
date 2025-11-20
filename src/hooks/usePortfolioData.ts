@@ -110,20 +110,20 @@ export const usePortfolioData = () => {
         const positions: PortfolioPosition[] = [];
 
         for (const token of tokens) {
-          if (token.underlyingContractId) {
+          if (token.underlyingContractId && token.poolId) {
             const market = markets.find((m) => m.symbol === token.symbol);
 
             // Fetch both deposit and borrow balances for this token
             const [depositBalance, borrowData] = await Promise.all([
               fetchUserDepositBalance(
                 userAddress,
-                "46505156", // Pool ID - should be dynamic
+                token.poolId,
                 token.underlyingContractId,
                 networkId as any
               ),
               fetchUserBorrowBalance(
                 userAddress,
-                "46505156", // Pool ID - should be dynamic
+                token.poolId,
                 token.underlyingContractId,
                 networkId as any
               ),
@@ -252,9 +252,17 @@ export const usePortfolioData = () => {
         }
 
         // Get the original token config to access tokenStandard
-        const originalTokenConfig = getTokenConfig(currentNetwork, asset);
+        // Use originalSymbol to look up the config, as asset might be a display symbol
+        const originalSymbol =
+          "originalSymbol" in token ? (token as any).originalSymbol : asset;
+        const originalTokenConfig = getTokenConfig(
+          currentNetwork,
+          originalSymbol
+        );
         if (!originalTokenConfig) {
-          console.error(`Original token config not found for ${asset}`);
+          console.error(
+            `Original token config not found for ${asset} (originalSymbol: ${originalSymbol})`
+          );
           return { balance: 0, balanceUSD: 0 };
         }
 
@@ -319,20 +327,15 @@ export const usePortfolioData = () => {
           );
           try {
             const clients = await algorandService.getCurrentClientsForReads();
-            const accountInfo = await clients.algod
-              .accountInformation(activeAccount.address)
+            const assetId = parseInt(token.underlyingAssetId);
+            const accAssetInfo = await clients.algod
+              .accountAssetInformation(activeAccount.address, assetId)
               .do();
 
-            // Find the asset in the account's assets
-            const assetId = parseInt(token.underlyingAssetId);
-            const assetHolding = accountInfo.assets?.find(
-              (asset: any) => asset["asset-id"] === assetId
-            );
-
-            if (assetHolding) {
+            if (accAssetInfo["asset-holding"]) {
               // Convert from smallest units to human readable format
               balance =
-                assetHolding.amount /
+                accAssetInfo["asset-holding"].amount /
                 Math.pow(10, originalTokenConfig.decimals);
               console.log(`ASA balance for ${asset}: ${balance}`);
             } else {
@@ -456,7 +459,11 @@ export const usePortfolioData = () => {
 
         // Fetch markets first, then global data (so we can pass marketData for healthFactorIndex calculation)
         const markets = await fetchAllMarkets(currentNetwork);
-        const globalData = await fetchUserGlobalData(activeAccount.address, currentNetwork, markets);
+        const globalData = await fetchUserGlobalData(
+          activeAccount.address,
+          currentNetwork,
+          markets
+        );
 
         // Then fetch user positions with market data
         const positions = await fetchUserPositions(

@@ -1,8 +1,13 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
-import { useNetwork } from '@/contexts/NetworkContext';
-import { getAllTokensWithDisplayInfo, NetworkId, getCurrentNetworkConfig, getLendingPools } from '@/config';
-import { fetchMarketInfo, type MarketInfo } from '@/services/lendingService';
-import { APYCalculationResult } from '@/utils/apyCalculations';
+import { useState, useMemo, useCallback, useEffect } from "react";
+import { useNetwork } from "@/contexts/NetworkContext";
+import {
+  getAllTokensWithDisplayInfo,
+  NetworkId,
+  getCurrentNetworkConfig,
+  getLendingPools,
+} from "@/config";
+import { fetchMarketInfo, type MarketInfo } from "@/services/lendingService";
+import { APYCalculationResult } from "@/utils/apyCalculations";
 
 export interface OnDemandMarketData {
   asset: string;
@@ -35,8 +40,14 @@ export interface OnDemandMarketData {
   isSToken?: boolean;
 }
 
-export type SortField = 'asset' | 'totalSupplyUSD' | 'supplyAPY' | 'totalBorrowUSD' | 'borrowAPY' | 'utilization';
-export type SortOrder = 'asc' | 'desc';
+export type SortField =
+  | "asset"
+  | "totalSupplyUSD"
+  | "supplyAPY"
+  | "totalBorrowUSD"
+  | "borrowAPY"
+  | "utilization";
+export type SortOrder = "asc" | "desc";
 
 interface UseOnDemandMarketDataProps {
   searchTerm?: string;
@@ -51,32 +62,37 @@ interface UseOnDemandMarketDataProps {
 const DEFAULT_THROTTLE_MS = 60 * 1000;
 
 export const useOnDemandMarketData = ({
-  searchTerm = '',
-  sortField = 'totalSupplyUSD',
-  sortOrder = 'desc',
+  searchTerm = "",
+  sortField = "totalSupplyUSD",
+  sortOrder = "desc",
   pageSize = 10,
   autoLoad = true,
-  throttleMs = DEFAULT_THROTTLE_MS
+  throttleMs = DEFAULT_THROTTLE_MS,
 }: UseOnDemandMarketDataProps = {}) => {
   const [currentPage, setCurrentPage] = useState(1);
-  const [marketsData, setMarketsData] = useState<Record<string, OnDemandMarketData>>({});
+  const [marketsData, setMarketsData] = useState<
+    Record<string, OnDemandMarketData>
+  >({});
   const [loadingMarkets, setLoadingMarkets] = useState<Set<string>>(new Set());
   const { currentNetwork } = useNetwork();
-  
+
   // Get token configuration for current network
-  const tokens = useMemo(() => getAllTokensWithDisplayInfo(currentNetwork), [currentNetwork]);
+  const tokens = useMemo(
+    () => getAllTokensWithDisplayInfo(currentNetwork),
+    [currentNetwork]
+  );
 
   // Initialize market data structure from tokens
   useEffect(() => {
     const initialData: Record<string, OnDemandMarketData> = {};
-    
+
     tokens.forEach((token) => {
       const key = token.symbol.toLowerCase();
       if (!marketsData[key]) {
         // Get the original token config to access isStoken property
         const networkConfig = getCurrentNetworkConfig(currentNetwork);
         const tokenConfig = networkConfig.tokens[token.symbol];
-        
+
         initialData[key] = {
           asset: token.symbol,
           icon: token.logoPath,
@@ -95,7 +111,7 @@ export const useOnDemandMarketData = ({
           liquidationThreshold: 0,
           liquidationPenalty: 0,
           reserveFactor: 0,
-          collectorContract: '',
+          collectorContract: "",
           isLoading: false,
           isLoaded: false,
           isSToken: tokenConfig?.isStoken || false,
@@ -104,167 +120,200 @@ export const useOnDemandMarketData = ({
     });
 
     if (Object.keys(initialData).length > 0) {
-      setMarketsData(prev => ({ ...prev, ...initialData }));
+      setMarketsData((prev) => ({ ...prev, ...initialData }));
     }
   }, [tokens, currentNetwork]);
 
   // Load individual market data
-  const loadMarketData = useCallback(async (marketKey: string, bypassCache = false) => {
-    const token = tokens.find(t => t.symbol.toLowerCase() === marketKey);
-    if (!token) return;
+  const loadMarketData = useCallback(
+    async (marketKey: string, bypassCache = false) => {
+      const token = tokens.find((t) => t.symbol.toLowerCase() === marketKey);
+      if (!token) return;
 
-    // Check if already loading
-    if (loadingMarkets.has(marketKey)) {
-      return;
-    }
-
-    // Check throttling - if not bypassing cache and recently fetched, skip
-    const existingData = marketsData[marketKey];
-    if (!bypassCache && existingData?.lastFetched) {
-      const timeSinceLastFetch = Date.now() - existingData.lastFetched;
-      if (timeSinceLastFetch < throttleMs) {
-        console.log(`Market ${marketKey} throttled. Last fetched ${Math.round(timeSinceLastFetch / 1000)}s ago`);
+      // Check if already loading
+      if (loadingMarkets.has(marketKey)) {
         return;
       }
-    }
 
-    setLoadingMarkets(prev => new Set(prev).add(marketKey));
-    
-    try {
-      // Use the pool ID directly from the token config
-      const marketId = token.underlyingContractId || token.underlyingAssetId || token.originalContractId;
-      const poolId = token.poolId;
-      
-      if (!poolId) {
-        console.log(`No pool ID configured for token ${token.symbol}`);
-        setMarketsData(prev => ({
-          ...prev,
-          [marketKey]: {
-            ...prev[marketKey],
-            isLoading: false,
-            isLoaded: true,
-            error: 'No pool ID configured for this token',
-            lastFetched: Date.now(),
-          }
-        }));
-        return;
-      }
-      
-      console.log(`Loading market ${marketId} for token ${token.symbol} using pool: ${poolId}`);
-      
-      // Fetch market info using the configured pool ID
-      const marketInfo = await fetchMarketInfo(poolId, marketId, currentNetwork);
-
-      if (marketInfo) {
-        // Use the pool ID from the token config
-        console.log(`Setting market data for ${token.symbol} with pool ID: ${poolId}`);
-        // Calculate USD values using the market price
-        const tokenPrice = parseFloat(marketInfo.price) || 0;
-        const totalSupplyAmount = parseFloat(marketInfo.totalDeposits) || 0;
-        const totalBorrowAmount = parseFloat(marketInfo.totalBorrows) || 0;
-        const supplyCapAmount = parseFloat(marketInfo.maxTotalDeposits) || 0;
-        
-        console.log(`USD calculations for ${token.symbol}:`, {
-          tokenPrice,
-          totalSupplyAmount,
-          totalSupplyUSD: totalSupplyAmount * tokenPrice,
-          totalBorrowAmount,
-          totalBorrowUSD: totalBorrowAmount * tokenPrice,
-        });
-        
-        // Get the original token config to access isStoken property
-        const networkConfig = getCurrentNetworkConfig(currentNetwork);
-        const tokenConfig = networkConfig.tokens[token.symbol];
-        
-        const marketData: OnDemandMarketData = {
-          asset: token.symbol,
-          icon: token.logoPath,
-          totalSupply: totalSupplyAmount,
-          totalSupplyUSD: totalSupplyAmount * tokenPrice,
-          supplyAPY: marketInfo.apyCalculation?.apy || marketInfo.supplyRate * 100,
-          totalBorrow: totalBorrowAmount,
-          totalBorrowUSD: totalBorrowAmount * tokenPrice,
-          borrowAPY: marketInfo.borrowApyCalculation?.apy || marketInfo.borrowRateCurrent * 100,
-          utilization: tokenConfig?.isStoken ? 100.0 : marketInfo.utilizationRate * 100,
-          collateralFactor: marketInfo.collateralFactor * 100,
-          walletBalance: 0, // This would need wallet integration
-          supplyCap: supplyCapAmount,
-          supplyCapUSD: supplyCapAmount * tokenPrice,
-          maxLTV: marketInfo.collateralFactor * 100,
-          liquidationThreshold: marketInfo.liquidationThreshold * 100,
-          liquidationPenalty: marketInfo.liquidationBonus * 100,
-          reserveFactor: marketInfo.reserveFactor * 100,
-          collectorContract: '', // Not available in MarketInfo
-          isLoading: false,
-          isLoaded: true,
-          marketInfo, // This contains the correct poolId for this market
-          lastFetched: Date.now(),
-          apyCalculation: marketInfo.apyCalculation, // Include APY calculation results
-          borrowApyCalculation: marketInfo.borrowApyCalculation, // Include borrow APY calculation results
-          isSToken: tokenConfig?.isStoken || false,
-        };
-
-        setMarketsData(prev => ({
-          ...prev,
-          [marketKey]: marketData
-        }));
-      } else {
-        // Handle case where market info couldn't be fetched
-        setMarketsData(prev => ({
-          ...prev,
-          [marketKey]: {
-            ...prev[marketKey],
-            isLoading: false,
-            isLoaded: true,
-            error: 'Failed to load market data',
-            lastFetched: Date.now(),
-          }
-        }));
-      }
-    } catch (error) {
-      console.error(`Error loading market data for ${marketKey}:`, error);
-      setMarketsData(prev => ({
-        ...prev,
-        [marketKey]: {
-          ...prev[marketKey],
-          isLoading: false,
-          isLoaded: true,
-          error: error instanceof Error ? error.message : 'Unknown error',
-          lastFetched: Date.now(),
+      // Check throttling - if not bypassing cache and recently fetched, skip
+      const existingData = marketsData[marketKey];
+      if (!bypassCache && existingData?.lastFetched) {
+        const timeSinceLastFetch = Date.now() - existingData.lastFetched;
+        if (timeSinceLastFetch < throttleMs) {
+          console.log(
+            `Market ${marketKey} throttled. Last fetched ${Math.round(
+              timeSinceLastFetch / 1000
+            )}s ago`
+          );
+          return;
         }
-      }));
-    } finally {
-      setLoadingMarkets(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(marketKey);
-        return newSet;
-      });
-    }
-  }, [tokens, currentNetwork, loadingMarkets, marketsData, throttleMs]);
+      }
+
+      setLoadingMarkets((prev) => new Set(prev).add(marketKey));
+
+      try {
+        // Use the pool ID directly from the token config
+        const marketId =
+          token.underlyingContractId ||
+          token.underlyingAssetId ||
+          token.originalContractId;
+        const poolId = token.poolId;
+
+        if (!poolId) {
+          console.log(`No pool ID configured for token ${token.symbol}`);
+          setMarketsData((prev) => ({
+            ...prev,
+            [marketKey]: {
+              ...prev[marketKey],
+              isLoading: false,
+              isLoaded: true,
+              error: "No pool ID configured for this token",
+              lastFetched: Date.now(),
+            },
+          }));
+          return;
+        }
+
+        console.log(
+          `Loading market ${marketId} for token ${token.symbol} using pool: ${poolId}`
+        );
+
+        // Fetch market info using the configured pool ID
+        const marketInfo = await fetchMarketInfo(
+          poolId,
+          marketId,
+          currentNetwork
+        );
+
+        if (marketInfo) {
+          // Use the pool ID from the token config
+          console.log(
+            `Setting market data for ${token.symbol} with pool ID: ${poolId}`
+          );
+          // Calculate USD values using the market price
+          const tokenPrice = parseFloat(marketInfo.price) || 0;
+          const totalSupplyAmount = parseFloat(marketInfo.totalDeposits) || 0;
+          const totalBorrowAmount = parseFloat(marketInfo.totalBorrows) || 0;
+          const supplyCapAmount = parseFloat(marketInfo.maxTotalDeposits) || 0;
+
+          console.log(`USD calculations for ${token.symbol}:`, {
+            tokenPrice,
+            totalSupplyAmount,
+            totalSupplyUSD: totalSupplyAmount * tokenPrice,
+            totalBorrowAmount,
+            totalBorrowUSD: totalBorrowAmount * tokenPrice,
+          });
+
+          // Get the original token config to access isStoken property
+          const networkConfig = getCurrentNetworkConfig(currentNetwork);
+          const tokenConfig = networkConfig.tokens[token.symbol];
+
+          const marketData: OnDemandMarketData = {
+            asset: token.symbol,
+            icon: token.logoPath,
+            totalSupply: totalSupplyAmount,
+            totalSupplyUSD:
+              (totalSupplyAmount * tokenPrice * Math.pow(10, token.decimals)) /
+              Math.pow(10, 6),
+            supplyAPY:
+              marketInfo.apyCalculation?.apy || marketInfo.supplyRate * 100,
+            totalBorrow: totalBorrowAmount,
+            totalBorrowUSD:
+              (totalBorrowAmount * tokenPrice * Math.pow(10, token.decimals)) /
+              Math.pow(10, 6),
+            borrowAPY:
+              marketInfo.borrowApyCalculation?.apy ||
+              marketInfo.borrowRateCurrent * 100,
+            utilization: tokenConfig?.isStoken
+              ? 100.0
+              : marketInfo.utilizationRate * 100,
+            collateralFactor: marketInfo.collateralFactor * 100,
+            walletBalance: 0, // This would need wallet integration
+            supplyCap: supplyCapAmount,
+            supplyCapUSD: supplyCapAmount * tokenPrice,
+            maxLTV: marketInfo.collateralFactor * 100,
+            liquidationThreshold: marketInfo.liquidationThreshold * 100,
+            liquidationPenalty: marketInfo.liquidationBonus * 100,
+            reserveFactor: marketInfo.reserveFactor * 100,
+            collectorContract: "", // Not available in MarketInfo
+            isLoading: false,
+            isLoaded: true,
+            marketInfo, // This contains the correct poolId for this market
+            lastFetched: Date.now(),
+            apyCalculation: marketInfo.apyCalculation, // Include APY calculation results
+            borrowApyCalculation: marketInfo.borrowApyCalculation, // Include borrow APY calculation results
+            isSToken: tokenConfig?.isStoken || false,
+          };
+
+          setMarketsData((prev) => ({
+            ...prev,
+            [marketKey]: marketData,
+          }));
+        } else {
+          // Handle case where market info couldn't be fetched
+          setMarketsData((prev) => ({
+            ...prev,
+            [marketKey]: {
+              ...prev[marketKey],
+              isLoading: false,
+              isLoaded: true,
+              error: "Failed to load market data",
+              lastFetched: Date.now(),
+            },
+          }));
+        }
+      } catch (error) {
+        console.error(`Error loading market data for ${marketKey}:`, error);
+        setMarketsData((prev) => ({
+          ...prev,
+          [marketKey]: {
+            ...prev[marketKey],
+            isLoading: false,
+            isLoaded: true,
+            error: error instanceof Error ? error.message : "Unknown error",
+            lastFetched: Date.now(),
+          },
+        }));
+      } finally {
+        setLoadingMarkets((prev) => {
+          const newSet = new Set(prev);
+          newSet.delete(marketKey);
+          return newSet;
+        });
+      }
+    },
+    [tokens, currentNetwork, loadingMarkets, marketsData, throttleMs]
+  );
 
   // Load market data for visible markets
-  const loadVisibleMarkets = useCallback((visibleMarketKeys: string[]) => {
-    if (!autoLoad) return;
-    
-    visibleMarketKeys.forEach(marketKey => {
-      if (!marketsData[marketKey]?.isLoaded && !loadingMarkets.has(marketKey)) {
-        loadMarketData(marketKey);
-      }
-    });
-  }, [autoLoad, marketsData, loadingMarkets, loadMarketData]);
+  const loadVisibleMarkets = useCallback(
+    (visibleMarketKeys: string[]) => {
+      if (!autoLoad) return;
+
+      visibleMarketKeys.forEach((marketKey) => {
+        if (
+          !marketsData[marketKey]?.isLoaded &&
+          !loadingMarkets.has(marketKey)
+        ) {
+          loadMarketData(marketKey);
+        }
+      });
+    },
+    [autoLoad, marketsData, loadingMarkets, loadMarketData]
+  );
 
   // Convert markets data to array format
   const marketDataArray = useMemo(() => {
-    return Object.values(marketsData).map(market => ({
+    return Object.values(marketsData).map((market) => ({
       ...market,
-      isLoading: loadingMarkets.has(market.asset.toLowerCase())
+      isLoading: loadingMarkets.has(market.asset.toLowerCase()),
     }));
   }, [marketsData, loadingMarkets]);
 
   // Filter and sort data
   const { filteredData, totalPages, paginatedData } = useMemo(() => {
     // Filter data based on search term
-    let filtered = marketDataArray.filter(market =>
+    let filtered = marketDataArray.filter((market) =>
       market.asset.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
@@ -273,12 +322,12 @@ export const useOnDemandMarketData = ({
       let aValue: number | string = a[sortField];
       let bValue: number | string = b[sortField];
 
-      if (typeof aValue === 'string') {
+      if (typeof aValue === "string") {
         aValue = aValue.toLowerCase();
         bValue = (bValue as string).toLowerCase();
       }
 
-      if (sortOrder === 'asc') {
+      if (sortOrder === "asc") {
         return aValue < bValue ? -1 : aValue > bValue ? 1 : 0;
       } else {
         return aValue > bValue ? -1 : aValue < bValue ? 1 : 0;
@@ -293,26 +342,39 @@ export const useOnDemandMarketData = ({
     return {
       filteredData: filtered,
       totalPages,
-      paginatedData: paginated
+      paginatedData: paginated,
     };
-  }, [searchTerm, sortField, sortOrder, currentPage, pageSize, marketDataArray]);
+  }, [
+    searchTerm,
+    sortField,
+    sortOrder,
+    currentPage,
+    pageSize,
+    marketDataArray,
+  ]);
 
   const handleSearchChange = (newSearchTerm: string) => {
     setCurrentPage(1);
   };
 
-  const handleSortChange = (newSortField: SortField, newSortOrder: SortOrder) => {
+  const handleSortChange = (
+    newSortField: SortField,
+    newSortOrder: SortOrder
+  ) => {
     setCurrentPage(1);
   };
 
   // Load market data with cache bypass (for view modal, refresh, etc.)
-  const loadMarketDataWithBypass = useCallback((marketKey: string) => {
-    return loadMarketData(marketKey, true);
-  }, [loadMarketData]);
+  const loadMarketDataWithBypass = useCallback(
+    (marketKey: string) => {
+      return loadMarketData(marketKey, true);
+    },
+    [loadMarketData]
+  );
 
   // Load all markets (for cases where you want to preload everything)
   const loadAllMarkets = useCallback(() => {
-    Object.keys(marketsData).forEach(marketKey => {
+    Object.keys(marketsData).forEach((marketKey) => {
       if (!loadingMarkets.has(marketKey)) {
         loadMarketData(marketKey);
       }

@@ -1,18 +1,22 @@
 import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Calendar, Clock, Rocket, Star, Waves, ShoppingCart } from "lucide-react";
+import {
+  Calendar,
+  Clock,
+  Rocket,
+  Star,
+  Waves,
+  ShoppingCart,
+} from "lucide-react";
 
 import WalletNetworkButton from "@/components/WalletNetworkButton";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
-import {
-  Dialog,
-  DialogContent,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { useWallet } from "@txnlab/use-wallet-react";
 
-const LAUNCH_TIMESTAMP = Date.UTC(2025, 8, 13, 0, 29, 0); // Sep 12, 2025 5:29 PM PDT
+const LAUNCH_TIMESTAMP = Date.UTC(2025, 10, 21, 2, 0, 0); // Nov 20, 2025 6:00 PM PST (Nov 21, 2025 2:00 AM UTC)
 
 interface TimeUnit {
   value: number;
@@ -36,7 +40,7 @@ function CountdownCard({ value, label }: TimeUnit) {
             transition={{ duration: 0.3 }}
             className="text-3xl sm:text-4xl md:text-6xl font-bold text-white mb-2 leading-none"
           >
-            {value.toString().padStart(2, '0')}
+            {value.toString().padStart(2, "0")}
           </motion.div>
           <div className="text-xs sm:text-sm md:text-base font-medium text-muted-foreground uppercase tracking-wider whitespace-nowrap">
             {label}
@@ -46,7 +50,6 @@ function CountdownCard({ value, label }: TimeUnit) {
     </motion.div>
   );
 }
-
 
 export default function CountdownPage() {
   const [timeLeft, setTimeLeft] = useState(LAUNCH_TIMESTAMP - Date.now());
@@ -91,10 +94,10 @@ export default function CountdownPage() {
   return (
     <div className="min-h-screen bg-background relative overflow-x-hidden md:overflow-hidden flex flex-col">
       {/* Background Images */}
-      <div 
+      <div
         className="absolute inset-0 z-0 bg-no-repeat bg-top md:bg-center bg-[length:100%_auto] md:bg-cover"
         style={{
-          backgroundImage: `url('/lovable-uploads/6c65a97f-e84e-4b36-8ba5-38b0208e9bc5.png')`
+          backgroundImage: `url('/lovable-uploads/6c65a97f-e84e-4b36-8ba5-38b0208e9bc5.png')`,
         }}
       />
       {/* Dark overlay */}
@@ -105,26 +108,27 @@ export default function CountdownPage() {
         <div className="container mx-auto px-4 py-3 md:py-4">
           <div className="flex items-center justify-between">
             {/* Logo */}
-            <Link 
-              to="/" 
+            <Link
+              to="/"
               className="flex items-center space-x-3 cursor-pointer hover:opacity-80 transition-opacity"
               aria-label="Go to DorkFi dashboard"
             >
               <div className="flex flex-col">
-                <img 
-                  src="/lovable-uploads/dork_fi_logo_edit1_light.png" 
-                  alt="DorkFi logo" 
-                  className="h-8 sm:h-9 md:h-10 lg:h-11 w-auto object-contain flex-shrink-0" 
+                <img
+                  src="/lovable-uploads/dork_fi_logo_edit1_light.png"
+                  alt="DorkFi logo"
+                  className="h-8 sm:h-9 md:h-10 lg:h-11 w-auto object-contain flex-shrink-0"
                   fetchPriority="high"
                   decoding="async"
                   onError={(e) => {
-                    console.error('Logo failed to load, using placeholder');
-                    (e.currentTarget as HTMLImageElement).src = '/placeholder.svg';
+                    console.error("Logo failed to load, using placeholder");
+                    (e.currentTarget as HTMLImageElement).src =
+                      "/placeholder.svg";
                   }}
                 />
               </div>
             </Link>
-            
+
             {/* Wallet and Buy Button */}
             <div className="flex items-center gap-2">
               {activeAccount?.address && (
@@ -190,12 +194,12 @@ export default function CountdownPage() {
                   🚀 LAUNCHED! 🚀
                 </div>
                 <p className="text-xl text-muted-foreground">
-                  PreFi is now live! Welcome to the future of DeFi.
+                  DorkFi is now live! Welcome to the future of DeFi.
                 </p>
               </motion.div>
             )}
 
-            {/* PreFi Information Card */}
+            {/* DorkFi Information Card */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -205,7 +209,13 @@ export default function CountdownPage() {
               <Card className="bg-card/80 backdrop-blur-sm border-border/50 shadow-lg">
                 <CardContent className="p-5 sm:p-8 text-left">
                   <p className="text-muted-foreground mb-6 leading-relaxed text-justify text-sm sm:text-base">
-                    PreFi begins at 5:29 pm PST (4:20+69) on September 12th, the one year anniversary of Voi Mainnet launch. This is DorkFi's pre-launch deposit program, and your opportunity to get in and lock yield early. From the creation of the PreFi Deposit until Mainnet launch, users can lock in early support for lending markets and be rewarded for doing so.
+                    DorkFi goes live at 6:00 PM PST on November 20th. This marks
+                    the official launch of DorkFi’s lending markets, opening the
+                    door for users to supply assets, earn yield, and participate
+                    in the full protocol. At go-live, users can deposit
+                    supported assets, begin earning APY, and take advantage of
+                    DorkFi’s on-chain lending and borrowing features as the
+                    markets come online.
                   </p>
                 </CardContent>
               </Card>

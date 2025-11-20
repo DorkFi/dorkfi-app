@@ -67,20 +67,20 @@ export const useUserAssets = (userAddress: string) => {
 
       // Fetch data for each token
       for (const token of tokens) {
-        if (token.underlyingContractId) {
+        if (token.underlyingContractId && token.poolId) {
           const market = markets.find((m) => m.symbol === token.symbol);
           
           // Fetch both deposit and borrow balances
           const [depositBalance, borrowData] = await Promise.all([
             fetchUserDepositBalance(
               userAddress,
-              "46505156", // Pool ID - should be dynamic
+              token.poolId,
               token.underlyingContractId,
               currentNetwork
             ),
             fetchUserBorrowBalance(
               userAddress,
-              "46505156", // Pool ID - should be dynamic
+              token.poolId,
               token.underlyingContractId,
               currentNetwork
             )

@@ -127,9 +127,11 @@ const SupplyBorrowModal = ({
           );
         }
 
-        const tokenConfig = getTokenConfig(currentNetwork, asset);
+        // Use originalSymbol to look up the config, as asset might be a display symbol
+        const originalSymbol = 'originalSymbol' in token ? (token as any).originalSymbol : asset;
+        const tokenConfig = getTokenConfig(currentNetwork, originalSymbol);
         if (!tokenConfig) {
-          throw new Error(`Token config not found for ${asset}`);
+          throw new Error(`Token config not found for ${asset} (originalSymbol: ${originalSymbol})`);
         }
 
         const poolId = token.poolId;
@@ -294,9 +296,11 @@ const SupplyBorrowModal = ({
       }
 
       // Get the original token config to access tokenStandard
-      const originalTokenConfig = getTokenConfig(currentNetwork, asset);
+      // Use originalSymbol to look up the config, as asset might be a display symbol
+      const originalSymbol = 'originalSymbol' in token ? (token as any).originalSymbol : asset;
+      const originalTokenConfig = getTokenConfig(currentNetwork, originalSymbol);
       if (!originalTokenConfig) {
-        throw new Error(`Original token config not found for ${asset}`);
+        throw new Error(`Original token config not found for ${asset} (originalSymbol: ${originalSymbol})`);
       }
 
       // Convert amount to atomic units (considering token decimals)

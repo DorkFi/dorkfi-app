@@ -266,12 +266,15 @@ const MarketsTable = () => {
     if (borrowModal.isOpen && borrowModal.asset && activeAccount?.address) {
       const fetchData = async () => {
         try {
-          const globalData = await fetchUserGlobalData(activeAccount.address, currentNetwork);
+          const globalData = await fetchUserGlobalData(
+            activeAccount.address,
+            currentNetwork
+          );
           setUserGlobalData(globalData);
-          
+
           const tokens = getAllTokensWithDisplayInfo(currentNetwork);
           const token = tokens.find((t) => t.symbol === borrowModal.asset);
-          
+
           if (token && token.poolId && token.underlyingContractId) {
             const borrowData = await fetchUserBorrowBalance(
               activeAccount.address,
@@ -285,22 +288,30 @@ const MarketsTable = () => {
           console.error("Error fetching user data:", error);
         }
       };
-      
+
       fetchData();
     }
-  }, [activeAccount?.address, borrowModal.isOpen, borrowModal.asset, currentNetwork]);
+  }, [
+    activeAccount?.address,
+    borrowModal.isOpen,
+    borrowModal.asset,
+    currentNetwork,
+  ]);
 
   // Fetch user data when wallet connects while mint modal is open
   useEffect(() => {
     if (mintModal.isOpen && mintModal.asset && activeAccount?.address) {
       const fetchData = async () => {
         try {
-          const globalData = await fetchUserGlobalData(activeAccount.address, currentNetwork);
+          const globalData = await fetchUserGlobalData(
+            activeAccount.address,
+            currentNetwork
+          );
           setUserGlobalData(globalData);
-          
+
           const tokens = getAllTokensWithDisplayInfo(currentNetwork);
           const token = tokens.find((t) => t.symbol === mintModal.asset);
-          
+
           if (token && token.poolId && token.underlyingContractId) {
             const borrowData = await fetchUserBorrowBalance(
               activeAccount.address,
@@ -314,10 +325,15 @@ const MarketsTable = () => {
           console.error("Error fetching user data:", error);
         }
       };
-      
+
       fetchData();
     }
-  }, [activeAccount?.address, mintModal.isOpen, mintModal.asset, currentNetwork]);
+  }, [
+    activeAccount?.address,
+    mintModal.isOpen,
+    mintModal.asset,
+    currentNetwork,
+  ]);
 
   const handleCloseMintModal = () => {
     const asset = mintModal.asset;
@@ -411,9 +427,17 @@ const MarketsTable = () => {
       }
 
       // Get the original token config to access tokenStandard
-      const originalTokenConfig = getTokenConfig(currentNetwork, asset);
+      // Use originalSymbol to look up the config, as asset might be a display symbol
+      const originalSymbol =
+        "originalSymbol" in token ? (token as any).originalSymbol : asset;
+      const originalTokenConfig = getTokenConfig(
+        currentNetwork,
+        originalSymbol
+      );
       if (!originalTokenConfig) {
-        console.error(`Original token config not found for ${asset}`);
+        console.error(
+          `Original token config not found for ${asset} (originalSymbol: ${originalSymbol})`
+        );
         return { balance: 0, balanceUSD: 0 };
       }
 
@@ -459,7 +483,7 @@ const MarketsTable = () => {
             .accountInformation(activeAccount.address)
             .do();
           // Convert from micro-units to units (divide by 1,000,000)
-          balance = accountInfo.amount / 1_000_000;
+          balance = Number(accountInfo.amount) / 1_000_000;
           console.log(`Network token balance for ${asset}: ${balance}`);
         } catch (error) {
           console.error(
@@ -478,20 +502,16 @@ const MarketsTable = () => {
         );
         try {
           const clients = await algorandService.getCurrentClientsForReads();
-          const accountInfo = await clients.algod
-            .accountInformation(activeAccount.address)
+          const assetId = parseInt(token.underlyingAssetId);
+          const accAssetInfo = await clients.algod
+            .accountAssetInformation(activeAccount.address, assetId)
             .do();
 
-          // Find the asset in the account's assets
-          const assetId = parseInt(token.underlyingAssetId);
-          const assetHolding = accountInfo.assets?.find(
-            (asset: any) => asset["asset-id"] === assetId
-          );
-
-          if (assetHolding) {
+          if (accAssetInfo.assetHolding) {
             // Convert from smallest units to human readable format
             balance =
-              assetHolding.amount / Math.pow(10, originalTokenConfig.decimals);
+              Number(accAssetInfo.assetHolding.amount) /
+              Math.pow(10, originalTokenConfig.decimals);
             console.log(`ASA balance for ${asset}: ${balance}`);
           } else {
             console.log(`No ASA balance found for ${asset}`);
@@ -510,14 +530,16 @@ const MarketsTable = () => {
 
       // Calculate USD value
       const market = markets.find((m) => m.asset === asset);
-      const tokenPrice = market ? ((market.totalSupplyUSD / market.totalSupply) || 1) / 10 ** 6 : 1;
+      const tokenPrice = market
+        ? (market.totalSupplyUSD / market.totalSupply || 1) / 10 ** 6
+        : 1;
       const balanceUSD = balance * tokenPrice;
 
       console.log({
         balance,
         tokenPrice,
         balanceUSD,
-      })
+      });
 
       const balanceData = {
         balance,

@@ -49,7 +49,9 @@ const Portfolio = () => {
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [isLoadingPositions, setIsLoadingPositions] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
-  const [walletBalances, setWalletBalances] = useState<Record<string, { balance: number; balanceUSD: number }>>({});
+  const [walletBalances, setWalletBalances] = useState<
+    Record<string, { balance: number; balanceUSD: number }>
+  >({});
   const [isLoadingWalletBalance, setIsLoadingWalletBalance] = useState(false);
   const [userBorrowBalance, setUserBorrowBalance] = useState<number>(0);
   const [isLoadingBorrowData, setIsLoadingBorrowData] = useState(false);
@@ -57,7 +59,11 @@ const Portfolio = () => {
   console.log("marketData", marketData);
 
   // Function to fetch ntoken balance for a specific token
-  const fetchNTokenBalance = async (userAddress: string, nTokenId: string, networkId: string) => {
+  const fetchNTokenBalance = async (
+    userAddress: string,
+    nTokenId: string,
+    networkId: string
+  ) => {
     try {
       if (!nTokenId) {
         console.log("No nTokenId provided, returning 0");
@@ -69,11 +75,16 @@ const Portfolio = () => {
       ARC200Service.initialize(clients);
 
       console.log(`Fetching nToken balance for contract: ${nTokenId}`);
-      const nTokenBalance = await ARC200Service.getBalance(userAddress, nTokenId);
-      
+      const nTokenBalance = await ARC200Service.getBalance(
+        userAddress,
+        nTokenId
+      );
+
       if (nTokenBalance) {
         // Convert from smallest units to human readable format
-        const balance = parseFloat(ARC200Service.formatBalance(nTokenBalance, 6)); // nTokens typically have 6 decimals
+        const balance = parseFloat(
+          ARC200Service.formatBalance(nTokenBalance, 6)
+        ); // nTokens typically have 6 decimals
         console.log(`nToken balance: ${balance}`);
         return balance;
       } else {
@@ -87,30 +98,38 @@ const Portfolio = () => {
   };
 
   // Function to fetch user positions (both deposits and borrows)
-  const fetchUserPositions = async (userAddress: string, networkId: string, markets: any[] = []) => {
+  const fetchUserPositions = async (
+    userAddress: string,
+    networkId: string,
+    markets: any[] = []
+  ) => {
     try {
-      console.log("fetchUserPositions called with:", { userAddress, networkId, marketsCount: markets.length });
+      console.log("fetchUserPositions called with:", {
+        userAddress,
+        networkId,
+        marketsCount: markets.length,
+      });
       const tokens = getAllTokensWithDisplayInfo(networkId as any);
       const positions = [];
 
       for (const token of tokens) {
-        if (token.underlyingContractId) {
+        if (token.underlyingContractId && token.poolId) {
           const market = markets.find((m) => m.symbol === token.symbol);
-          
+
           // Fetch both deposit and borrow balances for this token
           const [depositBalance, borrowData] = await Promise.all([
             fetchUserDepositBalance(
               userAddress,
-              "46505156", // Pool ID - should be dynamic
+              token.poolId,
               token.underlyingContractId,
               networkId as any
             ),
             fetchUserBorrowBalance(
               userAddress,
-              "46505156", // Pool ID - should be dynamic
+              token.poolId,
               token.underlyingContractId,
               networkId as any
-            )
+            ),
           ]);
 
           // Extract borrow balance and interest from the new return type
@@ -120,8 +139,11 @@ const Portfolio = () => {
           // Add deposit position if user has deposits
           if (depositBalance && depositBalance > 0) {
             // Get the original token config to access nTokenId
-            const originalTokenConfig = getTokenConfig(networkId as any, token.symbol);
-            
+            const originalTokenConfig = getTokenConfig(
+              networkId as any,
+              token.symbol
+            );
+
             // Fetch ntoken balance for this deposit
             const nTokenBalance = await fetchNTokenBalance(
               userAddress,
@@ -133,21 +155,34 @@ const Portfolio = () => {
               depositBalance,
               nTokenBalance,
               marketPrice: market?.price,
-              tokenPrice: market?.price ? parseFloat(market.price) / Math.pow(10, 6) : 1,
-              calculatedValue: (depositBalance * (market?.price ? parseFloat(market.price) : 1)) / Math.pow(10, 6),
+              tokenPrice: market?.price
+                ? (parseFloat(market.price) * 10 ** token.decimals) /
+                  Math.pow(10, 6)
+                : 1,
+              calculatedValue:
+                (depositBalance *
+                  (market?.price ? parseFloat(market.price) : 1)) /
+                Math.pow(10, 6),
               marketFound: !!market,
             });
-            
+
             positions.push({
               asset: token.symbol,
               icon: token.logoPath,
               balance: depositBalance,
               nTokenBalance: nTokenBalance,
-              value: (depositBalance * (market?.price ? parseFloat(market.price) : 1)) / Math.pow(10, 6),
-              apy: market?.apyCalculation?.apy || 
-                   (market?.supplyRate ? market.supplyRate * 100 : 0),
-              tokenPrice: market?.price ? parseFloat(market.price) / Math.pow(10, 6) : 1,
-              type: 'deposit'
+              value:
+                ((depositBalance *
+                  (market?.price ? parseFloat(market.price) : 1)) /
+                  Math.pow(10, 6)) *
+                (Math.pow(10, token.decimals) / Math.pow(10, 6)),
+              apy:
+                market?.apyCalculation?.apy ||
+                (market?.supplyRate ? market.supplyRate * 100 : 0),
+              tokenPrice: market?.price
+                ? parseFloat(market.price) / Math.pow(10, 6)
+                : 1,
+              type: "deposit",
             });
           }
 
@@ -157,11 +192,16 @@ const Portfolio = () => {
               borrowBalance,
               borrowInterest,
               marketPrice: market?.price,
-              tokenPrice: market?.price ? parseFloat(market.price) / Math.pow(10, 6) : 1,
-              calculatedValue: (borrowBalance * (market?.price ? parseFloat(market.price) : 1)) / Math.pow(10, 6),
+              tokenPrice: market?.price
+                ? parseFloat(market.price) / Math.pow(10, 6)
+                : 1,
+              calculatedValue:
+                (borrowBalance *
+                  (market?.price ? parseFloat(market.price) : 1)) /
+                Math.pow(10, 6),
               marketFound: !!market,
             });
-            
+
             positions.push({
               asset: token.symbol,
               icon: token.logoPath,
@@ -170,10 +210,15 @@ const Portfolio = () => {
                 (borrowBalance *
                   (market?.price ? parseFloat(market.price) : 1)) /
                 Math.pow(10, 6),
-              apy: market?.borrowApyCalculation?.apy || 
-                   (market?.borrowRateCurrent ? market.borrowRateCurrent * 100 : 0),
-              tokenPrice: market?.price ? parseFloat(market.price) / Math.pow(10, 6) : 1,
-              type: 'borrow',
+              apy:
+                market?.borrowApyCalculation?.apy ||
+                (market?.borrowRateCurrent
+                  ? market.borrowRateCurrent * 100
+                  : 0),
+              tokenPrice: market?.price
+                ? parseFloat(market.price) / Math.pow(10, 6)
+                : 1,
+              type: "borrow",
               interest: borrowInterest,
             });
           }
@@ -189,13 +234,19 @@ const Portfolio = () => {
   };
 
   // Separate deposits and borrows from user positions
-  const deposits = userPositions.filter(pos => pos.type === 'deposit');
-  const borrows = userPositions.filter(pos => pos.type === 'borrow');
-  
+  const deposits = userPositions.filter((pos) => pos.type === "deposit");
+  const borrows = userPositions.filter((pos) => pos.type === "borrow");
+
   // Calculate totals from real data only
   const totalCollateral =
     userGlobalData?.totalCollateralValue ||
     deposits.reduce((sum, deposit) => sum + deposit.value, 0);
+
+  console.log({
+    userGlobalData,
+    deposits,
+  });
+
   const totalBorrowed =
     userGlobalData?.totalBorrowValue ||
     borrows.reduce((sum, borrow) => sum + borrow.value, 0);
@@ -260,7 +311,9 @@ const Portfolio = () => {
   const healthFactor =
     totalCollateral > 0 && totalBorrowed > 0
       ? (totalCollateral * collateralFactor) / totalBorrowed
-      : totalCollateral > 0 ? 10.0 : null; // Excellent health when no borrows, null when no collateral
+      : totalCollateral > 0
+      ? 10.0
+      : null; // Excellent health when no borrows, null when no collateral
 
   // Calculate Net LTV (Loan-to-Value ratio)
   const netLTV =
@@ -278,7 +331,8 @@ const Portfolio = () => {
     // Risk factor = (borrow value / total collateral) * (1 / health factor)
     // Higher risk factor = more dangerous position
     const positionWeight = borrow.value / totalCollateral;
-    const healthFactorContribution = healthFactor !== null && healthFactor > 0 ? 1 / healthFactor : 10; // High risk if HF is low or null
+    const healthFactorContribution =
+      healthFactor !== null && healthFactor > 0 ? 1 / healthFactor : 10; // High risk if HF is low or null
     return positionWeight * healthFactorContribution;
   };
 
@@ -305,7 +359,6 @@ const Portfolio = () => {
     })),
   });
 
-
   // Fetch wallet balance for a specific asset (same as MarketsTable)
   const fetchWalletBalance = async (asset: string) => {
     if (!activeAccount?.address) {
@@ -319,17 +372,25 @@ const Portfolio = () => {
 
     try {
       const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-      const token = tokens.find(t => t.symbol === asset);
-      
+      const token = tokens.find((t) => t.symbol === asset);
+
       if (!token) {
         console.error(`Token ${asset} not found in network config`);
         return { balance: 0, balanceUSD: 0 };
       }
 
       // Get the original token config to access tokenStandard
-      const originalTokenConfig = getTokenConfig(currentNetwork, asset);
+      // Use originalSymbol to look up the config, as asset might be a display symbol
+      const originalSymbol =
+        "originalSymbol" in token ? (token as any).originalSymbol : asset;
+      const originalTokenConfig = getTokenConfig(
+        currentNetwork,
+        originalSymbol
+      );
       if (!originalTokenConfig) {
-        console.error(`Original token config not found for ${asset}`);
+        console.error(
+          `Original token config not found for ${asset} (originalSymbol: ${originalSymbol})`
+        );
         return { balance: 0, balanceUSD: 0 };
       }
 
@@ -338,19 +399,29 @@ const Portfolio = () => {
       ARC200Service.initialize(clients);
 
       let balance = 0;
-      
+
       // Handle different token standards
-      if (originalTokenConfig.tokenStandard === "arc200" && token.underlyingContractId) {
+      if (
+        originalTokenConfig.tokenStandard === "arc200" &&
+        token.underlyingContractId
+      ) {
         // Fetch ARC200 token balance
-        console.log(`Fetching ARC200 balance for ${asset} (contract: ${token.underlyingContractId})`);
+        console.log(
+          `Fetching ARC200 balance for ${asset} (contract: ${token.underlyingContractId})`
+        );
         const arc200Balance = await ARC200Service.getBalance(
           activeAccount.address,
           token.underlyingContractId
         );
-        
+
         if (arc200Balance) {
           // Convert from smallest units to human readable format
-          balance = parseFloat(ARC200Service.formatBalance(arc200Balance, originalTokenConfig.decimals));
+          balance = parseFloat(
+            ARC200Service.formatBalance(
+              arc200Balance,
+              originalTokenConfig.decimals
+            )
+          );
           console.log(`ARC200 balance for ${asset}: ${balance}`);
         } else {
           console.log(`No ARC200 balance found for ${asset}`);
@@ -361,28 +432,39 @@ const Portfolio = () => {
         console.log(`Fetching network token balance for ${asset}`);
         try {
           const clients = await algorandService.getCurrentClientsForReads();
-          const accountInfo = await clients.algod.accountInformation(activeAccount.address).do();
+          const accountInfo = await clients.algod
+            .accountInformation(activeAccount.address)
+            .do();
           // Convert from micro-units to units (divide by 1,000,000)
           balance = Number(accountInfo.amount) / 1_000_000;
           console.log(`Network token balance for ${asset}: ${balance}`);
         } catch (error) {
-          console.error(`Error fetching network token balance for ${asset}:`, error);
+          console.error(
+            `Error fetching network token balance for ${asset}:`,
+            error
+          );
           balance = 0;
         }
-      } else if (originalTokenConfig.tokenStandard === "asa" && token.underlyingAssetId) {
+      } else if (
+        originalTokenConfig.tokenStandard === "asa" &&
+        token.underlyingAssetId
+      ) {
         // For ASA tokens, fetch asset balance
-        console.log(`Fetching ASA balance for ${asset} (asset ID: ${token.underlyingAssetId})`);
+        console.log(
+          `Fetching ASA balance for ${asset} (asset ID: ${token.underlyingAssetId})`
+        );
         try {
           const clients = await algorandService.getCurrentClientsForReads();
-          const accountInfo = await clients.algod.accountInformation(activeAccount.address).do();
-          
-          // Find the asset in the account's assets
           const assetId = parseInt(token.underlyingAssetId);
-          const assetHolding = accountInfo.assets?.find((asset: any) => asset['asset-id'] === assetId);
-          
-          if (assetHolding) {
+          const accAssetInfo = await clients.algod
+            .accountAssetInformation(activeAccount.address, assetId)
+            .do();
+
+          if (accAssetInfo["asset-holding"]) {
             // Convert from smallest units to human readable format
-            balance = Number(assetHolding.amount) / Math.pow(10, originalTokenConfig.decimals);
+            balance =
+              Number(accAssetInfo["asset-holding"].amount) /
+              Math.pow(10, originalTokenConfig.decimals);
             console.log(`ASA balance for ${asset}: ${balance}`);
           } else {
             console.log(`No ASA balance found for ${asset}`);
@@ -393,23 +475,30 @@ const Portfolio = () => {
           balance = 0;
         }
       } else {
-        console.log(`Unsupported token standard for ${asset}: ${originalTokenConfig.tokenStandard}`);
+        console.log(
+          `Unsupported token standard for ${asset}: ${originalTokenConfig.tokenStandard}`
+        );
         balance = 0;
       }
 
       // Calculate USD value using market data
-      const market = marketData.find(m => m.symbol === asset);
-      const tokenPrice = market ? (market.price ? parseFloat(market.price) / Math.pow(10, 6) : 1) : 1;
-      const balanceUSD = balance * tokenPrice;
-      
+      const market = marketData.find((m) => m.symbol === asset);
+      const tokenPrice = market
+        ? market.price
+          ? parseFloat(market.price) / Math.pow(10, 6)
+          : 1
+        : 1;
+      const balanceUSD =
+        balance * tokenPrice * (Math.pow(10, token.decimals) / Math.pow(10, 6));
+
       const balanceData = {
         balance,
-        balanceUSD
+        balanceUSD,
       };
 
-      setWalletBalances(prev => ({
+      setWalletBalances((prev) => ({
         ...prev,
-        [asset]: balanceData // Store the full balance object with balance and balanceUSD
+        [asset]: balanceData, // Store the full balance object with balance and balanceUSD
       }));
 
       console.log(`Final balance data for ${asset}:`, balanceData);
@@ -423,15 +512,15 @@ const Portfolio = () => {
   // Refresh wallet balance for a specific asset
   const refreshWalletBalance = async (asset: string) => {
     if (!activeAccount?.address) return;
-    
+
     try {
       // Clear cached balance
-      setWalletBalances(prev => {
+      setWalletBalances((prev) => {
         const newBalances = { ...prev };
         delete newBalances[asset];
         return newBalances;
       });
-      
+
       // Fetch fresh balance
       await fetchWalletBalance(asset);
     } catch (error) {
@@ -449,10 +538,18 @@ const Portfolio = () => {
     try {
       // Fetch fresh market data and global data first
       const freshMarketData = await fetchAllMarkets(currentNetwork);
-      const freshGlobalData = await fetchUserGlobalData(activeAccount.address, currentNetwork, freshMarketData);
+      const freshGlobalData = await fetchUserGlobalData(
+        activeAccount.address,
+        currentNetwork,
+        freshMarketData
+      );
 
       // Then fetch fresh user positions with market data
-      const freshPositions = await fetchUserPositions(activeAccount.address, currentNetwork, freshMarketData);
+      const freshPositions = await fetchUserPositions(
+        activeAccount.address,
+        currentNetwork,
+        freshMarketData
+      );
 
       setMarketData(freshMarketData);
       setUserPositions(freshPositions);
@@ -487,10 +584,18 @@ const Portfolio = () => {
 
         // Fetch markets first, then global data (so we can pass marketData for healthFactorIndex calculation)
         const markets = await fetchAllMarkets(currentNetwork);
-        const globalData = await fetchUserGlobalData(activeAccount.address, currentNetwork, markets);
+        const globalData = await fetchUserGlobalData(
+          activeAccount.address,
+          currentNetwork,
+          markets
+        );
 
         // Then fetch user positions with market data
-        const positions = await fetchUserPositions(activeAccount.address, currentNetwork, markets);
+        const positions = await fetchUserPositions(
+          activeAccount.address,
+          currentNetwork,
+          markets
+        );
 
         if (globalData) {
           console.log("User global data fetched:", globalData);
@@ -536,17 +641,17 @@ const Portfolio = () => {
     }
 
     setIsLoadingWalletBalance(true);
-    
+
     try {
       // Fetch wallet balance before opening modal
       await fetchWalletBalance(asset);
-      
+
       // Open modal after balance is fetched
       setDepositModal({ isOpen: true, asset });
     } catch (error) {
       console.error("Error fetching wallet balance for deposit:", error);
       // Still open modal even if balance fetch fails
-    setDepositModal({ isOpen: true, asset });
+      setDepositModal({ isOpen: true, asset });
     } finally {
       setIsLoadingWalletBalance(false);
     }
@@ -558,19 +663,23 @@ const Portfolio = () => {
 
   const handleBorrowClick = async (asset: string) => {
     setIsLoadingBorrowData(true);
-    
+
     try {
       // Fetch user global data before opening modal (only if wallet is connected)
       if (activeAccount?.address) {
         // Fetch markets to pass for healthFactorIndex calculation
         const markets = await fetchAllMarkets(currentNetwork);
-        const globalData = await fetchUserGlobalData(activeAccount.address, currentNetwork, markets);
+        const globalData = await fetchUserGlobalData(
+          activeAccount.address,
+          currentNetwork,
+          markets
+        );
         setUserGlobalData(globalData);
-        
+
         // Fetch user's current borrow balance for this specific asset
         const tokens = getAllTokensWithDisplayInfo(currentNetwork);
         const token = tokens.find((t) => t.symbol === asset);
-        
+
         if (token && token.poolId && token.underlyingContractId) {
           const borrowData = await fetchUserBorrowBalance(
             activeAccount.address,
@@ -588,7 +697,7 @@ const Portfolio = () => {
         setUserGlobalData(null);
         setUserBorrowBalance(0);
       }
-      
+
       // Open modal regardless of connection status
       setBorrowModal({ isOpen: true, asset });
     } catch (error) {
@@ -609,7 +718,7 @@ const Portfolio = () => {
     try {
       // Fetch wallet balance for the asset before opening modal
       await refreshWalletBalance(asset);
-      
+
       // Open modal after wallet balance is fetched
       setRepayModal({ isOpen: true, asset });
     } catch (error) {
@@ -704,7 +813,7 @@ const Portfolio = () => {
   return (
     <div className="space-y-6">
       {/* Hero Section */}
-      <DorkFiCard 
+      <DorkFiCard
         hoverable
         className="relative text-center overflow-hidden p-6 md:p-8"
       >
@@ -772,7 +881,7 @@ const Portfolio = () => {
             decoding="async"
           />
         </div>
-        
+
         <div className="relative z-10">
           <H1 className="m-0 text-4xl md:text-5xl">
             <span className="hero-header">Portfolio Health</span>
@@ -836,97 +945,106 @@ const Portfolio = () => {
       />
 
       {/* At Risk Positions Section - Show when health factor < 1.5 and there are borrows */}
-      {isFeatureEnabled("enableLiquidations") && healthFactor !== null && healthFactor < 1.5 && healthFactor > 0 && totalBorrowed > 0 && !isLoadingData && (
-        <DorkFiCard className="border-red-500/30 bg-red-500/5">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <AlertTriangle className="w-6 h-6 text-red-500" />
-              <H1 className="text-xl text-red-500 m-0">At Risk Positions</H1>
+      {isFeatureEnabled("enableLiquidations") &&
+        healthFactor !== null &&
+        healthFactor < 1.5 &&
+        healthFactor > 0 &&
+        totalBorrowed > 0 &&
+        !isLoadingData && (
+          <DorkFiCard className="border-red-500/30 bg-red-500/5">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="w-6 h-6 text-red-500" />
+                <H1 className="text-xl text-red-500 m-0">At Risk Positions</H1>
+              </div>
+              <button
+                onClick={handleRefreshPositions}
+                disabled={isLoadingPositions}
+                className="flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Refresh positions data"
+              >
+                <RefreshCw
+                  className={`w-4 h-4 ${
+                    isLoadingPositions ? "animate-spin" : ""
+                  }`}
+                />
+                Refresh
+              </button>
             </div>
-            <button
-              onClick={handleRefreshPositions}
-              disabled={isLoadingPositions}
-              className="flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              title="Refresh positions data"
-            >
-              <RefreshCw className={`w-4 h-4 ${isLoadingPositions ? 'animate-spin' : ''}`} />
-              Refresh
-            </button>
-          </div>
-          <Body className="text-red-400 mb-4">
-            Your health factor is below 1.5, indicating elevated liquidation
-            risk. Consider reducing your borrowed amount or adding more
-            collateral.
-          </Body>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20">
-              <div className="text-sm text-red-300 mb-2">Health Factor</div>
-              <div className="text-2xl font-bold text-red-400">
-                {healthFactor.toFixed(3)}
+            <Body className="text-red-400 mb-4">
+              Your health factor is below 1.5, indicating elevated liquidation
+              risk. Consider reducing your borrowed amount or adding more
+              collateral.
+            </Body>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20">
+                <div className="text-sm text-red-300 mb-2">Health Factor</div>
+                <div className="text-2xl font-bold text-red-400">
+                  {healthFactor.toFixed(3)}
+                </div>
+                <div className="text-xs text-red-300 mt-1">
+                  Target: 1.5+ for safety
+                </div>
               </div>
-              <div className="text-xs text-red-300 mt-1">
-                Target: 1.5+ for safety
-              </div>
-            </div>
-            <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20">
-              <div className="text-sm text-red-300 mb-2">
-                Liquidation Margin
-              </div>
-              <div className="text-2xl font-bold text-red-400">
-                {liquidationMargin.toFixed(1)}%
-              </div>
-              <div className="text-xs text-red-300 mt-1">
-                Safety buffer remaining
+              <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20">
+                <div className="text-sm text-red-300 mb-2">
+                  Liquidation Margin
+                </div>
+                <div className="text-2xl font-bold text-red-400">
+                  {liquidationMargin.toFixed(1)}%
+                </div>
+                <div className="text-xs text-red-300 mt-1">
+                  Safety buffer remaining
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Risky Borrow Positions */}
-          {riskyBorrows.length > 0 && (
-            <div className="mt-4">
-              <div className="text-sm text-red-300 mb-3 font-medium">
-                Risky Borrow Positions
-              </div>
-              <div className="space-y-2">
-                {riskyBorrows.map((borrow, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center justify-between p-3 rounded-lg bg-red-500/10 border border-red-500/20"
-                  >
-                    <div className="flex items-center gap-3">
-                      <img
-                        src={borrow.icon}
-                        alt={borrow.asset}
-                        className="w-6 h-6 rounded-full"
-                      />
-                      <div>
-                        <div className="text-sm font-medium text-red-400">
-                          {borrow.asset}
+            {/* Risky Borrow Positions */}
+            {riskyBorrows.length > 0 && (
+              <div className="mt-4">
+                <div className="text-sm text-red-300 mb-3 font-medium">
+                  Risky Borrow Positions
+                </div>
+                <div className="space-y-2">
+                  {riskyBorrows.map((borrow, index) => (
+                    <div
+                      key={index}
+                      className="flex items-center justify-between p-3 rounded-lg bg-red-500/10 border border-red-500/20"
+                    >
+                      <div className="flex items-center gap-3">
+                        <img
+                          src={borrow.icon}
+                          alt={borrow.asset}
+                          className="w-6 h-6 rounded-full"
+                        />
+                        <div>
+                          <div className="text-sm font-medium text-red-400">
+                            {borrow.asset}
+                          </div>
+                          <div className="text-xs text-red-300">
+                            {borrow.balance.toFixed(2)} {borrow.asset}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-sm font-bold text-red-400">
+                          {borrow.value.toLocaleString("en-US", {
+                            style: "currency",
+                            currency: "USD",
+                          })}
                         </div>
                         <div className="text-xs text-red-300">
-                          {borrow.balance.toFixed(2)} {borrow.asset}
+                          {borrow.apy.toFixed(2)}% APY • Risk:{" "}
+                          {(borrow.riskFactor * 100).toFixed(1)}%
                         </div>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <div className="text-sm font-bold text-red-400">
-                        {borrow.value.toLocaleString("en-US", {
-                          style: "currency",
-                          currency: "USD",
-                        })}
-                      </div>
-                      <div className="text-xs text-red-300">
-                        {borrow.apy.toFixed(2)}% APY • Risk:{" "}
-                        {(borrow.riskFactor * 100).toFixed(1)}%
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
-        </DorkFiCard>
-      )}
+            )}
+          </DorkFiCard>
+        )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         {/* Stack lists vertically on mobile, keep two columns on desktop */}

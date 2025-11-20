@@ -525,6 +525,13 @@ export const updateMarketPrice = async (
         }
       );
 
+      console.log({
+        set_market_price: {
+          poolId,
+          marketId,
+          priceInSmallestUnit,
+        },
+      });
       // Create update price transaction
       const updatePriceTx = await ci.set_market_price(
         Number(marketId),
@@ -631,6 +638,8 @@ export const updateMarketMaxDeposits = async (
       // Convert max deposits to proper units (assuming 6 decimals for the value)
       const maxDepositsInSmallestUnit = BigInt(newMaxDeposits);
 
+      console.log("marketControllerAddress", { marketControllerAddress });
+
       // Use MarketController contract instead of lending pool contract
       const ci = new CONTRACT(
         Number(marketControllerAddress),
@@ -642,6 +651,14 @@ export const updateMarketMaxDeposits = async (
           sk: new Uint8Array(),
         }
       );
+
+      console.log({
+        set_market_max_total_deposits: {
+          poolId,
+          marketId,
+          maxDepositsInSmallestUnit,
+        },
+      });
 
       ci.setFee(10000);
       const updateMaxDepositsTx = await ci.set_market_max_total_deposits(
@@ -910,7 +927,7 @@ export const calculateMaxBorrowAmount = async (
     const result = await storageClient.calculate_max_borrow_amount(
       Number(poolId),
       userId,
-      Number(marketId),
+      Number(marketId)
     );
 
     if (result.success) {

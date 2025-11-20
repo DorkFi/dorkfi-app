@@ -27,6 +27,7 @@ export interface ContractConfig {
   marketController?: string;
   sToken?: string;
   beacon?: string;
+  appStorageId?: string;
   // Add more contracts as needed
 }
 
@@ -114,6 +115,18 @@ export interface GlobalConfig {
 /**
  * VOI Mainnet Configuration
  */
+const baseVoiMainnetConfig: BaseNetworkConfig = {
+  networkId: "voi-mainnet",
+  walletNetworkId: "voimain",
+  name: "VOI Mainnet",
+  networkType: "avm",
+  rpcUrl: "https://mainnet-api.voi.nodely.dev",
+  rpcPort: 443,
+  rpcToken: "",
+  indexerUrl: "https://mainnet-idx.voi.nodely.dev",
+  explorerUrl: "https://voi.observer",
+  faucetUrl: "https://faucet.voirewards.com/",
+};
 // prefi
 const prefiLendingPools = ["41760711", "44866061"];
 const prefiTokens = {
@@ -428,7 +441,6 @@ const betaTokens: { [symbol: string]: TokenConfig } = {
   },
 };
 const betaLendingPools = ["46505156"];
-
 const betaContracts = {
   lendingPools: [...betaLendingPools],
   priceOracle: "46826662", // Gooch
@@ -453,18 +465,6 @@ const betaPreFiParameters = {
   },
 };
 const betaGasStation = [...Object.keys(betaTokens)];
-const baseVoiMainnetConfig: BaseNetworkConfig = {
-  networkId: "voi-mainnet",
-  walletNetworkId: "voimain",
-  name: "VOI Mainnet",
-  networkType: "avm",
-  rpcUrl: "https://mainnet-api.voi.nodely.dev",
-  rpcPort: 443,
-  rpcToken: "",
-  indexerUrl: "https://mainnet-idx.voi.nodely.dev",
-  explorerUrl: "https://voi.observer",
-  faucetUrl: "https://faucet.voirewards.com/",
-};
 const betaVoiMainnetConfig: NetworkConfig = {
   ...baseVoiMainnetConfig,
   contracts: { ...betaContracts },
@@ -472,7 +472,253 @@ const betaVoiMainnetConfig: NetworkConfig = {
   gasStation: [...betaGasStation],
   preFiParameters: { ...betaPreFiParameters },
 };
-const voiMainnetConfig: NetworkConfig = { ...betaVoiMainnetConfig };
+const prodAMarket = "47139778";
+const prodBMarket = "47139781";
+const prodTokens: { [symbol: string]: TokenConfig } = {
+  VOI: {
+    assetId: "0",
+    poolId: "47139778",
+    contractId: "41877720",
+    nTokenId: "47139789",
+    decimals: 6,
+    name: "VOI",
+    symbol: "VOI",
+    logoPath: "/lovable-uploads/VOI.png",
+    tokenStandard: "network",
+    marketOverride: {
+      displayName: "Voi",
+      displaySymbol: "Voi",
+      isSmartContract: true,
+    },
+  },
+  aUSDC: {
+    assetId: "302190",
+    poolId: "47139778",
+    contractId: "395614",
+    nTokenId: "47140315",
+    decimals: 6,
+    name: "Aramid USDC",
+    symbol: "aUSDC",
+    logoPath: "/lovable-uploads/aUSDC.png",
+    tokenStandard: "asa",
+  },
+  UNIT: {
+    contractId: "420069",
+    poolId: "47139778",
+    nTokenId: "47148525",
+    decimals: 8,
+    name: "UNIT",
+    symbol: "UNIT",
+    logoPath: "/lovable-uploads/UNIT.png",
+    tokenStandard: "arc200",
+  },
+  // aALGO: {
+  //   assetId: "302189",
+  //   contractId: "413153",
+  //   poolId: "41760711",
+  //   nTokenId: "42674504",
+  //   decimals: 6,
+  //   name: "Aramid Algorand",
+  //   symbol: "aALGO",
+  //   logoPath: "/lovable-uploads/aALGO.png",
+  //   tokenStandard: "asa",
+  // },
+  // aETH: {
+  //   assetId: "302193",
+  //   contractId: "40153308",
+  //   poolId: "41760711",
+  //   nTokenId: "42682188",
+  //   decimals: 6,
+  //   name: "Aramid ETH",
+  //   symbol: "aETH",
+  //   logoPath: "/lovable-uploads/aETH.png",
+  //   tokenStandard: "asa",
+  // },
+  // aBTC: {
+  //   assetId: "40152643",
+  //   contractId: "40153368",
+  //   poolId: "41760711",
+  //   nTokenId: "42701185",
+  //   decimals: 8,
+  //   name: "Wrapped BTC",
+  //   symbol: "aBTC",
+  //   logoPath: "/lovable-uploads/WrappedBTC.png",
+  //   tokenStandard: "asa",
+  // },
+  // acbBTC: {
+  //   assetId: "40152648",
+  //   contractId: "40153415",
+  //   poolId: "41760711",
+  //   nTokenId: "42706178",
+  //   decimals: 8,
+  //   name: "Coinbase BTC",
+  //   symbol: "acbBTC",
+  //   logoPath: "/lovable-uploads/cbBTC.png",
+  //   tokenStandard: "asa",
+  // },
+  // POW: {
+  //   assetId: "40152679",
+  //   contractId: "40153155",
+  //   poolId: "41760711",
+  //   nTokenId: "42702842",
+  //   decimals: 6,
+  //   name: "POW",
+  //   symbol: "POW",
+  //   logoPath: "/lovable-uploads/POW.png",
+  //   tokenStandard: "asa",
+  // },
+  // // Fountain VOI 770561 6
+  // FV: {
+  //   assetId: "0",
+  //   contractId: "770561",
+  //   poolId: "44866061",
+  //   nTokenId: "45052343",
+  //   decimals: 6,
+  //   name: "Fountain VOI",
+  //   symbol: "FV",
+  //   logoPath: "https://asset-verification.nautilus.sh/icons/770561.png",
+  //   tokenStandard: "network",
+  // },
+  // NV: {
+  //   assetId: "0",
+  //   contractId: "8324600",
+  //   poolId: "44866061",
+  //   nTokenId: "45052477",
+  //   decimals: 6,
+  //   name: "Nautilus VOI",
+  //   symbol: "NV",
+  //   logoPath: "/lovable-uploads/NV.png",
+  //   tokenStandard: "network",
+  // },
+  // EV: {
+  //   assetId: "0",
+  //   contractId: "828295",
+  //   poolId: "44866061",
+  //   nTokenId: "45447486",
+  //   decimals: 6,
+  //   name: "enVOI",
+  //   symbol: "EV",
+  //   logoPath: "/lovable-uploads/EV.png",
+  //   tokenStandard: "network",
+  // },
+  // bVOI: {
+  //   assetId: "0",
+  //   contractId: "8471125",
+  //   poolId: "44866061",
+  //   nTokenId: "45052513",
+  //   decimals: 6,
+  //   name: "BUIDL VOI",
+  //   symbol: "bVOI",
+  //   logoPath: "/lovable-uploads/bVOI.png",
+  //   tokenStandard: "network",
+  // },
+  // // NODE 410811 6
+  // NODE: {
+  //   contractId: "410811",
+  //   poolId: "44866061",
+  //   nTokenId: "44872392",
+  //   decimals: 6,
+  //   name: "NODE",
+  //   symbol: "NODE",
+  //   logoPath: "https://asset-verification.nautilus.sh/icons/410811.png",
+  //   tokenStandard: "arc200",
+  // },
+  // // BUIDL 419744 6
+  // BUIDL: {
+  //   contractId: "419744",
+  //   poolId: "44866061",
+  //   nTokenId: "44872401",
+  //   decimals: 8,
+  //   name: "BUIDL",
+  //   symbol: "BUIDL",
+  //   logoPath: "https://asset-verification.nautilus.sh/icons/419744.png",
+  //   tokenStandard: "arc200",
+  // },
+  // // SHELLY 410111 8
+  // SHELLY: {
+  //   contractId: "410111",
+  //   poolId: "44866061",
+  //   nTokenId: "44872410",
+  //   decimals: 8,
+  //   name: "SHELLY",
+  //   symbol: "SHELLY",
+  //   logoPath: "https://asset-verification.nautilus.sh/icons/410111.png",
+  //   tokenStandard: "arc200",
+  // },
+  // // AMMO 798968 6
+  // AMMO: {
+  //   contractId: "798968",
+  //   poolId: "44866061",
+  //   nTokenId: "44872488",
+  //   decimals: 6,
+  //   name: "AMMO",
+  //   symbol: "AMMO",
+  //   logoPath: "https://asset-verification.nautilus.sh/icons/798968.png",
+  //   tokenStandard: "arc200",
+  // },
+  // // GM 300279 2
+  // GM: {
+  //   contractId: "300279",
+  //   poolId: "44866061",
+  //   nTokenId: "44872696",
+  //   decimals: 2,
+  //   name: "GM",
+  //   symbol: "GM",
+  //   logoPath: "https://asset-verification.nautilus.sh/icons/300279.png",
+  //   tokenStandard: "arc200",
+  // },
+  // // CORN 412682 6
+  // CORN: {
+  //   contractId: "412682",
+  //   poolId: "44866061",
+  //   nTokenId: "44872738",
+  //   decimals: 6,
+  //   name: "CORN",
+  //   symbol: "CORN",
+  //   logoPath: "https://asset-verification.nautilus.sh/icons/412682.png",
+  //   tokenStandard: "arc200",
+  // },
+  // // F 302222 6
+  // F: {
+  //   contractId: "302222",
+  //   poolId: "44866061",
+  //   nTokenId: "44872864",
+  //   decimals: 6,
+  //   name: "F",
+  //   symbol: "F",
+  //   logoPath: "https://asset-verification.nautilus.sh/icons/302222.png",
+  //   tokenStandard: "arc200",
+  // },
+  // // IAT 420024 6
+  // IAT: {
+  //   contractId: "420024",
+  //   poolId: "44866061",
+  //   nTokenId: "44872814",
+  //   decimals: 6,
+  //   name: "IAT",
+  //   symbol: "IAT",
+  //   logoPath: "https://asset-verification.nautilus.sh/icons/420024.png",
+  //   tokenStandard: "arc200",
+  // },
+};
+const prodLendingPools = [prodAMarket, prodBMarket];
+const prodContracts = {
+  lendingPools: [...prodLendingPools],
+  priceOracle: "47138069",
+  liquidationEngine: undefined,
+  governance: undefined,
+  treasury: undefined,
+  marketController: "47138067",
+  sToken: "47138068",
+  appStorageId: "47138065",
+};
+const voiMainnetConfig: NetworkConfig = {
+  ...baseVoiMainnetConfig,
+  contracts: { ...prodContracts },
+  tokens: { ...prodTokens },
+  gasStation: [],
+  preFiParameters: undefined,
+};
 
 /**
  * VOI Testnet Configuration
@@ -1084,6 +1330,7 @@ const localnetConfig: NetworkConfig = {
  */
 const prefiNetworks = ["voi-mainnet", "algorand-mainnet"];
 const betaNetworks = ["voi-mainnet"];
+const enabledNetworks = ["voi-mainnet", "algorand-mainnet"];
 export const config: GlobalConfig = {
   networks: {
     "voi-mainnet": voiMainnetConfig,
@@ -1105,7 +1352,7 @@ export const config: GlobalConfig = {
     enableSwap: false,
     enableGovernance: false, // Disabled until governance contracts are deployed
     enableMigration: true, // Enable asset migration feature
-    enableGasStation: true,
+    enableGasStation: false,
   },
 };
 

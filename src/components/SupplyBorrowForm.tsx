@@ -141,7 +141,8 @@ const SupplyBorrowForm = ({
     setValidationError(error);
 
     if (amount && tokenPrice > 0) {
-      const numAmount = parseFloat(amount);
+      const numAmount =
+        parseFloat(amount) * (Math.pow(10, decimals) / Math.pow(10, 6));
       setFiatValue(numAmount * tokenPrice);
     } else {
       setFiatValue(0);

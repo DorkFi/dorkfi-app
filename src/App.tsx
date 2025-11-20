@@ -10,15 +10,30 @@ import LiquidationMarkets from "./pages/LiquidationMarkets";
 import { NetworkProvider } from "./contexts/NetworkContext";
 import Index from "./pages/Index";
 import { isFeatureEnabled } from "./config";
+import CountdownPage from "./pages/Countdown";
+import MarketsTable from "./components/MarketsTable";
+import Dashboard from "./components/Dashboard";
 
-const LAUNCH_TIMESTAMP = Date.UTC(2025, 8, 13, 0, 29, 0); // Sep 12, 2025 5:29 PM PDT
+//const LAUNCH_TIMESTAMP = Date.UTC(2025, 10, 21, 2, 0, 0); // Nov 20, 2025 6:00 PM PST (Nov 21, 2025 2:00 AM UTC)
+const LAUNCH_TIMESTAMP = Date.now();
 
-// function ConditionalHomePage() {
-//   const now = Date.now();
-//   const isBeforeLaunch = now < LAUNCH_TIMESTAMP;
+interface ConditionalHomePageProps {
+  activeTab: string;
+  onTabChange: (value: string) => void;
+}
+function ConditionalHomePage({
+  activeTab,
+  onTabChange,
+}: ConditionalHomePageProps) {
+  const now = Date.now();
+  const isBeforeLaunch = now < LAUNCH_TIMESTAMP;
 
-//   return isBeforeLaunch ? <CountdownPage /> : <PreFi />;
-// }
+  return isBeforeLaunch ? (
+    <CountdownPage />
+  ) : (
+    <Index activeTab={activeTab} onTabChange={onTabChange} />
+  );
+}
 
 function App() {
   const [activeTab, setActiveTab] = useState("dashboard");
@@ -43,7 +58,10 @@ function App() {
               <Route
                 path="/"
                 element={
-                  <Index activeTab={activeTab} onTabChange={handleTabChange} />
+                  <ConditionalHomePage
+                    activeTab={activeTab}
+                    onTabChange={handleTabChange}
+                  />
                 }
               />
               <Route path="/admin" element={<Admin />} />

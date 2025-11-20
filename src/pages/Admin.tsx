@@ -755,8 +755,9 @@ export default function AdminDashboard() {
   };
 
   // Check if current user has price oracle role using the price oracle contract address
-  const hasPriceOracleRole = async () => {
-    if (!activeAccount?.address || !oracleContractInfo.contractId) {
+  const hasPriceOracleRole = async (contractIdOverride?: string) => {
+    const contractId = contractIdOverride || oracleContractInfo.contractId;
+    if (!activeAccount?.address || !contractId) {
       return false;
     }
 
@@ -768,12 +769,12 @@ export default function AdminDashboard() {
 
       // Use the price oracle contract address for role checking
       const priceOracleAddress = algosdk.encodeAddress(
-        algosdk.getApplicationAddress(Number(oracleContractInfo.contractId))
+        algosdk.getApplicationAddress(Number(contractId))
           .publicKey
       );
 
       const ci = new CONTRACT(
-        Number(oracleContractInfo.contractId),
+        Number(contractId),
         clients.algod,
         undefined,
         { ...LendingPoolAppSpec.contract, events: [] },
@@ -841,7 +842,8 @@ export default function AdminDashboard() {
     try {
       const markets = getMarketsFromConfig(currentNetwork);
       const statusPromises = markets.map(async (market) => {
-        const tokenId = market.underlyingAssetId || market.underlyingContractId;
+        // Use the same token ID logic as attach_price_feed to ensure consistency
+        const tokenId = market.underlyingContractId || market.underlyingAssetId;
         if (tokenId) {
           const hasPriceFeed = await checkPriceFeedStatus(
             tokenId,
@@ -888,7 +890,8 @@ export default function AdminDashboard() {
 
       const markets = getMarketsFromConfig(currentNetwork);
       const pricePromises = markets.map(async (market) => {
-        const tokenId = market.underlyingAssetId || market.underlyingContractId;
+        // Use the same token ID logic as attach_price_feed to ensure consistency
+        const tokenId = market.underlyingContractId || market.underlyingAssetId;
         if (tokenId) {
           try {
             const result = await ci.get_price_with_timestamp(Number(tokenId));
@@ -946,6 +949,72 @@ export default function AdminDashboard() {
     }
   };
 
+  // Fetch price for a single asset from the oracle contract
+  const fetchAssetPrice = async (marketId: string) => {
+    if (!oracleContractInfo.contractId || !oracleContractInfo.isDeployed) {
+      toast.error("Oracle contract is not deployed");
+      return;
+    }
+
+    try {
+      const networkConfig = getCurrentNetworkConfig();
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      // Find the market
+      const markets = getMarketsFromConfig(currentNetwork);
+      const market = markets.find((m) => m.id === marketId);
+      if (!market) {
+        toast.error("Market not found");
+        return;
+      }
+
+      // Use the same token ID logic as attach_price_feed to ensure consistency
+      const tokenId = market.underlyingContractId || market.underlyingAssetId;
+      if (!tokenId) {
+        toast.error("Token ID not found for this market");
+        return;
+      }
+
+      // Create oracle contract instance
+      const ci = new CONTRACT(
+        Number(market.poolId),
+        clients.algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        { addr: activeAccount?.address || "", sk: new Uint8Array() }
+      );
+      ci.setEnableRawBytes(true);
+
+      // Fetch price
+      const result = await ci.fetch_price_feed(Number(tokenId));
+      console.log({ result });
+      if (result.success) {
+        console.log("fetch_price_feed result", result);
+        const stxn = await signTransactions(
+          result.txns.map((txn: string) =>
+            Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+          )
+        );
+        console.log("stxn", stxn);
+        const res = await signTransactions(stxn);
+        console.log(res);
+        //await waitForConfirmation(clients.algod, res.txid, 4);
+        toast.success(`Price fetched for ${market.symbol}`);
+      } else {
+        toast.error(`Failed to fetch price for ${market.symbol}`);
+      }
+    } catch (error) {
+      console.error(`Error fetching price for ${marketId}:`, error);
+      toast.error(
+        `Error fetching price: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
+    }
+  };
+
   // Load market data for each asset from the lending pool
   const loadMarketData = async () => {
     console.log("🔄 loadMarketData called", { selectedLendingPool });
@@ -977,8 +1046,9 @@ export default function AdminDashboard() {
               { addr: activeAccount?.address || "", sk: new Uint8Array() }
             );
 
+            // Use the same token ID logic as attach_price_feed to ensure consistency
             const tokenId =
-              market.underlyingAssetId || market.underlyingContractId;
+              market.underlyingContractId || market.underlyingAssetId;
 
             console.log(`🔍 Processing market ${market.id}:`, {
               marketId: market.id,
@@ -1078,7 +1148,8 @@ export default function AdminDashboard() {
 
       const markets = getMarketsFromConfig(currentNetwork);
       const priceFeedPromises = markets.map(async (market) => {
-        const tokenId = market.underlyingAssetId || market.underlyingContractId;
+        // Use the same token ID logic as attach_price_feed to ensure consistency
+        const tokenId = market.underlyingContractId || market.underlyingAssetId;
         if (tokenId) {
           try {
             const result = await ci.get_price_feed(Number(tokenId));
@@ -1164,9 +1235,10 @@ export default function AdminDashboard() {
       const selectedMarket = markets.find(
         (market) => market.id === selectedTokenForFeeder
       );
+      // Use the same token ID logic as attach_price_feed to ensure consistency
       const tokenId =
-        selectedMarket?.underlyingAssetId ||
-        selectedMarket?.underlyingContractId;
+        selectedMarket?.underlyingContractId ||
+        selectedMarket?.underlyingAssetId;
 
       if (!tokenId) {
         toast.error("Invalid token selection", {
@@ -1265,9 +1337,10 @@ export default function AdminDashboard() {
       const selectedMarket = markets.find(
         (market) => market.id === selectedTokenForPrice
       );
+      // Use the same token ID logic as attach_price_feed to ensure consistency
       const tokenId =
-        selectedMarket?.underlyingAssetId ||
-        selectedMarket?.underlyingContractId;
+        selectedMarket?.underlyingContractId ||
+        selectedMarket?.underlyingAssetId;
 
       if (!tokenId) {
         toast.error("Invalid token selection", {
@@ -1367,9 +1440,10 @@ export default function AdminDashboard() {
       const selectedMarket = markets.find(
         (market) => market.id === selectedTokenForAttach
       );
+      // Use the same token ID logic as attach_price_feed to ensure consistency
       const tokenId =
-        selectedMarket?.underlyingAssetId ||
-        selectedMarket?.underlyingContractId;
+        selectedMarket?.underlyingContractId ||
+        selectedMarket?.underlyingAssetId;
 
       if (!tokenId) {
         toast.error("Invalid token selection", {
@@ -1380,6 +1454,10 @@ export default function AdminDashboard() {
 
       // Call attach_price_feed method
       //ci.setPaymentAmount(124500);
+      console.log({
+        tokenId,
+        oracleContractInfo: oracleContractInfo.contractId,
+      })
       const result = await ci.attach_price_feed(
         Number(tokenId),
         Number(oracleContractInfo.contractId)
@@ -1536,9 +1614,10 @@ export default function AdminDashboard() {
       // Get token ID from market
       const markets = getMarketsFromConfig(currentNetwork);
       const selectedMarket = markets.find((market) => market.id === marketId);
+      // Use the same token ID logic as attach_price_feed to ensure consistency
       const tokenId =
-        selectedMarket?.underlyingAssetId ||
-        selectedMarket?.underlyingContractId;
+        selectedMarket?.underlyingContractId ||
+        selectedMarket?.underlyingAssetId;
 
       console.log(`🔄 Fetching price feed for market ${marketId}:`, {
         selectedMarket,
@@ -2237,7 +2316,10 @@ export default function AdminDashboard() {
     Record<string, { depositIndex: string; borrowIndex: string }>
   >({});
   const [userMaxBorrowAmounts, setUserMaxBorrowAmounts] = useState<
-    Record<string, { maxBorrow: bigint | null; loading: boolean; error: string | null }>
+    Record<
+      string,
+      { maxBorrow: bigint | null; loading: boolean; error: string | null }
+    >
   >({});
   const [showRawData, setShowRawData] = useState(false);
   const [globalDataLoading, setGlobalDataLoading] = useState(false);
@@ -2488,9 +2570,9 @@ export default function AdminDashboard() {
         return;
       }
     } else if (marketType === "custom") {
-      if (!newMarket.tokenId || !newMarket.tokenContractId) {
+      if (!newMarket.tokenContractId) {
         alert(
-          "Please fill in all required custom market fields (Token ID, Token Contract ID)"
+          "Please fill in all required custom market fields (Token Contract ID)"
         );
         return;
       }
@@ -3722,13 +3804,15 @@ export default function AdminDashboard() {
             );
 
             if (marketInfo && token.underlyingContractId) {
-              const poolId = token.poolId || networkConfig.contracts.lendingPools[0];
+              const poolId =
+                token.poolId || networkConfig.contracts.lendingPools[0];
               const actualMarketId = Number(token.underlyingContractId);
 
-              console.log(
-                `🔄 Fetching max borrow for ${token.symbol}:`,
-                { poolId, userId: userAddress, marketId: actualMarketId }
-              );
+              console.log(`🔄 Fetching max borrow for ${token.symbol}:`, {
+                poolId,
+                userId: userAddress,
+                marketId: actualMarketId,
+              });
 
               const maxBorrow = await calculateMaxBorrowAmount(
                 poolId,
@@ -3987,7 +4071,8 @@ export default function AdminDashboard() {
       }
 
       // Check if user has PriceOracle role using the price oracle contract
-      const userHasPriceOracleRole = await hasPriceOracleRole();
+      // Pass contractId directly since oracleContractInfo.contractId hasn't been set yet
+      const userHasPriceOracleRole = await hasPriceOracleRole(contractId);
 
       // Try to get contract state (if deployed)
       let contractState = null;
@@ -4024,6 +4109,15 @@ export default function AdminDashboard() {
       });
     } catch (error) {
       console.error("Error loading oracle contract info:", error);
+      // Set contractId even on error so validation doesn't get stuck
+      const networkConfig = getCurrentNetworkConfig();
+      const contractId = networkConfig.contracts.priceOracle;
+      setOracleContractInfo({
+        contractId: contractId || undefined,
+        isDeployed: false,
+        hasPriceOracleRole: false,
+        contractState: null,
+      });
     } finally {
       setOracleLoading(false);
     }
@@ -5281,18 +5375,37 @@ export default function AdminDashboard() {
         loadLendingPoolPriceFeeds();
         loadMarketData();
       }
-      // Load asset prices when oracle contract is available
-      if (oracleContractInfo.contractId && oracleContractInfo.isDeployed) {
-        loadAssetPrices();
-      }
     }
   }, [
     activeTab,
     currentNetwork,
     activeAccount?.address,
     selectedLendingPool,
+  ]);
+
+  // Load asset prices when oracle contract is available and tab is active
+  React.useEffect(() => {
+    if (
+      (activeTab === "price-oracle" || activeTab === "price-feed-manager") &&
+      oracleContractInfo.contractId &&
+      oracleContractInfo.isDeployed &&
+      !oracleLoading &&
+      activeAccount
+    ) {
+      console.log("🔄 Loading asset prices from oracle contract:", {
+        contractId: oracleContractInfo.contractId,
+        isDeployed: oracleContractInfo.isDeployed,
+        activeTab,
+      });
+      loadAssetPrices();
+    }
+  }, [
+    activeTab,
     oracleContractInfo.contractId,
     oracleContractInfo.isDeployed,
+    oracleLoading,
+    currentNetwork,
+    activeAccount?.address,
   ]);
 
   return (
@@ -6918,7 +7031,12 @@ export default function AdminDashboard() {
                                       #{index + 1}
                                     </span>
                                     <span className="text-xs font-mono">
-                                      {depositor.address ? `${depositor.address.slice(0, 6)}...${depositor.address.slice(-4)}` : 'N/A'}
+                                      {depositor.address
+                                        ? `${depositor.address.slice(
+                                            0,
+                                            6
+                                          )}...${depositor.address.slice(-4)}`
+                                        : "N/A"}
                                     </span>
                                   </div>
                                   <div className="text-right">
@@ -7402,7 +7520,8 @@ export default function AdminDashboard() {
                       Maximum Borrow Amounts by Market
                     </CardTitle>
                     <CardDescription>
-                      Maximum borrowable amount for each market calculated using the LendingPoolStorage contract
+                      Maximum borrowable amount for each market calculated using
+                      the LendingPoolStorage contract
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
@@ -7415,21 +7534,26 @@ export default function AdminDashboard() {
                         <div className="space-y-2">
                           {markets.map((market) => {
                             const marketId = market.symbol.toLowerCase();
-                            const maxBorrowData = userMaxBorrowAmounts[marketId];
+                            const maxBorrowData =
+                              userMaxBorrowAmounts[marketId];
                             const price = userMarketPrices[marketId] || 0;
-                            
+
                             // Calculate USD value if we have max borrow and price
                             let maxBorrowUSD = 0;
                             let maxBorrowFormatted = "0";
-                            
-                            if (maxBorrowData?.maxBorrow && maxBorrowData.maxBorrow > 0n) {
+
+                            if (
+                              maxBorrowData?.maxBorrow &&
+                              maxBorrowData.maxBorrow > 0n
+                            ) {
                               const maxBorrowInTokens = fromBase(
                                 maxBorrowData.maxBorrow,
                                 market.decimals || 6
                               );
-                              maxBorrowFormatted = maxBorrowInTokens.toLocaleString(undefined, {
-                                maximumFractionDigits: 6,
-                              });
+                              maxBorrowFormatted =
+                                maxBorrowInTokens.toLocaleString(undefined, {
+                                  maximumFractionDigits: 6,
+                                });
                               maxBorrowUSD = maxBorrowInTokens * price;
                             }
 
@@ -7441,7 +7565,8 @@ export default function AdminDashboard() {
                                     ? "border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-950/20"
                                     : maxBorrowData?.error
                                     ? "border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/20"
-                                    : maxBorrowData?.maxBorrow && maxBorrowData.maxBorrow > 0n
+                                    : maxBorrowData?.maxBorrow &&
+                                      maxBorrowData.maxBorrow > 0n
                                     ? "border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/20"
                                     : "border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950/20"
                                 }`}
@@ -7453,7 +7578,8 @@ export default function AdminDashboard() {
                                         ? "bg-yellow-500 animate-pulse"
                                         : maxBorrowData?.error
                                         ? "bg-red-500"
-                                        : maxBorrowData?.maxBorrow && maxBorrowData.maxBorrow > 0n
+                                        : maxBorrowData?.maxBorrow &&
+                                          maxBorrowData.maxBorrow > 0n
                                         ? "bg-green-500"
                                         : "bg-gray-400"
                                     }`}
@@ -7492,14 +7618,19 @@ export default function AdminDashboard() {
                                       </div>
                                       {maxBorrowUSD > 0 && (
                                         <div className="text-xs text-muted-foreground">
-                                          ${maxBorrowUSD.toLocaleString(undefined, {
-                                            maximumFractionDigits: 2,
-                                          })}
+                                          $
+                                          {maxBorrowUSD.toLocaleString(
+                                            undefined,
+                                            {
+                                              maximumFractionDigits: 2,
+                                            }
+                                          )}
                                         </div>
                                       )}
                                       {maxBorrowData?.maxBorrow && (
                                         <div className="text-xs text-muted-foreground font-mono">
-                                          {maxBorrowData.maxBorrow.toString()} base
+                                          {maxBorrowData.maxBorrow.toString()}{" "}
+                                          base
                                         </div>
                                       )}
                                     </>
@@ -9451,7 +9582,12 @@ export default function AdminDashboard() {
                             </span>
                           )}
                           <span className="font-mono">
-                            {activeAccount?.address ? `${activeAccount.address.slice(0, 8)}...${activeAccount.address.slice(-8)}` : 'N/A'}
+                            {activeAccount?.address
+                              ? `${activeAccount.address.slice(
+                                  0,
+                                  8
+                                )}...${activeAccount.address.slice(-8)}`
+                              : "N/A"}
                           </span>
                         </div>
                       </div>
@@ -10697,7 +10833,7 @@ export default function AdminDashboard() {
                               className="text-blue-600 border-blue-600"
                             >
                               <Hash className="h-3 w-3 mr-1" />
-                              {market.underlyingAssetId || "Native"}
+                              {market.underlyingContractId || market.underlyingAssetId || "Native"}
                             </Badge>
                             <Badge
                               variant="outline"
@@ -10710,6 +10846,19 @@ export default function AdminDashboard() {
                               <Database className="h-3 w-3 mr-1" />
                               {priceData ? "Price Available" : "No Price Data"}
                             </Badge>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => fetchAssetPrice(market.id)}
+                              className="h-6 px-2 text-xs"
+                              disabled={
+                                !oracleContractInfo.contractId ||
+                                !oracleContractInfo.isDeployed
+                              }
+                            >
+                              <RefreshCw className="h-3 w-3 mr-1" />
+                              Fetch Price
+                            </Button>
                             <Button
                               size="sm"
                               variant="outline"
@@ -12726,7 +12875,12 @@ export default function AdminDashboard() {
                               {result.name}
                             </span>
                             <span className="text-xs text-muted-foreground">
-                              {result.address ? `${result.address.slice(0, 8)}...${result.address.slice(-8)}` : 'N/A'}
+                              {result.address
+                                ? `${result.address.slice(
+                                    0,
+                                    8
+                                  )}...${result.address.slice(-8)}`
+                                : "N/A"}
                             </span>
                           </div>
                         </div>
@@ -12740,70 +12894,36 @@ export default function AdminDashboard() {
                   </p>
                 </div>
 
-                {selectedRole?.id !== "price-oracle" && (
-                  <div>
-                    <Label htmlFor="assign-address">User Address</Label>
-                    <div className="relative">
-                      <Input
-                        id="assign-address"
-                        placeholder="Enter user's wallet address"
-                        value={assignAddress}
-                        onChange={(e) => handleAddressChange(e.target.value)}
-                        className="font-mono text-sm mt-2"
-                      />
-                      {envoiLoading && (
-                        <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-                          <RefreshCcw className="h-4 w-4 animate-spin text-muted-foreground" />
-                        </div>
-                      )}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Enter the wallet address of the user you want to assign
-                      this role to
-                    </p>
-                    {assignAddress.trim() &&
-                      !envoiService.isValidAddressFormat(assignAddress) && (
-                        <p className="text-xs text-red-600 dark:text-red-400 mt-1">
-                          Invalid address format. Please enter a valid Algorand
-                          address.
-                        </p>
-                      )}
+                <div>
+                  <Label htmlFor="assign-address">User Address</Label>
+                  <div className="relative">
+                    <Input
+                      id="assign-address"
+                      placeholder="Enter user's wallet address"
+                      value={assignAddress}
+                      onChange={(e) => handleAddressChange(e.target.value)}
+                      className="font-mono text-sm mt-2"
+                    />
+                    {envoiLoading && (
+                      <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                        <RefreshCcw className="h-4 w-4 animate-spin text-muted-foreground" />
+                      </div>
+                    )}
                   </div>
-                )}
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Enter the wallet address of the user you want to assign
+                    this role to
+                  </p>
+                  {assignAddress.trim() &&
+                    !envoiService.isValidAddressFormat(assignAddress) && (
+                      <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                        Invalid address format. Please enter a valid Algorand
+                        address.
+                      </p>
+                    )}
+                </div>
 
-                {selectedRole?.id === "price-oracle" && (
-                  <div className="p-3 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <Shield className="h-4 w-4 text-blue-600" />
-                      <span className="text-sm font-medium text-blue-800 dark:text-blue-200">
-                        Price Oracle Role Assignment
-                      </span>
-                    </div>
-                    <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
-                      This role will be assigned to the Oracle Contract address:{" "}
-                      {oracleContractInfo.contractId
-                        ? algosdk
-                            .encodeAddress(
-                              algosdk.getApplicationAddress(
-                                Number(oracleContractInfo.contractId)
-                              ).publicKey
-                            )
-                            .slice(0, 8) +
-                          "..." +
-                          algosdk
-                            .encodeAddress(
-                              algosdk.getApplicationAddress(
-                                Number(oracleContractInfo.contractId)
-                              ).publicKey
-                            )
-                            .slice(-8)
-                        : "N/A"}
-                    </p>
-                  </div>
-                )}
-
-                {selectedRole?.id !== "price-oracle" &&
-                  envoiName &&
+                {envoiName &&
                   assignAddress && (
                     <div className="p-3 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
                       <div className="flex items-center gap-2">
@@ -12813,12 +12933,18 @@ export default function AdminDashboard() {
                         </span>
                       </div>
                       <p className="text-xs text-green-700 dark:text-green-300 mt-1">
-                        {envoiName} → {assignAddress ? `${assignAddress.slice(0, 8)}...${assignAddress.slice(-8)}` : 'N/A'}
+                        {envoiName} →{" "}
+                        {assignAddress
+                          ? `${assignAddress.slice(
+                              0,
+                              8
+                            )}...${assignAddress.slice(-8)}`
+                          : "N/A"}
                       </p>
                     </div>
                   )}
 
-                {selectedRole?.id !== "price-oracle" && envoiError && (
+                {envoiError && (
                   <div className="p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg">
                     <div className="flex items-center gap-2">
                       <AlertTriangle className="h-4 w-4 text-red-600" />
@@ -12845,6 +12971,30 @@ export default function AdminDashboard() {
             <Button
               onClick={async () => {
                 try {
+                  // Validate role is selected
+                  if (!selectedRole) {
+                    toast.error("No role selected", {
+                      description: "Please select a role to assign.",
+                    });
+                    return;
+                  }
+
+                  // Validate address is provided
+                  if (!assignAddress.trim()) {
+                    toast.error("Address required", {
+                      description: "Please enter a user address to assign the role to.",
+                    });
+                    return;
+                  }
+
+                  // Validate address format
+                  if (!envoiService.isValidAddressFormat(assignAddress)) {
+                    toast.error("Invalid address format", {
+                      description: "Please enter a valid Algorand address (58 characters, base32 encoded).",
+                    });
+                    return;
+                  }
+
                   // get network clients
                   const networkConfig = getCurrentNetworkConfig();
                   const clients = algorandService.initializeClients(
@@ -12852,40 +13002,22 @@ export default function AdminDashboard() {
                   );
 
                   // Check if this is a Price Oracle role assignment
-                  const isPriceOracleRole = selectedRole?.id === "price-oracle";
+                  const isPriceOracleRole = selectedRole.id === "price-oracle";
 
                   let contractId: number;
                   let targetAddress: string;
                   let contractSpec: any;
 
-                  if (isPriceOracleRole) {
-                    // For Price Oracle role, use the oracle contract and assign to oracle contract address
-                    if (!oracleContractInfo.contractId) {
-                      toast.error("Oracle contract not deployed", {
-                        description:
-                          "Cannot assign Price Oracle role: Oracle contract is not deployed.",
-                      });
-                      return;
-                    }
-                    contractId = Number(oracleContractInfo.contractId);
-                    targetAddress = algosdk.encodeAddress(
-                      algosdk.getApplicationAddress(contractId).publicKey
-                    );
-                    contractSpec = {
-                      ...LendingPoolAppSpec.contract,
-                      events: [],
-                    }; // NOTE: Should be PriceOracleAppSpec when available
-                  } else {
-                    // For other roles, use the lending pool contract and assign to user address
-                    contractId = Number(
-                      networkConfig.contracts.lendingPools[0]
-                    );
-                    targetAddress = assignAddress;
-                    contractSpec = {
-                      ...LendingPoolAppSpec.contract,
-                      events: [],
-                    };
-                  }
+                  // All roles (including PriceOracle) are assigned on the LendingPool contract
+                  // The PriceOracle role on the LendingPool contract grants permission to update prices
+                  contractId = Number(
+                    networkConfig.contracts.lendingPools[0]
+                  );
+                  targetAddress = assignAddress;
+                  contractSpec = {
+                    ...LendingPoolAppSpec.contract,
+                    events: [],
+                  };
 
                   // get contract instance
                   const ci = new CONTRACT(
@@ -12943,9 +13075,7 @@ export default function AdminDashboard() {
                   toast.success("Role assigned successfully", {
                     description: `Successfully assigned ${
                       selectedRole?.name || "selected role"
-                    } role to ${
-                      isPriceOracleRole ? "Oracle Contract" : targetAddress
-                    }.`,
+                    } role to ${targetAddress}.`,
                   });
 
                   // Refresh oracle contract info if this was a Price Oracle role assignment
@@ -12970,12 +13100,6 @@ export default function AdminDashboard() {
                   });
                 }
               }}
-              disabled={
-                selectedRole?.id === "price-oracle"
-                  ? !oracleContractInfo.contractId // For Price Oracle role, only need oracle contract to be deployed
-                  : !assignAddress.trim() ||
-                    !envoiService.isValidAddressFormat(assignAddress) // For other roles, need valid user address
-              }
             >
               <UserCheck className="h-4 w-4 mr-2" />
               Assign Role
@@ -13048,7 +13172,12 @@ export default function AdminDashboard() {
                               {result.name}
                             </div>
                             <div className="text-xs text-muted-foreground font-mono">
-                              {result.address ? `${result.address.slice(0, 8)}...${result.address.slice(-8)}` : 'N/A'}
+                              {result.address
+                                ? `${result.address.slice(
+                                    0,
+                                    8
+                                  )}...${result.address.slice(-8)}`
+                                : "N/A"}
                             </div>
                           </div>
                         ))
@@ -13473,8 +13602,8 @@ export default function AdminDashboard() {
                       (market) => market.id === selectedTokenForAttach
                     );
                     const tokenId =
-                      selectedMarket?.underlyingAssetId ||
-                      selectedMarket?.underlyingContractId;
+                      selectedMarket?.underlyingContractId ||
+                      selectedMarket?.underlyingAssetId;
                     const priceData = assetPrices[selectedTokenForAttach];
                     return (
                       <div className="text-sm space-y-1">

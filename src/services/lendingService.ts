@@ -810,7 +810,7 @@ export const fetchUserDepositBalance = async (
         undefined,
         { ...LendingPoolAppSpec.contract, events: [] },
         {
-          addr: algosdk.getApplicationAddress(Number(poolId)),
+          addr: algosdk.encodeAddress(algosdk.getApplicationAddress(Number(poolId)).publicKey),
           sk: new Uint8Array(),
         }
       );
@@ -935,6 +935,13 @@ export const fetchUserWalletBalance = async (
           .accountInformation(userAddress)
           .do();
         balance = BigInt(accountInfo.amount);
+      } else if (token.tokenStandard === "asa") {
+        // For ASA tokens, get balance from account asset information
+        const accountAssetInfo = await clients.algod
+          .accountAssetInformation(userAddress, Number(token.assetId))
+          .do();
+        console.log("accountAssetInfo", accountAssetInfo);
+        balance = BigInt(accountAssetInfo?.asset?.amount);
       } else if (
         token.tokenStandard === "arc200" &&
         (token.contractId || token.underlyingContractId)
@@ -1277,32 +1284,16 @@ export const withdraw = async (
         });
       }
 
-      // sync user market for price change
-      // {
-      //   const txnO = (
-      //     await builder.lending.sync_user_market_for_price_change(
-      //       userAddress,
-      //       Number(marketId)
-      //     )
-      //   ).obj;
-      //   buildN.push({
-      //     ...txnO,
-      //     note: new TextEncoder().encode(
-      //       "lending sync_user_market_for_price_change"
-      //     ),
-      //   });
-      // }
-
       // cond a token withdraw
-      // if (tokenStandard != "arc200") {
-      //   const txnO = (
-      //     await builder.token.withdraw(BigInt(amountInSmallestUnit))
-      //   ).obj;
-      //   buildN.push({
-      //     ...txnO,
-      //     note: new TextEncoder().encode("atoken withdraw"),
-      //   });
-      // }
+      if (tokenStandard != "arc200") {
+        const txnO = (
+          await builder.token.withdraw(BigInt(amountInSmallestUnit))
+        ).obj;
+        buildN.push({
+          ...txnO,
+          note: new TextEncoder().encode("atoken withdraw"),
+        });
+      }
 
       console.log("buildN", { buildN });
 
@@ -1455,10 +1446,6 @@ export const deposit = async (
 
       ciLending.setFee(5000);
       ciLending.setPaymentAmount(1e5);
-      const fetch_price_feedR = await ciLending.fetch_price_feed(
-        Number(marketId)
-      );
-      const doFetchPriceFeed = fetch_price_feedR.success;
 
       const builder = {
         lending: new CONTRACT(
@@ -1513,24 +1500,14 @@ export const deposit = async (
 
         // TODO fund ntoken
 
-        // fetch market price
-        // if (doFetchPriceFeed) {
-        //   const txnO = (
-        //     await builder.lending.fetch_price_feed(Number(marketId))
-        //   ).obj;
-        //   buildN.push({
-        //     ...txnO,
-        //     payment: 1e5,
-        //     note: new TextEncoder().encode("lending fetch_price_feed"),
-        //   });
-        // }
-
         // conditionally deposit to token
         if (tokenStandard == "network") {
           if (p1 > 0) {
             const txnO = (
               await builder.token.createBalanceBox(
-                algosdk.getApplicationAddress(Number(poolId))
+                algosdk.encodeAddress(
+                  algosdk.getApplicationAddress(Number(poolId)).publicKey
+                )
               )
             ).obj;
             console.log("createBalanceBox", { txnO });
@@ -1575,7 +1552,9 @@ export const deposit = async (
         {
           const txnO = (
             await builder.token.arc200_approve(
-              algosdk.getApplicationAddress(Number(poolId)),
+              algosdk.encodeAddress(
+                algosdk.getApplicationAddress(Number(poolId)).publicKey
+              ),
               BigInt(new BigNumber(amount).multipliedBy(1.1).toFixed(0)) // TODO only increase for NODE
             )
           ).obj;
@@ -1588,22 +1567,20 @@ export const deposit = async (
 
         // arc200 transfer
         {
-          const txnO = (
-            await builder.token.arc200_transfer(
-              algosdk.getApplicationAddress(Number(poolId)),
-              0
-            )
-          ).obj;
+          const receiver = algosdk.encodeAddress(
+            algosdk.getApplicationAddress(Number(poolId)).publicKey
+          );
+          const txnO = (await builder.token.arc200_transfer(receiver, 0)).obj;
           buildN.push({
             ...txnO,
             payment: 28504,
-            note: new TextEncoder().encode("arc200 transfer"),
+            note: new TextEncoder().encode(`arc200 transfer`),
           });
         }
 
         // deposit to lending pool
         {
-          const depositCost = p3 > 0 ? 900000 : 0;
+          const depositCost = p3 > 0 ? 0 : 900000;
           const txnO = (
             await builder.lending.deposit(Number(marketId), BigInt(amount))
           ).obj as any;
@@ -1611,23 +1588,9 @@ export const deposit = async (
             ...txnO,
             note: new TextEncoder().encode("lending deposit"),
             payment: depositCost,
-            foreignApps: [46773453], // TODO move to config
+            foreignApps: [47138065], // TODO move to config
           });
         }
-
-        // sync user market
-        // {
-        //   const txnO = (
-        //     await builder.lending.sync_user_market_for_price_change(
-        //       userAddress,
-        //       Number(marketId)
-        //     )
-        //   ).obj;
-        //   buildN.push({
-        //     ...txnO,
-        //     note: new TextEncoder().encode("lending sync_user_market"),
-        //   });
-        // }
 
         console.log("buildN", { buildN });
 
