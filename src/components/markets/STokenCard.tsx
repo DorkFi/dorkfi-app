@@ -64,7 +64,7 @@ const STokenCard = ({
             />
           </Badge>
           <div className="text-xs text-purple-700 dark:text-purple-300 mt-1">
-            ${market.totalBorrowUSD.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+            ${(market.totalBorrowUSD / 1_000_000).toLocaleString()}
           </div>
         </div>
       </div>

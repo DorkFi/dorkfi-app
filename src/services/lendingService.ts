@@ -810,7 +810,9 @@ export const fetchUserDepositBalance = async (
         undefined,
         { ...LendingPoolAppSpec.contract, events: [] },
         {
-          addr: algosdk.encodeAddress(algosdk.getApplicationAddress(Number(poolId)).publicKey),
+          addr: algosdk.encodeAddress(
+            algosdk.getApplicationAddress(Number(poolId)).publicKey
+          ),
           sk: new Uint8Array(),
         }
       );
@@ -1580,6 +1582,14 @@ export const deposit = async (
 
         // deposit to lending pool
         {
+          // TODO fetch from config
+          const foreignApps = [];
+          if (networkConfig.networkId === "voi-mainnet") {
+            foreignApps.push(47138065);
+          }
+          if (networkConfig.networkId === "algorand-mainnet") {
+            foreignApps.push(3333688254);
+          }
           const depositCost = p3 > 0 ? 0 : 900000;
           const txnO = (
             await builder.lending.deposit(Number(marketId), BigInt(amount))
@@ -1588,7 +1598,7 @@ export const deposit = async (
             ...txnO,
             note: new TextEncoder().encode("lending deposit"),
             payment: depositCost,
-            foreignApps: [47138065], // TODO move to config
+            foreignApps,
           });
         }
 

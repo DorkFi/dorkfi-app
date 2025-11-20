@@ -82,7 +82,6 @@ import { Textarea } from "@/components/ui/textarea";
 import CanvasBubbles from "@/components/CanvasBubbles";
 import VersionDisplay from "@/components/VersionDisplay";
 import {
-  getCurrentNetworkConfig,
   getNetworkConfig,
   isCurrentNetworkAlgorandCompatible,
   isCurrentNetworkEVM,
@@ -90,6 +89,7 @@ import {
   getLendingPools,
   getAllTokensWithDisplayInfo,
   getPreFiParameters,
+  getAlgorandConfigForReads,
 } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
@@ -449,7 +449,7 @@ export default function AdminDashboard() {
 
     try {
       // get network clients
-      const networkConfig = getCurrentNetworkConfig();
+      const networkConfig = getNetworkConfig(currentNetwork);
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
@@ -524,7 +524,7 @@ export default function AdminDashboard() {
     setIsCheckingRoles(true);
     try {
       // get network clients
-      const networkConfig = getCurrentNetworkConfig();
+      const networkConfig = getNetworkConfig(currentNetwork);
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
@@ -762,7 +762,7 @@ export default function AdminDashboard() {
     }
 
     try {
-      const networkConfig = getCurrentNetworkConfig();
+      const networkConfig = getNetworkConfig(currentNetwork);
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
@@ -805,7 +805,7 @@ export default function AdminDashboard() {
     poolId?: string
   ) => {
     try {
-      const networkConfig = getCurrentNetworkConfig();
+      const networkConfig = getNetworkConfig(currentNetwork);
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
@@ -873,7 +873,7 @@ export default function AdminDashboard() {
     }
 
     try {
-      const networkConfig = getCurrentNetworkConfig();
+      const networkConfig = getNetworkConfig(currentNetwork);
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
@@ -957,7 +957,7 @@ export default function AdminDashboard() {
     }
 
     try {
-      const networkConfig = getCurrentNetworkConfig();
+      const networkConfig = getNetworkConfig(currentNetwork);
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
@@ -1028,7 +1028,7 @@ export default function AdminDashboard() {
         "✅ Starting market data load for lending pool:",
         selectedLendingPool
       );
-      const networkConfig = getCurrentNetworkConfig();
+      const networkConfig = getNetworkConfig(currentNetwork);
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
@@ -1131,7 +1131,7 @@ export default function AdminDashboard() {
     }
 
     try {
-      const networkConfig = getCurrentNetworkConfig();
+      const networkConfig = getNetworkConfig(currentNetwork);
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
@@ -1215,7 +1215,7 @@ export default function AdminDashboard() {
     }
 
     try {
-      const networkConfig = getCurrentNetworkConfig();
+      const networkConfig = getNetworkConfig(currentNetwork);
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
@@ -1317,7 +1317,7 @@ export default function AdminDashboard() {
     }
 
     try {
-      const networkConfig = getCurrentNetworkConfig();
+      const networkConfig = getNetworkConfig(currentNetwork);
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
@@ -1420,7 +1420,7 @@ export default function AdminDashboard() {
     }
 
     try {
-      const networkConfig = getCurrentNetworkConfig();
+      const networkConfig = getNetworkConfig(currentNetwork);
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
@@ -1504,7 +1504,7 @@ export default function AdminDashboard() {
   const handleExportOracleData = () => {
     try {
       const markets = getMarketsFromConfig(currentNetwork);
-      const networkConfig = getCurrentNetworkConfig();
+      const networkConfig = getNetworkConfig(currentNetwork);
       const exportData = {
         metadata: {
           network: currentNetwork,
@@ -1596,7 +1596,7 @@ export default function AdminDashboard() {
     }
 
     try {
-      const networkConfig = getCurrentNetworkConfig();
+      const networkConfig = getNetworkConfig(currentNetwork);
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
@@ -1827,7 +1827,7 @@ export default function AdminDashboard() {
     setStokenError(null);
 
     try {
-      const networkConfig = getCurrentNetworkConfig();
+      const networkConfig = getNetworkConfig(currentNetwork);
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
@@ -1897,7 +1897,7 @@ export default function AdminDashboard() {
 
   const loadApprovedMinters = async () => {
     try {
-      const networkConfig = getCurrentNetworkConfig();
+      const networkConfig = getNetworkConfig(currentNetwork);
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
@@ -1954,7 +1954,7 @@ export default function AdminDashboard() {
     setMinterApprovalResult(null);
 
     try {
-      const networkConfig = getCurrentNetworkConfig();
+      const networkConfig = getNetworkConfig(currentNetwork);
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
@@ -2032,7 +2032,7 @@ export default function AdminDashboard() {
     setMinterRevocationResult(null);
 
     try {
-      const networkConfig = getCurrentNetworkConfig();
+      const networkConfig = getNetworkConfig(currentNetwork);
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
@@ -2109,7 +2109,7 @@ export default function AdminDashboard() {
     setSetStokenResult(null);
 
     try {
-      const networkConfig = getCurrentNetworkConfig();
+      const networkConfig = getNetworkConfig(currentNetwork);
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
@@ -2167,7 +2167,7 @@ export default function AdminDashboard() {
 
   const checkStokenMarketExists = async () => {
     try {
-      const networkConfig = getCurrentNetworkConfig();
+      const networkConfig = getNetworkConfig(currentNetwork);
       const stokenContractId = networkConfig.contracts.sToken;
       if (!stokenContractId) {
         setStokenMarketExists(false);
@@ -2220,7 +2220,7 @@ export default function AdminDashboard() {
     setStokenMarketCreationResult(null);
 
     try {
-      const networkConfig = getCurrentNetworkConfig();
+      const networkConfig = getNetworkConfig(currentNetwork);
       const stokenContractId = networkConfig.contracts.sToken;
       const lendingPools = getLendingPools(currentNetwork);
 
@@ -2831,7 +2831,7 @@ export default function AdminDashboard() {
           activeAccount.address
         );
         if (result.success) {
-          const networkConfig = getCurrentNetworkConfig();
+          const networkConfig = getNetworkConfig(currentNetwork);
           const algorandClients = algorandService.initializeClients(
             networkConfig.walletNetworkId as AlgorandNetwork
           );
@@ -2896,7 +2896,7 @@ export default function AdminDashboard() {
           activeAccount.address
         );
         if (result.success) {
-          const networkConfig = getCurrentNetworkConfig();
+          const networkConfig = getNetworkConfig(currentNetwork);
           const algorandClients = algorandService.initializeClients(
             networkConfig.walletNetworkId as AlgorandNetwork
           );
@@ -2965,7 +2965,7 @@ export default function AdminDashboard() {
         });
         console.log("result", result);
         if (result.success) {
-          const networkConfig = getCurrentNetworkConfig();
+          const networkConfig = getNetworkConfig(currentNetwork);
           const algorandClients = algorandService.initializeClients(
             networkConfig.walletNetworkId as AlgorandNetwork
           );
@@ -3060,7 +3060,7 @@ export default function AdminDashboard() {
     setIsTogglingPause(true);
     try {
       if (isCurrentNetworkAlgorandCompatible()) {
-        const networkConfig = getCurrentNetworkConfig();
+        const networkConfig = getNetworkConfig(currentNetwork);
         const algorandClients = algorandService.initializeClients(
           networkConfig.walletNetworkId as AlgorandNetwork
         );
@@ -3116,7 +3116,7 @@ export default function AdminDashboard() {
           return;
         }
 
-        const networkConfig = getCurrentNetworkConfig();
+        const networkConfig = getNetworkConfig(currentNetwork);
         const algorandClients = algorandService.initializeClients(
           networkConfig.walletNetworkId as AlgorandNetwork
         );
@@ -3186,7 +3186,7 @@ export default function AdminDashboard() {
       setGlobalDataError(null);
 
       try {
-        const networkConfig = getCurrentNetworkConfig();
+        const networkConfig = getNetworkConfig(currentNetwork);
         const clients = algorandService.initializeClients(
           networkConfig.walletNetworkId as AlgorandNetwork
         );
@@ -3311,7 +3311,7 @@ export default function AdminDashboard() {
       const userDataByMarket: Record<string, any> = {};
 
       try {
-        const networkConfig = getCurrentNetworkConfig();
+        const networkConfig = getNetworkConfig(currentNetwork);
         const clients = algorandService.initializeClients(
           networkConfig.walletNetworkId as AlgorandNetwork
         );
@@ -3612,7 +3612,7 @@ export default function AdminDashboard() {
 
               try {
                 // Fetch REAL user balances from blockchain (mirroring PreFi.tsx getMarketBalance)
-                const networkConfig = getCurrentNetworkConfig();
+                const networkConfig = getNetworkConfig(currentNetwork);
                 const algorandClients = algorandService.initializeClients(
                   networkConfig.walletNetworkId as AlgorandNetwork
                 );
@@ -3776,7 +3776,7 @@ export default function AdminDashboard() {
       console.log("🔄 Starting max borrow amounts fetch...");
       try {
         const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-        const networkConfig = getCurrentNetworkConfig();
+        const networkConfig = getNetworkConfig(currentNetwork);
         const maxBorrowAmounts: Record<
           string,
           { maxBorrow: bigint | null; loading: boolean; error: string | null }
@@ -4057,7 +4057,7 @@ export default function AdminDashboard() {
 
     setOracleLoading(true);
     try {
-      const networkConfig = getCurrentNetworkConfig();
+      const networkConfig = getNetworkConfig(currentNetwork);
       const contractId = networkConfig.contracts.priceOracle;
 
       if (!contractId) {
@@ -4080,8 +4080,11 @@ export default function AdminDashboard() {
 
       if (isCurrentNetworkAlgorandCompatible()) {
         try {
+          // Get the correct network configuration for the current network
+          const algorandConfig = getAlgorandConfigForReads(currentNetwork);
           const clients = algorandService.initializeClients(
-            networkConfig.walletNetworkId as AlgorandNetwork
+            networkConfig.walletNetworkId as AlgorandNetwork,
+            algorandConfig
           );
 
           // Try to get application info to check if deployed
@@ -4110,7 +4113,7 @@ export default function AdminDashboard() {
     } catch (error) {
       console.error("Error loading oracle contract info:", error);
       // Set contractId even on error so validation doesn't get stuck
-      const networkConfig = getCurrentNetworkConfig();
+      const networkConfig = getNetworkConfig(currentNetwork);
       const contractId = networkConfig.contracts.priceOracle;
       setOracleContractInfo({
         contractId: contractId || undefined,
@@ -9951,7 +9954,7 @@ export default function AdminDashboard() {
                             className="h-3 w-3 text-muted-foreground hover:text-primary cursor-pointer"
                             onClick={() => {
                               const explorerUrl =
-                                getCurrentNetworkConfig().explorerUrl;
+                                getNetworkConfig(currentNetwork).explorerUrl;
                               window.open(
                                 `${explorerUrl}/application/${oracleContractInfo.contractId}`,
                                 "_blank"
@@ -10103,7 +10106,7 @@ export default function AdminDashboard() {
                             className="h-3 w-3 text-muted-foreground hover:text-primary cursor-pointer"
                             onClick={() => {
                               const explorerUrl =
-                                getCurrentNetworkConfig().explorerUrl;
+                                getNetworkConfig(currentNetwork).explorerUrl;
                               window.open(
                                 `${explorerUrl}/address/${oracleContractInfo.contractState.creator}`,
                                 "_blank"
@@ -10579,7 +10582,7 @@ export default function AdminDashboard() {
                           className="h-3 w-3 text-muted-foreground hover:text-primary cursor-pointer"
                           onClick={() => {
                             const explorerUrl =
-                              getCurrentNetworkConfig().explorerUrl;
+                              getNetworkConfig(currentNetwork).explorerUrl;
                             window.open(
                               `${explorerUrl}/application/${oracleContractInfo.contractId}`,
                               "_blank"
@@ -10752,7 +10755,7 @@ export default function AdminDashboard() {
                             className="h-3 w-3 text-muted-foreground hover:text-primary cursor-pointer"
                             onClick={() => {
                               const explorerUrl =
-                                getCurrentNetworkConfig().explorerUrl;
+                                getNetworkConfig(currentNetwork).explorerUrl;
                               window.open(
                                 `${explorerUrl}/address/${oracleContractInfo.contractState.creator}`,
                                 "_blank"
@@ -12996,7 +12999,7 @@ export default function AdminDashboard() {
                   }
 
                   // get network clients
-                  const networkConfig = getCurrentNetworkConfig();
+                  const networkConfig = getNetworkConfig(currentNetwork);
                   const clients = algorandService.initializeClients(
                     networkConfig.walletNetworkId as AlgorandNetwork
                   );

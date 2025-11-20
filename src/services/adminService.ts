@@ -19,7 +19,6 @@ import { APP_SPEC as LendingPoolStorageAppSpec } from "@/clients/LendingPoolStor
 import { CONTRACT } from "ulujs";
 import algorandService, { AlgorandNetwork } from "./algorandService";
 import algosdk, { TransactionSigner } from "algosdk";
-import { decodeMarket } from "./lendingService";
 
 export interface PausedState {
   isPaused: boolean;
@@ -86,8 +85,14 @@ export const fetchPausedState = async (
       if (!isPaused.success) {
         throw new Error("Failed to get paused state");
       }
+      // Convert return value to boolean (handles both boolean and number 0/1)
+      const pausedValue = isPaused.returnValue;
+      const isPausedBool = typeof pausedValue === "boolean" 
+        ? pausedValue 
+        : Boolean(Number(pausedValue));
+
       return {
-        isPaused: isPaused.returnValue,
+        isPaused: isPausedBool,
         pausedBy: undefined,
         pausedAt: undefined,
         pauseReason: undefined,
@@ -110,13 +115,19 @@ export const fetchPausedState = async (
           sk: new Uint8Array(),
         }
       );
-
-      const marketResult = await ci.get_market();
-      const market = decodeMarket(marketResult.returnValue);
-      console.log("Paused result:", market.paused);
+      const isPaused = await ci.is_paused();
+      console.log("Is paused:", isPaused);
+      if (!isPaused.success) {
+        throw new Error("Failed to get paused state");
+      }
+      // Convert return value to boolean (handles both boolean and number 0/1)
+      const pausedValue = isPaused.returnValue;
+      const isPausedBool = typeof pausedValue === "boolean" 
+        ? pausedValue 
+        : Boolean(Number(pausedValue));
 
       return {
-        isPaused: market.paused,
+        isPaused: isPausedBool,
         pausedBy: undefined,
         pausedAt: undefined,
         pauseReason: undefined,
@@ -253,7 +264,7 @@ export const togglePauseState = async (
         networkConfig.walletNetworkId as AlgorandNetwork
       );
       const ci = new CONTRACT(
-        Number(networkConfig.contracts.lendingPools[1]),
+        Number(networkConfig.contracts.lendingPools[0]),
         clients.algod,
         undefined,
         { ...LendingPoolAppSpec.contract, events: [] },
@@ -436,19 +447,10 @@ export const createMarket = async (
         }
       );
 
-      // Get the cost of creating a market
-      const costResult = await ci.create_market_cost();
-      console.log("costResult", { costResult });
-
-      if (!costResult.success) {
-        throw new Error("Failed to get market creation cost");
-      }
-
-      console.log("Market creation cost:", costResult.returnValue);
-
       // Create the market with the provided parameters
-      ci.setPaymentAmount(costResult.returnValue);
+      ci.setPaymentAmount(2000000);
       ci.setFee(8000);
+
       const createResult = await ci.create_market(
         params.tokenId,
         params.collateralFactor,
