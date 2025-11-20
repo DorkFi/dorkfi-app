@@ -1,73 +1,81 @@
-# Welcome to DorkFi Borrow Lend Protocol
+# DorkFi Protocol
 
-## Project info
+DorkFi is a decentralized, non-custodial borrow/lend protocol built on the Algorand Virtual Machine (AVM), launching on Voi Network and Algorand with plans to expand to EVM & SVM. The protocol enables users to lend assets, earn interest, borrow against collateral, and mint the overcollateralized stablecoin WAD. DorkFi is designed as a modular, transparent credit layer for emerging blockchain ecosystems.
 
-**URL**: https://lovable.dev/projects/453684e9-f8bf-459b-9196-e4f9c0e5b52c
+## Features
 
-## How can I edit this code?
+### Multi-Asset Lending Markets
+Each supported asset operates within an isolated market with configurable risk parameters:
+- Collateral factors  
+- Liquidation thresholds  
+- Deposit and borrow caps  
+- Utilization-based interest rates  
 
-There are several ways of editing your application.
+### Dynamic Interest Rate Model
+Borrow and supply rates adjust automatically based on market utilization. Interest accrues continuously using a scaled index system.
 
-**Use Lovable**
+### Unified Collateral & Health Factor System
+Users can borrow across all supported markets using global collateral valuation. Health factors are monitored continuously, and positions below threshold become liquidatable.
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/453684e9-f8bf-459b-9196-e4f9c0e5b52c) and start prompting.
+### WAD Stablecoin
+WAD is minted only through borrowing, ensuring every unit is fully overcollateralized.
 
-Changes made via Lovable will be committed automatically to this repo.
+### Liquidations
+Positions with a health factor below 1.0 become eligible for liquidation. Liquidators repay part of the debt and receive discounted collateral.
 
-**Use your preferred IDE**
+## Smart Contract Architecture
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+- **LendingPool** – Core contract for deposits, borrows, repayments, interest accrual, and liquidations  
+- **NToken** – Interest-bearing deposit token  
+- **DToken** – Debt token representing borrowed amounts  
+- **Oracle** – Price-feed source for collateral valuation  
+- **CollateralManager** – Tracks and values collateral types  
+- **InterestRateModel** – Utilization-driven interest rate logic  
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+## User Flows
 
-Follow these steps:
+### Lenders
+- Deposit assets and receive nTokens  
+- Withdraw underlying assets plus accrued interest  
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+### Borrowers
+- Deposit collateral  
+- Borrow assets or mint WAD  
+- Repay at any time  
+- Maintain HF ≥ 1.0 to avoid liquidation  
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+### Liquidators
+- Identify undercollateralized accounts  
+- Repay borrower debt  
+- Claim discounted collateral  
 
-# Step 3: Install the necessary dependencies.
-npm i
+## Tokenomics
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
+### UNIT Token
+- Total supply: 420,069  
+- Used for governance, incentives, and community alignment  
 
-**Edit a file directly in GitHub**
+### WAD Stablecoin
+- Always overcollateralized  
+- Minted exclusively through borrowing  
+- Supports cross-chain liquidity  
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+## Security
 
-**Use GitHub Codespaces**
+DorkFi incorporates overcollateralization, market caps, reserve accumulation, and continuous health monitoring. Third-party audits and a bug bounty program supplement protocol security.
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## Roadmap
 
-## What technologies are used for this project?
+- Lending market mainnet launch on Algorand and Voi Network
 
-This project is built with:
+- Activation of WAD stablecoin
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+- Additional asset markets
 
-## How can I deploy this project?
+- DAO governance and treasury management
 
-Simply open [Lovable](https://lovable.dev/projects/453684e9-f8bf-459b-9196-e4f9c0e5b52c) and click on Share -> Publish.
+- Multi-chain expansion
 
-## Can I connect a custom domain to my Lovable project?
 
-Yes, you can!
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+This project is licensed under the MIT License. See the LICENSE file for details.
