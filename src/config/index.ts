@@ -31,7 +31,7 @@ export interface ContractConfig {
   // Add more contracts as needed
 }
 
-export type TokenStandard = "network" | "asa" | "arc200";
+export type TokenStandard = "network" | "asa" | "arc200" | "arc200-exchange";
 
 export interface TokenConfig {
   assetId?: string;
@@ -1433,7 +1433,7 @@ const algorandProdTokens: Record<string, TokenConfig> = {
   //   tokenStandard: "asa",
   // },
   WAD: {
-    // assetId: 3334160924
+    assetId: "3334160924",
     contractId: "3333688448",
     poolId: "3333688282",
     nTokenId: "3333919084",
@@ -1441,7 +1441,7 @@ const algorandProdTokens: Record<string, TokenConfig> = {
     name: "WAD",
     symbol: "WAD",
     logoPath: "/lovable-uploads/WAD.png",
-    tokenStandard: "arc200",
+    tokenStandard: "arc200-exchange",
     isStoken: true,
   },
 };

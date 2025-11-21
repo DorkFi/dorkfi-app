@@ -3,7 +3,7 @@ import { useNetwork } from "@/contexts/NetworkContext";
 import {
   getAllTokensWithDisplayInfo,
   NetworkId,
-  getCurrentNetworkConfig,
+  getNetworkConfig,
   getLendingPools,
 } from "@/config";
 import { fetchMarketInfo, type MarketInfo } from "@/services/lendingService";
@@ -82,45 +82,50 @@ export const useOnDemandMarketData = ({
     [currentNetwork]
   );
 
+  // Clear markets data when network changes
+  useEffect(() => {
+    setMarketsData({});
+    setLoadingMarkets(new Set());
+    setCurrentPage(1);
+  }, [currentNetwork]);
+
   // Initialize market data structure from tokens
   useEffect(() => {
     const initialData: Record<string, OnDemandMarketData> = {};
 
     tokens.forEach((token) => {
       const key = token.symbol.toLowerCase();
-      if (!marketsData[key]) {
-        // Get the original token config to access isStoken property
-        const networkConfig = getCurrentNetworkConfig(currentNetwork);
-        const tokenConfig = networkConfig.tokens[token.symbol];
+      // Get the original token config to access isStoken property
+      const networkConfig = getNetworkConfig(currentNetwork);
+      const tokenConfig = networkConfig.tokens[token.symbol];
 
-        initialData[key] = {
-          asset: token.symbol,
-          icon: token.logoPath,
-          totalSupply: 0,
-          totalSupplyUSD: 0,
-          supplyAPY: 0,
-          totalBorrow: 0,
-          totalBorrowUSD: 0,
-          borrowAPY: 0,
-          utilization: 0,
-          collateralFactor: 0,
-          walletBalance: 0,
-          supplyCap: 0,
-          supplyCapUSD: 0,
-          maxLTV: 0,
-          liquidationThreshold: 0,
-          liquidationPenalty: 0,
-          reserveFactor: 0,
-          collectorContract: "",
-          isLoading: false,
-          isLoaded: false,
-          isSToken: tokenConfig?.isStoken || false,
-        };
-      }
+      initialData[key] = {
+        asset: token.symbol,
+        icon: token.logoPath,
+        totalSupply: 0,
+        totalSupplyUSD: 0,
+        supplyAPY: 0,
+        totalBorrow: 0,
+        totalBorrowUSD: 0,
+        borrowAPY: 0,
+        utilization: 0,
+        collateralFactor: 0,
+        walletBalance: 0,
+        supplyCap: 0,
+        supplyCapUSD: 0,
+        maxLTV: 0,
+        liquidationThreshold: 0,
+        liquidationPenalty: 0,
+        reserveFactor: 0,
+        collectorContract: "",
+        isLoading: false,
+        isLoaded: false,
+        isSToken: tokenConfig?.isStoken || false,
+      };
     });
 
     if (Object.keys(initialData).length > 0) {
-      setMarketsData((prev) => ({ ...prev, ...initialData }));
+      setMarketsData(initialData);
     }
   }, [tokens, currentNetwork]);
 
@@ -205,7 +210,7 @@ export const useOnDemandMarketData = ({
           });
 
           // Get the original token config to access isStoken property
-          const networkConfig = getCurrentNetworkConfig(currentNetwork);
+          const networkConfig = getNetworkConfig(currentNetwork);
           const tokenConfig = networkConfig.tokens[token.symbol];
 
           const marketData: OnDemandMarketData = {

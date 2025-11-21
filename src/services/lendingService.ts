@@ -1812,7 +1812,35 @@ export const borrow = async (
           {
             addr: userAddress,
             sk: new Uint8Array(),
-          }
+          },
+          true,
+          false,
+          true
+        ),
+        arc200Exchange: new CONTRACT(
+          Number(token.underlyingContractId),
+          clients.algod,
+          undefined,
+          {
+            name: "arc200Exchange",
+            desc: "arc200Exchange",
+            methods: [
+              // arc200_swapBack(uint64 amount)
+              {
+                name: "arc200_swapBack",
+                args: [{ name: "amount", type: "uint64" }],
+                returns: { type: "void" },
+              },
+            ],
+            events: [],
+          },
+          {
+            addr: userAddress,
+            sk: new Uint8Array(),
+          },
+          true,
+          false,
+          true
         ),
       };
 
@@ -1844,42 +1872,6 @@ export const borrow = async (
       ]) {
         const [p1, p2, p3] = p;
         const buildN = [];
-
-        // if (doFetchPriceFeed) {
-        //   const txnO = (
-        //     await builder.lending.fetch_price_feed(Number(marketId))
-        //   ).obj;
-        //   buildN.push({
-        //     ...txnO,
-        //     payment: 1e5,
-        //     note: new TextEncoder().encode("lending fetch_price_feed"),
-        //   });
-        // }
-
-        // approve ntoken spending
-        // {
-        //   const txnO = (
-        //     await builder.ntoken.arc200_approve(
-        //       algosdk.getApplicationAddress(Number(poolId)),
-        //       BigInt(new BigNumber(amount).multipliedBy(1.1).toFixed(0)) // TODO only increase for NODE
-        //     )
-        //   ).obj;
-        //   buildN.push({
-        //     ...txnO,
-        //     payment: 28505,
-        //     note: new TextEncoder().encode("nt200 approve"),
-        //   });
-        // }
-
-        // sync market
-        // {
-        //   const txnO = (await builder.lending.sync_market(Number(marketId)))
-        //     .obj;
-        //   buildN.push({
-        //     ...txnO,
-        //     note: new TextEncoder().encode("lending sync_market"),
-        //   });
-        // }
 
         // Borrow from lending pool
         {
@@ -1939,23 +1931,18 @@ export const borrow = async (
             ...txnO,
             note: new TextEncoder().encode("nt200 withdraw"),
           });
+        } else if (tokenStandard == "arc200-exchange") {
+          const txnO = (
+            await builder.arc200Exchange.arc200_swapBack(BigInt(amount))
+          ).obj;
+          buildN.push({
+            ...txnO,
+            note: new TextEncoder().encode("arc200_swapBack"),
+            xaid: Number(token.underlyingAssetId),
+            snd: userAddress,
+            arcv: userAddress,
+          });
         }
-
-        // sync user market for price change
-        // {
-        //   const txnO = (
-        //     await builder.lending.sync_user_market_for_price_change(
-        //       userAddress,
-        //       Number(marketId)
-        //     )
-        //   ).obj;
-        //   buildN.push({
-        //     ...txnO,
-        //     note: new TextEncoder().encode(
-        //       "lending sync_user_market_for_price_change"
-        //     ),
-        //   });
-        // }
 
         console.log("buildN", { buildN });
 
