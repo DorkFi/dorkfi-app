@@ -54,7 +54,7 @@ const STokenTabletRow = ({
           <img
             src={market.icon}
             alt={market.asset}
-            className="w-6 h-6 rounded-full flex-shrink-0"
+            className="w-6 h-6 rounded-full object-contain flex-shrink-0"
           />
           <div className="flex flex-col items-start gap-0.5">
             <span className="font-semibold text-sm leading-tight">{market.asset}</span>

@@ -23,7 +23,7 @@ const DashboardHero: React.FC<DashboardHeroProps> = ({
   onLearnMore,
   onExploreMarkets,
 }) => (
-  <div className="relative bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-[hsl(var(--deep-sea-navy))] dark:to-[hsl(var(--ocean-floor))] rounded-xl p-6 md:p-8 text-center overflow-hidden min-h-[300px] md:min-h-[360px] flex flex-col items-center justify-center border border-gray-200/50 dark:border-ocean-teal/20 card-hover hover:border-ocean-teal/40 transition-all">
+  <div className="relative bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 rounded-xl p-6 md:p-8 text-center overflow-hidden min-h-[300px] md:min-h-[360px] flex flex-col items-center justify-center border border-gray-200/50 dark:border-ocean-teal/20 card-hover hover:border-ocean-teal/40 transition-all">
     {/* Background birds (light mode) and golden globes (dark mode) */}
     {/* Birds - light mode only */}
     <div

@@ -63,7 +63,7 @@ export const getTokenImagePath = (symbol: string): string => {
     EV: "/lovable-uploads/EV.png",
     aBTC: "/lovable-uploads/WrappedBTC.png",
     acbBTC: "/lovable-uploads/cbBTC.png",
-    WAD: "/lovable-uploads/WAD.png",
+    WAD: "/lovable-uploads/WAD_fixed.png",
   };
 
   // First check for exact match (including prefixed tokens like aUSDC)
