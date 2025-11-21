@@ -65,12 +65,12 @@ export function TokenAutocomplete({
         setError('Failed to load tokens');
         // Set fallback tokens
         setTokens([
-          { id: 'VOI', symbol: 'VOI', name: 'Voi Network', decimals: 6 },
+          { id: 'VOI', symbol: 'VOI', name: 'VOI Network', decimals: 6 },
           { id: 'UNIT', symbol: 'UNIT', name: 'Unit Protocol', decimals: 6 },
           { id: 'aUSDC', symbol: 'USDC', name: 'USD Coin', decimals: 6 },
           { id: 'WBTC', symbol: 'BTC', name: 'Wrapped Bitcoin', decimals: 8 },
           { id: 'WETH', symbol: 'ETH', name: 'Wrapped Ethereum', decimals: 18 },
-          { id: 'ALGO', symbol: 'ALGO', name: 'Algorand', decimals: 6 },
+          { id: 'ALGO', symbol: 'ALGO', name: 'ALGO', decimals: 6 },
           { id: 'POW', symbol: 'POW', name: 'POW Token', decimals: 6 },
           { id: 'cbBTC', symbol: 'cbBTC', name: 'Coinbase Bitcoin', decimals: 8 },
           { id: 'USDT', symbol: 'USDT', name: 'Tether USD', decimals: 6 },

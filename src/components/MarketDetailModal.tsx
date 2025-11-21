@@ -42,10 +42,10 @@ interface MarketDetailModalProps {
 }
 
 const tokenNames: Record<string, string> = {
-  VOI: "VOI – Voi Network",
+  VOI: "VOI – VOI Network",
   UNIT: "UNIT – Unit Protocol",
   USDC: "USDC – USD Coin",
-  ALGO: "ALGO – Algorand",
+  ALGO: "ALGO – ALGO",
   ETH: "ETH – Ethereum",
   BTC: "BTC – Bitcoin"
 };

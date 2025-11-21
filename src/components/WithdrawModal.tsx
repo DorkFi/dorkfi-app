@@ -112,7 +112,7 @@ const WithdrawModal = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="bg-card dark:bg-slate-900 rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl card-hover hover:shadow-lg hover:border-ocean-teal/40 transition-all max-w-[95vw] md:max-w-md h-[90vh] max-h-[90vh] overflow-hidden flex flex-col px-0 py-0">
+      <DialogContent className="w-full max-w-[98vw] sm:max-w-md rounded-t-2xl sm:rounded-xl p-4 sm:p-8 max-h-[90vh] overflow-y-auto">
         {showSuccess ? (
           <div className="p-6 overflow-y-auto">
             <SupplyBorrowCongrats
