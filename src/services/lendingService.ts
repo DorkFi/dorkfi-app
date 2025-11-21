@@ -1883,6 +1883,14 @@ export const borrow = async (
 
         // Borrow from lending pool
         {
+          // TODO fetch from config
+          const foreignApps = [];
+          if (networkConfig.networkId === "voi-mainnet") {
+            foreignApps.push(47138065);
+          }
+          if (networkConfig.networkId === "algorand-mainnet") {
+            foreignApps.push(3333688254);
+          }
           const borrowCost = p3 > 0 ? 900000 : 0;
           const txnO = (
             await builder.lending.borrow(Number(marketId), BigInt(amount))
@@ -1891,7 +1899,7 @@ export const borrow = async (
             ...txnO,
             note: new TextEncoder().encode("lending borrow"),
             payment: borrowCost,
-            foreignApps: [46773453],
+            foreignApps,
           });
         }
         // Withdraw borrowed tokens to user

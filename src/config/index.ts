@@ -700,6 +700,18 @@ const prodTokens: { [symbol: string]: TokenConfig } = {
   //   logoPath: "https://asset-verification.nautilus.sh/icons/420024.png",
   //   tokenStandard: "arc200",
   // },
+  WAD: {
+    // assetId: 47155831
+    contractId: "47138068",
+    poolId: "47139778",
+    nTokenId: "47155328",
+    decimals: 6,
+    name: "WAD",
+    symbol: "WAD",
+    logoPath: "/lovable-uploads/WAD.png",
+    tokenStandard: "arc200",
+    isStoken: true,
+  },
 };
 const prodLendingPools = [prodAMarket, prodBMarket];
 const prodContracts = {
@@ -1420,6 +1432,18 @@ const algorandProdTokens: Record<string, TokenConfig> = {
   //     "https://algorand-wallet-mainnet.b-cdn.net/media/assets-logo-png/2023/04/10/a5706bc6e41049a385d80468259ce1f4.png?width=200&quality=70",
   //   tokenStandard: "asa",
   // },
+  WAD: {
+    // assetId: 3334160924
+    contractId: "3333688448",
+    poolId: "3333688282",
+    nTokenId: "3333919084",
+    decimals: 6,
+    name: "WAD",
+    symbol: "WAD",
+    logoPath: "/lovable-uploads/WAD.png",
+    tokenStandard: "arc200",
+    isStoken: true,
+  },
 };
 const algorandMainnetProdConfig: NetworkConfig = {
   networkId: "algorand-mainnet",

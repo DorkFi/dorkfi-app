@@ -90,6 +90,7 @@ import {
   getAllTokensWithDisplayInfo,
   getPreFiParameters,
   getAlgorandConfigForReads,
+  getEnabledNetworks,
 } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
@@ -289,6 +290,12 @@ export default function AdminDashboard() {
     null
   );
   const [stokenMarketInfo, setStokenMarketInfo] = useState<any>(null);
+  
+  // All market parameters state - configurable by network
+  const [selectedNetworkForMarketParams, setSelectedNetworkForMarketParams] = useState<NetworkId>("algorand-mainnet");
+  const [allMarketParameters, setAllMarketParameters] = useState<MarketInfo[]>([]);
+  const [isLoadingAllMarketParameters, setIsLoadingAllMarketParameters] = useState(false);
+  const [allMarketParametersError, setAllMarketParametersError] = useState<string | null>(null);
 
   // Market Analysis state
   const [marketAnalysisData, setMarketAnalysisData] = useState<any>(null);
@@ -2208,6 +2215,24 @@ export default function AdminDashboard() {
       setStokenMarketExists(false);
     }
   };
+
+  const loadAllMarketParameters = useCallback(async (networkId?: NetworkId) => {
+    const targetNetwork = networkId || selectedNetworkForMarketParams;
+    setIsLoadingAllMarketParameters(true);
+    setAllMarketParametersError(null);
+    try {
+      const markets = await fetchAllMarkets(targetNetwork);
+      setAllMarketParameters(markets);
+      console.log(`Loaded all market parameters for ${targetNetwork}:`, markets);
+    } catch (error) {
+      console.error("Error loading all market parameters:", error);
+      setAllMarketParametersError(
+        error instanceof Error ? error.message : "Failed to load market parameters"
+      );
+    } finally {
+      setIsLoadingAllMarketParameters(false);
+    }
+  }, [selectedNetworkForMarketParams]);
 
   const handleCreateStokenMarket = async () => {
     if (!activeAccount) {
@@ -5358,8 +5383,16 @@ export default function AdminDashboard() {
     if (activeTab === "stoken") {
       loadStokenInfo();
       checkStokenMarketExists();
+      loadAllMarketParameters();
     }
-  }, [activeTab, currentNetwork]);
+  }, [activeTab, currentNetwork, loadAllMarketParameters]);
+
+  // Reload market parameters when selected network changes (only if SToken tab is active)
+  React.useEffect(() => {
+    if (activeTab === "stoken" && selectedNetworkForMarketParams) {
+      loadAllMarketParameters();
+    }
+  }, [selectedNetworkForMarketParams, activeTab, loadAllMarketParameters]);
 
   // Initialize selected lending pool when network changes
   React.useEffect(() => {
@@ -9455,6 +9488,161 @@ export default function AdminDashboard() {
                         {stokenMarketCreationResult}
                       </div>
                     )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* All Market Parameters - Configurable by Network */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <BarChart3 className="h-5 w-5" />
+                  All Market Parameters
+                </CardTitle>
+                <CardDescription>
+                  View all market parameters for all markets on the selected network
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center justify-between gap-4 mb-4">
+                  <div className="flex-1 max-w-xs">
+                    <Label htmlFor="market-params-network-select">Network</Label>
+                    <Select
+                      value={selectedNetworkForMarketParams}
+                      onValueChange={(value) => {
+                        setSelectedNetworkForMarketParams(value as NetworkId);
+                      }}
+                    >
+                      <SelectTrigger id="market-params-network-select">
+                        <SelectValue placeholder="Select network" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {getEnabledNetworks().map((networkId) => {
+                          const networkConfig = getNetworkConfig(networkId);
+                          return (
+                            <SelectItem key={networkId} value={networkId}>
+                              <div className="flex items-center gap-2">
+                                <span>{networkConfig.name}</span>
+                                <span className="text-xs text-muted-foreground">
+                                  ({networkConfig.networkType.toUpperCase()})
+                                </span>
+                              </div>
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <DorkFiButton
+                    onClick={() => loadAllMarketParameters()}
+                    disabled={isLoadingAllMarketParameters}
+                    className="flex items-center gap-2"
+                  >
+                    <RefreshCcw
+                      className={`h-4 w-4 ${
+                        isLoadingAllMarketParameters ? "animate-spin" : ""
+                      }`}
+                    />
+                    Refresh
+                  </DorkFiButton>
+                </div>
+
+                {isLoadingAllMarketParameters ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-8 w-8 animate-spin" />
+                    <span className="ml-2">Loading market parameters...</span>
+                  </div>
+                ) : allMarketParametersError ? (
+                  <div className="text-red-500 p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                    <AlertTriangle className="h-5 w-5 inline mr-2" />
+                    {allMarketParametersError}
+                  </div>
+                ) : allMarketParameters.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b">
+                          <th className="text-left p-2 font-semibold">Symbol</th>
+                          <th className="text-left p-2 font-semibold">Name</th>
+                          <th className="text-right p-2 font-semibold">Collateral Factor</th>
+                          <th className="text-right p-2 font-semibold">Liquidation Threshold</th>
+                          <th className="text-right p-2 font-semibold">Reserve Factor</th>
+                          <th className="text-right p-2 font-semibold">Borrow Rate</th>
+                          <th className="text-right p-2 font-semibold">Max Deposits</th>
+                          <th className="text-right p-2 font-semibold">Max Borrows</th>
+                          <th className="text-right p-2 font-semibold">Total Deposits</th>
+                          <th className="text-right p-2 font-semibold">Total Borrows</th>
+                          <th className="text-right p-2 font-semibold">Utilization</th>
+                          <th className="text-right p-2 font-semibold">Price</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {allMarketParameters.map((market) => (
+                          <tr
+                            key={market.marketId}
+                            className="border-b hover:bg-muted/50"
+                          >
+                            <td className="p-2 font-medium">{market.symbol}</td>
+                            <td className="p-2 text-muted-foreground">{market.name}</td>
+                            <td className="p-2 text-right font-mono">
+                              {market.collateralFactor != null
+                                ? `${(market.collateralFactor * 100).toFixed(1)}%`
+                                : "N/A"}
+                            </td>
+                            <td className="p-2 text-right font-mono">
+                              {market.liquidationThreshold != null
+                                ? `${(market.liquidationThreshold * 100).toFixed(1)}%`
+                                : "N/A"}
+                            </td>
+                            <td className="p-2 text-right font-mono">
+                              {market.reserveFactor != null
+                                ? `${(market.reserveFactor * 100).toFixed(1)}%`
+                                : "N/A"}
+                            </td>
+                            <td className="p-2 text-right font-mono">
+                              {market.borrowRate != null
+                                ? `${(market.borrowRate * 100).toFixed(2)}%`
+                                : "N/A"}
+                            </td>
+                            <td className="p-2 text-right font-mono">
+                              {market.maxTotalDeposits
+                                ? `${market.maxTotalDeposits} ${market.symbol}`
+                                : "N/A"}
+                            </td>
+                            <td className="p-2 text-right font-mono">
+                              {market.maxTotalBorrows
+                                ? `${market.maxTotalBorrows} ${market.symbol}`
+                                : "N/A"}
+                            </td>
+                            <td className="p-2 text-right font-mono">
+                              {market.totalDeposits
+                                ? `${market.totalDeposits} ${market.symbol}`
+                                : "N/A"}
+                            </td>
+                            <td className="p-2 text-right font-mono">
+                              {market.totalBorrows
+                                ? `${market.totalBorrows} ${market.symbol}`
+                                : "N/A"}
+                            </td>
+                            <td className="p-2 text-right font-mono">
+                              {market.utilizationRate != null
+                                ? `${(market.utilizationRate * 100).toFixed(2)}%`
+                                : "N/A"}
+                            </td>
+                            <td className="p-2 text-right font-mono">
+                              {market.price
+                                ? `$${market.price}`
+                                : "N/A"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    No market parameters available. Click refresh to load.
                   </div>
                 )}
               </CardContent>
