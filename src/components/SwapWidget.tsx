@@ -41,7 +41,7 @@ const SwapWidget = ({ onTokenChange, selectedPrice }: SwapWidgetProps) => {
   const tokens: Token[] = [
     {
       symbol: "VOI",
-      name: "Voi Network",
+      name: "VOI Network",
       icon: "🌊",
       address: "0x...",
       decimals: 6,

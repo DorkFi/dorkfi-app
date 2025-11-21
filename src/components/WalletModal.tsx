@@ -65,9 +65,9 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
         },
         {
           id: "vera",
-          name: "Voi Wallet",
+          name: "VOI Wallet",
           icon: "/lovable-uploads/verwallet.png",
-          description: "Connect with Voi Wallet (Algorand/VOI)",
+          description: "Connect with VOI Wallet (Algorand/VOI)",
           isInstalled: true,
         },
       ];
@@ -372,7 +372,16 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="bg-card dark:bg-slate-900 rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-md p-6">
+      <DialogContent className="w-full max-w-[98vw] sm:max-w-md rounded-t-2xl sm:rounded-xl p-4 sm:p-6 max-h-[90vh] overflow-y-auto relative">
+        <button
+          onClick={onClose}
+          className="absolute top-3 right-3 sm:top-4 sm:right-4 z-20 p-2 rounded-full bg-white/90 hover:bg-white"
+          aria-label="Close"
+        >
+          <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
         <DialogHeader className="pb-4">
           <DialogTitle className="text-xl font-semibold text-center">
             Connect Wallet

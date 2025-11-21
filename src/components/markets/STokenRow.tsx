@@ -54,7 +54,7 @@ const STokenRow = ({
           <img
             src={market.icon}
             alt={market.asset}
-            className="w-8 h-8 rounded-full object-contain flex-shrink-0"
+            className="w-12 h-12 md:w-9 md:h-9 rounded-full object-contain flex-shrink-0"
           />
           <div className="flex flex-col items-center justify-center gap-1 text-center">
             <div className="font-semibold text-base leading-tight">

@@ -113,7 +113,7 @@ const DashboardHero: React.FC<DashboardHeroProps> = ({
         </span>
       </H1>
       <Body className="text-lg md:text-xl lg:text-2xl mb-4 md:mb-6 max-w-2xl mx-auto">
-        Advanced DeFi Protocol on Voi Network
+        A DeFi lending protocol with personality.
       </Body>
       {/* Action buttons - swapped order with tighter spacing */}
       <div className="flex flex-col sm:flex-row gap-4 md:gap-6 lg:gap-8 justify-center items-center mt-1">

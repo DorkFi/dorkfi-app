@@ -55,7 +55,7 @@ const mockLiquidationData: LiquidatedAssetData[] = [
   },
   {
     symbol: 'VOI',
-    name: 'Voi',
+    name: 'VOI',
     icon: '/lovable-uploads/eb092f67-df8a-436b-9ea3-a71f6a1bdf05.png',
     totalUSDLiquidated: 850000,
     liquidationCount: 127,
@@ -77,7 +77,7 @@ const mockLiquidationData: LiquidatedAssetData[] = [
   },
   {
     symbol: 'ALGO',
-    name: 'Algorand',
+    name: 'ALGO',
     icon: '/lovable-uploads/86303552-f96f-4fee-b61a-7e69d7c17ef0.png',
     totalUSDLiquidated: 420000,
     liquidationCount: 76,

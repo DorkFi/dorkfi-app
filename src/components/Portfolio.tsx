@@ -892,7 +892,7 @@ const Portfolio = () => {
               Portfolio.
             </span>
             <br className="hidden md:block" />
-            <span className="block md:inline md:whitespace-nowrap">
+            <span className="block md:inline md:whitespace-nowrap sm:hidden">
               Add collateral or repay if your health factor gets too low.
             </span>
           </Body>

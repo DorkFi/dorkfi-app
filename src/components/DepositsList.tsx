@@ -46,13 +46,13 @@ const DepositsList = ({ deposits, onDepositClick, onWithdrawClick, onRefresh, is
         {deposits.map((deposit) => (
           <div 
             key={deposit.asset}
-            className="flex flex-col md:flex-row md:items-center justify-between p-4 rounded-lg bg-white/50 dark:bg-slate-800/50 border border-gray-200/30 dark:border-ocean-teal/10 transition-all hover:bg-ocean-teal/5 hover:scale-105 hover:border-ocean-teal/40 card-hover cursor-pointer gap-3 md:gap-0"
+            className="flex flex-col md:flex-row items-center md:items-center justify-between p-4 rounded-lg bg-white/50 dark:bg-slate-800/50 border border-gray-200/30 dark:border-ocean-teal/10 transition-all hover:bg-ocean-teal/5 hover:scale-105 hover:border-ocean-teal/40 card-hover cursor-pointer gap-3 md:gap-0"
           >
             <div className="flex flex-col items-center text-center md:flex-row md:items-start md:text-left gap-3 flex-1">
               <img 
                 src={deposit.icon} 
                 alt={deposit.asset}
-                className="w-10 h-10 md:w-8 md:h-8 rounded-full flex-shrink-0"
+                className="w-12 h-12 md:w-9 md:h-9 rounded-full flex-shrink-0"
               />
               <div className="flex flex-col min-w-0 items-center md:items-start">
                 <div className="font-semibold text-base leading-tight text-slate-800 dark:text-white">{deposit.asset}</div>
@@ -93,7 +93,7 @@ const DepositsList = ({ deposits, onDepositClick, onWithdrawClick, onRefresh, is
                 </div>
               </div>
             </div>
-            <div className="mt-2 md:mt-0 text-center flex-shrink-0 min-w-[110px]">
+            <div className="mt-2 md:mt-0 text-center flex-shrink-0 min-w-[110px] mx-auto">
               <div className="font-semibold text-whale-gold">${deposit.value.toLocaleString()}</div>
               <div className="text-sm text-whale-gold flex flex-col items-center gap-1 mt-1">
                 <span>{deposit.apy.toFixed(2)}% APY</span>
@@ -111,12 +111,12 @@ const DepositsList = ({ deposits, onDepositClick, onWithdrawClick, onRefresh, is
               <DorkFiButton
                 variant="secondary"
                 onClick={() => onDepositClick(deposit.asset)}
-                className="min-h-[44px] min-w-[92px] font-semibold text-sm"
+                className="font-semibold text-sm"
               >Deposit</DorkFiButton>
               <DorkFiButton
                 variant="danger-outline"
                 onClick={() => onWithdrawClick(deposit.asset)}
-                className="min-h-[44px] min-w-[92px] font-semibold text-sm"
+                className="font-semibold text-sm"
               >Withdraw</DorkFiButton>
             </div>
           </div>

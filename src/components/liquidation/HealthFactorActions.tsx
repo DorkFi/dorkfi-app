@@ -143,7 +143,7 @@ const HealthFactorActions = ({
             </Button>
           </TooltipTrigger>
           <TooltipContent className="max-w-xs">
-            <p>Purchase VOI tokens to use as collateral or to repay VOI-denominated debt. Helps strengthen your position in the Voi ecosystem.</p>
+            <p>Purchase VOI tokens to use as collateral or to repay VOI-denominated debt. Helps strengthen your position in the VOI ecosystem.</p>
           </TooltipContent>
         </Tooltip>*/}
       </div>
