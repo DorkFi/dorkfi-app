@@ -290,12 +290,18 @@ export default function AdminDashboard() {
     null
   );
   const [stokenMarketInfo, setStokenMarketInfo] = useState<any>(null);
-  
+
   // All market parameters state - configurable by network
-  const [selectedNetworkForMarketParams, setSelectedNetworkForMarketParams] = useState<NetworkId>("algorand-mainnet");
-  const [allMarketParameters, setAllMarketParameters] = useState<MarketInfo[]>([]);
-  const [isLoadingAllMarketParameters, setIsLoadingAllMarketParameters] = useState(false);
-  const [allMarketParametersError, setAllMarketParametersError] = useState<string | null>(null);
+  const [selectedNetworkForMarketParams, setSelectedNetworkForMarketParams] =
+    useState<NetworkId>("algorand-mainnet");
+  const [allMarketParameters, setAllMarketParameters] = useState<MarketInfo[]>(
+    []
+  );
+  const [isLoadingAllMarketParameters, setIsLoadingAllMarketParameters] =
+    useState(false);
+  const [allMarketParametersError, setAllMarketParametersError] = useState<
+    string | null
+  >(null);
 
   // Market Analysis state
   const [marketAnalysisData, setMarketAnalysisData] = useState<any>(null);
@@ -776,8 +782,7 @@ export default function AdminDashboard() {
 
       // Use the price oracle contract address for role checking
       const priceOracleAddress = algosdk.encodeAddress(
-        algosdk.getApplicationAddress(Number(contractId))
-          .publicKey
+        algosdk.getApplicationAddress(Number(contractId)).publicKey
       );
 
       const ci = new CONTRACT(
@@ -1464,7 +1469,7 @@ export default function AdminDashboard() {
       console.log({
         tokenId,
         oracleContractInfo: oracleContractInfo.contractId,
-      })
+      });
       const result = await ci.attach_price_feed(
         Number(tokenId),
         Number(oracleContractInfo.contractId)
@@ -2216,23 +2221,31 @@ export default function AdminDashboard() {
     }
   };
 
-  const loadAllMarketParameters = useCallback(async (networkId?: NetworkId) => {
-    const targetNetwork = networkId || selectedNetworkForMarketParams;
-    setIsLoadingAllMarketParameters(true);
-    setAllMarketParametersError(null);
-    try {
-      const markets = await fetchAllMarkets(targetNetwork);
-      setAllMarketParameters(markets);
-      console.log(`Loaded all market parameters for ${targetNetwork}:`, markets);
-    } catch (error) {
-      console.error("Error loading all market parameters:", error);
-      setAllMarketParametersError(
-        error instanceof Error ? error.message : "Failed to load market parameters"
-      );
-    } finally {
-      setIsLoadingAllMarketParameters(false);
-    }
-  }, [selectedNetworkForMarketParams]);
+  const loadAllMarketParameters = useCallback(
+    async (networkId?: NetworkId) => {
+      const targetNetwork = networkId || selectedNetworkForMarketParams;
+      setIsLoadingAllMarketParameters(true);
+      setAllMarketParametersError(null);
+      try {
+        const markets = await fetchAllMarkets(targetNetwork);
+        setAllMarketParameters(markets);
+        console.log(
+          `Loaded all market parameters for ${targetNetwork}:`,
+          markets
+        );
+      } catch (error) {
+        console.error("Error loading all market parameters:", error);
+        setAllMarketParametersError(
+          error instanceof Error
+            ? error.message
+            : "Failed to load market parameters"
+        );
+      } finally {
+        setIsLoadingAllMarketParameters(false);
+      }
+    },
+    [selectedNetworkForMarketParams]
+  );
 
   const handleCreateStokenMarket = async () => {
     if (!activeAccount) {
@@ -3663,13 +3676,16 @@ export default function AdminDashboard() {
                     .accountInformation(userAddress)
                     .do();
                   balance = BigInt(
-                    Math.max(0, accInfo.amount - accInfo["min-balance"] - 1e6)
+                    Math.max(
+                      0,
+                      Number(accInfo.amount) - Number(accInfo.minBalance) - 1e6
+                    )
                   );
                 } else if (assetType === "asa") {
                   const accAssetInfo = await algorandClients.algod
                     .accountAssetInformation(userAddress, Number(assetId))
                     .do();
-                  balance = BigInt(accAssetInfo["asset-holding"].amount);
+                  balance = BigInt(accAssetInfo.assetHolding.amount);
                 } else if (assetType === "arc200") {
                   const tokenBalance = await ARC200Service.getBalance(
                     userAddress,
@@ -5412,12 +5428,7 @@ export default function AdminDashboard() {
         loadMarketData();
       }
     }
-  }, [
-    activeTab,
-    currentNetwork,
-    activeAccount?.address,
-    selectedLendingPool,
-  ]);
+  }, [activeTab, currentNetwork, activeAccount?.address, selectedLendingPool]);
 
   // Load asset prices when oracle contract is available and tab is active
   React.useEffect(() => {
@@ -9501,13 +9512,16 @@ export default function AdminDashboard() {
                   All Market Parameters
                 </CardTitle>
                 <CardDescription>
-                  View all market parameters for all markets on the selected network
+                  View all market parameters for all markets on the selected
+                  network
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="flex items-center justify-between gap-4 mb-4">
                   <div className="flex-1 max-w-xs">
-                    <Label htmlFor="market-params-network-select">Network</Label>
+                    <Label htmlFor="market-params-network-select">
+                      Network
+                    </Label>
                     <Select
                       value={selectedNetworkForMarketParams}
                       onValueChange={(value) => {
@@ -9563,18 +9577,40 @@ export default function AdminDashboard() {
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b">
-                          <th className="text-left p-2 font-semibold">Symbol</th>
+                          <th className="text-left p-2 font-semibold">
+                            Symbol
+                          </th>
                           <th className="text-left p-2 font-semibold">Name</th>
-                          <th className="text-right p-2 font-semibold">Collateral Factor</th>
-                          <th className="text-right p-2 font-semibold">Liquidation Threshold</th>
-                          <th className="text-right p-2 font-semibold">Reserve Factor</th>
-                          <th className="text-right p-2 font-semibold">Borrow Rate</th>
-                          <th className="text-right p-2 font-semibold">Max Deposits</th>
-                          <th className="text-right p-2 font-semibold">Max Borrows</th>
-                          <th className="text-right p-2 font-semibold">Total Deposits</th>
-                          <th className="text-right p-2 font-semibold">Total Borrows</th>
-                          <th className="text-right p-2 font-semibold">Utilization</th>
-                          <th className="text-right p-2 font-semibold">Price</th>
+                          <th className="text-right p-2 font-semibold">
+                            Collateral Factor
+                          </th>
+                          <th className="text-right p-2 font-semibold">
+                            Liquidation Threshold
+                          </th>
+                          <th className="text-right p-2 font-semibold">
+                            Reserve Factor
+                          </th>
+                          <th className="text-right p-2 font-semibold">
+                            Borrow Rate
+                          </th>
+                          <th className="text-right p-2 font-semibold">
+                            Max Deposits
+                          </th>
+                          <th className="text-right p-2 font-semibold">
+                            Max Borrows
+                          </th>
+                          <th className="text-right p-2 font-semibold">
+                            Total Deposits
+                          </th>
+                          <th className="text-right p-2 font-semibold">
+                            Total Borrows
+                          </th>
+                          <th className="text-right p-2 font-semibold">
+                            Utilization
+                          </th>
+                          <th className="text-right p-2 font-semibold">
+                            Price
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
@@ -9584,15 +9620,21 @@ export default function AdminDashboard() {
                             className="border-b hover:bg-muted/50"
                           >
                             <td className="p-2 font-medium">{market.symbol}</td>
-                            <td className="p-2 text-muted-foreground">{market.name}</td>
+                            <td className="p-2 text-muted-foreground">
+                              {market.name}
+                            </td>
                             <td className="p-2 text-right font-mono">
                               {market.collateralFactor != null
-                                ? `${(market.collateralFactor * 100).toFixed(1)}%`
+                                ? `${(market.collateralFactor * 100).toFixed(
+                                    1
+                                  )}%`
                                 : "N/A"}
                             </td>
                             <td className="p-2 text-right font-mono">
                               {market.liquidationThreshold != null
-                                ? `${(market.liquidationThreshold * 100).toFixed(1)}%`
+                                ? `${(
+                                    market.liquidationThreshold * 100
+                                  ).toFixed(1)}%`
                                 : "N/A"}
                             </td>
                             <td className="p-2 text-right font-mono">
@@ -9627,13 +9669,13 @@ export default function AdminDashboard() {
                             </td>
                             <td className="p-2 text-right font-mono">
                               {market.utilizationRate != null
-                                ? `${(market.utilizationRate * 100).toFixed(2)}%`
+                                ? `${(market.utilizationRate * 100).toFixed(
+                                    2
+                                  )}%`
                                 : "N/A"}
                             </td>
                             <td className="p-2 text-right font-mono">
-                              {market.price
-                                ? `$${market.price}`
-                                : "N/A"}
+                              {market.price ? `$${market.price}` : "N/A"}
                             </td>
                           </tr>
                         ))}
@@ -11024,7 +11066,9 @@ export default function AdminDashboard() {
                               className="text-blue-600 border-blue-600"
                             >
                               <Hash className="h-3 w-3 mr-1" />
-                              {market.underlyingContractId || market.underlyingAssetId || "Native"}
+                              {market.underlyingContractId ||
+                                market.underlyingAssetId ||
+                                "Native"}
                             </Badge>
                             <Badge
                               variant="outline"
@@ -13102,8 +13146,8 @@ export default function AdminDashboard() {
                     )}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Enter the wallet address of the user you want to assign
-                    this role to
+                    Enter the wallet address of the user you want to assign this
+                    role to
                   </p>
                   {assignAddress.trim() &&
                     !envoiService.isValidAddressFormat(assignAddress) && (
@@ -13114,26 +13158,24 @@ export default function AdminDashboard() {
                     )}
                 </div>
 
-                {envoiName &&
-                  assignAddress && (
-                    <div className="p-3 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2 className="h-4 w-4 text-green-600" />
-                        <span className="text-sm font-medium text-green-800 dark:text-green-200">
-                          Envoi Resolution Successful
-                        </span>
-                      </div>
-                      <p className="text-xs text-green-700 dark:text-green-300 mt-1">
-                        {envoiName} →{" "}
-                        {assignAddress
-                          ? `${assignAddress.slice(
-                              0,
-                              8
-                            )}...${assignAddress.slice(-8)}`
-                          : "N/A"}
-                      </p>
+                {envoiName && assignAddress && (
+                  <div className="p-3 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-green-600" />
+                      <span className="text-sm font-medium text-green-800 dark:text-green-200">
+                        Envoi Resolution Successful
+                      </span>
                     </div>
-                  )}
+                    <p className="text-xs text-green-700 dark:text-green-300 mt-1">
+                      {envoiName} →{" "}
+                      {assignAddress
+                        ? `${assignAddress.slice(0, 8)}...${assignAddress.slice(
+                            -8
+                          )}`
+                        : "N/A"}
+                    </p>
+                  </div>
+                )}
 
                 {envoiError && (
                   <div className="p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg">
@@ -13173,7 +13215,8 @@ export default function AdminDashboard() {
                   // Validate address is provided
                   if (!assignAddress.trim()) {
                     toast.error("Address required", {
-                      description: "Please enter a user address to assign the role to.",
+                      description:
+                        "Please enter a user address to assign the role to.",
                     });
                     return;
                   }
@@ -13181,7 +13224,8 @@ export default function AdminDashboard() {
                   // Validate address format
                   if (!envoiService.isValidAddressFormat(assignAddress)) {
                     toast.error("Invalid address format", {
-                      description: "Please enter a valid Algorand address (58 characters, base32 encoded).",
+                      description:
+                        "Please enter a valid Algorand address (58 characters, base32 encoded).",
                     });
                     return;
                   }
@@ -13201,9 +13245,7 @@ export default function AdminDashboard() {
 
                   // All roles (including PriceOracle) are assigned on the LendingPool contract
                   // The PriceOracle role on the LendingPool contract grants permission to update prices
-                  contractId = Number(
-                    networkConfig.contracts.lendingPools[0]
-                  );
+                  contractId = Number(networkConfig.contracts.lendingPools[0]);
                   targetAddress = assignAddress;
                   contractSpec = {
                     ...LendingPoolAppSpec.contract,

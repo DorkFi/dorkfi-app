@@ -641,14 +641,14 @@ const chainApi = {
           .accountInformation(address)
           .do();
         balance = BigInt(
-          Math.max(0, accInfo.amount - accInfo["min-balance"] - 1e6)
+          Math.max(0, Number(accInfo.amount) - Number(accInfo.minBalance) - 1e6)
         );
       } else if (assetType === "asa") {
         const accAssetInfo = await algorandClients.algod
           .accountAssetInformation(address, Number(market.assetId))
           .do();
         console.log("accAssetInfo", accAssetInfo);
-        balance = BigInt(accAssetInfo["asset-holding"].amount);
+        balance = BigInt(accAssetInfo.assetHolding.amount);
       } else if (assetType === "arc200") {
         // For other tokens, get balance from ARC200Service
         console.log("tokenId", tokenId);

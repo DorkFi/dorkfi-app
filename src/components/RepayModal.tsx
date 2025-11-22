@@ -99,7 +99,10 @@ const RepayModal = ({ isOpen, onClose, tokenSymbol, tokenIcon, currentBorrow, ac
   const maxRepayAmount = Math.min(currentBorrow, walletBalance);
 
   const handleMaxClick = () => {
-    setAmount(maxRepayAmount.toString());
+    // Round to 6 decimal places to match validation logic and avoid precision issues
+    const roundedMax = Math.round(maxRepayAmount * 1000000) / 1000000;
+    // Format to remove unnecessary trailing zeros while preserving up to 6 decimals
+    setAmount(roundedMax.toFixed(6).replace(/\.?0+$/, ''));
   };
 
   const handleSubmit = async () => {
@@ -136,7 +139,12 @@ const RepayModal = ({ isOpen, onClose, tokenSymbol, tokenIcon, currentBorrow, ac
     setFiatValue(0);
   };
 
-  const isValidAmount = amount && parseFloat(amount) > 0 && parseFloat(amount) <= maxRepayAmount;
+  // Round values to 6 decimal places to avoid floating-point precision issues
+  // Most tokens use 6 decimals, and this ensures consistent comparison
+  const numAmount = amount ? parseFloat(amount) : 0;
+  const roundedAmount = Math.round(numAmount * 1000000) / 1000000;
+  const roundedMaxRepay = Math.round(maxRepayAmount * 1000000) / 1000000;
+  const isValidAmount = amount && numAmount > 0 && roundedAmount <= roundedMaxRepay;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>

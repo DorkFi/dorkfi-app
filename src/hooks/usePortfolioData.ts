@@ -332,10 +332,10 @@ export const usePortfolioData = () => {
               .accountAssetInformation(activeAccount.address, assetId)
               .do();
 
-            if (accAssetInfo["asset-holding"]) {
+            if (accAssetInfo.assetHolding) {
               // Convert from smallest units to human readable format
               balance =
-                accAssetInfo["asset-holding"].amount /
+                Number(accAssetInfo.assetHolding.amount) /
                 Math.pow(10, originalTokenConfig.decimals);
               console.log(`ASA balance for ${asset}: ${balance}`);
             } else {

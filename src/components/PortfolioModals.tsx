@@ -1,4 +1,5 @@
 
+import { useEffect, useRef } from "react";
 import DepositModal from "./DepositModal";
 import WithdrawModal from "./WithdrawModal";
 import BorrowModal from "./BorrowModal";
@@ -310,6 +311,31 @@ const PortfolioModals = ({
       throw error;
     }
   };
+
+  // Track if we've already fetched balance for this modal open/asset combination
+  const lastFetchedRef = useRef<{ isOpen: boolean; asset: string | null }>({
+    isOpen: false,
+    asset: null,
+  });
+
+  // Fetch wallet balance when repay modal opens
+  useEffect(() => {
+    if (
+      repayModal.isOpen &&
+      repayModal.asset &&
+      activeAccount?.address &&
+      onRefreshWalletBalance &&
+      // Only fetch if modal just opened or asset changed
+      (!lastFetchedRef.current.isOpen || lastFetchedRef.current.asset !== repayModal.asset)
+    ) {
+      console.log(`[PortfolioModals] Fetching wallet balance for ${repayModal.asset} when repay modal opens`);
+      onRefreshWalletBalance(repayModal.asset);
+      lastFetchedRef.current = { isOpen: true, asset: repayModal.asset };
+    } else if (!repayModal.isOpen) {
+      // Reset when modal closes
+      lastFetchedRef.current = { isOpen: false, asset: null };
+    }
+  }, [repayModal.isOpen, repayModal.asset, activeAccount?.address, onRefreshWalletBalance]);
 
   const handleRepaySubmit = async (amount: string) => {
     if (!activeAccount?.address || !repayModal.asset) {

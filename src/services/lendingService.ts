@@ -2047,7 +2047,11 @@ export const repay = async (
       }
 
       // Convert amount to proper units (considering decimals)
-      const bigAmount = BigInt(Number(amount) * 10 ** token.decimals);
+      const bigAmount = BigInt(
+        new BigNumber(amount).multipliedBy(10 ** token.decimals).toFixed(0)
+      );
+
+      const symbol = token.symbol;
 
       // Check if market is paused
       const marketPaused = await isMarketPaused(poolId, marketId, networkId);
@@ -2144,66 +2148,104 @@ export const repay = async (
         tokenStandard,
       });
 
-      const buildN = [];
+      let customR: any;
+      for (const [p1, p2] of [
+        [0, 0],
+        [1, 0],
+        [0, 1],
+        [1, 1],
+      ]) {
+        const buildN = [];
 
-      // approve spending of token (non stoken only)
-      // TODO check if this is needed
-      {
-        const txnO = (
-          await builder.token.arc200_approve(
-            algosdk.getApplicationAddress(Number(poolId)),
-            bigAmount
-          )
-        ).obj;
-        buildN.push({
-          ...txnO,
-          note: new TextEncoder().encode("arc200 approve"),
-        });
+        if (tokenStandard === "asa") {
+          // create balance box for pool
+          if (p1 > 0) {
+            const addr = algosdk.encodeAddress(
+              algosdk.getApplicationAddress(Number(poolId)).publicKey
+            );
+            const txnO = (await builder.token.createBalanceBox(addr)).obj;
+            buildN.push({
+              ...txnO,
+              payment: 28500,
+              note: new TextEncoder().encode(
+                `nt200 createBalanceBox arc200 ${symbol} token for pool ${addr}`
+              ),
+            });
+          }
+          // create balance box for user
+          if (p2 > 0) {
+            const txnO = (await builder.token.createBalanceBox(userAddress))
+              .obj;
+            buildN.push({
+              ...txnO,
+              payment: 28501,
+              note: new TextEncoder().encode(
+                `nt200 createBalanceBox arc200 ${symbol} token for ${userAddress}`
+              ),
+            });
+          }
+          // deposit to arc200
+          {
+            const txnO = (await builder.token.deposit(bigAmount)).obj;
+            const axfer = {
+              aamt: bigAmount,
+              xaid: Number(token.underlyingAssetId),
+            };
+            buildN.push({
+              ...txnO,
+              ...axfer,
+              note: new TextEncoder().encode(
+                `nt200 deposit ${symbol} token for user (${userAddress})`
+              ),
+            });
+          }
+        }
+        // all payment to pool are arc200 payments trough approval
+        // approve spending of token (non stoken only)
+        // TODO check if this is needed
+        {
+          const addr = algosdk.encodeAddress(
+            algosdk.getApplicationAddress(Number(poolId)).publicKey
+          );
+          const txnO = (await builder.token.arc200_approve(addr, bigAmount))
+            .obj;
+          buildN.push({
+            ...txnO,
+            note: new TextEncoder().encode(
+              `arc200 approve ${symbol} token spending to pool (${addr}) for user (${userAddress})`
+            ),
+          });
+        }
+        // repay tp lending pool
+        {
+          const txnO = (
+            await builder.lending.repay(Number(marketId), bigAmount)
+          ).obj as any;
+          buildN.push({
+            ...txnO,
+            payment: 1e5,
+            note: new TextEncoder().encode("lending repay"),
+          });
+        }
+        ci.setEnableGroupResourceSharing(true);
+        ci.setExtraTxns(buildN);
+        ci.setFee(1e5);
+        if (networkConfig.networkId === "algorand-mainnet") {
+          ci.setBeaconId(3209233839); // TODO move this to ulujs
+        }
+        customR = await ci.custom();
+        console.log("customR", { customR });
+        if (customR.success) {
+          break;
+        }
       }
-
-      // repay to lending pool
-      {
-        const txnO = (await builder.lending.repay(Number(marketId), bigAmount))
-          .obj as any;
-        buildN.push({
-          ...txnO,
-          payment: 1e5,
-          note: new TextEncoder().encode("lending repay"),
-        });
+      if (!customR.success) {
+        throw new Error("Failed to create repay transaction");
       }
-
-      // sync user market for price change
-      // {
-      //   const txnO = (
-      //     await builder.lending.sync_user_market_for_price_change(
-      //       userAddress,
-      //       Number(marketId)
-      //     )
-      //   ).obj;
-      //   buildN.push({
-      //     ...txnO,
-      //     note: new TextEncoder().encode(
-      //       "lending sync_user_market_for_price_change"
-      //     ),
-      //   });
-      // }
-
-      ci.setEnableGroupResourceSharing(true);
-      ci.setExtraTxns(buildN);
-      ci.setFee(1e5);
-      if (networkConfig.networkId === "algorand-mainnet") {
-        ci.setBeaconId(3209233839); // TODO move this to ulujs
-      }
-      const customR = await ci.custom();
-
-      if (customR.success) {
-        return {
-          success: true,
-          txns: customR.txns,
-        };
-      } else {
-        throw new Error(customR.error || "Repay failed");
-      }
+      return {
+        success: true,
+        txns: customR.txns,
+      };
     } else {
       throw new Error("EVM networks not yet supported");
     }

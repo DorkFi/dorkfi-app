@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import {
@@ -413,6 +413,7 @@ const Portfolio = () => {
           activeAccount.address,
           token.underlyingContractId
         );
+        console.log("arc200Balance", { arc200Balance });
 
         if (arc200Balance) {
           // Convert from smallest units to human readable format
@@ -460,10 +461,10 @@ const Portfolio = () => {
             .accountAssetInformation(activeAccount.address, assetId)
             .do();
 
-          if (accAssetInfo["asset-holding"]) {
+          if (accAssetInfo.assetHolding) {
             // Convert from smallest units to human readable format
             balance =
-              Number(accAssetInfo["asset-holding"].amount) /
+              Number(accAssetInfo.assetHolding.amount) /
               Math.pow(10, originalTokenConfig.decimals);
             console.log(`ASA balance for ${asset}: ${balance}`);
           } else {
@@ -510,23 +511,26 @@ const Portfolio = () => {
   };
 
   // Refresh wallet balance for a specific asset
-  const refreshWalletBalance = async (asset: string) => {
-    if (!activeAccount?.address) return;
+  const refreshWalletBalance = useCallback(
+    async (asset: string) => {
+      if (!activeAccount?.address) return;
 
-    try {
-      // Clear cached balance
-      setWalletBalances((prev) => {
-        const newBalances = { ...prev };
-        delete newBalances[asset];
-        return newBalances;
-      });
+      try {
+        // Clear cached balance
+        setWalletBalances((prev) => {
+          const newBalances = { ...prev };
+          delete newBalances[asset];
+          return newBalances;
+        });
 
-      // Fetch fresh balance
-      await fetchWalletBalance(asset);
-    } catch (error) {
-      console.error("Error refreshing wallet balance:", error);
-    }
-  };
+        // Fetch fresh balance
+        await fetchWalletBalance(asset);
+      } catch (error) {
+        console.error("Error refreshing wallet balance:", error);
+      }
+    },
+    [activeAccount?.address, currentNetwork]
+  );
 
   // Function to refresh positions data
   const handleRefreshPositions = async () => {
