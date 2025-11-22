@@ -2125,6 +2125,31 @@ export const repay = async (
           false,
           true
         ),
+        arc200Exchange: new CONTRACT(
+          Number(token.underlyingContractId),
+          clients.algod,
+          undefined,
+          {
+            name: "arc200Exchange",
+            desc: "arc200Exchange",
+            methods: [
+              // arc200_redeem(uint64)void
+              {
+                name: "arc200_redeem",
+                args: [{ name: "amount", type: "uint64" }],
+                returns: { type: "void" },
+              },
+            ],
+            events: [],
+          },
+          {
+            addr: userAddress,
+            sk: new Uint8Array(),
+          },
+          true,
+          false,
+          true
+        ),
         ntoken: new CONTRACT(
           Number(marketInfo.ntokenId),
           clients.algod,
@@ -2199,6 +2224,18 @@ export const repay = async (
               ),
             });
           }
+        } else if (tokenStandard == "arc200-exchange") {
+          const axfer = {
+            aamt: bigAmount,
+            xaid: Number(token.underlyingAssetId),
+          };
+          const txnO = (await builder.arc200Exchange.arc200_redeem(bigAmount))
+            .obj;
+          buildN.push({
+            ...txnO,
+            ...axfer,
+            note: new TextEncoder().encode("arc200_redeem"),
+          });
         }
         // all payment to pool are arc200 payments trough approval
         // approve spending of token (non stoken only)

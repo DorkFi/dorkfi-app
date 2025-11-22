@@ -521,6 +521,32 @@ const MarketsTable = () => {
           console.error(`Error fetching ASA balance for ${asset}:`, error);
           balance = 0;
         }
+      } else if (originalTokenConfig.tokenStandard === "arc200-exchange") {
+        // For ASA tokens, fetch asset balance
+        console.log(
+          `Fetching ASA balance for ${asset} (asset ID: ${token.underlyingAssetId})`
+        );
+        try {
+          const clients = await algorandService.getCurrentClientsForReads();
+          const assetId = parseInt(token.underlyingAssetId);
+          const accAssetInfo = await clients.algod
+            .accountAssetInformation(activeAccount.address, assetId)
+            .do();
+
+          if (accAssetInfo.assetHolding) {
+            // Convert from smallest units to human readable format
+            balance =
+              Number(accAssetInfo.assetHolding.amount) /
+              Math.pow(10, originalTokenConfig.decimals);
+            console.log(`ASA balance for ${asset}: ${balance}`);
+          } else {
+            console.log(`No ASA balance found for ${asset}`);
+            balance = 0;
+          }
+        } catch (error) {
+          console.error(`Error fetching ASA balance for ${asset}:`, error);
+          balance = 0;
+        }
       } else {
         console.log(
           `Unsupported token standard for ${asset}: ${originalTokenConfig.tokenStandard}`

@@ -308,7 +308,7 @@ export const usePortfolioData = () => {
               .accountInformation(activeAccount.address)
               .do();
             // Convert from micro-units to units (divide by 1,000,000)
-            balance = accountInfo.amount / 1_000_000;
+            balance = Number(accountInfo.amount) / 1_000_000;
             console.log(`Network token balance for ${asset}: ${balance}`);
           } catch (error) {
             console.error(
