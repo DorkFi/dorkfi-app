@@ -1864,14 +1864,30 @@ export const borrow = async (
 
       let customTx: any;
 
+      // p1 - create balance box user
+      // p2 -
+      // p3 -
       for (const p of [
-        [0, 0, 0],
-        [0, 1, 0],
-        [1, 1, 1],
-        [1, 0, 1],
+        [0, 0],
+        [1, 0],
+        [1, 1],
+        [0, 1],
       ]) {
-        const [p1, p2, p3] = p;
+        const [p1, p2] = p;
         const buildN = [];
+
+        // cond create balance box user if needed and network token
+        if (tokenStandard == "network") {
+          if (p1 > 0) {
+            const txnO = (await builder.token.createBalanceBox(userAddress))
+              .obj;
+            buildN.push({
+              ...txnO,
+              payment: 28500,
+              note: new TextEncoder().encode("nt200 createBalanceBox"),
+            });
+          }
+        }
 
         // Borrow from lending pool
         {
@@ -1883,7 +1899,7 @@ export const borrow = async (
           if (networkConfig.networkId === "algorand-mainnet") {
             foreignApps.push(3333688254);
           }
-          const borrowCost = p3 > 0 ? 900000 : 0;
+          const borrowCost = p2 > 0 ? 900000 : 0;
           const txnO = (
             await builder.lending.borrow(Number(marketId), BigInt(amount))
           ).obj as any;
@@ -1894,30 +1910,9 @@ export const borrow = async (
             foreignApps,
           });
         }
-        // Withdraw borrowed tokens to user
+
+        // user withdraws from nt200 token
         if (tokenStandard == "network") {
-          if (p1 > 0) {
-            const txnO = (
-              await builder.token.createBalanceBox(
-                algosdk.getApplicationAddress(Number(poolId))
-              )
-            ).obj;
-            console.log("createBalanceBox", { txnO });
-            buildN.push({
-              ...txnO,
-              payment: 28500,
-              note: new TextEncoder().encode("nt200 createBalanceBox"),
-            });
-          }
-          if (p2 > 0) {
-            const txnO = (await builder.token.createBalanceBox(userAddress))
-              .obj;
-            buildN.push({
-              ...txnO,
-              payment: 28501,
-              note: new TextEncoder().encode("nt200 createBalanceBox"),
-            });
-          }
           {
             const txnO = (await builder.token.withdraw(BigInt(amount))).obj;
             buildN.push({
@@ -1925,13 +1920,17 @@ export const borrow = async (
               note: new TextEncoder().encode("nt200 withdraw"),
             });
           }
-        } else if (tokenStandard == "asa") {
+        }
+        // user withdraws from nnt200 token
+        else if (tokenStandard == "asa") {
           const txnO = (await builder.token.withdraw(BigInt(amount))).obj;
           buildN.push({
             ...txnO,
             note: new TextEncoder().encode("nt200 withdraw"),
           });
-        } else if (tokenStandard == "arc200-exchange") {
+        } 
+        // user withdraws from arc200-exchange
+        else if (tokenStandard == "arc200-exchange") {
           const txnO = (
             await builder.arc200Exchange.arc200_swapBack(BigInt(amount))
           ).obj;
