@@ -43,65 +43,70 @@ const BorrowsList = ({ borrows, onBorrowClick, onRepayClick, onRefresh, isLoadin
         )}
       </div>
       <div className="space-y-4">
-        {borrows.map((borrow) => (
+        {borrows.filter(borrow => borrow.balance > 0).map((borrow) => (
           <div
             key={borrow.asset}
-            className="flex flex-col md:flex-row md:items-center justify-between p-4 rounded-lg bg-red-500/5 border border-red-500/10 transition-all hover:bg-ocean-teal/5 hover:scale-105 hover:border-ocean-teal/40 card-hover cursor-pointer gap-3 md:gap-0"
+            className="grid grid-cols-[auto_1fr_auto] gap-x-4 items-center min-h-[100px] p-4 rounded-lg bg-red-500/5 border border-red-500/10 transition-all hover:bg-ocean-teal/5 hover:scale-105 hover:border-ocean-teal/40 card-hover cursor-pointer gap-y-1"
           >
-            <div className="flex flex-col items-center text-center md:flex-row md:items-start md:text-left gap-3 flex-1">
-              <img 
-                src={borrow.icon} 
+            {/* Icon + Asset (left column) */}
+            <div className="flex flex-col items-center gap-1 w-20">
+              <img
+                src={borrow.icon}
                 alt={borrow.asset}
-                className="w-10 h-10 md:w-8 md:h-8 rounded-full flex-shrink-0"
+                className="w-12 h-12 md:w-10 md:h-10 rounded-full"
               />
-              <div className="flex flex-col min-w-0 items-center md:items-start">
-                <div className="font-semibold text-base leading-tight text-slate-800 dark:text-white">{borrow.asset}</div>
-                <div className="text-sm text-slate-500 dark:text-muted-foreground flex items-center justify-center md:justify-start gap-1 mt-1">
-                  {borrow.balance.toLocaleString()} tokens
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Info className="w-3 h-3 cursor-help flex-shrink-0" />
-                    </TooltipTrigger>
-                    <TooltipContent className="max-w-xs">
-                      <p>The amount of {borrow.asset} you have borrowed. This debt accrues interest over time and must be repaid to maintain your position.</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-                <div className="text-xs text-slate-500 dark:text-muted-foreground flex items-center justify-center md:justify-start gap-1">
-                  ${borrow.tokenPrice.toFixed(3)} per token
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Info className="w-3 h-3 cursor-help flex-shrink-0" />
-                    </TooltipTrigger>
-                    <TooltipContent className="max-w-xs">
-                      <p>Current market price of {borrow.asset}. If the price rises, your debt value increases, potentially affecting your health factor.</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-              </div>
+              <div className="font-bold text-base text-slate-800 dark:text-white text-center truncate w-full">{borrow.asset}</div>
             </div>
-            <div className="mt-2 md:mt-0 text-center flex-shrink-0 min-w-[110px]">
-              <div className="font-semibold text-red-400">${borrow.value.toLocaleString()}</div>
-              <div className="text-sm text-red-400 flex flex-col items-center gap-1 mt-1">
-                <span>{borrow.apy.toFixed(2)}% APY</span>
+            {/* $ value, APY, tokens and price (middle column) */}
+            <div className="flex flex-col items-center gap-[2px] min-w-0 text-center">
+              {/* $ value (top, red) */}
+              <div className="font-semibold text-red-400 text-lg mb-1 text-center">${borrow.value.toLocaleString()}</div>
+              {/* APY below $value */}
+              <div className="flex items-center text-base font-semibold text-red-400 mb-1 text-center justify-center">
+                {borrow.apy.toFixed(2)}% APY
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Info className="w-3 h-3 cursor-help" />
+                    <Info className="w-3 h-3 cursor-help flex-shrink-0 ml-1" />
                   </TooltipTrigger>
                   <TooltipContent className="max-w-xs">
                     <p>Annual interest rate on your {borrow.asset} debt. This cost compounds over time, so consider repaying early to minimize interest payments.</p>
                   </TooltipContent>
                 </Tooltip>
               </div>
+              <div className="text-sm font-medium text-slate-700 dark:text-slate-200 flex items-center gap-1 text-center justify-center">
+                {borrow.balance.toLocaleString()} tokens
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="w-3 h-3 cursor-help flex-shrink-0" />
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs">
+                    <p>The amount of {borrow.asset} you have borrowed. This debt accrues interest over time and must be repaid to maintain your position.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <div className="text-xs text-slate-500 dark:text-muted-foreground flex items-center gap-1 text-center justify-center">
+                ${borrow.tokenPrice.toFixed(3)} per token
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="w-3 h-3 cursor-help flex-shrink-0" />
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs">
+                    <p>Current market price of {borrow.asset}. If the price rises, your debt value increases, potentially affecting your health factor.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </div>
             </div>
-            <div className="flex flex-row gap-2 mt-3 md:mt-0 md:ml-4 flex-shrink-0 justify-center md:justify-end">
+            {/* Action buttons vertical stack (right column) */}
+            <div className="flex flex-col items-end gap-2 min-w-[140px] pr-3">
               <DorkFiButton
-                variant="borrow-outline"
+                variant={borrow.asset === "WAD" ? "mint" : "borrow-outline"}
                 onClick={() => onBorrowClick(borrow.asset)}
-              >Borrow</DorkFiButton>
+                className="w-full max-w-[135px]"
+              >{borrow.asset === "WAD" ? "Mint" : "Borrow"}</DorkFiButton>
               <DorkFiButton
                 variant="danger-outline"
                 onClick={() => onRepayClick(borrow.asset)}
+                className="w-full max-w-[135px]"
               >Repay</DorkFiButton>
             </div>
           </div>

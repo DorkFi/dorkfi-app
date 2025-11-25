@@ -1,8 +1,9 @@
 
 import { Card, CardContent } from "@/components/ui/card";
-import { InfoIcon } from "lucide-react";
+import { InfoIcon, ChevronDown, ChevronUp } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { calculateDepositAPY } from "@/utils/apyCalculations";
+import { useState } from "react";
 
 interface AssetData {
   supplyAPY: number;
@@ -127,6 +128,11 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
   };
 
   const adjustedMetrics = calculateAdjustedMetrics();
+  const [expandedDetail, setExpandedDetail] = useState<string | null>(null);
+  const handleToggleDetail = (field: string) => {
+    setExpandedDetail(prev => (prev === field ? null : field));
+  };
+
   return (
     <Card className="bg-white/50 dark:bg-slate-800 border-gray-200 dark:border-slate-700">
       <CardContent className="p-3 space-y-2">
@@ -186,74 +192,57 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
           </div>
         )}
 
-        {/* Only show utilization if it's greater than 0 */}
-        {assetData.utilization > 0 && (
-          <div className="flex justify-between items-center">
-            <div className="flex items-center gap-1.5 md:gap-2">
-              <span className="text-[10px] md:text-sm text-slate-500 dark:text-slate-400">Utilization</span>
-              <Tooltip>
-                <TooltipTrigger>
-                  <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>
-                    {mode === "deposit" && depositAmount > 0 
-                      ? "Utilization after your deposit (borrowed / total supplied)"
-                      : "Percentage of deposited assets being borrowed"
-                    }
-                  </p>
-                </TooltipContent>
-              </Tooltip>
+        {/* Utilization */}
+        {mode === "deposit" && assetData.utilization > 0 && (
+          <div className="border-b border-gray-200 dark:border-slate-700 pb-2 md:pb-3">
+            <div className="flex justify-between items-center">
+              <button
+                onClick={() => handleToggleDetail("utilization")}
+                type="button"
+                className="flex items-center gap-1.5 md:gap-2 hover:opacity-70 transition-opacity"
+              >
+                <span className="text-[10px] md:text-sm text-slate-500 dark:text-slate-400">Utilization</span>
+                <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                {expandedDetail === "utilization" ? <ChevronUp className="h-3 w-3 text-slate-400 dark:text-slate-500" /> : <ChevronDown className="h-3 w-3 text-slate-400 dark:text-slate-500" />}
+              </button>
+              <span className="text-sm font-medium text-slate-800 dark:text-white">
+                {isSToken ? "100.00" : assetData.utilization.toFixed(2)}%
+              </span>
             </div>
-            <div className="text-right">
-              {mode === "deposit" && depositAmount > 0 ? (
-                <div className="space-y-1">
-                  <div className="text-sm font-medium text-slate-800 dark:text-white">
-                    {adjustedMetrics.utilization.adjusted.toFixed(2)}%
-                  </div>
-                  <div className={`text-xs flex items-center justify-end gap-1 ${
-                    Math.abs(adjustedMetrics.utilization.change) > 0.1 
-                      ? (adjustedMetrics.utilization.change < 0 
-                          ? "text-green-600 dark:text-green-400" 
-                          : "text-orange-600 dark:text-orange-400")
-                      : "text-slate-500 dark:text-slate-400"
-                  }`}>
-                    {Math.abs(adjustedMetrics.utilization.change) > 0.1 ? (
-                      <>
-                        <span>{adjustedMetrics.utilization.change < 0 ? "↓" : "↑"}</span>
-                        <span>
-                          {adjustedMetrics.utilization.change < 0 ? "Decreases by " : "Increases by "}
-                          {Math.abs(adjustedMetrics.utilization.change).toFixed(1)}%
-                        </span>
-                      </>
-                    ) : (
-                      <span>No significant change</span>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <span className="text-sm font-medium text-slate-800 dark:text-white">
-                  {isSToken ? "100.00" : assetData.utilization.toFixed(2)}%
-                </span>
-              )}
-            </div>
+            {expandedDetail === "utilization" && (
+              <div className="mt-2 pt-2 border-t border-gray-200 dark:border-slate-700">
+                <p className="text-xs text-slate-600 dark:text-slate-400">Current percentage of supplied assets that are being borrowed. High utilization may increase interest rates and affect withdrawal availability.</p>
+              </div>
+            )}
           </div>
         )}
 
-        <div className="flex justify-between items-center">
-            <div className="flex items-center gap-1.5 md:gap-2">
-              <span className="text-[10px] md:text-sm text-slate-500 dark:text-slate-400">Collateral Factor</span>
-              <Tooltip>
-                <TooltipTrigger>
-                  <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Maximum borrowing power from this collateral</p>
-              </TooltipContent>
-            </Tooltip>
+        {/* Collateral Factor */}
+        {mode === "deposit" && (
+          <div className="border-b border-gray-200 dark:border-slate-700 pb-2 md:pb-3">
+            <div className="flex justify-between items-center">
+              <button
+                onClick={() => handleToggleDetail("collateralFactor")}
+                type="button"
+                className="flex items-center gap-1.5 md:gap-2 hover:opacity-70 transition-opacity"
+              >
+                <span className="text-[10px] md:text-sm text-slate-500 dark:text-slate-400">Collateral Factor</span>
+                <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                {expandedDetail === "collateralFactor" ? (
+                  <ChevronUp className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                ) : (
+                  <ChevronDown className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                )}
+              </button>
+              <span className="text-sm font-medium text-slate-800 dark:text-white">{assetData.collateralFactor}%</span>
+            </div>
+            {expandedDetail === "collateralFactor" && (
+              <div className="mt-2 pt-2 border-t border-gray-200 dark:border-slate-700">
+                <p className="text-xs text-slate-600 dark:text-slate-400">The percentage of your deposited value that can be used as collateral for borrowing other assets. Higher collateral factors provide greater borrowing power.</p>
+              </div>
+            )}
           </div>
-          <span className="text-sm font-medium text-slate-800 dark:text-white">{assetData.collateralFactor}%</span>
-        </div>
+        )}
 
         {mode === "deposit" && assetData.totalSupply !== undefined && (
           <div className="flex justify-between items-center">
@@ -316,6 +305,35 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
                 }
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Supply APY */}
+        {mode === "deposit" && (
+          <div className="border-b border-gray-200 dark:border-slate-700 pb-2 md:pb-3">
+            <div className="flex justify-between items-center">
+              <button
+                onClick={() => handleToggleDetail("supplyAPY")}
+                type="button"
+                className="flex items-center gap-1.5 md:gap-2 hover:opacity-70 transition-opacity"
+              >
+                <span className="text-[10px] md:text-sm text-slate-500 dark:text-slate-400">Estimated APY</span>
+                <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                {expandedDetail === "supplyAPY" ? (
+                  <ChevronUp className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                ) : (
+                  <ChevronDown className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                )}
+              </button>
+              <span className="text-sm font-medium text-teal-600 dark:text-teal-400">
+                {depositAmount > 0 && adjustedMetrics ? adjustedMetrics.apy.adjusted.toFixed(2) : assetData.supplyAPY.toFixed(2)}%
+              </span>
+            </div>
+            {expandedDetail === "supplyAPY" && (
+              <div className="mt-2 pt-2 border-t border-gray-200 dark:border-slate-700">
+                <p className="text-xs text-slate-600 dark:text-slate-400">Estimated annual percentage yield for new deposits based on current market rates.</p>
+              </div>
+            )}
           </div>
         )}
 
