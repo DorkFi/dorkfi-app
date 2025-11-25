@@ -624,17 +624,17 @@ const MarketsTable = () => {
         />
 
         {/* Markets Table */}
-        <Card className="card-hover bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 shadow-md border border-gray-200/50 dark:border-ocean-teal/20">
-          <CardHeader className="pb-4">
+        <div className="rounded-xl border bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 border-gray-200/50 dark:border-ocean-teal/20 p-4 card-hover overflow-visible">
+          <div className="pb-4">
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-4">
-              <CardTitle className="text-xl md:text-2xl font-bold text-slate-800 dark:text-white">
+              <div className="text-xl md:text-2xl font-bold text-slate-800 dark:text-white">
                 Market Overview
                 {isLoading && (
                   <span className="ml-2 text-sm font-normal text-muted-foreground">
                     (Loading...)
                   </span>
                 )}
-              </CardTitle>
+              </div>
               <div className="flex flex-row gap-2 mt-2 sm:mt-0 sm:ml-4">
                 <Button
                   variant="outline"
@@ -667,56 +667,54 @@ const MarketsTable = () => {
                 </Button>
               </div>
             </div>
-          </CardHeader>
-          <CardContent>
-            {/* Informational guidance - matches Liquidations Queue styles */}
-            <section
-              aria-label="What you can do here"
-              className="mb-4 hidden md:block"
-            >
-              <p className="text-sm text-muted-foreground mt-1">
-                What You Can Do Here:
+          </div>
+          {/* Informational guidance - matches Liquidations Queue styles */}
+          <section
+            aria-label="What you can do here"
+            className="mb-4 hidden md:block"
+          >
+            <p className="text-sm text-muted-foreground mt-1">
+              What You Can Do Here:
+            </p>
+            <div className="mt-3 space-y-1 text-xs text-slate-600 dark:text-slate-400">
+              <p>
+                • Deposit Assets: Earn interest with interest bearing tokens
+                that grow in value over time.
               </p>
-              <div className="mt-3 space-y-1 text-xs text-slate-600 dark:text-slate-400">
-                <p>
-                  • Deposit Assets: Earn interest with interest bearing tokens
-                  that grow in value over time.
-                </p>
-                <p>
-                  • Borrow Against Collateral: Access liquidity without selling
-                  your holdings.
-                </p>
-                <p>
-                  • Track Utilization: See how much of each market is borrowed
-                  vs. supplied — a key signal for demand and interest rates.
-                </p>
-                <p>
-                  • Compare Risk Profiles: Different assets have different
-                  Loan-to-Value (LTV) limits and liquidation thresholds.
-                </p>
-              </div>
-            </section>
+              <p>
+                • Borrow Against Collateral: Access liquidity without selling
+                your holdings.
+              </p>
+              <p>
+                • Track Utilization: See how much of each market is borrowed
+                vs. supplied — a key signal for demand and interest rates.
+              </p>
+              <p>
+                • Compare Risk Profiles: Different assets have different
+                Loan-to-Value (LTV) limits and liquidation thresholds.
+              </p>
+            </div>
+          </section>
 
-            {markets.length === 0 && !isLoading ? (
-              <div className="text-center py-8">
-                <p className="text-muted-foreground">
-                  No markets found. Try adjusting your search criteria.
-                </p>
-              </div>
-            ) : (
-              <MarketsTableContent
-                markets={markets}
-                onRowClick={handleRowClick}
-                onInfoClick={handleInfoClick}
-                onDepositClick={handleDepositClick}
-                onWithdrawClick={handleWithdrawClick}
-                onBorrowClick={handleBorrowClick}
-                onMintClick={handleMintClick}
-                isLoadingBalance={isLoadingBalance}
-              />
-            )}
-          </CardContent>
-        </Card>
+          {markets.length === 0 && !isLoading ? (
+            <div className="text-center py-8">
+              <p className="text-muted-foreground">
+                No markets found. Try adjusting your search criteria.
+              </p>
+            </div>
+          ) : (
+            <MarketsTableContent
+              markets={markets}
+              onRowClick={handleRowClick}
+              onInfoClick={handleInfoClick}
+              onDepositClick={handleDepositClick}
+              onWithdrawClick={handleWithdrawClick}
+              onBorrowClick={handleBorrowClick}
+              onMintClick={handleMintClick}
+              isLoadingBalance={isLoadingBalance}
+            />
+          )}
+        </div>
 
         {/* Pagination */}
         <MarketPagination

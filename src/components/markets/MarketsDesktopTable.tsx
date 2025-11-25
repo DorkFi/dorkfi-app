@@ -71,8 +71,8 @@ const MarketsDesktopTable = ({
   }
 
   return (
-    <div className="overflow-x-auto">
-      <div className="rounded-lg border bg-card text-card-foreground shadow-sm overflow-hidden">
+    <div className="overflow-x-visible overflow-visible w-full">
+      <div className="rounded-lg border bg-white/50 dark:bg-slate-800/50 border-gray-200/30 dark:border-ocean-teal/10 shadow-md overflow-visible w-full">
         <Table>
           <TableHeader>
             <TableRow>
@@ -205,32 +205,23 @@ const MarketsDesktopTable = ({
               return (
                 <TableRow
                   key={market.asset}
-                  className="hover:bg-ocean-teal/5 cursor-pointer transition-colors"
+                  className="transition-all relative card-hover rounded-lg border border-gray-200/30 dark:border-ocean-teal/10 bg-white/50 dark:bg-slate-800/50 hover:border-teal-400 hover:shadow-[0_0_16px_4px_rgba(13,255,190,0.15)] hover:z-20 cursor-pointer"
                   onClick={() => onRowClick(market)}
                 >
-                  <TableCell className="text-center">
-                    <div className="flex items-center justify-center gap-3">
+                  <TableCell className="text-left align-top">
+                    <div className="flex items-center gap-3 w-full">
+                      {/* Asset icon */}
                       <img
                         src={market.icon}
                         alt={market.asset}
-                        className="w-8 h-8 rounded-full flex-shrink-0"
+                        className="w-10 h-10 rounded-full flex-shrink-0"
                       />
-                      <div className="flex flex-col items-center justify-center gap-1 text-center">
-                        <div className="font-semibold text-base leading-tight">
-                          {market.asset}
-                        </div>
-                        <Badge variant="outline" className="text-xs px-1 py-0 h-4">
-                          CF {market.collateralFactor}%
-                        </Badge>
+                      {/* Asset name and CF badge stacked */}
+                      <div className="flex flex-col items-center">
+                        <div className="font-extrabold text-lg leading-tight">{market.asset}</div>
+                        <Badge variant="outline" className="text-xs px-1 py-0 h-4 mt-1">CF {market.collateralFactor}%</Badge>
                       </div>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={(e) => onInfoClick(e, market)}
-                        className="p-1 h-auto"
-                      >
-                        <Info className="w-4 h-4 text-ocean-teal" />
-                      </Button>
+                      {/* Removed info icon */}
                     </div>
                   </TableCell>
                   <TableCell className="text-center">
