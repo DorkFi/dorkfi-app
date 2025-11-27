@@ -5,6 +5,7 @@ import WithdrawModal from "./WithdrawModal";
 import BorrowModal from "./BorrowModal";
 import RepayModal from "./RepayModal";
 import SupplyBorrowModal from "./SupplyBorrowModal";
+import MintModal from "./MintModal"; // Added MintModal import
 import { useWallet } from "@txnlab/use-wallet-react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { withdraw, repay, fetchUserWalletBalance } from "@/services/lendingService";
@@ -91,7 +92,8 @@ const PortfolioModals = ({
       utilization: market?.utilizationRate ? market.utilizationRate * 100 : 0,
       collateralFactor: market?.collateralFactor ? market.collateralFactor * 100 : 0,
       tokenPrice: market?.price ? parseFloat(market.price) / Math.pow(10, 6) : 
-                  deposit?.tokenPrice || 1
+                  deposit?.tokenPrice || 1,
+      accruedInterest: deposit?.accruedInterest !== undefined ? deposit.accruedInterest : undefined
     };
   };
 
@@ -483,23 +485,40 @@ const PortfolioModals = ({
       )}
 
       {borrowModal.isOpen && borrowModal.asset && getAssetData(borrowModal.asset) && (
-        <SupplyBorrowModal
-          isOpen={borrowModal.isOpen}
-          onClose={onCloseBorrowModal}
-          asset={borrowModal.asset}
-          mode="borrow"
-          assetData={getAssetData(borrowModal.asset)}
-          userGlobalData={userGlobalData}
-          userBorrowBalance={userBorrowBalance || 0}
-          onTransactionSuccess={() => {
-            // Refresh market data after successful borrow
-            if (onRefreshMarket) {
-              setTimeout(() => {
-                onRefreshMarket();
-              }, 1000); // Small delay to ensure transaction is fully processed
-            }
-          }}
-        />
+        borrowModal.asset === 'WAD' ? (
+          <MintModal
+            isOpen={borrowModal.isOpen}
+            onClose={onCloseBorrowModal}
+            asset={borrowModal.asset}
+            assetData={getAssetData(borrowModal.asset)}
+            userGlobalData={userGlobalData}
+            userBorrowBalance={userBorrowBalance || 0}
+            onTransactionSuccess={() => {
+              if (onRefreshMarket) {
+                setTimeout(() => {
+                  onRefreshMarket();
+                }, 1000);
+              }
+            }}
+          />
+        ) : (
+          <SupplyBorrowModal
+            isOpen={borrowModal.isOpen}
+            onClose={onCloseBorrowModal}
+            asset={borrowModal.asset}
+            mode="borrow"
+            assetData={getAssetData(borrowModal.asset)}
+            userGlobalData={userGlobalData}
+            userBorrowBalance={userBorrowBalance || 0}
+            onTransactionSuccess={() => {
+              if (onRefreshMarket) {
+                setTimeout(() => {
+                  onRefreshMarket();
+                }, 1000);
+              }
+            }}
+          />
+        )
       )}
 
       {repayModal.isOpen && repayModal.asset && (

@@ -1,8 +1,6 @@
 
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Info } from "lucide-react";
 import { OnDemandMarketData } from "@/hooks/useOnDemandMarketData";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import DorkFiButton from "@/components/ui/DorkFiButton";
@@ -72,14 +70,7 @@ const MarketCardView = ({
                   </Badge>
                 </div>
               </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={(e) => { e.stopPropagation(); onInfoClick(e, market); }}
-                className="p-1 h-auto flex-shrink-0 self-center md:self-start"
-              >
-                <Info className="w-4 h-4 text-ocean-teal" />
-              </Button>
+              {/* Removed info icon */}
             </div>
 
             {/* APY and Supply/Borrow Info */}

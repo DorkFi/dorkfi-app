@@ -46,78 +46,73 @@ const DepositsList = ({ deposits, onDepositClick, onWithdrawClick, onRefresh, is
         {deposits.map((deposit) => (
           <div 
             key={deposit.asset}
-            className="flex flex-col md:flex-row items-center md:items-center justify-between p-4 rounded-lg bg-white/50 dark:bg-slate-800/50 border border-gray-200/30 dark:border-ocean-teal/10 transition-all hover:bg-ocean-teal/5 hover:scale-105 hover:border-ocean-teal/40 card-hover cursor-pointer gap-3 md:gap-0"
+            className="grid grid-cols-[auto_1fr_auto] gap-x-4 items-center min-h-[100px] p-4 rounded-lg bg-white/50 dark:bg-slate-800/50 border border-gray-200/30 dark:border-ocean-teal/10 transition-all hover:bg-ocean-teal/5 hover:scale-105 hover:border-ocean-teal/40 card-hover cursor-pointer gap-y-1"
           >
-            <div className="flex flex-col items-center text-center md:flex-row md:items-start md:text-left gap-3 flex-1">
+            {/* Token Icon + Name (column 1) */}
+            <div className="flex flex-col items-center gap-1 w-20">
               <img 
                 src={deposit.icon} 
                 alt={deposit.asset}
-                className="w-12 h-12 md:w-9 md:h-9 rounded-full flex-shrink-0"
+                className="w-12 h-12 md:w-10 md:h-10 rounded-full"
               />
-              <div className="flex flex-col min-w-0 items-center md:items-start">
-                <div className="font-semibold text-base leading-tight text-slate-800 dark:text-white">{deposit.asset}</div>
-                <div className="text-sm text-slate-500 dark:text-muted-foreground flex items-center justify-center md:justify-start gap-1 mt-1">
-                  {deposit.balance.toLocaleString()} tokens
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Info className="w-3 h-3 cursor-help flex-shrink-0" />
-                    </TooltipTrigger>
-                    <TooltipContent className="max-w-xs">
-                      <p>The amount of {deposit.asset} tokens you have deposited and available to use as collateral for borrowing other assets.</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-                {deposit.nTokenBalance !== undefined && deposit.nTokenBalance > 0 && (
-                  <div className="text-xs text-slate-400 dark:text-slate-500 flex items-center justify-center md:justify-start gap-1">
-                    {deposit.nTokenBalance.toFixed(6)} n{deposit.asset}
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Info className="w-3 h-3 cursor-help flex-shrink-0" />
-                      </TooltipTrigger>
-                      <TooltipContent className="max-w-xs">
-                        <p>Your n{deposit.asset} token balance representing your share of the {deposit.asset} lending pool. These tokens accrue interest over time.</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                )}
-                <div className="text-xs text-slate-500 dark:text-muted-foreground flex items-center justify-center md:justify-start gap-1">
-                  ${deposit.tokenPrice.toFixed(3)} per token
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Info className="w-3 h-3 cursor-help flex-shrink-0" />
-                    </TooltipTrigger>
-                    <TooltipContent className="max-w-xs">
-                      <p>Current market price of {deposit.asset}. Your position value fluctuates with price changes, affecting your health factor.</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-              </div>
+              <div className="font-bold text-base text-slate-800 dark:text-white text-center truncate w-full">{deposit.asset}</div>
             </div>
-            <div className="mt-2 md:mt-0 text-center flex-shrink-0 min-w-[110px] mx-auto">
-              <div className="font-semibold text-whale-gold">${deposit.value.toLocaleString()}</div>
-              <div className="text-sm text-whale-gold flex flex-col items-center gap-1 mt-1">
-                <span>{deposit.apy.toFixed(2)}% APY</span>
+            {/* $ value, APY, Balances & Price Info (column 2) */}
+            <div className="flex flex-col items-center gap-[2px] min-w-0 text-center">
+              {/* USD value (top, yellow) */}
+              <div className="font-semibold text-yellow-400 text-lg mb-1 text-center">${deposit.value.toLocaleString()}</div>
+              {/* APY below USD */}
+              <div className="flex items-center text-base font-semibold text-yellow-400 mb-1 text-center justify-center">
+                {deposit.apy.toFixed(2)}% APY
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Info className="w-3 h-3 cursor-help" />
+                    <Info className="w-3 h-3 cursor-help flex-shrink-0 ml-1" />
                   </TooltipTrigger>
                   <TooltipContent className="max-w-xs">
-                    <p>Annual Percentage Yield - the interest rate you earn on your {deposit.asset} deposits. Rewards are typically distributed automatically.</p>
+                    <p>Annual percentage yield for this deposit position.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <div className="text-sm font-medium text-slate-700 dark:text-slate-200 flex items-center gap-1 text-center justify-center">
+                {deposit.balance.toLocaleString()} tokens
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="w-3 h-3 cursor-help flex-shrink-0" />
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs">
+                    <p>The amount of {deposit.asset} tokens you have deposited and available to use as collateral for borrowing other assets.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              {deposit.nTokenBalance !== undefined && deposit.nTokenBalance > 0 && (
+                <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1 break-all text-center justify-center">
+                  {deposit.nTokenBalance.toFixed(6)} n{deposit.asset}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Info className="w-3 h-3 cursor-help flex-shrink-0" />
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs">
+                      <p>Your n{deposit.asset} token balance representing your share of the {deposit.asset} lending pool. These tokens accrue interest over time.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+              )}
+              <div className="text-xs text-slate-400 dark:text-muted-foreground flex items-center gap-1 text-center justify-center">
+                ${deposit.tokenPrice.toFixed(3)} per token
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="w-3 h-3 cursor-help flex-shrink-0" />
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs">
+                    <p>Current market price of {deposit.asset}. Your position value fluctuates with price changes, affecting your health factor.</p>
                   </TooltipContent>
                 </Tooltip>
               </div>
             </div>
-            <div className="flex flex-row gap-2 mt-3 md:mt-0 md:ml-4 flex-shrink-0 justify-center md:justify-end">
-              <DorkFiButton
-                variant="secondary"
-                onClick={() => onDepositClick(deposit.asset)}
-                className="font-semibold text-sm"
-              >Deposit</DorkFiButton>
-              <DorkFiButton
-                variant="danger-outline"
-                onClick={() => onWithdrawClick(deposit.asset)}
-                className="font-semibold text-sm"
-              >Withdraw</DorkFiButton>
+            {/* USD value above Deposit/Withdraw buttons (column 3) */}
+            <div className="flex flex-col items-end gap-2 min-w-[150px] pr-3">
+              <DorkFiButton variant="secondary" onClick={() => onDepositClick(deposit.asset)} className="w-full max-w-[148px]">Deposit</DorkFiButton>
+              <DorkFiButton variant="danger-outline" onClick={() => onWithdrawClick(deposit.asset)} className="w-full max-w-[148px]">Withdraw</DorkFiButton>
             </div>
           </div>
         ))}

@@ -29,6 +29,8 @@ interface DepositModalProps {
     utilization: number;
     collateralFactor: number;
     tokenPrice: number;
+    totalDeposits?: number;
+    marketCapacity?: number;
   };
 }
 
@@ -231,6 +233,65 @@ const DepositModal = ({
                     </div>
                     <span className="text-sm font-medium text-slate-800 dark:text-white">
                       {marketStats.collateralFactor}%
+                    </span>
+                  </div>
+                  {/* Total Deposits */}
+                  <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-slate-500 dark:text-slate-400">
+                        Total Deposits
+                      </span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Total supplied tokens in this market</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                    <span className="text-sm font-medium text-slate-800 dark:text-white">
+                      {/* Inject a totalDeposits value if available in marketStats */}
+                      {marketStats.totalDeposits?.toLocaleString() ?? '—'} {tokenSymbol}
+                    </span>
+                  </div>
+                  {/* Market Capacity */}
+                  <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-slate-500 dark:text-slate-400">
+                        Market Capacity
+                      </span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Maximum liquidity you can deposit in this market</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                    <span className="text-sm font-medium text-slate-800 dark:text-white">
+                      {/* If there is a known capacity field */}
+                      {marketStats.marketCapacity?.toLocaleString() ?? '—'} {tokenSymbol}
+                    </span>
+                  </div>
+                  {/* Estimated APY (new row) */}
+                  <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-slate-500 dark:text-slate-400">
+                        Estimated APY
+                      </span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Estimated annual percentage yield for new deposits based on the current market rates.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                    <span className="text-sm font-medium text-teal-600 dark:text-teal-400">
+                      {marketStats.supplyAPY.toFixed(2)}%
                     </span>
                   </div>
                 </CardContent>

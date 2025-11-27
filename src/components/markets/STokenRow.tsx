@@ -54,24 +54,12 @@ const STokenRow = ({
           <img
             src={market.icon}
             alt={market.asset}
-            className="w-12 h-12 md:w-9 md:h-9 rounded-full object-contain flex-shrink-0"
+            className="w-10 h-10 rounded-full object-contain flex-shrink-0" // Updated size to match MarketsDesktopTable
           />
           <div className="flex flex-col items-center justify-center gap-1 text-center">
-            <div className="font-semibold text-base leading-tight">
-              {market.asset}
-            </div>
-            <Badge variant="outline" className="text-xs px-1 py-0 h-4">
-              CF {market.collateralFactor}%
-            </Badge>
+            <div className="font-extrabold text-lg leading-tight">{market.asset}</div>
+            <Badge variant="outline" className="text-xs px-1 py-0 h-4 mt-1 text-muted-foreground">CF {market.collateralFactor}%</Badge>
           </div>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={(e) => onInfoClick(e, market)}
-            className="p-1 h-auto"
-          >
-            <Info className="w-4 h-4 text-ocean-teal" />
-          </Button>
         </div>
       </TableCell>
       <TableCell className="text-center">

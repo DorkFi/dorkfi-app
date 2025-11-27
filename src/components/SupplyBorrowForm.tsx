@@ -422,6 +422,21 @@ const SupplyBorrowForm = ({
         </div>
       </div>
 
+      {/* Wallet Balance Display - Deposit Mode Centered */}
+      {/* TODO add back}
+      {/*mode === "deposit" && (
+        <div className="flex flex-col items-center justify-center text-center gap-1 py-3 mt-2 mb-2 bg-white/60 dark:bg-slate-800/60 rounded-lg shadow-sm border border-gray-200/40 dark:border-slate-700/30 min-w-[210px]">
+          <div className="text-base font-bold text-slate-800 dark:text-white">{asset}</div>
+          <div className="text-sm text-teal-700 dark:text-teal-300 font-semibold">{walletBalance.toLocaleString(undefined, { maximumFractionDigits: 6 })} tokens</div>
+          {typeof userDepositBalance === 'number' && userDepositBalance > 0 && (
+            <div className="text-xs text-slate-400 dark:text-teal-400 flex flex-row items-center justify-center gap-1">
+              {userDepositBalance.toLocaleString(undefined, { maximumFractionDigits: 6 })} n{asset}
+            </div>
+          )}
+          <div className="text-xs text-slate-500 dark:text-slate-400">${tokenPrice ? tokenPrice.toFixed(3) : '1.000'} per token</div>
+        </div>
+      )*/}
+
       {!hideButton && (
         <Button
           onClick={onSubmit}

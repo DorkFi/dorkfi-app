@@ -19,7 +19,7 @@ const MarketsTableActions = ({
   isSToken = false 
 }: MarketsTableActionsProps) => {
   return (
-    <div className="flex space-x-2">
+    <div className="flex flex-row space-x-2">
       {!isSToken && (
         <DorkFiButton
           variant="secondary"
@@ -42,7 +42,7 @@ const MarketsTableActions = ({
             onBorrowClick(asset);
           }
         }}
-        className={isSToken ? "w-full" : ""}
+        className={isSToken ? "min-w-[140px] flex-1" : ""}
       >
         {isSToken ? "Mint" : "Borrow"}
       </DorkFiButton>
