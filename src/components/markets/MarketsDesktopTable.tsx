@@ -214,12 +214,12 @@ const MarketsDesktopTable = ({
                       <img
                         src={market.icon}
                         alt={market.asset}
-                        className="w-10 h-10 rounded-full flex-shrink-0"
+                        className="w-10 h-10 rounded-full object-contain flex-shrink-0"
                       />
                       {/* Asset name and CF badge stacked */}
                       <div className="flex flex-col items-center">
                         <div className="font-extrabold text-lg leading-tight">{market.asset}</div>
-                        <Badge variant="outline" className="text-xs px-1 py-0 h-4 mt-1">CF {market.collateralFactor}%</Badge>
+                        <Badge variant="outline" className="text-xs px-1 py-0 h-4 mt-1 text-muted-foreground">CF {market.collateralFactor}%</Badge>
                       </div>
                       {/* Removed info icon */}
                     </div>

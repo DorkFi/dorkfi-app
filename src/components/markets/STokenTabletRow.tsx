@@ -1,11 +1,9 @@
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import {
   TableCell,
   TableRow,
 } from "@/components/ui/table";
-import { Info } from "lucide-react";
 import { OnDemandMarketData } from "@/hooks/useOnDemandMarketData";
 import MarketsTableActions from "./MarketsTableActions";
 import APYDisplay from "@/components/APYDisplay";
@@ -60,14 +58,7 @@ const STokenTabletRow = ({
             <span className="font-semibold text-sm leading-tight">{market.asset}</span>
             <Badge variant="outline" className="text-xs px-1 py-0 h-4">CF {market.collateralFactor}%</Badge>
           </div>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={(e) => { e.stopPropagation(); onInfoClick(e, market); }}
-            className="p-1 h-auto"
-          >
-            <Info className="w-4 h-4 text-ocean-teal" />
-          </Button>
+          {/* Removed info icon */}
         </div>
       </TableCell>
       <TableCell className="text-center">

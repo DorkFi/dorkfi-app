@@ -1,7 +1,5 @@
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Info } from "lucide-react";
 import { OnDemandMarketData } from "@/hooks/useOnDemandMarketData";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import DorkFiButton from "@/components/ui/DorkFiButton";
@@ -34,7 +32,7 @@ const STokenCard = ({
       {/* Header with logo, asset info, and info button */}
       <div className="flex flex-col items-center text-center md:flex-col-reverse md:items-start md:text-left md:justify-normal">
         <div className="flex items-center gap-3 flex-1">
-          <img src={market.icon} alt={market.asset} className="w-12 h-12 md:w-9 md:h-9 rounded-full object-contain flex-shrink-0" />
+          <img src={market.icon} alt={market.asset} className="w-10 h-10 md:w-8 md:h-8 rounded-full object-contain flex-shrink-0" />
           <div className="flex flex-col items-center justify-center gap-1 text-center flex-1">
             <div className="font-semibold text-lg leading-tight">{market.asset}</div>
             <Badge variant="outline" className="text-xs px-1 py-0 h-4">
@@ -42,14 +40,7 @@ const STokenCard = ({
             </Badge>
           </div>
         </div>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={(e) => { e.stopPropagation(); onInfoClick(e, market); }}
-          className="p-1 h-auto flex-shrink-0 self-center md:self-start"
-        >
-          <Info className="w-4 h-4 text-ocean-teal" />
-        </Button>
+        {/* Removed info icon */}
       </div>
 
       {/* APY and Supply/Borrow Info */}

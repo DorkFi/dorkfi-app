@@ -2,10 +2,8 @@
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Info } from "lucide-react";
 import { OnDemandMarketData } from "@/hooks/useOnDemandMarketData";
 import MarketsTableActions from "./MarketsTableActions";
-import { Button } from "@/components/ui/button";
 import APYDisplay from "@/components/APYDisplay";
 import BorrowAPYDisplay from "@/components/BorrowAPYDisplay";
 import STokenTabletRow from "./STokenTabletRow";
@@ -84,20 +82,13 @@ const MarketsTabletTable = ({
                     <img
                       src={market.icon}
                       alt={market.asset}
-                      className="w-6 h-6 rounded-full flex-shrink-0"
+                      className="w-10 h-10 rounded-full object-contain flex-shrink-0"
                     />
                     <div className="flex flex-col items-start gap-0.5">
                       <span className="font-semibold text-sm leading-tight">{market.asset}</span>
                       <Badge variant="outline" className="text-xs px-1 py-0 h-4">CF {market.collateralFactor}%</Badge>
                     </div>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={(e) => { e.stopPropagation(); onInfoClick(e, market); }}
-                      className="p-1 h-auto"
-                    >
-                      <Info className="w-4 h-4 text-ocean-teal" />
-                    </Button>
+                    {/* Removed info icon */}
                   </div>
                 </TableCell>
                 {!hasSTokens && (
