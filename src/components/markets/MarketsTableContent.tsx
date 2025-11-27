@@ -14,6 +14,7 @@ interface MarketsTableContentProps {
   onWithdrawClick?: (asset: string) => void;
   onBorrowClick: (asset: string) => void;
   onMintClick?: (asset: string) => void;
+  onMigrateClick?: (asset: string) => void;
   isLoadingBalance?: boolean;
 }
 
@@ -26,6 +27,7 @@ const MarketsTableContent = ({
   onWithdrawClick, 
   onBorrowClick,
   onMintClick,
+  onMigrateClick,
   isLoadingBalance = false 
 }: MarketsTableContentProps) => {
   const breakpoint = useBreakpoint();
@@ -39,6 +41,7 @@ const MarketsTableContent = ({
         onDepositClick={onDepositClick}
         onBorrowClick={onBorrowClick}
         onMintClick={onMintClick}
+        onMigrateClick={onMigrateClick}
       />
     );
   }
@@ -52,6 +55,7 @@ const MarketsTableContent = ({
         onDepositClick={onDepositClick}
         onBorrowClick={onBorrowClick}
         onMintClick={onMintClick}
+        onMigrateClick={onMigrateClick}
         isLoadingBalance={isLoadingBalance}
       />
     );
@@ -66,6 +70,7 @@ const MarketsTableContent = ({
       onDepositClick={onDepositClick}
       onBorrowClick={onBorrowClick}
       onMintClick={onMintClick}
+      onMigrateClick={onMigrateClick}
       isLoadingBalance={isLoadingBalance}
     />
   );

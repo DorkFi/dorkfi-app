@@ -1646,6 +1646,320 @@ export const deposit = async (
 };
 
 /**
+ * Migrate tokens from old pool to new pool
+ * Combines withdraw from old pool and deposit to new pool in a single transaction group
+ */
+export const migrate = async (
+  oldPoolId: string,
+  oldContractId: string,
+  oldNTokenId: string,
+  newPoolId: string,
+  newContractId: string,
+  tokenStandard: TokenStandard,
+  amount: string, // Amount in human-readable format
+  userAddress: string,
+  networkId: NetworkId,
+  assetId?: string // Asset ID for network/ASA tokens
+): Promise<
+  | { success: boolean; txId?: string; error?: string }
+  | { success: true; txns: string[] }
+> => {
+  console.log("migrate", {
+    oldPoolId,
+    oldContractId,
+    oldNTokenId,
+    newPoolId,
+    newContractId,
+    amount,
+    userAddress,
+    networkId,
+    tokenStandard,
+  });
+
+  try {
+    const networkConfig = getCurrentNetworkConfig();
+
+    if (isAlgorandCompatibleNetwork(networkId)) {
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      // Get token information for decimals
+      const allTokens = getAllTokensWithDisplayInfo(networkId);
+      const token = allTokens.find(
+        (token) => token.underlyingContractId === newContractId
+      );
+
+      if (!token) {
+        throw new Error("Token not found for new contract");
+      }
+
+      // Convert amount to proper units (considering decimals)
+      const amountInSmallestUnit = new BigNumber(amount)
+        .multipliedBy(10 ** token.decimals)
+        .toFixed(0);
+      const bigAmount = BigInt(amountInSmallestUnit);
+
+      // Get old market info
+      const oldMarketInfo = await fetchMarketInfo(
+        oldPoolId,
+        oldContractId,
+        networkId
+      );
+      if (!oldMarketInfo) {
+        throw new Error("Failed to fetch old market info");
+      }
+
+      // Get new market info
+      const newMarketInfo = await fetchMarketInfo(
+        newPoolId,
+        newContractId,
+        networkId
+      );
+      if (!newMarketInfo) {
+        throw new Error("Failed to fetch new market info");
+      }
+
+      // Check if new market is paused
+      const marketPaused = await isMarketPaused(
+        newPoolId,
+        newContractId,
+        networkId
+      );
+      if (marketPaused) {
+        throw new Error("New market is paused");
+      }
+
+      // Create contract instances
+      const ci = new CONTRACT(
+        Number(oldNTokenId),
+        clients.algod,
+        undefined,
+        abi.custom,
+        {
+          addr: userAddress,
+          sk: new Uint8Array(),
+        }
+      );
+
+      const builder = {
+        oldNToken: new CONTRACT(
+          Number(oldNTokenId),
+          clients.algod,
+          undefined,
+          abi.nt200,
+          {
+            addr: userAddress,
+            sk: new Uint8Array(),
+          },
+          true,
+          false,
+          true
+        ),
+        oldToken: new CONTRACT(
+          Number(oldContractId),
+          clients.algod,
+          undefined,
+          abi.nt200,
+          {
+            addr: userAddress,
+            sk: new Uint8Array(),
+          },
+          true,
+          false,
+          true
+        ),
+        newToken: new CONTRACT(
+          Number(newContractId),
+          clients.algod,
+          undefined,
+          abi.nt200,
+          {
+            addr: userAddress,
+            sk: new Uint8Array(),
+          },
+          true,
+          false,
+          true
+        ),
+        oldLendingPool: new CONTRACT(
+          Number(oldPoolId),
+          clients.algod,
+          undefined,
+          {
+            ...LendingPoolAppSpec.contract,
+            events: [],
+            methods: [
+              // withdraw(uint64 market_id, uint256 amount) void
+              {
+                name: "withdraw",
+                args: [
+                  {
+                    type: "uint64",
+                    name: "market_id",
+                  },
+                  {
+                    type: "uint256",
+                    name: "amount",
+                  },
+                ],
+                readonly: false,
+                returns: {
+                  type: "void",
+                },
+              },
+              // get_market(uint64 token_id) (bool,uint256,uint256,uint64,uint64,uint64,uint64,uint64,uint64,uint256,uint256,uint256,uint256,uint64,uint256,uint256,uint64,uint64)
+              {
+                name: "get_market",
+                args: [
+                  {
+                    type: "uint64",
+                    name: "token_id",
+                  },
+                ],
+                readonly: true,
+                returns: {
+                  type: "(bool,uint256,uint256,uint64,uint64,uint64,uint64,uint64,uint64,uint256,uint256,uint256,uint256,uint64,uint256,uint256,uint64,uint64)",
+                },
+              },
+            ],
+          },
+          {
+            addr: userAddress,
+            sk: new Uint8Array(),
+          },
+          true,
+          false,
+          true
+        ),
+        newLendingPool: new CONTRACT(
+          Number(newPoolId),
+          clients.algod,
+          undefined,
+          { ...LendingPoolAppSpec.contract, events: [] },
+          {
+            addr: userAddress,
+            sk: new Uint8Array(),
+          },
+          true,
+          false,
+          true
+        ),
+      };
+
+      let customR: any;
+
+      // Try different combinations of balance box creation
+      for (const p of [
+        [0, 0, 0, 0], // do not create balance boxes
+        [0, 0, 1, 1], // create balance boxes for new token
+        [0, 0, 0, 1], // create balance box for pool
+        [0, 0, 1, 0], // create balance box for user
+        [1, 0, 0, 0], // create balance box for old token user
+        [0, 1, 1, 0], // create balance boxes
+        [1, 1, 1, 1], // create all balance boxes
+      ]) {
+        const [p1, p2, p3, p4] = p;
+        const buildN = [];
+
+        // Step 1: Withdraw from old lending pool
+        {
+          const txnO = (
+            await builder.oldLendingPool.withdraw(
+              Number(oldContractId),
+              bigAmount
+            )
+          ).obj;
+          buildN.push({
+            ...txnO,
+            note: new TextEncoder().encode("lending withdraw"),
+          });
+        }
+        // at this point we have an arc200 token in any case no need to withdraw
+        // to underlying token
+        //
+        // the user should already have all the arc200 balances setup
+
+        // Step 2: Approve new token for lending pool
+        {
+          const txnO = (
+            await builder.newToken.arc200_approve(
+              algosdk.getApplicationAddress(Number(newPoolId)),
+              bigAmount
+            )
+          ).obj;
+          buildN.push({
+            ...txnO,
+            note: new TextEncoder().encode("nt200 approve"),
+            payment: p3 > 0 ? 28100 : 0,
+          });
+        }
+
+        // Step 6: Deposit to new lending pool
+        {
+          const foreignApps = [];
+          if (networkConfig.networkId === "voi-mainnet") {
+            foreignApps.push(47138065);
+          }
+          if (networkConfig.networkId === "algorand-mainnet") {
+            foreignApps.push(3333688254);
+          }
+          const txnO = (
+            await builder.newLendingPool.deposit(
+              Number(newContractId),
+              bigAmount
+            )
+          ).obj as any;
+          buildN.push({
+            ...txnO,
+            note: new TextEncoder().encode("lending deposit"),
+            payment: p4 > 0 ? 900000 : 0,
+            foreignApps,
+          });
+        }
+
+        console.log("buildN", { buildN });
+
+        // Create migration transaction
+        ci.setFee(9000);
+        ci.setEnableGroupResourceSharing(true);
+        ci.setExtraTxns(buildN);
+        if (networkConfig.networkId === "algorand-mainnet") {
+          ci.setBeaconId(3209233839); // TODO move this to ulujs
+        }
+
+        customR = await ci.custom();
+        console.log({ customR });
+
+        if (customR.success) {
+          break;
+        }
+      }
+
+      if (!customR.success) {
+        throw new Error("Failed to create migrate transaction");
+      }
+
+      return {
+        success: true,
+        txns: customR.txns,
+      };
+    } else if (isEVMNetwork(networkId)) {
+      // TODO: Implement EVM migrate
+      throw new Error("EVM networks are not supported yet");
+    } else {
+      throw new Error("Unsupported network");
+    }
+  } catch (error) {
+    console.error("Error migrating:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Migration failed",
+    };
+  }
+};
+
+/**
  * Borrow tokens from a lending market
  */
 export const borrow = async (

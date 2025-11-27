@@ -25,7 +25,10 @@ import {
   fetchUserGlobalData,
   fetchUserBorrowBalance,
   fetchUserDepositBalance,
+  migrate,
 } from "@/services/lendingService";
+import { useToast } from "@/hooks/use-toast";
+import algosdk, { waitForConfirmation } from "algosdk";
 
 const MarketsTable = () => {
   const [searchTerm, setSearchTerm] = useState("");
@@ -65,8 +68,9 @@ const MarketsTable = () => {
   // Mock user deposits - in real app, this would come from user's wallet/backend
   const [userDeposits] = useState<Record<string, number>>({});
 
-  const { activeAccount } = useWallet();
+  const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
+  const { toast } = useToast();
 
   const {
     data: markets,
@@ -228,6 +232,133 @@ const MarketsTable = () => {
       setMintModal({ isOpen: true, asset });
     } finally {
       setIsLoadingGlobalData(false);
+    }
+  };
+
+  const handleMigrateClick = async (asset: string) => {
+    if (!activeAccount?.address) {
+      toast({
+        title: "Wallet Not Connected",
+        description: "Please connect your wallet to migrate tokens",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      // Get token configuration
+      const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+      const token = tokens.find((t) => t.symbol === asset);
+      
+      if (!token) {
+        throw new Error(`Token not found for ${asset}`);
+      }
+
+      // Use originalSymbol to look up the config, as asset might be a display symbol
+      const originalSymbol =
+        "originalSymbol" in token ? (token as any).originalSymbol : asset;
+      const tokenConfig = getTokenConfig(currentNetwork, originalSymbol);
+      
+      if (!tokenConfig) {
+        throw new Error(`Token config not found for ${asset}`);
+      }
+
+      if (!tokenConfig.migration) {
+        throw new Error(`No migration config found for ${asset}`);
+      }
+
+      // Get the migration balance (already formatted)
+      const clients = await algorandService.getCurrentClientsForReads();
+      ARC200Service.initialize(clients);
+      
+      const migrationBalance = await ARC200Service.getBalance(
+        activeAccount.address,
+        tokenConfig.migration.nTokenId
+      );
+
+      if (!migrationBalance || BigInt(migrationBalance) === 0n) {
+        throw new Error("No balance to migrate");
+      }
+
+      // Format balance for withdraw/deposit (convert from base units to human readable)
+      const formattedBalance = ARC200Service.formatBalance(
+        migrationBalance,
+        tokenConfig.decimals
+      );
+
+      toast({
+        title: "Starting Migration",
+        description: `Migrating ${formattedBalance} ${asset}...`,
+      });
+
+      // Call migrate function which combines withdraw and deposit
+      const migrateResult = await migrate(
+        tokenConfig.migration.poolId, // Old pool ID
+        tokenConfig.migration.contractId, // Old contract ID
+        tokenConfig.migration.nTokenId, // Old nToken ID
+        token.poolId!, // New pool ID
+        token.underlyingContractId!, // New contract ID
+        tokenConfig.tokenStandard,
+        formattedBalance, // Amount in human readable format
+        activeAccount.address,
+        currentNetwork,
+        tokenConfig.assetId // Asset ID for network/ASA tokens
+      );
+
+      if (!migrateResult.success) {
+        throw new Error(
+          (migrateResult as any).error || "Migration failed"
+        );
+      }
+
+      // Sign and send migration transaction
+      const walletName = activeWallet?.metadata?.name || "your wallet";
+      toast({
+        title: "Please Sign Migration Transaction",
+        description: `Please open ${walletName} and sign the migration transaction`,
+        duration: 10000,
+      });
+
+      let migrateTxns: Uint8Array[];
+      if ("txns" in migrateResult && migrateResult.txns) {
+        migrateTxns = migrateResult.txns.map((txn: string) =>
+          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+        );
+      } else if ("txId" in migrateResult && migrateResult.txId) {
+        migrateTxns = [
+          Uint8Array.from(atob(migrateResult.txId), (c) => c.charCodeAt(0)),
+        ];
+      } else {
+        throw new Error("No transaction data in migrate result");
+      }
+
+      const signedMigrateTxns = await signTransactions(migrateTxns);
+      const algorandClients =
+        await algorandService.getCurrentClientsForTransactions();
+      const migrateRes = await algorandClients.algod
+        .sendRawTransaction(signedMigrateTxns)
+        .do();
+      await waitForConfirmation(algorandClients.algod, migrateRes.txid, 4);
+
+      toast({
+        title: "Migration Successful",
+        description: `Successfully migrated ${formattedBalance} ${asset} to new pool`,
+      });
+
+      // Wait a bit for the blockchain state to update, then refresh
+      setTimeout(() => {
+        loadMarketDataWithBypass(asset.toLowerCase());
+        refreshWalletBalance(asset);
+      }, 2000);
+      
+    } catch (error) {
+      console.error("Migration error:", error);
+      toast({
+        title: "Migration Failed",
+        description:
+          error instanceof Error ? error.message : "Migration failed",
+        variant: "destructive",
+      });
     }
   };
 
@@ -711,6 +842,7 @@ const MarketsTable = () => {
               onWithdrawClick={handleWithdrawClick}
               onBorrowClick={handleBorrowClick}
               onMintClick={handleMintClick}
+              onMigrateClick={handleMigrateClick}
               isLoadingBalance={isLoadingBalance}
             />
           )}

@@ -1,4 +1,5 @@
 
+import { useState, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { OnDemandMarketData } from "@/hooks/useOnDemandMarketData";
@@ -7,7 +8,12 @@ import DorkFiButton from "@/components/ui/DorkFiButton";
 import APYDisplay from "@/components/APYDisplay";
 import BorrowAPYDisplay from "@/components/BorrowAPYDisplay";
 import { useNetwork } from "@/contexts/NetworkContext";
+import { useWallet } from "@txnlab/use-wallet-react";
 import STokenCard from "./STokenCard";
+import { ArrowRightLeft } from "lucide-react";
+import { getTokenConfig, getAllTokensWithDisplayInfo } from "@/config";
+import { ARC200Service } from "@/services/arc200Service";
+import algorandService from "@/services/algorandService";
 
 interface MarketCardViewProps {
   markets: OnDemandMarketData[];
@@ -16,6 +22,7 @@ interface MarketCardViewProps {
   onDepositClick: (asset: string) => void;
   onBorrowClick: (asset: string) => void;
   onMintClick?: (asset: string) => void;
+  onMigrateClick?: (asset: string) => void;
 }
 
 const MarketCardView = ({ 
@@ -24,9 +31,77 @@ const MarketCardView = ({
   onInfoClick, 
   onDepositClick, 
   onBorrowClick,
-  onMintClick
+  onMintClick,
+  onMigrateClick
 }: MarketCardViewProps) => {
   const { currentNetwork } = useNetwork();
+  const { activeAccount } = useWallet();
+  const [migrationBalances, setMigrationBalances] = useState<
+    Record<string, string | null>
+  >({});
+
+  // Check migration balances for markets that have migration property
+  useEffect(() => {
+    const checkMigrationBalances = async () => {
+      if (!activeAccount?.address) {
+        setMigrationBalances({});
+        return;
+      }
+
+      const balances: Record<string, string | null> = {};
+      const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+
+      // Initialize ARC200Service
+      try {
+        const clients = await algorandService.getCurrentClientsForReads();
+        ARC200Service.initialize(clients);
+
+        // Check balance for each market that has migration
+        for (const market of markets) {
+          if (market.isSToken) continue;
+
+          const token = tokens.find((t) => t.symbol === market.asset);
+          const originalSymbol =
+            token && "originalSymbol" in token
+              ? (token as any).originalSymbol
+              : market.asset;
+          const tokenConfig = getTokenConfig(currentNetwork, originalSymbol);
+
+          if (tokenConfig?.migration?.nTokenId) {
+            try {
+              const balance = await ARC200Service.getBalance(
+                activeAccount.address,
+                tokenConfig.migration.nTokenId
+              );
+              // Format balance if > 0 (balance is returned as string in base units)
+              if (balance && BigInt(balance) > 0n) {
+                const formattedBalance = ARC200Service.formatBalance(
+                  balance,
+                  tokenConfig.decimals
+                );
+                // Format to 2 decimal places
+                balances[market.asset] = parseFloat(formattedBalance).toFixed(2);
+              } else {
+                balances[market.asset] = null;
+              }
+            } catch (error) {
+              console.error(
+                `Error checking migration balance for ${market.asset}:`,
+                error
+              );
+              balances[market.asset] = null;
+            }
+          }
+        }
+
+        setMigrationBalances(balances);
+      } catch (error) {
+        console.error("Error initializing ARC200Service:", error);
+      }
+    };
+
+    checkMigrationBalances();
+  }, [markets, activeAccount?.address, currentNetwork]);
   if (markets.length === 0) {
     return (
       <div className="text-center py-8">
@@ -114,15 +189,44 @@ const MarketCardView = ({
               </div>
             </div>
 
-            <div className="flex gap-2 pt-1 justify-center md:justify-start">
-              <DorkFiButton
-                variant="secondary"
-                onClick={e => { e.stopPropagation(); onDepositClick(market.asset); }}
-              >Deposit</DorkFiButton>
-              <DorkFiButton
-                variant="borrow-outline"
-                onClick={e => { e.stopPropagation(); onBorrowClick(market.asset); }}
-              >Borrow</DorkFiButton>
+            <div className="flex flex-col gap-2 pt-1">
+              <div className="flex gap-2 justify-center md:justify-start">
+                <DorkFiButton
+                  variant="secondary"
+                  onClick={e => { e.stopPropagation(); onDepositClick(market.asset); }}
+                >Deposit</DorkFiButton>
+                <DorkFiButton
+                  variant="borrow-outline"
+                  onClick={e => { e.stopPropagation(); onBorrowClick(market.asset); }}
+                >Borrow</DorkFiButton>
+              </div>
+              {(() => {
+                // Get token to access originalSymbol if market override exists
+                const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+                const token = tokens.find((t) => t.symbol === market.asset);
+                const originalSymbol =
+                  token && "originalSymbol" in token
+                    ? (token as any).originalSymbol
+                    : market.asset;
+                const tokenConfig = getTokenConfig(currentNetwork, originalSymbol);
+                const hasMigration = !!tokenConfig?.migration;
+                const migrationBalance = migrationBalances[market.asset];
+
+                return (
+                  onMigrateClick &&
+                  hasMigration &&
+                  migrationBalance && (
+                    <DorkFiButton
+                      variant="secondary"
+                      onClick={e => { e.stopPropagation(); onMigrateClick(market.asset); }}
+                      className="w-full border-blue-500 text-blue-600 hover:bg-blue-50 hover:border-blue-600 dark:text-blue-400 dark:border-blue-400 dark:hover:bg-blue-900/20"
+                    >
+                      <ArrowRightLeft className="h-4 w-4" /> 
+                      Migrate {migrationBalance} {market.asset}
+                    </DorkFiButton>
+                  )
+                );
+              })()}
             </div>
           </DorkFiCard>
         );

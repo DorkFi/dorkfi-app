@@ -55,6 +55,11 @@ export interface TokenConfig {
   oldContractId?: string;
   oldNTokenId?: string;
   isStoken?: boolean;
+  migration?: {
+    poolId: string;
+    contractId: string;
+    nTokenId: string;
+  };
 }
 
 export interface PreFiParameters {
@@ -480,6 +485,11 @@ const prodTokens: { [symbol: string]: TokenConfig } = {
     poolId: "47139778",
     contractId: "41877720",
     nTokenId: "47139789",
+    migration: {
+      poolId: "41760711",
+      contractId: "41877720",
+      nTokenId: "42125195",
+    },
     decimals: 6,
     name: "VOI",
     symbol: "VOI",
@@ -496,6 +506,11 @@ const prodTokens: { [symbol: string]: TokenConfig } = {
     poolId: "47139778",
     contractId: "395614",
     nTokenId: "47140315",
+    migration: {
+      poolId: "41760711",
+      contractId: "395614",
+      nTokenId: "42577758",
+    },
     decimals: 6,
     name: "Aramid USDC",
     symbol: "aUSDC",
@@ -506,6 +521,11 @@ const prodTokens: { [symbol: string]: TokenConfig } = {
     contractId: "420069",
     poolId: "47139778",
     nTokenId: "47148525",
+    migration: {
+      contractId: "420069",
+      poolId: "41760711",
+      nTokenId: "42638644",
+    },
     decimals: 8,
     name: "UNIT",
     symbol: "UNIT",
@@ -1139,6 +1159,11 @@ const algorandProdTokens: Record<string, TokenConfig> = {
     poolId: "3333688282",
     contractId: "3207744109",
     nTokenId: "3333724131",
+    migration: {
+      poolId: "3207735602",
+      contractId: "3207744109",
+      nTokenId: "3209220112",
+    },
     decimals: 6,
     name: "Algorand",
     symbol: "ALGO",
@@ -1155,6 +1180,11 @@ const algorandProdTokens: Record<string, TokenConfig> = {
     poolId: "3333688282",
     contractId: "3210682240",
     nTokenId: "3333764003",
+    migration: {
+      poolId: "3207735602",
+      contractId: "3210682240",
+      nTokenId: "3210686647",
+    },
     decimals: 6,
     name: "USD Coin",
     symbol: "USDC",
@@ -1166,9 +1196,11 @@ const algorandProdTokens: Record<string, TokenConfig> = {
     poolId: "3333688282",
     contractId: "3220125024",
     nTokenId: "3333783429",
-    // oldPoolId: "3207735602",
-    // oldContractId: "3220125024",
-    // oldNTokenId: "3220137925",
+    migration: {
+      poolId: "3207735602",
+      contractId: "3220125024",
+      nTokenId: "3220137925",
+    },
     decimals: 8,
     name: "UNIT",
     symbol: "UNIT",
