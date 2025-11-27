@@ -190,10 +190,14 @@ const MarketsTabletTable = ({
                   </Badge>
                 </TableCell>
                 <TableCell className="text-center">
-                  <div className="flex flex-col items-center space-y-1">
-                    <span className="text-sm font-medium">{market.isSToken ? "100.00" : market.utilization.toFixed(2)}%</span>
-                    <Progress value={market.isSToken ? 100 : market.utilization} className="h-2 w-16" />
-                  </div>
+                  {market.asset === "WAD" ? (
+                    <span></span>
+                  ) : (
+                    <div className="flex flex-col items-center space-y-1">
+                      <span className="text-sm font-medium">{market.isSToken ? "100.00" : market.utilization.toFixed(2)}%</span>
+                      <Progress value={market.isSToken ? 100 : market.utilization} className="h-2 w-16" />
+                    </div>
+                  )}
                 </TableCell>
                 <TableCell className="text-center">
                   {(() => {

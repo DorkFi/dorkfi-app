@@ -21,7 +21,7 @@ interface STokenRowProps {
   isLoadingBalance?: boolean;
 }
 
-const LoadingCell = ({ children }: { children: React.ReactNode }) => (
+const LoadingCell = () => (
   <div className="flex items-center justify-center gap-2 text-muted-foreground">
     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-ocean-teal"></div>
     <span className="text-sm">Loading...</span>
@@ -121,6 +121,8 @@ const STokenRow = ({
           <LoadingCell />
         ) : market.error ? (
           <ErrorCell error={market.error} />
+        ) : market.asset === "WAD" ? (
+          <span></span>
         ) : (
           <div className="flex flex-col items-center space-y-1">
             <div className="text-sm font-medium text-purple-700 dark:text-purple-300">

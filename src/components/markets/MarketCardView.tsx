@@ -179,15 +179,17 @@ const MarketCardView = ({
               </div>
             </div>
 
-            <div className="text-center">
-              <div className="flex items-center justify-center md:justify-between mb-2">
-                <span className="text-sm text-muted-foreground">Utilization</span>
-                <span className="text-sm font-medium ml-2 md:ml-0">{market.utilization.toFixed(2)}%</span>
+            {market.asset !== "WAD" && (
+              <div className="text-center">
+                <div className="flex items-center justify-center md:justify-between mb-2">
+                  <span className="text-sm text-muted-foreground">Utilization</span>
+                  <span className="text-sm font-medium ml-2 md:ml-0">{market.utilization.toFixed(2)}%</span>
+                </div>
+                <div className="flex justify-center md:justify-start">
+                  <Progress value={market.utilization} className="h-2 w-full max-w-[200px] md:max-w-none" />
+                </div>
               </div>
-              <div className="flex justify-center md:justify-start">
-                <Progress value={market.utilization} className="h-2 w-full max-w-[200px] md:max-w-none" />
-              </div>
-            </div>
+            )}
 
             <div className="flex flex-col gap-2 pt-1">
               <div className="flex gap-2 justify-center md:justify-start">

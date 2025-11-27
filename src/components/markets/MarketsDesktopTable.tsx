@@ -45,7 +45,7 @@ const headerTooltips = {
   actions: "Quick actions to deposit or borrow the selected asset.",
 };
 
-const LoadingCell = ({ children }: { children: React.ReactNode }) => (
+const LoadingCell = () => (
   <div className="flex items-center justify-center gap-2 text-muted-foreground">
     <Loader2 className="w-4 h-4 animate-spin" />
     <span className="text-sm">Loading...</span>
@@ -368,6 +368,8 @@ const MarketsDesktopTable = ({
                       <LoadingCell />
                     ) : market.error ? (
                       <ErrorCell error={market.error} />
+                    ) : market.asset === "WAD" ? (
+                      <span></span>
                     ) : (
                       <div className="flex flex-col items-center space-y-1">
                         <div className="text-sm font-medium">
