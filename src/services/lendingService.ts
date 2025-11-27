@@ -1928,7 +1928,7 @@ export const borrow = async (
             ...txnO,
             note: new TextEncoder().encode("nt200 withdraw"),
           });
-        } 
+        }
         // user withdraws from arc200-exchange
         else if (tokenStandard == "arc200-exchange") {
           const txnO = (
@@ -2181,7 +2181,27 @@ export const repay = async (
       ]) {
         const buildN = [];
 
-        if (tokenStandard === "asa") {
+        if (tokenStandard == "network") {
+          // create balance box for pool
+          if (p1 > 0) {
+            const txnO = (await builder.token.createBalanceBox(userAddress))
+              .obj;
+            buildN.push({
+              ...txnO,
+              payment: 28500,
+              note: new TextEncoder().encode("nt200 createBalanceBox"),
+            });
+          }
+          // user withdraws from nt200 token
+          {
+            const txnO = (await builder.token.deposit(bigAmount)).obj;
+            buildN.push({
+              ...txnO,
+              note: new TextEncoder().encode("nt200 deposit"),
+              payment: bigAmount,
+            });
+          }
+        } else if (tokenStandard === "asa") {
           // create balance box for pool
           if (p1 > 0) {
             const addr = algosdk.encodeAddress(
