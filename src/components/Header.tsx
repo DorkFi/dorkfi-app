@@ -102,22 +102,6 @@ const Header = ({ activeTab, onTabChange }: HeaderProps) => {
                   {tab.label}
                 </Button>
               ))}
-              {/* PreFi External Button (right of Portfolio) */}
-              <a
-                href="https://prefi.dork.fi/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="ml-2"
-                style={{ textDecoration: "none" }}
-              >
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="flex-1 inline-flex items-center justify-center whitespace-nowrap rounded-sm px-2 md:px-3 py-1.5 text-xs md:text-sm font-medium transition-all hover:bg-ocean-teal/10 text-gray-700 dark:text-muted-foreground"
-                >
-                  PreFi Markets
-                </Button>
-              </a>
             </div>
           </div>
           
@@ -157,22 +141,6 @@ const Header = ({ activeTab, onTabChange }: HeaderProps) => {
                   {tab.label}
                 </Button>
               ))}
-              {/* PreFi External Button (Mobile) */}
-              <a
-                href="https://prefi.dork.fi/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block mt-2"
-                style={{ textDecoration: "none" }}
-              >
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="w-full justify-start px-3 py-1.5 text-xs md:text-sm font-medium hover:bg-ocean-teal/10 text-gray-700 dark:text-white"
-                >
-                  PreFi Markets
-                </Button>
-              </a>
               <div className="mt-4">
                 <WalletNetworkButton />
               </div>
