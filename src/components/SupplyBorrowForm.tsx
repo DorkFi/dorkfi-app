@@ -61,7 +61,6 @@ const SupplyBorrowForm = ({
   // Get token config for decimal precision
   const tokenConfig = getTokenConfig(currentNetwork, asset);
   const decimals = tokenConfig?.decimals || 6;
-  const minDepositAmount = 0.01; // Minimum deposit amount
 
   // Input validation function
   const validateAmount = (value: string): string | null => {
@@ -72,11 +71,6 @@ const SupplyBorrowForm = ({
     // Check if it's a valid number
     if (isNaN(numValue) || numValue < 0) {
       return "Please enter a valid amount";
-    }
-
-    // Check minimum deposit amount
-    if (mode === "deposit" && numValue < minDepositAmount) {
-      return `Minimum deposit amount is ${minDepositAmount} ${asset}`;
     }
 
     // Check wallet balance for deposits

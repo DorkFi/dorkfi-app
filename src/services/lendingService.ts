@@ -1895,6 +1895,20 @@ export const migrate = async (
           });
         }
 
+        // Step 5: Conditionally create balance box for pool
+        if (p1 > 0) {
+          const txnO = (
+            await builder.newToken.createBalanceBox(
+              algosdk.getApplicationAddress(Number(newPoolId))
+            )
+          ).obj;
+          buildN.push({
+            ...txnO,
+            payment: 28500,
+            note: new TextEncoder().encode("nt200 createBalanceBox"),
+          });
+        }
+
         // Step 6: Deposit to new lending pool
         {
           const foreignApps = [];
