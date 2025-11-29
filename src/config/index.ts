@@ -1133,7 +1133,7 @@ const algorandMainnetPrefiConfig: NetworkConfig = {
   tokens: algorandPrefiTokens,
 };
 const algorandProdAMarket = "3333688282";
-const algorandProdBMarket = "";
+const algorandProdBMarket = "3345940978";
 const algorandProdPriceOracle = "3333688500";
 const algorandProdLiquidationEngine = undefined;
 const algorandProdGovernance = undefined;
@@ -1142,10 +1142,7 @@ const algorandProdMarketController = "3333688332";
 const algorandProdSToken = "3333688448";
 const algorandProdBeacon = "3209233839";
 const algorandProdAppStorageId = "3333688254";
-const algorandProdLendingPools = [
-  algorandProdAMarket,
-  //algorandProdBMarket,
-];
+const algorandProdLendingPools = [algorandProdAMarket, algorandProdBMarket];
 const algorandProdContracts: ContractConfig = {
   lendingPools: algorandProdLendingPools,
   priceOracle: algorandProdPriceOracle,
@@ -1250,17 +1247,22 @@ const algorandProdTokens: Record<string, TokenConfig> = {
   //   logoPath: "/lovable-uploads/TINY.webp",
   //   tokenStandard: "asa",
   // },
-  // FINITE: {
-  //   assetId: "400593267",
-  //   poolId: "3207735602",
-  //   contractId: "3211805086",
-  //   nTokenId: "3211898346",
-  //   decimals: 8,
-  //   name: "FINITE",
-  //   symbol: "FINITE",
-  //   logoPath: "/lovable-uploads/FINITE.webp",
-  //   tokenStandard: "asa",
-  // },
+  FINITE: {
+    assetId: "400593267",
+    poolId: "3345940978",
+    contractId: "3211805086",
+    nTokenId: "3346001205",
+    migration: {
+      poolId: "3207735602",
+      contractId: "3211805086",
+      nTokenId: "3211898346",
+    },
+    decimals: 8,
+    name: "FINITE",
+    symbol: "FINITE",
+    logoPath: "/lovable-uploads/FINITE.webp",
+    tokenStandard: "asa",
+  },
   // COMPX: {
   //   assetId: "1732165149",
   //   poolId: "3207735602",

@@ -466,8 +466,9 @@ export default function AdminDashboard() {
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
-      // get lending pool id from network config
-      const lendingPoolId = networkConfig.contracts.lendingPools[0];
+      // get lending pool id from selected pool or fallback to first pool
+      const lendingPoolId =
+        selectedLendingPool || networkConfig.contracts.lendingPools[0];
       // get lending pool contract
       const ci = new CONTRACT(
         Number(lendingPoolId),
@@ -541,8 +542,9 @@ export default function AdminDashboard() {
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
-      // get lending pool id from network config
-      const lendingPoolId = networkConfig.contracts.lendingPools[0];
+      // get lending pool id from selected pool or fallback to first pool
+      const lendingPoolId =
+        selectedLendingPool || networkConfig.contracts.lendingPools[0];
       // get lending pool contract
       const ci = new CONTRACT(
         Number(lendingPoolId),
@@ -1299,6 +1301,7 @@ export default function AdminDashboard() {
       // Reset form
       setFeederAddress("");
       setSelectedTokenForFeeder("");
+      setSelectedLendingPoolForFeeder("");
       setFeederApproval(true);
       setIsApproveFeederModalOpen(false);
     } catch (error) {
@@ -2427,6 +2430,8 @@ export default function AdminDashboard() {
     useState(false);
   const [feederAddress, setFeederAddress] = useState("");
   const [selectedTokenForFeeder, setSelectedTokenForFeeder] =
+    useState<string>("");
+  const [selectedLendingPoolForFeeder, setSelectedLendingPoolForFeeder] =
     useState<string>("");
   const [feederApproval, setFeederApproval] = useState<boolean>(true);
 
@@ -9702,6 +9707,70 @@ export default function AdminDashboard() {
               <H2>Role Management</H2>
             </div>
 
+            {/* Lending Pool Selector */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Database className="h-5 w-5" />
+                  Lending Pool Selection
+                </CardTitle>
+                <CardDescription>
+                  Select a lending pool to manage roles for. Roles are assigned
+                  and revoked on the selected lending pool contract.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div className="flex items-center gap-4">
+                    <div className="flex-1">
+                      <Label htmlFor="role-lending-pool-select">
+                        Lending Pool
+                      </Label>
+                      <Select
+                        value={selectedLendingPool}
+                        onValueChange={(value) => {
+                          setSelectedLendingPool(value);
+                        }}
+                      >
+                        <SelectTrigger id="role-lending-pool-select">
+                          <SelectValue placeholder="Select a lending pool" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {getLendingPools(currentNetwork).map(
+                            (poolId, index) => {
+                              const classLabel = String.fromCharCode(
+                                65 + index
+                              ); // A, B, C, etc.
+                              return (
+                                <SelectItem key={poolId} value={poolId}>
+                                  Pool {classLabel} ({poolId})
+                                </SelectItem>
+                              );
+                            }
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  {selectedLendingPool && (
+                    <div className="p-3 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                      <p className="text-sm text-blue-800 dark:text-blue-200">
+                        <strong>Active Pool:</strong> All role operations (assign,
+                        revoke, check) will be performed on Pool{" "}
+                        {String.fromCharCode(
+                          65 +
+                            getLendingPools(currentNetwork).indexOf(
+                              selectedLendingPool
+                            )
+                        )}{" "}
+                        ({selectedLendingPool})
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
             {/* Role Checker */}
             <Card>
               <CardHeader>
@@ -13250,7 +13319,11 @@ export default function AdminDashboard() {
 
                   // All roles (including PriceOracle) are assigned on the LendingPool contract
                   // The PriceOracle role on the LendingPool contract grants permission to update prices
-                  contractId = Number(networkConfig.contracts.lendingPools[0]);
+                  // Use selected lending pool or fallback to first pool
+                  const lendingPoolId =
+                    selectedLendingPool ||
+                    networkConfig.contracts.lendingPools[0];
+                  contractId = Number(lendingPoolId);
                   targetAddress = assignAddress;
                   contractSpec = {
                     ...LendingPoolAppSpec.contract,
@@ -13566,6 +13639,39 @@ export default function AdminDashboard() {
                 </Select>
                 <p className="text-xs text-muted-foreground mt-1">
                   Select the token this feeder will provide prices for
+                </p>
+              </div>
+
+              <div>
+                <Label htmlFor="lending-pool-feeder-select">
+                  Lending Pool
+                </Label>
+                <Select
+                  value={selectedLendingPoolForFeeder}
+                  onValueChange={(value) => {
+                    setSelectedLendingPoolForFeeder(value);
+                  }}
+                >
+                  <SelectTrigger id="lending-pool-feeder-select" className="mt-2">
+                    <SelectValue placeholder="Select a lending pool" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {getLendingPools(currentNetwork).map(
+                      (poolId, index) => {
+                        const classLabel = String.fromCharCode(
+                          65 + index
+                        ); // A, B, C, etc.
+                        return (
+                          <SelectItem key={poolId} value={poolId}>
+                            Pool {classLabel} ({poolId})
+                          </SelectItem>
+                        );
+                      }
+                    )}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Select the lending pool for this feeder operation
                 </p>
               </div>
 
