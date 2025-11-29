@@ -87,9 +87,10 @@ export const fetchPausedState = async (
       }
       // Convert return value to boolean (handles both boolean and number 0/1)
       const pausedValue = isPaused.returnValue;
-      const isPausedBool = typeof pausedValue === "boolean" 
-        ? pausedValue 
-        : Boolean(Number(pausedValue));
+      const isPausedBool =
+        typeof pausedValue === "boolean"
+          ? pausedValue
+          : Boolean(Number(pausedValue));
 
       return {
         isPaused: isPausedBool,
@@ -122,9 +123,10 @@ export const fetchPausedState = async (
       }
       // Convert return value to boolean (handles both boolean and number 0/1)
       const pausedValue = isPaused.returnValue;
-      const isPausedBool = typeof pausedValue === "boolean" 
-        ? pausedValue 
-        : Boolean(Number(pausedValue));
+      const isPausedBool =
+        typeof pausedValue === "boolean"
+          ? pausedValue
+          : Boolean(Number(pausedValue));
 
       return {
         isPaused: isPausedBool,
@@ -798,7 +800,7 @@ export const updateMarketMaxBorrows = async (
         }
       );
 
-      ci.setFee(10000);
+      ci.setFee(20000);
       const updateMaxBorrowsTx = await ci.set_market_max_total_borrows(
         BigInt(options.poolId),
         BigInt(options.marketId),
@@ -849,6 +851,7 @@ export const updateMarketMaxBorrows = async (
         }
       );
 
+      ci.setFee(3000);
       const updateMaxBorrowsTx = await ci.set_market_max_total_borrows(
         BigInt(options.poolId),
         BigInt(options.marketId),

@@ -1700,6 +1700,13 @@ export const migrate = async (
         .toFixed(0);
       const bigAmount = BigInt(amountInSmallestUnit);
 
+      console.log({
+        amountInSmallestUnit,
+        bigAmount,
+        amount,
+        token,
+      });
+
       // Get old market info
       const oldMarketInfo = await fetchMarketInfo(
         oldPoolId,
@@ -1851,22 +1858,19 @@ export const migrate = async (
 
       // Try different combinations of balance box creation
       for (const p of [
-        [0, 0, 0, 0], // do not create balance boxes
-        [0, 0, 1, 1], // create balance boxes for new token
-        [0, 0, 0, 1], // create balance box for pool
-        [0, 0, 1, 0], // create balance box for user
-        [1, 0, 0, 0], // create balance box for old token user
-        [0, 1, 1, 0], // create balance boxes
-        [1, 1, 1, 1], // create all balance boxes
+        [0, 0],
+        [0, 1],
+        [1, 0],
+        [1, 1],
       ]) {
-        const [p1, p2, p3, p4] = p;
+        const [p1, p2] = p;
         const buildN = [];
 
         // Step 1: Withdraw from old lending pool
         {
           const txnO = (
             await builder.oldLendingPool.withdraw(
-              Number(oldContractId),
+              Number(newContractId),
               bigAmount
             )
           ).obj;
@@ -1883,31 +1887,35 @@ export const migrate = async (
         // Step 2: Approve new token for lending pool
         {
           const txnO = (
-            await builder.newToken.arc200_approve(
-              algosdk.getApplicationAddress(Number(newPoolId)),
+            await builder.oldToken.arc200_approve(
+              algosdk.encodeAddress(
+                algosdk.getApplicationAddress(Number(newPoolId)).publicKey
+              ),
               bigAmount
             )
           ).obj;
           buildN.push({
             ...txnO,
             note: new TextEncoder().encode("nt200 approve"),
-            payment: p3 > 0 ? 28100 : 0,
+            payment: p1 > 0 ? 28100 : 0,
           });
         }
 
         // Step 5: Conditionally create balance box for pool
-        if (p1 > 0) {
-          const txnO = (
-            await builder.newToken.createBalanceBox(
-              algosdk.getApplicationAddress(Number(newPoolId))
-            )
-          ).obj;
-          buildN.push({
-            ...txnO,
-            payment: 28500,
-            note: new TextEncoder().encode("nt200 createBalanceBox"),
-          });
-        }
+        // {
+        //   const txnO = (
+        //     await builder.oldToken.createBalanceBox(
+        //       algosdk.encodeAddress(
+        //         algosdk.getApplicationAddress(Number(newPoolId)).publicKey
+        //       )
+        //     )
+        //   ).obj;
+        //   buildN.push({
+        //     ...txnO,
+        //     payment: 28500,
+        //     note: new TextEncoder().encode("nt200 createBalanceBox"),
+        //   });
+        // }
 
         // Step 6: Deposit to new lending pool
         {
@@ -1927,7 +1935,7 @@ export const migrate = async (
           buildN.push({
             ...txnO,
             note: new TextEncoder().encode("lending deposit"),
-            payment: p4 > 0 ? 900000 : 0,
+            payment: p2 > 0 ? 900000 : 0,
             foreignApps,
           });
         }
