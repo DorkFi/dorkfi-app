@@ -1260,6 +1260,11 @@ export default function AdminDashboard() {
       }
 
       ci.setPaymentAmount(124500);
+      console.log({
+        tokenId,
+        feederAddress,
+        feederApproval,
+      })
       const result = await ci.approve_feeder(
         Number(tokenId),
         feederAddress,
