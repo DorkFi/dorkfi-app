@@ -58,7 +58,7 @@ const STokenRow = ({
           />
           <div className="flex flex-col items-center justify-center gap-1 text-center">
             <div className="font-extrabold text-lg leading-tight">{market.asset}</div>
-            <Badge variant="outline" className="text-xs px-1 py-0 h-4 mt-1 text-muted-foreground">CF {market.collateralFactor}%</Badge>
+            <Badge variant="outline" className="text-xs px-1 py-0 h-4 mt-1 text-muted-foreground">CF {Math.round(market.collateralFactor)}%</Badge>
           </div>
         </div>
       </TableCell>

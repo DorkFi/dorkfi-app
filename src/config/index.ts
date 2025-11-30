@@ -1454,19 +1454,6 @@ const algorandProdTokens: Record<string, TokenConfig> = {
     logoPath: "/lovable-uploads/HOG.webp",
     tokenStandard: "asa",
   },
-  // // SCOUT 569120128 6 3220313750
-  // SCOUT: {
-  //   assetId: "569120128",
-  //   poolId: "3212536201",
-  //   contractId: "3220313750",
-  //   nTokenId: "3220327258",
-  //   decimals: 6,
-  //   name: "SCOUT",
-  //   symbol: "SCOUT",
-  //   logoPath:
-  //     "https://algorand-wallet-mainnet.b-cdn.net/media/asset_verification_requests_logo_png/2022/06/30/f339b006471443f982e3f5bb22dea3ac.png?width=200&quality=70",
-  //   tokenStandard: "asa",
-  // },
   // // GOLD$ 246516580 6 3220347315
   // GOLD$: {
   //   assetId: "246516580",
@@ -1489,6 +1476,17 @@ const algorandProdTokens: Record<string, TokenConfig> = {
     name: "FOLKS",
     symbol: "FOLKS",
     logoPath: "/lovable-uploads/FOLKS.png",
+    tokenStandard: "asa",
+  },
+  USDt: {
+    assetId: "312769",
+    poolId: "3345940978",
+    contractId: "3346408431",
+    nTokenId: "3346410585",
+    decimals: 6,
+    name: "USDt",
+    symbol: "USDt",
+    logoPath: "/lovable-uploads/USDt.webp",
     tokenStandard: "asa",
   },
   WAD: {

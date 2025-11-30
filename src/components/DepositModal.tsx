@@ -232,7 +232,7 @@ const DepositModal = ({
                       </Tooltip>
                     </div>
                     <span className="text-sm font-medium text-slate-800 dark:text-white">
-                      {marketStats.collateralFactor}%
+                      {marketStats.collateralFactor.toFixed(0)}%
                     </span>
                   </div>
                   {/* Total Deposits */}

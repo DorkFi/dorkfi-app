@@ -163,7 +163,7 @@ const MarketsTabletTable = ({
                     />
                     <div className="flex flex-col items-start gap-0.5">
                       <span className="font-semibold text-sm leading-tight">{market.asset}</span>
-                      <Badge variant="outline" className="text-xs px-1 py-0 h-4">CF {market.collateralFactor}%</Badge>
+                      <Badge variant="outline" className="text-xs px-1 py-0 h-4">CF {Math.round(market.collateralFactor)}%</Badge>
                     </div>
                     {/* Removed info icon */}
                   </div>
