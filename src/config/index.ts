@@ -1438,17 +1438,22 @@ const algorandProdTokens: Record<string, TokenConfig> = {
   //   logoPath: "/lovable-uploads/PEPE.webp",
   //   tokenStandard: "asa",
   // },
-  // HOG: {
-  //   assetId: "3178895177",
-  //   poolId: "3212536201",
-  //   contractId: "3212773584",
-  //   nTokenId: "3212877734",
-  //   decimals: 6,
-  //   name: "HOG",
-  //   symbol: "HOG",
-  //   logoPath: "/lovable-uploads/HOG.webp",
-  //   tokenStandard: "asa",
-  // },
+  HOG: {
+    assetId: "3178895177",
+    poolId: "3345940978",
+    contractId: "3212773584",
+    nTokenId: "3346388982",
+    migration: {
+      poolId: "3212536201",
+      contractId: "3212773584",
+      nTokenId: "3212877734",
+    },
+    decimals: 6,
+    name: "HOG",
+    symbol: "HOG",
+    logoPath: "/lovable-uploads/HOG.webp",
+    tokenStandard: "asa",
+  },
   // // SCOUT 569120128 6 3220313750
   // SCOUT: {
   //   assetId: "569120128",
