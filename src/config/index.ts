@@ -1082,7 +1082,6 @@ const algorandPrefiTokens: Record<string, TokenConfig> = {
     logoPath: "/lovable-uploads/HOG.webp",
     tokenStandard: "asa",
   },
-  // SCOUT 569120128 6 3220313750
   SCOUT: {
     assetId: "569120128",
     poolId: "3212536201",
@@ -1095,7 +1094,6 @@ const algorandPrefiTokens: Record<string, TokenConfig> = {
       "https://algorand-wallet-mainnet.b-cdn.net/media/asset_verification_requests_logo_png/2022/06/30/f339b006471443f982e3f5bb22dea3ac.png?width=200&quality=70",
     tokenStandard: "asa",
   },
-  // GOLD$ 246516580 6 3220347315
   GOLD$: {
     assetId: "246516580",
     poolId: "3212536201",
@@ -1356,17 +1354,22 @@ const algorandProdTokens: Record<string, TokenConfig> = {
   //   logoPath: "/lovable-uploads/wAVAX.png",
   //   tokenStandard: "asa",
   // },
-  // HAY: {
-  //   assetId: "3160000000",
-  //   poolId: "3207735602",
-  //   contractId: "3211890928",
-  //   nTokenId: "3212035193",
-  //   decimals: 6,
-  //   name: "HAY",
-  //   symbol: "HAY",
-  //   logoPath: "/lovable-uploads/wBTC.png",
-  //   tokenStandard: "asa",
-  // },
+  HAY: {
+    assetId: "3160000000",
+    poolId: "3345940978",
+    contractId: "3211890928",
+    nTokenId: "3347112042",
+    migration: {
+      poolId: "3207735602",
+      contractId: "3211890928",
+      nTokenId: "3212035193",
+    },
+    decimals: 6,
+    name: "HAY",
+    symbol: "HAY",
+    logoPath: "/lovable-uploads/HAY.webp",
+    tokenStandard: "asa",
+  },
   COOP: {
     assetId: "796425061",
     poolId: "3345940978",
@@ -1385,9 +1388,14 @@ const algorandProdTokens: Record<string, TokenConfig> = {
   },
   // MONKO: {
   //   assetId: "2494786278",
-  //   poolId: "3212536201",
+  //   poolId: "3345940978",
   //   contractId: "3212530444",
-  //   nTokenId: "3212621493",
+  //   nTokenId: "3347032952",
+  //   migration: {
+  //     poolId: "3212536201",
+  //     contractId: "3212530444",
+  //     nTokenId: "3212621493",
+  //   },
   //   decimals: 6,
   //   name: "MONKO",
   //   symbol: "MONKO",
