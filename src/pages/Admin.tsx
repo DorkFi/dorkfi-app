@@ -5957,37 +5957,66 @@ export default function AdminDashboard() {
                     Loading markets...
                   </div>
                 </div>
-              ) : Object.keys(marketsData).length > 0 ? (
-                Object.values(marketsData).map((market) => (
-                  <Card
-                    key={market.asset}
-                    className="hover:shadow-lg transition-shadow"
-                  >
-                    <CardHeader className="pb-3">
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="text-lg">
-                          {market.asset}
-                        </CardTitle>
+              ) : (() => {
+                // Get all markets from config to show all markets, not just loaded ones
+                const allMarkets = getMarketsFromConfig(currentNetwork);
+                if (allMarkets.length === 0) {
+                  return (
+                    <div className="col-span-full flex items-center justify-center py-8">
+                      <div className="text-center text-muted-foreground">
+                        <Database className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                        <p className="text-lg font-medium">No markets found</p>
+                        <p className="text-sm">
+                          Create your first market to get started
+                        </p>
+                      </div>
+                    </div>
+                  );
+                }
+                return (
+                  <>
+                    {allMarkets.map((configMarket) => {
+                      // Find matching market data if available
+                      const marketKey = configMarket.symbol.toLowerCase();
+                      const market = marketsData[marketKey];
+                      const hasData = market && market.isLoaded && !market.error;
+                      
+                      return (
+                      <Card
+                        key={configMarket.id}
+                        className="hover:shadow-lg transition-shadow"
+                      >
+                        <CardHeader className="pb-3">
+                          <div className="flex items-center justify-between">
+                            <CardTitle className="text-lg">
+                              {configMarket.symbol}
+                            </CardTitle>
                         <div className="flex items-center gap-2">
                           <Badge
                             variant={
-                              market.isLoaded && !market.error
+                              hasData
                                 ? "default"
-                                : "secondary"
+                                : market?.isLoading
+                                ? "secondary"
+                                : market?.error
+                                ? "destructive"
+                                : "outline"
                             }
                           >
-                            {market.isLoaded && !market.error
+                            {hasData
                               ? "Active"
-                              : market.isLoading
+                              : market?.isLoading
                               ? "Loading..."
-                              : "Error"}
+                              : market?.error
+                              ? "Error"
+                              : "No Data"}
                           </Badge>
-                          {market.isLoading && (
+                          {market?.isLoading && (
                             <Badge variant="outline" className="text-xs">
                               Loading...
                             </Badge>
                           )}
-                          {market.error && (
+                          {market?.error && (
                             <Badge variant="destructive" className="text-xs">
                               Error
                             </Badge>
@@ -5995,12 +6024,14 @@ export default function AdminDashboard() {
                         </div>
                       </div>
                       <p className="text-sm text-muted-foreground">
-                        {market.asset} •{" "}
-                        {market.isLoaded ? "Loaded" : "Not loaded"}
+                        {configMarket.name} •{" "}
+                        {hasData ? "Loaded" : "Not loaded"}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {market.isLoaded && market.marketInfo
+                        {hasData && market.marketInfo
                           ? `Contract: ${market.marketInfo.tokenContractId}`
+                          : configMarket.underlyingContractId
+                          ? `Contract: ${configMarket.underlyingContractId}`
                           : "Contract: Not available"}
                       </p>
                     </CardHeader>
@@ -6011,17 +6042,10 @@ export default function AdminDashboard() {
                             Total Deposits
                           </p>
                           <p className="font-semibold">
-                            {market.isLoaded && market.marketInfo
+                            {hasData && market.marketInfo
                               ? `$${(() => {
                                   // Get token decimals for proper price scaling
-                                  const tokens =
-                                    getAllTokensWithDisplayInfo(currentNetwork);
-                                  const token = tokens.find(
-                                    (t) =>
-                                      t.symbol.toLowerCase() ===
-                                      market.asset?.toLowerCase()
-                                  );
-                                  const tokenDecimals = token?.decimals || 6;
+                                  const tokenDecimals = configMarket.decimals || 6;
 
                                   const value =
                                     parseFloat(
@@ -6041,23 +6065,16 @@ export default function AdminDashboard() {
                                     return value.toFixed(2);
                                   }
                                 })()}`
-                              : "Loading..."}
+                              : "N/A"}
                           </p>
                         </div>
                         <div>
                           <p className="text-muted-foreground">Total Borrows</p>
                           <p className="font-semibold">
-                            {market.isLoaded && market.marketInfo
+                            {hasData && market.marketInfo
                               ? `$${(() => {
                                   // Get token decimals for proper price scaling
-                                  const tokens =
-                                    getAllTokensWithDisplayInfo(currentNetwork);
-                                  const token = tokens.find(
-                                    (t) =>
-                                      t.symbol.toLowerCase() ===
-                                      market.asset?.toLowerCase()
-                                  );
-                                  const tokenDecimals = token?.decimals || 6;
+                                  const tokenDecimals = configMarket.decimals || 6;
 
                                   const value =
                                     parseFloat(market.marketInfo.totalBorrows) *
@@ -6075,7 +6092,7 @@ export default function AdminDashboard() {
                                     return value.toFixed(2);
                                   }
                                 })()}`
-                              : "Loading..."}
+                              : "N/A"}
                           </p>
                         </div>
                       </div>
@@ -6083,21 +6100,21 @@ export default function AdminDashboard() {
                         <div>
                           <p className="text-muted-foreground">Supply Rate</p>
                           <p className="font-semibold">
-                            {market.isLoaded && market.marketInfo
+                            {hasData && market.marketInfo
                               ? `${(market.marketInfo.supplyRate * 100).toFixed(
                                   2
                                 )}%`
-                              : "Loading..."}
+                              : "N/A"}
                           </p>
                         </div>
                         <div>
                           <p className="text-muted-foreground">Borrow Rate</p>
                           <p className="font-semibold">
-                            {market.isLoaded && market.marketInfo
+                            {hasData && market.marketInfo
                               ? `${(
                                   market.marketInfo.borrowRateCurrent * 100
                                 ).toFixed(2)}%`
-                              : "Loading..."}
+                              : "N/A"}
                           </p>
                         </div>
                       </div>
@@ -6106,11 +6123,11 @@ export default function AdminDashboard() {
                           Utilization Rate
                         </p>
                         <p className="font-semibold">
-                          {market.isLoaded && market.marketInfo
+                          {hasData && market.marketInfo
                             ? `${(
                                 market.marketInfo.utilizationRate * 100
                               ).toFixed(1)}%`
-                            : "Loading..."}
+                            : "N/A"}
                         </p>
                       </div>
 
@@ -6121,7 +6138,8 @@ export default function AdminDashboard() {
                             variant="outline"
                             size="sm"
                             className="flex-1"
-                            onClick={() => handleViewMarket(market)}
+                            onClick={() => handleViewMarket(market || { asset: configMarket.symbol })}
+                            disabled={!hasData}
                           >
                             <Eye className="h-3 w-3 mr-1" />
                             View
@@ -6130,7 +6148,8 @@ export default function AdminDashboard() {
                             variant="outline"
                             size="sm"
                             className="flex-1"
-                            onClick={() => handleEditMarket(market)}
+                            onClick={() => handleEditMarket(market || { asset: configMarket.symbol })}
+                            disabled={!hasData}
                           >
                             <Edit className="h-3 w-3 mr-1" />
                             Edit Price
@@ -6143,7 +6162,8 @@ export default function AdminDashboard() {
                             variant="outline"
                             size="sm"
                             className="flex-1"
-                            onClick={() => handleEditMaxDeposits(market)}
+                            onClick={() => handleEditMaxDeposits(market || { asset: configMarket.symbol })}
+                            disabled={!hasData}
                           >
                             <Edit className="h-3 w-3 mr-1" />
                             Max Deposits
@@ -6152,7 +6172,8 @@ export default function AdminDashboard() {
                             variant="outline"
                             size="sm"
                             className="flex-1"
-                            onClick={() => handleEditMaxBorrows(market)}
+                            onClick={() => handleEditMaxBorrows(market || { asset: configMarket.symbol })}
+                            disabled={!hasData}
                           >
                             <Edit className="h-3 w-3 mr-1" />
                             Max Borrows
@@ -6161,6 +6182,7 @@ export default function AdminDashboard() {
                             variant="outline"
                             size="sm"
                             className="text-destructive hover:text-destructive flex-1"
+                            disabled={!hasData}
                           >
                             <Trash2 className="h-3 w-3 mr-1" />
                             Delete
@@ -6169,18 +6191,11 @@ export default function AdminDashboard() {
                       </div>
                     </CardContent>
                   </Card>
-                ))
-              ) : (
-                <div className="col-span-full flex items-center justify-center py-8">
-                  <div className="text-center text-muted-foreground">
-                    <Database className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <p className="text-lg font-medium">No markets found</p>
-                    <p className="text-sm">
-                      Create your first market to get started
-                    </p>
-                  </div>
-                </div>
-              )}
+                    );
+                  })}
+                </>
+              );
+            })()}
             </div>
           </TabsContent>
 
