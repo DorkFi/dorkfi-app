@@ -397,27 +397,8 @@ export const fetchAllMarkets = async (
     const networkConfig = getNetworkConfig(networkId);
 
     if (isAlgorandCompatibleNetwork(networkId)) {
-      const clients = algorandService.initializeClients(
-        networkConfig.walletNetworkId as AlgorandNetwork
-      );
-
-      const ci = new CONTRACT(
-        Number(networkConfig.contracts.lendingPools[0]),
-        clients.algod,
-        undefined,
-        { ...LendingPoolAppSpec.contract, events: [] },
-        {
-          addr: algosdk.getApplicationAddress(
-            Number(networkConfig.contracts.lendingPools[0])
-          ),
-          sk: new Uint8Array(),
-        }
-      );
-
       // Get markets from config
       const tokens = getAllTokensWithDisplayInfo(networkId);
-      const lendingPools = getLendingPools(networkId);
-      const poolId = lendingPools[0];
 
       console.log("Fetching real market data for", tokens.length, "tokens");
 
@@ -426,10 +407,20 @@ export const fetchAllMarkets = async (
 
       for (const token of tokens) {
         try {
+          // Use the token's own poolId from config, not the first lending pool
+          const poolId = token.poolId;
+          
+          if (!poolId) {
+            console.warn(
+              `No pool ID configured for token ${token.symbol}, skipping`
+            );
+            continue;
+          }
+
           const marketId = token.underlyingContractId || token.symbol;
 
           console.log(
-            `Fetching market data for ${token.symbol} (marketId: ${marketId})`
+            `Fetching market data for ${token.symbol} (marketId: ${marketId}, poolId: ${poolId})`
           );
 
           const marketInfo = await fetchMarketInfo(poolId, marketId, networkId);
@@ -462,8 +453,6 @@ export const fetchAllMarkets = async (
     } else if (isEVMNetwork(networkId)) {
       // For EVM networks, fetch real market data
       const tokens = getAllTokensWithDisplayInfo(networkId);
-      const lendingPools = getLendingPools(networkId);
-      const poolId = lendingPools[0];
 
       console.log("Fetching real EVM market data for", tokens.length, "tokens");
 
@@ -472,10 +461,20 @@ export const fetchAllMarkets = async (
 
       for (const token of tokens) {
         try {
+          // Use the token's own poolId from config, not the first lending pool
+          const poolId = token.poolId;
+          
+          if (!poolId) {
+            console.warn(
+              `No pool ID configured for token ${token.symbol}, skipping`
+            );
+            continue;
+          }
+
           const marketId = token.underlyingContractId || token.symbol;
 
           console.log(
-            `Fetching EVM market data for ${token.symbol} (marketId: ${marketId})`
+            `Fetching EVM market data for ${token.symbol} (marketId: ${marketId}, poolId: ${poolId})`
           );
 
           const marketInfo = await fetchMarketInfo(poolId, marketId, networkId);

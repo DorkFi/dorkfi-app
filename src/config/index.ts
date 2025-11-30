@@ -1481,6 +1481,17 @@ const algorandProdTokens: Record<string, TokenConfig> = {
   //     "https://algorand-wallet-mainnet.b-cdn.net/media/assets-logo-png/2023/04/10/a5706bc6e41049a385d80468259ce1f4.png?width=200&quality=70",
   //   tokenStandard: "asa",
   // },
+  FOLKS: {
+    assetId: "3203964481",
+    poolId: "3345940978",
+    contractId: "3346185062",
+    nTokenId: "",
+    decimals: 6,
+    name: "FINITE",
+    symbol: "FINITE",
+    logoPath: "/lovable-uploads/FOLKS.png",
+    tokenStandard: "asa",
+  },
   WAD: {
     assetId: "3334160924",
     contractId: "3333688448",
