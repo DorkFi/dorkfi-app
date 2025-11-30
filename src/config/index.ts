@@ -1489,6 +1489,17 @@ const algorandProdTokens: Record<string, TokenConfig> = {
     logoPath: "/lovable-uploads/USDt.webp",
     tokenStandard: "asa",
   },
+  xUSD: {
+    assetId: "760037151",
+    poolId: "3345940978",
+    contractId: "3346881192",
+    nTokenId: "3346887893",
+    decimals: 6,
+    name: "xUSD",
+    symbol: "xUSD",
+    logoPath: "/lovable-uploads/xUSD.webp",
+    tokenStandard: "asa",
+  },
   WAD: {
     assetId: "3334160924",
     contractId: "3333688448",

@@ -66,6 +66,7 @@ export const getTokenImagePath = (symbol: string): string => {
     WAD: "/lovable-uploads/WAD_fixed.png",
     FOLKS: "/lovable-uploads/FOLKS.png",
     USDt: "/lovable-uploads/USDt.webp",
+    xUSD: "/lovable-uploads/xUSD.webp",
   };
 
   // First check for exact match (including prefixed tokens like aUSDC)
