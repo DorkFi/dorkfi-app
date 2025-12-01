@@ -1492,19 +1492,23 @@ const algorandProdTokens: Record<string, TokenConfig> = {
     logoPath: "/lovable-uploads/HOG.webp",
     tokenStandard: "asa",
   },
-  // // GOLD$ 246516580 6 3220347315
-  // GOLD$: {
-  //   assetId: "246516580",
-  //   poolId: "3212536201",
-  //   contractId: "3220347315",
-  //   nTokenId: "3220356360",
-  //   decimals: 6,
-  //   name: "GOLD$",
-  //   symbol: "GOLD$",
-  //   logoPath:
-  //     "https://algorand-wallet-mainnet.b-cdn.net/media/assets-logo-png/2023/04/10/a5706bc6e41049a385d80468259ce1f4.png?width=200&quality=70",
-  //   tokenStandard: "asa",
-  // },
+  GOLD$: {
+    assetId: "246516580",
+    poolId: "3345940978",
+    contractId: "3220347315",
+    nTokenId: "3347951758",
+    migration: {
+      poolId: "3212536201",
+      contractId: "3220347315",
+      nTokenId: "3220356360",
+    },
+    decimals: 6,
+    name: "GOLD$",
+    symbol: "GOLD$",
+    logoPath:
+      "https://algorand-wallet-mainnet.b-cdn.net/media/assets-logo-png/2023/04/10/a5706bc6e41049a385d80468259ce1f4.png?width=200&quality=70",
+    tokenStandard: "asa",
+  },
   FOLKS: {
     assetId: "3203964481",
     poolId: "3345940978",
