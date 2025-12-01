@@ -36,7 +36,7 @@ function ConditionalHomePage({
 }
 
 function App() {
-  const [activeTab, setActiveTab] = useState("dashboard");
+  const [activeTab, setActiveTab] = useState("markets");
 
   const handleTabChange = (value: string) => {
     setActiveTab(value);
