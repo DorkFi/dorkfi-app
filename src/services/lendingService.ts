@@ -1589,7 +1589,7 @@ export const deposit = async (
           if (networkConfig.networkId === "algorand-mainnet") {
             foreignApps.push(3333688254);
           }
-          const depositCost = p3 > 0 ? 0 : 900000;
+          const depositCost = p3 > 0 ? 900000 : 0; // try deposit without payment if it would succed
           const txnO = (
             await builder.lending.deposit(Number(marketId), BigInt(amount))
           ).obj as any;
