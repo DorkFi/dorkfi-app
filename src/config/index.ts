@@ -227,7 +227,6 @@ const prefiTokens = {
     logoPath: "/lovable-uploads/POW.png",
     tokenStandard: "asa",
   },
-  // Fountain VOI 770561 6
   FV: {
     assetId: "0",
     contractId: "770561",
@@ -272,7 +271,6 @@ const prefiTokens = {
     logoPath: "/lovable-uploads/bVOI.png",
     tokenStandard: "network",
   },
-  // NODE 410811 6
   NODE: {
     contractId: "410811",
     poolId: "44866061",
@@ -283,7 +281,6 @@ const prefiTokens = {
     logoPath: "https://asset-verification.nautilus.sh/icons/410811.png",
     tokenStandard: "arc200",
   },
-  // BUIDL 419744 6
   BUIDL: {
     contractId: "419744",
     poolId: "44866061",
@@ -294,7 +291,6 @@ const prefiTokens = {
     logoPath: "https://asset-verification.nautilus.sh/icons/419744.png",
     tokenStandard: "arc200",
   },
-  // SHELLY 410111 8
   SHELLY: {
     contractId: "410111",
     poolId: "44866061",
@@ -305,7 +301,6 @@ const prefiTokens = {
     logoPath: "https://asset-verification.nautilus.sh/icons/410111.png",
     tokenStandard: "arc200",
   },
-  // AMMO 798968 6
   AMMO: {
     contractId: "798968",
     poolId: "44866061",
@@ -316,7 +311,6 @@ const prefiTokens = {
     logoPath: "https://asset-verification.nautilus.sh/icons/798968.png",
     tokenStandard: "arc200",
   },
-  // GM 300279 2
   GM: {
     contractId: "300279",
     poolId: "44866061",
@@ -637,7 +631,6 @@ const prodTokens: { [symbol: string]: TokenConfig } = {
   //   logoPath: "/lovable-uploads/bVOI.png",
   //   tokenStandard: "network",
   // },
-  // // NODE 410811 6
   // NODE: {
   //   contractId: "410811",
   //   poolId: "44866061",
@@ -648,7 +641,6 @@ const prodTokens: { [symbol: string]: TokenConfig } = {
   //   logoPath: "https://asset-verification.nautilus.sh/icons/410811.png",
   //   tokenStandard: "arc200",
   // },
-  // // BUIDL 419744 6
   // BUIDL: {
   //   contractId: "419744",
   //   poolId: "44866061",
@@ -659,7 +651,6 @@ const prodTokens: { [symbol: string]: TokenConfig } = {
   //   logoPath: "https://asset-verification.nautilus.sh/icons/419744.png",
   //   tokenStandard: "arc200",
   // },
-  // // SHELLY 410111 8
   // SHELLY: {
   //   contractId: "410111",
   //   poolId: "44866061",
@@ -670,7 +661,6 @@ const prodTokens: { [symbol: string]: TokenConfig } = {
   //   logoPath: "https://asset-verification.nautilus.sh/icons/410111.png",
   //   tokenStandard: "arc200",
   // },
-  // // AMMO 798968 6
   // AMMO: {
   //   contractId: "798968",
   //   poolId: "44866061",
@@ -681,17 +671,21 @@ const prodTokens: { [symbol: string]: TokenConfig } = {
   //   logoPath: "https://asset-verification.nautilus.sh/icons/798968.png",
   //   tokenStandard: "arc200",
   // },
-  // // GM 300279 2
-  // GM: {
-  //   contractId: "300279",
-  //   poolId: "44866061",
-  //   nTokenId: "44872696",
-  //   decimals: 2,
-  //   name: "GM",
-  //   symbol: "GM",
-  //   logoPath: "https://asset-verification.nautilus.sh/icons/300279.png",
-  //   tokenStandard: "arc200",
-  // },
+  GM: {
+    contractId: "300279",
+    poolId: "47139781",
+    nTokenId: "47467486",
+    decimals: 2,
+    migration: {
+      contractId: "300279",
+      poolId: "44866061",
+      nTokenId: "44872696",
+    },
+    name: "GM",
+    symbol: "GM",
+    logoPath: "https://asset-verification.nautilus.sh/icons/300279.png",
+    tokenStandard: "arc200",
+  },
   // // CORN 412682 6
   // CORN: {
   //   contractId: "412682",

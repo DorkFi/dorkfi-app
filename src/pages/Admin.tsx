@@ -106,6 +106,7 @@ import { useMemo } from "react";
 import { toast } from "sonner";
 import {
   fetchPausedState,
+  fetchPoolPausedState,
   fetchSystemHealth,
   fetchAdminStats,
   togglePauseState,
@@ -2338,6 +2339,13 @@ export default function AdminDashboard() {
   const [isLoadingPausedState, setIsLoadingPausedState] = useState(false);
   const [isLoadingSystemHealth, setIsLoadingSystemHealth] = useState(false);
   const [isTogglingPause, setIsTogglingPause] = useState(false);
+  
+  // Pool paused state - track paused state for each lending pool
+  const [poolPausedStates, setPoolPausedStates] = useState<
+    Record<string, PausedState>
+  >({});
+  const [isLoadingPoolPausedStates, setIsLoadingPoolPausedStates] =
+    useState(false);
 
   // Test transaction state
   const [isTestTxLoading, setIsTestTxLoading] = useState(false);
@@ -3102,6 +3110,45 @@ export default function AdminDashboard() {
     }
   };
 
+  // Load paused state for all lending pools
+  const loadAllPoolPausedStates = async () => {
+    setIsLoadingPoolPausedStates(true);
+    try {
+      const lendingPools = getLendingPools(currentNetwork);
+      const pausedStates: Record<string, PausedState> = {};
+
+      // Fetch paused state for each pool in parallel
+      await Promise.all(
+        lendingPools.map(async (poolId) => {
+          try {
+            const state = await fetchPoolPausedState(poolId, currentNetwork);
+            pausedStates[poolId] = state;
+          } catch (error) {
+            console.error(
+              `Failed to load paused state for pool ${poolId}:`,
+              error
+            );
+            // Set default state on error
+            pausedStates[poolId] = {
+              isPaused: false,
+              pausedBy: undefined,
+              pausedAt: undefined,
+              pauseReason: undefined,
+              pausedContracts: [],
+              lastUpdated: new Date().toISOString(),
+            };
+          }
+        })
+      );
+
+      setPoolPausedStates(pausedStates);
+    } catch (error) {
+      console.error("Failed to load pool paused states:", error);
+    } finally {
+      setIsLoadingPoolPausedStates(false);
+    }
+  };
+
   const handleTogglePause = async () => {
     if (!pausedState) return;
 
@@ -3147,6 +3194,94 @@ export default function AdminDashboard() {
       }
     } catch (error) {
       console.error("Failed to toggle pause state:", error);
+    } finally {
+      setIsTogglingPause(false);
+    }
+  };
+
+  // Toggle pause state for the selected lending pool
+  const handleTogglePoolPause = async () => {
+    if (!selectedLendingPool || !activeAccount?.address) {
+      toast.error("No pool selected or wallet not connected", {
+        description: "Please select a lending pool and connect your wallet.",
+      });
+      return;
+    }
+
+    const currentPoolState = poolPausedStates[selectedLendingPool];
+    if (!currentPoolState) {
+      toast.error("Pool state not loaded", {
+        description: "Please wait for pool state to load.",
+      });
+      return;
+    }
+
+    setIsTogglingPause(true);
+    try {
+      if (isCurrentNetworkAlgorandCompatible()) {
+        const networkConfig = getNetworkConfig(currentNetwork);
+        const algorandClients = algorandService.initializeClients(
+          networkConfig.walletNetworkId as AlgorandNetwork
+        );
+        const togglePauseResult = await togglePauseState(
+          !currentPoolState.isPaused,
+          activeAccount.address,
+          selectedLendingPool
+        );
+        console.log("togglePauseResult", togglePauseResult);
+        if (togglePauseResult.success) {
+          // Sign and send transaction
+          const stxns = await signTransactions(
+            togglePauseResult.txns.map(
+              (txn: string) =>
+                new Uint8Array(
+                  Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+                )
+            )
+          );
+          console.log("Transaction signed:", stxns);
+          const res = await algorandClients.algod
+            .sendRawTransaction(stxns)
+            .do();
+
+          console.log("Transaction sent:", res);
+
+          await waitForConfirmation(algorandClients.algod, res.txid, 4);
+
+          console.log("Transaction confirmed:", res);
+
+          toast.success(
+            `Pool ${!currentPoolState.isPaused ? "paused" : "unpaused"} successfully`,
+            {
+              description: `Transaction ID: ${res.txid}`,
+            }
+          );
+
+          // Reload pool paused states after successful toggle
+          await loadAllPoolPausedStates();
+        } else {
+          // Handle error case - TypeScript type narrowing
+          if (!togglePauseResult.success) {
+            const errorMessage =
+              togglePauseResult.error instanceof Error
+                ? togglePauseResult.error.message
+                : String(togglePauseResult.error || "Unknown error occurred");
+            toast.error("Failed to toggle pool pause state", {
+              description: errorMessage,
+            });
+          }
+        }
+      } else if (isCurrentNetworkEVM()) {
+        throw new Error("EVM networks are not supported yet");
+      } else {
+        throw new Error("Unsupported network");
+      }
+    } catch (error) {
+      console.error("Failed to toggle pool pause state:", error);
+      toast.error("Failed to toggle pool pause state", {
+        description:
+          error instanceof Error ? error.message : "Unknown error occurred",
+      });
     } finally {
       setIsTogglingPause(false);
     }
@@ -5428,6 +5563,11 @@ export default function AdminDashboard() {
     }
   }, [currentNetwork, selectedLendingPool]);
 
+  // Load paused states for all pools when network changes
+  React.useEffect(() => {
+    loadAllPoolPausedStates();
+  }, [currentNetwork]);
+
   // Load Oracle contract info when PriceOracle or PriceFeedManager tab is active
   React.useEffect(() => {
     if (activeTab === "price-oracle" || activeTab === "price-feed-manager") {
@@ -5621,6 +5761,138 @@ export default function AdminDashboard() {
 
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6">
+            {/* Global Lending Pool Selector */}
+            <Card className="border-primary/20 bg-primary/5">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div className="flex items-center gap-3">
+                    <Coins className="h-5 w-5 text-primary" />
+                    <div>
+                      <Label className="text-sm font-semibold">
+                        Active Lending Pool
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        Select which lending pool to view and manage
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 flex-1 max-w-md">
+                    <Select
+                      value={selectedLendingPool}
+                      onValueChange={(value) => {
+                        setSelectedLendingPool(value);
+                      }}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select a lending pool" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {getLendingPools(currentNetwork).map(
+                          (poolId, index) => {
+                            const classLabel = String.fromCharCode(
+                              65 + index
+                            ); // A, B, C, etc.
+                            const poolPausedState = poolPausedStates[poolId];
+                            const isPaused = poolPausedState?.isPaused ?? false;
+                            return (
+                              <SelectItem key={poolId} value={poolId}>
+                                <div className="flex items-center gap-2">
+                                  <span>
+                                    Pool {classLabel} ({poolId})
+                                  </span>
+                                  {isLoadingPoolPausedStates ? (
+                                    <Loader2 className="h-3 w-3 animate-spin ml-auto" />
+                                  ) : isPaused ? (
+                                    <Badge
+                                      variant="destructive"
+                                      className="ml-auto text-xs"
+                                    >
+                                      Paused
+                                    </Badge>
+                                  ) : (
+                                    <Badge
+                                      variant="default"
+                                      className="ml-auto text-xs"
+                                    >
+                                      Active
+                                    </Badge>
+                                  )}
+                                </div>
+                              </SelectItem>
+                            );
+                          }
+                        )}
+                      </SelectContent>
+                    </Select>
+                    {selectedLendingPool && (
+                      <div className="flex items-center gap-2">
+                        {isLoadingPoolPausedStates ? (
+                          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                        ) : poolPausedStates[selectedLendingPool]?.isPaused ? (
+                          <Badge variant="destructive" className="text-xs">
+                            <AlertTriangle className="h-3 w-3 mr-1" />
+                            Paused
+                          </Badge>
+                        ) : (
+                          <Badge variant="default" className="text-xs">
+                            <CheckCircle2 className="h-3 w-3 mr-1" />
+                            Active
+                          </Badge>
+                        )}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={loadAllPoolPausedStates}
+                          disabled={isLoadingPoolPausedStates}
+                          className="h-8"
+                          title="Refresh pool states"
+                        >
+                          {isLoadingPoolPausedStates ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-3 w-3" />
+                          )}
+                        </Button>
+                        <Button
+                          variant={
+                            poolPausedStates[selectedLendingPool]?.isPaused
+                              ? "default"
+                              : "destructive"
+                          }
+                          size="sm"
+                          onClick={handleTogglePoolPause}
+                          disabled={
+                            isTogglingPause ||
+                            isLoadingPoolPausedStates ||
+                            !activeAccount?.address
+                          }
+                          className="h-8"
+                          title={
+                            poolPausedStates[selectedLendingPool]?.isPaused
+                              ? "Unpause this pool"
+                              : "Pause this pool"
+                          }
+                        >
+                          {isTogglingPause ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : poolPausedStates[selectedLendingPool]?.isPaused ? (
+                            <>
+                              <CheckCircle2 className="h-3 w-3 mr-1" />
+                              Unpause
+                            </>
+                          ) : (
+                            <>
+                              <AlertTriangle className="h-3 w-3 mr-1" />
+                              Pause
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
             {/* System Stats */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <Card>
@@ -7793,9 +8065,33 @@ export default function AdminDashboard() {
                                     {pool.classLabel} Pool ({pool.poolId})
                                   </h5>
                                 </div>
-                                <Badge variant="outline" className="text-xs">
-                                  {pool.markets.length} markets
-                                </Badge>
+                                <div className="flex items-center gap-2">
+                                  <Badge
+                                    variant={
+                                      poolPausedStates[pool.poolId]?.isPaused
+                                        ? "destructive"
+                                        : "default"
+                                    }
+                                    className="text-xs"
+                                  >
+                                    {isLoadingPoolPausedStates ? (
+                                      <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                    ) : poolPausedStates[pool.poolId]?.isPaused ? (
+                                      <>
+                                        <AlertTriangle className="h-3 w-3 mr-1" />
+                                        Paused
+                                      </>
+                                    ) : (
+                                      <>
+                                        <CheckCircle2 className="h-3 w-3 mr-1" />
+                                        Active
+                                      </>
+                                    )}
+                                  </Badge>
+                                  <Badge variant="outline" className="text-xs">
+                                    {pool.markets.length} markets
+                                  </Badge>
+                                </div>
                               </div>
 
                               <div className="space-y-2">
@@ -9118,28 +9414,53 @@ export default function AdminDashboard() {
                     Available Lending Pools
                   </Label>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    {poolOptions.map((pool) => (
-                      <div
-                        key={pool.value}
-                        className="flex items-center justify-between p-2 border rounded-lg"
-                      >
-                        <div className="flex items-center gap-2">
-                          <Coins className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-sm">{pool.label}</span>
-                        </div>
-                        <Badge
-                          variant={
-                            approvedMinters.includes(pool.value)
-                              ? "default"
-                              : "secondary"
-                          }
+                    {poolOptions.map((pool) => {
+                      const poolPausedState = poolPausedStates[pool.value];
+                      const isPaused = poolPausedState?.isPaused ?? false;
+                      return (
+                        <div
+                          key={pool.value}
+                          className="flex items-center justify-between p-2 border rounded-lg"
                         >
-                          {approvedMinters.includes(pool.value)
-                            ? "Approved"
-                            : "Not Approved"}
-                        </Badge>
-                      </div>
-                    ))}
+                          <div className="flex items-center gap-2">
+                            <Coins className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-sm">{pool.label}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge
+                              variant={isPaused ? "destructive" : "default"}
+                              className="text-xs"
+                            >
+                              {isLoadingPoolPausedStates ? (
+                                <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                              ) : isPaused ? (
+                                <>
+                                  <AlertTriangle className="h-3 w-3 mr-1" />
+                                  Paused
+                                </>
+                              ) : (
+                                <>
+                                  <CheckCircle2 className="h-3 w-3 mr-1" />
+                                  Active
+                                </>
+                              )}
+                            </Badge>
+                            <Badge
+                              variant={
+                                approvedMinters.includes(pool.value)
+                                  ? "default"
+                                  : "secondary"
+                              }
+                              className="text-xs"
+                            >
+                              {approvedMinters.includes(pool.value)
+                                ? "Approved"
+                                : "Not Approved"}
+                            </Badge>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </CardContent>

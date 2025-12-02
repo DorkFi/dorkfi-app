@@ -7,6 +7,7 @@
 
 import {
   getCurrentNetworkConfig,
+  getNetworkConfig,
   getContractAddress,
   isCurrentNetworkEVM,
   isCurrentNetworkAVM,
@@ -52,6 +53,81 @@ export interface CreateMarketParams {
   liquidationBonus: bigint;
   closeFactor: bigint;
 }
+
+/**
+ * Fetches the paused state for a specific lending pool
+ * @param poolId The lending pool contract ID
+ * @param networkId Optional network ID, defaults to current network
+ * @returns Promise<PausedState> The paused state for the pool
+ */
+export const fetchPoolPausedState = async (
+  poolId: string,
+  networkId?: string
+): Promise<PausedState> => {
+  try {
+    const networkConfig = networkId
+      ? getNetworkConfig(networkId as any)
+      : getCurrentNetworkConfig();
+
+    if (isCurrentNetworkVOI() || isCurrentNetworkAlgorand()) {
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      const ci = new CONTRACT(
+        Number(poolId),
+        clients.algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        {
+          addr: "G3MSA75OZEJTCCENOJDLDJK7UD7E2K5DNC7FVHCNOV7E3I4DTXTOWDUIFQ", // TODO replace with address with tokens
+          sk: new Uint8Array(),
+        }
+      );
+      const isPaused = await ci.is_paused();
+      if (!isPaused.success) {
+        throw new Error("Failed to get paused state");
+      }
+      // Convert return value to boolean (handles both boolean and number 0/1)
+      const pausedValue = isPaused.returnValue;
+      const isPausedBool =
+        typeof pausedValue === "boolean"
+          ? pausedValue
+          : Boolean(Number(pausedValue));
+
+      return {
+        isPaused: isPausedBool,
+        pausedBy: undefined,
+        pausedAt: undefined,
+        pauseReason: undefined,
+        pausedContracts: [],
+        lastUpdated: new Date().toISOString(),
+      };
+    } else if (isCurrentNetworkEVM()) {
+      throw new Error("EVM networks are not supported yet");
+    }
+  } catch (error) {
+    console.error(`Failed to fetch paused state for pool ${poolId}:`, error);
+    // Return a safe default state
+    return {
+      isPaused: false,
+      pausedBy: undefined,
+      pausedAt: undefined,
+      pauseReason: undefined,
+      pausedContracts: [],
+      lastUpdated: new Date().toISOString(),
+    };
+  }
+  // Fallback
+  return {
+    isPaused: false,
+    pausedBy: undefined,
+    pausedAt: undefined,
+    pauseReason: undefined,
+    pausedContracts: [],
+    lastUpdated: new Date().toISOString(),
+  };
+};
 
 /**
  * Fetches the current paused state from the protocol
@@ -219,22 +295,24 @@ export const fetchAdminStats = async () => {
 /**
  * Simulates pausing/unpausing the protocol
  * In a real implementation, this would make contract calls
+ * @param pause Whether to pause (true) or unpause (false)
+ * @param address The address of the account making the call
+ * @param poolId Optional pool ID. If not provided, uses the first pool from config
  */
 export const togglePauseState = async (
   pause: boolean,
-  address: string
+  address: string,
+  poolId?: string
 ): Promise<
   { success: true; txns: string[] } | { success: false; error: any }
 > => {
   try {
     const networkConfig = getCurrentNetworkConfig();
-    const lendingPoolAddress = getContractAddress(
-      networkConfig.networkId,
-      "lendingPools"
-    );
+    // Use provided poolId or fallback to first pool
+    const targetPoolId = poolId || networkConfig.contracts.lendingPools[0];
 
     console.log(`Attempting to ${pause ? "pause" : "unpause"} protocol...`);
-    console.log("Lending Pool Address:", lendingPoolAddress);
+    console.log("Lending Pool ID:", targetPoolId);
 
     if (isCurrentNetworkVOI()) {
       // Use VOI-specific service for VOI networks
@@ -242,7 +320,7 @@ export const togglePauseState = async (
         networkConfig.walletNetworkId as AlgorandNetwork
       );
       const ci = new CONTRACT(
-        Number(networkConfig.contracts.lendingPools[0]),
+        Number(targetPoolId),
         clients.algod,
         undefined,
         { ...LendingPoolAppSpec.contract, events: [] },
@@ -266,7 +344,7 @@ export const togglePauseState = async (
         networkConfig.walletNetworkId as AlgorandNetwork
       );
       const ci = new CONTRACT(
-        Number(networkConfig.contracts.lendingPools[0]),
+        Number(targetPoolId),
         clients.algod,
         undefined,
         { ...LendingPoolAppSpec.contract, events: [] },

@@ -409,7 +409,7 @@ export const fetchAllMarkets = async (
         try {
           // Use the token's own poolId from config, not the first lending pool
           const poolId = token.poolId;
-          
+
           if (!poolId) {
             console.warn(
               `No pool ID configured for token ${token.symbol}, skipping`
@@ -463,7 +463,7 @@ export const fetchAllMarkets = async (
         try {
           // Use the token's own poolId from config, not the first lending pool
           const poolId = token.poolId;
-          
+
           if (!poolId) {
             console.warn(
               `No pool ID configured for token ${token.symbol}, skipping`
@@ -1490,10 +1490,14 @@ export const deposit = async (
       let customTx: any;
 
       for (const p of [
-        [0, 0, 0],
+        [0, 0, 0], // no payments for any
         [0, 1, 0],
-        [1, 1, 1],
+        [1, 0, 0],
+        [1, 1, 0],
+        [0, 0, 1],
+        [0, 1, 1],
         [1, 0, 1],
+        [1, 1, 1],
       ]) {
         const [p1, p2, p3] = p;
 
@@ -1503,27 +1507,31 @@ export const deposit = async (
 
         // conditionally deposit to token
         if (tokenStandard == "network") {
+          // ------------------------------------------------------------
+          // TODO move this to setup market workflow
+          // ------------------------------------------------------------
+          // {
+          //   const txnO = (
+          //     await builder.token.createBalanceBox(
+          //       algosdk.encodeAddress(
+          //         algosdk.getApplicationAddress(Number(poolId)).publicKey
+          //       )
+          //     )
+          //   ).obj;
+          //   console.log("createBalanceBox", { txnO });
+          //   buildN.push({
+          //     ...txnO,
+          //     payment: 28500,
+          //     note: new TextEncoder().encode("nt200 createBalanceBox"),
+          //   });
+          // }
+          // ------------------------------------------------------------
           if (p1 > 0) {
-            const txnO = (
-              await builder.token.createBalanceBox(
-                algosdk.encodeAddress(
-                  algosdk.getApplicationAddress(Number(poolId)).publicKey
-                )
-              )
-            ).obj;
-            console.log("createBalanceBox", { txnO });
-            buildN.push({
-              ...txnO,
-              payment: 28500,
-              note: new TextEncoder().encode("nt200 createBalanceBox"),
-            });
-          }
-          if (p2 > 0) {
             const txnO = (await builder.token.createBalanceBox(userAddress))
               .obj;
             buildN.push({
               ...txnO,
-              payment: 28501,
+              payment: 28500,
               note: new TextEncoder().encode("nt200 createBalanceBox"),
             });
           }
@@ -1536,11 +1544,10 @@ export const deposit = async (
             });
           }
         } else if (tokenStandard == "asa") {
-          const payment = 28502;
           const aamt = BigInt(amount);
           const xaid = Number(token.underlyingAssetId);
+          const payment = p1 > 0 ? 28501 : 0;
           const axfer = { payment, aamt, xaid };
-          console.log("axfer", { axfer });
           const txnO = (await builder.token.deposit(BigInt(amount))).obj;
           buildN.push({
             ...txnO,
@@ -1561,27 +1568,34 @@ export const deposit = async (
           ).obj;
           buildN.push({
             ...txnO,
-            payment: 28503,
+            payment: p2 > 0 ? 28502 : 0,
             note: new TextEncoder().encode("arc200 approve"),
           });
         }
 
-        // arc200 transfer
-        {
-          const receiver = algosdk.encodeAddress(
-            algosdk.getApplicationAddress(Number(poolId)).publicKey
-          );
-          const txnO = (await builder.token.arc200_transfer(receiver, 0)).obj;
-          buildN.push({
-            ...txnO,
-            payment: 28504,
-            note: new TextEncoder().encode(`arc200 transfer`),
-          });
-        }
+        // ------------------------------------------------------------
+        // TODO move this to setup market workflow
+        // REM ensures that the pool can hold a balance prior to first
+        //     first deposit
+        // ------------------------------------------------------------
+        // {
+        //   const receiver = algosdk.encodeAddress(
+        //     algosdk.getApplicationAddress(Number(poolId)).publicKey
+        //   );
+        //   const txnO = (await builder.token.arc200_transfer(receiver, 0)).obj;
+        //   buildN.push({
+        //     ...txnO,
+        //     payment: 28504,
+        //     note: new TextEncoder().encode(`arc200 transfer`),
+        //   });
+        // }
+        // ------------------------------------------------------------
 
         // deposit to lending pool
         {
+          // ------------------------------------------------------------
           // TODO fetch from config
+          // ------------------------------------------------------------
           const foreignApps = [];
           if (networkConfig.networkId === "voi-mainnet") {
             foreignApps.push(47138065);
@@ -1589,14 +1603,15 @@ export const deposit = async (
           if (networkConfig.networkId === "algorand-mainnet") {
             foreignApps.push(3333688254);
           }
-          const depositCost = p3 > 0 ? 900000 : 0; // try deposit without payment if it would succed
+          // ------------------------------------------------------------
+          const payment = p3 > 0 ? 9e5 : 1e5;
           const txnO = (
             await builder.lending.deposit(Number(marketId), BigInt(amount))
           ).obj as any;
           buildN.push({
             ...txnO,
             note: new TextEncoder().encode("lending deposit"),
-            payment: depositCost,
+            payment,
             foreignApps,
           });
         }
@@ -1934,7 +1949,7 @@ export const migrate = async (
           buildN.push({
             ...txnO,
             note: new TextEncoder().encode("lending deposit"),
-            payment: p2 > 0 ? 900000 : 0,
+            payment: p2 > 0 ? 9e5 : 1e5,
             foreignApps,
           });
         }
@@ -2234,7 +2249,7 @@ export const borrow = async (
           if (networkConfig.networkId === "algorand-mainnet") {
             foreignApps.push(3333688254);
           }
-          const borrowCost = p2 > 0 ? 900000 : 0;
+          const borrowCost = p2 > 0 ? 9e5 : 1e5;
           const txnO = (
             await builder.lending.borrow(Number(marketId), BigInt(amount))
           ).obj as any;
