@@ -58,6 +58,26 @@ const Portfolio = () => {
 
   console.log("marketData", marketData);
 
+  // Helper function to format price from contract using decimal adjustment
+  // The price oracle contract stores prices in a 12-decimal scale
+  // This converts from contract format back to token's native decimal format
+  const formatPriceFromContract = (
+    contractPrice: string | number,
+    tokenDecimals: number
+  ): number => {
+    const price = typeof contractPrice === "string" 
+      ? parseFloat(contractPrice) 
+      : contractPrice;
+    
+    if (!price || price === 0) return 1;
+    
+    // Calculate adjustment: 12 (oracle decimals) - token decimals
+    const targetAdjustment = 12 - tokenDecimals;
+    const divisor = Math.pow(10, targetAdjustment);
+    
+    return price / divisor;
+  };
+
   // Function to fetch ntoken balance for a specific token
   const fetchNTokenBalance = async (
     userAddress: string,
@@ -151,18 +171,17 @@ const Portfolio = () => {
               networkId
             );
 
+            const tokenPrice = market?.price
+              ? formatPriceFromContract(market.price, token.decimals)
+              : 1;
+
             console.log(`Deposit position for ${token.symbol}:`, {
               depositBalance,
               nTokenBalance,
               marketPrice: market?.price,
-              tokenPrice: market?.price
-                ? (parseFloat(market.price) * 10 ** token.decimals) /
-                  Math.pow(10, 6)
-                : 1,
+              tokenPrice: tokenPrice,
               calculatedValue:
-                (depositBalance *
-                  (market?.price ? parseFloat(market.price) : 1)) /
-                Math.pow(10, 6),
+                depositBalance * tokenPrice,
               marketFound: !!market,
             });
 
@@ -171,34 +190,27 @@ const Portfolio = () => {
               icon: token.logoPath,
               balance: depositBalance,
               nTokenBalance: nTokenBalance,
-              value:
-                ((depositBalance *
-                  (market?.price ? parseFloat(market.price) : 1)) /
-                  Math.pow(10, 6)) *
-                (Math.pow(10, token.decimals) / Math.pow(10, 6)),
+              value: depositBalance * tokenPrice,
               apy:
                 market?.apyCalculation?.apy ||
                 (market?.supplyRate ? market.supplyRate * 100 : 0),
-              tokenPrice: market?.price
-                ? parseFloat(market.price) / Math.pow(10, 6)
-                : 1,
+              tokenPrice: tokenPrice,
               type: "deposit",
             });
           }
 
           // Add borrow position if user has borrows
           if (borrowBalance && borrowBalance > 0) {
+            const tokenPrice = market?.price
+              ? formatPriceFromContract(market.price, token.decimals)
+              : 1;
+
             console.log(`Borrow position for ${token.symbol}:`, {
               borrowBalance,
               borrowInterest,
               marketPrice: market?.price,
-              tokenPrice: market?.price
-                ? parseFloat(market.price) / Math.pow(10, 6)
-                : 1,
-              calculatedValue:
-                (borrowBalance *
-                  (market?.price ? parseFloat(market.price) : 1)) /
-                Math.pow(10, 6),
+              tokenPrice: tokenPrice,
+              calculatedValue: borrowBalance * tokenPrice,
               marketFound: !!market,
             });
 
@@ -206,18 +218,13 @@ const Portfolio = () => {
               asset: token.symbol,
               icon: token.logoPath,
               balance: borrowBalance,
-              value:
-                (borrowBalance *
-                  (market?.price ? parseFloat(market.price) : 1)) /
-                Math.pow(10, 6),
+              value: borrowBalance * tokenPrice,
               apy:
                 market?.borrowApyCalculation?.apy ||
                 (market?.borrowRateCurrent
                   ? market.borrowRateCurrent * 100
                   : 0),
-              tokenPrice: market?.price
-                ? parseFloat(market.price) / Math.pow(10, 6)
-                : 1,
+              tokenPrice: tokenPrice,
               type: "borrow",
               interest: borrowInterest,
             });
@@ -510,13 +517,10 @@ const Portfolio = () => {
 
       // Calculate USD value using market data
       const market = marketData.find((m) => m.symbol === asset);
-      const tokenPrice = market
-        ? market.price
-          ? parseFloat(market.price) / Math.pow(10, 6)
-          : 1
+      const tokenPrice = market?.price
+        ? formatPriceFromContract(market.price, token.decimals)
         : 1;
-      const balanceUSD =
-        balance * tokenPrice * (Math.pow(10, token.decimals) / Math.pow(10, 6));
+      const balanceUSD = balance * tokenPrice;
 
       const balanceData = {
         balance,
