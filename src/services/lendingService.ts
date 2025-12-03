@@ -1287,6 +1287,35 @@ export const withdraw = async (
           false,
           true
         ),
+        ...(tokenStandard === "arc200-exchange"
+          ? {
+              arc200Exchange: new CONTRACT(
+                Number(token.underlyingContractId),
+                clients.algod,
+                undefined,
+                {
+                  name: "arc200Exchange",
+                  desc: "arc200Exchange",
+                  methods: [
+                    // arc200_swapBack(uint64)void
+                    {
+                      name: "arc200_swapBack",
+                      args: [{ name: "amount", type: "uint64" }],
+                      returns: { type: "void" },
+                    },
+                  ],
+                  events: [],
+                },
+                {
+                  addr: userAddress,
+                  sk: new Uint8Array(),
+                },
+                true,
+                false,
+                true
+              ),
+            }
+          : {}),
       };
 
       console.log("builder", { builder });
@@ -1312,13 +1341,26 @@ export const withdraw = async (
       }
 
       // cond a token withdraw
-      if (tokenStandard != "arc200") {
+      if (tokenStandard == "network" || tokenStandard == "asa") {
         const txnO = (
           await builder.token.withdraw(BigInt(amountInSmallestUnit))
         ).obj;
         buildN.push({
           ...txnO,
           note: new TextEncoder().encode("atoken withdraw"),
+        });
+      } else if (tokenStandard == "arc200-exchange") {
+        const txnO = (
+          await builder.arc200Exchange.arc200_swapBack(
+            BigInt(amountInSmallestUnit)
+          )
+        ).obj;
+        buildN.push({
+          ...txnO,
+          note: new TextEncoder().encode("arc200_swapBack"),
+          xaid: Number(token.underlyingAssetId),
+          snd: userAddress,
+          arcv: userAddress,
         });
       }
 

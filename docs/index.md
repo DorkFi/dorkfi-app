@@ -57,6 +57,18 @@ Information about the automatic version management system:
 
 **Perfect for:** Developers, contributors, those working with the codebase
 
+### 🔗 [ARC200 Exchange Extension](ARC200_EXCHANGE.md)
+**Technical specification for ARC200 token exchange standard**
+
+Complete specification for the ARC200 Exchange Extension:
+- Bidirectional exchange between ARC200 tokens and ASAs
+- Interface definitions and method signatures
+- Security considerations and validation requirements
+- Implementation requirements and backward compatibility
+- Use cases and future considerations
+
+**Perfect for:** Developers implementing token standards, smart contract developers, DeFi protocol builders
+
 ## Quick Start Guide
 
 ### For New Users
@@ -69,7 +81,8 @@ Information about the automatic version management system:
 ### For Developers
 1. **Technical Details**: Review [APY Estimation Strategy](APY_ESTIMATION.md) for calculation methods
 2. **Version Control**: Check [Version Management](VERSION_MANAGEMENT.md) for development setup
-3. **Codebase**: Explore the React/TypeScript frontend implementation
+3. **Token Standards**: Review [ARC200 Exchange Extension](ARC200_EXCHANGE.md) for token exchange specifications
+4. **Codebase**: Explore the React/TypeScript frontend implementation
 
 ## Key Features
 
