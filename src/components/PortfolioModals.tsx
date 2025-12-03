@@ -24,6 +24,7 @@ interface Deposit {
   value: number;
   apy: number;
   tokenPrice: number;
+  nTokenBalance?: number;
 }
 
 interface Borrow {
@@ -37,10 +38,10 @@ interface Borrow {
 }
 
 interface PortfolioModalsProps {
-  depositModal: { isOpen: boolean; asset: string | null };
-  withdrawModal: { isOpen: boolean; asset: string | null };
-  borrowModal: { isOpen: boolean; asset: string | null };
-  repayModal: { isOpen: boolean; asset: string | null };
+  depositModal: { isOpen: boolean; asset: string | null; poolId?: string };
+  withdrawModal: { isOpen: boolean; asset: string | null; poolId?: string };
+  borrowModal: { isOpen: boolean; asset: string | null; poolId?: string };
+  repayModal: { isOpen: boolean; asset: string | null; poolId?: string };
   deposits: Deposit[];
   borrows: Borrow[];
   walletBalances: Record<string, { balance: number; balanceUSD: number }>;
@@ -81,9 +82,41 @@ const PortfolioModals = ({
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
   const { toast } = useToast();
-  const getMarketStatsForDeposit = (asset: string) => {
-    const market = marketData.find(m => m.symbol === asset);
-    const deposit = deposits.find(d => d.asset === asset);
+  const getMarketStatsForDeposit = (asset: string, poolId?: string) => {
+    // Find matching markets - prefer poolId match if provided
+    let market;
+    if (poolId) {
+      // If poolId is provided, match by both symbol and poolId
+      market = marketData.find(m => m.symbol === asset && m.poolId === poolId);
+    }
+    
+    // If no poolId match or poolId not provided, find by symbol
+    // For tokens with multiple markets, prefer the one with higher totalDeposits (more active market)
+    if (!market) {
+      const matchingMarkets = marketData.filter(m => m.symbol === asset);
+      if (matchingMarkets.length > 1) {
+        // Multiple markets found - prefer the one with higher totalDeposits
+        market = matchingMarkets.reduce((prev, current) => {
+          const prevDeposits = parseFloat(prev.totalDeposits || "0");
+          const currentDeposits = parseFloat(current.totalDeposits || "0");
+          return currentDeposits > prevDeposits ? current : prev;
+        });
+      } else {
+        market = matchingMarkets[0];
+      }
+    }
+    
+    // Find matching deposit - prefer poolId match if provided
+    let deposit;
+    if (poolId) {
+      // If poolId is provided, match by both asset and poolId
+      deposit = deposits.find(d => d.asset === asset && d.poolId === poolId);
+    }
+    
+    // If no poolId match or poolId not provided, find by asset only
+    if (!deposit) {
+      deposit = deposits.find(d => d.asset === asset);
+    }
     
     return {
       supplyAPY: market?.apyCalculation?.apy || 
@@ -97,9 +130,41 @@ const PortfolioModals = ({
     };
   };
 
-  const getMarketStatsForBorrow = (asset: string) => {
-    const market = marketData.find(m => m.symbol === asset);
-    const borrow = borrows.find(b => b.asset === asset);
+  const getMarketStatsForBorrow = (asset: string, poolId?: string) => {
+    // Find matching markets - prefer poolId match if provided
+    let market;
+    if (poolId) {
+      // If poolId is provided, match by both symbol and poolId
+      market = marketData.find(m => m.symbol === asset && m.poolId === poolId);
+    }
+    
+    // If no poolId match or poolId not provided, find by symbol
+    // For tokens with multiple markets, prefer the one with higher totalDeposits (more active market)
+    if (!market) {
+      const matchingMarkets = marketData.filter(m => m.symbol === asset);
+      if (matchingMarkets.length > 1) {
+        // Multiple markets found - prefer the one with higher totalDeposits
+        market = matchingMarkets.reduce((prev, current) => {
+          const prevDeposits = parseFloat(prev.totalDeposits || "0");
+          const currentDeposits = parseFloat(current.totalDeposits || "0");
+          return currentDeposits > prevDeposits ? current : prev;
+        });
+      } else {
+        market = matchingMarkets[0];
+      }
+    }
+    
+    // Find matching borrow - prefer poolId match if provided
+    let borrow;
+    if (poolId) {
+      // If poolId is provided, match by both asset and poolId
+      borrow = borrows.find(b => b.asset === asset && b.poolId === poolId);
+    }
+    
+    // If no poolId match or poolId not provided, find by asset only
+    if (!borrow) {
+      borrow = borrows.find(b => b.asset === asset);
+    }
     
     // Calculate health factor from userGlobalData
     // Use healthFactorIndex if available (calculated with individual market collateral factors)
@@ -186,9 +251,41 @@ const PortfolioModals = ({
     return stats;
   };
 
-  const getAssetData = (asset: string) => {
-    const market = marketData.find(m => m.symbol === asset);
-    const deposit = deposits.find(d => d.asset === asset);
+  const getAssetData = (asset: string, poolId?: string) => {
+    // Find matching markets - prefer poolId match if provided
+    let market;
+    if (poolId) {
+      // If poolId is provided, match by both symbol and poolId
+      market = marketData.find(m => m.symbol === asset && m.poolId === poolId);
+    }
+    
+    // If no poolId match or poolId not provided, find by symbol
+    // For tokens with multiple markets, prefer the one with higher totalDeposits (more active market)
+    if (!market) {
+      const matchingMarkets = marketData.filter(m => m.symbol === asset);
+      if (matchingMarkets.length > 1) {
+        // Multiple markets found - prefer the one with higher totalDeposits
+        market = matchingMarkets.reduce((prev, current) => {
+          const prevDeposits = parseFloat(prev.totalDeposits || "0");
+          const currentDeposits = parseFloat(current.totalDeposits || "0");
+          return currentDeposits > prevDeposits ? current : prev;
+        });
+      } else {
+        market = matchingMarkets[0];
+      }
+    }
+    
+    // Find matching deposit - prefer poolId match if provided
+    let deposit;
+    if (poolId) {
+      // If poolId is provided, match by both asset and poolId
+      deposit = deposits.find(d => d.asset === asset && d.poolId === poolId);
+    }
+    
+    // If no poolId match or poolId not provided, find by asset only
+    if (!deposit) {
+      deposit = deposits.find(d => d.asset === asset);
+    }
     
     if (!market) return null;
     
@@ -223,17 +320,31 @@ const PortfolioModals = ({
 
       // Get token configuration
       const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-      const token = tokens.find((t) => t.symbol === withdrawModal.asset);
+      // If poolId is provided, find the token that matches both symbol and poolId
+      // Otherwise, fall back to finding by symbol only (for backward compatibility)
+      const token = withdrawModal.poolId
+        ? tokens.find((t) => t.symbol === withdrawModal.asset && t.poolId === withdrawModal.poolId)
+        : tokens.find((t) => t.symbol === withdrawModal.asset);
       
       if (!token) {
-        throw new Error(`Token not found for ${withdrawModal.asset}`);
+        throw new Error(`Token not found for ${withdrawModal.asset}${withdrawModal.poolId ? ` with poolId ${withdrawModal.poolId}` : ''}`);
       }
 
       // Use originalSymbol to look up the config, as asset might be a display symbol
       const originalSymbol = 'originalSymbol' in token ? (token as any).originalSymbol : withdrawModal.asset;
-      const originalTokenConfig = getTokenConfig(currentNetwork, originalSymbol);
-      if (!originalTokenConfig) {
+      const originalTokenConfigRaw = getTokenConfig(currentNetwork, originalSymbol);
+      if (!originalTokenConfigRaw) {
         throw new Error(`Token config not found for ${withdrawModal.asset} (originalSymbol: ${originalSymbol})`);
+      }
+
+      // Handle case where tokenConfig might be an array (multiple markets)
+      // Compare poolIds as strings to ensure exact match
+      const originalTokenConfig = Array.isArray(originalTokenConfigRaw)
+        ? originalTokenConfigRaw.find((tc) => String(tc.poolId) === String(token.poolId)) || originalTokenConfigRaw[0]
+        : originalTokenConfigRaw;
+
+      if (!originalTokenConfig) {
+        throw new Error(`Token config not found for ${withdrawModal.asset} with poolId ${token.poolId}`);
       }
 
       console.log("Withdraw parameters:", {
@@ -350,17 +461,31 @@ const PortfolioModals = ({
 
       // Get token configuration
       const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-      const token = tokens.find((t) => t.symbol === repayModal.asset);
+      // If poolId is provided, find the token that matches both symbol and poolId
+      // Otherwise, fall back to finding by symbol only (for backward compatibility)
+      const token = repayModal.poolId
+        ? tokens.find((t) => t.symbol === repayModal.asset && t.poolId === repayModal.poolId)
+        : tokens.find((t) => t.symbol === repayModal.asset);
       
       if (!token) {
-        throw new Error(`Token not found for ${repayModal.asset}`);
+        throw new Error(`Token not found for ${repayModal.asset}${repayModal.poolId ? ` with poolId ${repayModal.poolId}` : ''}`);
       }
 
       // Use originalSymbol to look up the config, as asset might be a display symbol
       const originalSymbol = 'originalSymbol' in token ? (token as any).originalSymbol : repayModal.asset;
-      const originalTokenConfig = getTokenConfig(currentNetwork, originalSymbol);
-      if (!originalTokenConfig) {
+      const originalTokenConfigRaw = getTokenConfig(currentNetwork, originalSymbol);
+      if (!originalTokenConfigRaw) {
         throw new Error(`Token config not found for ${repayModal.asset} (originalSymbol: ${originalSymbol})`);
+      }
+
+      // Handle case where tokenConfig might be an array (multiple markets)
+      // Compare poolIds as strings to ensure exact match
+      const originalTokenConfig = Array.isArray(originalTokenConfigRaw)
+        ? originalTokenConfigRaw.find((tc) => String(tc.poolId) === String(token.poolId)) || originalTokenConfigRaw[0]
+        : originalTokenConfigRaw;
+
+      if (!originalTokenConfig) {
+        throw new Error(`Token config not found for ${repayModal.asset} with poolId ${token.poolId}`);
       }
 
       console.log("Repay parameters:", {
@@ -442,13 +567,14 @@ const PortfolioModals = ({
 
   return (
     <>
-      {depositModal.isOpen && depositModal.asset && getAssetData(depositModal.asset) && (
+      {depositModal.isOpen && depositModal.asset && getAssetData(depositModal.asset, depositModal.poolId) && (
         <SupplyBorrowModal
           isOpen={depositModal.isOpen}
           onClose={onCloseDepositModal}
           asset={depositModal.asset}
+          poolId={depositModal.poolId}
           mode="deposit"
-          assetData={getAssetData(depositModal.asset)}
+          assetData={getAssetData(depositModal.asset, depositModal.poolId)}
           walletBalance={walletBalances[depositModal.asset]?.balance || 0}
           walletBalanceUSD={walletBalances[depositModal.asset]?.balanceUSD || 0}
           onTransactionSuccess={() => {
@@ -466,15 +592,22 @@ const PortfolioModals = ({
         />
       )}
 
-      {withdrawModal.isOpen && withdrawModal.asset && (
-        <WithdrawModal
-          isOpen={withdrawModal.isOpen}
-          onClose={onCloseWithdrawModal}
-          tokenSymbol={withdrawModal.asset}
-          tokenIcon={getTokenImagePath(withdrawModal.asset)}
-          currentlyDeposited={deposits.find(d => d.asset === withdrawModal.asset)?.balance || 0}
-          marketStats={getMarketStatsForDeposit(withdrawModal.asset)}
-          onSubmit={handleWithdrawSubmit}
+      {withdrawModal.isOpen && withdrawModal.asset && (() => {
+        // Find the correct deposit - prefer poolId match if provided
+        const deposit = withdrawModal.poolId
+          ? deposits.find(d => d.asset === withdrawModal.asset && d.poolId === withdrawModal.poolId)
+          : deposits.find(d => d.asset === withdrawModal.asset);
+        
+        return (
+          <WithdrawModal
+            isOpen={withdrawModal.isOpen}
+            onClose={onCloseWithdrawModal}
+            tokenSymbol={withdrawModal.asset}
+            tokenIcon={getTokenImagePath(withdrawModal.asset)}
+            currentlyDeposited={deposit?.balance || 0}
+            nTokenBalance={deposit?.nTokenBalance}
+            marketStats={getMarketStatsForDeposit(withdrawModal.asset, withdrawModal.poolId)}
+            onSubmit={handleWithdrawSubmit}
           onRefreshBalance={() => {
             // Refresh market data to update nToken balance
             if (onRefreshMarket) {
@@ -482,15 +615,17 @@ const PortfolioModals = ({
             }
           }}
         />
-      )}
+        );
+      })()}
 
-      {borrowModal.isOpen && borrowModal.asset && getAssetData(borrowModal.asset) && (
+      {borrowModal.isOpen && borrowModal.asset && getAssetData(borrowModal.asset, borrowModal.poolId) && (
         borrowModal.asset === 'WAD' ? (
           <MintModal
             isOpen={borrowModal.isOpen}
             onClose={onCloseBorrowModal}
             asset={borrowModal.asset}
-            assetData={getAssetData(borrowModal.asset)}
+            poolId={borrowModal.poolId}
+            assetData={getAssetData(borrowModal.asset, borrowModal.poolId)}
             userGlobalData={userGlobalData}
             userBorrowBalance={userBorrowBalance || 0}
             onTransactionSuccess={() => {
@@ -506,8 +641,9 @@ const PortfolioModals = ({
             isOpen={borrowModal.isOpen}
             onClose={onCloseBorrowModal}
             asset={borrowModal.asset}
+            poolId={borrowModal.poolId}
             mode="borrow"
-            assetData={getAssetData(borrowModal.asset)}
+            assetData={getAssetData(borrowModal.asset, borrowModal.poolId)}
             userGlobalData={userGlobalData}
             userBorrowBalance={userBorrowBalance || 0}
             onTransactionSuccess={() => {
@@ -521,20 +657,27 @@ const PortfolioModals = ({
         )
       )}
 
-      {repayModal.isOpen && repayModal.asset && (
-        <RepayModal
-          isOpen={repayModal.isOpen}
-          onClose={onCloseRepayModal}
-          tokenSymbol={repayModal.asset}
-          tokenIcon={getTokenImagePath(repayModal.asset)}
-          currentBorrow={borrows.find(b => b.asset === repayModal.asset)?.balance || 0}
-          accruedInterest={borrows.find(b => b.asset === repayModal.asset)?.interest || 0}
-          walletBalance={walletBalances[repayModal.asset]?.balance || 0}
-          marketStats={getMarketStatsForBorrow(repayModal.asset)}
-          lastUpdateTime={userGlobalData?.lastUpdateTime}
-          onSubmit={handleRepaySubmit}
-        />
-      )}
+      {repayModal.isOpen && repayModal.asset && (() => {
+        // Find the correct borrow - prefer poolId match if provided
+        const borrow = repayModal.poolId
+          ? borrows.find(b => b.asset === repayModal.asset && b.poolId === repayModal.poolId)
+          : borrows.find(b => b.asset === repayModal.asset);
+        
+        return (
+          <RepayModal
+            isOpen={repayModal.isOpen}
+            onClose={onCloseRepayModal}
+            tokenSymbol={repayModal.asset}
+            tokenIcon={getTokenImagePath(repayModal.asset)}
+            currentBorrow={borrow?.balance || 0}
+            accruedInterest={borrow?.interest || 0}
+            walletBalance={walletBalances[repayModal.asset]?.balance || 0}
+            marketStats={getMarketStatsForBorrow(repayModal.asset, repayModal.poolId)}
+            lastUpdateTime={userGlobalData?.lastUpdateTime}
+            onSubmit={handleRepaySubmit}
+          />
+        );
+      })()}
     </>
   );
 };

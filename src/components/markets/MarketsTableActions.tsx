@@ -4,9 +4,10 @@ import { ArrowRightLeft } from "lucide-react";
 
 interface MarketsTableActionsProps {
   asset: string;
-  onDepositClick: (asset: string) => void;
-  onBorrowClick: (asset: string) => void;
-  onMintClick?: (asset: string) => void;
+  poolId?: string; // Pool ID to identify specific market when multiple markets exist for same symbol
+  onDepositClick: (asset: string, poolId?: string) => void;
+  onBorrowClick: (asset: string, poolId?: string) => void;
+  onMintClick?: (asset: string, poolId?: string) => void;
   onMigrateClick?: (asset: string) => void;
   migrationBalance?: string; // Formatted balance to display
   isLoadingBalance?: boolean;
@@ -14,7 +15,8 @@ interface MarketsTableActionsProps {
 }
 
 const MarketsTableActions = ({ 
-  asset, 
+  asset,
+  poolId,
   onDepositClick, 
   onBorrowClick, 
   onMintClick,
@@ -31,7 +33,7 @@ const MarketsTableActions = ({
             variant="secondary"
             onClick={(e) => {
               e.stopPropagation();
-              onDepositClick(asset);
+              onDepositClick(asset, poolId);
             }}
             disabled={isLoadingBalance}
           >
@@ -43,9 +45,9 @@ const MarketsTableActions = ({
           onClick={(e) => {
             e.stopPropagation();
             if (isSToken && onMintClick) {
-              onMintClick(asset);
+              onMintClick(asset, poolId);
             } else {
-              onBorrowClick(asset);
+              onBorrowClick(asset, poolId);
             }
           }}
           className={isSToken ? "min-w-[140px] flex-1" : ""}

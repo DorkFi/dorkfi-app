@@ -94,7 +94,7 @@ export interface NetworkConfig extends BaseNetworkConfig {
   rpcPublicUrl?: string;
   contracts: ContractConfig;
   tokens: {
-    [symbol: string]: TokenConfig;
+    [symbol: string]: TokenConfig | TokenConfig[];
   };
   preFiParameters?: PreFiParameters;
   gasStation?: string[];
@@ -321,7 +321,6 @@ const prefiTokens = {
     logoPath: "https://asset-verification.nautilus.sh/icons/300279.png",
     tokenStandard: "arc200",
   },
-  // CORN 412682 6
   CORN: {
     contractId: "412682",
     poolId: "44866061",
@@ -332,7 +331,6 @@ const prefiTokens = {
     logoPath: "https://asset-verification.nautilus.sh/icons/412682.png",
     tokenStandard: "arc200",
   },
-  // F 302222 6
   F: {
     contractId: "302222",
     poolId: "44866061",
@@ -343,7 +341,6 @@ const prefiTokens = {
     logoPath: "https://asset-verification.nautilus.sh/icons/302222.png",
     tokenStandard: "arc200",
   },
-  // IAT 420024 6
   IAT: {
     contractId: "420024",
     poolId: "44866061",
@@ -473,7 +470,7 @@ const betaVoiMainnetConfig: NetworkConfig = {
 };
 const prodAMarket = "47139778";
 const prodBMarket = "47139781";
-const prodTokens: { [symbol: string]: TokenConfig } = {
+const prodTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
   VOI: {
     assetId: "0",
     poolId: "47139778",
@@ -526,17 +523,22 @@ const prodTokens: { [symbol: string]: TokenConfig } = {
     logoPath: "/lovable-uploads/UNIT.png",
     tokenStandard: "arc200",
   },
-  // aALGO: {
-  //   assetId: "302189",
-  //   contractId: "413153",
-  //   poolId: "41760711",
-  //   nTokenId: "42674504",
-  //   decimals: 6,
-  //   name: "Aramid Algorand",
-  //   symbol: "aALGO",
-  //   logoPath: "/lovable-uploads/aALGO.png",
-  //   tokenStandard: "asa",
-  // },
+  aALGO: {
+    assetId: "302189",
+    contractId: "413153",
+    poolId: "47139778",
+    nTokenId: "47475308",
+    migration: {
+      contractId: "413153",
+      poolId: "41760711",
+      nTokenId: "42674504",
+    },
+    decimals: 6,
+    name: "Aramid Algorand",
+    symbol: "aALGO",
+    logoPath: "/lovable-uploads/aALGO.png",
+    tokenStandard: "asa",
+  },
   // aETH: {
   //   assetId: "302193",
   //   contractId: "40153308",
@@ -586,7 +588,6 @@ const prodTokens: { [symbol: string]: TokenConfig } = {
     logoPath: "/lovable-uploads/POW.png",
     tokenStandard: "asa",
   },
-  // // Fountain VOI 770561 6
   // FV: {
   //   assetId: "0",
   //   contractId: "770561",
@@ -686,18 +687,21 @@ const prodTokens: { [symbol: string]: TokenConfig } = {
     logoPath: "https://asset-verification.nautilus.sh/icons/300279.png",
     tokenStandard: "arc200",
   },
-  // // CORN 412682 6
-  // CORN: {
-  //   contractId: "412682",
-  //   poolId: "44866061",
-  //   nTokenId: "44872738",
-  //   decimals: 6,
-  //   name: "CORN",
-  //   symbol: "CORN",
-  //   logoPath: "https://asset-verification.nautilus.sh/icons/412682.png",
-  //   tokenStandard: "arc200",
-  // },
-  // // F 302222 6
+  CORN: {
+    contractId: "412682",
+    poolId: "47139781",
+    nTokenId: "47475083",
+    decimals: 6,
+    migration: {
+      contractId: "412682",
+      poolId: "44866061",
+      nTokenId: "44872738",
+    },
+    name: "CORN",
+    symbol: "CORN",
+    logoPath: "https://asset-verification.nautilus.sh/icons/412682.png",
+    tokenStandard: "arc200",
+  },
   // F: {
   //   contractId: "302222",
   //   poolId: "44866061",
@@ -719,18 +723,30 @@ const prodTokens: { [symbol: string]: TokenConfig } = {
   //   logoPath: "https://asset-verification.nautilus.sh/icons/420024.png",
   //   tokenStandard: "arc200",
   // },
-  WAD: {
-    // assetId: 47155831
-    contractId: "47138068",
-    poolId: "47139778",
-    nTokenId: "47155328",
-    decimals: 6,
-    name: "WAD",
-    symbol: "WAD",
-    logoPath: "/lovable-uploads/WAD_fixed.png",
-    tokenStandard: "arc200",
-    isStoken: true,
-  },
+  WAD: [
+    {
+      // assetId: 47155831
+      contractId: "47138068",
+      poolId: "47139778",
+      nTokenId: "47155328",
+      decimals: 6,
+      name: "WAD",
+      symbol: "WAD",
+      logoPath: "/lovable-uploads/WAD_fixed.png",
+      tokenStandard: "arc200",
+      isStoken: true,
+    },
+    {
+      contractId: "47138068",
+      poolId: "47139781",
+      nTokenId: "47469357",
+      decimals: 6,
+      name: "WAD",
+      symbol: "WAD",
+      logoPath: "/lovable-uploads/WAD_fixed.png",
+      tokenStandard: "arc200",
+    },
+  ],
 };
 const prodLendingPools = [prodAMarket, prodBMarket];
 const prodContracts = {
@@ -1147,7 +1163,7 @@ const algorandProdContracts: ContractConfig = {
   appStorageId: algorandProdAppStorageId,
 };
 
-const algorandProdTokens: Record<string, TokenConfig> = {
+const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
   ALGO: {
     assetId: "0",
     poolId: "3333688282",
@@ -1561,18 +1577,31 @@ const algorandProdTokens: Record<string, TokenConfig> = {
     logoPath: "/lovable-uploads/xUSD.webp",
     tokenStandard: "asa",
   },
-  WAD: {
-    assetId: "3334160924",
-    contractId: "3333688448",
-    poolId: "3333688282",
-    nTokenId: "3333919084",
-    decimals: 6,
-    name: "WAD",
-    symbol: "WAD",
-    logoPath: "/lovable-uploads/WAD_fixed.png",
-    tokenStandard: "arc200-exchange",
-    isStoken: true,
-  },
+  WAD: [
+    {
+      assetId: "3334160924",
+      contractId: "3333688448",
+      poolId: "3333688282",
+      nTokenId: "3333919084",
+      decimals: 6,
+      name: "WAD",
+      symbol: "WAD",
+      logoPath: "/lovable-uploads/WAD_fixed.png",
+      tokenStandard: "arc200-exchange",
+      isStoken: true,
+    },
+    {
+      assetId: "3334160924",
+      contractId: "3333688448",
+      poolId: "3345940978",
+      nTokenId: "3350640542",
+      decimals: 6,
+      name: "WAD",
+      symbol: "WAD",
+      logoPath: "/lovable-uploads/WAD_fixed.png",
+      tokenStandard: "arc200-exchange",
+    },
+  ],
 };
 const algorandMainnetProdConfig: NetworkConfig = {
   networkId: "algorand-mainnet",
@@ -1973,101 +2002,175 @@ export const getCurrentLendingPool = (): string | undefined => {
   return getLendingPool(config.defaultNetwork);
 };
 
-export const getTokenConfig = (networkId: NetworkId, symbol: string) => {
+export const getTokenConfig = (
+  networkId: NetworkId,
+  symbol: string
+): TokenConfig | TokenConfig[] | undefined => {
   return config.networks[networkId].tokens[symbol];
 };
 
-export const getAllTokens = (networkId: NetworkId) => {
-  return Object.values(config.networks[networkId].tokens);
+export const getAllTokens = (networkId: NetworkId): TokenConfig[] => {
+  const tokens = config.networks[networkId].tokens;
+  const result: TokenConfig[] = [];
+  for (const tokenConfig of Object.values(tokens)) {
+    if (Array.isArray(tokenConfig)) {
+      result.push(...tokenConfig);
+    } else {
+      result.push(tokenConfig);
+    }
+  }
+  return result;
 };
 
 /**
  * Get token display information with market override support
  * This function returns the display name and symbol, considering market overrides
+ * For tokens with multiple markets (array), returns info for the first market
  */
-export const getTokenDisplayInfo = (networkId: NetworkId, symbol: string) => {
+export const getTokenDisplayInfo = (
+  networkId: NetworkId,
+  symbol: string,
+  marketIndex: number = 0
+) => {
   const tokenConfig = getTokenConfig(networkId, symbol);
   if (!tokenConfig) {
     return null;
   }
 
+  // Handle array of token configs (multiple markets)
+  const config: TokenConfig = Array.isArray(tokenConfig)
+    ? tokenConfig[marketIndex] ?? tokenConfig[0]
+    : tokenConfig;
+
+  if (!config) {
+    return null;
+  }
+
   // If market override is configured, use the override values
-  if (tokenConfig.marketOverride) {
+  if (config.marketOverride) {
     return {
-      name: tokenConfig.marketOverride.displayName,
-      symbol: tokenConfig.marketOverride.displaySymbol,
+      name: config.marketOverride.displayName,
+      symbol: config.marketOverride.displaySymbol,
       underlyingAssetId:
-        tokenConfig.marketOverride.underlyingAssetId || tokenConfig.assetId,
+        config.marketOverride.underlyingAssetId || config.assetId,
       underlyingContractId:
-        tokenConfig.marketOverride.underlyingContractId ||
-        tokenConfig.contractId,
-      isSmartContract: tokenConfig.marketOverride.isSmartContract,
-      originalName: tokenConfig.name,
-      originalSymbol: tokenConfig.symbol,
-      originalContractId: tokenConfig.contractId,
-      poolId: tokenConfig.poolId, // Include pool ID from config
+        config.marketOverride.underlyingContractId || config.contractId,
+      isSmartContract: config.marketOverride.isSmartContract,
+      originalName: config.name,
+      originalSymbol: config.symbol,
+      originalContractId: config.contractId,
+      poolId: config.poolId, // Include pool ID from config
     };
   }
 
   // Otherwise, return the original token information
   return {
-    name: tokenConfig.name,
-    symbol: tokenConfig.symbol,
-    underlyingAssetId: tokenConfig.assetId,
-    underlyingContractId: tokenConfig.contractId,
+    name: config.name,
+    symbol: config.symbol,
+    underlyingAssetId: config.assetId,
+    underlyingContractId: config.contractId,
     isSmartContract: false,
-    originalName: tokenConfig.name,
-    originalSymbol: tokenConfig.symbol,
-    originalContractId: tokenConfig.contractId,
-    poolId: tokenConfig.poolId, // Include pool ID from config
+    originalName: config.name,
+    originalSymbol: config.symbol,
+    originalContractId: config.contractId,
+    poolId: config.poolId, // Include pool ID from config
   };
 };
 
 /**
  * Get all tokens with display information (considering market overrides)
+ * For tokens with multiple markets, each market is returned as a separate entry
  */
 export const getAllTokensWithDisplayInfo = (networkId: NetworkId) => {
   const networkConfig = getNetworkConfig(networkId);
   const tokens = config.networks[networkId].tokens;
   console.log("tokens", { tokens });
-  return Object.entries(tokens).map(([symbol, tokenConfig]) => ({
-    symbol,
-    ...getTokenDisplayInfo(networkId, symbol)!,
-    decimals: tokenConfig.decimals,
-    logoPath: tokenConfig.logoPath,
-  }));
+  const result: Array<{
+    symbol: string;
+    name: string;
+    underlyingAssetId?: string;
+    underlyingContractId?: string;
+    isSmartContract: boolean;
+    originalName: string;
+    originalSymbol: string;
+    originalContractId?: string;
+    poolId?: string;
+    decimals: number;
+    logoPath: string;
+  }> = [];
+
+  for (const [symbol, tokenConfig] of Object.entries(tokens)) {
+    if (Array.isArray(tokenConfig)) {
+      // Handle multiple markets for the same token
+      tokenConfig.forEach((config, index) => {
+        const displayInfo = getTokenDisplayInfo(networkId, symbol, index);
+        if (displayInfo) {
+          result.push({
+            symbol,
+            ...displayInfo,
+            decimals: config.decimals,
+            logoPath: config.logoPath,
+          });
+        }
+      });
+    } else {
+      // Handle single token config (backwards compatible)
+      const displayInfo = getTokenDisplayInfo(networkId, symbol);
+      if (displayInfo) {
+        result.push({
+          symbol,
+          ...displayInfo,
+          decimals: tokenConfig.decimals,
+          logoPath: tokenConfig.logoPath,
+        });
+      }
+    }
+  }
+
+  return result;
 };
 
 /**
  * Check if a token has market override configured
+ * For tokens with multiple markets, checks the first market
  */
 export const hasMarketOverride = (
   networkId: NetworkId,
   symbol: string
 ): boolean => {
   const tokenConfig = getTokenConfig(networkId, symbol);
-  return tokenConfig?.marketOverride !== undefined;
+  if (!tokenConfig) {
+    return false;
+  }
+  const config: TokenConfig = Array.isArray(tokenConfig)
+    ? tokenConfig[0]
+    : tokenConfig;
+  return config?.marketOverride !== undefined;
 };
 
 /**
  * Get the underlying asset ID for a token (considering market overrides)
+ * For tokens with multiple markets, returns the asset ID for the first market
  */
 export const getUnderlyingAssetId = (
   networkId: NetworkId,
-  symbol: string
+  symbol: string,
+  marketIndex: number = 0
 ): string | undefined => {
-  const displayInfo = getTokenDisplayInfo(networkId, symbol);
+  const displayInfo = getTokenDisplayInfo(networkId, symbol, marketIndex);
   return displayInfo?.underlyingAssetId;
 };
 
 /**
  * Get the underlying contract ID for a token (considering market overrides)
+ * For tokens with multiple markets, returns the contract ID for the first market
  */
 export const getUnderlyingContractId = (
   networkId: NetworkId,
-  symbol: string
+  symbol: string,
+  marketIndex: number = 0
 ): string | undefined => {
-  const displayInfo = getTokenDisplayInfo(networkId, symbol);
+  const displayInfo = getTokenDisplayInfo(networkId, symbol, marketIndex);
   return displayInfo?.underlyingContractId;
 };
 

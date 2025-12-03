@@ -146,7 +146,10 @@ const getMarketsFromConfig = (networkId: NetworkId) => {
   const tokens = getAllTokensWithDisplayInfo(networkId);
 
   return tokens.map((token) => ({
-    id: token.symbol.toLowerCase(),
+    // Include poolId in id to make it unique for tokens with multiple markets
+    id: token.poolId 
+      ? `${token.symbol.toLowerCase()}-${token.poolId}`
+      : token.symbol.toLowerCase(),
     name: token.name, // This will be "Voi" or "Algo" if override is configured
     symbol: token.symbol, // This will be "Voi" or "Algo" if override is configured
     originalName: token.originalName, // The original token name
@@ -2743,7 +2746,8 @@ export default function AdminDashboard() {
 
     try {
       // Get the market data from on-demand loading
-      const marketKey = market.asset?.toLowerCase();
+      // Use market.id if available (includes poolId), otherwise fall back to asset symbol
+      const marketKey = market.id || market.asset?.toLowerCase();
       const marketData = marketsData[marketKey];
 
       if (marketData?.marketInfo) {
@@ -6249,7 +6253,8 @@ export default function AdminDashboard() {
                   <>
                     {allMarkets.map((configMarket) => {
                       // Find matching market data if available
-                      const marketKey = configMarket.symbol.toLowerCase();
+                      // Use configMarket.id which includes poolId for unique identification
+                      const marketKey = configMarket.id;
                       const market = marketsData[marketKey];
                       const hasData = market && market.isLoaded && !market.error;
                       
@@ -6410,7 +6415,7 @@ export default function AdminDashboard() {
                             variant="outline"
                             size="sm"
                             className="flex-1"
-                            onClick={() => handleViewMarket(market || { asset: configMarket.symbol })}
+                            onClick={() => handleViewMarket(market ? { ...market, id: configMarket.id } : { asset: configMarket.symbol, id: configMarket.id })}
                             disabled={!hasData}
                           >
                             <Eye className="h-3 w-3 mr-1" />
@@ -12693,7 +12698,8 @@ export default function AdminDashboard() {
                     if (!selectedMarket) return;
                     setIsLoadingMarketView(true);
                     try {
-                      const marketKey = selectedMarket.asset?.toLowerCase();
+                      // Use market.id if available (includes poolId), otherwise fall back to asset symbol
+                      const marketKey = selectedMarket.id || selectedMarket.asset?.toLowerCase();
                       await loadMarketDataWithBypass(marketKey);
 
                       // Wait for data to be updated

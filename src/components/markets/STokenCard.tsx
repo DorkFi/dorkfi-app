@@ -12,7 +12,7 @@ interface STokenCardProps {
   onInfoClick: (e: React.MouseEvent, market: OnDemandMarketData) => void;
   onDepositClick: (asset: string) => void;
   onBorrowClick: (asset: string) => void;
-  onMintClick?: (asset: string) => void;
+  onMintClick?: (asset: string, poolId?: string) => void;
 }
 
 const STokenCard = ({ 
@@ -35,7 +35,7 @@ const STokenCard = ({
           <img src={market.icon} alt={market.asset} className="w-10 h-10 md:w-8 md:h-8 rounded-full object-contain flex-shrink-0" />
           <div className="flex flex-col items-center justify-center gap-1 text-center flex-1">
             <div className="font-semibold text-lg leading-tight">{market.asset}</div>
-            <Badge variant="outline" className="text-xs px-1 py-0 h-4">
+            <Badge variant="outline" className="text-xs px-2 py-0.5 h-4 flex items-center justify-center whitespace-nowrap">
               CF {market.collateralFactor}%
             </Badge>
           </div>
@@ -78,7 +78,7 @@ const STokenCard = ({
       <div className="flex gap-2 pt-1 justify-center md:justify-start">
         <DorkFiButton
           variant="secondary"
-          onClick={e => { e.stopPropagation(); onMintClick?.(market.asset); }}
+          onClick={e => { e.stopPropagation(); onMintClick?.(market.asset, market.marketInfo?.poolId); }}
           className="w-full bg-purple-100 hover:bg-purple-200 text-purple-800 dark:bg-purple-900 dark:hover:bg-purple-800 dark:text-purple-200"
         >
           Mint

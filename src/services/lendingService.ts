@@ -17,6 +17,7 @@ import {
   getTokenConfig,
   getLendingPools,
   getPreFiParameters,
+  TokenConfig,
 } from "@/config";
 import algorandService, { AlgorandNetwork } from "./algorandService";
 import { ARC200Service } from "./arc200Service";
@@ -225,7 +226,15 @@ export const fetchMarketInfo = async (
       }
 
       // Get the original token config to access isStoken property
-      const tokenConfig = networkConfig.tokens[token.symbol];
+      // For tokens with multiple markets (array), find the one matching the poolId
+      const tokenConfigRaw = networkConfig.tokens[token.symbol];
+      let tokenConfig: TokenConfig | undefined;
+      if (Array.isArray(tokenConfigRaw)) {
+        // Find the token config that matches the poolId
+        tokenConfig = tokenConfigRaw.find((config) => config.poolId === poolId) || tokenConfigRaw[0];
+      } else {
+        tokenConfig = tokenConfigRaw;
+      }
       const isSToken = tokenConfig?.isStoken || false;
 
       const marketR = await ci.get_market(Number(marketId));
@@ -297,10 +306,16 @@ export const fetchMarketInfo = async (
 
       const totalBorrows = formatDeposit(market.totalScaledBorrows.toString());
 
+      // For b market (poolId 47139781), use 2% (200 basis points) as base borrow rate
+      // Otherwise use the borrow rate from the contract
+      const baseBorrowRateBps = poolId === "47139781" 
+        ? 200 // 2% = 200 basis points for b market
+        : parseFloat(market.borrowRate.toString());
+
       // Calculate APY using the new utility function
       const apyCalculation = calculateDepositAPY(
         {
-          borrowRate: parseFloat(market.borrowRate.toString()),
+          borrowRate: baseBorrowRateBps,
           slope: parseFloat(market.slope.toString()),
           reserveFactor: parseFloat(market.reserveFactor.toString()),
         },
@@ -314,7 +329,7 @@ export const fetchMarketInfo = async (
       // Calculate borrow APY using the new utility function
       const borrowApyCalculation = calculateBorrowAPY(
         {
-          borrowRate: parseFloat(market.borrowRate.toString()),
+          borrowRate: baseBorrowRateBps,
           slope: parseFloat(market.slope.toString()),
           reserveFactor: parseFloat(market.reserveFactor.toString()),
         },
@@ -911,11 +926,22 @@ export const fetchUserWalletBalance = async (
       return null;
     }
 
+    // Get the actual token config to access all properties
+    const tokenConfigRaw = getTokenConfig(networkId, tokenSymbol);
+    const tokenConfig = Array.isArray(tokenConfigRaw)
+      ? tokenConfigRaw[0]
+      : tokenConfigRaw;
+
+    if (!tokenConfig) {
+      console.warn(`Token config not found for symbol ${tokenSymbol}`);
+      return null;
+    }
+
     console.log(`Token found for ${tokenSymbol}:`, {
       symbol: token.symbol,
-      contractId: token.contractId,
+      contractId: tokenConfig.contractId,
       underlyingContractId: token.underlyingContractId,
-      tokenStandard: token.tokenStandard,
+      tokenStandard: tokenConfig.tokenStandard,
       decimals: token.decimals,
     });
 
@@ -930,26 +956,26 @@ export const fetchUserWalletBalance = async (
 
       let balance = 0n;
 
-      if (token.tokenStandard === "network") {
+      if (tokenConfig.tokenStandard === "network") {
         // For network tokens (like VOI), get balance from account info
         const accountInfo = await clients.algod
           .accountInformation(userAddress)
           .do();
         balance = BigInt(accountInfo.amount);
-      } else if (token.tokenStandard === "asa") {
+      } else if (tokenConfig.tokenStandard === "asa") {
         // For ASA tokens, get balance from account asset information
         const accountAssetInfo = await clients.algod
-          .accountAssetInformation(userAddress, Number(token.assetId))
+          .accountAssetInformation(userAddress, Number(tokenConfig.assetId))
           .do();
         console.log("accountAssetInfo", accountAssetInfo);
-        balance = BigInt(accountAssetInfo?.asset?.amount);
+        balance = BigInt(accountAssetInfo?.amount || 0);
       } else if (
-        token.tokenStandard === "arc200" &&
-        (token.contractId || token.underlyingContractId)
+        tokenConfig.tokenStandard === "arc200" &&
+        (tokenConfig.contractId || token.underlyingContractId)
       ) {
         // For ARC200 tokens, get balance from ARC200Service
         // Use underlyingContractId if available, otherwise fallback to contractId
-        const contractId = token.underlyingContractId || token.contractId;
+        const contractId = token.underlyingContractId || tokenConfig.contractId;
         console.log(
           `Fetching ARC200 balance for ${tokenSymbol} with contractId: ${contractId}`
         );
@@ -960,7 +986,7 @@ export const fetchUserWalletBalance = async (
         console.log(`ARC200 balance result for ${tokenSymbol}:`, tokenBalance);
         balance = tokenBalance ? BigInt(tokenBalance) : 0n;
       } else {
-        console.warn(`Unsupported token standard: ${token.tokenStandard}`);
+        console.warn(`Unsupported token standard: ${tokenConfig.tokenStandard}`);
         return null;
       }
 
@@ -1350,7 +1376,15 @@ export const deposit = async (
   | { success: boolean; txId?: string; error?: string }
   | { success: true; txns: string[] }
 > => {
-  console.log("deposit", { poolId, marketId, amount, userAddress, networkId });
+  console.log("=== DEPOSIT DEBUG START ===");
+  console.log("deposit called with:", { 
+    poolId, 
+    marketId, 
+    tokenStandard, 
+    amount, 
+    userAddress, 
+    networkId 
+  });
 
   try {
     const networkConfig = getCurrentNetworkConfig();
@@ -1362,33 +1396,80 @@ export const deposit = async (
       );
       // Get token information
       const allTokens = getAllTokensWithDisplayInfo(networkId);
+      console.log("=== TOKEN LOOKUP DEBUG ===");
+      console.log("Total tokens available:", allTokens.length);
       console.log(
         "All available tokens:",
         allTokens.map((t) => ({
           symbol: t.symbol,
+          poolId: t.poolId,
           underlyingContractId: t.underlyingContractId,
           originalContractId: t.originalContractId,
         }))
       );
-      console.log("Looking for marketId:", marketId);
+      console.log("Searching for token with:", { 
+        marketId, 
+        poolId,
+        tokenStandard 
+      });
 
-      const token = allTokens.find(
-        (token) => token.underlyingContractId === marketId
-      );
+      // First try to find by both poolId and marketId (for multi-market tokens)
+      // If poolId is provided, prefer matching both poolId and underlyingContractId
+      let token = poolId
+        ? allTokens.find(
+            (token) =>
+              token.underlyingContractId === marketId && token.poolId === poolId
+          )
+        : null;
 
+      console.log("First search (with poolId):", token ? "FOUND" : "NOT FOUND");
+      if (token) {
+        console.log("Matched token details:", {
+          symbol: token.symbol,
+          poolId: token.poolId,
+          underlyingContractId: token.underlyingContractId,
+          originalContractId: token.originalContractId,
+        });
+      }
+
+      // Fall back to finding by marketId only if no match found with poolId
+      if (!token) {
+        console.log("Falling back to marketId-only search...");
+        token = allTokens.find(
+          (token) => token.underlyingContractId === marketId
+        );
+        console.log("Fallback search result:", token ? "FOUND" : "NOT FOUND");
+        if (token) {
+          console.log("WARNING: Found token by marketId only, may not match poolId!");
+          console.log("Matched token details:", {
+            symbol: token.symbol,
+            poolId: token.poolId,
+            underlyingContractId: token.underlyingContractId,
+            originalContractId: token.originalContractId,
+          });
+          console.log("Expected poolId:", poolId, "Found poolId:", token.poolId);
+        }
+      }
+
+      console.log("=== FINAL TOKEN SELECTED ===");
       console.log("Token found:", token);
 
       if (!token) {
-        console.error("Token not found for marketId:", marketId);
+        console.error("=== TOKEN NOT FOUND ERROR ===");
+        console.error("Token not found for marketId:", marketId, "poolId:", poolId);
         console.error(
           "Available underlyingContractIds:",
           allTokens.map((t) => t.underlyingContractId)
         );
+        console.error("Available poolIds:", allTokens.map((t) => t.poolId));
         throw new Error("Token not found");
       }
 
       // Convert amount to proper units (considering decimals)
       const bigAmount = BigInt(amount);
+      console.log("=== AMOUNT CONVERSION ===");
+      console.log("Input amount (string):", amount);
+      console.log("Converted amount (BigInt):", bigAmount.toString());
 
       console.log("bigAmount", { bigAmount });
 
@@ -1399,17 +1480,22 @@ export const deposit = async (
       }
 
       // Get market info to check limits
-      console.log({
-        fetchMarketInfo: {
-          poolId,
-          marketId,
-          networkId,
-        },
+      console.log("=== FETCHING MARKET INFO ===");
+      console.log("Market info request:", {
+        poolId,
+        marketId,
+        networkId,
       });
       const marketInfo = await fetchMarketInfo(poolId, marketId, networkId);
       if (!marketInfo) {
+        console.error("Failed to fetch market info for:", { poolId, marketId, networkId });
         throw new Error("Failed to fetch market info");
       }
+      console.log("Market info retrieved:", {
+        ntokenId: marketInfo.ntokenId,
+        totalDeposits: marketInfo.totalDeposits?.toString(),
+        maxTotalDeposits: marketInfo.maxTotalDeposits?.toString(),
+      });
 
       // Check if deposit would exceed max total deposits
       const currentTotalDeposits = new BigNumber(marketInfo.totalDeposits);
@@ -1448,6 +1534,14 @@ export const deposit = async (
       ciLending.setFee(5000);
       ciLending.setPaymentAmount(1e5);
 
+      console.log("=== BUILDING CONTRACTS ===");
+      console.log("Contract addresses:", {
+        poolId: Number(poolId),
+        underlyingContractId: Number(token.underlyingContractId),
+        ntokenId: Number(marketInfo.ntokenId),
+        userAddress,
+      });
+
       const builder = {
         lending: new CONTRACT(
           Number(poolId),
@@ -1485,7 +1579,33 @@ export const deposit = async (
             sk: new Uint8Array(),
           }
         ),
+        arc200Exchange: new CONTRACT(
+          Number(token.underlyingContractId),
+          clients.algod,
+          undefined,
+          {
+            name: "arc200Exchange",
+            desc: "arc200Exchange",
+            methods: [
+              // arc200_redeem(uint64)void
+              {
+                name: "arc200_redeem",
+                args: [{ name: "amount", type: "uint64" }],
+                returns: { type: "void" },
+              },
+            ],
+            events: [],
+          },
+          {
+            addr: userAddress,
+            sk: new Uint8Array(),
+          },
+          true,
+          false,
+          true
+        ),
       };
+      console.log("Contracts initialized successfully");
 
       let customTx: any;
 
@@ -1554,6 +1674,18 @@ export const deposit = async (
             ...axfer,
             note: new TextEncoder().encode("nt200 deposit"),
           });
+        } else if (tokenStandard == "arc200-exchange") {
+          const axfer = {
+            aamt: bigAmount,
+            xaid: Number(token.underlyingAssetId),
+          };
+          const txnO = (await builder.arc200Exchange.arc200_redeem(bigAmount))
+            .obj;
+          buildN.push({
+            ...txnO,
+            ...axfer,
+            note: new TextEncoder().encode("arc200_redeem"),
+          });
         }
 
         // approve spending of token
@@ -1605,6 +1737,14 @@ export const deposit = async (
           }
           // ------------------------------------------------------------
           const payment = p3 > 0 ? 9e5 : 1e5;
+          console.log("=== CREATING DEPOSIT TRANSACTION ===");
+          console.log("Deposit transaction params:", {
+            marketId: Number(marketId),
+            amount: BigInt(amount).toString(),
+            poolId: Number(poolId),
+            payment,
+            foreignApps,
+          });
           const txnO = (
             await builder.lending.deposit(Number(marketId), BigInt(amount))
           ).obj as any;
@@ -1614,9 +1754,17 @@ export const deposit = async (
             payment,
             foreignApps,
           });
+          console.log("Deposit transaction added to buildN");
         }
 
-        console.log("buildN", { buildN });
+        console.log("=== TRANSACTION BUILD ===");
+        console.log("buildN transactions count:", buildN.length);
+        console.log("buildN details:", buildN.map((txn, idx) => ({
+          index: idx,
+          type: txn.type,
+          note: txn.note ? new TextDecoder().decode(txn.note) : undefined,
+          payment: txn.payment,
+        })));
 
         // Create deposit transaction
         ci.setFee(20000);
@@ -1626,21 +1774,33 @@ export const deposit = async (
           ci.setBeaconId(3209233839); // TODO move this to ulujs
         }
 
+        console.log("=== CALLING ci.custom() ===");
         customTx = await ci.custom();
 
-        console.log("customTx", { customTx });
+        console.log("=== CUSTOM TX RESULT ===");
+        console.log("customTx success:", customTx.success);
+        if (customTx.success) {
+          console.log("Transaction count:", customTx.txns?.length || 0);
+        } else {
+          console.error("customTx error:", customTx);
+        }
 
         if (customTx.success) {
           break;
         }
       }
 
-      console.log("customTx", { customTx });
-
       if (!customTx.success) {
+        console.error("=== DEPOSIT TRANSACTION FAILED ===");
+        console.error("Failed to create deposit transaction after all attempts");
         throw new Error("Failed to create deposit transaction");
       }
 
+      console.log("=== DEPOSIT SUCCESS ===");
+      console.log("Deposit transaction created successfully");
+      console.log("Returning transaction array with", customTx.txns.length, "transactions");
+      console.log("=== DEPOSIT DEBUG END ===");
+      
       return {
         success: true,
         txns: [...customTx.txns],
@@ -1651,7 +1811,19 @@ export const deposit = async (
       throw new Error("Unsupported network");
     }
   } catch (error) {
+    console.error("=== DEPOSIT ERROR ===");
     console.error("Error depositing:", error);
+    console.error("Error details:", {
+      poolId,
+      marketId,
+      tokenStandard,
+      amount,
+      userAddress,
+      networkId,
+      errorMessage: error instanceof Error ? error.message : "Unknown error",
+      errorStack: error instanceof Error ? error.stack : undefined,
+    });
+    console.error("=== DEPOSIT DEBUG END (ERROR) ===");
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error occurred",
@@ -2709,7 +2881,15 @@ export const mint = async (
       }
 
       // Get the original token config to access tokenStandard
-      const originalTokenConfig = getTokenConfig(networkId, token.symbol);
+      const originalTokenConfigRaw = getTokenConfig(networkId, token.symbol);
+      if (!originalTokenConfigRaw) {
+        throw new Error(`Token config not found for ${token.symbol}`);
+      }
+
+      const originalTokenConfig = Array.isArray(originalTokenConfigRaw)
+        ? originalTokenConfigRaw[0]
+        : originalTokenConfigRaw;
+
       if (!originalTokenConfig) {
         throw new Error(`Token config not found for ${token.symbol}`);
       }

@@ -19,9 +19,9 @@ interface MarketCardViewProps {
   markets: OnDemandMarketData[];
   onRowClick: (market: OnDemandMarketData) => void;
   onInfoClick: (e: React.MouseEvent, market: OnDemandMarketData) => void;
-  onDepositClick: (asset: string) => void;
-  onBorrowClick: (asset: string) => void;
-  onMintClick?: (asset: string) => void;
+  onDepositClick: (asset: string, poolId?: string) => void;
+  onBorrowClick: (asset: string, poolId?: string) => void;
+  onMintClick?: (asset: string, poolId?: string) => void;
   onMigrateClick?: (asset: string) => void;
 }
 
@@ -140,7 +140,7 @@ const MarketCardView = ({
                 <img src={market.icon} alt={market.asset} className="w-10 h-10 md:w-8 md:h-8 rounded-full object-contain flex-shrink-0" />
                 <div className="flex flex-col items-center justify-center gap-1 text-center flex-1">
                   <div className="font-semibold text-lg leading-tight">{market.asset}</div>
-                  <Badge variant="outline" className="text-xs px-1 py-0 h-4">
+                  <Badge variant="outline" className="text-xs px-2 py-0.5 h-4 flex items-center justify-center whitespace-nowrap">
                     CF {market.collateralFactor}%
                   </Badge>
                 </div>

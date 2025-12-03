@@ -4,6 +4,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ArrowDown, Info, RefreshCw } from "lucide-react";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import DorkFiButton from "@/components/ui/DorkFiButton";
+import { useNetwork } from "@/contexts/NetworkContext";
+import { getNetworkConfig } from "@/config";
 
 interface Deposit {
   asset: string;
@@ -13,17 +15,32 @@ interface Deposit {
   value: number;
   apy: number;
   tokenPrice: number;
+  poolId?: string;
 }
 
 interface DepositsListProps {
   deposits: Deposit[];
-  onDepositClick: (asset: string) => void;
-  onWithdrawClick: (asset: string) => void;
+  onDepositClick: (asset: string, poolId?: string) => void;
+  onWithdrawClick: (asset: string, poolId?: string) => void;
   onRefresh?: () => void;
   isLoading?: boolean;
 }
 
 const DepositsList = ({ deposits, onDepositClick, onWithdrawClick, onRefresh, isLoading }: DepositsListProps) => {
+  const { currentNetwork } = useNetwork();
+  
+  // Helper function to get market label (A or B) based on poolId
+  const getMarketLabel = (poolId?: string): string | null => {
+    if (!poolId) return null;
+    const networkConfig = getNetworkConfig(currentNetwork);
+    const lendingPools = networkConfig?.contracts?.lendingPools || [];
+    if (lendingPools.length >= 2) {
+      if (String(poolId) === String(lendingPools[0])) return "A";
+      if (String(poolId) === String(lendingPools[1])) return "B";
+    }
+    return null;
+  };
+  
   return (
     <DorkFiCard className="card-hover dorkfi-mb-lg">
       <div className="flex items-center justify-between mb-4">
@@ -43,20 +60,35 @@ const DepositsList = ({ deposits, onDepositClick, onWithdrawClick, onRefresh, is
         )}
       </div>
       <div className="space-y-4">
-        {deposits.map((deposit) => (
-          <div 
-            key={deposit.asset}
-            className="grid grid-cols-[auto_1fr_auto] gap-x-4 items-center min-h-[100px] p-4 rounded-lg bg-white/50 dark:bg-slate-800/50 border border-gray-200/30 dark:border-ocean-teal/10 transition-all hover:bg-ocean-teal/5 hover:scale-105 hover:border-ocean-teal/40 card-hover cursor-pointer gap-y-1"
-          >
-            {/* Token Icon + Name (column 1) */}
-            <div className="flex flex-col items-center gap-1 w-20">
-              <img 
-                src={deposit.icon} 
-                alt={deposit.asset}
-                className="w-12 h-12 md:w-10 md:h-10 rounded-full"
-              />
-              <div className="font-bold text-base text-slate-800 dark:text-white text-center truncate w-full">{deposit.asset}</div>
-            </div>
+        {deposits.map((deposit) => {
+          const marketLabel = getMarketLabel(deposit.poolId);
+          // Use both asset and poolId for unique key to handle multiple markets for same token
+          const uniqueKey = deposit.poolId ? `${deposit.asset}-${deposit.poolId}` : deposit.asset;
+          return (
+            <div 
+              key={uniqueKey}
+              className="grid grid-cols-[auto_1fr_auto] gap-x-4 items-center min-h-[100px] p-4 rounded-lg bg-white/50 dark:bg-slate-800/50 border border-gray-200/30 dark:border-ocean-teal/10 transition-all hover:bg-ocean-teal/5 hover:scale-105 hover:border-ocean-teal/40 card-hover cursor-pointer gap-y-1"
+            >
+              {/* Token Icon + Name (column 1) */}
+              <div className="flex flex-col items-center gap-1 w-20">
+                <div className="relative flex-shrink-0">
+                  <img 
+                    src={deposit.icon} 
+                    alt={deposit.asset}
+                    className="w-12 h-12 md:w-10 md:h-10 rounded-full"
+                  />
+                  {marketLabel && (
+                    <div className={`absolute -top-1 -right-1 w-5 h-5 rounded-full ${
+                      marketLabel === "A" 
+                        ? "bg-blue-500 dark:bg-blue-600" 
+                        : "bg-purple-500 dark:bg-purple-600"
+                    } border-2 border-white dark:border-slate-800 flex items-center justify-center`}>
+                      <span className="text-xs font-bold text-white">{marketLabel}</span>
+                    </div>
+                  )}
+                </div>
+                <div className="font-bold text-base text-slate-800 dark:text-white text-center truncate w-full">{deposit.asset}</div>
+              </div>
             {/* $ value, APY, Balances & Price Info (column 2) */}
             <div className="flex flex-col items-center gap-[2px] min-w-0 text-center">
               {/* USD value (top, yellow) */}
@@ -111,11 +143,12 @@ const DepositsList = ({ deposits, onDepositClick, onWithdrawClick, onRefresh, is
             </div>
             {/* USD value above Deposit/Withdraw buttons (column 3) */}
             <div className="flex flex-col items-end gap-2 min-w-[150px] pr-3">
-              <DorkFiButton variant="secondary" onClick={() => onDepositClick(deposit.asset)} className="w-full max-w-[148px]">Deposit</DorkFiButton>
-              <DorkFiButton variant="danger-outline" onClick={() => onWithdrawClick(deposit.asset)} className="w-full max-w-[148px]">Withdraw</DorkFiButton>
+              <DorkFiButton variant="secondary" onClick={() => onDepositClick(deposit.asset, deposit.poolId)} className="w-full max-w-[148px]">Deposit</DorkFiButton>
+              <DorkFiButton variant="danger-outline" onClick={() => onWithdrawClick(deposit.asset, deposit.poolId)} className="w-full max-w-[148px]">Withdraw</DorkFiButton>
             </div>
           </div>
-        ))}
+          );
+        })}
         {deposits.length === 0 && (
           <div className="text-center py-8 dorkfi-text-secondary">
             <p>No active deposits</p>

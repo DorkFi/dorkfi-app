@@ -33,6 +33,7 @@ interface SupplyBorrowModalProps {
   isOpen: boolean;
   onClose: () => void;
   asset: string;
+  poolId?: string; // Pool ID to identify specific market when multiple markets exist for same symbol
   mode: "deposit" | "borrow";
   assetData: {
     icon: string;
@@ -67,6 +68,7 @@ const SupplyBorrowModal = ({
   isOpen,
   onClose,
   asset,
+  poolId,
   mode,
   assetData,
   walletBalance: propWalletBalance = 0,
@@ -115,10 +117,14 @@ const SupplyBorrowModal = ({
 
       try {
         const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-        const token = tokens.find((t) => t.symbol === asset);
+        // If poolId is provided, find the token that matches both symbol and poolId
+        // Otherwise, fall back to finding by symbol only (for backward compatibility)
+        const token = poolId
+          ? tokens.find((t) => t.symbol === asset && t.poolId === poolId)
+          : tokens.find((t) => t.symbol === asset);
 
         if (!token) {
-          throw new Error(`Token ${asset} not found in network config`);
+          throw new Error(`Token ${asset} not found in network config${poolId ? ` with poolId ${poolId}` : ''}`);
         }
 
         if (!token.poolId || !token.underlyingContractId) {
@@ -129,24 +135,34 @@ const SupplyBorrowModal = ({
 
         // Use originalSymbol to look up the config, as asset might be a display symbol
         const originalSymbol = 'originalSymbol' in token ? (token as any).originalSymbol : asset;
-        const tokenConfig = getTokenConfig(currentNetwork, originalSymbol);
+        const tokenConfigRaw = getTokenConfig(currentNetwork, originalSymbol);
+        if (!tokenConfigRaw) {
+          throw new Error(`Token config not found for ${asset} (originalSymbol: ${originalSymbol})`);
+        }
+
+        // Handle case where tokenConfig might be an array (multiple markets)
+        // Compare poolIds as strings to ensure exact match
+        const tokenConfig = Array.isArray(tokenConfigRaw)
+          ? tokenConfigRaw.find((tc) => String(tc.poolId) === String(token.poolId)) || tokenConfigRaw[0]
+          : tokenConfigRaw;
+
         if (!tokenConfig) {
           throw new Error(`Token config not found for ${asset} (originalSymbol: ${originalSymbol})`);
         }
 
-        const poolId = token.poolId;
+        const marketPoolId = token.poolId;
         const marketId = token.underlyingContractId;
         const decimals = tokenConfig.decimals;
 
         console.log("SupplyBorrowModal: Calling calculateMaxBorrowAmount", {
-          poolId,
+          poolId: marketPoolId,
           userId: activeAccount.address,
           marketId,
           asset,
         });
 
         const maxBorrowBigInt = await calculateMaxBorrowAmount(
-          poolId,
+          marketPoolId,
           activeAccount.address,
           marketId,
           47015119 // TODO get this from config
@@ -226,7 +242,7 @@ const SupplyBorrowModal = ({
     };
 
     fetchMaxBorrowAmount();
-  }, [isOpen, mode, activeAccount?.address, asset, currentNetwork]);
+  }, [isOpen, mode, activeAccount?.address, asset, poolId, currentNetwork]);
 
   // Reset states when modal opens/closes
   useEffect(() => {
@@ -270,11 +286,33 @@ const SupplyBorrowModal = ({
     setError(null);
 
     try {
+      console.log("=== SUPPLYBORROWMODAL HANDLESUBMIT DEBUG ===");
+      console.log("Input params:", { asset, poolId, mode, amount });
+      
       const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-      const token = tokens.find((t) => t.symbol === asset);
+      console.log("All tokens for", asset, ":", tokens.filter(t => t.symbol === asset).map(t => ({
+        symbol: t.symbol,
+        poolId: t.poolId,
+        underlyingContractId: t.underlyingContractId
+      })));
+      
+      // If poolId is provided, find the token that matches both symbol and poolId
+      // Otherwise, fall back to finding by symbol only (for backward compatibility)
+      const token = poolId
+        ? tokens.find((t) => t.symbol === asset && t.poolId === poolId)
+        : tokens.find((t) => t.symbol === asset);
+
+      console.log("Token lookup result:", {
+        poolIdProvided: poolId,
+        tokenFound: !!token,
+        tokenPoolId: token?.poolId,
+        tokenSymbol: token?.symbol,
+        tokenUnderlyingContractId: token?.underlyingContractId,
+      });
 
       if (!token) {
-        throw new Error(`Token ${asset} not found in network config`);
+        console.error("Token not found!", { asset, poolId, availableTokens: tokens.filter(t => t.symbol === asset) });
+        throw new Error(`Token ${asset} not found in network config${poolId ? ` with poolId ${poolId}` : ''}`);
       }
 
       if (!token.poolId || !token.underlyingContractId) {
@@ -298,24 +336,49 @@ const SupplyBorrowModal = ({
       // Get the original token config to access tokenStandard
       // Use originalSymbol to look up the config, as asset might be a display symbol
       const originalSymbol = 'originalSymbol' in token ? (token as any).originalSymbol : asset;
-      const originalTokenConfig = getTokenConfig(currentNetwork, originalSymbol);
+      const tokenConfigRaw = getTokenConfig(currentNetwork, originalSymbol);
+      if (!tokenConfigRaw) {
+        throw new Error(`Original token config not found for ${asset} (originalSymbol: ${originalSymbol})`);
+      }
+
+      // Handle case where tokenConfig might be an array (multiple markets)
+      const originalTokenConfig = Array.isArray(tokenConfigRaw)
+        ? tokenConfigRaw.find((tc) => String(tc.poolId) === String(token.poolId)) || tokenConfigRaw[0]
+        : tokenConfigRaw;
+
       if (!originalTokenConfig) {
         throw new Error(`Original token config not found for ${asset} (originalSymbol: ${originalSymbol})`);
       }
 
+      // Validate decimals exists
+      if (typeof originalTokenConfig.decimals !== 'number' || isNaN(originalTokenConfig.decimals)) {
+        throw new Error(`Invalid decimals for token ${asset}: ${originalTokenConfig.decimals}`);
+      }
+
       // Convert amount to atomic units (considering token decimals)
       const amountInAtomicUnits = new BigNumber(amount)
-        .multipliedBy(10 ** token.decimals)
+        .multipliedBy(10 ** originalTokenConfig.decimals)
         .toFixed(0);
 
-      console.log(`${mode} parameters:`, {
+      console.log(`=== ${mode.toUpperCase()} TRANSACTION PARAMS ===`);
+      console.log("Final parameters:", {
         poolId: token.poolId,
+        poolIdFromProp: poolId,
+        poolIdMatch: token.poolId === poolId,
         marketId: token.underlyingContractId,
         tokenStandard: originalTokenConfig.tokenStandard,
         amount: amountInAtomicUnits,
         userAddress: activeAccount.address,
         networkId: currentNetwork,
       });
+      
+      if (poolId && token.poolId !== poolId) {
+        console.error("⚠️ POOLID MISMATCH!", {
+          expectedPoolId: poolId,
+          actualTokenPoolId: token.poolId,
+          asset,
+        });
+      }
 
       let result;
 

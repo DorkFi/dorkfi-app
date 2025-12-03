@@ -54,7 +54,7 @@ export const BorrowAPYDisplay: React.FC<BorrowAPYDisplayProps> = ({
         </div>
         
         <div className="flex justify-between">
-          <span className="text-gray-300">Base Borrow Rate:</span>
+          <span className="text-gray-300">Borrow Rate:</span>
           <span className="text-white font-mono">
             {(tooltipCalculation.borrowRate * 100).toFixed(2)}%
           </span>

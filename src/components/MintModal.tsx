@@ -29,6 +29,7 @@ interface MintModalProps {
   isOpen: boolean;
   onClose: () => void;
   asset: string;
+  poolId?: string; // Pool ID to identify specific market when multiple markets exist for same symbol
   assetData: {
     icon: string;
     totalSupply: number;
@@ -57,6 +58,7 @@ const MintModal = ({
   isOpen,
   onClose,
   asset,
+  poolId,
   assetData,
   userGlobalData,
   userBorrowBalance = 0,
@@ -96,10 +98,14 @@ const MintModal = ({
 
       try {
         const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-        const token = tokens.find((t) => t.symbol === asset);
+        // If poolId is provided, find the token that matches both symbol and poolId
+        // Otherwise, fall back to finding by symbol only (for backward compatibility)
+        const token = poolId
+          ? tokens.find((t) => t.symbol === asset && t.poolId === poolId)
+          : tokens.find((t) => t.symbol === asset);
 
         if (!token) {
-          throw new Error(`Token ${asset} not found in network config`);
+          throw new Error(`Token ${asset} not found in network config${poolId ? ` with poolId ${poolId}` : ''}`);
         }
 
         if (!token.poolId || !token.underlyingContractId) {
@@ -108,24 +114,33 @@ const MintModal = ({
           );
         }
 
-        const tokenConfig = getTokenConfig(currentNetwork, asset);
+        const tokenConfigRaw = getTokenConfig(currentNetwork, asset);
+        if (!tokenConfigRaw) {
+          throw new Error(`Token config not found for ${asset}`);
+        }
+
+        // Handle case where tokenConfig might be an array (multiple markets)
+        const tokenConfig = Array.isArray(tokenConfigRaw)
+          ? tokenConfigRaw.find((tc) => String(tc.poolId) === String(token.poolId)) || tokenConfigRaw[0]
+          : tokenConfigRaw;
+
         if (!tokenConfig) {
           throw new Error(`Token config not found for ${asset}`);
         }
 
-        const poolId = token.poolId;
+        const marketPoolId = token.poolId;
         const marketId = token.underlyingContractId;
         const decimals = tokenConfig.decimals;
 
         console.log("Calculating max borrow amount:", {
-          poolId,
+          poolId: marketPoolId,
           userId: activeAccount.address,
           marketId,
           asset,
         });
 
         const maxBorrowBigInt = await calculateMaxBorrowAmount(
-          poolId,
+          marketPoolId,
           activeAccount.address,
           marketId,
           47015119 // TODO get this from config
@@ -157,7 +172,7 @@ const MintModal = ({
     };
 
     fetchMaxBorrowAmount();
-  }, [isOpen, activeAccount?.address, asset, currentNetwork]);
+  }, [isOpen, activeAccount?.address, asset, poolId, currentNetwork]);
 
   // Reset states when modal opens/closes
   useEffect(() => {
@@ -194,10 +209,14 @@ const MintModal = ({
 
     try {
       const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-      const token = tokens.find((t) => t.symbol === asset);
+      // If poolId is provided, find the token that matches both symbol and poolId
+      // Otherwise, fall back to finding by symbol only (for backward compatibility)
+      const token = poolId
+        ? tokens.find((t) => t.symbol === asset && t.poolId === poolId)
+        : tokens.find((t) => t.symbol === asset);
 
       if (!token) {
-        throw new Error(`Token ${asset} not found in network config`);
+        throw new Error(`Token ${asset} not found in network config${poolId ? ` with poolId ${poolId}` : ''}`);
       }
 
       if (!token.poolId || !token.underlyingContractId) {
@@ -207,9 +226,23 @@ const MintModal = ({
       }
 
       // Get the original token config to access tokenStandard
-      const originalTokenConfig = getTokenConfig(currentNetwork, asset);
+      const tokenConfigRaw = getTokenConfig(currentNetwork, asset);
+      if (!tokenConfigRaw) {
+        throw new Error(`Token config not found for ${asset}`);
+      }
+
+      // Handle case where tokenConfig might be an array (multiple markets)
+      const originalTokenConfig = Array.isArray(tokenConfigRaw)
+        ? tokenConfigRaw.find((tc) => tc.poolId === token.poolId) || tokenConfigRaw[0]
+        : tokenConfigRaw;
+
       if (!originalTokenConfig) {
         throw new Error(`Token config not found for ${asset}`);
+      }
+
+      // Validate decimals exists and is valid
+      if (typeof originalTokenConfig.decimals !== 'number' || isNaN(originalTokenConfig.decimals)) {
+        throw new Error(`Invalid decimals for token ${asset}: ${originalTokenConfig.decimals}`);
       }
 
       // Initialize clients

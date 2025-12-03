@@ -136,10 +136,17 @@ export const usePortfolioData = () => {
             // Add deposit position if user has deposits
             if (depositBalance && depositBalance > 0) {
               // Get the original token config to access nTokenId
-              const originalTokenConfig = getTokenConfig(
+              // For multi-market tokens (array), find the one matching the token's poolId
+              const originalTokenConfigRaw = getTokenConfig(
                 networkId as any,
                 token.symbol
               );
+              
+              // Handle array of token configs (multiple markets)
+              // Compare poolIds as strings to ensure exact match
+              const originalTokenConfig = Array.isArray(originalTokenConfigRaw)
+                ? originalTokenConfigRaw.find((tc) => String(tc.poolId) === String(token.poolId)) || originalTokenConfigRaw[0]
+                : originalTokenConfigRaw;
 
               // Fetch ntoken balance for this deposit
               const nTokenBalance = await fetchNTokenBalance(

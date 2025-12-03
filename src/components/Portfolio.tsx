@@ -24,11 +24,19 @@ const Portfolio = () => {
   const { activeAccount } = useWallet();
   const { currentNetwork } = useNetwork();
 
-  const [depositModal, setDepositModal] = useState({
+  const [depositModal, setDepositModal] = useState<{
+    isOpen: boolean;
+    asset: string | null;
+    poolId?: string;
+  }>({
     isOpen: false,
     asset: null,
   });
-  const [withdrawModal, setWithdrawModal] = useState({
+  const [withdrawModal, setWithdrawModal] = useState<{
+    isOpen: boolean;
+    asset: string | null;
+    poolId?: string;
+  }>({
     isOpen: false,
     asset: null,
   });
@@ -36,7 +44,14 @@ const Portfolio = () => {
     isOpen: false,
     asset: null,
   });
-  const [repayModal, setRepayModal] = useState({ isOpen: false, asset: null });
+  const [repayModal, setRepayModal] = useState<{
+    isOpen: boolean;
+    asset: string | null;
+    poolId?: string;
+  }>({
+    isOpen: false,
+    asset: null,
+  });
 
   // Real user data state
   const [userGlobalData, setUserGlobalData] = useState<{
@@ -134,7 +149,13 @@ const Portfolio = () => {
 
       for (const token of tokens) {
         if (token.underlyingContractId && token.poolId) {
-          const market = markets.find((m) => m.symbol === token.symbol);
+          // Find matching market by both symbol and poolId to handle multiple markets for same token
+          let market = markets.find((m) => m.symbol === token.symbol && m.poolId === token.poolId);
+          
+          // Fallback to symbol-only match if poolId match not found (for backward compatibility)
+          if (!market) {
+            market = markets.find((m) => m.symbol === token.symbol);
+          }
 
           // Fetch both deposit and borrow balances for this token
           const [depositBalance, borrowData] = await Promise.all([
@@ -159,10 +180,17 @@ const Portfolio = () => {
           // Add deposit position if user has deposits
           if (depositBalance && depositBalance > 0) {
             // Get the original token config to access nTokenId
-            const originalTokenConfig = getTokenConfig(
+            // For multi-market tokens (array), find the one matching the token's poolId
+            const originalTokenConfigRaw = getTokenConfig(
               networkId as any,
               token.symbol
             );
+            
+            // Handle array of token configs (multiple markets)
+            // Compare poolIds as strings to ensure exact match
+            const originalTokenConfig = Array.isArray(originalTokenConfigRaw)
+              ? originalTokenConfigRaw.find((tc) => String(tc.poolId) === String(token.poolId)) || originalTokenConfigRaw[0]
+              : originalTokenConfigRaw;
 
             // Fetch ntoken balance for this deposit
             const nTokenBalance = await fetchNTokenBalance(
@@ -196,6 +224,7 @@ const Portfolio = () => {
                 (market?.supplyRate ? market.supplyRate * 100 : 0),
               tokenPrice: tokenPrice,
               type: "deposit",
+              poolId: token.poolId,
             });
           }
 
@@ -227,6 +256,7 @@ const Portfolio = () => {
               tokenPrice: tokenPrice,
               type: "borrow",
               interest: borrowInterest,
+              poolId: token.poolId,
             });
           }
         }
@@ -390,16 +420,23 @@ const Portfolio = () => {
       // Use originalSymbol to look up the config, as asset might be a display symbol
       const originalSymbol =
         "originalSymbol" in token ? (token as any).originalSymbol : asset;
-      const originalTokenConfig = getTokenConfig(
+      const originalTokenConfigRaw = getTokenConfig(
         currentNetwork,
         originalSymbol
       );
-      if (!originalTokenConfig) {
+      if (!originalTokenConfigRaw) {
         console.error(
           `Original token config not found for ${asset} (originalSymbol: ${originalSymbol})`
         );
         return { balance: 0, balanceUSD: 0 };
       }
+
+      // Handle array of token configs (multiple markets)
+      // For multi-market tokens, find the one matching the token's poolId
+      // Compare poolIds as strings to ensure exact match
+      const originalTokenConfig = Array.isArray(originalTokenConfigRaw)
+        ? originalTokenConfigRaw.find((tc) => String(tc.poolId) === String(token.poolId)) || originalTokenConfigRaw[0]
+        : originalTokenConfigRaw;
 
       // Initialize ARC200Service with current clients
       const clients = await algorandService.getCurrentClientsForReads();
@@ -669,7 +706,7 @@ const Portfolio = () => {
     fetchData();
   }, [activeAccount?.address, currentNetwork]);
 
-  const handleDepositClick = async (asset: string) => {
+  const handleDepositClick = async (asset: string, poolId?: string) => {
     if (!activeAccount?.address || !currentNetwork) {
       return;
     }
@@ -681,18 +718,18 @@ const Portfolio = () => {
       await fetchWalletBalance(asset);
 
       // Open modal after balance is fetched
-      setDepositModal({ isOpen: true, asset });
+      setDepositModal({ isOpen: true, asset, poolId });
     } catch (error) {
       console.error("Error fetching wallet balance for deposit:", error);
       // Still open modal even if balance fetch fails
-      setDepositModal({ isOpen: true, asset });
+      setDepositModal({ isOpen: true, asset, poolId });
     } finally {
       setIsLoadingWalletBalance(false);
     }
   };
 
-  const handleWithdrawClick = (asset: string) => {
-    setWithdrawModal({ isOpen: true, asset });
+  const handleWithdrawClick = (asset: string, poolId?: string) => {
+    setWithdrawModal({ isOpen: true, asset, poolId });
   };
 
   const handleBorrowClick = async (asset: string) => {
@@ -743,7 +780,7 @@ const Portfolio = () => {
     }
   };
 
-  const handleRepayClick = async (asset: string) => {
+  const handleRepayClick = async (asset: string, poolId?: string) => {
     if (!activeAccount?.address) {
       console.error("No active account for repayment");
       return;
@@ -754,11 +791,11 @@ const Portfolio = () => {
       await refreshWalletBalance(asset);
 
       // Open modal after wallet balance is fetched
-      setRepayModal({ isOpen: true, asset });
+      setRepayModal({ isOpen: true, asset, poolId });
     } catch (error) {
       console.error("Error fetching wallet balance for repay:", error);
       // Still open modal even if wallet balance fetch fails
-      setRepayModal({ isOpen: true, asset });
+      setRepayModal({ isOpen: true, asset, poolId });
     }
   };
 
@@ -1110,15 +1147,15 @@ const Portfolio = () => {
         userGlobalData={userGlobalData}
         userBorrowBalance={userBorrowBalance}
         onCloseDepositModal={() =>
-          setDepositModal({ isOpen: false, asset: null })
+          setDepositModal({ isOpen: false, asset: null, poolId: undefined })
         }
         onCloseWithdrawModal={() =>
-          setWithdrawModal({ isOpen: false, asset: null })
+          setWithdrawModal({ isOpen: false, asset: null, poolId: undefined })
         }
         onCloseBorrowModal={() =>
           setBorrowModal({ isOpen: false, asset: null })
         }
-        onCloseRepayModal={() => setRepayModal({ isOpen: false, asset: null })}
+        onCloseRepayModal={() => setRepayModal({ isOpen: false, asset: null, poolId: undefined })}
         onRefreshWalletBalance={refreshWalletBalance}
         onRefreshMarket={handleRefreshPositions}
       />

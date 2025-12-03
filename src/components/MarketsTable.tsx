@@ -46,7 +46,7 @@ const MarketsTable = () => {
     isOpen: false,
     asset: null,
   });
-  const [mintModal, setMintModal] = useState({ isOpen: false, asset: null });
+  const [mintModal, setMintModal] = useState<{ isOpen: boolean; asset: string | null; poolId?: string }>({ isOpen: false, asset: null });
   const [detailModal, setDetailModal] = useState({
     isOpen: false,
     asset: null,
@@ -105,17 +105,24 @@ const MarketsTable = () => {
     handleSortChange(field, order);
   };
 
-  const handleDepositClick = async (asset: string) => {
+  const handleDepositClick = async (asset: string, poolId?: string) => {
+    console.log("=== HANDLE DEPOSIT CLICK DEBUG ===");
+    console.log("Received params:", { asset, poolId });
+    
     setIsLoadingBalance(true);
 
     try {
       // Fetch wallet balance before opening modal
-      await fetchWalletBalance(asset);
+      await fetchWalletBalance(asset, poolId);
 
       // Fetch user's existing deposit balance for this asset
       if (activeAccount?.address) {
         const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-        const token = tokens.find((t) => t.symbol === asset);
+        // If poolId is provided, find the token that matches both symbol and poolId
+        // Otherwise, fall back to finding by symbol only (for backward compatibility)
+        const token = poolId
+          ? tokens.find((t) => t.symbol === asset && t.poolId === poolId)
+          : tokens.find((t) => t.symbol === asset);
 
         if (token && token.poolId && token.underlyingContractId) {
           const depositBalance = await fetchUserDepositBalance(
@@ -133,11 +140,12 @@ const MarketsTable = () => {
       }
 
       // Open modal after balance is fetched
-      setDepositModal({ isOpen: true, asset });
+      console.log("Opening deposit modal with:", { asset, poolId });
+      setDepositModal({ isOpen: true, asset, poolId });
     } catch (error) {
       console.error("Error fetching wallet balance for deposit:", error);
       // Still open modal even if balance fetch fails
-      setDepositModal({ isOpen: true, asset });
+      setDepositModal({ isOpen: true, asset, poolId });
     } finally {
       setIsLoadingBalance(false);
     }
@@ -147,7 +155,7 @@ const MarketsTable = () => {
     setWithdrawModal({ isOpen: true, asset });
   };
 
-  const handleBorrowClick = async (asset: string) => {
+  const handleBorrowClick = async (asset: string, poolId?: string) => {
     setIsLoadingGlobalData(true);
 
     try {
@@ -161,7 +169,11 @@ const MarketsTable = () => {
 
         // Fetch user's current borrow balance for this specific asset
         const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-        const token = tokens.find((t) => t.symbol === asset);
+        // If poolId is provided, find the token that matches both symbol and poolId
+        // Otherwise, fall back to finding by symbol only (for backward compatibility)
+        const token = poolId
+          ? tokens.find((t) => t.symbol === asset && t.poolId === poolId)
+          : tokens.find((t) => t.symbol === asset);
 
         if (token && token.poolId && token.underlyingContractId) {
           const borrowData = await fetchUserBorrowBalance(
@@ -181,17 +193,17 @@ const MarketsTable = () => {
       }
 
       // Open modal regardless of connection status
-      setBorrowModal({ isOpen: true, asset });
+      setBorrowModal({ isOpen: true, asset, poolId });
     } catch (error) {
       console.error("Error fetching user data for borrow:", error);
       // Still open modal even if data fetch fails
-      setBorrowModal({ isOpen: true, asset });
+      setBorrowModal({ isOpen: true, asset, poolId });
     } finally {
       setIsLoadingGlobalData(false);
     }
   };
 
-  const handleMintClick = async (asset: string) => {
+  const handleMintClick = async (asset: string, poolId?: string) => {
     setIsLoadingGlobalData(true);
 
     try {
@@ -205,7 +217,11 @@ const MarketsTable = () => {
 
         // Fetch user's current borrow balance for this specific asset
         const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-        const token = tokens.find((t) => t.symbol === asset);
+        // If poolId is provided, find the token that matches both symbol and poolId
+        // Otherwise, fall back to finding by symbol only (for backward compatibility)
+        const token = poolId
+          ? tokens.find((t) => t.symbol === asset && t.poolId === poolId)
+          : tokens.find((t) => t.symbol === asset);
 
         if (token && token.poolId && token.underlyingContractId) {
           const borrowData = await fetchUserBorrowBalance(
@@ -224,12 +240,12 @@ const MarketsTable = () => {
         setUserBorrowBalance(0);
       }
 
-      // Open modal regardless of connection status
-      setMintModal({ isOpen: true, asset });
+      // Open modal regardless of connection status, pass poolId if available
+      setMintModal({ isOpen: true, asset, poolId });
     } catch (error) {
       console.error("Error fetching user data for mint:", error);
       // Still open modal even if data fetch fails
-      setMintModal({ isOpen: true, asset });
+      setMintModal({ isOpen: true, asset, poolId });
     } finally {
       setIsLoadingGlobalData(false);
     }
@@ -364,7 +380,7 @@ const MarketsTable = () => {
 
   const handleCloseDepositModal = () => {
     const asset = depositModal.asset;
-    setDepositModal({ isOpen: false, asset: null });
+    setDepositModal({ isOpen: false, asset: null, poolId: undefined });
 
     // Refresh market data and wallet balance after deposit
     if (asset) {
@@ -380,7 +396,7 @@ const MarketsTable = () => {
 
   const handleCloseBorrowModal = () => {
     const asset = borrowModal.asset;
-    setBorrowModal({ isOpen: false, asset: null });
+    setBorrowModal({ isOpen: false, asset: null, poolId: undefined });
 
     // Refresh market data and user global data after borrow
     if (asset) {
@@ -404,7 +420,11 @@ const MarketsTable = () => {
           setUserGlobalData(globalData);
 
           const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-          const token = tokens.find((t) => t.symbol === borrowModal.asset);
+          // If poolId is provided, find the token that matches both symbol and poolId
+          // Otherwise, fall back to finding by symbol only (for backward compatibility)
+          const token = borrowModal.poolId
+            ? tokens.find((t) => t.symbol === borrowModal.asset && t.poolId === borrowModal.poolId)
+            : tokens.find((t) => t.symbol === borrowModal.asset);
 
           if (token && token.poolId && token.underlyingContractId) {
             const borrowData = await fetchUserBorrowBalance(
@@ -426,6 +446,7 @@ const MarketsTable = () => {
     activeAccount?.address,
     borrowModal.isOpen,
     borrowModal.asset,
+    borrowModal.poolId,
     currentNetwork,
   ]);
 
@@ -468,7 +489,7 @@ const MarketsTable = () => {
 
   const handleCloseMintModal = () => {
     const asset = mintModal.asset;
-    setMintModal({ isOpen: false, asset: null });
+    setMintModal({ isOpen: false, asset: null, poolId: undefined });
 
     // Refresh market data and user global data after mint
     if (asset) {
@@ -538,22 +559,26 @@ const MarketsTable = () => {
   };
 
   // Fetch wallet balance for a specific asset
-  const fetchWalletBalance = async (asset: string) => {
+  const fetchWalletBalance = async (asset: string, poolId?: string) => {
     if (!activeAccount?.address) {
       return { balance: 0, balanceUSD: 0 };
     }
 
-    // Check if we already have this balance cached
+    // Check if we already have this balance cached (use asset as key since wallet balance is same for all markets)
     if (walletBalances[asset]) {
       return walletBalances[asset];
     }
 
     try {
       const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-      const token = tokens.find((t) => t.symbol === asset);
+      // If poolId is provided, find the token that matches both symbol and poolId
+      // Otherwise, fall back to finding by symbol only (for backward compatibility)
+      const token = poolId
+        ? tokens.find((t) => t.symbol === asset && t.poolId === poolId)
+        : tokens.find((t) => t.symbol === asset);
 
       if (!token) {
-        console.error(`Token ${asset} not found in network config`);
+        console.error(`Token ${asset} not found in network config${poolId ? ` with poolId ${poolId}` : ''}`);
         return { balance: 0, balanceUSD: 0 };
       }
 
@@ -561,10 +586,23 @@ const MarketsTable = () => {
       // Use originalSymbol to look up the config, as asset might be a display symbol
       const originalSymbol =
         "originalSymbol" in token ? (token as any).originalSymbol : asset;
-      const originalTokenConfig = getTokenConfig(
+      const tokenConfigRaw = getTokenConfig(
         currentNetwork,
         originalSymbol
       );
+      if (!tokenConfigRaw) {
+        console.error(
+          `Original token config not found for ${asset} (originalSymbol: ${originalSymbol})`
+        );
+        return { balance: 0, balanceUSD: 0 };
+      }
+
+      // Handle case where tokenConfig might be an array (multiple markets)
+      // Compare poolIds as strings to ensure exact match
+      const originalTokenConfig = Array.isArray(tokenConfigRaw)
+        ? tokenConfigRaw.find((tc) => String(tc.poolId) === String(token.poolId)) || tokenConfigRaw[0]
+        : tokenConfigRaw;
+
       if (!originalTokenConfig) {
         console.error(
           `Original token config not found for ${asset} (originalSymbol: ${originalSymbol})`
@@ -716,8 +754,28 @@ const MarketsTable = () => {
     }
   };
 
-  const getAssetData = (asset: string) => {
-    const market = markets.find((m) => m.asset === asset);
+  const getAssetData = (asset: string, poolId?: string) => {
+    // Find matching markets - prefer poolId match if provided
+    let market;
+    if (poolId) {
+      // If poolId is provided, match by both asset and poolId
+      market = markets.find((m) => m.asset === asset && m.poolId === poolId);
+    }
+    
+    // If no poolId match or poolId not provided, find by asset
+    // For tokens with multiple markets, prefer the one with higher totalSupply (more active market)
+    if (!market) {
+      const matchingMarkets = markets.filter((m) => m.asset === asset);
+      if (matchingMarkets.length > 1) {
+        // Multiple markets found - prefer the one with higher totalSupply
+        market = matchingMarkets.reduce((prev, current) => {
+          return (current.totalSupply || 0) > (prev.totalSupply || 0) ? current : prev;
+        });
+      } else {
+        market = matchingMarkets[0];
+      }
+    }
+    
     if (!market) return null;
 
     return {
@@ -874,6 +932,7 @@ const MarketsTable = () => {
               isOpen={depositModal.isOpen}
               onClose={handleCloseDepositModal}
               asset={depositModal.asset}
+              poolId={depositModal.poolId}
               mode="deposit"
               assetData={getAssetData(depositModal.asset)}
               walletBalance={walletBalances[depositModal.asset]?.balance || 0}
@@ -913,13 +972,14 @@ const MarketsTable = () => {
         {/* Borrow Modal */}
         {borrowModal.isOpen &&
           borrowModal.asset &&
-          getAssetData(borrowModal.asset) && (
+          getAssetData(borrowModal.asset, borrowModal.poolId) && (
             <SupplyBorrowModal
               isOpen={borrowModal.isOpen}
               onClose={handleCloseBorrowModal}
               asset={borrowModal.asset}
+              poolId={borrowModal.poolId}
               mode="borrow"
-              assetData={getAssetData(borrowModal.asset)}
+              assetData={getAssetData(borrowModal.asset, borrowModal.poolId)}
               userGlobalData={userGlobalData}
               userBorrowBalance={userBorrowBalance}
               onTransactionSuccess={() => {
@@ -934,12 +994,13 @@ const MarketsTable = () => {
         {/* Mint Modal */}
         {mintModal.isOpen &&
           mintModal.asset &&
-          getAssetData(mintModal.asset) && (
+          getAssetData(mintModal.asset, mintModal.poolId) && (
             <MintModal
               isOpen={mintModal.isOpen}
               onClose={handleCloseMintModal}
               asset={mintModal.asset}
-              assetData={getAssetData(mintModal.asset)}
+              poolId={mintModal.poolId}
+              assetData={getAssetData(mintModal.asset, mintModal.poolId)}
               userGlobalData={userGlobalData}
               userBorrowBalance={userBorrowBalance}
               onTransactionSuccess={() => {
