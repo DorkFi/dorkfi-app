@@ -48,6 +48,7 @@ const HealthFactorActions = ({
             : "bg-blue-500/20 border-blue-500/50"
         }`}
       >
+        {/*
         <div className="flex items-center gap-3 mb-3">
           <div
             className={`w-3 h-3 rounded-full ${
@@ -79,6 +80,7 @@ const HealthFactorActions = ({
             </div>
           </div>
         </div>
+*/}
 
         {/* Contextual Recommendations */}
         <div className="text-sm space-y-1">

@@ -17,7 +17,7 @@ import MarketSearchFilters from "@/components/markets/MarketSearchFilters";
 import MarketPagination from "@/components/markets/MarketPagination";
 import SupplyBorrowModal from "@/components/SupplyBorrowModal";
 import WithdrawModal from "@/components/WithdrawModal";
-import MarketDetailModal from "@/components/MarketDetailModal";
+import { PremiumMarketModal } from "@/components/market-modal/PremiumMarketModal";
 import MintModal from "@/components/MintModal";
 import MarketsHeroSection from "@/components/markets/MarketsHeroSection";
 import MarketsTableContent from "@/components/markets/MarketsTableContent";
@@ -29,6 +29,31 @@ import {
 } from "@/services/lendingService";
 import { useToast } from "@/hooks/use-toast";
 import algosdk, { waitForConfirmation } from "algosdk";
+
+function normalizeMarketData(md) {
+  return {
+    icon: md.icon || "",
+    name: md.asset ?? md.name ?? "Unknown",
+    symbol: md.asset ?? md.symbol ?? "???",
+    price: md.price ?? 1,
+    priceChange24h: md.priceChange24h ?? 0,
+    priceHistory: md.priceHistory ?? [],
+    totalSupply: md.totalSupply ?? 0,
+    totalBorrow: md.totalBorrow ?? 0,
+    availableLiquidity: md.availableLiquidity ?? 0,
+    utilization: md.utilization ?? 0,
+    supplyAPY: md.supplyAPY ?? 0,
+    borrowAPY: md.borrowAPY ?? 0,
+    maxLTV: md.maxLTV ?? 0,
+    liquidationThreshold: md.liquidationThreshold ?? 0,
+    liquidationBonus: md.liquidationBonus ?? 0,
+    reserveFactor: md.reserveFactor ?? 0,
+    supplyCap: md.supplyCap ?? 0,
+    borrowCap: md.borrowCap ?? 0,
+    oracleStatus: md.oracleStatus ?? 'live',
+    auditProvider: md.auditProvider ?? "N/A",
+  };
+}
 
 const MarketsTable = () => {
   const [searchTerm, setSearchTerm] = useState("");
@@ -67,6 +92,8 @@ const MarketsTable = () => {
 
   // Mock user deposits - in real app, this would come from user's wallet/backend
   const [userDeposits] = useState<Record<string, number>>({});
+const [showClaimModal, setShowClaimModal] = useState(false);
+const [claimConfirmed, setClaimConfirmed] = useState(false);
 
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
@@ -824,37 +851,51 @@ const MarketsTable = () => {
                   </span>
                 )}
               </div>
-              <div className="flex flex-row gap-2 mt-2 sm:mt-0 sm:ml-4">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleRefresh}
-                  disabled={isLoading}
-                  className="flex items-center gap-2 bg-blue-50 border-blue-200 hover:bg-blue-100 text-blue-600 dark:bg-blue-950 dark:border-blue-800 dark:hover:bg-blue-900 dark:text-blue-400"
-                  aria-label="Refresh market data"
-                >
-                  <RefreshCw
-                    className={`h-3 w-3 ${isLoading ? "animate-spin" : ""}`}
-                  />
-                  Refresh
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    window.open(
-                      "https://docs.dork.fi",
-                      "_blank",
-                      "noopener,noreferrer"
-                    )
-                  }
-                  className="flex items-center gap-2 bg-ocean-teal/5 border-ocean-teal/20 hover:bg-ocean-teal/10 text-ocean-teal"
-                  aria-label="Learn more about markets (opens in new tab)"
-                >
-                  Learn More
-                  <ExternalLink className="h-3 w-3" />
-                </Button>
-              </div>
+              <div className="flex flex-col items-end gap-2">
+  <div className="flex flex-row gap-2">
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={handleRefresh}
+      disabled={isLoading}
+      className="flex items-center gap-2 bg-blue-50 border-blue-200 hover:bg-blue-100 text-blue-600 dark:bg-blue-950 dark:border-blue-800 dark:hover:bg-blue-900 dark:text-blue-400"
+      aria-label="Refresh market data"
+    >
+      <RefreshCw className={`h-3 w-3 ${isLoading ? 'animate-spin' : ''}`} />
+      Refresh
+    </Button>
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() =>
+        window.open(
+          "https://docs.dork.fi",
+          "_blank",
+          "noopener,noreferrer"
+        )
+      }
+      className="flex items-center gap-2 border-ocean-teal/20 text-ocean-teal hover:bg-ocean-teal/10"
+      aria-label="Learn more about markets (opens in new tab)"
+    >
+      Learn More
+      <ExternalLink className="h-3 w-3" />
+    </Button>
+  </div>
+  <Button
+    size="sm"
+    onClick={() => setShowClaimModal(true)}
+    className="flex items-center gap-2 bg-yellow-400 border-2 border-yellow-400 text-slate-900 font-bold rounded-lg py-2 px-4 shadow hover:bg-yellow-300 focus:bg-yellow-300 active:bg-yellow-400"
+    style={{ minWidth: 170 }}
+    aria-label="Claim Rewards"
+  >
+    <svg className="h-4 w-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+        d="M20 12v7a2 2 0 01-2 2H6a2 2 0 01-2-2v-7m16-3V7a2 2 0 00-2-2h-3.28a2 2 0 01-1.95-2.58 2 2 0 00-2.58 2.58H6a2 2 0 00-2 2v2m16 0H4"
+      />
+    </svg>
+    Claim Rewards
+  </Button>
+</div>
             </div>
           </div>
           {/* Informational guidance - matches Liquidations Queue styles */}
@@ -916,11 +957,23 @@ const MarketsTable = () => {
 
         {/* Market Detail Modal */}
         {detailModal.isOpen && detailModal.asset && detailModal.marketData && (
-          <MarketDetailModal
+          <PremiumMarketModal
             isOpen={detailModal.isOpen}
             onClose={handleCloseDetailModal}
             asset={detailModal.asset}
-            marketData={detailModal.marketData}
+            marketData={detailModal.marketData ? normalizeMarketData(detailModal.marketData) : undefined}
+            userPosition={{
+              supplied: 100,
+              borrowed: 0,
+              withdrawable: 100,
+              borrowable: 1000,
+              healthFactor: 2.5,
+              earnings: 5.25,
+            }}
+            onDeposit={() => handleDepositClick(detailModal.asset!)}
+            onWithdraw={() => handleWithdrawClick(detailModal.asset!)}
+            onBorrow={() => handleBorrowClick(detailModal.asset!)}
+            onRepay={() => {}}
           />
         )}
 
@@ -991,28 +1044,108 @@ const MarketsTable = () => {
             />
           )}
 
-        {/* Mint Modal */}
-        {mintModal.isOpen &&
-          mintModal.asset &&
-          getAssetData(mintModal.asset, mintModal.poolId) && (
-            <MintModal
-              isOpen={mintModal.isOpen}
-              onClose={handleCloseMintModal}
-              asset={mintModal.asset}
-              poolId={mintModal.poolId}
-              assetData={getAssetData(mintModal.asset, mintModal.poolId)}
-              userGlobalData={userGlobalData}
-              userBorrowBalance={userBorrowBalance}
-              onTransactionSuccess={() => {
-                // Refresh market data after successful mint
-                if (mintModal.asset) {
-                  loadMarketDataWithBypass(mintModal.asset.toLowerCase());
-                }
+      {/* Mint Modal */}
+      {mintModal.isOpen &&
+        mintModal.asset &&
+        getAssetData(mintModal.asset, mintModal.poolId) && (
+          <MintModal
+            isOpen={mintModal.isOpen}
+            onClose={handleCloseMintModal}
+            asset={mintModal.asset}
+            poolId={mintModal.poolId}
+            assetData={getAssetData(mintModal.asset, mintModal.poolId)}
+            userGlobalData={userGlobalData}
+            userBorrowBalance={userBorrowBalance}
+            onTransactionSuccess={() => {
+              // Refresh market data after successful mint
+              if (mintModal.asset) {
+                loadMarketDataWithBypass(mintModal.asset.toLowerCase());
+              }
+            }}
+          />
+        )}
+
+      {/* Claim Rewards Modal */}
+      {showClaimModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-white rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl p-6 w-full max-w-sm relative">
+            <button
+              className="absolute top-3 right-3 text-white/60 hover:text-white"
+              onClick={() => {
+                setShowClaimModal(false);
+                setClaimConfirmed(false);
               }}
-            />
-          )}
+              aria-label="Close"
+            >✕</button>
+
+            {!claimConfirmed ? (
+              <>
+                <h2 className="text-2xl font-bold mb-1 text-center">Claim Rewards</h2>
+                <p className="mb-5 text-center text-white/70">Claim your accumulated rewards from PreFi participation.</p>
+                <div className="rounded-xl bg-[#131A2A] border border-yellow-400/30 flex flex-col items-center py-5 mb-5">
+                  <svg className="h-8 w-8 mb-3 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"
+                    d="M20 12v7a2 2 0 01-2 2H6a2 2 0 01-2-2v-7m16-3V7a2 2 0 00-2-2h-3.28a2 2 0 01-1.95-2.58 2 2 0 00-2.58 2.58H6a2 2 0 00-2 2v2m16 0H4"/>
+                  </svg>
+                  <div className="text-lg mb-1 text-white/70">Available to Claim</div>
+                  <div className="text-3xl font-extrabold text-yellow-300 mb-2">125.5 VOI</div>
+                </div>
+                <div className="flex justify-between text-sm mb-3 px-1">
+                  <div>
+                    <span className="block text-white/50">Total Earned</span>
+                    <span className="font-medium text-white">1,250 VOI</span>
+                  </div>
+                  <div>
+                    <span className="block text-white/50">Reward APY</span>
+                    <span className="font-medium text-yellow-400">12.5%</span>
+                  </div>
+                </div>
+                <button
+                  className="mt-6 w-full py-3 rounded-lg bg-yellow-400 text-slate-900 font-bold text-lg hover:bg-yellow-300 transition"
+                  onClick={() => setClaimConfirmed(true)}
+                >
+                  Claim 125.5 VOI
+                </button>
+              </>
+            ) : (
+              <div className="flex flex-col items-center pt-6 pb-8">
+  {/* Sparkles Decorative */}
+  <div className="relative flex flex-col items-center mb-2">
+    {/* Top Left Sparkle */}
+    <svg className="absolute -top-7 -left-7 text-yellow-300 w-8 h-8" viewBox="0 0 24 24" fill="none"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+    {/* Top Right Sparkle */}
+    <svg className="absolute -top-7 -right-7 text-cyan-400 w-8 h-8" viewBox="0 0 24 24" fill="none"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+    {/* VOI Logo with Green Check in Box */}
+    <div className="relative">
+      <div className="rounded-2xl border-4 border-yellow-400 p-4 bg-[#182237] shadow-lg flex flex-col items-center">
+        <img src="/lovable-uploads/VOI.png" alt="VOI token" className="w-20 h-20 rounded-full" />
+        {/* Green Check */}
+        <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-green-500 rounded-full p-1.5 border-4 border-[#182237]">
+          <svg className="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </div>
       </div>
     </div>
+  </div>
+  <h2 className="text-2xl font-bold text-center mt-4 mb-2 text-white">
+    Transaction Successful!
+  </h2>
+  <div className="text-md md:text-lg text-white text-center mb-5">
+    You successfully claimed <span className="text-yellow-400 font-bold">125.5 VOI</span>
+  </div>
+  <a
+    href="/portfolio"
+    className="w-full block py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white font-bold text-center"
+    onClick={() => setShowClaimModal(false)}
+  >
+    View Portfolio
+  </a>
+</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  </div>
   );
 };
 

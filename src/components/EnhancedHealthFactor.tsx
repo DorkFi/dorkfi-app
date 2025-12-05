@@ -54,18 +54,20 @@ const EnhancedHealthFactor = ({
                     Monitor your portfolio health and manage risk
                   </p>
                 </div>
-                <div className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                  healthFactor === null ? 'bg-gray-500/20 text-gray-400' :
-                  healthFactor <= 1.0 ? 'bg-red-500/20 text-red-400' :
-                  healthFactor <= 1.2 ? 'bg-orange-500/20 text-orange-400' :
-                  healthFactor <= 1.5 ? 'bg-yellow-500/20 text-yellow-400' :
-                  'bg-green-500/20 text-green-400'
-                }`}>
-                  {healthFactor === null ? 'No Collateral' :
-                   healthFactor <= 1.0 ? 'Critical' :
-                   healthFactor <= 1.2 ? 'High Risk' :
-                   healthFactor <= 1.5 ? 'Moderate' : 'Safe'}
-                </div>
+                {/*
+<div className={`px-3 py-1 rounded-full text-xs font-semibold ${
+  healthFactor === null ? 'bg-gray-500/20 text-gray-400' :
+  healthFactor <= 1.0 ? 'bg-red-500/20 text-red-400' :
+  healthFactor <= 1.2 ? 'bg-orange-500/20 text-orange-400' :
+  healthFactor <= 1.5 ? 'bg-yellow-500/20 text-yellow-400' :
+  'bg-green-500/20 text-green-400'
+}`}>
+  {healthFactor === null ? 'No Collateral' :
+   healthFactor <= 1.0 ? 'Critical' :
+   healthFactor <= 1.2 ? 'High Risk' :
+   healthFactor <= 1.5 ? 'Moderate' : 'Safe'}
+</div>
+*/}
               </div>
               
               {/* Stats Grid with Tooltips */}
