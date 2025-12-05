@@ -231,7 +231,9 @@ export const fetchMarketInfo = async (
       let tokenConfig: TokenConfig | undefined;
       if (Array.isArray(tokenConfigRaw)) {
         // Find the token config that matches the poolId
-        tokenConfig = tokenConfigRaw.find((config) => config.poolId === poolId) || tokenConfigRaw[0];
+        tokenConfig =
+          tokenConfigRaw.find((config) => config.poolId === poolId) ||
+          tokenConfigRaw[0];
       } else {
         tokenConfig = tokenConfigRaw;
       }
@@ -308,9 +310,10 @@ export const fetchMarketInfo = async (
 
       // For b market (poolId 47139781), use 2% (200 basis points) as base borrow rate
       // Otherwise use the borrow rate from the contract
-      const baseBorrowRateBps = poolId === "47139781" 
-        ? 200 // 2% = 200 basis points for b market
-        : parseFloat(market.borrowRate.toString());
+      const baseBorrowRateBps =
+        poolId === "47139781"
+          ? 200 // 2% = 200 basis points for b market
+          : parseFloat(market.borrowRate.toString());
 
       // Calculate APY using the new utility function
       const apyCalculation = calculateDepositAPY(
@@ -986,7 +989,9 @@ export const fetchUserWalletBalance = async (
         console.log(`ARC200 balance result for ${tokenSymbol}:`, tokenBalance);
         balance = tokenBalance ? BigInt(tokenBalance) : 0n;
       } else {
-        console.warn(`Unsupported token standard: ${tokenConfig.tokenStandard}`);
+        console.warn(
+          `Unsupported token standard: ${tokenConfig.tokenStandard}`
+        );
         return null;
       }
 
@@ -1419,13 +1424,13 @@ export const deposit = async (
   | { success: true; txns: string[] }
 > => {
   console.log("=== DEPOSIT DEBUG START ===");
-  console.log("deposit called with:", { 
-    poolId, 
-    marketId, 
-    tokenStandard, 
-    amount, 
-    userAddress, 
-    networkId 
+  console.log("deposit called with:", {
+    poolId,
+    marketId,
+    tokenStandard,
+    amount,
+    userAddress,
+    networkId,
   });
 
   try {
@@ -1449,10 +1454,10 @@ export const deposit = async (
           originalContractId: t.originalContractId,
         }))
       );
-      console.log("Searching for token with:", { 
-        marketId, 
+      console.log("Searching for token with:", {
+        marketId,
         poolId,
-        tokenStandard 
+        tokenStandard,
       });
 
       // First try to find by both poolId and marketId (for multi-market tokens)
@@ -1482,14 +1487,21 @@ export const deposit = async (
         );
         console.log("Fallback search result:", token ? "FOUND" : "NOT FOUND");
         if (token) {
-          console.log("WARNING: Found token by marketId only, may not match poolId!");
+          console.log(
+            "WARNING: Found token by marketId only, may not match poolId!"
+          );
           console.log("Matched token details:", {
             symbol: token.symbol,
             poolId: token.poolId,
             underlyingContractId: token.underlyingContractId,
             originalContractId: token.originalContractId,
           });
-          console.log("Expected poolId:", poolId, "Found poolId:", token.poolId);
+          console.log(
+            "Expected poolId:",
+            poolId,
+            "Found poolId:",
+            token.poolId
+          );
         }
       }
 
@@ -1498,12 +1510,20 @@ export const deposit = async (
 
       if (!token) {
         console.error("=== TOKEN NOT FOUND ERROR ===");
-        console.error("Token not found for marketId:", marketId, "poolId:", poolId);
+        console.error(
+          "Token not found for marketId:",
+          marketId,
+          "poolId:",
+          poolId
+        );
         console.error(
           "Available underlyingContractIds:",
           allTokens.map((t) => t.underlyingContractId)
         );
-        console.error("Available poolIds:", allTokens.map((t) => t.poolId));
+        console.error(
+          "Available poolIds:",
+          allTokens.map((t) => t.poolId)
+        );
         throw new Error("Token not found");
       }
 
@@ -1530,7 +1550,11 @@ export const deposit = async (
       });
       const marketInfo = await fetchMarketInfo(poolId, marketId, networkId);
       if (!marketInfo) {
-        console.error("Failed to fetch market info for:", { poolId, marketId, networkId });
+        console.error("Failed to fetch market info for:", {
+          poolId,
+          marketId,
+          networkId,
+        });
         throw new Error("Failed to fetch market info");
       }
       console.log("Market info retrieved:", {
@@ -1801,12 +1825,15 @@ export const deposit = async (
 
         console.log("=== TRANSACTION BUILD ===");
         console.log("buildN transactions count:", buildN.length);
-        console.log("buildN details:", buildN.map((txn, idx) => ({
-          index: idx,
-          type: txn.type,
-          note: txn.note ? new TextDecoder().decode(txn.note) : undefined,
-          payment: txn.payment,
-        })));
+        console.log(
+          "buildN details:",
+          buildN.map((txn, idx) => ({
+            index: idx,
+            type: txn.type,
+            note: txn.note ? new TextDecoder().decode(txn.note) : undefined,
+            payment: txn.payment,
+          }))
+        );
 
         // Create deposit transaction
         ci.setFee(20000);
@@ -1834,15 +1861,21 @@ export const deposit = async (
 
       if (!customTx.success) {
         console.error("=== DEPOSIT TRANSACTION FAILED ===");
-        console.error("Failed to create deposit transaction after all attempts");
+        console.error(
+          "Failed to create deposit transaction after all attempts"
+        );
         throw new Error("Failed to create deposit transaction");
       }
 
       console.log("=== DEPOSIT SUCCESS ===");
       console.log("Deposit transaction created successfully");
-      console.log("Returning transaction array with", customTx.txns.length, "transactions");
+      console.log(
+        "Returning transaction array with",
+        customTx.txns.length,
+        "transactions"
+      );
       console.log("=== DEPOSIT DEBUG END ===");
-      
+
       return {
         success: true,
         txns: [...customTx.txns],
@@ -2767,21 +2800,21 @@ export const repay = async (
           }
         } else if (tokenStandard === "asa") {
           // create balance box for pool
-          if (p1 > 0) {
-            const addr = algosdk.encodeAddress(
-              algosdk.getApplicationAddress(Number(poolId)).publicKey
-            );
-            const txnO = (await builder.token.createBalanceBox(addr)).obj;
-            buildN.push({
-              ...txnO,
-              payment: 28500,
-              note: new TextEncoder().encode(
-                `nt200 createBalanceBox arc200 ${symbol} token for pool ${addr}`
-              ),
-            });
-          }
+          // {
+          //   const addr = algosdk.encodeAddress(
+          //     algosdk.getApplicationAddress(Number(poolId)).publicKey
+          //   );
+          //   const txnO = (await builder.token.createBalanceBox(addr)).obj;
+          //   buildN.push({
+          //     ...txnO,
+          //     payment: 28500,
+          //     note: new TextEncoder().encode(
+          //       `nt200 createBalanceBox arc200 ${symbol} token for pool ${addr}`
+          //     ),
+          //   });
+          // }
           // create balance box for user
-          if (p2 > 0) {
+          if (p1 > 0) {
             const txnO = (await builder.token.createBalanceBox(userAddress))
               .obj;
             buildN.push({
@@ -2834,6 +2867,7 @@ export const repay = async (
             note: new TextEncoder().encode(
               `arc200 approve ${symbol} token spending to pool (${addr}) for user (${userAddress})`
             ),
+            payment: p2 > 0 ? 28502 : 0,
           });
         }
         // repay tp lending pool
