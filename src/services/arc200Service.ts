@@ -194,6 +194,55 @@ export class ARC200Service {
   }
 
   /**
+   * Get allowance for a specific ARC200 token
+   */
+  static async getAllowance(
+    ownerAddress: string,
+    spenderAddress: string,
+    contractId: string
+  ): Promise<string | null> {
+    try {
+      if (!this.clients) {
+        throw new Error("ARC200Service not initialized");
+      }
+
+      console.log(
+        `Fetching ARC200 allowance for contract ${contractId}, owner ${ownerAddress}, spender ${spenderAddress}`
+      );
+
+      const ci = new CONTRACT(
+        Number(contractId),
+        this.clients.algod,
+        undefined,
+        abi.nt200,
+        { addr: ownerAddress, sk: new Uint8Array() }
+      );
+      const arc200AllowanceR = await ci.arc200_allowance(
+        ownerAddress,
+        spenderAddress
+      );
+
+      if (!arc200AllowanceR.success) {
+        throw new Error("Failed to get ARC200 allowance");
+      }
+
+      const arc200Allowance = arc200AllowanceR.returnValue;
+
+      console.log(
+        `ARC200 Allowance for ${contractId}: ${arc200Allowance} base unit tokens`
+      );
+
+      return arc200Allowance;
+    } catch (error) {
+      console.error(
+        `Error fetching ARC200 allowance for contract ${contractId}:`,
+        error
+      );
+      return null;
+    }
+  }
+
+  /**
    * Get multiple token balances for a user address
    */
   static async getMultipleBalances(
