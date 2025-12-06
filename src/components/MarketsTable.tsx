@@ -833,7 +833,28 @@ const MarketsTable = () => {
             ).obj;
             buildN.push({
               ...txnO,
+              note: Uint8Array.from(
+                Buffer.from(
+                  `dorkfi claim reward ${reward.id} transfer (amount: ${rewardData.formatted} ${reward.symbol})`
+                )
+              ),
             });
+            // withdraw if token standard is network or asa
+            if (
+              reward.tokenStandard === "network" ||
+              reward.tokenStandard === "asa"
+            ) {
+              // TODO: cond optin for asa
+              const txnW = (await builder.token.withdraw(allowance)).obj;
+              buildN.push({
+                ...txnW,
+                note: Uint8Array.from(
+                  Buffer.from(
+                    `dorkfi claim reward ${reward.id} withdraw (amount: ${rewardData.formatted} ${reward.symbol})`
+                  )
+                ),
+              });
+            }
           }
         } catch (error) {
           console.error(`Error claiming reward ${reward.id}:`, error);
@@ -850,6 +871,7 @@ const MarketsTable = () => {
 
       console.log({ buildN });
 
+      ci.setFee(2000);
       ci.setEnableGroupResourceSharing(true);
       ci.setExtraTxns(buildN);
       customR = await ci.custom();
