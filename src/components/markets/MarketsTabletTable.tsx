@@ -234,8 +234,11 @@ const MarketsTabletTable = ({
         const isBA = String(poolIdB) === String(lendingPools[0]);
         const isBB = String(poolIdB) === String(lendingPools[1]);
         
-        if (isAA && (isAB || isBB)) return -1;
-        if ((isAB || isBB) && isBA) return 1;
+        // If A is A market and B is B market, A comes first
+        if (isAA && isBB) return -1;
+        // If A is B market and B is A market, B comes first (A comes after)
+        if (isAB && isBA) return 1;
+        // Otherwise maintain order (both A or both B)
         return 0;
       });
     });
@@ -549,7 +552,11 @@ const MarketsTabletTable = ({
                 return renderMarketRow(firstMarket, false, symbol, 0);
               }
 
-              // Find the highest level market (by totalSupplyUSD)
+              // For main row, use the A market (first in sorted list) instead of highest by supply
+              // Markets are already sorted: A markets first, then B markets
+              const mainMarket = symbolMarkets[0]; // A market comes first after sorting
+              
+              // Find the highest level market (by totalSupplyUSD) for reference
               const highestMarket = symbolMarkets.reduce((prev, current) => {
                 const prevSupply = prev.totalSupplyUSD || 0;
                 const currentSupply = current.totalSupplyUSD || 0;
@@ -566,29 +573,29 @@ const MarketsTabletTable = ({
                       {/* Asset icon with market label badge (only when collapsed) */}
                       <div className="relative flex-shrink-0">
                         <img
-                          src={firstMarket.icon}
-                          alt={firstMarket.asset}
+                          src={mainMarket.icon}
+                          alt={mainMarket.asset}
                           className="w-10 h-10 rounded-full object-contain"
                         />
                         {!isExpanded && (() => {
-                          // For collapsed header, show badge for the highest market
+                          // For collapsed header, show badge for the main market (A market)
                           let marketLabel: string | null = null;
                           const networkConfig = getNetworkConfig(currentNetwork);
                           const lendingPools = networkConfig.contracts.lendingPools;
                           
-                          // Get poolId from highest market
+                          // Get poolId from main market (A market)
                           let poolId: string | null = 
-                            highestMarket.marketInfo?.poolId || 
-                            highestMarket.poolId || 
+                            mainMarket.marketInfo?.poolId || 
+                            mainMarket.poolId || 
                             null;
                           
                           // If poolId not on market, get from token config
                           if (!poolId) {
-                            const tokenConfigRaw = networkConfig.tokens[highestMarket.asset];
+                            const tokenConfigRaw = networkConfig.tokens[mainMarket.asset];
                             if (Array.isArray(tokenConfigRaw) && tokenConfigRaw.length > 0) {
-                              // Find matching config by comparing with highest market
+                              // Find matching config by comparing with main market
                               const matchingConfig = tokenConfigRaw.find(tc => {
-                                const marketPoolId = highestMarket.marketInfo?.poolId || highestMarket.poolId;
+                                const marketPoolId = mainMarket.marketInfo?.poolId || mainMarket.poolId;
                                 return tc.poolId === marketPoolId;
                               });
                               poolId = matchingConfig?.poolId || tokenConfigRaw[0]?.poolId || null;
@@ -608,7 +615,7 @@ const MarketsTabletTable = ({
                           
                           // If still no label, try getMarketLabel as fallback
                           if (!marketLabel) {
-                            marketLabel = getMarketLabel(highestMarket, 0);
+                            marketLabel = getMarketLabel(mainMarket, 0);
                           }
                           
                           // Always show badge when collapsed if we have multiple markets
@@ -630,8 +637,8 @@ const MarketsTabletTable = ({
                         })()}
                       </div>
                       <div className="flex flex-col items-start gap-0.5 whitespace-nowrap">
-                        <span className="font-semibold text-sm leading-tight">{firstMarket.asset}</span>
-                        <Badge variant="outline" className="text-xs px-2 py-0.5 h-4 flex items-center justify-center">CF {Math.round(firstMarket.collateralFactor)}%</Badge>
+                        <span className="font-semibold text-sm leading-tight">{mainMarket.asset}</span>
+                        <Badge variant="outline" className="text-xs px-2 py-0.5 h-4 flex items-center justify-center">CF {Math.round(mainMarket.collateralFactor)}%</Badge>
                       </div>
                       <button
                         onClick={(e) => {
@@ -650,15 +657,15 @@ const MarketsTabletTable = ({
                   </TableCell>
                   {!hasSTokens && (
                     <TableCell className="text-center">
-                      {highestMarket.isLoading ? (
+                      {mainMarket.isLoading ? (
                         <div className="text-xs text-muted-foreground">Loading...</div>
-                      ) : highestMarket.error ? (
+                      ) : mainMarket.error ? (
                         <div className="text-xs text-red-500">Error</div>
                       ) : (
                         <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
                           <APYDisplay 
-                            apyCalculation={highestMarket.apyCalculation}
-                            fallbackAPY={highestMarket.supplyAPY}
+                            apyCalculation={mainMarket.apyCalculation}
+                            fallbackAPY={mainMarket.supplyAPY}
                             showTooltip={true}
                           />
                         </Badge>
@@ -666,28 +673,28 @@ const MarketsTabletTable = ({
                     </TableCell>
                   )}
                   <TableCell className="text-center">
-                    {highestMarket.isLoading ? (
+                    {mainMarket.isLoading ? (
                       <div className="text-xs text-muted-foreground">Loading...</div>
-                    ) : highestMarket.error ? (
+                    ) : mainMarket.error ? (
                       <div className="text-xs text-red-500">Error</div>
                     ) : (
                       <Badge className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
                         <BorrowAPYDisplay 
-                          apyCalculation={highestMarket.apyCalculation}
-                          borrowApyCalculation={highestMarket.borrowApyCalculation}
-                          fallbackAPY={highestMarket.borrowAPY}
+                          apyCalculation={mainMarket.apyCalculation}
+                          borrowApyCalculation={mainMarket.borrowApyCalculation}
+                          fallbackAPY={mainMarket.borrowAPY}
                           showTooltip={true}
                         />
                       </Badge>
                     )}
                   </TableCell>
                   <TableCell className="text-center">
-                    {highestMarket.asset === "WAD" ? (
+                    {mainMarket.asset === "WAD" ? (
                       <span>&nbsp;</span>
                     ) : (
                       <div className="flex flex-col items-center space-y-1">
-                        <span className="text-sm font-medium">{highestMarket.isSToken ? "100.00" : highestMarket.utilization.toFixed(2)}%</span>
-                        <Progress value={highestMarket.isSToken ? 100 : highestMarket.utilization} className="h-2 w-16" />
+                        <span className="text-sm font-medium">{mainMarket.isSToken ? "100.00" : mainMarket.utilization.toFixed(2)}%</span>
+                        <Progress value={mainMarket.isSToken ? 100 : mainMarket.utilization} className="h-2 w-16" />
                       </div>
                     )}
                   </TableCell>
@@ -695,25 +702,25 @@ const MarketsTabletTable = ({
                     {(() => {
                       // Get token to access originalSymbol if market override exists
                       const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-                      const token = tokens.find((t) => t.symbol === highestMarket.asset);
+                      const token = tokens.find((t) => t.symbol === mainMarket.asset);
                       const originalSymbol =
                         token && "originalSymbol" in token
                           ? (token as any).originalSymbol
-                          : highestMarket.asset;
+                          : mainMarket.asset;
                       const tokenConfigRaw = getTokenConfig(
                         currentNetwork,
                         originalSymbol
                       );
                       const tokenConfig = Array.isArray(tokenConfigRaw)
-                        ? tokenConfigRaw.find((tc) => tc.poolId === highestMarket.marketInfo?.poolId || highestMarket.poolId) || tokenConfigRaw[0]
+                        ? tokenConfigRaw.find((tc) => tc.poolId === mainMarket.marketInfo?.poolId || mainMarket.poolId) || tokenConfigRaw[0]
                         : tokenConfigRaw;
                       const hasMigration = !!tokenConfig?.migration;
-                      const migrationBalance = migrationBalances[highestMarket.asset];
+                      const migrationBalance = migrationBalances[mainMarket.asset];
 
                       return (
                         <MarketsTableActions
-                          asset={highestMarket.asset}
-                          poolId={highestMarket.marketInfo?.poolId || highestMarket.poolId}
+                          asset={mainMarket.asset}
+                          poolId={mainMarket.marketInfo?.poolId || mainMarket.poolId}
                           onDepositClick={onDepositClick}
                           onBorrowClick={onBorrowClick}
                           onMintClick={onMintClick}
@@ -726,7 +733,7 @@ const MarketsTabletTable = ({
                           }
                           migrationBalance={migrationBalance || undefined}
                           isLoadingBalance={isLoadingBalance}
-                          isSToken={highestMarket.isSToken}
+                          isSToken={mainMarket.isSToken}
                         />
                       );
                     })()}
