@@ -202,6 +202,8 @@ export class ARC200Service {
     contractId: string
   ): Promise<string | null> {
     try {
+      console.log({ ownerAddress, spenderAddress, contractId });
+
       if (!this.clients) {
         throw new Error("ARC200Service not initialized");
       }
@@ -215,7 +217,10 @@ export class ARC200Service {
         this.clients.algod,
         undefined,
         abi.nt200,
-        { addr: ownerAddress, sk: new Uint8Array() }
+        {
+          addr: spenderAddress,
+          sk: new Uint8Array(),
+        }
       );
       const arc200AllowanceR = await ci.arc200_allowance(
         ownerAddress,

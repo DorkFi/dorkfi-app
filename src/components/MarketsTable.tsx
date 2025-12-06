@@ -4,7 +4,11 @@ import { Button } from "@/components/ui/button";
 import { ExternalLink, RefreshCw } from "lucide-react";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { getAllTokensWithDisplayInfo, getTokenConfig } from "@/config";
+import {
+  getAllTokensWithDisplayInfo,
+  getTokenConfig,
+  getAlgorandNetworkFromNetworkId,
+} from "@/config";
 import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
 
@@ -108,6 +112,36 @@ const MarketsTable = () => {
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
   const { toast } = useToast();
+
+  // Helper function to get clients for reads using the active network
+  const getSyncedClientsForReads = async () => {
+    const algorandNetwork = getAlgorandNetworkFromNetworkId(
+      currentNetwork as any
+    );
+    if (!algorandNetwork) {
+      throw new Error(
+        `Network ${currentNetwork} is not an Algorand-compatible network`
+      );
+    }
+    // Directly initialize clients for the active network
+    return await algorandService.initializeClientsForReads(algorandNetwork);
+  };
+
+  // Helper function to get clients for transactions using the active network
+  const getSyncedClientsForTransactions = async () => {
+    const algorandNetwork = getAlgorandNetworkFromNetworkId(
+      currentNetwork as any
+    );
+    if (!algorandNetwork) {
+      throw new Error(
+        `Network ${currentNetwork} is not an Algorand-compatible network`
+      );
+    }
+    // Directly initialize clients for the active network
+    return await algorandService.initializeClientsForTransactions(
+      algorandNetwork
+    );
+  };
 
   const rewards = [
     {
@@ -345,7 +379,7 @@ const MarketsTable = () => {
       }
 
       // Get the migration balance (already formatted)
-      const clients = await algorandService.getCurrentClientsForReads();
+      const clients = await getSyncedClientsForReads();
       ARC200Service.initialize(clients);
 
       const migrationBalance = await ARC200Service.getBalance(
@@ -408,8 +442,7 @@ const MarketsTable = () => {
       }
 
       const signedMigrateTxns = await signTransactions(migrateTxns);
-      const algorandClients =
-        await algorandService.getCurrentClientsForTransactions();
+      const algorandClients = await getSyncedClientsForTransactions();
       const migrateRes = await algorandClients.algod
         .sendRawTransaction(signedMigrateTxns)
         .do();
@@ -603,7 +636,8 @@ const MarketsTable = () => {
       setIsCountingRewards(true);
 
       try {
-        const clients = await algorandService.getCurrentClientsForReads();
+        const clients = await getSyncedClientsForReads();
+        console.log({ clients });
         ARC200Service.initialize(clients);
 
         const rewardsData: Record<
@@ -735,7 +769,7 @@ const MarketsTable = () => {
     setIsClaiming(true);
 
     try {
-      const clients = await algorandService.getCurrentClientsForReads();
+      const clients = await getSyncedClientsForReads();
       ARC200Service.initialize(clients);
 
       const allTxns: Uint8Array[] = [];
@@ -833,6 +867,7 @@ const MarketsTable = () => {
             ).obj;
             buildN.push({
               ...txnO,
+              payment: 28500,
               note: Uint8Array.from(
                 Buffer.from(
                   `dorkfi claim reward ${reward.id} transfer (amount: ${rewardData.formatted} ${reward.symbol})`
@@ -876,6 +911,8 @@ const MarketsTable = () => {
       ci.setExtraTxns(buildN);
       customR = await ci.custom();
 
+      console.log({ customR });
+
       if (!customR.success) {
         throw new Error(customR.error || "Failed to claim rewards");
       }
@@ -893,22 +930,15 @@ const MarketsTable = () => {
       });
 
       const signedTxns = await signTransactions(stxns);
-      const algorandClients =
-        await algorandService.getCurrentClientsForTransactions();
+      const algorandClients = await getSyncedClientsForTransactions();
 
       // Send all transactions
-      const sendResults = await Promise.all(
-        signedTxns.map((txn) =>
-          algorandClients.algod.sendRawTransaction(txn).do()
-        )
-      );
+      const res = await algorandClients.algod
+        .sendRawTransaction(signedTxns)
+        .do();
 
       // Wait for all confirmations
-      await Promise.all(
-        sendResults.map((result) =>
-          waitForConfirmation(algorandClients.algod, result.txid, 4)
-        )
-      );
+      await algosdk.waitForConfirmation(algorandClients.algod, res.txid, 4);
 
       toast({
         title: "Claim Successful",
@@ -1023,7 +1053,7 @@ const MarketsTable = () => {
       }
 
       // Initialize ARC200Service with current clients
-      const clients = await algorandService.getCurrentClientsForReads();
+      const clients = await getSyncedClientsForReads();
       ARC200Service.initialize(clients);
 
       let balance = 0;
@@ -1059,7 +1089,7 @@ const MarketsTable = () => {
         // For network tokens (like VOI), fetch native balance
         console.log(`Fetching network token balance for ${asset}`);
         try {
-          const clients = await algorandService.getCurrentClientsForReads();
+          const clients = await getSyncedClientsForReads();
           const accountInfo = await clients.algod
             .accountInformation(activeAccount.address)
             .do();
@@ -1082,7 +1112,7 @@ const MarketsTable = () => {
           `Fetching ASA balance for ${asset} (asset ID: ${token.underlyingAssetId})`
         );
         try {
-          const clients = await algorandService.getCurrentClientsForReads();
+          const clients = await getSyncedClientsForReads();
           const assetId = parseInt(token.underlyingAssetId);
           const accAssetInfo = await clients.algod
             .accountAssetInformation(activeAccount.address, assetId)
@@ -1108,7 +1138,7 @@ const MarketsTable = () => {
           `Fetching ASA balance for ${asset} (asset ID: ${token.underlyingAssetId})`
         );
         try {
-          const clients = await algorandService.getCurrentClientsForReads();
+          const clients = await getSyncedClientsForReads();
           const assetId = parseInt(token.underlyingAssetId);
           const accAssetInfo = await clients.algod
             .accountAssetInformation(activeAccount.address, assetId)
@@ -1270,7 +1300,7 @@ const MarketsTable = () => {
                     <ExternalLink className="h-3 w-3" />
                   </Button>
                 </div>
-                {hasClaimableRewards && (
+                {hasClaimableRewards && currentNetwork === "voi-mainnet" && (
                   <Button
                     size="sm"
                     onClick={() => setShowClaimModal(true)}
@@ -1639,10 +1669,10 @@ const MarketsTable = () => {
                     Transaction Successful!
                   </h2>
                   <div className="text-md md:text-lg text-white text-center mb-5">
-                    You successfully claimed{" "}
-                    <span className="text-yellow-400 font-bold">
+                    You successfully claimed rewards{" "}
+                    {/*<span className="text-yellow-400 font-bold">
                       {formattedTotalClaimable} {rewardSymbol}
-                    </span>
+                    </span>*/}
                   </div>
                   <div className="flex flex-col gap-2">
                     {voiToken?.poolId && (
@@ -1657,7 +1687,7 @@ const MarketsTable = () => {
                         Deposit into Market
                       </button>
                     )}
-                    <a
+                    {/*<a
                       href="/portfolio"
                       className="w-full block py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white font-bold text-center"
                       onClick={() => {
@@ -1666,7 +1696,16 @@ const MarketsTable = () => {
                       }}
                     >
                       View Portfolio
-                    </a>
+                    </a>*/}
+                    <button
+                      className="w-full py-5 px-8 rounded-lg border-2 border-green-600 hover:border-green-700 text-green-600 hover:text-green-700 font-bold text-xl transition bg-transparent hover:bg-green-50 dark:hover:bg-green-900/20"
+                      onClick={() => {
+                        setShowClaimModal(false);
+                        setClaimConfirmed(false);
+                      }}
+                    >
+                      Close
+                    </button>
                   </div>
                 </div>
               )}

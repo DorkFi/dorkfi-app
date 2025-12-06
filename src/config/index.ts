@@ -125,7 +125,7 @@ const baseVoiMainnetConfig: BaseNetworkConfig = {
   walletNetworkId: "voimain",
   name: "VOI Mainnet",
   networkType: "avm",
-  rpcUrl: "https://mainnet-api.voi.nodely.dev",
+  rpcUrl: "https://mainnet-api.voi.dork.fi",
   rpcPort: 443,
   rpcToken: "",
   indexerUrl: "https://mainnet-idx.voi.nodely.dev",
@@ -1618,8 +1618,7 @@ const algorandMainnetProdConfig: NetworkConfig = {
   walletNetworkId: "mainnet",
   name: "Algorand Mainnet",
   networkType: "avm",
-  rpcUrl: "https://mainnet-api.4160.nodely.dev",
-  // rpcPublicUrl removed - using deprecated endpoint https://dork-algo-api.nautilus.sh
+  rpcUrl: "https://mainnet-api.algorand.dork.fi",
   rpcPort: 443,
   rpcToken: undefined, // Public endpoint, no token required
   indexerUrl: "https://mainnet-idx.4160.nodely.dev",
