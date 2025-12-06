@@ -17,7 +17,7 @@ import MarketSearchFilters from "@/components/markets/MarketSearchFilters";
 import MarketPagination from "@/components/markets/MarketPagination";
 import SupplyBorrowModal from "@/components/SupplyBorrowModal";
 import WithdrawModal from "@/components/WithdrawModal";
-import MarketDetailModal from "@/components/MarketDetailModal";
+import { PremiumMarketModal } from "@/components/market-modal/PremiumMarketModal";
 import MintModal from "@/components/MintModal";
 import MarketsHeroSection from "@/components/markets/MarketsHeroSection";
 import MarketsTableContent from "@/components/markets/MarketsTableContent";
@@ -29,6 +29,32 @@ import {
 } from "@/services/lendingService";
 import { useToast } from "@/hooks/use-toast";
 import algosdk, { waitForConfirmation } from "algosdk";
+import { abi, CONTRACT } from "ulujs";
+
+function normalizeMarketData(md) {
+  return {
+    icon: md.icon || "",
+    name: md.asset ?? md.name ?? "Unknown",
+    symbol: md.asset ?? md.symbol ?? "???",
+    price: md.price ?? 1,
+    priceChange24h: md.priceChange24h ?? 0,
+    priceHistory: md.priceHistory ?? [],
+    totalSupply: md.totalSupply ?? 0,
+    totalBorrow: md.totalBorrow ?? 0,
+    availableLiquidity: md.availableLiquidity ?? 0,
+    utilization: md.utilization ?? 0,
+    supplyAPY: md.supplyAPY ?? 0,
+    borrowAPY: md.borrowAPY ?? 0,
+    maxLTV: md.maxLTV ?? 0,
+    liquidationThreshold: md.liquidationThreshold ?? 0,
+    liquidationBonus: md.liquidationBonus ?? 0,
+    reserveFactor: md.reserveFactor ?? 0,
+    supplyCap: md.supplyCap ?? 0,
+    borrowCap: md.borrowCap ?? 0,
+    oracleStatus: md.oracleStatus ?? "live",
+    auditProvider: md.auditProvider ?? "N/A",
+  };
+}
 
 const MarketsTable = () => {
   const [searchTerm, setSearchTerm] = useState("");
@@ -46,7 +72,11 @@ const MarketsTable = () => {
     isOpen: false,
     asset: null,
   });
-  const [mintModal, setMintModal] = useState<{ isOpen: boolean; asset: string | null; poolId?: string }>({ isOpen: false, asset: null });
+  const [mintModal, setMintModal] = useState<{
+    isOpen: boolean;
+    asset: string | null;
+    poolId?: string;
+  }>({ isOpen: false, asset: null });
   const [detailModal, setDetailModal] = useState({
     isOpen: false,
     asset: null,
@@ -67,10 +97,41 @@ const MarketsTable = () => {
 
   // Mock user deposits - in real app, this would come from user's wallet/backend
   const [userDeposits] = useState<Record<string, number>>({});
+  const [showClaimModal, setShowClaimModal] = useState(false);
+  const [claimConfirmed, setClaimConfirmed] = useState(false);
+  const [claimableRewards, setClaimableRewards] = useState<
+    Record<string, { amount: number; formatted: string }>
+  >({});
+  const [isCountingRewards, setIsCountingRewards] = useState(false);
+  const [isClaiming, setIsClaiming] = useState(false);
 
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
   const { toast } = useToast();
+
+  const rewards = [
+    {
+      id: 1,
+      name: "Prefi Incentive",
+      description: "5M VOI DorkFi Prefi Incentive",
+      reward: 5_000_000,
+      icon: "/lovable-uploads/VOI.png",
+      airdropAccount:
+        "PORY6TDWT5B7YIJY36NSMY3DKIIH4TAEY35NUFCQRT7QMU66NUSZHLP6VA",
+      tokenStandard: "network",
+      networks: {
+        "algorand-mainnet": {
+          contractId: "3210709899",
+        },
+        "voi-mainnet": {
+          contractId: "41877720",
+        },
+      },
+      symbol: "VOI",
+      decimals: 6,
+    },
+    // add more rewards here
+  ];
 
   const {
     data: markets,
@@ -108,7 +169,7 @@ const MarketsTable = () => {
   const handleDepositClick = async (asset: string, poolId?: string) => {
     console.log("=== HANDLE DEPOSIT CLICK DEBUG ===");
     console.log("Received params:", { asset, poolId });
-    
+
     setIsLoadingBalance(true);
 
     try {
@@ -265,7 +326,7 @@ const MarketsTable = () => {
       // Get token configuration
       const tokens = getAllTokensWithDisplayInfo(currentNetwork);
       const token = tokens.find((t) => t.symbol === asset);
-      
+
       if (!token) {
         throw new Error(`Token not found for ${asset}`);
       }
@@ -274,7 +335,7 @@ const MarketsTable = () => {
       const originalSymbol =
         "originalSymbol" in token ? (token as any).originalSymbol : asset;
       const tokenConfig = getTokenConfig(currentNetwork, originalSymbol);
-      
+
       if (!tokenConfig) {
         throw new Error(`Token config not found for ${asset}`);
       }
@@ -286,7 +347,7 @@ const MarketsTable = () => {
       // Get the migration balance (already formatted)
       const clients = await algorandService.getCurrentClientsForReads();
       ARC200Service.initialize(clients);
-      
+
       const migrationBalance = await ARC200Service.getBalance(
         activeAccount.address,
         tokenConfig.migration.nTokenId
@@ -322,9 +383,7 @@ const MarketsTable = () => {
       );
 
       if (!migrateResult.success) {
-        throw new Error(
-          (migrateResult as any).error || "Migration failed"
-        );
+        throw new Error((migrateResult as any).error || "Migration failed");
       }
 
       // Sign and send migration transaction
@@ -366,7 +425,6 @@ const MarketsTable = () => {
         loadMarketDataWithBypass(asset.toLowerCase());
         refreshWalletBalance(asset);
       }, 2000);
-      
     } catch (error) {
       console.error("Migration error:", error);
       toast({
@@ -423,7 +481,11 @@ const MarketsTable = () => {
           // If poolId is provided, find the token that matches both symbol and poolId
           // Otherwise, fall back to finding by symbol only (for backward compatibility)
           const token = borrowModal.poolId
-            ? tokens.find((t) => t.symbol === borrowModal.asset && t.poolId === borrowModal.poolId)
+            ? tokens.find(
+                (t) =>
+                  t.symbol === borrowModal.asset &&
+                  t.poolId === borrowModal.poolId
+              )
             : tokens.find((t) => t.symbol === borrowModal.asset);
 
           if (token && token.poolId && token.underlyingContractId) {
@@ -502,7 +564,7 @@ const MarketsTable = () => {
   };
 
   const handleRowClick = (market: any) => {
-    setDetailModal({ isOpen: true, asset: market.asset, marketData: market });
+    //setDetailModal({ isOpen: true, asset: market.asset, marketData: market });
   };
 
   const handleInfoClick = (e: React.MouseEvent, market: any) => {
@@ -523,7 +585,354 @@ const MarketsTable = () => {
   useEffect(() => {
     setWalletBalances({});
     setUserGlobalData(null);
+    setClaimableRewards({});
   }, [activeAccount?.address]);
+
+  // Check for rewards using arc200_approval method simulation
+  useEffect(() => {
+    const countRewards = async () => {
+      if (!activeAccount?.address) {
+        return;
+      }
+
+      // Prevent multiple simultaneous checks
+      if (isCountingRewards) {
+        return;
+      }
+
+      setIsCountingRewards(true);
+
+      try {
+        const clients = await algorandService.getCurrentClientsForReads();
+        ARC200Service.initialize(clients);
+
+        const rewardsData: Record<
+          string,
+          { amount: number; formatted: string }
+        > = {};
+
+        for (const reward of rewards) {
+          try {
+            // Get the contract ID for the current network
+            const networkKey = currentNetwork as keyof typeof reward.networks;
+            const networkReward = reward.networks[networkKey];
+
+            if (!networkReward?.contractId) {
+              console.log(
+                `No contract ID found for reward ${reward.id} on network ${currentNetwork}`
+              );
+              continue;
+            }
+
+            const contractId = networkReward.contractId;
+
+            // Check balance of reward token in airdrop account using ARC200Service
+            let claimableBalance = 0n;
+            try {
+              const balance = await ARC200Service.getAllowance(
+                reward.airdropAccount,
+                activeAccount.address,
+                contractId
+              );
+              claimableBalance = balance ? BigInt(balance) : 0n;
+            } catch (error) {
+              console.error(
+                `Error fetching balance for reward ${reward.id}:`,
+                error
+              );
+              continue;
+            }
+
+            // Count rewards if there's a claimable balance
+            if (claimableBalance > 0n) {
+              const formattedAmount = ARC200Service.formatBalance(
+                claimableBalance.toString(),
+                reward.decimals
+              );
+
+              rewardsData[reward.id.toString()] = {
+                amount: Number(claimableBalance),
+                formatted: formattedAmount,
+              };
+
+              console.log(
+                `Reward ${reward.id} is claimable: ${formattedAmount} ${reward.symbol}`
+              );
+            }
+          } catch (error) {
+            console.error(`Error checking reward ${reward.id}:`, error);
+          }
+        }
+
+        setClaimableRewards(rewardsData);
+      } catch (error) {
+        console.error("Error counting rewards:", error);
+      } finally {
+        setIsCountingRewards(false);
+      }
+    };
+
+    countRewards();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeAccount?.address, currentNetwork]);
+
+  // Check if there are any claimable rewards
+  const hasClaimableRewards = Object.values(claimableRewards).some(
+    (reward) => reward.amount > 0
+  );
+
+  // Calculate total claimable rewards (sum of all amounts)
+  const totalClaimableAmount = Object.values(claimableRewards).reduce(
+    (sum, reward) => sum + reward.amount,
+    0
+  );
+
+  // Get reward symbol and decimals (assuming all rewards use the same symbol)
+  const rewardSymbol = rewards.length > 0 ? rewards[0].symbol : "VOI";
+  const rewardDecimals = rewards.length > 0 ? rewards[0].decimals : 6;
+
+  // Format total claimable amount
+  const formattedTotalClaimable =
+    totalClaimableAmount > 0
+      ? ARC200Service.formatBalance(
+          totalClaimableAmount.toString(),
+          rewardDecimals
+        )
+      : "0";
+
+  // Get VOI token config to find poolId for deposit
+  const getVOITokenConfig = () => {
+    const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+    return tokens.find((t) => t.symbol === "VOI");
+  };
+
+  const voiToken = getVOITokenConfig();
+
+  // Handle claim VOI rewards
+  const handleClaimVoi = async () => {
+    if (!activeAccount?.address) {
+      toast({
+        title: "Wallet Not Connected",
+        description: "Please connect your wallet to claim rewards",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!hasClaimableRewards || totalClaimableAmount === 0) {
+      toast({
+        title: "No Rewards Available",
+        description: "You don't have any rewards to claim",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (isClaiming) {
+      return; // Prevent multiple simultaneous claims
+    }
+
+    setIsClaiming(true);
+
+    try {
+      const clients = await algorandService.getCurrentClientsForReads();
+      ARC200Service.initialize(clients);
+
+      const allTxns: Uint8Array[] = [];
+
+      // Process each claimable reward
+      let ci: any;
+      let customR: any;
+      let buildN: any[] = [];
+      for (const [rewardId, rewardData] of Object.entries(claimableRewards)) {
+        if (rewardData.amount <= 0) continue;
+
+        const reward = rewards.find((r) => r.id.toString() === rewardId);
+        if (!reward) continue;
+
+        // Get the contract ID for the current network
+        const networkKey = currentNetwork as keyof typeof reward.networks;
+        const networkReward = reward.networks[networkKey];
+
+        if (!networkReward?.contractId) {
+          console.log(
+            `No contract ID found for reward ${reward.id} on network ${currentNetwork}`
+          );
+          continue;
+        }
+
+        const contractId = networkReward.contractId;
+
+        try {
+          // Create CONTRACT instance for the reward token
+
+          if (!ci) {
+            ci = new CONTRACT(
+              Number(contractId),
+              clients.algod,
+              undefined,
+              abi.custom,
+              {
+                addr: activeAccount.address,
+                sk: new Uint8Array(),
+              }
+            );
+          }
+          const ciTok = new CONTRACT(
+            Number(contractId),
+            clients.algod,
+            undefined,
+            abi.nt200,
+            {
+              addr: activeAccount.address,
+              sk: new Uint8Array(),
+            }
+          );
+          const builder = {
+            token: new CONTRACT(
+              Number(contractId),
+              clients.algod,
+              undefined,
+              abi.nt200,
+              {
+                addr: activeAccount.address,
+                sk: new Uint8Array(),
+              },
+              true,
+              false,
+              true
+            ),
+          };
+          // check allowance
+          const arc200_allowanceR = await ciTok.arc200_allowance(
+            reward.airdropAccount,
+            activeAccount.address
+          );
+          if (!arc200_allowanceR.success) {
+            throw new Error(
+              arc200_allowanceR.error || `Failed to claim reward ${reward.id}`
+            );
+          }
+          const allowance = arc200_allowanceR.returnValue;
+          if (allowance == BigInt(0)) {
+            continue;
+          }
+          // Call arc200_transferFrom to transfer from airdrop account to user
+          {
+            console.log("arc200_transferFrom", {
+              from: reward.airdropAccount,
+              to: activeAccount.address,
+              allowance: allowance.toString(),
+            });
+            const txnO = (
+              await builder.token.arc200_transferFrom(
+                reward.airdropAccount,
+                activeAccount.address,
+                allowance
+              )
+            ).obj;
+            buildN.push({
+              ...txnO,
+              note: Uint8Array.from(
+                Buffer.from(
+                  `dorkfi claim reward ${reward.id} transfer (amount: ${rewardData.formatted} ${reward.symbol})`
+                )
+              ),
+            });
+            // withdraw if token standard is network or asa
+            if (
+              reward.tokenStandard === "network" ||
+              reward.tokenStandard === "asa"
+            ) {
+              // TODO: cond optin for asa
+              const txnW = (await builder.token.withdraw(allowance)).obj;
+              buildN.push({
+                ...txnW,
+                note: Uint8Array.from(
+                  Buffer.from(
+                    `dorkfi claim reward ${reward.id} withdraw (amount: ${rewardData.formatted} ${reward.symbol})`
+                  )
+                ),
+              });
+            }
+          }
+        } catch (error) {
+          console.error(`Error claiming reward ${reward.id}:`, error);
+          toast({
+            title: "Claim Error",
+            description: `Failed to claim ${reward.name}: ${
+              error instanceof Error ? error.message : "Unknown error"
+            }`,
+            variant: "destructive",
+          });
+          // Continue with other rewards even if one fails
+        }
+      }
+
+      console.log({ buildN });
+
+      ci.setFee(2000);
+      ci.setEnableGroupResourceSharing(true);
+      ci.setExtraTxns(buildN);
+      customR = await ci.custom();
+
+      if (!customR.success) {
+        throw new Error(customR.error || "Failed to claim rewards");
+      }
+
+      const stxns = customR.txns.map((txn: string) =>
+        Uint8Array.from(Buffer.from(txn, "base64"))
+      );
+
+      // Sign all transactions
+      const walletName = activeWallet?.metadata?.name || "your wallet";
+      toast({
+        title: "Please Sign Claim Transaction",
+        description: `Please open ${walletName} and sign the claim transaction`,
+        duration: 10000,
+      });
+
+      const signedTxns = await signTransactions(stxns);
+      const algorandClients =
+        await algorandService.getCurrentClientsForTransactions();
+
+      // Send all transactions
+      const sendResults = await Promise.all(
+        signedTxns.map((txn) =>
+          algorandClients.algod.sendRawTransaction(txn).do()
+        )
+      );
+
+      // Wait for all confirmations
+      await Promise.all(
+        sendResults.map((result) =>
+          waitForConfirmation(algorandClients.algod, result.txid, 4)
+        )
+      );
+
+      toast({
+        title: "Claim Successful",
+        description: `Successfully claimed ${formattedTotalClaimable} ${rewardSymbol}`,
+      });
+
+      // Clear claimable rewards - the useEffect will refresh them automatically
+      setClaimableRewards({});
+
+      // Show success confirmation
+      setClaimConfirmed(true);
+    } catch (error) {
+      console.error("Claim error:", error);
+      toast({
+        title: "Claim Failed",
+        description:
+          error instanceof Error ? error.message : "Failed to claim rewards",
+        variant: "destructive",
+      });
+      setClaimConfirmed(false);
+    } finally {
+      setIsClaiming(false);
+    }
+  };
 
   // Handle refresh button click
   const handleRefresh = () => {
@@ -578,7 +987,11 @@ const MarketsTable = () => {
         : tokens.find((t) => t.symbol === asset);
 
       if (!token) {
-        console.error(`Token ${asset} not found in network config${poolId ? ` with poolId ${poolId}` : ''}`);
+        console.error(
+          `Token ${asset} not found in network config${
+            poolId ? ` with poolId ${poolId}` : ""
+          }`
+        );
         return { balance: 0, balanceUSD: 0 };
       }
 
@@ -586,10 +999,7 @@ const MarketsTable = () => {
       // Use originalSymbol to look up the config, as asset might be a display symbol
       const originalSymbol =
         "originalSymbol" in token ? (token as any).originalSymbol : asset;
-      const tokenConfigRaw = getTokenConfig(
-        currentNetwork,
-        originalSymbol
-      );
+      const tokenConfigRaw = getTokenConfig(currentNetwork, originalSymbol);
       if (!tokenConfigRaw) {
         console.error(
           `Original token config not found for ${asset} (originalSymbol: ${originalSymbol})`
@@ -600,7 +1010,9 @@ const MarketsTable = () => {
       // Handle case where tokenConfig might be an array (multiple markets)
       // Compare poolIds as strings to ensure exact match
       const originalTokenConfig = Array.isArray(tokenConfigRaw)
-        ? tokenConfigRaw.find((tc) => String(tc.poolId) === String(token.poolId)) || tokenConfigRaw[0]
+        ? tokenConfigRaw.find(
+            (tc) => String(tc.poolId) === String(token.poolId)
+          ) || tokenConfigRaw[0]
         : tokenConfigRaw;
 
       if (!originalTokenConfig) {
@@ -761,7 +1173,7 @@ const MarketsTable = () => {
       // If poolId is provided, match by both asset and poolId
       market = markets.find((m) => m.asset === asset && m.poolId === poolId);
     }
-    
+
     // If no poolId match or poolId not provided, find by asset
     // For tokens with multiple markets, prefer the one with higher totalSupply (more active market)
     if (!market) {
@@ -769,13 +1181,15 @@ const MarketsTable = () => {
       if (matchingMarkets.length > 1) {
         // Multiple markets found - prefer the one with higher totalSupply
         market = matchingMarkets.reduce((prev, current) => {
-          return (current.totalSupply || 0) > (prev.totalSupply || 0) ? current : prev;
+          return (current.totalSupply || 0) > (prev.totalSupply || 0)
+            ? current
+            : prev;
         });
       } else {
         market = matchingMarkets[0];
       }
     }
-    
+
     if (!market) return null;
 
     return {
@@ -824,36 +1238,62 @@ const MarketsTable = () => {
                   </span>
                 )}
               </div>
-              <div className="flex flex-row gap-2 mt-2 sm:mt-0 sm:ml-4">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleRefresh}
-                  disabled={isLoading}
-                  className="flex items-center gap-2 bg-blue-50 border-blue-200 hover:bg-blue-100 text-blue-600 dark:bg-blue-950 dark:border-blue-800 dark:hover:bg-blue-900 dark:text-blue-400"
-                  aria-label="Refresh market data"
-                >
-                  <RefreshCw
-                    className={`h-3 w-3 ${isLoading ? "animate-spin" : ""}`}
-                  />
-                  Refresh
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    window.open(
-                      "https://docs.dork.fi",
-                      "_blank",
-                      "noopener,noreferrer"
-                    )
-                  }
-                  className="flex items-center gap-2 bg-ocean-teal/5 border-ocean-teal/20 hover:bg-ocean-teal/10 text-ocean-teal"
-                  aria-label="Learn more about markets (opens in new tab)"
-                >
-                  Learn More
-                  <ExternalLink className="h-3 w-3" />
-                </Button>
+              <div className="flex flex-col items-end gap-2">
+                <div className="flex flex-row gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleRefresh}
+                    disabled={isLoading}
+                    className="flex items-center gap-2 bg-blue-50 border-blue-200 hover:bg-blue-100 text-blue-600 dark:bg-blue-950 dark:border-blue-800 dark:hover:bg-blue-900 dark:text-blue-400"
+                    aria-label="Refresh market data"
+                  >
+                    <RefreshCw
+                      className={`h-3 w-3 ${isLoading ? "animate-spin" : ""}`}
+                    />
+                    Refresh
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      window.open(
+                        "https://docs.dork.fi",
+                        "_blank",
+                        "noopener,noreferrer"
+                      )
+                    }
+                    className="flex items-center gap-2 border-ocean-teal/20 text-ocean-teal hover:bg-ocean-teal/10"
+                    aria-label="Learn more about markets (opens in new tab)"
+                  >
+                    Learn More
+                    <ExternalLink className="h-3 w-3" />
+                  </Button>
+                </div>
+                {hasClaimableRewards && (
+                  <Button
+                    size="sm"
+                    onClick={() => setShowClaimModal(true)}
+                    className="flex items-center gap-2 bg-yellow-400 border-2 border-yellow-400 text-slate-900 font-bold rounded-lg py-2 px-4 shadow hover:bg-yellow-300 focus:bg-yellow-300 active:bg-yellow-400"
+                    style={{ minWidth: 170 }}
+                    aria-label="Claim Rewards"
+                  >
+                    <svg
+                      className="h-4 w-4 mr-1"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M20 12v7a2 2 0 01-2 2H6a2 2 0 01-2-2v-7m16-3V7a2 2 0 00-2-2h-3.28a2 2 0 01-1.95-2.58 2 2 0 00-2.58 2.58H6a2 2 0 00-2 2v2m16 0H4"
+                      />
+                    </svg>
+                    Claim Rewards
+                  </Button>
+                )}
               </div>
             </div>
           </div>
@@ -875,8 +1315,8 @@ const MarketsTable = () => {
                 your holdings.
               </p>
               <p>
-                • Track Utilization: See how much of each market is borrowed
-                vs. supplied — a key signal for demand and interest rates.
+                • Track Utilization: See how much of each market is borrowed vs.
+                supplied — a key signal for demand and interest rates.
               </p>
               <p>
                 • Compare Risk Profiles: Different assets have different
@@ -916,11 +1356,27 @@ const MarketsTable = () => {
 
         {/* Market Detail Modal */}
         {detailModal.isOpen && detailModal.asset && detailModal.marketData && (
-          <MarketDetailModal
+          <PremiumMarketModal
             isOpen={detailModal.isOpen}
             onClose={handleCloseDetailModal}
             asset={detailModal.asset}
-            marketData={detailModal.marketData}
+            marketData={
+              detailModal.marketData
+                ? normalizeMarketData(detailModal.marketData)
+                : undefined
+            }
+            userPosition={{
+              supplied: 100,
+              borrowed: 0,
+              withdrawable: 100,
+              borrowable: 1000,
+              healthFactor: 2.5,
+              earnings: 5.25,
+            }}
+            onDeposit={() => handleDepositClick(detailModal.asset!)}
+            onWithdraw={() => handleWithdrawClick(detailModal.asset!)}
+            onBorrow={() => handleBorrowClick(detailModal.asset!)}
+            onRepay={() => {}}
           />
         )}
 
@@ -1011,6 +1467,212 @@ const MarketsTable = () => {
               }}
             />
           )}
+
+        {/* Claim Rewards Modal */}
+        {showClaimModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+            <div className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-white rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl p-6 w-full max-w-sm relative">
+              <button
+                className="absolute top-3 right-3 text-white/60 hover:text-white"
+                onClick={() => {
+                  setShowClaimModal(false);
+                  setClaimConfirmed(false);
+                }}
+                aria-label="Close"
+              >
+                ✕
+              </button>
+
+              {!claimConfirmed ? (
+                <>
+                  <h2 className="text-2xl font-bold mb-1 text-center">
+                    Claim Rewards
+                  </h2>
+                  <p className="mb-5 text-center text-white/70">
+                    Claim your accumulated rewards.
+                  </p>
+                  <div className="rounded-xl bg-[#131A2A] border border-yellow-400/30 flex flex-col items-center py-5 mb-5">
+                    <svg
+                      className="h-8 w-8 mb-3 text-yellow-400"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                        d="M20 12v7a2 2 0 01-2 2H6a2 2 0 01-2-2v-7m16-3V7a2 2 0 00-2-2h-3.28a2 2 0 01-1.95-2.58 2 2 0 00-2.58 2.58H6a2 2 0 00-2 2v2m16 0H4"
+                      />
+                    </svg>
+                    <div className="text-lg mb-1 text-white/70">
+                      Available to Claim
+                    </div>
+                    <div className="text-3xl font-extrabold text-yellow-300 mb-2">
+                      {formattedTotalClaimable || "0"} {rewardSymbol}
+                    </div>
+                  </div>
+                  {Object.keys(claimableRewards).length > 0 && (
+                    <div className="mb-3 px-1">
+                      <div className="text-sm text-white/50 mb-2">
+                        Breakdown:
+                      </div>
+                      <div className="space-y-1">
+                        {Object.entries(claimableRewards).map(
+                          ([rewardId, reward]) => {
+                            const rewardInfo = rewards.find(
+                              (r) => r.id.toString() === rewardId
+                            );
+                            return (
+                              <div
+                                key={rewardId}
+                                className="flex justify-between text-sm"
+                              >
+                                <span className="text-white/70">
+                                  {rewardInfo?.name || `Reward ${rewardId}`}:
+                                </span>
+                                <span className="font-medium text-white">
+                                  {reward.formatted}{" "}
+                                  {rewardInfo?.symbol || rewardSymbol}
+                                </span>
+                              </div>
+                            );
+                          }
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  <div className="mt-6 flex flex-col gap-3">
+                    <button
+                      className="w-full py-3 rounded-lg bg-yellow-400 text-slate-900 font-bold text-lg hover:bg-yellow-300 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                      onClick={handleClaimVoi}
+                      disabled={
+                        !hasClaimableRewards ||
+                        totalClaimableAmount === 0 ||
+                        isClaiming
+                      }
+                    >
+                      {isClaiming
+                        ? "Claiming..."
+                        : `Claim ${
+                            formattedTotalClaimable || "0"
+                          } ${rewardSymbol}`}
+                    </button>
+                    {/*<div className="flex items-center gap-3">
+                      <div className="flex-1 h-px bg-white/20"></div>
+                      <span className="text-sm text-white/50">or</span>
+                      <div className="flex-1 h-px bg-white/20"></div>
+                    </div>
+                    <button
+                      className="w-full py-3 rounded-lg border-2 border-green-600 hover:border-green-700 text-green-600 hover:text-green-700 font-bold text-lg transition disabled:opacity-50 disabled:cursor-not-allowed bg-transparent hover:bg-green-50 dark:hover:bg-green-900/20"
+                      onClick={() => {
+                        setShowClaimModal(false);
+                        setClaimConfirmed(false);
+                        handleDepositClick("VOI", voiToken.poolId);
+                      }}
+                      disabled={
+                        !hasClaimableRewards || totalClaimableAmount === 0
+                      }
+                    >
+                      Deposit Rewards into Market
+                    </button>*/}
+                  </div>
+                </>
+              ) : (
+                <div className="flex flex-col items-center pt-6 pb-8">
+                  {/* Sparkles Decorative */}
+                  <div className="relative flex flex-col items-center mb-2">
+                    {/* Top Left Sparkle */}
+                    <svg
+                      className="absolute -top-7 -left-7 text-yellow-300 w-8 h-8"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                    >
+                      <path
+                        d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                    {/* Top Right Sparkle */}
+                    <svg
+                      className="absolute -top-7 -right-7 text-cyan-400 w-8 h-8"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                    >
+                      <path
+                        d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                    {/* VOI Logo with Green Check in Box */}
+                    <div className="relative">
+                      <div className="rounded-2xl border-4 border-yellow-400 p-4 bg-[#182237] shadow-lg flex flex-col items-center">
+                        <img
+                          src="/lovable-uploads/VOI.png"
+                          alt="VOI token"
+                          className="w-20 h-20 rounded-full"
+                        />
+                        {/* Green Check */}
+                        <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-green-500 rounded-full p-1.5 border-4 border-[#182237]">
+                          <svg
+                            className="w-6 h-6 text-white"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                          >
+                            <path
+                              d="M5 13l4 4L19 7"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <h2 className="text-2xl font-bold text-center mt-4 mb-2 text-white">
+                    Transaction Successful!
+                  </h2>
+                  <div className="text-md md:text-lg text-white text-center mb-5">
+                    You successfully claimed{" "}
+                    <span className="text-yellow-400 font-bold">
+                      {formattedTotalClaimable} {rewardSymbol}
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {voiToken?.poolId && (
+                      <button
+                        className="w-full py-3 rounded-lg border-2 border-green-600 hover:border-green-700 text-green-600 hover:text-green-700 font-bold text-lg transition bg-transparent hover:bg-green-50 dark:hover:bg-green-900/20"
+                        onClick={() => {
+                          setShowClaimModal(false);
+                          setClaimConfirmed(false);
+                          handleDepositClick("VOI", voiToken.poolId);
+                        }}
+                      >
+                        Deposit into Market
+                      </button>
+                    )}
+                    <a
+                      href="/portfolio"
+                      className="w-full block py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white font-bold text-center"
+                      onClick={() => {
+                        setShowClaimModal(false);
+                        setClaimConfirmed(false);
+                      }}
+                    >
+                      View Portfolio
+                    </a>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

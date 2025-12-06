@@ -2769,6 +2769,8 @@ export const repay = async (
         tokenStandard,
       });
 
+      console.log({ tokenStandard });
+
       let customR: any;
       for (const [p1, p2] of [
         [0, 0],
@@ -2780,6 +2782,8 @@ export const repay = async (
 
         if (tokenStandard == "network") {
           // create balance box for pool
+          // ...
+          // create balance box for user
           if (p1 > 0) {
             const txnO = (await builder.token.createBalanceBox(userAddress))
               .obj;
