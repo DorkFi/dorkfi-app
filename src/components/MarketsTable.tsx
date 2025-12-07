@@ -37,7 +37,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import algosdk, { waitForConfirmation } from "algosdk";
 import { abi, CONTRACT } from "ulujs";
-import { getCurrentNetworkConfig, isAlgorandCompatibleNetwork } from "@/config";
+import { getCurrentNetworkConfig, isAlgorandCompatibleNetwork, isCurrentNetworkVOI, isCurrentNetworkAlgorand } from "@/config";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
 import BigNumber from "bignumber.js";
 
@@ -123,6 +123,7 @@ const MarketsTable = () => {
   const [shareButtonClicked, setShareButtonClicked] = useState(false);
 
   const { activeAccount, signTransactions, activeWallet } = useWallet();
+
   const { currentNetwork } = useNetwork();
   const { toast } = useToast();
 
@@ -169,6 +170,7 @@ const MarketsTable = () => {
       networks: {
         "algorand-mainnet": {
           contractId: "3210709899",
+          assetId: "2320775407",
         },
         "voi-mainnet": {
           contractId: "41877720",
@@ -682,6 +684,7 @@ const MarketsTable = () => {
                 activeAccount.address,
                 contractId
               );
+              console.log("balance/allowance", balance);
               claimableBalance = balance ? BigInt(balance) : 0n;
             } catch (error) {
               console.error(
@@ -748,12 +751,14 @@ const MarketsTable = () => {
         )
       : "0";
 
-  // Get VOI token config to find poolId for deposit
+  // Get VOI token confiag to find poolId for deposit
   const getVOITokenConfig = () => {
     try {
       const tokens = getAllTokensWithDisplayInfo(currentNetwork);
       console.log("=== Tokens Debug ===", { tokens });
-      return tokens.find((t) => t.symbol === "Voi" || t.symbol === "aVoi");
+      return tokens.find(
+        (t) => t.symbol === "Voi" || t.symbol === "aVoi" || t.symbol === "aVOI"
+      );
     } catch (error) {
       console.error("Error in getVOITokenConfig:", error);
       return undefined;
@@ -873,13 +878,15 @@ const MarketsTable = () => {
           if (allowance == BigInt(0)) {
             continue;
           }
-          // Call arc200_transferFrom to transfer from airdrop account to user
+
+          // Call arc200_transferFrom to transfer from airdrop account to user with optin
           {
             console.log("arc200_transferFrom", {
               from: reward.airdropAccount,
               to: activeAccount.address,
               allowance: allowance.toString(),
             });
+
             const txnO = (
               await builder.token.arc200_transferFrom(
                 reward.airdropAccount,
@@ -903,8 +910,16 @@ const MarketsTable = () => {
             ) {
               // TODO: cond optin for asa
               const txnW = (await builder.token.withdraw(allowance)).obj;
+              const optinW = voiToken.underlyingAssetId
+                ? {
+                    xaid: Number(voiToken.underlyingAssetId),
+                    snd: activeAccount.address,
+                    arcv: activeAccount.address,
+                  }
+                : {};
               buildN.push({
                 ...txnW,
+                ...optinW,
                 note: Uint8Array.from(
                   Buffer.from(
                     `dorkfi claim reward ${reward.id} withdraw (amount: ${rewardData.formatted} ${reward.symbol})`
@@ -931,6 +946,9 @@ const MarketsTable = () => {
       ci.setFee(2000);
       ci.setEnableGroupResourceSharing(true);
       ci.setExtraTxns(buildN);
+      if (currentNetwork === "algorand-mainnet") {
+        ci.setBeaconId(3209233839);
+      }
       customR = await ci.custom();
 
       console.log({ customR });
@@ -959,15 +977,15 @@ const MarketsTable = () => {
         .sendRawTransaction(signedTxns)
         .do();
 
+      // TODO: fix this
       // Wait for all confirmations
-      await algosdk.waitForConfirmation(algorandClients.algod, res.txid, 4);
+      //await algosdk.waitForConfirmation(algorandClients.algod, res.txid, 4);
+      await new Promise((resolve) => setTimeout(resolve, 3000));
 
       // Get reward names before clearing
       const rewardNames = Object.keys(claimableRewards)
         .map((rewardId) => {
-          const rewardInfo = rewards.find(
-            (r) => r.id.toString() === rewardId
-          );
+          const rewardInfo = rewards.find((r) => r.id.toString() === rewardId);
           return rewardInfo?.name;
         })
         .filter(Boolean) as string[];
@@ -1360,14 +1378,14 @@ const MarketsTable = () => {
         .do();
 
       // Wait for confirmation
-      await algosdk.waitForConfirmation(algorandClients.algod, res.txid, 4);
+      //await algosdk.waitForConfirmation(algorandClients.algod, res.txid, 4);
+      // TODO: fix this
+      await new Promise((resolve) => setTimeout(resolve, 3000));
 
       // Get reward names before clearing
       const rewardNames = Object.keys(claimableRewards)
         .map((rewardId) => {
-          const rewardInfo = rewards.find(
-            (r) => r.id.toString() === rewardId
-          );
+          const rewardInfo = rewards.find((r) => r.id.toString() === rewardId);
           return rewardInfo?.name;
         })
         .filter(Boolean) as string[];
@@ -1747,7 +1765,7 @@ const MarketsTable = () => {
                     <ExternalLink className="h-3 w-3" />
                   </Button>
                 </div>
-                {hasClaimableRewards && currentNetwork === "voi-mainnet" && (
+                {hasClaimableRewards && (
                   <Button
                     size="sm"
                     onClick={() => setShowClaimModal(true)}
@@ -2110,6 +2128,8 @@ const MarketsTable = () => {
                         const formattedAPY = apy.toFixed(2);
                         const depositButtonText = isClaiming
                           ? "Processing..."
+                          : apy === 0
+                          ? "Direct Deposit into Market"
                           : `Deposit & Earn ${formattedAPY}% APY`;
 
                         return (
@@ -2228,7 +2248,7 @@ const MarketsTable = () => {
                     >
                       View Portfolio
                     </a>
-                    
+
                     {/* Divider and Share button - hide when share button is clicked */}
                     {!shareButtonClicked && (
                       <>
@@ -2238,16 +2258,52 @@ const MarketsTable = () => {
                           <span className="text-xs text-white/50">Share</span>
                           <div className="flex-1 h-px bg-white/20"></div>
                         </div>
-                        
+
                         {/* Share on X */}
                         {(() => {
+                          // Determine network mentions
+                          const networkMentions = isCurrentNetworkVOI()
+                            ? " @Voi_Net"
+                            : isCurrentNetworkAlgorand()
+                            ? " @AlgoFoundation"
+                            : "";
+
+                          // Get wallet name
+                          const rawWalletName = activeWallet?.metadata?.name || "";
+                          let walletName = rawWalletName;
+                          if (rawWalletName.toLowerCase() === "lute") {
+                            walletName = "@LuteWallet";
+                          } else if (rawWalletName.toLowerCase() === "pera") {
+                            walletName = "@PeraAlgoWallet";
+                          } else if (rawWalletName.toLowerCase() === "defly") {
+                            walletName = "@deflyapp";
+                          } else if (rawWalletName.toLowerCase() === "vera") {
+                            walletName = "@Voi_Wallet";
+                          } else if (rawWalletName.toLowerCase() === "biatec") {
+                            walletName = "@BiatecGroup";
+                          }
+
                           const shareText = claimedAmount?.wasDeposited
-                            ? `Just claimed and deposited ${claimedAmount?.formatted || formattedTotalClaimable} ${claimedAmount?.symbol || rewardSymbol} rewards for PreFi incentives on @dork_fi! 🎉`
-                            : `Just claimed ${claimedAmount?.formatted || formattedTotalClaimable} ${claimedAmount?.symbol || rewardSymbol} rewards for PreFi incentives on @dork_fi! 🎉`;
-                          
+                            ? `Just claimed and deposited ${
+                                claimedAmount?.formatted ||
+                                formattedTotalClaimable
+                              } ${
+                                claimedAmount?.symbol || rewardSymbol
+                              } rewards for PreFi incentives on @dork_fi${networkMentions}${walletName ? ` using ${walletName}` : ""}! 🎉`
+                            : `Just claimed ${
+                                claimedAmount?.formatted ||
+                                formattedTotalClaimable
+                              } ${
+                                claimedAmount?.symbol || rewardSymbol
+                              } rewards for PreFi incentives on @dork_fi${networkMentions}${walletName ? ` using ${walletName}` : ""}! 🎉`;
+
                           return (
                             <a
-                              href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent('https://app.dork.fi')}`}
+                              href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(
+                                shareText
+                              )}&url=${encodeURIComponent(
+                                "https://app.dork.fi"
+                              )}`}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="w-full flex items-center justify-center gap-2 py-3 px-6 rounded-lg bg-black hover:bg-gray-900 text-white font-semibold text-base text-center transition border border-white/20"
@@ -2257,7 +2313,11 @@ const MarketsTable = () => {
                                 // Modal will close when user clicks View Portfolio or Close button
                               }}
                             >
-                              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                              <svg
+                                className="w-5 h-5"
+                                viewBox="0 0 24 24"
+                                fill="currentColor"
+                              >
                                 <path d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932ZM17.61 20.644h2.039L6.486 3.24H4.298Z" />
                               </svg>
                               Share on X

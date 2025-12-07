@@ -8,11 +8,25 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import { Wallet, Copy, LogOut, CheckCircle, ChevronDown, Wifi, WifiOff, Trash2 } from "lucide-react";
+import {
+  Wallet,
+  Copy,
+  LogOut,
+  CheckCircle,
+  ChevronDown,
+  Wifi,
+  WifiOff,
+  Trash2,
+} from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import WalletModal from "./WalletModal";
 import AccountSelector from "./AccountSelector";
-import { config, NetworkId, getNetworkConfig, getEnabledNetworks } from "@/config";
+import {
+  config,
+  NetworkId,
+  getNetworkConfig,
+  getEnabledNetworks,
+} from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { getNetworkLogoPath } from "@/utils/tokenImageUtils";
 
@@ -25,11 +39,21 @@ const WalletNetworkButton = ({
   currentNetwork = "voi-mainnet",
   onNetworkChange,
 }: WalletNetworkButtonProps) => {
-  const { activeAccount, activeWallet, activeWalletAccounts, setActiveNetwork } = useWallet();
-  const { currentNetwork: contextNetwork, switchNetwork, isSwitchingNetwork } = useNetwork();
+  const {
+    activeAccount,
+    activeWallet,
+    activeWalletAccounts,
+    setActiveNetwork,
+  } = useWallet();
+  const {
+    currentNetwork: contextNetwork,
+    switchNetwork,
+    isSwitchingNetwork,
+  } = useNetwork();
   const [copied, setCopied] = useState(false);
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
-  const [selectedNetwork, setSelectedNetwork] = useState<NetworkId>(contextNetwork);
+  const [selectedNetwork, setSelectedNetwork] =
+    useState<NetworkId>(contextNetwork);
   const { toast } = useToast();
 
   // Determine which networks are supported by the connected wallet
@@ -40,51 +64,59 @@ const WalletNetworkButton = ({
     }
 
     const walletId = activeWallet.id.toLowerCase();
-    const walletName = activeWallet.metadata?.name?.toLowerCase() || '';
-    
+    const walletName = activeWallet.metadata?.name?.toLowerCase() || "";
+
     // Debug logging to see what we have
-    console.log('Wallet Debug:', {
+    console.log("Wallet Debug:", {
       walletId,
       walletName,
       metadata: activeWallet.metadata,
-      fullWallet: activeWallet
+      fullWallet: activeWallet,
     });
-    
+
     // Universal wallets that work on both VOI and Algorand
-    if (walletId === 'lute' || walletId === 'kibisis') {
+    if (
+      walletId === "lute" ||
+      walletId === "kibisis" ||
+      walletId === "walletconnect" ||
+      walletId === "vera" ||
+      walletId === "biatec" ||
+      walletName.includes("vera") ||
+      walletName.includes("biatec")
+    ) {
       return getEnabledNetworks(); // Show all AVM networks
     }
-    
-    // VOI-specific wallets
-    if (walletId === 'vera' || walletId === 'biatec' || walletName.includes('vera') || walletName.includes('biatec')) {
-      return ['voi-mainnet']; // Only VOI Mainnet
-    }
-    
+
     // Algorand-specific wallets
-    if (walletId === 'pera' || walletId === 'defly' || walletName.includes('pera') || walletName.includes('defly')) {
-      return ['algorand-mainnet']; // Only Algorand Mainnet
+    if (
+      walletId === "pera" ||
+      walletId === "defly" ||
+      walletName.includes("pera") ||
+      walletName.includes("defly")
+    ) {
+      return ["algorand-mainnet"]; // Only Algorand Mainnet
     }
-    
+
     // WalletConnect - check if it's a specific wallet
-    if (walletId === 'walletconnect') {
+    if (walletId === "walletconnect") {
       // If connected via WalletConnect, check the wallet name to determine restrictions
-      if (walletName.includes('vera') || walletName.includes('biatec')) {
-        return ['voi-mainnet']; // VOI-specific wallets via WalletConnect
+      if (walletName.includes("vera") || walletName.includes("biatec")) {
+        return ["voi-mainnet"]; // VOI-specific wallets via WalletConnect
       }
-      if (walletName.includes('pera') || walletName.includes('defly')) {
-        return ['algorand-mainnet']; // Algorand-specific wallets via WalletConnect
+      if (walletName.includes("pera") || walletName.includes("defly")) {
+        return ["algorand-mainnet"]; // Algorand-specific wallets via WalletConnect
       }
-      
+
       // Fallback: If WalletConnect on VOI Mainnet, assume it's a VOI-specific wallet
       // This handles cases where wallet name doesn't contain the specific wallet name
-      if (currentNetwork === 'voi-mainnet') {
-        return ['voi-mainnet']; // Assume VOI-specific wallet
+      if (currentNetwork === "voi-mainnet") {
+        return ["voi-mainnet"]; // Assume VOI-specific wallet
       }
-      
+
       // If WalletConnect but unknown wallet, show all networks
       return getEnabledNetworks();
     }
-    
+
     // Default: show all networks if wallet type is unknown
     return getEnabledNetworks();
   };
@@ -111,7 +143,7 @@ const WalletNetworkButton = ({
         });
       }
     } catch (error) {
-      console.error('Failed to disconnect wallet:', error);
+      console.error("Failed to disconnect wallet:", error);
       toast({
         title: "Disconnect Failed",
         description: "Failed to disconnect wallet",
@@ -134,11 +166,11 @@ const WalletNetworkButton = ({
         await activeWallet.setActiveAccount(account.address);
         toast({
           title: "Account Switched",
-          description: `Switched to ${account.name || 'account'}`,
+          description: `Switched to ${account.name || "account"}`,
         });
       }
     } catch (error) {
-      console.error('Failed to switch account:', error);
+      console.error("Failed to switch account:", error);
       toast({
         title: "Switch Failed",
         description: "Failed to switch account",
@@ -151,15 +183,15 @@ const WalletNetworkButton = ({
     try {
       // Clear localStorage
       localStorage.clear();
-      
+
       // Clear sessionStorage
       sessionStorage.clear();
-      
+
       // Clear IndexedDB (if used)
-      if ('indexedDB' in window) {
+      if ("indexedDB" in window) {
         const databases = await indexedDB.databases();
         await Promise.all(
-          databases.map(db => {
+          databases.map((db) => {
             return new Promise((resolve, reject) => {
               const deleteReq = indexedDB.deleteDatabase(db.name!);
               deleteReq.onerror = () => reject(deleteReq.error);
@@ -168,27 +200,26 @@ const WalletNetworkButton = ({
           })
         );
       }
-      
+
       // Clear cookies (if accessible)
-      document.cookie.split(";").forEach(cookie => {
+      document.cookie.split(";").forEach((cookie) => {
         const eqPos = cookie.indexOf("=");
         const name = eqPos > -1 ? cookie.substr(0, eqPos) : cookie;
         document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`;
         document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=${window.location.hostname}`;
       });
-      
+
       toast({
         title: "Site Data Cleared",
         description: "All local data has been cleared successfully",
       });
-      
+
       // Optionally reload the page to ensure clean state
       setTimeout(() => {
         window.location.reload();
       }, 1000);
-      
     } catch (error) {
-      console.error('Failed to clear site data:', error);
+      console.error("Failed to clear site data:", error);
       toast({
         title: "Clear Failed",
         description: "Failed to clear some site data",
@@ -199,7 +230,7 @@ const WalletNetworkButton = ({
 
   const handleNetworkChange = async (networkId: NetworkId) => {
     if (isSwitchingNetwork) return; // Prevent multiple simultaneous switches
-    
+
     try {
       // Check if the target network is supported by the connected wallet
       // const supportedNetworks = getSupportedNetworks();
@@ -212,15 +243,15 @@ const WalletNetworkButton = ({
       //   });
       //   return;
       // }
-      
+
       setSelectedNetwork(networkId);
-      
+
       // Switch network - all wallets stay connected
       await switchNetwork(networkId);
-      
+
       // Get the new network configuration
       const networkConfig = getNetworkConfig(networkId);
-      
+
       // If no wallet is connected, open wallet modal after switching network
       if (!activeAccount) {
         setIsWalletModalOpen(true);
@@ -235,12 +266,11 @@ const WalletNetworkButton = ({
           description: `Switched to ${networkConfig.name}. Wallet remains connected.`,
         });
       }
-      
+
       // Notify parent component about network change
       onNetworkChange?.(networkId);
-      
     } catch (error) {
-      console.error('Failed to switch network:', error);
+      console.error("Failed to switch network:", error);
       toast({
         title: "Network Switch Failed",
         description: "Failed to switch network. Please try again.",
@@ -273,8 +303,12 @@ const WalletNetworkButton = ({
           <DropdownMenuTrigger asChild>
             <Button className="bg-whale-gold hover:bg-whale-gold/90 text-black font-semibold transition-all hover:scale-105 flex items-center gap-2">
               <CheckCircle className="w-4 h-4" />
-              <span className="hidden sm:inline">{formatAddress(activeAccount.address)}</span>
-              <span className="sm:hidden">{formatAddress(activeAccount.address)}</span>
+              <span className="hidden sm:inline">
+                {formatAddress(activeAccount.address)}
+              </span>
+              <span className="sm:hidden">
+                {formatAddress(activeAccount.address)}
+              </span>
               <ChevronDown className="w-4 h-4 opacity-70" />
             </Button>
           </DropdownMenuTrigger>
@@ -285,7 +319,10 @@ const WalletNetworkButton = ({
                 Wallet
               </div>
             </div>
-            <DropdownMenuItem onClick={handleCopyAddress} className="cursor-pointer">
+            <DropdownMenuItem
+              onClick={handleCopyAddress}
+              className="cursor-pointer"
+            >
               {copied ? (
                 <CheckCircle className="w-4 h-4 mr-2 text-green-500" />
               ) : (
@@ -293,15 +330,18 @@ const WalletNetworkButton = ({
               )}
               {copied ? "Copied!" : "Copy Address"}
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleDisconnect} className="cursor-pointer text-red-600">
+            <DropdownMenuItem
+              onClick={handleDisconnect}
+              className="cursor-pointer text-red-600"
+            >
               <LogOut className="w-4 h-4 mr-2" />
               Disconnect
             </DropdownMenuItem>
-            
+
             {showNetworkSection && (
               <>
                 <DropdownMenuSeparator />
-                
+
                 {/* Network Section */}
                 <div className="px-2 py-1.5">
                   <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
@@ -319,8 +359,8 @@ const WalletNetworkButton = ({
                       }`}
                     >
                       <div className="flex items-center gap-2">
-                        <img 
-                          src={getNetworkLogoPath(networkId)} 
+                        <img
+                          src={getNetworkLogoPath(networkId)}
                           alt={`${networkConfig.name} logo`}
                           className="w-6 h-6 rounded-full"
                           onError={(e) => {
@@ -329,7 +369,9 @@ const WalletNetworkButton = ({
                           }}
                         />
                         <div className="flex flex-col">
-                          <span className="font-medium text-sm">{networkConfig.name}</span>
+                          <span className="font-medium text-sm">
+                            {networkConfig.name}
+                          </span>
                           <span className="text-xs text-muted-foreground">
                             {networkConfig.networkType.toUpperCase()}
                           </span>
@@ -343,9 +385,12 @@ const WalletNetworkButton = ({
                 })}
               </>
             )}
-            
+
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={handleClearSiteData} className="cursor-pointer text-orange-600">
+            <DropdownMenuItem
+              onClick={handleClearSiteData}
+              className="cursor-pointer text-orange-600"
+            >
               <Trash2 className="w-4 h-4 mr-2" />
               Clear Site Data
             </DropdownMenuItem>
@@ -373,15 +418,18 @@ const WalletNetworkButton = ({
               Wallet
             </div>
           </div>
-          <DropdownMenuItem onClick={handleOpenWalletModal} className="cursor-pointer">
+          <DropdownMenuItem
+            onClick={handleOpenWalletModal}
+            className="cursor-pointer"
+          >
             <Wallet className="w-4 h-4 mr-2" />
             Connect Wallet
           </DropdownMenuItem>
-          
+
           {showNetworkSection && (
             <>
               <DropdownMenuSeparator />
-              
+
               {/* Network Section */}
               <div className="px-2 py-1.5">
                 <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
@@ -390,16 +438,21 @@ const WalletNetworkButton = ({
               </div>
               {getSupportedNetworks().map((networkId) => {
                 const networkConfig = getNetworkConfig(networkId);
-                const isCurrentlySwitching = isSwitchingNetwork && selectedNetwork === networkId;
+                const isCurrentlySwitching =
+                  isSwitchingNetwork && selectedNetwork === networkId;
                 const isDisabled = isSwitchingNetwork;
                 const isCurrentNetwork = selectedNetwork === networkId;
-                
+
                 return (
                   <DropdownMenuItem
                     key={networkId}
-                    onClick={() => !isDisabled && handleNetworkChange(networkId)}
+                    onClick={() =>
+                      !isDisabled && handleNetworkChange(networkId)
+                    }
                     className={`flex items-center justify-between ${
-                      isDisabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
+                      isDisabled
+                        ? "cursor-not-allowed opacity-50"
+                        : "cursor-pointer"
                     } ${isCurrentNetwork ? "bg-accent" : ""}`}
                     disabled={isDisabled}
                   >
@@ -407,8 +460,8 @@ const WalletNetworkButton = ({
                       {isCurrentlySwitching ? (
                         <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
                       ) : (
-                        <img 
-                          src={getNetworkLogoPath(networkId)} 
+                        <img
+                          src={getNetworkLogoPath(networkId)}
                           alt={`${networkConfig.name} logo`}
                           className="w-6 h-6 rounded-full"
                           onError={(e) => {
@@ -424,7 +477,9 @@ const WalletNetworkButton = ({
                         </span>
                         <span className="text-xs text-muted-foreground">
                           {networkConfig.networkType.toUpperCase()}
-                          {!activeAccount && !isCurrentNetwork && " • Connect wallet"}
+                          {!activeAccount &&
+                            !isCurrentNetwork &&
+                            " • Connect wallet"}
                         </span>
                       </div>
                     </div>
@@ -436,16 +491,19 @@ const WalletNetworkButton = ({
               })}
             </>
           )}
-          
+
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={handleClearSiteData} className="cursor-pointer text-orange-600">
+          <DropdownMenuItem
+            onClick={handleClearSiteData}
+            className="cursor-pointer text-orange-600"
+          >
             <Trash2 className="w-4 h-4 mr-2" />
             Clear Site Data
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      
-      <WalletModal 
+
+      <WalletModal
         isOpen={isWalletModalOpen}
         onClose={handleCloseWalletModal}
       />

@@ -228,6 +228,7 @@ export class ARC200Service {
       );
 
       if (!arc200AllowanceR.success) {
+        console.log("arc200AllowanceR", arc200AllowanceR);
         throw new Error("Failed to get ARC200 allowance");
       }
 
