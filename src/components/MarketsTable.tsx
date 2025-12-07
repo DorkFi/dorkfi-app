@@ -37,7 +37,12 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import algosdk, { waitForConfirmation } from "algosdk";
 import { abi, CONTRACT } from "ulujs";
-import { getCurrentNetworkConfig, isAlgorandCompatibleNetwork, isCurrentNetworkVOI, isCurrentNetworkAlgorand } from "@/config";
+import {
+  getCurrentNetworkConfig,
+  isAlgorandCompatibleNetwork,
+  isCurrentNetworkVOI,
+  isCurrentNetworkAlgorand,
+} from "@/config";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
 import BigNumber from "bignumber.js";
 
@@ -1112,7 +1117,8 @@ const MarketsTable = () => {
       const networkConfig = getCurrentNetworkConfig();
 
       // Build claim transactions first
-      let buildN: any[] = [];
+      let claimBuildN: any[] = [];
+      let counter = 0;
 
       // Build claim transactions for each reward
       for (const [rewardId, rewardData] of Object.entries(claimableRewards)) {
@@ -1174,7 +1180,6 @@ const MarketsTable = () => {
           if (allowance == BigInt(0)) {
             continue;
           }
-
           // Add claim transfer transaction
           const txnO = (
             await rewardBuilder.token.arc200_transferFrom(
@@ -1183,9 +1188,9 @@ const MarketsTable = () => {
               allowance
             )
           ).obj;
-          buildN.push({
+          claimBuildN.push({
             ...txnO,
-            payment: 28500,
+            payment: 28500 + counter++,
             note: Uint8Array.from(
               Buffer.from(
                 `dorkfi claim reward ${reward.id} transfer (amount: ${rewardData.formatted} ${reward.symbol})`
@@ -1272,16 +1277,13 @@ const MarketsTable = () => {
       // Try different payment combinations (same logic as deposit function)
       let customTx: any;
       for (const p of [
-        [0, 0, 0],
-        [0, 1, 0],
-        [1, 0, 0],
-        [1, 1, 0],
-        [0, 0, 1],
-        [0, 1, 1],
-        [1, 0, 1],
-        [1, 1, 1],
+        [0, 0],
+        [1, 0],
+        [0, 1],
+        [1, 1],
       ]) {
-        const [p1, p2, p3] = p;
+        const buildN = [...claimBuildN];
+        const [p1, p2] = p;
         const depositBuildN = [...buildN]; // Start with claim transactions
 
         // Approve spending of token
@@ -1296,7 +1298,7 @@ const MarketsTable = () => {
           ).obj;
           depositBuildN.push({
             ...txnO,
-            payment: p2 > 0 ? 28502 : 0,
+            payment: p1 > 0 ? 28500 + counter++ : 0,
             note: new TextEncoder().encode("arc200 approve"),
           });
         }
@@ -1310,7 +1312,7 @@ const MarketsTable = () => {
           if (networkConfig.networkId === "algorand-mainnet") {
             foreignApps.push(3333688254);
           }
-          const payment = p3 > 0 ? 9e5 : 1e5;
+          const payment = p2 > 0 ? 9e5 : 1e5;
           const txnO = (
             await depositBuilder.lending.deposit(
               Number(voiToken.underlyingContractId),
@@ -1662,6 +1664,7 @@ const MarketsTable = () => {
   };
 
   const getAssetData = (asset: string, poolId?: string) => {
+    console.log({ asset, poolId, markets });
     // Find matching markets - prefer poolId match if provided
     let market;
     if (poolId) {
@@ -2269,7 +2272,8 @@ const MarketsTable = () => {
                             : "";
 
                           // Get wallet name
-                          const rawWalletName = activeWallet?.metadata?.name || "";
+                          const rawWalletName =
+                            activeWallet?.metadata?.name || "";
                           let walletName = rawWalletName;
                           if (rawWalletName.toLowerCase() === "lute") {
                             walletName = "@LuteWallet";
@@ -2277,11 +2281,14 @@ const MarketsTable = () => {
                             walletName = "@PeraAlgoWallet";
                           } else if (rawWalletName.toLowerCase() === "defly") {
                             walletName = "@deflyapp";
-                          } else if (rawWalletName.toLowerCase() === "vera" || rawWalletName.toLowerCase() === "walletconnect") {
+                          } else if (
+                            rawWalletName.toLowerCase() === "vera" ||
+                            rawWalletName.toLowerCase() === "walletconnect"
+                          ) {
                             walletName = "@Voi_Wallet";
                           } else if (rawWalletName.toLowerCase() === "biatec") {
                             walletName = "@BiatecGroup";
-                          } 
+                          }
 
                           const shareText = claimedAmount?.wasDeposited
                             ? `Just claimed and deposited ${
@@ -2289,13 +2296,17 @@ const MarketsTable = () => {
                                 formattedTotalClaimable
                               } ${
                                 claimedAmount?.symbol || rewardSymbol
-                              } rewards for PreFi incentives on @dork_fi${networkMentions}${walletName ? ` using ${walletName}` : ""}! 🎉`
+                              } rewards for PreFi incentives on @dork_fi${networkMentions}${
+                                walletName ? ` using ${walletName}` : ""
+                              }! 🎉`
                             : `Just claimed ${
                                 claimedAmount?.formatted ||
                                 formattedTotalClaimable
                               } ${
                                 claimedAmount?.symbol || rewardSymbol
-                              } rewards for PreFi incentives on @dork_fi${networkMentions}${walletName ? ` using ${walletName}` : ""}! 🎉`;
+                              } rewards for PreFi incentives on @dork_fi${networkMentions}${
+                                walletName ? ` using ${walletName}` : ""
+                              }! 🎉`;
 
                           return (
                             <a
