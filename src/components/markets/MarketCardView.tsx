@@ -1,5 +1,5 @@
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { OnDemandMarketData } from "@/hooks/useOnDemandMarketData";
@@ -65,7 +65,21 @@ const MarketCardView = ({
             token && "originalSymbol" in token
               ? (token as any).originalSymbol
               : market.asset;
-          const tokenConfig = getTokenConfig(currentNetwork, originalSymbol);
+          const tokenConfigRaw = getTokenConfig(currentNetwork, originalSymbol);
+          
+          // Handle case where tokenConfig might be an array (multiple markets)
+          let tokenConfig: any;
+          if (Array.isArray(tokenConfigRaw)) {
+            // Try to find matching config by poolId
+            const marketPoolId = market.marketInfo?.poolId || market.poolId;
+            if (marketPoolId) {
+              tokenConfig = tokenConfigRaw.find(tc => String(tc.poolId) === String(marketPoolId)) || tokenConfigRaw[0];
+            } else {
+              tokenConfig = tokenConfigRaw[0];
+            }
+          } else {
+            tokenConfig = tokenConfigRaw;
+          }
 
           if (tokenConfig?.migration?.nTokenId) {
             try {
@@ -102,7 +116,40 @@ const MarketCardView = ({
 
     checkMigrationBalances();
   }, [markets, activeAccount?.address, currentNetwork]);
-  if (markets.length === 0) {
+
+  // Deduplicate markets by asset symbol and poolId
+  // For mobile, we show only one market per asset (preferring sToken if available)
+  const deduplicatedMarkets = useMemo(() => {
+    const marketMap = new Map<string, OnDemandMarketData>();
+    
+    markets.forEach((market) => {
+      const key = market.asset;
+      const existingMarket = marketMap.get(key);
+      
+      // If no existing market, add this one
+      if (!existingMarket) {
+        marketMap.set(key, market);
+      } else {
+        // Prefer sToken markets, otherwise keep the first one
+        // Also check by poolId to avoid true duplicates
+        const existingPoolId = existingMarket.marketInfo?.poolId || existingMarket.poolId;
+        const currentPoolId = market.marketInfo?.poolId || market.poolId;
+        
+        // If poolIds are different, prefer sToken
+        if (existingPoolId !== currentPoolId) {
+          if (market.isSToken && !existingMarket.isSToken) {
+            marketMap.set(key, market);
+          }
+          // If both are sTokens or both are not, keep the first one
+        }
+        // If poolIds match, it's a duplicate, keep existing
+      }
+    });
+    
+    return Array.from(marketMap.values());
+  }, [markets]);
+
+  if (deduplicatedMarkets.length === 0) {
     return (
       <div className="text-center py-8">
         <p className="text-ink-blue">No markets found matching your search criteria.</p>
@@ -111,12 +158,14 @@ const MarketCardView = ({
   }
   return (
     <div className="space-y-4">
-      {markets.map((market) => {
+      {deduplicatedMarkets.map((market) => {
         // Render special card for s-tokens
         if (market.isSToken) {
+          // Use poolId in key to ensure uniqueness even if multiple markets exist
+          const marketKey = `${market.asset}-${market.marketInfo?.poolId || market.poolId || 'stoken'}`;
           return (
             <STokenCard
-              key={market.asset}
+              key={marketKey}
               market={market}
               onRowClick={onRowClick}
               onInfoClick={onInfoClick}
@@ -128,9 +177,11 @@ const MarketCardView = ({
         }
 
         // Render regular card for non-s-tokens
+        // Use poolId in key to ensure uniqueness even if multiple markets exist
+        const marketKey = `${market.asset}-${market.marketInfo?.poolId || market.poolId || 'default'}`;
         return (
           <DorkFiCard
-            key={market.asset}
+            key={marketKey}
             className="flex flex-col md:flex-row md:items-stretch gap-4 md:gap-6"
             onClick={() => onRowClick(market)}
           >
@@ -195,11 +246,11 @@ const MarketCardView = ({
               <div className="flex gap-2 justify-center md:justify-start">
                 <DorkFiButton
                   variant="secondary"
-                  onClick={e => { e.stopPropagation(); onDepositClick(market.asset); }}
+                  onClick={e => { e.stopPropagation(); onDepositClick(market.asset, market.marketInfo?.poolId || market.poolId); }}
                 >Deposit</DorkFiButton>
                 <DorkFiButton
                   variant="borrow-outline"
-                  onClick={e => { e.stopPropagation(); onBorrowClick(market.asset); }}
+                  onClick={e => { e.stopPropagation(); onBorrowClick(market.asset, market.marketInfo?.poolId || market.poolId); }}
                 >Borrow</DorkFiButton>
               </div>
               {(() => {
@@ -210,7 +261,20 @@ const MarketCardView = ({
                   token && "originalSymbol" in token
                     ? (token as any).originalSymbol
                     : market.asset;
-                const tokenConfig = getTokenConfig(currentNetwork, originalSymbol);
+                const tokenConfigRaw = getTokenConfig(currentNetwork, originalSymbol);
+                // Handle case where tokenConfig might be an array (multiple markets)
+                let tokenConfig: any;
+                if (Array.isArray(tokenConfigRaw)) {
+                  // Try to find matching config by poolId
+                  const marketPoolId = market.marketInfo?.poolId || market.poolId;
+                  if (marketPoolId) {
+                    tokenConfig = tokenConfigRaw.find(tc => String(tc.poolId) === String(marketPoolId)) || tokenConfigRaw[0];
+                  } else {
+                    tokenConfig = tokenConfigRaw[0];
+                  }
+                } else {
+                  tokenConfig = tokenConfigRaw;
+                }
                 const hasMigration = !!tokenConfig?.migration;
                 const migrationBalance = migrationBalances[market.asset];
 
