@@ -2277,11 +2277,11 @@ const MarketsTable = () => {
                             walletName = "@PeraAlgoWallet";
                           } else if (rawWalletName.toLowerCase() === "defly") {
                             walletName = "@deflyapp";
-                          } else if (rawWalletName.toLowerCase() === "vera") {
+                          } else if (rawWalletName.toLowerCase() === "vera" || rawWalletName.toLowerCase() === "walletconnect") {
                             walletName = "@Voi_Wallet";
                           } else if (rawWalletName.toLowerCase() === "biatec") {
                             walletName = "@BiatecGroup";
-                          }
+                          } 
 
                           const shareText = claimedAmount?.wasDeposited
                             ? `Just claimed and deposited ${
