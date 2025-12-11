@@ -8,6 +8,9 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
     port: 8080,
+    hmr: {
+      protocol: "ws",
+    },
   },
   plugins: [
     react(),
@@ -24,6 +27,16 @@ export default defineConfig(({ mode }) => ({
     global: 'globalThis',
   },
   optimizeDeps: {
-    include: ["buffer"],
+    include: [
+      "buffer",
+      "@txnlab/use-wallet-react",
+      "@walletconnect/modal",
+      "@walletconnect/sign-client",
+      "@perawallet/connect",
+      "lute-connect",
+      "algosdk",
+      "@algorandfoundation/algokit-utils",
+    ],
+    force: true, // Force re-optimization on next dev server start
   },
 }));

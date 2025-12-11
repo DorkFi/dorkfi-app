@@ -6,10 +6,12 @@ import {
   fetchAllMarkets,
   fetchUserBorrowBalance,
   fetchUserDepositBalance,
+  enhanceAVMMarketInfo,
 } from "@/services/lendingService";
+import dorkfiAPIService from "@/services/dorkfiAPIService";
 import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
-import { getTokenConfig, isFeatureEnabled } from "@/config";
+import { getAllTokens, getTokenConfig, isFeatureEnabled } from "@/config";
 import { getAllTokensWithDisplayInfo } from "@/config";
 import EnhancedHealthFactor from "./EnhancedHealthFactor";
 import DepositsList from "./DepositsList";
@@ -80,16 +82,17 @@ const Portfolio = () => {
     contractPrice: string | number,
     tokenDecimals: number
   ): number => {
-    const price = typeof contractPrice === "string" 
-      ? parseFloat(contractPrice) 
-      : contractPrice;
-    
+    const price =
+      typeof contractPrice === "string"
+        ? parseFloat(contractPrice)
+        : contractPrice;
+
     if (!price || price === 0) return 1;
-    
+
     // Calculate adjustment: 12 (oracle decimals) - token decimals
     const targetAdjustment = 12 - tokenDecimals;
     const divisor = Math.pow(10, targetAdjustment);
-    
+
     return price / divisor;
   };
 
@@ -150,8 +153,18 @@ const Portfolio = () => {
       for (const token of tokens) {
         if (token.underlyingContractId && token.poolId) {
           // Find matching market by both symbol and poolId to handle multiple markets for same token
-          let market = markets.find((m) => m.symbol === token.symbol && m.poolId === token.poolId);
-          
+          let market = markets.find(
+            (m) => m.symbol === token.symbol && m.poolId === token.poolId
+          );
+
+          console.log({
+            fetchUserPositions: {
+              token,
+              markets,
+              market,
+            },
+          });
+
           // Fallback to symbol-only match if poolId match not found (for backward compatibility)
           if (!market) {
             market = markets.find((m) => m.symbol === token.symbol);
@@ -185,11 +198,13 @@ const Portfolio = () => {
               networkId as any,
               token.symbol
             );
-            
+
             // Handle array of token configs (multiple markets)
             // Compare poolIds as strings to ensure exact match
             const originalTokenConfig = Array.isArray(originalTokenConfigRaw)
-              ? originalTokenConfigRaw.find((tc) => String(tc.poolId) === String(token.poolId)) || originalTokenConfigRaw[0]
+              ? originalTokenConfigRaw.find(
+                  (tc) => String(tc.poolId) === String(token.poolId)
+                ) || originalTokenConfigRaw[0]
               : originalTokenConfigRaw;
 
             // Fetch ntoken balance for this deposit
@@ -208,8 +223,7 @@ const Portfolio = () => {
               nTokenBalance,
               marketPrice: market?.price,
               tokenPrice: tokenPrice,
-              calculatedValue:
-                depositBalance * tokenPrice,
+              calculatedValue: depositBalance * tokenPrice,
               marketFound: !!market,
             });
 
@@ -435,7 +449,9 @@ const Portfolio = () => {
       // For multi-market tokens, find the one matching the token's poolId
       // Compare poolIds as strings to ensure exact match
       const originalTokenConfig = Array.isArray(originalTokenConfigRaw)
-        ? originalTokenConfigRaw.find((tc) => String(tc.poolId) === String(token.poolId)) || originalTokenConfigRaw[0]
+        ? originalTokenConfigRaw.find(
+            (tc) => String(tc.poolId) === String(token.poolId)
+          ) || originalTokenConfigRaw[0]
         : originalTokenConfigRaw;
 
       // Initialize ARC200Service with current clients
@@ -607,22 +623,30 @@ const Portfolio = () => {
 
     setIsLoadingPositions(true);
     try {
+      // fetch market from node api for accurate position info
       // Fetch fresh market data and global data first
-      const freshMarketData = await fetchAllMarkets(currentNetwork);
+      const markets = await fetchAllMarkets(currentNetwork);
+      // const marketDataResponse =
+      //   await dorkfiAPIService.getAllMarketDataByNetwork(currentNetwork);
+      // const freshMarketData = marketDataResponse.success
+      //   ? marketDataResponse.data
+      //   : [];
+      const marketData = markets;
+
       const freshGlobalData = await fetchUserGlobalData(
         activeAccount.address,
         currentNetwork,
-        freshMarketData
+        marketData
       );
 
       // Then fetch fresh user positions with market data
       const freshPositions = await fetchUserPositions(
         activeAccount.address,
         currentNetwork,
-        freshMarketData
+        marketData
       );
 
-      setMarketData(freshMarketData);
+      setMarketData(marketData);
       setUserPositions(freshPositions);
       setUserGlobalData(freshGlobalData);
     } catch (error) {
@@ -653,20 +677,43 @@ const Portfolio = () => {
           currentNetwork
         );
 
+        // fetch market data from api for faster response on page load
         // Fetch markets first, then global data (so we can pass marketData for healthFactorIndex calculation)
-        const markets = await fetchAllMarkets(currentNetwork);
+        const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+        //const markets = await fetchAllMarkets(currentNetwork);
+        const marketDataResponse =
+          await dorkfiAPIService.getAllMarketDataByNetwork(currentNetwork);
+        const freshMarketData = marketDataResponse.success
+          ? marketDataResponse.data.map((item: any) => {
+              const token = tokens.find(
+                (t) =>
+                  t.originalContractId === `${item.marketId}` &&
+                  t.poolId === `${item.appId}`
+              );
+              return enhanceAVMMarketInfo(item, token as any);
+            })
+          : [];
+        const marketData = freshMarketData;
+
         const globalData = await fetchUserGlobalData(
           activeAccount.address,
           currentNetwork,
-          markets
+          marketData
         );
 
         // Then fetch user positions with market data
         const positions = await fetchUserPositions(
           activeAccount.address,
           currentNetwork,
-          markets
+          marketData
         );
+
+        console.log({
+          //markets,
+          freshMarketData,
+          globalData: globalData,
+          positions: positions,
+        });
 
         if (globalData) {
           console.log("User global data fetched:", globalData);
@@ -676,9 +723,9 @@ const Portfolio = () => {
           setUserGlobalData(null);
         }
 
-        if (markets) {
-          console.log("Market data fetched:", markets);
-          setMarketData(markets);
+        if (freshMarketData) {
+          console.log("Market data fetched:", freshMarketData);
+          setMarketData(freshMarketData);
         } else {
           console.log("No market data found");
           setMarketData([]);
@@ -738,8 +785,14 @@ const Portfolio = () => {
     try {
       // Fetch user global data before opening modal (only if wallet is connected)
       if (activeAccount?.address) {
+        // fetch markets from node api for accurate healthFactorIndex calculation
         // Fetch markets to pass for healthFactorIndex calculation
         const markets = await fetchAllMarkets(currentNetwork);
+        // const marketDataResponse =
+        //   await dorkfiAPIService.getAllMarketDataByNetwork(currentNetwork);
+        // const markets = marketDataResponse.success
+        //   ? marketDataResponse.data
+        //   : [];
         const globalData = await fetchUserGlobalData(
           activeAccount.address,
           currentNetwork,
@@ -1155,7 +1208,9 @@ const Portfolio = () => {
         onCloseBorrowModal={() =>
           setBorrowModal({ isOpen: false, asset: null })
         }
-        onCloseRepayModal={() => setRepayModal({ isOpen: false, asset: null, poolId: undefined })}
+        onCloseRepayModal={() =>
+          setRepayModal({ isOpen: false, asset: null, poolId: undefined })
+        }
         onRefreshWalletBalance={refreshWalletBalance}
         onRefreshMarket={handleRefreshPositions}
       />

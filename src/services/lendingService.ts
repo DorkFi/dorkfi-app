@@ -164,6 +164,117 @@ export const decodeUser = (user: any[]) => {
   } as User;
 };
 
+export const enhanceAVMMarketInfo = (
+  market: any,
+  token?: TokenConfig
+): MarketInfo => {
+  const poolId = market.poolId || market.appId;
+  const utilizationRate =
+    market.totalScaledDeposits.toString() == "0"
+      ? 0
+      : new BigNumber(market.totalScaledBorrows.toString())
+          .div(market.totalScaledDeposits.toString())
+          .toNumber();
+
+  const supplyRate = new BigNumber(market.borrowRate.toString())
+    .multipliedBy(utilizationRate)
+    .multipliedBy(10000 - Number(market.reserveFactor.toString()))
+    .dividedBy(10000)
+    .toNumber();
+
+  const formatPrice = (price: string) => {
+    return new BigNumber(price).div(new BigNumber(10).pow(18)).toFixed(12);
+  };
+
+  const formatDeposit = (deposit: string) => {
+    return new BigNumber(deposit)
+      .div(new BigNumber(10).pow(token?.decimals || 0))
+      .toFixed(4);
+  };
+
+  const totalDeposits = formatDeposit(market.totalScaledDeposits.toString());
+
+  const totalBorrows = formatDeposit(market.totalScaledBorrows.toString());
+
+  // For b market (poolId 47139781), use 2% (200 basis points) as base borrow rate
+  // Otherwise use the borrow rate from the contract
+  const baseBorrowRateBps =
+    poolId === "47139781"
+      ? 200 // 2% = 200 basis points for b market
+      : parseFloat(market.borrowRate.toString());
+
+  // Calculate APY using the new utility function
+  const apyCalculation = calculateDepositAPY(
+    {
+      borrowRate: baseBorrowRateBps,
+      slope: parseFloat(market.slope.toString()),
+      reserveFactor: parseFloat(market.reserveFactor.toString()),
+    },
+    {
+      totalScaledDeposits: market.totalScaledDeposits.toString(),
+      totalScaledBorrows: market.totalScaledBorrows.toString(),
+      lastUpdateTime: Number(market.lastUpdateTime),
+    }
+  );
+
+  // Calculate borrow APY using the new utility function
+  const borrowApyCalculation = calculateBorrowAPY(
+    {
+      borrowRate: baseBorrowRateBps,
+      slope: parseFloat(market.slope.toString()),
+      reserveFactor: parseFloat(market.reserveFactor.toString()),
+    },
+    {
+      totalScaledDeposits: market.totalScaledDeposits.toString(),
+      totalScaledBorrows: market.totalScaledBorrows.toString(),
+      lastUpdateTime: Number(market.lastUpdateTime),
+    },
+    token?.isStoken || false
+  );
+
+  const marketInfo: MarketInfo = {
+    networkId: market.network,
+    poolId: String(poolId),
+    marketId: String(market.marketId),
+    tokenId: market.ntokenId.toString(),
+    tokenContractId: market.ntokenId.toString(),
+    name: token?.name || "",
+    symbol: token?.symbol || "",
+    decimals: token?.decimals || 0,
+    collateralFactor: parseFloat(market.collateralFactor.toString()) / 10000,
+    liquidationThreshold:
+      parseFloat(market.liquidationThreshold.toString()) / 10000,
+    reserveFactor: parseFloat(market.reserveFactor.toString()) / 10000,
+    borrowRate: parseFloat(market.borrowRate.toString()) / 10000,
+    slope: parseFloat(market.slope.toString()) / 10000,
+    maxTotalDeposits: BigNumber(market.maxTotalDeposits.toString())
+      .div(10 ** token?.decimals || 0)
+      .toFixed(0),
+    maxTotalBorrows: BigNumber(market.maxTotalBorrows.toString())
+      .div(10 ** token?.decimals || 0)
+      .toFixed(0),
+    liquidationBonus: parseFloat(market.liquidationBonus.toString()) / 10000,
+    closeFactor: parseFloat(market.closeFactor.toString()) / 10000,
+    totalDeposits,
+    totalBorrows,
+    utilizationRate,
+    supplyRate,
+    borrowRateCurrent: parseFloat(market.borrowRate.toString()) / 10000,
+    price: formatPrice(market.price.toString()),
+    isActive: true,
+    isPaused: market.paused,
+    ntokenId: market.ntokenId.toString(),
+    lastUpdated: new Date().toISOString(),
+    // Current market indices (for accurate position calculations)
+    depositIndex: market.depositIndex.toString(),
+    borrowIndex: market.borrowIndex.toString(),
+    apyCalculation,
+    borrowApyCalculation,
+  };
+  console.log("marketInfo", { marketInfo });
+  return marketInfo;
+};
+
 /**
  * Fetch market information for a specific market
  */
@@ -202,7 +313,9 @@ export const fetchMarketInfo = async (
         undefined,
         { ...LendingPoolAppSpec.contract, events: [] },
         {
-          addr: algosdk.getApplicationAddress(Number(poolId)),
+          addr: algosdk.encodeAddress(
+            algosdk.getApplicationAddress(Number(poolId)).publicKey
+          ),
           sk: new Uint8Array(),
         }
       );
@@ -279,112 +392,117 @@ export const fetchMarketInfo = async (
         maxTotalBorrows: market.maxTotalBorrows.toString(),
       });
 
-      const utilizationRate =
-        market.totalScaledDeposits.toString() == "0"
-          ? 0
-          : new BigNumber(market.totalScaledBorrows.toString())
-              .div(market.totalScaledDeposits.toString())
-              .toNumber();
+      // const utilizationRate =
+      //   market.totalScaledDeposits.toString() == "0"
+      //     ? 0
+      //     : new BigNumber(market.totalScaledBorrows.toString())
+      //         .div(market.totalScaledDeposits.toString())
+      //         .toNumber();
 
-      const supplyRate = new BigNumber(market.borrowRate.toString())
-        .multipliedBy(utilizationRate)
-        .multipliedBy(10000 - Number(market.reserveFactor.toString()))
-        .dividedBy(10000)
-        .toNumber();
+      // const supplyRate = new BigNumber(market.borrowRate.toString())
+      //   .multipliedBy(utilizationRate)
+      //   .multipliedBy(10000 - Number(market.reserveFactor.toString()))
+      //   .dividedBy(10000)
+      //   .toNumber();
 
-      const formatPrice = (price: string) => {
-        return new BigNumber(price).div(new BigNumber(10).pow(18)).toFixed(12);
-      };
+      // const formatPrice = (price: string) => {
+      //   return new BigNumber(price).div(new BigNumber(10).pow(18)).toFixed(12);
+      // };
 
-      const formatDeposit = (deposit: string) => {
-        return new BigNumber(deposit)
-          .div(new BigNumber(10).pow(token?.decimals || 0))
-          .toFixed(4);
-      };
+      // const formatDeposit = (deposit: string) => {
+      //   return new BigNumber(deposit)
+      //     .div(new BigNumber(10).pow(token?.decimals || 0))
+      //     .toFixed(4);
+      // };
 
-      const totalDeposits = formatDeposit(
-        market.totalScaledDeposits.toString()
+      // const totalDeposits = formatDeposit(
+      //   market.totalScaledDeposits.toString()
+      // );
+
+      // const totalBorrows = formatDeposit(market.totalScaledBorrows.toString());
+
+      // // For b market (poolId 47139781), use 2% (200 basis points) as base borrow rate
+      // // Otherwise use the borrow rate from the contract
+      // const baseBorrowRateBps =
+      //   poolId === "47139781"
+      //     ? 200 // 2% = 200 basis points for b market
+      //     : parseFloat(market.borrowRate.toString());
+
+      // // Calculate APY using the new utility function
+      // const apyCalculation = calculateDepositAPY(
+      //   {
+      //     borrowRate: baseBorrowRateBps,
+      //     slope: parseFloat(market.slope.toString()),
+      //     reserveFactor: parseFloat(market.reserveFactor.toString()),
+      //   },
+      //   {
+      //     totalScaledDeposits: market.totalScaledDeposits.toString(),
+      //     totalScaledBorrows: market.totalScaledBorrows.toString(),
+      //     lastUpdateTime: Number(market.lastUpdateTime),
+      //   }
+      // );
+
+      // // Calculate borrow APY using the new utility function
+      // const borrowApyCalculation = calculateBorrowAPY(
+      //   {
+      //     borrowRate: baseBorrowRateBps,
+      //     slope: parseFloat(market.slope.toString()),
+      //     reserveFactor: parseFloat(market.reserveFactor.toString()),
+      //   },
+      //   {
+      //     totalScaledDeposits: market.totalScaledDeposits.toString(),
+      //     totalScaledBorrows: market.totalScaledBorrows.toString(),
+      //     lastUpdateTime: Number(market.lastUpdateTime),
+      //   },
+      //   isSToken // Pass isSToken flag
+      // );
+
+      // const marketInfo: MarketInfo = {
+      //   networkId: networkId,
+      //   poolId: poolId,
+      //   marketId: marketId,
+      //   tokenId: market.ntokenId.toString(),
+      //   tokenContractId: market.ntokenId.toString(),
+      //   name: token?.name || "",
+      //   symbol: token?.symbol || "",
+      //   decimals: token?.decimals || 0,
+      //   collateralFactor:
+      //     parseFloat(market.collateralFactor.toString()) / 10000,
+      //   liquidationThreshold:
+      //     parseFloat(market.liquidationThreshold.toString()) / 10000,
+      //   reserveFactor: parseFloat(market.reserveFactor.toString()) / 10000,
+      //   borrowRate: parseFloat(market.borrowRate.toString()) / 10000,
+      //   slope: parseFloat(market.slope.toString()) / 10000,
+      //   maxTotalDeposits: BigNumber(market.maxTotalDeposits.toString())
+      //     .div(10 ** token?.decimals || 0)
+      //     .toFixed(0),
+      //   maxTotalBorrows: BigNumber(market.maxTotalBorrows.toString())
+      //     .div(10 ** token?.decimals || 0)
+      //     .toFixed(0),
+      //   liquidationBonus:
+      //     parseFloat(market.liquidationBonus.toString()) / 10000,
+      //   closeFactor: parseFloat(market.closeFactor.toString()) / 10000,
+      //   totalDeposits,
+      //   totalBorrows,
+      //   utilizationRate,
+      //   supplyRate,
+      //   borrowRateCurrent: parseFloat(market.borrowRate.toString()) / 10000,
+      //   price: formatPrice(market.price.toString()),
+      //   isActive: true,
+      //   isPaused: market.paused,
+      //   ntokenId: market.ntokenId.toString(),
+      //   lastUpdated: new Date().toISOString(),
+      //   // Current market indices (for accurate position calculations)
+      //   depositIndex: market.depositIndex.toString(),
+      //   borrowIndex: market.borrowIndex.toString(),
+      //   apyCalculation,
+      //   borrowApyCalculation,
+      // };
+
+      const marketInfo = enhanceAVMMarketInfo(
+        { ...market, network: networkId, poolId, marketId },
+        tokenConfig
       );
-
-      const totalBorrows = formatDeposit(market.totalScaledBorrows.toString());
-
-      // For b market (poolId 47139781), use 2% (200 basis points) as base borrow rate
-      // Otherwise use the borrow rate from the contract
-      const baseBorrowRateBps =
-        poolId === "47139781"
-          ? 200 // 2% = 200 basis points for b market
-          : parseFloat(market.borrowRate.toString());
-
-      // Calculate APY using the new utility function
-      const apyCalculation = calculateDepositAPY(
-        {
-          borrowRate: baseBorrowRateBps,
-          slope: parseFloat(market.slope.toString()),
-          reserveFactor: parseFloat(market.reserveFactor.toString()),
-        },
-        {
-          totalScaledDeposits: market.totalScaledDeposits.toString(),
-          totalScaledBorrows: market.totalScaledBorrows.toString(),
-          lastUpdateTime: Number(market.lastUpdateTime),
-        }
-      );
-
-      // Calculate borrow APY using the new utility function
-      const borrowApyCalculation = calculateBorrowAPY(
-        {
-          borrowRate: baseBorrowRateBps,
-          slope: parseFloat(market.slope.toString()),
-          reserveFactor: parseFloat(market.reserveFactor.toString()),
-        },
-        {
-          totalScaledDeposits: market.totalScaledDeposits.toString(),
-          totalScaledBorrows: market.totalScaledBorrows.toString(),
-          lastUpdateTime: Number(market.lastUpdateTime),
-        },
-        isSToken // Pass isSToken flag
-      );
-
-      const marketInfo: MarketInfo = {
-        networkId: networkId,
-        poolId: poolId,
-        marketId: marketId,
-        tokenId: market.ntokenId.toString(),
-        tokenContractId: market.ntokenId.toString(),
-        name: token?.name || "",
-        symbol: token?.symbol || "",
-        decimals: token?.decimals || 0,
-        collateralFactor:
-          parseFloat(market.collateralFactor.toString()) / 10000,
-        liquidationThreshold:
-          parseFloat(market.liquidationThreshold.toString()) / 10000,
-        reserveFactor: parseFloat(market.reserveFactor.toString()) / 10000,
-        borrowRate: parseFloat(market.borrowRate.toString()) / 10000,
-        slope: parseFloat(market.slope.toString()) / 10000,
-        maxTotalDeposits: BigNumber(market.maxTotalDeposits.toString())
-          .div(10 ** token?.decimals || 0)
-          .toFixed(0),
-        maxTotalBorrows: BigNumber(market.maxTotalBorrows.toString())
-          .div(10 ** token?.decimals || 0)
-          .toFixed(0),
-        liquidationBonus:
-          parseFloat(market.liquidationBonus.toString()) / 10000,
-        closeFactor: parseFloat(market.closeFactor.toString()) / 10000,
-        totalDeposits,
-        totalBorrows,
-        utilizationRate,
-        supplyRate,
-        borrowRateCurrent: parseFloat(market.borrowRate.toString()) / 10000,
-        price: formatPrice(market.price.toString()),
-        isActive: true,
-        isPaused: market.paused,
-        ntokenId: market.ntokenId.toString(),
-        lastUpdated: new Date().toISOString(),
-        // Current market indices (for accurate position calculations)
-        depositIndex: market.depositIndex.toString(),
-        borrowIndex: market.borrowIndex.toString(),
-        apyCalculation,
-        borrowApyCalculation,
-      };
 
       console.log("marketInfo", { marketInfo });
 
