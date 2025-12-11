@@ -753,7 +753,7 @@ const prodTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     },
   ],
 };
-const prodLendingPools = [prodAMarket];//, prodBMarket];
+const prodLendingPools = [prodAMarket, prodBMarket];
 const prodContracts = {
   lendingPools: [...prodLendingPools],
   priceOracle: "47138069",

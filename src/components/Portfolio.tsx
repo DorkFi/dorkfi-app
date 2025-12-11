@@ -685,11 +685,44 @@ const Portfolio = () => {
           await dorkfiAPIService.getAllMarketDataByNetwork(currentNetwork);
         const freshMarketData = marketDataResponse.success
           ? marketDataResponse.data.map((item: any) => {
-              const token = tokens.find(
+              // Try multiple matching strategies to find the correct token
+              let token = tokens.find(
                 (t) =>
                   t.originalContractId === `${item.marketId}` &&
                   t.poolId === `${item.appId}`
               );
+              
+              // If not found, try matching by underlyingContractId
+              if (!token) {
+                token = tokens.find(
+                  (t) =>
+                    t.underlyingContractId === `${item.marketId}` &&
+                    t.poolId === `${item.appId}`
+                );
+              }
+              
+              // If still not found, try matching by poolId and marketId "0" (for network tokens like VOI)
+              if (!token && item.marketId === "0") {
+                token = tokens.find(
+                  (t) =>
+                    t.poolId === `${item.appId}` &&
+                    (t.assetId === "0" || t.originalContractId === "0")
+                );
+              }
+              
+              // Log if token not found for debugging
+              if (!token) {
+                console.warn(
+                  `Token not found for marketId ${item.marketId}, appId ${item.appId}`,
+                  { availableTokens: tokens.map((t) => ({ 
+                    symbol: t.symbol, 
+                    originalContractId: t.originalContractId,
+                    underlyingContractId: t.underlyingContractId,
+                    poolId: t.poolId 
+                  })) }
+                );
+              }
+              
               return enhanceAVMMarketInfo(item, token as any);
             })
           : [];

@@ -168,6 +168,8 @@ export const enhanceAVMMarketInfo = (
   market: any,
   token?: TokenConfig
 ): MarketInfo => {
+  console.log("enhanceAVMMarketInfo", { market, token });
+
   const poolId = market.poolId || market.appId;
   const utilizationRate =
     market.totalScaledDeposits.toString() == "0"
@@ -187,8 +189,11 @@ export const enhanceAVMMarketInfo = (
   };
 
   const formatDeposit = (deposit: string) => {
+    // Default to 6 decimals (standard for VOI and most Algorand tokens) instead of 0
+    // Using 0 would cause values to appear 1,000,000x larger than they should be
+    const decimals = token?.decimals ?? 6;
     return new BigNumber(deposit)
-      .div(new BigNumber(10).pow(token?.decimals || 0))
+      .div(new BigNumber(10).pow(decimals))
       .toFixed(4);
   };
 
@@ -240,7 +245,7 @@ export const enhanceAVMMarketInfo = (
     tokenContractId: market.ntokenId.toString(),
     name: token?.name || "",
     symbol: token?.symbol || "",
-    decimals: token?.decimals || 0,
+    decimals: token?.decimals ?? 6,
     collateralFactor: parseFloat(market.collateralFactor.toString()) / 10000,
     liquidationThreshold:
       parseFloat(market.liquidationThreshold.toString()) / 10000,
@@ -248,10 +253,10 @@ export const enhanceAVMMarketInfo = (
     borrowRate: parseFloat(market.borrowRate.toString()) / 10000,
     slope: parseFloat(market.slope.toString()) / 10000,
     maxTotalDeposits: BigNumber(market.maxTotalDeposits.toString())
-      .div(10 ** token?.decimals || 0)
+      .div(10 ** (token?.decimals ?? 6))
       .toFixed(0),
     maxTotalBorrows: BigNumber(market.maxTotalBorrows.toString())
-      .div(10 ** token?.decimals || 0)
+      .div(10 ** (token?.decimals ?? 6))
       .toFixed(0),
     liquidationBonus: parseFloat(market.liquidationBonus.toString()) / 10000,
     closeFactor: parseFloat(market.closeFactor.toString()) / 10000,
@@ -324,7 +329,7 @@ export const fetchMarketInfo = async (
         (token) => token.underlyingContractId === marketId
       );
 
-      console.log("token", { token });
+      console.log("fetchMarketInfo token", { token });
 
       if (!token) {
         console.error(
@@ -341,16 +346,15 @@ export const fetchMarketInfo = async (
       // Get the original token config to access isStoken property
       // For tokens with multiple markets (array), find the one matching the poolId
       const tokenConfigRaw = networkConfig.tokens[token.symbol];
+      console.log("fetchMarketInfo tokenConfigRaw", { tokenConfigRaw, token });
       let tokenConfig: TokenConfig | undefined;
       if (Array.isArray(tokenConfigRaw)) {
         // Find the token config that matches the poolId
         tokenConfig =
           tokenConfigRaw.find((config) => config.poolId === poolId) ||
           tokenConfigRaw[0];
-      } else {
-        tokenConfig = tokenConfigRaw;
       }
-      const isSToken = tokenConfig?.isStoken || false;
+      console.log("fetchMarketInfo tokenConfig", { tokenConfig });
 
       const marketR = await ci.get_market(Number(marketId));
 
