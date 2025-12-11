@@ -109,7 +109,7 @@ export interface ApiListResponse<T> {
 }
 
 class DorkFiAPIService {
-  private baseUrl = 'https://dorkfi-api.nautilus.sh';
+  private baseUrl = import.meta.env.VITE_DORKFI_API_URL || 'https://dorkfi-api.nautilus.sh';
 
   /**
    * Health check endpoint
