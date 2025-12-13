@@ -18,7 +18,7 @@ import SupplyBorrowStats from "./SupplyBorrowStats";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { borrow, fetchUserGlobalData } from "@/services/lendingService";
-import { getTokenConfig, getAllTokensWithDisplayInfo } from "@/config";
+import { getTokenConfig, getAllTokensWithDisplayInfo, getAlgorandNetworkFromNetworkId } from "@/config";
 import algorandService from "@/services/algorandService";
 import algosdk, { waitForConfirmation } from "algosdk";
 import BigNumber from "bignumber.js";
@@ -30,6 +30,7 @@ interface MintModalProps {
   onClose: () => void;
   asset: string;
   poolId?: string; // Pool ID to identify specific market when multiple markets exist for same symbol
+  network?: string;
   assetData: {
     icon: string;
     totalSupply: number;
@@ -59,6 +60,7 @@ const MintModal = ({
   onClose,
   asset,
   poolId,
+  network,
   assetData,
   userGlobalData,
   userBorrowBalance = 0,
@@ -208,7 +210,9 @@ const MintModal = ({
     setError(null);
 
     try {
-      const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+      // Use the asset's network if provided, otherwise fall back to currentNetwork
+      const networkToUse = (network || currentNetwork) as any;
+      const tokens = getAllTokensWithDisplayInfo(networkToUse);
       // If poolId is provided, find the token that matches both symbol and poolId
       // Otherwise, fall back to finding by symbol only (for backward compatibility)
       const token = poolId
@@ -226,7 +230,7 @@ const MintModal = ({
       }
 
       // Get the original token config to access tokenStandard
-      const tokenConfigRaw = getTokenConfig(currentNetwork, asset);
+      const tokenConfigRaw = getTokenConfig(networkToUse, asset);
       if (!tokenConfigRaw) {
         throw new Error(`Token config not found for ${asset}`);
       }
@@ -281,8 +285,13 @@ const MintModal = ({
             Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
           )
         );
+        // Get the correct algod client for the asset's network (not currentNetwork)
+        const algorandNetwork = getAlgorandNetworkFromNetworkId(networkToUse);
+        if (!algorandNetwork) {
+          throw new Error(`Invalid network: ${networkToUse}`);
+        }
         const algorandClients =
-          await algorandService.getCurrentClientsForTransactions();
+          await algorandService.initializeClientsForTransactions(algorandNetwork);
         const res = await algorandClients.algod.sendRawTransaction(stxns).do();
         await waitForConfirmation(algorandClients.algod, res.txid, 4);
 

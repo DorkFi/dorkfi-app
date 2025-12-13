@@ -9,7 +9,7 @@ import MintModal from "./MintModal"; // Added MintModal import
 import { useWallet } from "@txnlab/use-wallet-react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { withdraw, repay, fetchUserWalletBalance } from "@/services/lendingService";
-import { getTokenConfig, getAllTokensWithDisplayInfo } from "@/config";
+import { getTokenConfig, getAllTokensWithDisplayInfo, getAlgorandNetworkFromNetworkId } from "@/config";
 import algorandService from "@/services/algorandService";
 import algosdk, { waitForConfirmation } from "algosdk";
 import BigNumber from "bignumber.js";
@@ -38,10 +38,10 @@ interface Borrow {
 }
 
 interface PortfolioModalsProps {
-  depositModal: { isOpen: boolean; asset: string | null; poolId?: string };
-  withdrawModal: { isOpen: boolean; asset: string | null; poolId?: string };
-  borrowModal: { isOpen: boolean; asset: string | null; poolId?: string };
-  repayModal: { isOpen: boolean; asset: string | null; poolId?: string };
+  depositModal: { isOpen: boolean; asset: string | null; poolId?: string; network?: string };
+  withdrawModal: { isOpen: boolean; asset: string | null; poolId?: string; network?: string };
+  borrowModal: { isOpen: boolean; asset: string | null; poolId?: string; network?: string };
+  repayModal: { isOpen: boolean; asset: string | null; poolId?: string; network?: string };
   deposits: Deposit[];
   borrows: Borrow[];
   walletBalances: Record<string, { balance: number; balanceUSD: number }>;
@@ -251,7 +251,7 @@ const PortfolioModals = ({
     return stats;
   };
 
-  const getAssetData = (asset: string, poolId?: string) => {
+  const getAssetData = (asset: string, poolId?: string, networkId?: string) => {
     // Find matching markets - prefer poolId match if provided
     let market;
     if (poolId) {
@@ -287,6 +287,27 @@ const PortfolioModals = ({
       deposit = deposits.find(d => d.asset === asset);
     }
     
+    // If no market found but we have deposit data, create minimal asset data from deposit
+    // This allows the modal to open even when market data isn't available for cross-network assets
+    if (!market && deposit) {
+      const tokenPrice = deposit.tokenPrice || 1;
+      return {
+        icon: getTokenImagePath(asset),
+        totalSupply: 0,
+        totalSupplyUSD: 0,
+        totalBorrow: 0,
+        totalBorrowUSD: 0,
+        supplyAPY: deposit.apy || 0,
+        borrowAPY: 0,
+        utilization: 0,
+        collateralFactor: 80, // Default 80%
+        liquidationThreshold: 85, // Default 85%
+        tokenPrice: tokenPrice,
+        walletBalance: 0,
+        walletBalanceUSD: 0,
+      };
+    }
+    
     if (!market) return null;
     
     const tokenPrice = market.price ? parseFloat(market.price) / Math.pow(10, 6) : 1;
@@ -318,8 +339,16 @@ const PortfolioModals = ({
     try {
       console.log(`Withdrawing ${amount} ${withdrawModal.asset}`);
 
-      // Get token configuration
-      const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+      // Find the deposit to get its network
+      const deposit = withdrawModal.poolId
+        ? deposits.find(d => d.asset === withdrawModal.asset && d.poolId === withdrawModal.poolId)
+        : deposits.find(d => d.asset === withdrawModal.asset);
+      
+      // Use the deposit's network if available, otherwise fall back to currentNetwork
+      const networkToUse = withdrawModal.network || (deposit as any)?.network || currentNetwork;
+
+      // Get token configuration using the deposit's network
+      const tokens = getAllTokensWithDisplayInfo(networkToUse);
       // If poolId is provided, find the token that matches both symbol and poolId
       // Otherwise, fall back to finding by symbol only (for backward compatibility)
       const token = withdrawModal.poolId
@@ -327,14 +356,14 @@ const PortfolioModals = ({
         : tokens.find((t) => t.symbol === withdrawModal.asset);
       
       if (!token) {
-        throw new Error(`Token not found for ${withdrawModal.asset}${withdrawModal.poolId ? ` with poolId ${withdrawModal.poolId}` : ''}`);
+        throw new Error(`Token not found for ${withdrawModal.asset}${withdrawModal.poolId ? ` with poolId ${withdrawModal.poolId}` : ''} on network ${networkToUse}`);
       }
 
       // Use originalSymbol to look up the config, as asset might be a display symbol
       const originalSymbol = 'originalSymbol' in token ? (token as any).originalSymbol : withdrawModal.asset;
-      const originalTokenConfigRaw = getTokenConfig(currentNetwork, originalSymbol);
+      const originalTokenConfigRaw = getTokenConfig(networkToUse, originalSymbol);
       if (!originalTokenConfigRaw) {
-        throw new Error(`Token config not found for ${withdrawModal.asset} (originalSymbol: ${originalSymbol})`);
+        throw new Error(`Token config not found for ${withdrawModal.asset} (originalSymbol: ${originalSymbol}) on network ${networkToUse}`);
       }
 
       // Handle case where tokenConfig might be an array (multiple markets)
@@ -344,7 +373,7 @@ const PortfolioModals = ({
         : originalTokenConfigRaw;
 
       if (!originalTokenConfig) {
-        throw new Error(`Token config not found for ${withdrawModal.asset} with poolId ${token.poolId}`);
+        throw new Error(`Token config not found for ${withdrawModal.asset} with poolId ${token.poolId} on network ${networkToUse}`);
       }
 
       console.log("Withdraw parameters:", {
@@ -353,7 +382,7 @@ const PortfolioModals = ({
         tokenStandard: originalTokenConfig.tokenStandard,
         amount: amount,
         userAddress: activeAccount.address,
-        networkId: currentNetwork,
+        networkId: networkToUse,
       });
 
       // Call the lending service withdraw method (pass amount as string like PreFi)
@@ -363,7 +392,7 @@ const PortfolioModals = ({
         originalTokenConfig.tokenStandard,
         amount,
         activeAccount.address,
-        currentNetwork
+        networkToUse
       );
 
       if (!result.success) {
@@ -387,8 +416,13 @@ const PortfolioModals = ({
         )
       );
 
+      // Get the correct algod client for the deposit's network (not currentNetwork)
+      const algorandNetwork = getAlgorandNetworkFromNetworkId(networkToUse as any);
+      if (!algorandNetwork) {
+        throw new Error(`Invalid network: ${networkToUse}`);
+      }
       const algorandClients =
-        await algorandService.getCurrentClientsForTransactions();
+        await algorandService.initializeClientsForTransactions(algorandNetwork);
       const res = await algorandClients.algod.sendRawTransaction(stxns).do();
       await waitForConfirmation(algorandClients.algod, res.txid, 4);
 
@@ -442,7 +476,7 @@ const PortfolioModals = ({
       (!lastFetchedRef.current.isOpen || lastFetchedRef.current.asset !== repayModal.asset)
     ) {
       console.log(`[PortfolioModals] Fetching wallet balance for ${repayModal.asset} when repay modal opens`);
-      onRefreshWalletBalance(repayModal.asset);
+      onRefreshWalletBalance(repayModal.asset, repayModal.network);
       lastFetchedRef.current = { isOpen: true, asset: repayModal.asset };
     } else if (!repayModal.isOpen) {
       // Reset when modal closes
@@ -459,8 +493,16 @@ const PortfolioModals = ({
     try {
       console.log(`Repaying ${amount} ${repayModal.asset}`);
 
-      // Get token configuration
-      const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+      // Find the borrow to get its network
+      const borrow = repayModal.poolId
+        ? borrows.find(b => b.asset === repayModal.asset && b.poolId === repayModal.poolId)
+        : borrows.find(b => b.asset === repayModal.asset);
+      
+      // Use the borrow's network if available, otherwise fall back to currentNetwork
+      const networkToUse = repayModal.network || (borrow as any)?.network || currentNetwork;
+
+      // Get token configuration using the borrow's network
+      const tokens = getAllTokensWithDisplayInfo(networkToUse);
       // If poolId is provided, find the token that matches both symbol and poolId
       // Otherwise, fall back to finding by symbol only (for backward compatibility)
       const token = repayModal.poolId
@@ -468,14 +510,14 @@ const PortfolioModals = ({
         : tokens.find((t) => t.symbol === repayModal.asset);
       
       if (!token) {
-        throw new Error(`Token not found for ${repayModal.asset}${repayModal.poolId ? ` with poolId ${repayModal.poolId}` : ''}`);
+        throw new Error(`Token not found for ${repayModal.asset}${repayModal.poolId ? ` with poolId ${repayModal.poolId}` : ''} on network ${networkToUse}`);
       }
 
       // Use originalSymbol to look up the config, as asset might be a display symbol
       const originalSymbol = 'originalSymbol' in token ? (token as any).originalSymbol : repayModal.asset;
-      const originalTokenConfigRaw = getTokenConfig(currentNetwork, originalSymbol);
+      const originalTokenConfigRaw = getTokenConfig(networkToUse, originalSymbol);
       if (!originalTokenConfigRaw) {
-        throw new Error(`Token config not found for ${repayModal.asset} (originalSymbol: ${originalSymbol})`);
+        throw new Error(`Token config not found for ${repayModal.asset} (originalSymbol: ${originalSymbol}) on network ${networkToUse}`);
       }
 
       // Handle case where tokenConfig might be an array (multiple markets)
@@ -485,7 +527,7 @@ const PortfolioModals = ({
         : originalTokenConfigRaw;
 
       if (!originalTokenConfig) {
-        throw new Error(`Token config not found for ${repayModal.asset} with poolId ${token.poolId}`);
+        throw new Error(`Token config not found for ${repayModal.asset} with poolId ${token.poolId} on network ${networkToUse}`);
       }
 
       console.log("Repay parameters:", {
@@ -494,7 +536,7 @@ const PortfolioModals = ({
         tokenStandard: originalTokenConfig.tokenStandard,
         amount: amount, // Pass amount as string (not atomic units)
         userAddress: activeAccount.address,
-        networkId: currentNetwork,
+        networkId: networkToUse,
       });
 
       // Call the lending service repay method (pass amount as string like PreFi)
@@ -504,7 +546,7 @@ const PortfolioModals = ({
         originalTokenConfig.tokenStandard,
         amount, // Pass amount as string
         activeAccount.address,
-        currentNetwork
+        networkToUse
       );
 
       if (!result.success) {
@@ -528,8 +570,13 @@ const PortfolioModals = ({
         )
       );
 
+      // Get the correct algod client for the borrow's network (not currentNetwork)
+      const algorandNetwork = getAlgorandNetworkFromNetworkId(networkToUse as any);
+      if (!algorandNetwork) {
+        throw new Error(`Invalid network: ${networkToUse}`);
+      }
       const algorandClients =
-        await algorandService.getCurrentClientsForTransactions();
+        await algorandService.initializeClientsForTransactions(algorandNetwork);
       const res = await algorandClients.algod.sendRawTransaction(stxns).do();
       await waitForConfirmation(algorandClients.algod, res.txid, 4);
 
@@ -537,7 +584,7 @@ const PortfolioModals = ({
 
       // Refresh wallet balance after successful repayment
       if (onRefreshWalletBalance) {
-        onRefreshWalletBalance(repayModal.asset);
+        onRefreshWalletBalance(repayModal.asset, networkToUse);
       }
 
       // Refresh market data after successful repayment (like PreFi)
@@ -567,16 +614,29 @@ const PortfolioModals = ({
 
   return (
     <>
-      {depositModal.isOpen && depositModal.asset && getAssetData(depositModal.asset, depositModal.poolId) && (
+      {depositModal.isOpen && depositModal.asset && getAssetData(depositModal.asset, depositModal.poolId, depositModal.network) && (
         <SupplyBorrowModal
           isOpen={depositModal.isOpen}
           onClose={onCloseDepositModal}
           asset={depositModal.asset}
           poolId={depositModal.poolId}
+          network={depositModal.network}
           mode="deposit"
-          assetData={getAssetData(depositModal.asset, depositModal.poolId)}
-          walletBalance={walletBalances[depositModal.asset]?.balance || 0}
-          walletBalanceUSD={walletBalances[depositModal.asset]?.balanceUSD || 0}
+          assetData={getAssetData(depositModal.asset, depositModal.poolId, depositModal.network)}
+          walletBalance={
+            depositModal.network
+              ? walletBalances[`${depositModal.network}-${depositModal.asset}`]?.balance ||
+                walletBalances[depositModal.asset]?.balance ||
+                0
+              : walletBalances[depositModal.asset]?.balance || 0
+          }
+          walletBalanceUSD={
+            depositModal.network
+              ? walletBalances[`${depositModal.network}-${depositModal.asset}`]?.balanceUSD ||
+                walletBalances[depositModal.asset]?.balanceUSD ||
+                0
+              : walletBalances[depositModal.asset]?.balanceUSD || 0
+          }
           onTransactionSuccess={() => {
             // Refresh wallet balance immediately after successful transaction
             if (depositModal.asset && onRefreshWalletBalance) {
@@ -625,6 +685,7 @@ const PortfolioModals = ({
             onClose={onCloseBorrowModal}
             asset={borrowModal.asset}
             poolId={borrowModal.poolId}
+            network={borrowModal.network}
             assetData={getAssetData(borrowModal.asset, borrowModal.poolId)}
             userGlobalData={userGlobalData}
             userBorrowBalance={userBorrowBalance || 0}
@@ -642,6 +703,7 @@ const PortfolioModals = ({
             onClose={onCloseBorrowModal}
             asset={borrowModal.asset}
             poolId={borrowModal.poolId}
+            network={borrowModal.network}
             mode="borrow"
             assetData={getAssetData(borrowModal.asset, borrowModal.poolId)}
             userGlobalData={userGlobalData}

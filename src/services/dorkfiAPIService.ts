@@ -1,6 +1,6 @@
 /**
  * DorkFi API Service
- * 
+ *
  * This service provides integration with the DorkFi API
  * Documentation: https://dorkfi-api.nautilus.sh/api-docs/
  */
@@ -109,7 +109,8 @@ export interface ApiListResponse<T> {
 }
 
 class DorkFiAPIService {
-  private baseUrl = import.meta.env.VITE_DORKFI_API_URL || 'https://dorkfi-api.nautilus.sh';
+  private baseUrl =
+    import.meta.env.VITE_DORKFI_API_URL || "https://dorkfi-api.nautilus.sh";
 
   /**
    * Health check endpoint
@@ -118,7 +119,7 @@ class DorkFiAPIService {
   async healthCheck(): Promise<HealthResponse> {
     try {
       const response = await fetch(`${this.baseUrl}/`);
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -126,7 +127,7 @@ class DorkFiAPIService {
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error('Error checking DorkFi API health:', error);
+      console.error("Error checking DorkFi API health:", error);
       throw error;
     }
   }
@@ -138,7 +139,7 @@ class DorkFiAPIService {
   async detailedHealthCheck(): Promise<DetailedHealthResponse> {
     try {
       const response = await fetch(`${this.baseUrl}/health/detailed`);
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -146,7 +147,7 @@ class DorkFiAPIService {
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error('Error checking DorkFi API detailed health:', error);
+      console.error("Error checking DorkFi API detailed health:", error);
       throw error;
     }
   }
@@ -155,10 +156,12 @@ class DorkFiAPIService {
    * Get all lending pool global states
    * @returns Promise<ApiListResponse<LendingPoolGlobalState>>
    */
-  async getAllLendingPoolGlobalStates(): Promise<ApiListResponse<LendingPoolGlobalState>> {
+  async getAllLendingPoolGlobalStates(): Promise<
+    ApiListResponse<LendingPoolGlobalState>
+  > {
     try {
       const response = await fetch(`${this.baseUrl}/lending-pool/global-state`);
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -166,7 +169,7 @@ class DorkFiAPIService {
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error('Error fetching all lending pool global states:', error);
+      console.error("Error fetching all lending pool global states:", error);
       throw error;
     }
   }
@@ -176,10 +179,16 @@ class DorkFiAPIService {
    * @param network - Network identifier (e.g., "algorand-mainnet", "voi-mainnet")
    * @returns Promise<ApiListResponse<LendingPoolGlobalState>>
    */
-  async getLendingPoolGlobalStatesByNetwork(network: string): Promise<ApiListResponse<LendingPoolGlobalState>> {
+  async getLendingPoolGlobalStatesByNetwork(
+    network: string
+  ): Promise<ApiListResponse<LendingPoolGlobalState>> {
     try {
-      const response = await fetch(`${this.baseUrl}/lending-pool/global-state/${encodeURIComponent(network)}`);
-      
+      const response = await fetch(
+        `${this.baseUrl}/lending-pool/global-state/${encodeURIComponent(
+          network
+        )}`
+      );
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -187,7 +196,10 @@ class DorkFiAPIService {
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error(`Error fetching lending pool global states for network ${network}:`, error);
+      console.error(
+        `Error fetching lending pool global states for network ${network}:`,
+        error
+      );
       throw error;
     }
   }
@@ -198,10 +210,17 @@ class DorkFiAPIService {
    * @param appId - Application ID of the lending pool
    * @returns Promise<ApiResponse<LendingPoolGlobalState>>
    */
-  async getLendingPoolGlobalState(network: string, appId: number): Promise<ApiResponse<LendingPoolGlobalState>> {
+  async getLendingPoolGlobalState(
+    network: string,
+    appId: number
+  ): Promise<ApiResponse<LendingPoolGlobalState>> {
     try {
-      const response = await fetch(`${this.baseUrl}/lending-pool/global-state/${encodeURIComponent(network)}/${appId}`);
-      
+      const response = await fetch(
+        `${this.baseUrl}/lending-pool/global-state/${encodeURIComponent(
+          network
+        )}/${appId}`
+      );
+
       if (!response.ok) {
         if (response.status === 404) {
           const errorData = await response.json();
@@ -213,7 +232,10 @@ class DorkFiAPIService {
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error(`Error fetching lending pool global state for network ${network}, appId ${appId}:`, error);
+      console.error(
+        `Error fetching lending pool global state for network ${network}, appId ${appId}:`,
+        error
+      );
       throw error;
     }
   }
@@ -225,7 +247,7 @@ class DorkFiAPIService {
   async getAllMarkets(): Promise<ApiListResponse<Market>> {
     try {
       const response = await fetch(`${this.baseUrl}/markets`);
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -233,7 +255,7 @@ class DorkFiAPIService {
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error('Error fetching all markets:', error);
+      console.error("Error fetching all markets:", error);
       throw error;
     }
   }
@@ -245,8 +267,10 @@ class DorkFiAPIService {
    */
   async getMarketsByNetwork(network: string): Promise<ApiListResponse<Market>> {
     try {
-      const response = await fetch(`${this.baseUrl}/markets/${encodeURIComponent(network)}`);
-      
+      const response = await fetch(
+        `${this.baseUrl}/markets/${encodeURIComponent(network)}`
+      );
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -265,10 +289,15 @@ class DorkFiAPIService {
    * @param appId - Application ID of the lending pool
    * @returns Promise<ApiListResponse<Market>>
    */
-  async getMarketsByAppId(network: string, appId: number): Promise<ApiListResponse<Market>> {
+  async getMarketsByAppId(
+    network: string,
+    appId: number
+  ): Promise<ApiListResponse<Market>> {
     try {
-      const response = await fetch(`${this.baseUrl}/markets/${encodeURIComponent(network)}/${appId}`);
-      
+      const response = await fetch(
+        `${this.baseUrl}/markets/${encodeURIComponent(network)}/${appId}`
+      );
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -276,7 +305,10 @@ class DorkFiAPIService {
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error(`Error fetching markets for network ${network}, appId ${appId}:`, error);
+      console.error(
+        `Error fetching markets for network ${network}, appId ${appId}:`,
+        error
+      );
       throw error;
     }
   }
@@ -288,10 +320,18 @@ class DorkFiAPIService {
    * @param marketId - Market ID
    * @returns Promise<ApiResponse<Market>>
    */
-  async getMarket(network: string, appId: number, marketId: number): Promise<ApiResponse<Market>> {
+  async getMarket(
+    network: string,
+    appId: number,
+    marketId: number
+  ): Promise<ApiResponse<Market>> {
     try {
-      const response = await fetch(`${this.baseUrl}/markets/${encodeURIComponent(network)}/${appId}/${marketId}`);
-      
+      const response = await fetch(
+        `${this.baseUrl}/markets/${encodeURIComponent(
+          network
+        )}/${appId}/${marketId}`
+      );
+
       if (!response.ok) {
         if (response.status === 404) {
           const errorData = await response.json();
@@ -303,7 +343,10 @@ class DorkFiAPIService {
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error(`Error fetching market for network ${network}, appId ${appId}, marketId ${marketId}:`, error);
+      console.error(
+        `Error fetching market for network ${network}, appId ${appId}, marketId ${marketId}:`,
+        error
+      );
       throw error;
     }
   }
@@ -315,7 +358,7 @@ class DorkFiAPIService {
   async getAllMarketData(): Promise<ApiListResponse<MarketData>> {
     try {
       const response = await fetch(`${this.baseUrl}/market-data`);
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -323,7 +366,7 @@ class DorkFiAPIService {
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error('Error fetching all market data:', error);
+      console.error("Error fetching all market data:", error);
       throw error;
     }
   }
@@ -333,10 +376,14 @@ class DorkFiAPIService {
    * @param network - Network identifier
    * @returns Promise<ApiListResponse<MarketData>>
    */
-  async getMarketDataByNetwork(network: string): Promise<ApiListResponse<MarketData>> {
+  async getMarketDataByNetwork(
+    network: string
+  ): Promise<ApiListResponse<MarketData>> {
     try {
-      const response = await fetch(`${this.baseUrl}/market-data/${encodeURIComponent(network)}`);
-      
+      const response = await fetch(
+        `${this.baseUrl}/market-data/${encodeURIComponent(network)}`
+      );
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -344,7 +391,10 @@ class DorkFiAPIService {
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error(`Error fetching market data for network ${network}:`, error);
+      console.error(
+        `Error fetching market data for network ${network}:`,
+        error
+      );
       throw error;
     }
   }
@@ -355,7 +405,9 @@ class DorkFiAPIService {
    * @param network - Network identifier
    * @returns Promise<ApiListResponse<MarketData>>
    */
-  async getAllMarketDataByNetwork(network: string): Promise<ApiListResponse<MarketData>> {
+  async getAllMarketDataByNetwork(
+    network: string
+  ): Promise<ApiListResponse<MarketData>> {
     return this.getMarketDataByNetwork(network);
   }
 
@@ -365,10 +417,15 @@ class DorkFiAPIService {
    * @param appId - Application ID of the lending pool
    * @returns Promise<ApiListResponse<MarketData>>
    */
-  async getMarketDataByAppId(network: string, appId: number): Promise<ApiListResponse<MarketData>> {
+  async getMarketDataByAppId(
+    network: string,
+    appId: number
+  ): Promise<ApiListResponse<MarketData>> {
     try {
-      const response = await fetch(`${this.baseUrl}/market-data/${encodeURIComponent(network)}/${appId}`);
-      
+      const response = await fetch(
+        `${this.baseUrl}/market-data/${encodeURIComponent(network)}/${appId}`
+      );
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -376,7 +433,10 @@ class DorkFiAPIService {
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error(`Error fetching market data for network ${network}, appId ${appId}:`, error);
+      console.error(
+        `Error fetching market data for network ${network}, appId ${appId}:`,
+        error
+      );
       throw error;
     }
   }
@@ -388,10 +448,18 @@ class DorkFiAPIService {
    * @param marketId - Market ID
    * @returns Promise<ApiResponse<MarketData>>
    */
-  async getMarketData(network: string, appId: number, marketId: number): Promise<ApiResponse<MarketData>> {
+  async getMarketData(
+    network: string,
+    appId: number,
+    marketId: number
+  ): Promise<ApiResponse<MarketData>> {
     try {
-      const response = await fetch(`${this.baseUrl}/market-data/${encodeURIComponent(network)}/${appId}/${marketId}`);
-      
+      const response = await fetch(
+        `${this.baseUrl}/market-data/${encodeURIComponent(
+          network
+        )}/${appId}/${marketId}`
+      );
+
       if (!response.ok) {
         if (response.status === 404) {
           const errorData = await response.json();
@@ -403,7 +471,10 @@ class DorkFiAPIService {
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error(`Error fetching market data for network ${network}, appId ${appId}, marketId ${marketId}:`, error);
+      console.error(
+        `Error fetching market data for network ${network}, appId ${appId}, marketId ${marketId}:`,
+        error
+      );
       throw error;
     }
   }
@@ -413,10 +484,14 @@ class DorkFiAPIService {
    * @param userAddress - User address
    * @returns Promise<ApiResponse<UserHealth>>
    */
-  async getUserHealthByAddress(userAddress: string): Promise<ApiResponse<UserHealth>> {
+  async getUserHealthByAddress(
+    userAddress: string
+  ): Promise<ApiResponse<UserHealth>> {
     try {
-      const response = await fetch(`${this.baseUrl}/user-health/user/${encodeURIComponent(userAddress)}`);
-      
+      const response = await fetch(
+        `${this.baseUrl}/user-health/user/${encodeURIComponent(userAddress)}`
+      );
+
       if (!response.ok) {
         if (response.status === 404) {
           const errorData = await response.json();
@@ -428,7 +503,10 @@ class DorkFiAPIService {
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error(`Error fetching user health for address ${userAddress}:`, error);
+      console.error(
+        `Error fetching user health for address ${userAddress}:`,
+        error
+      );
       throw error;
     }
   }
@@ -438,10 +516,14 @@ class DorkFiAPIService {
    * @param network - Network identifier
    * @returns Promise<ApiListResponse<UserHealth>>
    */
-  async getUserHealthByNetwork(network: string): Promise<ApiListResponse<UserHealth>> {
+  async getUserHealthByNetwork(
+    network: string
+  ): Promise<ApiListResponse<UserHealth>> {
     try {
-      const response = await fetch(`${this.baseUrl}/user-health/${encodeURIComponent(network)}`);
-      
+      const response = await fetch(
+        `${this.baseUrl}/user-health/${encodeURIComponent(network)}`
+      );
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -449,7 +531,10 @@ class DorkFiAPIService {
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error(`Error fetching user health for network ${network}:`, error);
+      console.error(
+        `Error fetching user health for network ${network}:`,
+        error
+      );
       throw error;
     }
   }
@@ -460,10 +545,15 @@ class DorkFiAPIService {
    * @param appId - Application ID of the lending pool
    * @returns Promise<ApiListResponse<UserHealth>>
    */
-  async getUserHealthByAppId(network: string, appId: number): Promise<ApiListResponse<UserHealth>> {
+  async getUserHealthByAppId(
+    network: string,
+    appId: number
+  ): Promise<ApiListResponse<UserHealth>> {
     try {
-      const response = await fetch(`${this.baseUrl}/user-health/${encodeURIComponent(network)}/${appId}`);
-      
+      const response = await fetch(
+        `${this.baseUrl}/user-health/${encodeURIComponent(network)}/${appId}`
+      );
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -471,7 +561,10 @@ class DorkFiAPIService {
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error(`Error fetching user health for network ${network}, appId ${appId}:`, error);
+      console.error(
+        `Error fetching user health for network ${network}, appId ${appId}:`,
+        error
+      );
       throw error;
     }
   }
@@ -483,10 +576,18 @@ class DorkFiAPIService {
    * @param userAddress - User address
    * @returns Promise<ApiResponse<UserHealth>>
    */
-  async getUserHealth(network: string, appId: number, userAddress: string): Promise<ApiResponse<UserHealth>> {
+  async getUserHealth(
+    network: string,
+    appId: number,
+    userAddress: string
+  ): Promise<ApiResponse<UserHealth>> {
     try {
-      const response = await fetch(`${this.baseUrl}/user-health/${encodeURIComponent(network)}/${appId}/${encodeURIComponent(userAddress)}`);
-      
+      const response = await fetch(
+        `${this.baseUrl}/user-health/${encodeURIComponent(
+          network
+        )}/${appId}/${encodeURIComponent(userAddress)}`
+      );
+
       if (!response.ok) {
         if (response.status === 404) {
           const errorData = await response.json();
@@ -498,7 +599,10 @@ class DorkFiAPIService {
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error(`Error fetching user health for network ${network}, appId ${appId}, userAddress ${userAddress}:`, error);
+      console.error(
+        `Error fetching user health for network ${network}, appId ${appId}, userAddress ${userAddress}:`,
+        error
+      );
       throw error;
     }
   }
@@ -510,7 +614,7 @@ class DorkFiAPIService {
   async getAllUsers(): Promise<ApiListResponse<User>> {
     try {
       const response = await fetch(`${this.baseUrl}/users`);
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -518,7 +622,7 @@ class DorkFiAPIService {
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error('Error fetching all users:', error);
+      console.error("Error fetching all users:", error);
       throw error;
     }
   }
@@ -530,8 +634,10 @@ class DorkFiAPIService {
    */
   async getUsersByNetwork(network: string): Promise<ApiListResponse<User>> {
     try {
-      const response = await fetch(`${this.baseUrl}/users/network/${encodeURIComponent(network)}`);
-      
+      const response = await fetch(
+        `${this.baseUrl}/users/network/${encodeURIComponent(network)}`
+      );
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -551,8 +657,10 @@ class DorkFiAPIService {
    */
   async getUser(userAddress: string): Promise<ApiResponse<User>> {
     try {
-      const response = await fetch(`${this.baseUrl}/users/${encodeURIComponent(userAddress)}`);
-      
+      const response = await fetch(
+        `${this.baseUrl}/users/${encodeURIComponent(userAddress)}`
+      );
+
       if (!response.ok) {
         if (response.status === 404) {
           const errorData = await response.json();

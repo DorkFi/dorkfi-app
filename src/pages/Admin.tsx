@@ -45,6 +45,7 @@ import {
   DollarSign,
   Database,
   Download,
+  TestTube,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import DorkFiCard from "@/components/ui/DorkFiCard";
@@ -123,8 +124,10 @@ import {
 import {
   fetchAllMarkets,
   fetchMarketInfo,
+  fetchMarketInfoFromContract,
   type MarketInfo,
 } from "@/services/lendingService";
+import dorkfiAPIService from "@/services/dorkfiAPIService";
 import { useOnDemandMarketData } from "@/hooks/useOnDemandMarketData";
 import WalletNetworkButton from "@/components/WalletNetworkButton";
 import { useWallet } from "@txnlab/use-wallet-react";
@@ -317,6 +320,16 @@ export default function AdminDashboard() {
   const [selectedMarketForAnalysis, setSelectedMarketForAnalysis] =
     useState<string>("all");
   const marketAnalysisFetchRef = useRef<boolean>(false);
+
+  // Test tab state
+  const [selectedTestMarket, setSelectedTestMarket] = useState<string>("");
+  const [testAppId, setTestAppId] = useState<string>("");
+  const [testMarketId, setTestMarketId] = useState<string>("");
+  const [testPoolId, setTestPoolId] = useState<string>("");
+  const [isLoadingTestComparison, setIsLoadingTestComparison] = useState(false);
+  const [apiMarketsResult, setApiMarketsResult] = useState<any>(null);
+  const [contractMarketResult, setContractMarketResult] = useState<any>(null);
+  const [testError, setTestError] = useState<string | null>(null);
 
   // Individual Market View state
   const [selectedMarketDetails, setSelectedMarketDetails] = useState<any>(null);
@@ -5726,8 +5739,8 @@ export default function AdminDashboard() {
               </TabsTrigger>
             </TabsList>
 
-            {/* Second row for Market Analysis, User Analysis, SToken, Price Feed Manager and Price Oracle */}
-            <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:grid-cols-5">
+            {/* Second row for Market Analysis, User Analysis, SToken, Price Feed Manager, Price Oracle and Test */}
+            <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:grid-cols-6">
               <TabsTrigger
                 value="market-analysis"
                 className="flex items-center gap-2"
@@ -5759,6 +5772,10 @@ export default function AdminDashboard() {
               >
                 <Database className="h-4 w-4" />
                 <span>Price Oracle</span>
+              </TabsTrigger>
+              <TabsTrigger value="test" className="flex items-center gap-2">
+                <TestTube className="h-4 w-4" />
+                <span>Test</span>
               </TabsTrigger>
             </TabsList>
           </div>
@@ -11697,6 +11714,524 @@ export default function AdminDashboard() {
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
+
+          {/* Test Tab */}
+          <TabsContent value="test" className="space-y-6">
+            <H2>Market Data Comparison</H2>
+            <Card>
+              <CardHeader>
+                <CardTitle>Compare API vs Contract Data</CardTitle>
+                <CardDescription>
+                  Compare results from getMarketData (API) and
+                  fetchMarketInfoFromContract (on-chain)
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Market Selector */}
+                <div className="space-y-2">
+                  <Label htmlFor="test-market-selector">
+                    Select Existing Market (Optional)
+                  </Label>
+                  <Select
+                    value={selectedTestMarket}
+                    onValueChange={(value) => {
+                      setSelectedTestMarket(value);
+                      if (value === "none") {
+                        // Clear fields if "none" is selected
+                        setTestAppId("");
+                        setTestPoolId("");
+                        setTestMarketId("");
+                      } else if (value) {
+                        const market = markets.find((m) => m.id === value);
+                        if (market) {
+                          setTestAppId(market.poolId || "");
+                          setTestPoolId(market.poolId || "");
+                          setTestMarketId(
+                            market.underlyingContractId || market.originalContractId || ""
+                          );
+                        }
+                      }
+                    }}
+                  >
+                    <SelectTrigger id="test-market-selector">
+                      <SelectValue placeholder="Select a market to auto-fill fields" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None (Manual Entry)</SelectItem>
+                      {markets.map((market) => (
+                        <SelectItem key={market.id} value={market.id}>
+                          {market.name} ({market.symbol}) - Pool: {market.poolId || "N/A"}, Market: {market.underlyingContractId || market.originalContractId || "N/A"}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Select a market to auto-populate the fields below, or enter
+                    values manually
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="test-app-id">App ID (Pool ID)</Label>
+                    <Input
+                      id="test-app-id"
+                      type="number"
+                      placeholder="Enter App ID"
+                      value={testAppId}
+                      onChange={(e) => setTestAppId(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="test-pool-id">Pool ID (for contract)</Label>
+                    <Input
+                      id="test-pool-id"
+                      type="text"
+                      placeholder="Enter Pool ID"
+                      value={testPoolId}
+                      onChange={(e) => setTestPoolId(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Usually same as App ID
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="test-market-id">Market ID</Label>
+                    <Input
+                      id="test-market-id"
+                      type="text"
+                      placeholder="Enter Market ID"
+                      value={testMarketId}
+                      onChange={(e) => setTestMarketId(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <Button
+                  onClick={async () => {
+                    if (!testAppId || !testMarketId || !testPoolId) {
+                      setTestError(
+                        "Please provide App ID, Pool ID, and Market ID"
+                      );
+                      return;
+                    }
+
+                    setIsLoadingTestComparison(true);
+                    setTestError(null);
+                    setApiMarketsResult(null);
+                    setContractMarketResult(null);
+
+                    try {
+                      // Get network name for API call
+                      const networkName = currentNetwork;
+
+                      // Call getMarketData
+                      const apiResult = await dorkfiAPIService.getMarketData(
+                        networkName,
+                        Number(testAppId),
+                        Number(testMarketId)
+                      );
+                      setApiMarketsResult(apiResult);
+
+                      // Call fetchMarketInfoFromContract
+                      const contractResult =
+                        await fetchMarketInfoFromContract(
+                          testPoolId,
+                          testMarketId,
+                          currentNetwork
+                        );
+                      setContractMarketResult(contractResult);
+                    } catch (error: any) {
+                      console.error("Error comparing market data:", error);
+                      setTestError(
+                        error?.message || "Failed to fetch market data"
+                      );
+                    } finally {
+                      setIsLoadingTestComparison(false);
+                    }
+                  }}
+                  disabled={isLoadingTestComparison}
+                  className="w-full"
+                >
+                  {isLoadingTestComparison ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Comparing...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      Run Comparison
+                    </>
+                  )}
+                </Button>
+
+                {testError && (
+                  <Card className="border-destructive">
+                    <CardContent className="pt-6">
+                      <div className="flex items-center gap-2 text-destructive">
+                        <AlertTriangle className="h-4 w-4" />
+                        <p className="font-semibold">Error</p>
+                      </div>
+                      <p className="mt-2 text-sm">{testError}</p>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {(apiMarketsResult || contractMarketResult) && (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+                    {/* API Results */}
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <Database className="h-5 w-5" />
+                          API Result (getMarketData)
+                        </CardTitle>
+                        <CardDescription>
+                          Network: {currentNetwork}, App ID: {testAppId}, Market ID: {testMarketId}
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        {apiMarketsResult ? (
+                          <div className="space-y-4">
+                            <div>
+                              <Label className="text-xs text-muted-foreground">
+                                Success
+                              </Label>
+                              <p className="font-mono text-sm">
+                                {apiMarketsResult.success ? "Yes" : "No"}
+                              </p>
+                            </div>
+                            {apiMarketsResult.data && (
+                              <div>
+                                <Label className="text-xs text-muted-foreground">
+                                  Market Data
+                                </Label>
+                                <div className="mt-2 p-3 bg-muted rounded-md max-h-96 overflow-auto">
+                                  <pre className="text-xs font-mono">
+                                    {JSON.stringify(
+                                      apiMarketsResult.data,
+                                      null,
+                                      2
+                                    )}
+                                  </pre>
+                                </div>
+                              </div>
+                            )}
+                            {apiMarketsResult.error && (
+                              <div>
+                                <Label className="text-xs text-muted-foreground">
+                                  Error
+                                </Label>
+                                <p className="text-sm text-destructive">
+                                  {apiMarketsResult.error}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-muted-foreground">
+                            No data available
+                          </p>
+                        )}
+                      </CardContent>
+                    </Card>
+
+                    {/* Contract Results */}
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <Hash className="h-5 w-5" />
+                          Contract Result (fetchMarketInfoFromContract)
+                        </CardTitle>
+                        <CardDescription>
+                          Network: {currentNetwork}, Pool ID: {testPoolId}, Market
+                          ID: {testMarketId}
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        {contractMarketResult ? (
+                          <div className="space-y-4">
+                            <div className="mt-2 p-3 bg-muted rounded-md max-h-96 overflow-auto">
+                              <pre className="text-xs font-mono">
+                                {JSON.stringify(
+                                  contractMarketResult,
+                                  null,
+                                  2
+                                )}
+                              </pre>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-sm text-muted-foreground">
+                            No data available (may be null if fetch failed)
+                          </p>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </div>
+                )}
+
+                {/* Deep Comparison */}
+                {apiMarketsResult?.data && contractMarketResult && (
+                  <Card className="border-primary/20 bg-primary/5">
+                    <CardHeader>
+                      <CardTitle>Deep Comparison</CardTitle>
+                      <CardDescription>
+                        Field-by-field comparison between API and Contract data
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {(() => {
+                        const apiData = apiMarketsResult.data;
+                        const contractData = contractMarketResult;
+                        
+                        // Get all unique keys from both objects
+                        const allKeys = new Set([
+                          ...Object.keys(apiData || {}),
+                          ...Object.keys(contractData || {}),
+                        ]);
+                        
+                        // Fields that might need special comparison (numeric comparisons)
+                        const numericFields = new Set([
+                          'borrowRate',
+                          'totalDeposits',
+                          'totalBorrows',
+                          'totalScaledDeposits',
+                          'totalScaledBorrows',
+                          'utilizationRate',
+                          'supplyRate',
+                          'price',
+                          'reserves',
+                          'maxTotalDeposits',
+                          'maxTotalBorrows',
+                          'collateralFactor',
+                          'liquidationThreshold',
+                          'liquidationBonus',
+                          'reserveFactor',
+                          'slope',
+                          'depositIndex',
+                          'borrowIndex',
+                          'closeFactor',
+                        ]);
+                        
+                        const comparisons: Array<{
+                          field: string;
+                          apiValue: any;
+                          contractValue: any;
+                          match: boolean;
+                          onlyInApi: boolean;
+                          onlyInContract: boolean;
+                        }> = [];
+                        
+                        allKeys.forEach((key) => {
+                          const apiValue = apiData?.[key];
+                          const contractValue = contractData?.[key];
+                          const onlyInApi = apiValue !== undefined && contractValue === undefined;
+                          const onlyInContract = contractValue !== undefined && apiValue === undefined;
+                          
+                          let match = false;
+                          if (!onlyInApi && !onlyInContract) {
+                            // Compare values
+                            if (numericFields.has(key)) {
+                              // For numeric fields, compare as numbers
+                              const apiNum = typeof apiValue === 'string' 
+                                ? parseFloat(apiValue) 
+                                : typeof apiValue === 'number' 
+                                ? apiValue 
+                                : null;
+                              const contractNum = typeof contractValue === 'string'
+                                ? parseFloat(contractValue)
+                                : typeof contractValue === 'number'
+                                ? contractValue
+                                : null;
+                              
+                              if (apiNum !== null && contractNum !== null) {
+                                // Allow small floating point differences
+                                match = Math.abs(apiNum - contractNum) < 0.0001;
+                              } else {
+                                match = String(apiValue) === String(contractValue);
+                              }
+                            } else {
+                              match = String(apiValue) === String(contractValue);
+                            }
+                          }
+                          
+                          comparisons.push({
+                            field: key,
+                            apiValue,
+                            contractValue,
+                            match,
+                            onlyInApi,
+                            onlyInContract,
+                          });
+                        });
+                        
+                        // Sort: mismatches first, then matches, then only-in-one
+                        comparisons.sort((a, b) => {
+                          if (a.onlyInApi || a.onlyInContract) return 1;
+                          if (b.onlyInApi || b.onlyInContract) return -1;
+                          if (!a.match && b.match) return -1;
+                          if (a.match && !b.match) return 1;
+                          return 0;
+                        });
+                        
+                        const matchCount = comparisons.filter(c => c.match && !c.onlyInApi && !c.onlyInContract).length;
+                        const mismatchCount = comparisons.filter(c => !c.match && !c.onlyInApi && !c.onlyInContract).length;
+                        const onlyInApiCount = comparisons.filter(c => c.onlyInApi).length;
+                        const onlyInContractCount = comparisons.filter(c => c.onlyInContract).length;
+                        
+                        return (
+                          <div className="space-y-4">
+                            {/* Summary Stats */}
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                              <div className="p-3 bg-background rounded-md border">
+                                <div className="text-xs text-muted-foreground">Matches</div>
+                                <div className="text-2xl font-bold text-green-600">{matchCount}</div>
+                              </div>
+                              <div className="p-3 bg-background rounded-md border">
+                                <div className="text-xs text-muted-foreground">Mismatches</div>
+                                <div className="text-2xl font-bold text-red-600">{mismatchCount}</div>
+                              </div>
+                              <div className="p-3 bg-background rounded-md border">
+                                <div className="text-xs text-muted-foreground">Only in API</div>
+                                <div className="text-2xl font-bold text-yellow-600">{onlyInApiCount}</div>
+                              </div>
+                              <div className="p-3 bg-background rounded-md border">
+                                <div className="text-xs text-muted-foreground">Only in Contract</div>
+                                <div className="text-2xl font-bold text-blue-600">{onlyInContractCount}</div>
+                              </div>
+                            </div>
+                            
+                            {/* Field-by-field comparison */}
+                            <div className="space-y-2 max-h-96 overflow-auto">
+                              {comparisons.map((comp) => (
+                                <div
+                                  key={comp.field}
+                                  className={`p-3 rounded-md border ${
+                                    comp.onlyInApi || comp.onlyInContract
+                                      ? 'bg-yellow-50 dark:bg-yellow-950/20 border-yellow-200 dark:border-yellow-800'
+                                      : comp.match
+                                      ? 'bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800'
+                                      : 'bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800'
+                                  }`}
+                                >
+                                  <div className="flex items-start justify-between gap-4">
+                                    <div className="flex-1">
+                                      <div className="font-semibold text-sm mb-1">
+                                        {comp.field}
+                                        {comp.onlyInApi && (
+                                          <Badge variant="outline" className="ml-2 text-xs">
+                                            API Only
+                                          </Badge>
+                                        )}
+                                        {comp.onlyInContract && (
+                                          <Badge variant="outline" className="ml-2 text-xs">
+                                            Contract Only
+                                          </Badge>
+                                        )}
+                                        {!comp.onlyInApi && !comp.onlyInContract && comp.match && (
+                                          <Badge variant="outline" className="ml-2 text-xs bg-green-100 dark:bg-green-900">
+                                            <CheckCircle2 className="h-3 w-3 mr-1" />
+                                            Match
+                                          </Badge>
+                                        )}
+                                        {!comp.onlyInApi && !comp.onlyInContract && !comp.match && (
+                                          <Badge variant="outline" className="ml-2 text-xs bg-red-100 dark:bg-red-900">
+                                            <AlertTriangle className="h-3 w-3 mr-1" />
+                                            Mismatch
+                                          </Badge>
+                                        )}
+                                      </div>
+                                      <div className="grid grid-cols-2 gap-4 text-xs">
+                                        <div>
+                                          <div className="text-muted-foreground mb-1">API Value:</div>
+                                          <div className="font-mono break-all">
+                                            {comp.apiValue !== undefined
+                                              ? typeof comp.apiValue === 'object'
+                                                ? JSON.stringify(comp.apiValue, null, 2)
+                                                : String(comp.apiValue)
+                                              : '—'}
+                                          </div>
+                                        </div>
+                                        <div>
+                                          <div className="text-muted-foreground mb-1">Contract Value:</div>
+                                          <div className="font-mono break-all">
+                                            {comp.contractValue !== undefined
+                                              ? typeof comp.contractValue === 'object'
+                                                ? JSON.stringify(comp.contractValue, null, 2)
+                                                : String(comp.contractValue)
+                                              : '—'}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Comparison Summary */}
+                {apiMarketsResult && contractMarketResult && (
+                  <Card className="border-primary/20 bg-primary/5">
+                    <CardHeader>
+                      <CardTitle>Comparison Summary</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm">API Market Found:</span>
+                          <Badge
+                            variant={apiMarketsResult.success ? "default" : "destructive"}
+                          >
+                            {apiMarketsResult.success ? "Yes" : "No"}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm">Contract Data:</span>
+                          <Badge
+                            variant={
+                              contractMarketResult ? "default" : "destructive"
+                            }
+                          >
+                            {contractMarketResult ? "Available" : "Not Available"}
+                          </Badge>
+                        </div>
+                        {apiMarketsResult.data &&
+                          contractMarketResult && (
+                            <div className="mt-4 p-3 bg-background rounded-md">
+                              <Label className="text-xs text-muted-foreground">
+                                Market Comparison:
+                              </Label>
+                              <div className="mt-2">
+                                {apiMarketsResult.data.marketId?.toString() ===
+                                testMarketId.toString() ? (
+                                  <Badge variant="default" className="mt-2">
+                                    <CheckCircle2 className="h-3 w-3 mr-1" />
+                                    Market IDs match
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="destructive" className="mt-2">
+                                    <AlertTriangle className="h-3 w-3 mr-1" />
+                                    Market IDs do not match
+                                  </Badge>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       </main>

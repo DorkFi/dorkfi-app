@@ -16,12 +16,13 @@ interface Deposit {
   apy: number;
   tokenPrice: number;
   poolId?: string;
+  network?: string;
 }
 
 interface DepositsListProps {
   deposits: Deposit[];
   onDepositClick: (asset: string, poolId?: string) => void;
-  onWithdrawClick: (asset: string, poolId?: string) => void;
+  onWithdrawClick: (asset: string, poolId?: string, networkId?: string) => void;
   onRefresh?: () => void;
   isLoading?: boolean;
 }
@@ -144,7 +145,7 @@ const DepositsList = ({ deposits, onDepositClick, onWithdrawClick, onRefresh, is
             {/* USD value above Deposit/Withdraw buttons (column 3) */}
             <div className="flex flex-col items-end gap-2 min-w-[150px] pr-3">
               <DorkFiButton variant="secondary" onClick={() => onDepositClick(deposit.asset, deposit.poolId)} className="w-full max-w-[148px]">Deposit</DorkFiButton>
-              <DorkFiButton variant="danger-outline" onClick={() => onWithdrawClick(deposit.asset, deposit.poolId)} className="w-full max-w-[148px]">Withdraw</DorkFiButton>
+              <DorkFiButton variant="danger-outline" onClick={() => onWithdrawClick(deposit.asset, deposit.poolId, deposit.network)} className="w-full max-w-[148px]">Withdraw</DorkFiButton>
             </div>
           </div>
           );

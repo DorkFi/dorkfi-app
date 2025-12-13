@@ -10,7 +10,7 @@ interface UseTokenPriceResult {
   refetch: () => void;
 }
 
-export const useTokenPrice = (tokenSymbol: string): UseTokenPriceResult => {
+export const useTokenPrice = (tokenSymbol: string, networkId?: string): UseTokenPriceResult => {
   const [price, setPrice] = useState<number>(0);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -26,11 +26,50 @@ export const useTokenPrice = (tokenSymbol: string): UseTokenPriceResult => {
     setError(null);
 
     try {
+      // Use provided networkId or fallback to currentNetwork
+      const networkToUse = networkId || currentNetwork;
+      
+      if (!networkToUse) {
+        throw new Error('No network specified');
+      }
+
       // Get token configuration to find pool and market IDs
-      const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+      const tokens = getAllTokensWithDisplayInfo(networkToUse as any);
       const token = tokens.find(t => t.symbol === tokenSymbol);
       
       if (!token || !token.poolId || !token.underlyingContractId) {
+        // If token not found in specified network, try other enabled networks
+        if (!networkId) {
+          // Only try other networks if networkId wasn't explicitly provided
+          const { getEnabledNetworks } = await import('@/config');
+          const enabledNetworks = getEnabledNetworks();
+          
+          for (const network of enabledNetworks) {
+            if (network === networkToUse) continue; // Skip the one we already tried
+            
+            const otherTokens = getAllTokensWithDisplayInfo(network as any);
+            const otherToken = otherTokens.find(t => t.symbol === tokenSymbol);
+            
+            if (otherToken && otherToken.poolId && otherToken.underlyingContractId) {
+              // Found token in another network, use that network
+              const marketInfo = await fetchMarketInfo(
+                otherToken.poolId,
+                otherToken.underlyingContractId,
+                network
+              );
+              
+              if (marketInfo && marketInfo.price) {
+                const scaledPrice = parseFloat(marketInfo.price);
+                const marketPrice = scaledPrice / Math.pow(10, 6);
+                console.log(`Market price for ${tokenSymbol} on ${network}: $${marketPrice}`);
+                setPrice(marketPrice);
+                setIsLoading(false);
+                return;
+              }
+            }
+          }
+        }
+        
         throw new Error(`Token ${tokenSymbol} not found or missing configuration`);
       }
 
@@ -38,7 +77,7 @@ export const useTokenPrice = (tokenSymbol: string): UseTokenPriceResult => {
       const marketInfo = await fetchMarketInfo(
         token.poolId,
         token.underlyingContractId,
-        currentNetwork
+        networkToUse
       );
 
       if (marketInfo && marketInfo.price) {
@@ -73,7 +112,7 @@ export const useTokenPrice = (tokenSymbol: string): UseTokenPriceResult => {
     } finally {
       setIsLoading(false);
     }
-  }, [tokenSymbol, currentNetwork]);
+  }, [tokenSymbol, networkId, currentNetwork]);
 
   useEffect(() => {
     fetchPrice();

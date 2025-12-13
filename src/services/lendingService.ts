@@ -12,6 +12,7 @@ import {
   isCurrentNetworkEVM,
   isAlgorandCompatibleNetwork,
   isEVMNetwork,
+  getAlgorandNetworkFromNetworkId,
   NetworkId,
   getAllTokensWithDisplayInfo,
   getTokenConfig,
@@ -35,6 +36,59 @@ import {
   calculateBorrowAPY,
   APYCalculationResult,
 } from "@/utils/apyCalculations";
+import dorkfiAPIService from "./dorkfiAPIService";
+
+export interface MarketData {
+  appId: string;
+  network: string;
+  marketId: string;
+  paused: boolean;
+  maxTotalDeposits: string;
+  maxTotalBorrows: string;
+  liquidationBonus: string;
+  collateralFactor: string;
+  liquidationThreshold: string;
+  reserveFactor: string;
+  borrowRate: string;
+  slope: string;
+  totalScaledDeposits: string;
+  totalScaledBorrows: string;
+  depositIndex: string;
+  borrowIndex: string;
+  lastUpdateTime: string;
+  reserves: string;
+  price: string;
+  ntokenId: string;
+  closeFactor: string;
+  lastUpdated: number;
+}
+
+export const decodeMarketData = (market: any[]): MarketData => {
+  return {
+    appId: market[0].toString(),
+    network: market[1].toString(),
+    marketId: market[2].toString(),
+    paused: market[0] as boolean,
+    maxTotalDeposits: market[1].toString(),
+    maxTotalBorrows: market[2].toString(),
+    liquidationBonus: market[3].toString(),
+    collateralFactor: market[4].toString(),
+    liquidationThreshold: market[5].toString(),
+    reserveFactor: market[6].toString(),
+    borrowRate: market[7].toString(),
+    slope: market[8].toString(),
+    totalScaledDeposits: market[9].toString(),
+    totalScaledBorrows: market[10].toString(),
+    depositIndex: market[11].toString(),
+    borrowIndex: market[12].toString(),
+    lastUpdateTime: market[13].toString(),
+    reserves: market[14].toString(),
+    price: market[15].toString(),
+    ntokenId: market[16].toString(),
+    closeFactor: market[17].toString(),
+    lastUpdated: Date.now(),
+  };
+};
 
 export interface MarketInfo {
   networkId: NetworkId;
@@ -121,26 +175,52 @@ export interface Market {
   closeFactor: BigInt;
 }
 
-export const decodeMarket = (market: any[]): Market => {
+/**
+ * Raw market data as returned from the contract (tuple format)
+ * Index 0: paused (boolean)
+ * Indices 1-17: BigInt values for market parameters
+ */
+export type RawMarket = [
+  boolean, // [0] paused
+  bigint, // [1] maxTotalDeposits
+  bigint, // [2] maxTotalBorrows
+  bigint, // [3] liquidationBonus
+  bigint, // [4] collateralFactor
+  bigint, // [5] liquidationThreshold
+  bigint, // [6] reserveFactor
+  bigint, // [7] borrowRate
+  bigint, // [8] slope
+  bigint, // [9] totalScaledDeposits
+  bigint, // [10] totalScaledBorrows
+  bigint, // [11] depositIndex
+  bigint, // [12] borrowIndex
+  bigint, // [13] lastUpdateTime
+  bigint, // [14] reserves
+  bigint, // [15] price
+  bigint, // [16] ntokenId
+  bigint // [17] closeFactor
+];
+
+export const decodeMarket = (market: RawMarket): Market => {
   return {
-    paused: market[0] as boolean,
-    maxTotalDeposits: market[1] as BigInt,
-    maxTotalBorrows: market[2] as BigInt,
-    liquidationBonus: market[3] as BigInt,
-    collateralFactor: market[4] as BigInt,
-    liquidationThreshold: market[5] as BigInt,
-    reserveFactor: market[6] as BigInt,
-    borrowRate: market[7] as BigInt,
-    slope: market[8] as BigInt,
-    totalScaledDeposits: market[9] as BigInt,
-    totalScaledBorrows: market[10] as BigInt,
-    depositIndex: market[11] as BigInt,
-    borrowIndex: market[12] as BigInt,
-    lastUpdateTime: market[13] as BigInt,
-    reserves: market[14] as BigInt,
-    price: market[15] as BigInt,
-    ntokenId: market[16] as BigInt,
-    closeFactor: market[17] as BigInt,
+    paused: market[0],
+    maxTotalDeposits: market[1],
+    maxTotalBorrows: market[2],
+    liquidationBonus: market[3],
+    collateralFactor: market[4],
+    liquidationThreshold: market[5],
+    reserveFactor: market[6],
+    borrowRate: market[7],
+    slope: market[8],
+    totalScaledDeposits: market[9],
+    totalScaledBorrows: market[10],
+    depositIndex: market[11],
+    borrowIndex: market[12],
+    lastUpdateTime: market[13],
+    reserves: market[14],
+    price: market[15],
+    ntokenId: market[16],
+    closeFactor: market[17],
   } as Market;
 };
 
@@ -280,18 +360,89 @@ export const enhanceAVMMarketInfo = (
   return marketInfo;
 };
 
+export const fetchMarketInfoFromContract = async (
+  poolId: string,
+  marketId: string,
+  networkId: NetworkId
+): Promise<MarketData> => {
+  console.log("fetchMarketInfoFromContract", { poolId, marketId, networkId });
+  try {
+    if (!poolId || !marketId || !networkId) {
+      throw new Error(
+        "Missing required parameters: poolId, marketId, or networkId"
+      );
+    }
+    if (isNaN(Number(poolId))) {
+      throw new Error(`Invalid poolId: ${poolId}. Must be a number.`);
+    }
+    if (isNaN(Number(marketId))) {
+      throw new Error(`Invalid marketId: ${marketId}. Must be a number.`);
+    }
+    const networkConfig = getNetworkConfig(networkId);
+    if (isAlgorandCompatibleNetwork(networkId)) {
+      const clients = await algorandService.initializeClientsForReads(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+      const ci = new CONTRACT(
+        Number(poolId),
+        clients.algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        {
+          addr: algosdk.encodeAddress(
+            algosdk.getApplicationAddress(Number(poolId)).publicKey
+          ),
+          sk: new Uint8Array(),
+        }
+      );
+      const marketR = await ci.get_market(Number(marketId));
+      if (!marketR.success) {
+        console.error(`Contract call failed for market ${marketId}:`, marketR);
+        throw new Error(`Failed to get market info for market ${marketId}`);
+      }
+
+      if (!marketR.returnValue || !Array.isArray(marketR.returnValue)) {
+        console.error(
+          `Invalid market data structure for market ${marketId}:`,
+          marketR.returnValue
+        );
+        throw new Error(`Invalid market data structure for market ${marketId}`);
+      }
+      return {
+        ...decodeMarketData(marketR.returnValue),
+        appId: poolId,
+        marketId,
+        network: networkId,
+        lastUpdated: Date.now(),
+      };
+    } else if (isEVMNetwork(networkId)) {
+      // For EVM networks, we need to implement contract interaction
+      // For now, return null to indicate no market data available
+      console.warn(
+        `EVM network ${networkId} not yet supported for market data fetching`
+      );
+      return null;
+    } else {
+      throw new Error("Unsupported network");
+    }
+  } catch (error) {
+    console.error("Error fetching market info:", error);
+    return null;
+  }
+};
+
 /**
  * Fetch market information for a specific market
  */
 export const fetchMarketInfo = async (
   poolId: string,
   marketId: string,
-  networkId: NetworkId
+  networkId: NetworkId,
+  source: "contract" | "api" = "api"
 ): Promise<MarketInfo | null> => {
   console.log("fetchMarketInfo", { poolId, marketId, networkId });
   try {
-    // Validate input parameters
-    if (!poolId || !marketId || !networkId) {
+    if (!poolId || !marketId || !networkId || !source) {
       throw new Error(
         "Missing required parameters: poolId, marketId, or networkId"
       );
@@ -308,22 +459,54 @@ export const fetchMarketInfo = async (
     const networkConfig = getNetworkConfig(networkId);
 
     if (isAlgorandCompatibleNetwork(networkId)) {
-      const clients = await algorandService.initializeClientsForReads(
-        networkConfig.walletNetworkId as AlgorandNetwork
+      let marketData: MarketData | null = null;
+      if (source === "contract") {
+        marketData = await fetchMarketInfoFromContract(
+          poolId,
+          marketId,
+          networkId
+        );
+      } else if (source === "api") {
+        const getMarketResponse = await dorkfiAPIService.getMarketData(
+          networkId,
+          Number(poolId),
+          Number(marketId)
+        );
+        if (!getMarketResponse?.success || !getMarketResponse?.data) {
+          marketData = await fetchMarketInfoFromContract(
+            poolId,
+            marketId,
+            networkId
+          );
+        } else {
+          // Convert API Market to local MarketData format
+          const apiMarket = getMarketResponse.data;
+          console.log({ apiMarket });
+          marketData = apiMarket as unknown as MarketData;
+        }
+      }
+
+      console.log(
+        "=============== [fetchMarketInfo] marketData ===============",
+        { marketData }
       );
 
-      const ci = new CONTRACT(
-        Number(poolId),
-        clients.algod,
-        undefined,
-        { ...LendingPoolAppSpec.contract, events: [] },
-        {
-          addr: algosdk.encodeAddress(
-            algosdk.getApplicationAddress(Number(poolId)).publicKey
-          ),
-          sk: new Uint8Array(),
-        }
-      );
+      // const clients = await algorandService.initializeClientsForReads(
+      //   networkConfig.walletNetworkId as AlgorandNetwork
+      // );
+
+      // const ci = new CONTRACT(
+      //   Number(poolId),
+      //   clients.algod,
+      //   undefined,
+      //   { ...LendingPoolAppSpec.contract, events: [] },
+      //   {
+      //     addr: algosdk.encodeAddress(
+      //       algosdk.getApplicationAddress(Number(poolId)).publicKey
+      //     ),
+      //     sk: new Uint8Array(),
+      //   }
+      // );
 
       const token = getAllTokensWithDisplayInfo(networkId).find(
         (token) => token.underlyingContractId === marketId
@@ -356,56 +539,58 @@ export const fetchMarketInfo = async (
       }
       console.log("fetchMarketInfo tokenConfig", { tokenConfig });
 
-      const marketR = await ci.get_market(Number(marketId));
+      // const marketR = await ci.get_market(Number(marketId));
 
-      console.log("marketR", { marketR });
+      // console.log("marketR", { marketR });
 
-      if (!marketR.success) {
-        console.error(`Contract call failed for market ${marketId}:`, marketR);
-        throw new Error(`Failed to get market info for market ${marketId}`);
-      }
+      // if (!marketR.success) {
+      //   console.error(`Contract call failed for market ${marketId}:`, marketR);
+      //   throw new Error(`Failed to get market info for market ${marketId}`);
+      // }
 
-      if (!marketR.returnValue || !Array.isArray(marketR.returnValue)) {
-        console.error(
-          `Invalid market data structure for market ${marketId}:`,
-          marketR.returnValue
-        );
-        throw new Error(`Invalid market data structure for market ${marketId}`);
-      }
+      // if (!marketR.returnValue || !Array.isArray(marketR.returnValue)) {
+      //   console.error(
+      //     `Invalid market data structure for market ${marketId}:`,
+      //     marketR.returnValue
+      //   );
+      //   throw new Error(`Invalid market data structure for market ${marketId}`);
+      // }
 
-      // Debug: Log raw market data to verify field order
-      console.log("Raw market data:", marketR.returnValue);
-      console.log("Field count:", marketR.returnValue.length);
+      // // Debug: Log raw market data to verify field order
+      // console.log("Raw market data:", marketR.returnValue);
+      // console.log("Field count:", marketR.returnValue.length);
 
-      if (marketR.returnValue.length < 18) {
-        console.error(
-          `Insufficient market data fields for market ${marketId}. Expected 18, got ${marketR.returnValue.length}`
-        );
-        throw new Error(
-          `Insufficient market data fields for market ${marketId}`
-        );
-      }
+      // if (marketR.returnValue.length < 18) {
+      //   console.error(
+      //     `Insufficient market data fields for market ${marketId}. Expected 18, got ${marketR.returnValue.length}`
+      //   );
+      //   throw new Error(
+      //     `Insufficient market data fields for market ${marketId}`
+      //   );
+      // }
 
-      const market = decodeMarket(marketR.returnValue);
+      // const market = decodeMarket(marketR.returnValue);
+
+      const market = marketData as MarketData;
 
       // Debug: Log decoded market data
-      console.log("Decoded market data:", {
-        depositIndex: market.depositIndex.toString(),
-        borrowIndex: market.borrowIndex.toString(),
-        maxTotalDeposits: market.maxTotalDeposits.toString(),
-        maxTotalBorrows: market.maxTotalBorrows.toString(),
-      });
+      // console.log("Decoded market data:", {
+      //   depositIndex: market.depositIndex.toString(),
+      //   borrowIndex: market.borrowIndex.toString(),
+      //   maxTotalDeposits: market.maxTotalDeposits.toString(),
+      //   maxTotalBorrows: market.maxTotalBorrows.toString(),
+      // });
 
       const utilizationRate =
-        market.totalScaledDeposits.toString() == "0"
+        market.totalScaledDeposits == "0"
           ? 0
-          : new BigNumber(market.totalScaledBorrows.toString())
-              .div(market.totalScaledDeposits.toString())
+          : new BigNumber(market.totalScaledBorrows)
+              .div(market.totalScaledDeposits)
               .toNumber();
 
-      const supplyRate = new BigNumber(market.borrowRate.toString())
+      const supplyRate = new BigNumber(market.borrowRate)
         .multipliedBy(utilizationRate)
-        .multipliedBy(10000 - Number(market.reserveFactor.toString()))
+        .multipliedBy(10000 - Number(market.reserveFactor))
         .dividedBy(10000)
         .toNumber();
 
@@ -419,29 +604,27 @@ export const fetchMarketInfo = async (
           .toFixed(4);
       };
 
-      const totalDeposits = formatDeposit(
-        market.totalScaledDeposits.toString()
-      );
+      const totalDeposits = formatDeposit(market.totalScaledDeposits);
 
-      const totalBorrows = formatDeposit(market.totalScaledBorrows.toString());
+      const totalBorrows = formatDeposit(market.totalScaledBorrows);
 
       // For b market (poolId 47139781), use 2% (200 basis points) as base borrow rate
       // Otherwise use the borrow rate from the contract
       const baseBorrowRateBps =
         poolId === "47139781"
           ? 200 // 2% = 200 basis points for b market
-          : parseFloat(market.borrowRate.toString());
+          : parseFloat(market.borrowRate);
 
       // Calculate APY using the new utility function
       const apyCalculation = calculateDepositAPY(
         {
           borrowRate: baseBorrowRateBps,
-          slope: parseFloat(market.slope.toString()),
-          reserveFactor: parseFloat(market.reserveFactor.toString()),
+          slope: parseFloat(market.slope),
+          reserveFactor: parseFloat(market.reserveFactor),
         },
         {
-          totalScaledDeposits: market.totalScaledDeposits.toString(),
-          totalScaledBorrows: market.totalScaledBorrows.toString(),
+          totalScaledDeposits: market.totalScaledDeposits,
+          totalScaledBorrows: market.totalScaledBorrows,
           lastUpdateTime: Number(market.lastUpdateTime),
         }
       );
@@ -450,12 +633,12 @@ export const fetchMarketInfo = async (
       const borrowApyCalculation = calculateBorrowAPY(
         {
           borrowRate: baseBorrowRateBps,
-          slope: parseFloat(market.slope.toString()),
-          reserveFactor: parseFloat(market.reserveFactor.toString()),
+          slope: parseFloat(market.slope),
+          reserveFactor: parseFloat(market.reserveFactor),
         },
         {
-          totalScaledDeposits: market.totalScaledDeposits.toString(),
-          totalScaledBorrows: market.totalScaledBorrows.toString(),
+          totalScaledDeposits: market.totalScaledDeposits,
+          totalScaledBorrows: market.totalScaledBorrows,
           lastUpdateTime: Number(market.lastUpdateTime),
         },
         tokenConfig?.isStoken || false // Pass isSToken flag
@@ -465,54 +648,44 @@ export const fetchMarketInfo = async (
         networkId: networkId,
         poolId: poolId,
         marketId: marketId,
-        tokenId: market.ntokenId.toString(),
-        tokenContractId: market.ntokenId.toString(),
+        tokenId: market.ntokenId,
+        tokenContractId: market.ntokenId,
         name: token?.name || "",
         symbol: token?.symbol || "",
         decimals: token?.decimals || 0,
-        collateralFactor:
-          parseFloat(market.collateralFactor.toString()) / 10000,
-        liquidationThreshold:
-          parseFloat(market.liquidationThreshold.toString()) / 10000,
-        reserveFactor: parseFloat(market.reserveFactor.toString()) / 10000,
-        borrowRate: parseFloat(market.borrowRate.toString()) / 10000,
-        slope: parseFloat(market.slope.toString()) / 10000,
-        maxTotalDeposits: BigNumber(market.maxTotalDeposits.toString())
+        collateralFactor: parseFloat(market.collateralFactor) / 10000,
+        liquidationThreshold: parseFloat(market.liquidationThreshold) / 10000,
+        reserveFactor: parseFloat(market.reserveFactor) / 10000,
+        borrowRate: parseFloat(market.borrowRate) / 10000,
+        slope: parseFloat(market.slope) / 10000,
+        maxTotalDeposits: BigNumber(market.maxTotalDeposits)
           .div(10 ** token?.decimals || 0)
           .toFixed(0),
-        maxTotalBorrows: BigNumber(market.maxTotalBorrows.toString())
+        maxTotalBorrows: BigNumber(market.maxTotalBorrows)
           .div(10 ** token?.decimals || 0)
           .toFixed(0),
-        liquidationBonus:
-          parseFloat(market.liquidationBonus.toString()) / 10000,
-        closeFactor: parseFloat(market.closeFactor.toString()) / 10000,
+        liquidationBonus: parseFloat(market.liquidationBonus) / 10000,
+        closeFactor: parseFloat(market.closeFactor) / 10000,
         totalDeposits,
         totalBorrows,
         utilizationRate,
         supplyRate,
-        borrowRateCurrent: parseFloat(market.borrowRate.toString()) / 10000,
-        price: formatPrice(market.price.toString()),
+        borrowRateCurrent: parseFloat(market.borrowRate) / 10000,
+        price: formatPrice(market.price),
         isActive: true,
         isPaused: market.paused,
-        ntokenId: market.ntokenId.toString(),
+        ntokenId: market.ntokenId,
         lastUpdated: new Date().toISOString(),
         // Current market indices (for accurate position calculations)
-        depositIndex: market.depositIndex.toString(),
-        borrowIndex: market.borrowIndex.toString(),
+        depositIndex: market.depositIndex,
+        borrowIndex: market.borrowIndex,
         apyCalculation,
         borrowApyCalculation,
       };
 
+      console.log("fetchMarketInfo marketInfo", { marketInfo, marketData });
+
       return marketInfo;
-
-      // const marketInfo = enhanceAVMMarketInfo(
-      //   { ...market, network: networkId, poolId, marketId },
-      //   tokenConfig
-      // );
-
-      // console.log("marketInfo", { marketInfo });
-
-      // return marketInfo;
     } else if (isEVMNetwork(networkId)) {
       // For EVM networks, we need to implement contract interaction
       // For now, return null to indicate no market data available
@@ -1329,7 +1502,7 @@ export const withdraw = async (
   });
 
   try {
-    const networkConfig = getCurrentNetworkConfig();
+    const networkConfig = getNetworkConfig(networkId);
 
     if (isAlgorandCompatibleNetwork(networkId)) {
       const clients = algorandService.initializeClients(
@@ -1558,12 +1731,20 @@ export const deposit = async (
   });
 
   try {
-    const networkConfig = getCurrentNetworkConfig();
+    // Use the networkId parameter, not the current network
+    const networkConfig = getNetworkConfig(networkId);
 
     if (isAlgorandCompatibleNetwork(networkId)) {
-      console.log({ networkConfig });
+      console.log({ networkConfig, networkId });
+      // Convert networkId to AlgorandNetwork format
+      const algorandNetwork = getAlgorandNetworkFromNetworkId(networkId);
+      
+      if (!algorandNetwork) {
+        throw new Error(`Network ${networkId} is not an Algorand-compatible network`);
+      }
+      
       const clients = algorandService.initializeClients(
-        networkConfig.walletNetworkId as AlgorandNetwork
+        algorandNetwork
       );
       // Get token information
       const allTokens = getAllTokensWithDisplayInfo(networkId);
@@ -2383,7 +2564,7 @@ export const borrow = async (
   console.log("borrow", { poolId, marketId, amount, userAddress, networkId });
 
   try {
-    const networkConfig = getCurrentNetworkConfig();
+    const networkConfig = getNetworkConfig(networkId);
 
     if (isAlgorandCompatibleNetwork(networkId)) {
       console.log({ networkConfig });
@@ -2724,7 +2905,7 @@ export const repay = async (
   console.log("repay", { poolId, marketId, amount, userAddress, networkId });
 
   try {
-    const networkConfig = getCurrentNetworkConfig();
+    const networkConfig = getNetworkConfig(networkId);
 
     if (isAlgorandCompatibleNetwork(networkId)) {
       console.log({ networkConfig });

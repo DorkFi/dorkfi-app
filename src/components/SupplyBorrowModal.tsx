@@ -22,7 +22,7 @@ import {
   borrow,
   fetchUserGlobalData,
 } from "@/services/lendingService";
-import { getTokenConfig, getAllTokensWithDisplayInfo } from "@/config";
+import { getTokenConfig, getAllTokensWithDisplayInfo, getAlgorandNetworkFromNetworkId } from "@/config";
 import algorandService from "@/services/algorandService";
 import algosdk, { waitForConfirmation } from "algosdk";
 import BigNumber from "bignumber.js";
@@ -34,6 +34,7 @@ interface SupplyBorrowModalProps {
   onClose: () => void;
   asset: string;
   poolId?: string; // Pool ID to identify specific market when multiple markets exist for same symbol
+  network?: string; // Network ID for cross-network operations
   mode: "deposit" | "borrow";
   assetData: {
     icon: string;
@@ -69,6 +70,7 @@ const SupplyBorrowModal = ({
   onClose,
   asset,
   poolId,
+  network,
   mode,
   assetData,
   walletBalance: propWalletBalance = 0,
@@ -94,6 +96,9 @@ const SupplyBorrowModal = ({
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
   const { toast } = useToast();
+  
+  // Use provided network or fallback to current network
+  const networkToUse = network || currentNetwork;
 
   // Calculate max borrow amount when modal opens in borrow mode
   useEffect(() => {
@@ -118,7 +123,7 @@ const SupplyBorrowModal = ({
       setMaxBorrowError(null);
 
       try {
-        const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+        const tokens = getAllTokensWithDisplayInfo(networkToUse as any);
         // If poolId is provided, find the token that matches both symbol and poolId
         // Otherwise, fall back to finding by symbol only (for backward compatibility)
         const token = poolId
@@ -142,7 +147,7 @@ const SupplyBorrowModal = ({
         // Use originalSymbol to look up the config, as asset might be a display symbol
         const originalSymbol =
           "originalSymbol" in token ? (token as any).originalSymbol : asset;
-        const tokenConfigRaw = getTokenConfig(currentNetwork, originalSymbol);
+        const tokenConfigRaw = getTokenConfig(networkToUse as any, originalSymbol);
         if (!tokenConfigRaw) {
           throw new Error(
             `Token config not found for ${asset} (originalSymbol: ${originalSymbol})`
@@ -264,7 +269,7 @@ const SupplyBorrowModal = ({
     };
 
     fetchMaxBorrowAmount();
-  }, [isOpen, mode, activeAccount?.address, asset, poolId, currentNetwork]);
+  }, [isOpen, mode, activeAccount?.address, asset, poolId, networkToUse]);
 
   // Reset states when modal opens/closes
   useEffect(() => {
@@ -311,10 +316,12 @@ const SupplyBorrowModal = ({
       console.log("=== SUPPLYBORROWMODAL HANDLESUBMIT DEBUG ===");
       console.log("Input params:", { asset, poolId, mode, amount });
 
-      const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+      const tokens = getAllTokensWithDisplayInfo(networkToUse as any);
       console.log(
         "All tokens for",
         asset,
+        "on network",
+        networkToUse,
         ":",
         tokens
           .filter((t) => t.symbol === asset)
@@ -327,9 +334,32 @@ const SupplyBorrowModal = ({
 
       // If poolId is provided, find the token that matches both symbol and poolId
       // Otherwise, fall back to finding by symbol only (for backward compatibility)
-      const token = poolId
+      let token = poolId
         ? tokens.find((t) => t.symbol === asset && t.poolId === poolId)
         : tokens.find((t) => t.symbol === asset);
+      
+      // If token not found in specified network, try other enabled networks
+      let actualNetwork = networkToUse;
+      if (!token && !network) {
+        const { getEnabledNetworks } = await import('@/config');
+        const enabledNetworks = getEnabledNetworks();
+        
+        for (const enabledNetwork of enabledNetworks) {
+          if (enabledNetwork === networkToUse) continue;
+          
+          const otherTokens = getAllTokensWithDisplayInfo(enabledNetwork as any);
+          const otherToken = poolId
+            ? otherTokens.find((t) => t.symbol === asset && t.poolId === poolId)
+            : otherTokens.find((t) => t.symbol === asset);
+          
+          if (otherToken) {
+            // Found token in another network, use that network
+            token = otherToken;
+            actualNetwork = enabledNetwork;
+            break;
+          }
+        }
+      }
 
       console.log("Token lookup result:", {
         poolIdProvided: poolId,
@@ -337,6 +367,7 @@ const SupplyBorrowModal = ({
         tokenPoolId: token?.poolId,
         tokenSymbol: token?.symbol,
         tokenUnderlyingContractId: token?.underlyingContractId,
+        networkUsed: actualNetwork,
       });
 
       if (!token) {
@@ -374,7 +405,7 @@ const SupplyBorrowModal = ({
       // Use originalSymbol to look up the config, as asset might be a display symbol
       const originalSymbol =
         "originalSymbol" in token ? (token as any).originalSymbol : asset;
-      const tokenConfigRaw = getTokenConfig(currentNetwork, originalSymbol);
+      const tokenConfigRaw = getTokenConfig(actualNetwork as any, originalSymbol);
       if (!tokenConfigRaw) {
         throw new Error(
           `Original token config not found for ${asset} (originalSymbol: ${originalSymbol})`
@@ -418,7 +449,7 @@ const SupplyBorrowModal = ({
         tokenStandard: originalTokenConfig.tokenStandard,
         amount: amountInAtomicUnits,
         userAddress: activeAccount.address,
-        networkId: currentNetwork,
+        networkId: actualNetwork,
       });
 
       if (poolId && token.poolId !== poolId) {
@@ -439,7 +470,7 @@ const SupplyBorrowModal = ({
           originalTokenConfig.tokenStandard,
           amountInAtomicUnits,
           activeAccount.address,
-          currentNetwork
+          actualNetwork
         );
       } else if (mode === "borrow") {
         // Call the lending service borrow method
@@ -449,7 +480,7 @@ const SupplyBorrowModal = ({
           originalTokenConfig.tokenStandard,
           amountInAtomicUnits,
           activeAccount.address,
-          currentNetwork
+          actualNetwork
         );
       } else {
         throw new Error(`Unsupported mode: ${mode}`);
@@ -476,8 +507,14 @@ const SupplyBorrowModal = ({
         )
       );
 
+      // Get the correct algod client for the asset's network (not currentNetwork)
+      const finalNetwork = actualNetwork || network || currentNetwork;
+      const algorandNetwork = getAlgorandNetworkFromNetworkId(finalNetwork as any);
+      if (!algorandNetwork) {
+        throw new Error(`Invalid network: ${finalNetwork}`);
+      }
       const algorandClients =
-        await algorandService.getCurrentClientsForTransactions();
+        await algorandService.initializeClientsForTransactions(algorandNetwork);
       const res = await algorandClients.algod.sendRawTransaction(stxns).do();
       // TODO fix this
       //await waitForConfirmation(algorandClients.algod, res.txid, 4);

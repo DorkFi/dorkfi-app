@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import {
@@ -11,7 +11,13 @@ import {
 import dorkfiAPIService from "@/services/dorkfiAPIService";
 import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
-import { getAllTokens, getTokenConfig, isFeatureEnabled } from "@/config";
+import {
+  getAllTokens,
+  getTokenConfig,
+  isFeatureEnabled,
+  getEnabledNetworks,
+  getAlgorandNetworkFromNetworkId,
+} from "@/config";
 import { getAllTokensWithDisplayInfo } from "@/config";
 import EnhancedHealthFactor from "./EnhancedHealthFactor";
 import DepositsList from "./DepositsList";
@@ -20,7 +26,42 @@ import PortfolioModals from "./PortfolioModals";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import { H1, Body } from "@/components/ui/Typography";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertTriangle, RefreshCw } from "lucide-react";
+import {
+  AlertTriangle,
+  RefreshCw,
+  TrendingDown,
+  AlertCircle,
+  Info,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Search,
+} from "lucide-react";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  PieChart,
+  Pie,
+  Cell,
+  ResponsiveContainer,
+  Legend,
+  Tooltip,
+} from "recharts";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Tooltip as UITooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 const Portfolio = () => {
   const { activeAccount } = useWallet();
@@ -30,6 +71,7 @@ const Portfolio = () => {
     isOpen: boolean;
     asset: string | null;
     poolId?: string;
+    network?: string;
   }>({
     isOpen: false,
     asset: null,
@@ -38,11 +80,17 @@ const Portfolio = () => {
     isOpen: boolean;
     asset: string | null;
     poolId?: string;
+    network?: string;
   }>({
     isOpen: false,
     asset: null,
   });
-  const [borrowModal, setBorrowModal] = useState({
+  const [borrowModal, setBorrowModal] = useState<{
+    isOpen: boolean;
+    asset: string | null;
+    poolId?: string;
+    network?: string;
+  }>({
     isOpen: false,
     asset: null,
   });
@@ -50,6 +98,7 @@ const Portfolio = () => {
     isOpen: boolean;
     asset: string | null;
     poolId?: string;
+    network?: string;
   }>({
     isOpen: false,
     asset: null,
@@ -72,6 +121,27 @@ const Portfolio = () => {
   const [isLoadingWalletBalance, setIsLoadingWalletBalance] = useState(false);
   const [userBorrowBalance, setUserBorrowBalance] = useState<number>(0);
   const [isLoadingBorrowData, setIsLoadingBorrowData] = useState(false);
+  const [user, setUser] = useState<any>(null);
+  const [selectedNetworkFilter, setSelectedNetworkFilter] =
+    useState<string>("all");
+  const [suppliedAssetsSort, setSuppliedAssetsSort] = useState<{
+    column: string | null;
+    direction: "asc" | "desc";
+  }>({ column: "apy", direction: "desc" });
+  const [suppliedAssetsSearchTerm, setSuppliedAssetsSearchTerm] =
+    useState<string>("");
+  const [showAllSuppliedAssets, setShowAllSuppliedAssets] =
+    useState<boolean>(false);
+  const suppliedAssetsTableRef = useRef<HTMLDivElement>(null);
+  const [borrowedAssetsSearchTerm, setBorrowedAssetsSearchTerm] =
+    useState<string>("");
+  const [showAllBorrowedAssets, setShowAllBorrowedAssets] =
+    useState<boolean>(false);
+  const borrowedAssetsTableRef = useRef<HTMLDivElement>(null);
+  const [borrowedAssetsSort, setBorrowedAssetsSort] = useState<{
+    column: string | null;
+    direction: "asc" | "desc";
+  }>({ column: "apy", direction: "asc" });
 
   console.log("marketData", marketData);
 
@@ -239,6 +309,7 @@ const Portfolio = () => {
               tokenPrice: tokenPrice,
               type: "deposit",
               poolId: token.poolId,
+              network: networkId, // Add network information
             });
           }
 
@@ -271,6 +342,7 @@ const Portfolio = () => {
               type: "borrow",
               interest: borrowInterest,
               poolId: token.poolId,
+              network: networkId, // Add network information
             });
           }
         }
@@ -288,19 +360,24 @@ const Portfolio = () => {
   const deposits = userPositions.filter((pos) => pos.type === "deposit");
   const borrows = userPositions.filter((pos) => pos.type === "borrow");
 
-  // Calculate totals from real data only
+  // Calculate totals - prioritize computed global values from API, then fallback to local calculations
   const totalCollateral =
-    userGlobalData?.totalCollateralValue ||
-    deposits.reduce((sum, deposit) => sum + deposit.value, 0);
+    user?.computed?.globalCollateralValue !== undefined
+      ? Number(user.computed.globalCollateralValue)
+      : userGlobalData?.totalCollateralValue ||
+        deposits.reduce((sum, deposit) => sum + deposit.value, 0);
 
   console.log({
     userGlobalData,
+    userComputed: user?.computed,
     deposits,
   });
 
   const totalBorrowed =
-    userGlobalData?.totalBorrowValue ||
-    borrows.reduce((sum, borrow) => sum + borrow.value, 0);
+    user?.computed?.globalBorrowValue !== undefined
+      ? Number(user.computed.globalBorrowValue)
+      : userGlobalData?.totalBorrowValue ||
+        borrows.reduce((sum, borrow) => sum + borrow.value, 0);
 
   // Calculate weighted liquidation threshold based on borrowed assets only
   // This is more accurate because liquidation risk only applies to markets with active debt
@@ -359,12 +436,28 @@ const Portfolio = () => {
   // If no collateral, return null (no calculation possible)
   // If no borrows, return high value (excellent health - no liquidation risk)
   const collateralFactor = 0.8; // 80% collateral factor
-  const healthFactor =
-    totalCollateral > 0 && totalBorrowed > 0
-      ? (totalCollateral * collateralFactor) / totalBorrowed
-      : totalCollateral > 0
-      ? 10.0
-      : null; // Excellent health when no borrows, null when no collateral
+
+  // Helper function to calculate health factor for given collateral and borrow values
+  const calculateHealthFactor = (
+    collateral: number,
+    borrowed: number
+  ): number | null => {
+    if (collateral > 0 && borrowed > 0) {
+      return (collateral * collateralFactor) / borrowed;
+    } else if (collateral > 0) {
+      return 10.0; // Excellent health when no borrows
+    }
+    return null; // No calculation possible when no collateral
+  };
+
+  // Helper function to saturate health factor values at 3.00 for display
+  const saturateHealthFactor = (healthFactor: number | null): number | null => {
+    if (healthFactor === null) return null;
+    return Math.min(healthFactor, 3.0);
+  };
+
+  const healthFactor = calculateHealthFactor(totalCollateral, totalBorrowed);
+  const displayHealthFactor = saturateHealthFactor(healthFactor);
 
   // Calculate Net LTV (Loan-to-Value ratio)
   const netLTV =
@@ -400,6 +493,9 @@ const Portfolio = () => {
   console.log("Portfolio Debug:", {
     totalCollateral,
     totalBorrowed,
+    usingComputedValues: user?.computed !== undefined,
+    globalNetPortfolioValue: user?.computed?.globalNetPortfolioValue,
+    networkValues: user?.computed?.networkValues,
     weightedLiquidationThreshold,
     netLTV,
     liquidationMargin,
@@ -411,22 +507,53 @@ const Portfolio = () => {
   });
 
   // Fetch wallet balance for a specific asset (same as MarketsTable)
-  const fetchWalletBalance = async (asset: string) => {
+  const fetchWalletBalance = async (
+    asset: string,
+    networkId?: string,
+    doFetch?: boolean
+  ) => {
     if (!activeAccount?.address) {
       return { balance: 0, balanceUSD: 0 };
     }
 
-    // Check if we already have this balance cached
-    if (walletBalances[asset]) {
-      return walletBalances[asset];
+    // Use provided network or fallback to current network
+    const networkToUse = networkId || currentNetwork;
+
+    if (!networkToUse) {
+      return { balance: 0, balanceUSD: 0 };
+    }
+
+    // Check if we already have this balance cached (with network-specific key)
+    const cacheKey = `${networkToUse}-${asset}`;
+    console.log("[Portfolio] fetchWalletBalance cache check:", {
+      asset,
+      networkId,
+      networkToUse,
+      cacheKey,
+      cached: !!walletBalances[cacheKey],
+    });
+    if (walletBalances[cacheKey] && !doFetch) {
+      console.log(
+        "[Portfolio] Using cached balance:",
+        walletBalances[cacheKey]
+      );
+      return walletBalances[cacheKey];
     }
 
     try {
-      const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+      console.log("[Portfolio] Fetching fresh balance for:", {
+        asset,
+        networkToUse,
+      });
+      const tokens = getAllTokensWithDisplayInfo(networkToUse as any);
       const token = tokens.find((t) => t.symbol === asset);
 
+      console.log("token", token);
+
       if (!token) {
-        console.error(`Token ${asset} not found in network config`);
+        console.error(
+          `Token ${asset} not found in network config for network: ${networkToUse}`
+        );
         return { balance: 0, balanceUSD: 0 };
       }
 
@@ -435,9 +562,10 @@ const Portfolio = () => {
       const originalSymbol =
         "originalSymbol" in token ? (token as any).originalSymbol : asset;
       const originalTokenConfigRaw = getTokenConfig(
-        currentNetwork,
+        networkToUse as any,
         originalSymbol
       );
+      console.log("originalTokenConfigRaw", { originalTokenConfigRaw, token });
       if (!originalTokenConfigRaw) {
         console.error(
           `Original token config not found for ${asset} (originalSymbol: ${originalSymbol})`
@@ -454,8 +582,23 @@ const Portfolio = () => {
           ) || originalTokenConfigRaw[0]
         : originalTokenConfigRaw;
 
-      // Initialize ARC200Service with current clients
-      const clients = await algorandService.getCurrentClientsForReads();
+      // Initialize ARC200Service with clients for the specific network
+      const algorandNetwork = getAlgorandNetworkFromNetworkId(
+        networkToUse as any
+      );
+      let clients;
+      if (algorandNetwork) {
+        // Use the specific network's clients
+        clients = await algorandService.initializeClientsForReads(
+          algorandNetwork
+        );
+      } else {
+        // Fallback to current network if conversion fails
+        console.warn(
+          `Could not convert networkId ${networkToUse} to AlgorandNetwork, using current network`
+        );
+        clients = await algorandService.getCurrentClientsForReads();
+      }
       ARC200Service.initialize(clients);
 
       let balance = 0;
@@ -492,7 +635,7 @@ const Portfolio = () => {
         // For network tokens (like VOI), fetch native balance
         console.log(`Fetching network token balance for ${asset}`);
         try {
-          const clients = await algorandService.getCurrentClientsForReads();
+          // Use the same clients we initialized earlier for this network
           const accountInfo = await clients.algod
             .accountInformation(activeAccount.address)
             .do();
@@ -515,7 +658,7 @@ const Portfolio = () => {
           `Fetching ASA balance for ${asset} (asset ID: ${token.underlyingAssetId})`
         );
         try {
-          const clients = await algorandService.getCurrentClientsForReads();
+          // Use the same clients we initialized earlier for this network
           const assetId = parseInt(token.underlyingAssetId);
           const accAssetInfo = await clients.algod
             .accountAssetInformation(activeAccount.address, assetId)
@@ -541,7 +684,7 @@ const Portfolio = () => {
           `Fetching ASA balance for ${asset} (asset ID: ${token.underlyingAssetId})`
         );
         try {
-          const clients = await algorandService.getCurrentClientsForReads();
+          // Use the same clients we initialized earlier for this network
           const assetId = parseInt(token.underlyingAssetId);
           const accAssetInfo = await clients.algod
             .accountAssetInformation(activeAccount.address, assetId)
@@ -569,10 +712,23 @@ const Portfolio = () => {
       }
 
       // Calculate USD value using market data
+      // Note: marketData might only contain current network's data
+      // For cross-network balances, we might need to fetch market data separately
       const market = marketData.find((m) => m.symbol === asset);
-      const tokenPrice = market?.price
-        ? formatPriceFromContract(market.price, token.decimals)
-        : 1;
+      let tokenPrice = 1;
+
+      if (market?.price) {
+        tokenPrice = formatPriceFromContract(market.price, token.decimals);
+      } else if (networkToUse !== currentNetwork) {
+        // If market not found and we're on a different network, try to get price from token config or use default
+        console.warn(
+          `Market data not found for ${asset} on ${networkToUse}, using default price`
+        );
+        tokenPrice = 1;
+      }
+
+      console.log({ market, tokenPrice, marketData, asset });
+
       const balanceUSD = balance * tokenPrice;
 
       const balanceData = {
@@ -582,10 +738,18 @@ const Portfolio = () => {
 
       setWalletBalances((prev) => ({
         ...prev,
-        [asset]: balanceData, // Store the full balance object with balance and balanceUSD
+        [cacheKey]: balanceData, // Store with network-specific key
+        [asset]: balanceData, // Also store with asset key for backward compatibility
       }));
 
-      console.log(`Final balance data for ${asset}:`, balanceData);
+      console.log(
+        `[Portfolio] Final balance data for ${asset} on ${networkToUse}:`,
+        {
+          balanceData,
+          cacheKey,
+          stored: true,
+        }
+      );
       return balanceData;
     } catch (error) {
       console.error("Error fetching wallet balance:", error);
@@ -595,7 +759,7 @@ const Portfolio = () => {
 
   // Refresh wallet balance for a specific asset
   const refreshWalletBalance = useCallback(
-    async (asset: string) => {
+    async (asset: string, networkId?: string) => {
       if (!activeAccount?.address) return;
 
       try {
@@ -606,8 +770,8 @@ const Portfolio = () => {
           return newBalances;
         });
 
-        // Fetch fresh balance
-        await fetchWalletBalance(asset);
+        // Fetch fresh balance using the provided network
+        await fetchWalletBalance(asset, networkId, true);
       } catch (error) {
         console.error("Error refreshing wallet balance:", error);
       }
@@ -639,15 +803,30 @@ const Portfolio = () => {
         marketData
       );
 
-      // Then fetch fresh user positions with market data
-      const freshPositions = await fetchUserPositions(
-        activeAccount.address,
-        currentNetwork,
-        marketData
-      );
+      // Fetch user positions from all enabled networks (not just currentNetwork)
+      // This ensures VOI items don't disappear when doing Algorand transactions
+      const enabledNetworks = getEnabledNetworks();
+      const allPositions = [];
+
+      for (const networkId of enabledNetworks) {
+        try {
+          const networkMarkets = await fetchAllMarkets(networkId);
+          const networkPositions = await fetchUserPositions(
+            activeAccount.address,
+            networkId,
+            networkMarkets
+          );
+          allPositions.push(...networkPositions);
+        } catch (error) {
+          console.error(
+            `Error fetching positions for network ${networkId}:`,
+            error
+          );
+        }
+      }
 
       setMarketData(marketData);
-      setUserPositions(freshPositions);
+      setUserPositions(allPositions);
       setUserGlobalData(freshGlobalData);
     } catch (error) {
       console.error("Error refreshing positions:", error);
@@ -656,6 +835,105 @@ const Portfolio = () => {
       setIsLoadingPositions(false);
     }
   };
+
+  const fetchUser = async (userAddress: string) => {
+    try {
+      // Try API endpoint first for faster loading
+      console.log(
+        `[Portfolio] Attempting to fetch user data from API for ${userAddress}`
+      );
+      const apiResponse = await dorkfiAPIService.getUser(userAddress);
+
+      console.log("[Portfolio] API response:", apiResponse);
+
+      if (apiResponse.success && apiResponse.data) {
+        const userData = apiResponse.data;
+        console.log("[Portfolio] User data fetched from API:", userData);
+        const networks = userData.networks;
+        console.log(
+          "[Portfolio] User data globalUserData:",
+          userData.globalUserData
+        );
+        const globalCollateralValue =
+          userData.globalUserData
+            .map((item: any) => BigInt(item.totalCollateralValue))
+            .reduce((acc: bigint, curr: bigint) => acc + curr, BigInt(0)) /
+          BigInt(1e12);
+        console.log(
+          "[Portfolio] Global collateral value:",
+          globalCollateralValue
+        );
+        const globalBorrowValue =
+          userData.globalUserData
+            .map((item: any) => BigInt(item.totalBorrowValue))
+            .reduce((acc: bigint, curr: bigint) => acc + curr, BigInt(0)) /
+          BigInt(1e12);
+        console.log("[Portfolio] Global borrow value:", globalBorrowValue);
+        const globalNetPortfolioValue =
+          globalCollateralValue - globalBorrowValue;
+        console.log(
+          "[Portfolio] Global net portfolio value:",
+          globalNetPortfolioValue
+        );
+
+        // Calculate collateral, borrow, and net value for each network
+        const networkValues: Record<
+          string,
+          {
+            collateral: number;
+            borrow: number;
+            netValue: number;
+          }
+        > = {};
+
+        if (userData.globalUserData && Array.isArray(userData.globalUserData)) {
+          userData.globalUserData.forEach((item: any) => {
+            const network = item.network || "unknown";
+            const collateralValue = Number(
+              BigInt(item.totalCollateralValue) / BigInt(1e12)
+            );
+            const borrowValue = Number(
+              BigInt(item.totalBorrowValue) / BigInt(1e12)
+            );
+            const netValue = collateralValue - borrowValue;
+
+            if (!networkValues[network]) {
+              networkValues[network] = {
+                collateral: 0,
+                borrow: 0,
+                netValue: 0,
+              };
+            }
+
+            networkValues[network].collateral += collateralValue;
+            networkValues[network].borrow += borrowValue;
+            networkValues[network].netValue += netValue;
+          });
+          setUser({
+            ...userData,
+            computed: {
+              globalCollateralValue: globalCollateralValue,
+              globalBorrowValue: globalBorrowValue,
+              globalNetPortfolioValue: globalNetPortfolioValue,
+              networkValues: networkValues,
+            },
+          });
+        }
+
+        console.log("[Portfolio] Network values:", networkValues);
+      } else {
+        console.error("Error fetching user data:", apiResponse);
+      }
+    } catch (error) {
+      console.error("Error fetching user global data:", error);
+    }
+  };
+
+  useEffect(() => {
+    if (activeAccount?.address) {
+      fetchUser(activeAccount.address);
+    }
+  }, [activeAccount?.address]);
 
   // Fetch user global data and market data when wallet connects
   useEffect(() => {
@@ -714,12 +992,14 @@ const Portfolio = () => {
               if (!token) {
                 console.warn(
                   `Token not found for marketId ${item.marketId}, appId ${item.appId}`,
-                  { availableTokens: tokens.map((t) => ({
-                    symbol: t.symbol,
-                    originalContractId: t.originalContractId,
-                    underlyingContractId: t.underlyingContractId,
-                    poolId: t.poolId
-                  })) }
+                  {
+                    availableTokens: tokens.map((t) => ({
+                      symbol: t.symbol,
+                      originalContractId: t.originalContractId,
+                      underlyingContractId: t.underlyingContractId,
+                      poolId: t.poolId,
+                    })),
+                  }
                 );
               }
 
@@ -734,19 +1014,33 @@ const Portfolio = () => {
           marketData
         );
 
-        // Then fetch user positions with market data
-        const positions = await fetchUserPositions(
-          activeAccount.address,
-          currentNetwork,
-          marketData
-        );
+        // Fetch user positions from all enabled networks
+        const enabledNetworks = getEnabledNetworks();
+        const allPositions = [];
+
+        for (const networkId of enabledNetworks) {
+          try {
+            const networkMarkets = await fetchAllMarkets(networkId);
+            const networkPositions = await fetchUserPositions(
+              activeAccount.address,
+              networkId,
+              networkMarkets
+            );
+            allPositions.push(...networkPositions);
+          } catch (error) {
+            console.error(
+              `Error fetching positions for network ${networkId}:`,
+              error
+            );
+          }
+        }
 
         console.log({
           markets,
           freshMarketData,
           marketData,
           globalData: globalData,
-          positions: positions,
+          positions: allPositions,
         });
 
         if (globalData) {
@@ -765,9 +1059,12 @@ const Portfolio = () => {
           setMarketData([]);
         }
 
-        if (positions) {
-          console.log("User positions fetched:", positions);
-          setUserPositions(positions);
+        if (allPositions && allPositions.length > 0) {
+          console.log(
+            "User positions fetched from all networks:",
+            allPositions
+          );
+          setUserPositions(allPositions);
         } else {
           console.log("No user positions found");
           setUserPositions([]);
@@ -787,63 +1084,107 @@ const Portfolio = () => {
     fetchData();
   }, [activeAccount?.address, currentNetwork]);
 
-  const handleDepositClick = async (asset: string, poolId?: string) => {
-    if (!activeAccount?.address || !currentNetwork) {
+  // Reset showAllSuppliedAssets when filters change
+  useEffect(() => {
+    setShowAllSuppliedAssets(false);
+  }, [suppliedAssetsSearchTerm, selectedNetworkFilter]);
+
+  // Reset showAllBorrowedAssets when filters change
+  useEffect(() => {
+    setShowAllBorrowedAssets(false);
+  }, [borrowedAssetsSearchTerm, selectedNetworkFilter]);
+
+  const handleDepositClick = async (
+    asset: string,
+    poolId?: string,
+    networkId?: string
+  ) => {
+    if (!activeAccount?.address) {
       return;
     }
+
+    console.log("[Portfolio] handleDepositClick called with:", {
+      asset,
+      poolId,
+      networkId,
+      currentNetwork,
+    });
 
     setIsLoadingWalletBalance(true);
 
     try {
-      // Fetch wallet balance before opening modal
-      await fetchWalletBalance(asset);
+      // Fetch wallet balance before opening modal using the deposit's network
+      console.log("[Portfolio] Fetching wallet balance for:", {
+        asset,
+        networkId,
+        currentNetwork,
+      });
+      const balanceResult = await fetchWalletBalance(asset, networkId, true);
+      console.log("[Portfolio] Wallet balance fetched:", {
+        asset,
+        networkId,
+        balance: balanceResult,
+      });
 
       // Open modal after balance is fetched
-      setDepositModal({ isOpen: true, asset, poolId });
+      setDepositModal({ isOpen: true, asset, poolId, network: networkId });
     } catch (error) {
       console.error("Error fetching wallet balance for deposit:", error);
       // Still open modal even if balance fetch fails
-      setDepositModal({ isOpen: true, asset, poolId });
+      setDepositModal({ isOpen: true, asset, poolId, network: networkId });
     } finally {
       setIsLoadingWalletBalance(false);
     }
   };
 
-  const handleWithdrawClick = (asset: string, poolId?: string) => {
-    setWithdrawModal({ isOpen: true, asset, poolId });
+  const handleWithdrawClick = (
+    asset: string,
+    poolId?: string,
+    networkId?: string
+  ) => {
+    setWithdrawModal({ isOpen: true, asset, poolId, network: networkId });
   };
 
-  const handleBorrowClick = async (asset: string) => {
+  const handleBorrowClick = async (
+    asset: string,
+    poolId?: string,
+    networkId?: string
+  ) => {
     setIsLoadingBorrowData(true);
 
     try {
+      // Use the asset's network if provided, otherwise fall back to currentNetwork
+      const networkToUse = (networkId || currentNetwork) as any;
+
       // Fetch user global data before opening modal (only if wallet is connected)
       if (activeAccount?.address) {
         // fetch markets from node api for accurate healthFactorIndex calculation
         // Fetch markets to pass for healthFactorIndex calculation
-        const markets = await fetchAllMarkets(currentNetwork);
+        const markets = await fetchAllMarkets(networkToUse);
         // const marketDataResponse =
-        //   await dorkfiAPIService.getAllMarketDataByNetwork(currentNetwork);
+        //   await dorkfiAPIService.getAllMarketDataByNetwork(networkToUse);
         // const markets = marketDataResponse.success
         //   ? marketDataResponse.data
         //   : [];
         const globalData = await fetchUserGlobalData(
           activeAccount.address,
-          currentNetwork,
+          networkToUse,
           markets
         );
         setUserGlobalData(globalData);
 
         // Fetch user's current borrow balance for this specific asset
-        const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-        const token = tokens.find((t) => t.symbol === asset);
+        const tokens = getAllTokensWithDisplayInfo(networkToUse);
+        const token = poolId
+          ? tokens.find((t) => t.symbol === asset && t.poolId === poolId)
+          : tokens.find((t) => t.symbol === asset);
 
         if (token && token.poolId && token.underlyingContractId) {
           const borrowData = await fetchUserBorrowBalance(
             activeAccount.address,
             token.poolId,
             token.underlyingContractId,
-            currentNetwork
+            networkToUse
           );
           const borrowBalance = borrowData?.balance || 0;
           setUserBorrowBalance(borrowBalance || 0);
@@ -857,32 +1198,41 @@ const Portfolio = () => {
       }
 
       // Open modal regardless of connection status
-      setBorrowModal({ isOpen: true, asset });
+      setBorrowModal({ isOpen: true, asset, poolId, network: networkToUse });
     } catch (error) {
       console.error("Error fetching user data for borrow:", error);
       // Still open modal even if data fetch fails
-      setBorrowModal({ isOpen: true, asset });
+      setBorrowModal({
+        isOpen: true,
+        asset,
+        poolId,
+        network: networkId || currentNetwork,
+      });
     } finally {
       setIsLoadingBorrowData(false);
     }
   };
 
-  const handleRepayClick = async (asset: string, poolId?: string) => {
+  const handleRepayClick = async (
+    asset: string,
+    poolId?: string,
+    networkId?: string
+  ) => {
     if (!activeAccount?.address) {
       console.error("No active account for repayment");
       return;
     }
 
     try {
-      // Fetch wallet balance for the asset before opening modal
-      await refreshWalletBalance(asset);
+      // Fetch wallet balance for the asset before opening modal using the asset's network
+      await refreshWalletBalance(asset, networkId);
 
       // Open modal after wallet balance is fetched
-      setRepayModal({ isOpen: true, asset, poolId });
+      setRepayModal({ isOpen: true, asset, poolId, network: networkId });
     } catch (error) {
       console.error("Error fetching wallet balance for repay:", error);
       // Still open modal even if wallet balance fetch fails
-      setRepayModal({ isOpen: true, asset, poolId });
+      setRepayModal({ isOpen: true, asset, poolId, network: networkId });
     }
   };
 
@@ -1059,14 +1409,34 @@ const Portfolio = () => {
           <div className="mt-4 flex items-center justify-center gap-2 text-xs text-muted-foreground">
             <div
               className={`w-2 h-2 rounded-full ${
-                userGlobalData ? "bg-green-500" : "bg-gray-500"
+                user?.computed || userGlobalData
+                  ? "bg-green-500"
+                  : "bg-gray-500"
               }`}
             ></div>
             <span>
-              {userGlobalData ? "Live Data" : "No Data"} •{" "}
-              {activeAccount?.address.slice(0, 8)}...
+              {user?.computed
+                ? "Global Portfolio Data"
+                : userGlobalData
+                ? "Live Data"
+                : "No Data"}{" "}
+              • {activeAccount?.address.slice(0, 8)}...
               {activeAccount?.address.slice(-8)}
             </span>
+            {user?.computed?.globalNetPortfolioValue !== undefined && (
+              <span className="ml-2">
+                • Net Value:{" "}
+                {Number(user.computed.globalNetPortfolioValue).toLocaleString(
+                  "en-US",
+                  {
+                    style: "currency",
+                    currency: "USD",
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  }
+                )}
+              </span>
+            )}
             {marketData.length > 0 && totalBorrowed > 0 && (
               <span className="ml-2">
                 • Collateral Factor: {(collateralFactor * 100).toFixed(0)}% •
@@ -1091,7 +1461,7 @@ const Portfolio = () => {
       </DorkFiCard>
 
       <EnhancedHealthFactor
-        healthFactor={healthFactor}
+        healthFactor={displayHealthFactor}
         totalCollateral={totalCollateral}
         totalBorrowed={totalBorrowed}
         liquidationMargin={liquidationMargin}
@@ -1101,6 +1471,1759 @@ const Portfolio = () => {
         onAddCollateral={handleAddCollateral}
         onBuyVoi={handleBuyVoi}
       />
+
+      {/* Network Portfolio Breakdown */}
+      {user?.computed?.networkValues &&
+        Object.keys(user.computed.networkValues).length > 0 && (
+          <DorkFiCard className="p-6 md:p-8">
+            <div className="mb-6">
+              <H1 className="text-2xl md:text-3xl mb-2">Network Portfolio</H1>
+              <Body className="text-sm text-muted-foreground">
+                View your portfolio breakdown by network. These values sum up to
+                your global portfolio.
+              </Body>
+            </div>
+
+            {/* Network Filter Tabs */}
+            <Tabs
+              value={selectedNetworkFilter}
+              onValueChange={setSelectedNetworkFilter}
+              className="w-full"
+            >
+              <TabsList className="grid w-full grid-cols-3 mb-6">
+                <TabsTrigger value="all" className="text-sm">
+                  All Networks
+                </TabsTrigger>
+                <TabsTrigger value="algorand" className="text-sm">
+                  Algorand
+                </TabsTrigger>
+                <TabsTrigger value="voi" className="text-sm">
+                  VOI
+                </TabsTrigger>
+              </TabsList>
+
+              {/* Visual Slice: Allocation + Risk */}
+              {(() => {
+                // Calculate allocation data
+                const allocationData = (() => {
+                  if (selectedNetworkFilter === "all") {
+                    // Show allocation by network
+                    return Object.entries(user.computed.networkValues)
+                      .map(([network, values]: [string, any]) => {
+                        const networkDisplayName = network
+                          .split("-")
+                          .map(
+                            (word) =>
+                              word.charAt(0).toUpperCase() + word.slice(1)
+                          )
+                          .join(" ");
+                        return {
+                          name: networkDisplayName,
+                          value: values.collateral || 0,
+                          network: network.toLowerCase(),
+                        };
+                      })
+                      .filter((item) => item.value > 0)
+                      .sort((a, b) => b.value - a.value);
+                  } else {
+                    // Show allocation by asset for selected network
+                    const filteredDeposits = deposits.filter((deposit) => {
+                      // This is a simplified filter - in a real scenario, you'd match by network
+                      return true; // For now, show all deposits
+                    });
+
+                    const assetMap = new Map<string, number>();
+                    filteredDeposits.forEach((deposit) => {
+                      const current = assetMap.get(deposit.asset) || 0;
+                      assetMap.set(deposit.asset, current + deposit.value);
+                    });
+
+                    return Array.from(assetMap.entries())
+                      .map(([asset, value]) => ({
+                        name: asset,
+                        value,
+                        asset,
+                      }))
+                      .filter((item) => item.value > 0)
+                      .sort((a, b) => b.value - a.value);
+                  }
+                })();
+
+                const totalAllocation = allocationData.reduce(
+                  (sum, item) => sum + item.value,
+                  0
+                );
+
+                // Calculate risk metrics
+                const topBorrowedAsset =
+                  borrows.length > 0
+                    ? borrows.reduce((top, current) =>
+                        current.value > (top?.value || 0) ? current : top
+                      )
+                    : null;
+
+                const topBorrowedPercentage =
+                  topBorrowedAsset && totalBorrowed > 0
+                    ? (topBorrowedAsset.value / totalBorrowed) * 100
+                    : 0;
+
+                // Find position closest to liquidation (lowest health factor)
+                const positionsWithHealth = deposits
+                  .map((deposit) => {
+                    // For each deposit, calculate a simplified health factor
+                    // This is a simplified calculation - in reality, you'd need network-specific data
+                    const depositHealthFactor = calculateHealthFactor(
+                      deposit.value,
+                      0
+                    );
+                    return {
+                      ...deposit,
+                      healthFactor: depositHealthFactor,
+                    };
+                  })
+                  .filter((pos) => pos.healthFactor !== null);
+
+                const closestToLiquidation =
+                  borrows.length > 0 &&
+                  healthFactor !== null &&
+                  healthFactor < 2.0
+                    ? {
+                        asset: "Portfolio",
+                        healthFactor: healthFactor,
+                      }
+                    : null;
+
+                // Chart colors
+                const COLORS = [
+                  "#0ea5e9", // sky-500
+                  "#8b5cf6", // violet-500
+                  "#10b981", // emerald-500
+                  "#f59e0b", // amber-500
+                  "#ef4444", // red-500
+                  "#06b6d4", // cyan-500
+                  "#a855f7", // purple-500
+                  "#14b8a6", // teal-500
+                ];
+
+                return (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                    {/* Left: Allocation Chart */}
+                    <DorkFiCard className="p-5">
+                      <h3 className="text-lg font-semibold mb-4">
+                        Collateral Allocation
+                      </h3>
+                      {totalAllocation > 0 && allocationData.length > 0 ? (
+                        <div className="flex flex-col items-center">
+                          <ResponsiveContainer width="100%" height={250}>
+                            <PieChart>
+                              <Pie
+                                data={allocationData}
+                                cx="50%"
+                                cy="50%"
+                                labelLine={false}
+                                label={({ name, percent }) =>
+                                  `${name}: ${(percent * 100).toFixed(0)}%`
+                                }
+                                outerRadius={80}
+                                fill="#8884d8"
+                                dataKey="value"
+                              >
+                                {allocationData.map((entry, index) => (
+                                  <Cell
+                                    key={`cell-${index}`}
+                                    fill={COLORS[index % COLORS.length]}
+                                  />
+                                ))}
+                              </Pie>
+                              <Tooltip
+                                formatter={(value: number) => [
+                                  `$${value.toLocaleString("en-US", {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  })}`,
+                                  "Collateral",
+                                ]}
+                              />
+                            </PieChart>
+                          </ResponsiveContainer>
+                          <div className="mt-4 w-full space-y-2">
+                            {allocationData.slice(0, 5).map((item, index) => (
+                              <div
+                                key={index}
+                                className="flex items-center justify-between text-sm"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <div
+                                    className="w-3 h-3 rounded-full"
+                                    style={{
+                                      backgroundColor:
+                                        COLORS[index % COLORS.length],
+                                    }}
+                                  />
+                                  <span className="text-muted-foreground">
+                                    {item.name}
+                                  </span>
+                                </div>
+                                <span className="font-semibold">
+                                  {(
+                                    (item.value / totalAllocation) *
+                                    100
+                                  ).toFixed(1)}
+                                  %
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center h-64 text-muted-foreground">
+                          <p>No collateral data available</p>
+                        </div>
+                      )}
+                    </DorkFiCard>
+
+                    {/* Right: Risk Cards */}
+                    <div className="space-y-4">
+                      <h3 className="text-lg font-semibold mb-4">
+                        Risk Overview
+                      </h3>
+
+                      {/* Top Borrowed Asset Card */}
+                      {topBorrowedAsset && topBorrowedPercentage > 0 && (
+                        <DorkFiCard className="p-4 border-l-4 border-amber-500">
+                          <div className="flex items-start gap-3">
+                            <TrendingDown className="w-5 h-5 text-amber-500 mt-0.5" />
+                            <div className="flex-1">
+                              <div className="text-sm font-semibold text-amber-600 dark:text-amber-400 mb-1">
+                                Top Borrowed Asset
+                              </div>
+                              <div className="text-base font-bold">
+                                {topBorrowedAsset.asset}
+                              </div>
+                              <div className="text-sm text-muted-foreground mt-1">
+                                {topBorrowedPercentage.toFixed(1)}% of total
+                                borrows
+                              </div>
+                              <div className="text-xs text-muted-foreground mt-1">
+                                $
+                                {topBorrowedAsset.value.toLocaleString(
+                                  "en-US",
+                                  {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  }
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </DorkFiCard>
+                      )}
+
+                      {/* Closest to Liquidation Card */}
+                      {closestToLiquidation && (
+                        <DorkFiCard className="p-4 border-l-4 border-red-500">
+                          <div className="flex items-start gap-3">
+                            <AlertCircle className="w-5 h-5 text-red-500 mt-0.5" />
+                            <div className="flex-1">
+                              <div className="text-sm font-semibold text-red-600 dark:text-red-400 mb-1">
+                                Closest to Liquidation
+                              </div>
+                              <div className="text-base font-bold">
+                                {closestToLiquidation.asset}
+                              </div>
+                              <div className="text-sm text-muted-foreground mt-1">
+                                Health Factor:{" "}
+                                <span
+                                  className={`font-semibold ${
+                                    closestToLiquidation.healthFactor >= 1.5
+                                      ? "text-green-600 dark:text-green-400"
+                                      : closestToLiquidation.healthFactor >= 1.0
+                                      ? "text-yellow-600 dark:text-yellow-400"
+                                      : "text-red-600 dark:text-red-400"
+                                  }`}
+                                >
+                                  {closestToLiquidation.healthFactor.toFixed(2)}
+                                </span>
+                              </div>
+                              {closestToLiquidation.healthFactor < 1.5 && (
+                                <div className="text-xs text-red-500 mt-1">
+                                  Consider adding collateral or repaying debt
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </DorkFiCard>
+                      )}
+
+                      {/* Risk Score Card */}
+                      {healthFactor !== null && (
+                        <DorkFiCard className="p-4 border-l-4 border-ocean-teal">
+                          <div className="flex items-start gap-3">
+                            <AlertTriangle className="w-5 h-5 text-ocean-teal mt-0.5" />
+                            <div className="flex-1">
+                              <div className="text-sm font-semibold text-ocean-teal mb-1">
+                                Portfolio Risk Score
+                              </div>
+                              <div className="flex items-center gap-3 mt-2">
+                                <div className="flex-1">
+                                  <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
+                                    <div
+                                      className={`h-2.5 rounded-full transition-all ${
+                                        healthFactor >= 2.0
+                                          ? "bg-green-500"
+                                          : healthFactor >= 1.5
+                                          ? "bg-yellow-500"
+                                          : healthFactor >= 1.0
+                                          ? "bg-orange-500"
+                                          : "bg-red-500"
+                                      }`}
+                                      style={{
+                                        width: `${Math.min(
+                                          ((displayHealthFactor || 0) / 3.0) *
+                                            100,
+                                          100
+                                        )}%`,
+                                      }}
+                                    />
+                                  </div>
+                                </div>
+                                <div className="text-sm font-semibold">
+                                  {displayHealthFactor !== null
+                                    ? displayHealthFactor.toFixed(2)
+                                    : "N/A"}
+                                </div>
+                              </div>
+                              <div className="text-xs text-muted-foreground mt-2">
+                                {healthFactor >= 2.0
+                                  ? "Low Risk"
+                                  : healthFactor >= 1.5
+                                  ? "Moderate Risk"
+                                  : healthFactor >= 1.0
+                                  ? "High Risk"
+                                  : "Critical Risk"}
+                              </div>
+                            </div>
+                          </div>
+                        </DorkFiCard>
+                      )}
+
+                      {/* Empty state if no risk data */}
+                      {!topBorrowedAsset &&
+                        !closestToLiquidation &&
+                        healthFactor === null && (
+                          <DorkFiCard className="p-4">
+                            <div className="text-center text-muted-foreground">
+                              <p className="text-sm">No risk data available</p>
+                            </div>
+                          </DorkFiCard>
+                        )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Network Portfolio Cards */}
+              {(() => {
+                const filteredNetworks = Object.entries(
+                  user.computed.networkValues
+                ).filter(([network, values]: [string, any]) => {
+                  // Filter by network type
+                  if (selectedNetworkFilter !== "all") {
+                    const normalizedNetwork = network.toLowerCase();
+                    if (selectedNetworkFilter === "algorand") {
+                      if (!normalizedNetwork.includes("algorand")) return false;
+                    } else if (selectedNetworkFilter === "voi") {
+                      if (!normalizedNetwork.includes("voi")) return false;
+                    }
+                  }
+
+                  // Only show networks with activity
+                  const networkCollateral = values.collateral || 0;
+                  const networkBorrow = values.borrow || 0;
+                  return networkCollateral > 0 || networkBorrow > 0;
+                });
+
+                if (filteredNetworks.length === 0) {
+                  return (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <p>No networks found for the selected filter.</p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {filteredNetworks.map(
+                      ([network, values]: [string, any]) => {
+                        const networkDisplayName = network
+                          .split("-")
+                          .map(
+                            (word) =>
+                              word.charAt(0).toUpperCase() + word.slice(1)
+                          )
+                          .join(" ");
+
+                        const networkCollateral = values.collateral || 0;
+                        const networkBorrow = values.borrow || 0;
+                        const networkNetValue = values.netValue || 0;
+                        const networkHealthFactorRaw = calculateHealthFactor(
+                          networkCollateral,
+                          networkBorrow
+                        );
+                        const networkHealthFactor = saturateHealthFactor(
+                          networkHealthFactorRaw
+                        );
+
+                        return (
+                          <DorkFiCard
+                            key={network}
+                            className="p-5 border-2 hover:border-ocean-teal/50 transition-all"
+                          >
+                            <div className="space-y-4">
+                              <div>
+                                <h3 className="text-lg font-semibold mb-1">
+                                  {networkDisplayName} Portfolio
+                                </h3>
+                              </div>
+
+                              <div className="space-y-3">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-sm text-muted-foreground">
+                                    Collateral:
+                                  </span>
+                                  <span className="text-sm font-semibold">
+                                    {networkCollateral.toLocaleString("en-US", {
+                                      style: "currency",
+                                      currency: "USD",
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    })}
+                                  </span>
+                                </div>
+
+                                <div className="flex justify-between items-center">
+                                  <span className="text-sm text-muted-foreground">
+                                    Borrowed:
+                                  </span>
+                                  <span className="text-sm font-semibold">
+                                    {networkBorrow.toLocaleString("en-US", {
+                                      style: "currency",
+                                      currency: "USD",
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    })}
+                                  </span>
+                                </div>
+
+                                <div className="flex justify-between items-center">
+                                  <span className="text-sm text-muted-foreground">
+                                    Net Value:
+                                  </span>
+                                  <span
+                                    className={`text-sm font-semibold ${
+                                      networkNetValue >= 0
+                                        ? "text-green-600 dark:text-green-400"
+                                        : "text-red-600 dark:text-red-400"
+                                    }`}
+                                  >
+                                    {networkNetValue.toLocaleString("en-US", {
+                                      style: "currency",
+                                      currency: "USD",
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    })}
+                                  </span>
+                                </div>
+
+                                <div className="pt-2 border-t border-border">
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-sm text-muted-foreground">
+                                      Health Factor:
+                                    </span>
+                                    <span
+                                      className={`text-sm font-semibold ${
+                                        networkHealthFactor === null
+                                          ? "text-muted-foreground"
+                                          : networkHealthFactor >= 1.5
+                                          ? "text-green-600 dark:text-green-400"
+                                          : networkHealthFactor >= 1.0
+                                          ? "text-yellow-600 dark:text-yellow-400"
+                                          : "text-red-600 dark:text-red-400"
+                                      }`}
+                                    >
+                                      {networkHealthFactor === null
+                                        ? "N/A"
+                                        : networkHealthFactor.toFixed(2)}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </DorkFiCard>
+                        );
+                      }
+                    )}
+                  </div>
+                );
+              })()}
+            </Tabs>
+          </DorkFiCard>
+        )}
+
+      {/* Per-Network Asset Tables */}
+      {user?.computed?.networkValues &&
+        Object.keys(user.computed.networkValues).length > 0 && (
+          <TooltipProvider>
+            <div className="space-y-6">
+              {/* Supplied Assets Table */}
+              {deposits.length > 0 && (
+                <DorkFiCard className="p-6 md:p-8">
+                  <div ref={suppliedAssetsTableRef} className="mb-4">
+                    <H1 className="text-xl md:text-2xl mb-2">
+                      Supplied Assets
+                      {selectedNetworkFilter !== "all" && (
+                        <span className="text-lg text-muted-foreground ml-2">
+                          (
+                          {selectedNetworkFilter.charAt(0).toUpperCase() +
+                            selectedNetworkFilter.slice(1)}
+                          )
+                        </span>
+                      )}
+                    </H1>
+                  </div>
+                  <div className="mb-4">
+                    <div className="relative max-w-md">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
+                      <Input
+                        placeholder="Search assets..."
+                        value={suppliedAssetsSearchTerm}
+                        onChange={(e) =>
+                          setSuppliedAssetsSearchTerm(e.target.value)
+                        }
+                        className="pl-10"
+                      />
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>
+                            <button
+                              onClick={() => {
+                                if (suppliedAssetsSort.column === "asset") {
+                                  setSuppliedAssetsSort({
+                                    column: "asset",
+                                    direction:
+                                      suppliedAssetsSort.direction === "asc"
+                                        ? "desc"
+                                        : "asc",
+                                  });
+                                } else {
+                                  setSuppliedAssetsSort({
+                                    column: "asset",
+                                    direction: "asc",
+                                  });
+                                }
+                              }}
+                              className="flex items-center gap-1 hover:text-foreground transition-colors"
+                            >
+                              Asset
+                              {suppliedAssetsSort.column === "asset" ? (
+                                suppliedAssetsSort.direction === "asc" ? (
+                                  <ArrowUp className="w-3 h-3" />
+                                ) : (
+                                  <ArrowDown className="w-3 h-3" />
+                                )
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-50" />
+                              )}
+                            </button>
+                          </TableHead>
+                          {selectedNetworkFilter === "all" && (
+                            <TableHead>
+                              <button
+                                onClick={() => {
+                                  if (suppliedAssetsSort.column === "network") {
+                                    setSuppliedAssetsSort({
+                                      column: "network",
+                                      direction:
+                                        suppliedAssetsSort.direction === "asc"
+                                          ? "desc"
+                                          : "asc",
+                                    });
+                                  } else {
+                                    setSuppliedAssetsSort({
+                                      column: "network",
+                                      direction: "asc",
+                                    });
+                                  }
+                                }}
+                                className="flex items-center gap-1 hover:text-foreground transition-colors"
+                              >
+                                Network
+                                {suppliedAssetsSort.column === "network" ? (
+                                  suppliedAssetsSort.direction === "asc" ? (
+                                    <ArrowUp className="w-3 h-3" />
+                                  ) : (
+                                    <ArrowDown className="w-3 h-3" />
+                                  )
+                                ) : (
+                                  <ArrowUpDown className="w-3 h-3 opacity-50" />
+                                )}
+                              </button>
+                            </TableHead>
+                          )}
+                          <TableHead>
+                            <button
+                              onClick={() => {
+                                if (suppliedAssetsSort.column === "supplied") {
+                                  setSuppliedAssetsSort({
+                                    column: "supplied",
+                                    direction:
+                                      suppliedAssetsSort.direction === "asc"
+                                        ? "desc"
+                                        : "asc",
+                                  });
+                                } else {
+                                  setSuppliedAssetsSort({
+                                    column: "supplied",
+                                    direction: "desc",
+                                  });
+                                }
+                              }}
+                              className="flex items-center gap-1 hover:text-foreground transition-colors"
+                            >
+                              Supplied
+                              {suppliedAssetsSort.column === "supplied" ? (
+                                suppliedAssetsSort.direction === "asc" ? (
+                                  <ArrowUp className="w-3 h-3" />
+                                ) : (
+                                  <ArrowDown className="w-3 h-3" />
+                                )
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-50" />
+                              )}
+                            </button>
+                          </TableHead>
+                          <TableHead>
+                            <button
+                              onClick={() => {
+                                if (suppliedAssetsSort.column === "value") {
+                                  setSuppliedAssetsSort({
+                                    column: "value",
+                                    direction:
+                                      suppliedAssetsSort.direction === "asc"
+                                        ? "desc"
+                                        : "asc",
+                                  });
+                                } else {
+                                  setSuppliedAssetsSort({
+                                    column: "value",
+                                    direction: "desc",
+                                  });
+                                }
+                              }}
+                              className="flex items-center gap-1 hover:text-foreground transition-colors"
+                            >
+                              Value (USD)
+                              {suppliedAssetsSort.column === "value" ? (
+                                suppliedAssetsSort.direction === "asc" ? (
+                                  <ArrowUp className="w-3 h-3" />
+                                ) : (
+                                  <ArrowDown className="w-3 h-3" />
+                                )
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-50" />
+                              )}
+                            </button>
+                          </TableHead>
+                          <TableHead>
+                            <button
+                              onClick={() => {
+                                if (suppliedAssetsSort.column === "apy") {
+                                  setSuppliedAssetsSort({
+                                    column: "apy",
+                                    direction:
+                                      suppliedAssetsSort.direction === "asc"
+                                        ? "desc"
+                                        : "asc",
+                                  });
+                                } else {
+                                  setSuppliedAssetsSort({
+                                    column: "apy",
+                                    direction: "desc",
+                                  });
+                                }
+                              }}
+                              className="flex items-center gap-1 hover:text-foreground transition-colors"
+                            >
+                              APY
+                              {suppliedAssetsSort.column === "apy" ? (
+                                suppliedAssetsSort.direction === "asc" ? (
+                                  <ArrowUp className="w-3 h-3" />
+                                ) : (
+                                  <ArrowDown className="w-3 h-3" />
+                                )
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-50" />
+                              )}
+                            </button>
+                          </TableHead>
+                          <TableHead>
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => {
+                                  if (
+                                    suppliedAssetsSort.column ===
+                                    "borrowingPower"
+                                  ) {
+                                    setSuppliedAssetsSort({
+                                      column: "borrowingPower",
+                                      direction:
+                                        suppliedAssetsSort.direction === "asc"
+                                          ? "desc"
+                                          : "asc",
+                                    });
+                                  } else {
+                                    setSuppliedAssetsSort({
+                                      column: "borrowingPower",
+                                      direction: "desc",
+                                    });
+                                  }
+                                }}
+                                className="flex items-center gap-1 hover:text-foreground transition-colors"
+                              >
+                                Borrow Power
+                                {suppliedAssetsSort.column ===
+                                "borrowingPower" ? (
+                                  suppliedAssetsSort.direction === "asc" ? (
+                                    <ArrowUp className="w-3 h-3" />
+                                  ) : (
+                                    <ArrowDown className="w-3 h-3" />
+                                  )
+                                ) : (
+                                  <ArrowUpDown className="w-3 h-3 opacity-50" />
+                                )}
+                              </button>
+                              <UITooltip>
+                                <TooltipTrigger asChild>
+                                  <Info className="w-4 h-4 text-muted-foreground cursor-help" />
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p>
+                                    Maximum amount you can borrow against this
+                                    collateral (80% of collateral value)
+                                  </p>
+                                </TooltipContent>
+                              </UITooltip>
+                            </div>
+                          </TableHead>
+                          <TableHead>Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {(() => {
+                          const filteredAndSorted = deposits
+                            .filter((deposit) => {
+                              // Filter by search term
+                              if (suppliedAssetsSearchTerm) {
+                                const searchLower =
+                                  suppliedAssetsSearchTerm.toLowerCase();
+                                const assetMatch = deposit.asset
+                                  .toLowerCase()
+                                  .includes(searchLower);
+                                if (!assetMatch) {
+                                  return false;
+                                }
+                              }
+
+                              // Filter by network
+                              if (selectedNetworkFilter === "all") {
+                                return true; // Show all deposits
+                              }
+
+                              // Get network from deposit (if available) or infer from networkValues
+                              const depositNetwork = (deposit as any).network;
+                              if (depositNetwork) {
+                                const normalizedNetwork =
+                                  depositNetwork.toLowerCase();
+                                if (selectedNetworkFilter === "algorand") {
+                                  return normalizedNetwork.includes("algorand");
+                                } else if (selectedNetworkFilter === "voi") {
+                                  return normalizedNetwork.includes("voi");
+                                }
+                              }
+
+                              // Fallback: try to match by network values
+                              const matchingNetwork = Object.entries(
+                                user.computed.networkValues
+                              ).find(([network, values]: [string, any]) => {
+                                const normalizedNetwork = network.toLowerCase();
+                                if (selectedNetworkFilter === "algorand") {
+                                  return normalizedNetwork.includes("algorand");
+                                } else if (selectedNetworkFilter === "voi") {
+                                  return normalizedNetwork.includes("voi");
+                                }
+                                return false;
+                              });
+
+                              // If we can't determine, show it (better to show than hide)
+                              return true;
+                            })
+                            .sort((a, b) => {
+                              let comparison = 0;
+
+                              switch (suppliedAssetsSort.column) {
+                                case "network":
+                                  const networkA = (
+                                    (a as any).network || "Unknown"
+                                  ).toLowerCase();
+                                  const networkB = (
+                                    (b as any).network || "Unknown"
+                                  ).toLowerCase();
+                                  comparison = networkA.localeCompare(networkB);
+                                  break;
+                                case "asset":
+                                  comparison = a.asset.localeCompare(b.asset);
+                                  break;
+                                case "supplied":
+                                  comparison = a.balance - b.balance;
+                                  break;
+                                case "value":
+                                  comparison = a.value - b.value;
+                                  break;
+                                case "apy":
+                                  comparison = a.apy - b.apy;
+                                  break;
+                                case "borrowingPower":
+                                default:
+                                  // Default sort by borrowing power
+                                  const borrowingPowerA =
+                                    a.value * collateralFactor;
+                                  const borrowingPowerB =
+                                    b.value * collateralFactor;
+                                  comparison =
+                                    borrowingPowerB - borrowingPowerA;
+                                  break;
+                              }
+
+                              return suppliedAssetsSort.direction === "asc"
+                                ? comparison
+                                : -comparison;
+                            });
+
+                          const displayDeposits = showAllSuppliedAssets
+                            ? filteredAndSorted
+                            : filteredAndSorted.slice(0, 5);
+                          const hasMore = filteredAndSorted.length > 5;
+
+                          return displayDeposits.map((deposit, index) => {
+                            const market = marketData.find(
+                              (m) => m.symbol === deposit.asset
+                            );
+                            const isCollateral = deposit.value > 0; // Simplified - in reality, check if it's enabled as collateral
+
+                            // Get network name from deposit or infer
+                            let networkName = "Unknown";
+                            const depositNetwork = (deposit as any).network;
+                            if (depositNetwork) {
+                              // Format network name: "algorand-mainnet" -> "Algorand", "voi-mainnet" -> "VOI"
+                              const normalized = depositNetwork.toLowerCase();
+                              if (normalized.includes("algorand")) {
+                                networkName = "Algorand";
+                              } else if (normalized.includes("voi")) {
+                                networkName = "VOI";
+                              } else {
+                                // Fallback to formatted name
+                                networkName = depositNetwork
+                                  .split("-")
+                                  .map(
+                                    (word) =>
+                                      word.charAt(0).toUpperCase() +
+                                      word.slice(1)
+                                  )
+                                  .join(" ");
+                              }
+                            } else if (selectedNetworkFilter === "all") {
+                              // Fallback: try to infer from networkValues
+                              const matchingNetwork = Object.entries(
+                                user.computed.networkValues
+                              ).find(([network, values]: [string, any]) => {
+                                // Simple heuristic: if deposit value is close to network collateral, it might belong there
+                                return (
+                                  Math.abs(values.collateral - deposit.value) <
+                                  values.collateral * 0.1
+                                );
+                              });
+                              if (matchingNetwork) {
+                                const network = matchingNetwork[0];
+                                const normalized = network.toLowerCase();
+                                if (normalized.includes("algorand")) {
+                                  networkName = "Algorand";
+                                } else if (normalized.includes("voi")) {
+                                  networkName = "VOI";
+                                } else {
+                                  // Fallback to formatted name
+                                  networkName = network
+                                    .split("-")
+                                    .map(
+                                      (word) =>
+                                        word.charAt(0).toUpperCase() +
+                                        word.slice(1)
+                                    )
+                                    .join(" ");
+                                }
+                              }
+                            }
+
+                            return (
+                              <TableRow
+                                key={index}
+                                className="cursor-pointer hover:bg-muted/50 transition-colors"
+                                onClick={() =>
+                                  handleDepositClick(
+                                    deposit.asset,
+                                    deposit.poolId,
+                                    (deposit as any).network
+                                  )
+                                }
+                              >
+                                <TableCell>
+                                  <div className="flex items-center gap-2">
+                                    <img
+                                      src={deposit.icon}
+                                      alt={deposit.asset}
+                                      className="w-6 h-6 rounded-full"
+                                    />
+                                    <span className="font-medium">
+                                      {deposit.asset}
+                                    </span>
+                                  </div>
+                                </TableCell>
+                                {selectedNetworkFilter === "all" && (
+                                  <TableCell className="font-medium">
+                                    {networkName}
+                                  </TableCell>
+                                )}
+                                <TableCell>
+                                  {deposit.balance.toLocaleString("en-US", {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 6,
+                                  })}
+                                </TableCell>
+                                <TableCell>
+                                  {deposit.value.toLocaleString("en-US", {
+                                    style: "currency",
+                                    currency: "USD",
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  })}
+                                </TableCell>
+                                <TableCell>
+                                  <span className="text-green-600 dark:text-green-400">
+                                    {deposit.apy.toFixed(2)}%
+                                  </span>
+                                </TableCell>
+                                <TableCell>
+                                  {isCollateral ? (
+                                    <span className="font-semibold">
+                                      {(
+                                        deposit.value * collateralFactor
+                                      ).toLocaleString("en-US", {
+                                        style: "currency",
+                                        currency: "USD",
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 2,
+                                      })}
+                                    </span>
+                                  ) : (
+                                    <span className="text-muted-foreground">
+                                      —
+                                    </span>
+                                  )}
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex items-center gap-2">
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDepositClick(
+                                          deposit.asset,
+                                          deposit.poolId,
+                                          (deposit as any).network
+                                        );
+                                      }}
+                                      title="Deposit"
+                                    >
+                                      +
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleWithdrawClick(
+                                          deposit.asset,
+                                          deposit.poolId,
+                                          (deposit as any).network
+                                        );
+                                      }}
+                                      title="Withdraw"
+                                    >
+                                      −
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          });
+                        })()}
+                        {deposits.length === 0 && (
+                          <TableRow>
+                            <TableCell
+                              colSpan={selectedNetworkFilter === "all" ? 7 : 6}
+                              className="text-center text-muted-foreground py-8"
+                            >
+                              No supplied assets
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  {(() => {
+                    const filteredAndSorted = deposits
+                      .filter((deposit) => {
+                        // Filter by search term
+                        if (suppliedAssetsSearchTerm) {
+                          const searchLower =
+                            suppliedAssetsSearchTerm.toLowerCase();
+                          const assetMatch = deposit.asset
+                            .toLowerCase()
+                            .includes(searchLower);
+                          if (!assetMatch) {
+                            return false;
+                          }
+                        }
+
+                        // Filter by network
+                        if (selectedNetworkFilter === "all") {
+                          return true;
+                        }
+
+                        const depositNetwork = (deposit as any).network;
+                        if (depositNetwork) {
+                          const normalizedNetwork =
+                            depositNetwork.toLowerCase();
+                          if (selectedNetworkFilter === "algorand") {
+                            return normalizedNetwork.includes("algorand");
+                          } else if (selectedNetworkFilter === "voi") {
+                            return normalizedNetwork.includes("voi");
+                          }
+                        }
+
+                        const matchingNetwork = Object.entries(
+                          user?.computed?.networkValues || {}
+                        ).find(([network, values]: [string, any]) => {
+                          const normalizedNetwork = network.toLowerCase();
+                          if (selectedNetworkFilter === "algorand") {
+                            return normalizedNetwork.includes("algorand");
+                          } else if (selectedNetworkFilter === "voi") {
+                            return normalizedNetwork.includes("voi");
+                          }
+                          return false;
+                        });
+
+                        return true;
+                      })
+                      .sort((a, b) => {
+                        let comparison = 0;
+
+                        switch (suppliedAssetsSort.column) {
+                          case "network":
+                            const networkA = (
+                              (a as any).network || "Unknown"
+                            ).toLowerCase();
+                            const networkB = (
+                              (b as any).network || "Unknown"
+                            ).toLowerCase();
+                            comparison = networkA.localeCompare(networkB);
+                            break;
+                          case "asset":
+                            comparison = a.asset.localeCompare(b.asset);
+                            break;
+                          case "supplied":
+                            comparison = a.balance - b.balance;
+                            break;
+                          case "value":
+                            comparison = a.value - b.value;
+                            break;
+                          case "apy":
+                            comparison = a.apy - b.apy;
+                            break;
+                          case "borrowingPower":
+                          default:
+                            const borrowingPowerA = a.value * collateralFactor;
+                            const borrowingPowerB = b.value * collateralFactor;
+                            comparison = borrowingPowerB - borrowingPowerA;
+                            break;
+                        }
+
+                        return suppliedAssetsSort.direction === "asc"
+                          ? comparison
+                          : -comparison;
+                      });
+
+                    const hasMore = filteredAndSorted.length > 5;
+
+                    return hasMore ? (
+                      <div className="mt-4 text-center">
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            const wasExpanded = showAllSuppliedAssets;
+                            setShowAllSuppliedAssets(!showAllSuppliedAssets);
+                            // Scroll to top when collapsing
+                            if (wasExpanded && suppliedAssetsTableRef.current) {
+                              setTimeout(() => {
+                                suppliedAssetsTableRef.current?.scrollIntoView({
+                                  behavior: "smooth",
+                                  block: "start",
+                                });
+                              }, 0);
+                            }
+                          }}
+                          className="w-full"
+                        >
+                          {showAllSuppliedAssets ? "Show Less" : "Show More"}
+                        </Button>
+                      </div>
+                    ) : null;
+                  })()}
+                </DorkFiCard>
+              )}
+
+              {/* Borrowed Assets Table */}
+              {borrows.length > 0 && (
+                <DorkFiCard className="p-6 md:p-8">
+                  <div ref={borrowedAssetsTableRef} className="mb-4">
+                    <H1 className="text-xl md:text-2xl mb-2">
+                      Borrowed Assets
+                      {selectedNetworkFilter !== "all" && (
+                        <span className="text-lg text-muted-foreground ml-2">
+                          (
+                          {selectedNetworkFilter.charAt(0).toUpperCase() +
+                            selectedNetworkFilter.slice(1)}
+                          )
+                        </span>
+                      )}
+                    </H1>
+                  </div>
+                  <div className="mb-4">
+                    <div className="relative max-w-md">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
+                      <Input
+                        placeholder="Search assets..."
+                        value={borrowedAssetsSearchTerm}
+                        onChange={(e) =>
+                          setBorrowedAssetsSearchTerm(e.target.value)
+                        }
+                        className="pl-10"
+                      />
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          {selectedNetworkFilter === "all" && (
+                            <TableHead>Network</TableHead>
+                          )}
+                          <TableHead>
+                            <button
+                              onClick={() => {
+                                if (borrowedAssetsSort.column === "asset") {
+                                  setBorrowedAssetsSort({
+                                    column: "asset",
+                                    direction:
+                                      borrowedAssetsSort.direction === "asc"
+                                        ? "desc"
+                                        : "asc",
+                                  });
+                                } else {
+                                  setBorrowedAssetsSort({
+                                    column: "asset",
+                                    direction: "asc",
+                                  });
+                                }
+                              }}
+                              className="flex items-center gap-1 hover:text-foreground transition-colors"
+                            >
+                              Asset
+                              {borrowedAssetsSort.column === "asset" ? (
+                                borrowedAssetsSort.direction === "asc" ? (
+                                  <ArrowUp className="w-3 h-3" />
+                                ) : (
+                                  <ArrowDown className="w-3 h-3" />
+                                )
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-50" />
+                              )}
+                            </button>
+                          </TableHead>
+                          <TableHead>
+                            <button
+                              onClick={() => {
+                                if (borrowedAssetsSort.column === "borrowed") {
+                                  setBorrowedAssetsSort({
+                                    column: "borrowed",
+                                    direction:
+                                      borrowedAssetsSort.direction === "asc"
+                                        ? "desc"
+                                        : "asc",
+                                  });
+                                } else {
+                                  setBorrowedAssetsSort({
+                                    column: "borrowed",
+                                    direction: "desc",
+                                  });
+                                }
+                              }}
+                              className="flex items-center gap-1 hover:text-foreground transition-colors"
+                            >
+                              Borrowed
+                              {borrowedAssetsSort.column === "borrowed" ? (
+                                borrowedAssetsSort.direction === "asc" ? (
+                                  <ArrowUp className="w-3 h-3" />
+                                ) : (
+                                  <ArrowDown className="w-3 h-3" />
+                                )
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-50" />
+                              )}
+                            </button>
+                          </TableHead>
+                          <TableHead>
+                            <button
+                              onClick={() => {
+                                if (borrowedAssetsSort.column === "value") {
+                                  setBorrowedAssetsSort({
+                                    column: "value",
+                                    direction:
+                                      borrowedAssetsSort.direction === "asc"
+                                        ? "desc"
+                                        : "asc",
+                                  });
+                                } else {
+                                  setBorrowedAssetsSort({
+                                    column: "value",
+                                    direction: "desc",
+                                  });
+                                }
+                              }}
+                              className="flex items-center gap-1 hover:text-foreground transition-colors"
+                            >
+                              Value (USD)
+                              {borrowedAssetsSort.column === "value" ? (
+                                borrowedAssetsSort.direction === "asc" ? (
+                                  <ArrowUp className="w-3 h-3" />
+                                ) : (
+                                  <ArrowDown className="w-3 h-3" />
+                                )
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-50" />
+                              )}
+                            </button>
+                          </TableHead>
+                          <TableHead>
+                            <button
+                              onClick={() => {
+                                if (borrowedAssetsSort.column === "apy") {
+                                  setBorrowedAssetsSort({
+                                    column: "apy",
+                                    direction:
+                                      borrowedAssetsSort.direction === "asc"
+                                        ? "desc"
+                                        : "asc",
+                                  });
+                                } else {
+                                  setBorrowedAssetsSort({
+                                    column: "apy",
+                                    direction: "asc",
+                                  });
+                                }
+                              }}
+                              className="flex items-center gap-1 hover:text-foreground transition-colors"
+                            >
+                              APY
+                              {borrowedAssetsSort.column === "apy" ? (
+                                borrowedAssetsSort.direction === "asc" ? (
+                                  <ArrowUp className="w-3 h-3" />
+                                ) : (
+                                  <ArrowDown className="w-3 h-3" />
+                                )
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-50" />
+                              )}
+                            </button>
+                          </TableHead>
+                          <TableHead>
+                            <div className="flex items-center gap-1">
+                              LTV Usage
+                              <UITooltip>
+                                <TooltipTrigger asChild>
+                                  <Info className="w-4 h-4 text-muted-foreground cursor-help" />
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p>
+                                    Loan-to-Value ratio: Borrowed value /
+                                    Collateral value
+                                  </p>
+                                </TooltipContent>
+                              </UITooltip>
+                            </div>
+                          </TableHead>
+                          <TableHead>
+                            <div className="flex items-center gap-1">
+                              Liquidation Price
+                              <UITooltip>
+                                <TooltipTrigger asChild>
+                                  <Info className="w-4 h-4 text-muted-foreground cursor-help" />
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-xs">
+                                  <p className="font-semibold mb-1">
+                                    Liquidation Price
+                                  </p>
+                                  <p className="text-sm mb-2">
+                                    The estimated price at which your collateral
+                                    would need to drop to trigger liquidation
+                                    for this borrowed position.
+                                  </p>
+                                  <p className="text-xs text-muted-foreground">
+                                    Liquidation occurs when: Collateral Value ×
+                                    Liquidation Threshold &lt; Borrowed Value
+                                  </p>
+                                  <p className="text-xs text-muted-foreground mt-1">
+                                    This is calculated based on your total
+                                    collateral and the asset's liquidation
+                                    threshold (typically 85%).
+                                  </p>
+                                </TooltipContent>
+                              </UITooltip>
+                            </div>
+                          </TableHead>
+                          <TableHead>Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {(() => {
+                          const filteredAndSorted = borrows
+                            .filter((borrow) => {
+                              // Filter by search term
+                              if (borrowedAssetsSearchTerm) {
+                                const searchLower =
+                                  borrowedAssetsSearchTerm.toLowerCase();
+                                const assetMatch = borrow.asset
+                                  .toLowerCase()
+                                  .includes(searchLower);
+                                if (!assetMatch) {
+                                  return false;
+                                }
+                              }
+
+                              // Filter by network
+                              if (selectedNetworkFilter === "all") {
+                                return true;
+                              }
+
+                              const borrowNetwork = (borrow as any).network;
+                              if (borrowNetwork) {
+                                const normalizedNetwork =
+                                  borrowNetwork.toLowerCase();
+                                if (selectedNetworkFilter === "algorand") {
+                                  return normalizedNetwork.includes("algorand");
+                                } else if (selectedNetworkFilter === "voi") {
+                                  return normalizedNetwork.includes("voi");
+                                }
+                              }
+
+                              const matchingNetwork = Object.entries(
+                                user?.computed?.networkValues || {}
+                              ).find(([network, values]: [string, any]) => {
+                                const normalizedNetwork = network.toLowerCase();
+                                if (selectedNetworkFilter === "algorand") {
+                                  return normalizedNetwork.includes("algorand");
+                                } else if (selectedNetworkFilter === "voi") {
+                                  return normalizedNetwork.includes("voi");
+                                }
+                                return false;
+                              });
+
+                              return true;
+                            })
+                            .sort((a, b) => {
+                              let comparison = 0;
+
+                              switch (borrowedAssetsSort.column) {
+                                case "network":
+                                  const networkA = (
+                                    (a as any).network || "Unknown"
+                                  ).toLowerCase();
+                                  const networkB = (
+                                    (b as any).network || "Unknown"
+                                  ).toLowerCase();
+                                  comparison = networkA.localeCompare(networkB);
+                                  break;
+                                case "asset":
+                                  comparison = a.asset.localeCompare(b.asset);
+                                  break;
+                                case "borrowed":
+                                  comparison = a.balance - b.balance;
+                                  break;
+                                case "value":
+                                  comparison = a.value - b.value;
+                                  break;
+                                case "apy":
+                                default:
+                                  comparison = a.apy - b.apy;
+                                  break;
+                              }
+
+                              return borrowedAssetsSort.direction === "asc"
+                                ? comparison
+                                : -comparison;
+                            });
+
+                          const displayBorrows = showAllBorrowedAssets
+                            ? filteredAndSorted
+                            : filteredAndSorted.slice(0, 5);
+
+                          return displayBorrows.map((borrow, index) => {
+                            const market = marketData.find(
+                              (m) => m.symbol === borrow.asset
+                            );
+                            const liquidationThreshold =
+                              market?.liquidationThreshold || 0.85;
+
+                            // Calculate LTV Usage
+                            const ltvUsage =
+                              totalCollateral > 0
+                                ? (borrow.value / totalCollateral) * 100
+                                : 0;
+
+                            // Calculate Liquidation Price
+                            // Liquidation occurs when: Collateral Value × Liquidation Threshold < Borrowed Value
+                            // For a borrowed asset, we calculate: what would the average collateral price need to be?
+                            // Simplified: If total borrowed = B, and we need collateral C where C × threshold = B
+                            // Then C = B / threshold, and if current collateral is C_current at price P_current,
+                            // liquidation price ≈ P_current × (B / threshold) / C_current
+                            // For per-asset display, we use a simplified approximation
+                            const currentPrice = borrow.tokenPrice || 1;
+                            // More accurate: liquidation price is the price at which collateral would need to drop
+                            // For this specific borrow: if this borrow represents X% of total borrows,
+                            // and collateral needs to maintain threshold, then:
+                            const borrowRatio =
+                              totalBorrowed > 0
+                                ? borrow.value / totalBorrowed
+                                : 0;
+                            const requiredCollateralForThisBorrow =
+                              borrow.value / liquidationThreshold;
+                            // If we assume collateral is proportional, liquidation price would be:
+                            // current collateral price × (required collateral / current collateral)
+                            // Simplified version: show price that would trigger liquidation for this borrow amount
+                            const liquidationPrice =
+                              totalCollateral > 0
+                                ? currentPrice *
+                                  (requiredCollateralForThisBorrow /
+                                    (totalCollateral * borrowRatio || 1))
+                                : currentPrice / liquidationThreshold;
+
+                            // Get network name from borrow or infer
+                            let networkName = "Unknown";
+                            const borrowNetwork = (borrow as any).network;
+                            if (borrowNetwork) {
+                              // Format network name: "algorand-mainnet" -> "Algorand", "voi-mainnet" -> "VOI"
+                              const normalized = borrowNetwork.toLowerCase();
+                              if (normalized.includes("algorand")) {
+                                networkName = "Algorand";
+                              } else if (normalized.includes("voi")) {
+                                networkName = "VOI";
+                              } else {
+                                // Fallback to formatted name
+                                networkName = borrowNetwork
+                                  .split("-")
+                                  .map(
+                                    (word) =>
+                                      word.charAt(0).toUpperCase() +
+                                      word.slice(1)
+                                  )
+                                  .join(" ");
+                              }
+                            } else if (selectedNetworkFilter === "all") {
+                              // Fallback: try to infer from networkValues
+                              const matchingNetwork = Object.entries(
+                                user.computed.networkValues
+                              ).find(([network, values]: [string, any]) => {
+                                return (
+                                  Math.abs(values.borrow - borrow.value) <
+                                  values.borrow * 0.1
+                                );
+                              });
+                              if (matchingNetwork) {
+                                const network = matchingNetwork[0];
+                                const normalized = network.toLowerCase();
+                                if (normalized.includes("algorand")) {
+                                  networkName = "Algorand";
+                                } else if (normalized.includes("voi")) {
+                                  networkName = "VOI";
+                                } else {
+                                  // Fallback to formatted name
+                                  networkName = network
+                                    .split("-")
+                                    .map(
+                                      (word) =>
+                                        word.charAt(0).toUpperCase() +
+                                        word.slice(1)
+                                    )
+                                    .join(" ");
+                                }
+                              }
+                            }
+
+                            // Color code LTV usage
+                            const getLTVColor = (ltv: number) => {
+                              if (ltv >= 80) return "bg-red-500";
+                              if (ltv >= 60) return "bg-orange-500";
+                              if (ltv >= 40) return "bg-yellow-500";
+                              return "bg-green-500";
+                            };
+
+                            return (
+                              <TableRow key={index}>
+                                {selectedNetworkFilter === "all" && (
+                                  <TableCell className="font-medium">
+                                    {networkName}
+                                  </TableCell>
+                                )}
+                                <TableCell>
+                                  <div className="flex items-center gap-2">
+                                    <img
+                                      src={borrow.icon}
+                                      alt={borrow.asset}
+                                      className="w-6 h-6 rounded-full"
+                                    />
+                                    <span className="font-medium">
+                                      {borrow.asset}
+                                    </span>
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  {borrow.balance.toLocaleString("en-US", {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 6,
+                                  })}
+                                </TableCell>
+                                <TableCell>
+                                  {borrow.value.toLocaleString("en-US", {
+                                    style: "currency",
+                                    currency: "USD",
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  })}
+                                </TableCell>
+                                <TableCell>
+                                  <span className="text-red-600 dark:text-red-400">
+                                    {borrow.apy.toFixed(2)}%
+                                  </span>
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex items-center gap-2">
+                                    <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2 max-w-[100px]">
+                                      <div
+                                        className={`h-2 rounded-full ${getLTVColor(
+                                          ltvUsage
+                                        )}`}
+                                        style={{
+                                          width: `${Math.min(ltvUsage, 100)}%`,
+                                        }}
+                                      />
+                                    </div>
+                                    <span className="text-sm font-medium min-w-[50px]">
+                                      {ltvUsage.toFixed(1)}%
+                                    </span>
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <span className="text-sm">
+                                    $
+                                    {liquidationPrice.toLocaleString("en-US", {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 4,
+                                    })}
+                                  </span>
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex items-center gap-2">
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleBorrowClick(
+                                          borrow.asset,
+                                          borrow.poolId,
+                                          (borrow as any).network
+                                        );
+                                      }}
+                                      title="Borrow"
+                                    >
+                                      +
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleRepayClick(
+                                          borrow.asset,
+                                          borrow.poolId,
+                                          (borrow as any).network
+                                        );
+                                      }}
+                                      title="Repay"
+                                    >
+                                      −
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          });
+                        })()}
+                        {borrows.length === 0 && (
+                          <TableRow>
+                            <TableCell
+                              colSpan={selectedNetworkFilter === "all" ? 8 : 7}
+                              className="text-center text-muted-foreground py-8"
+                            >
+                              No borrowed assets
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  {(() => {
+                    const filteredAndSorted = borrows
+                      .filter((borrow) => {
+                        // Filter by search term
+                        if (borrowedAssetsSearchTerm) {
+                          const searchLower =
+                            borrowedAssetsSearchTerm.toLowerCase();
+                          const assetMatch = borrow.asset
+                            .toLowerCase()
+                            .includes(searchLower);
+                          if (!assetMatch) {
+                            return false;
+                          }
+                        }
+
+                        // Filter by network
+                        if (selectedNetworkFilter === "all") {
+                          return true;
+                        }
+
+                        const borrowNetwork = (borrow as any).network;
+                        if (borrowNetwork) {
+                          const normalizedNetwork = borrowNetwork.toLowerCase();
+                          if (selectedNetworkFilter === "algorand") {
+                            return normalizedNetwork.includes("algorand");
+                          } else if (selectedNetworkFilter === "voi") {
+                            return normalizedNetwork.includes("voi");
+                          }
+                        }
+
+                        const matchingNetwork = Object.entries(
+                          user?.computed?.networkValues || {}
+                        ).find(([network, values]: [string, any]) => {
+                          const normalizedNetwork = network.toLowerCase();
+                          if (selectedNetworkFilter === "algorand") {
+                            return normalizedNetwork.includes("algorand");
+                          } else if (selectedNetworkFilter === "voi") {
+                            return normalizedNetwork.includes("voi");
+                          }
+                          return false;
+                        });
+
+                        return true;
+                      })
+                      .sort((a, b) => {
+                        let comparison = 0;
+
+                        switch (borrowedAssetsSort.column) {
+                          case "network":
+                            const networkA = (
+                              (a as any).network || "Unknown"
+                            ).toLowerCase();
+                            const networkB = (
+                              (b as any).network || "Unknown"
+                            ).toLowerCase();
+                            comparison = networkA.localeCompare(networkB);
+                            break;
+                          case "asset":
+                            comparison = a.asset.localeCompare(b.asset);
+                            break;
+                          case "borrowed":
+                            comparison = a.balance - b.balance;
+                            break;
+                          case "value":
+                            comparison = a.value - b.value;
+                            break;
+                          case "apy":
+                          default:
+                            comparison = a.apy - b.apy;
+                            break;
+                        }
+
+                        return borrowedAssetsSort.direction === "asc"
+                          ? comparison
+                          : -comparison;
+                      });
+
+                    const hasMore = filteredAndSorted.length > 5;
+
+                    return hasMore ? (
+                      <div className="mt-4 text-center">
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            const wasExpanded = showAllBorrowedAssets;
+                            setShowAllBorrowedAssets(!showAllBorrowedAssets);
+                            // Scroll to top when collapsing
+                            if (wasExpanded && borrowedAssetsTableRef.current) {
+                              setTimeout(() => {
+                                borrowedAssetsTableRef.current?.scrollIntoView({
+                                  behavior: "smooth",
+                                  block: "start",
+                                });
+                              }, 0);
+                            }
+                          }}
+                          className="w-full"
+                        >
+                          {showAllBorrowedAssets ? "Show Less" : "Show More"}
+                        </Button>
+                      </div>
+                    ) : null;
+                  })()}
+                </DorkFiCard>
+              )}
+            </div>
+          </TooltipProvider>
+        )}
 
       {/* At Risk Positions Section - Show when health factor < 1.5 and there are borrows */}
       {isFeatureEnabled("enableLiquidations") &&
@@ -1138,7 +3261,9 @@ const Portfolio = () => {
               <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20">
                 <div className="text-sm text-red-300 mb-2">Health Factor</div>
                 <div className="text-2xl font-bold text-red-400">
-                  {healthFactor.toFixed(3)}
+                  {displayHealthFactor !== null
+                    ? displayHealthFactor.toFixed(3)
+                    : "N/A"}
                 </div>
                 <div className="text-xs text-red-300 mt-1">
                   Target: 1.5+ for safety
@@ -1204,8 +3329,7 @@ const Portfolio = () => {
           </DorkFiCard>
         )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-        {/* Stack lists vertically on mobile, keep two columns on desktop */}
+      {/*<div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         <DepositsList
           deposits={deposits}
           onDepositClick={handleDepositClick}
@@ -1220,7 +3344,7 @@ const Portfolio = () => {
           onRefresh={handleRefreshPositions}
           isLoading={isLoadingPositions}
         />
-      </div>
+      </div>*/}
 
       <PortfolioModals
         depositModal={depositModal}
@@ -1234,16 +3358,36 @@ const Portfolio = () => {
         userGlobalData={userGlobalData}
         userBorrowBalance={userBorrowBalance}
         onCloseDepositModal={() =>
-          setDepositModal({ isOpen: false, asset: null, poolId: undefined })
+          setDepositModal({
+            isOpen: false,
+            asset: null,
+            poolId: undefined,
+            network: undefined,
+          })
         }
         onCloseWithdrawModal={() =>
-          setWithdrawModal({ isOpen: false, asset: null, poolId: undefined })
+          setWithdrawModal({
+            isOpen: false,
+            asset: null,
+            poolId: undefined,
+            network: undefined,
+          })
         }
         onCloseBorrowModal={() =>
-          setBorrowModal({ isOpen: false, asset: null })
+          setBorrowModal({
+            isOpen: false,
+            asset: null,
+            poolId: undefined,
+            network: undefined,
+          })
         }
         onCloseRepayModal={() =>
-          setRepayModal({ isOpen: false, asset: null, poolId: undefined })
+          setRepayModal({
+            isOpen: false,
+            asset: null,
+            poolId: undefined,
+            network: undefined,
+          })
         }
         onRefreshWalletBalance={refreshWalletBalance}
         onRefreshMarket={handleRefreshPositions}
