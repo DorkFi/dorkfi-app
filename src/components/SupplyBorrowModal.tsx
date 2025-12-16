@@ -640,7 +640,9 @@ const SupplyBorrowModal = ({
       if (error instanceof Error) {
         const message = error.message.toLowerCase();
 
-        if (message.includes("insufficient liquidity for withdraw")) {
+        if (message.includes("compatible wallet")) {
+          errorMessage = error.message;
+        } else if (message.includes("insufficient liquidity for withdraw")) {
           errorMessage =
             "Insufficient liquidity for withdraw. Please check your deposit and borrow balances, add collateral, or repay debt and try again.";
         } else if (message.includes("insufficient collateral for borrow")) {
