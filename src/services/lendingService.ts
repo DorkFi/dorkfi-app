@@ -1681,6 +1681,15 @@ export const withdraw = async (
       console.log("customTx", { customTx });
 
       if (!customTx.success) {
+        if (customTx.error.match(/tried to spend/)) {
+          throw new Error(customTx.error);
+        } else if (
+          customTx.error.match(
+            /transaction [A-Z0-9]+: logic eval error: assert failed pc=[0-9]+. Details: app=[0-9]+, pc=[0-9]+, opcodes=frame_dig 4; b>=; assert; label191:/
+          )
+        ) {
+          throw new Error("Insufficient liquidity for withdraw");
+        }
         throw new Error("Withdraw transaction failed");
       }
 
@@ -1738,14 +1747,14 @@ export const deposit = async (
       console.log({ networkConfig, networkId });
       // Convert networkId to AlgorandNetwork format
       const algorandNetwork = getAlgorandNetworkFromNetworkId(networkId);
-      
+
       if (!algorandNetwork) {
-        throw new Error(`Network ${networkId} is not an Algorand-compatible network`);
+        throw new Error(
+          `Network ${networkId} is not an Algorand-compatible network`
+        );
       }
-      
-      const clients = algorandService.initializeClients(
-        algorandNetwork
-      );
+
+      const clients = algorandService.initializeClients(algorandNetwork);
       // Get token information
       const allTokens = getAllTokensWithDisplayInfo(networkId);
       console.log("=== TOKEN LOOKUP DEBUG ===");
@@ -2165,11 +2174,10 @@ export const deposit = async (
       }
 
       if (!customTx.success) {
-        console.error("=== DEPOSIT TRANSACTION FAILED ===");
-        console.error(
-          "Failed to create deposit transaction after all attempts"
-        );
-        throw new Error("Failed to create deposit transaction");
+        if (customTx.error.match(/tried to spend/)) {
+          throw new Error(customTx.error);
+        }
+        throw new Error("Deposit transaction failed");
       }
 
       console.log("=== DEPOSIT SUCCESS ===");
@@ -2867,7 +2875,16 @@ export const borrow = async (
       console.log("customTx", { customTx });
 
       if (!customTx.success) {
-        throw new Error("Failed to create borrow transaction");
+        if (customTx.error.match(/tried to spend/)) {
+          throw new Error(customTx.error);
+        } else if (
+          customTx.error.match(
+            /logic eval error: assert failed pc=.*opcodes=b[/]; b<=; assert/
+          )
+        ) {
+          throw new Error("insufficient collateral for borrow");
+        }
+        throw new Error("Borrow transaction failed");
       }
 
       return {

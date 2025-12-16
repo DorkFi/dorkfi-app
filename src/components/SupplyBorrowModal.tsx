@@ -26,6 +26,7 @@ import {
   getTokenConfig,
   getAllTokensWithDisplayInfo,
   getAlgorandNetworkFromNetworkId,
+  NetworkId,
 } from "@/config";
 import algorandService from "@/services/algorandService";
 import algosdk, { waitForConfirmation } from "algosdk";
@@ -488,7 +489,7 @@ const SupplyBorrowModal = ({
           originalTokenConfig.tokenStandard,
           amountInAtomicUnits,
           activeAccount.address,
-          actualNetwork
+          actualNetwork as NetworkId
         );
       } else if (mode === "borrow") {
         // Call the lending service borrow method
@@ -498,7 +499,7 @@ const SupplyBorrowModal = ({
           originalTokenConfig.tokenStandard,
           amountInAtomicUnits,
           activeAccount.address,
-          actualNetwork
+          actualNetwork as NetworkId
         );
       } else {
         throw new Error(`Unsupported mode: ${mode}`);
@@ -509,6 +510,67 @@ const SupplyBorrowModal = ({
       }
 
       console.log(`${mode} result:`, result);
+
+      // Check if wallet is supported on the network for signing
+      if (activeWallet) {
+        const walletId = activeWallet.id?.toLowerCase() || "";
+        const walletName = activeWallet.metadata?.name?.toLowerCase() || "";
+        const networkId = actualNetwork as string;
+
+        // Universal wallets support all AVM networks
+        const isUniversalWallet =
+          walletId === "lute" ||
+          walletId === "kibisis" ||
+          walletId === "vera" ||
+          walletId === "biatec";
+
+        // VOI-specific wallets only support VOI Mainnet
+        const isVOIWallet = false;
+
+        // Algorand-specific wallets only support Algorand Mainnet
+        const isAlgorandWallet =
+          walletId === "pera" ||
+          walletId === "defly" ||
+          walletName.includes("pera") ||
+          walletName.includes("defly");
+
+        // WalletConnect - check wallet name for specific restrictions
+        const isWalletConnect = walletId === "walletconnect";
+        let isWalletConnectVOI = false;
+        let isWalletConnectAlgorand = false;
+
+        if (isWalletConnect) {
+          isWalletConnectVOI =
+            walletName.includes("vera") || walletName.includes("biatec");
+          isWalletConnectAlgorand =
+            walletName.includes("pera") || walletName.includes("defly");
+        }
+
+        // Check if wallet supports the network
+        const isSupported =
+          isUniversalWallet ||
+          (isVOIWallet && networkId === "voi-mainnet") ||
+          (isAlgorandWallet && networkId === "algorand-mainnet") ||
+          (isWalletConnect &&
+            ((isWalletConnectVOI && networkId === "voi-mainnet") ||
+              (isWalletConnectAlgorand && networkId === "algorand-mainnet") ||
+              (!isWalletConnectVOI &&
+                !isWalletConnectAlgorand &&
+                currentNetwork === "voi-mainnet" &&
+                networkId === "voi-mainnet") ||
+              (!isWalletConnectVOI && !isWalletConnectAlgorand))) ||
+          (!isVOIWallet && !isAlgorandWallet && !isWalletConnect); // Unknown wallet types allow all networks
+
+        if (!isSupported) {
+          const networkName =
+            networkId === "voi-mainnet" ? "VOI Mainnet" : "Algorand Mainnet";
+          throw new Error(
+            `Your wallet (${
+              activeWallet.metadata?.name || walletId
+            }) does not support ${networkName}. Please switch to a compatible wallet or network.`
+          );
+        }
+      }
 
       // Show toast notification to prompt user to open wallet
       const walletName = activeWallet?.metadata?.name || "your wallet";
@@ -578,7 +640,17 @@ const SupplyBorrowModal = ({
       if (error instanceof Error) {
         const message = error.message.toLowerCase();
 
-        if (message.includes("insufficient")) {
+        if (message.includes("insufficient liquidity for withdraw")) {
+          errorMessage =
+            "Insufficient liquidity for withdraw. Please check your deposit and borrow balances, add collateral, or repay debt and try again.";
+        } else if (message.includes("insufficient collateral for borrow")) {
+          errorMessage =
+            "Insufficient collateral for borrow. Please check your collateral balance, add collateral, or repay debt and try again.";
+        } else if (message.includes("tried to spend")) {
+          errorMessage = `Insufficient ${
+            networkToUse === "algorand-mainnet" ? "Algorand" : "Voi"
+          } Network balance for this transaction. Please check your wallet balance and try again.`;
+        } else if (message.includes("insufficient")) {
           errorMessage =
             mode === "deposit"
               ? "Insufficient wallet balance for this transaction"

@@ -9,7 +9,7 @@
 function formatAlgo(microAlgos: number): string {
   const algo = microAlgos / 1_000_000;
   // Format with 6 decimals and remove trailing zeros
-  return algo.toFixed(6).replace(/\.?0+$/, '') || '0';
+  return algo.toFixed(6).replace(/\.?0+$/, "") || "0";
 }
 
 /**
@@ -17,7 +17,15 @@ function formatAlgo(microAlgos: number): string {
  */
 export function getUserFriendlyError(error: unknown): string {
   const errorMessage = error instanceof Error ? error.message : String(error);
-  
+
+  if (errorMessage.includes("insufficient liquidity for withdraw")) {
+    return "Insufficient liquidity for withdraw. Please check your deposit and borrow balances, add collateral, or repay debt and try again.";
+  }
+
+  if (errorMessage.includes("insufficient collateral for borrow")) {
+    return "Insufficient collateral for borrow. Please check your collateral balance, add collateral, or repay debt and try again.";
+  }
+
   // Handle insufficient ALGO balance for transaction fees
   // Format: "transaction ...: account ... balance X below min Y (1 assets)"
   const balanceBelowMinMatch = errorMessage.match(
@@ -29,70 +37,83 @@ export function getUserFriendlyError(error: unknown): string {
     const currentAlgo = formatAlgo(currentBalance);
     const requiredAlgo = formatAlgo(minRequired);
     const shortfall = formatAlgo(minRequired - currentBalance);
-    
+
     return `Insufficient ALGO balance for transaction fees. You need at least ${requiredAlgo} ALGO but only have ${currentAlgo} ALGO. Please add at least ${shortfall} ALGO to your wallet.`;
   }
-  
+
   // Handle generic insufficient balance errors
-  if (errorMessage.toLowerCase().includes('insufficient') && 
-      errorMessage.toLowerCase().includes('balance')) {
+  if (
+    errorMessage.toLowerCase().includes("insufficient") &&
+    errorMessage.toLowerCase().includes("balance")
+  ) {
     return "Insufficient balance for this transaction. Please check your wallet balance and try again.";
   }
-  
+
   // Handle network/connection errors
-  if (errorMessage.toLowerCase().includes('network') || 
-      errorMessage.toLowerCase().includes('connection') ||
-      errorMessage.toLowerCase().includes('fetch')) {
+  if (
+    errorMessage.toLowerCase().includes("network") ||
+    errorMessage.toLowerCase().includes("connection") ||
+    errorMessage.toLowerCase().includes("fetch")
+  ) {
     return "Network connection issue. Please check your internet connection and try again.";
   }
-  
+
   // Handle gas/fee errors
-  if (errorMessage.toLowerCase().includes('gas') || 
-      errorMessage.toLowerCase().includes('fee')) {
+  if (
+    errorMessage.toLowerCase().includes("gas") ||
+    errorMessage.toLowerCase().includes("fee")
+  ) {
     return "Transaction failed due to insufficient fees. Please ensure you have enough ALGO for transaction fees.";
   }
-  
+
   // Handle transaction rejection
-  if (errorMessage.toLowerCase().includes('rejected') || 
-      errorMessage.toLowerCase().includes('user cancelled') ||
-      errorMessage.toLowerCase().includes('user denied')) {
+  if (
+    errorMessage.toLowerCase().includes("rejected") ||
+    errorMessage.toLowerCase().includes("user cancelled") ||
+    errorMessage.toLowerCase().includes("user denied")
+  ) {
     return "Transaction was cancelled. No changes were made.";
   }
-  
+
   // Handle timeout errors
-  if (errorMessage.toLowerCase().includes('timeout')) {
+  if (errorMessage.toLowerCase().includes("timeout")) {
     return "Transaction timed out. Please try again.";
   }
-  
+
   // Handle invalid/malformed transaction errors
-  if (errorMessage.toLowerCase().includes('invalid') || 
-      errorMessage.toLowerCase().includes('malformed')) {
+  if (
+    errorMessage.toLowerCase().includes("invalid") ||
+    errorMessage.toLowerCase().includes("malformed")
+  ) {
     return "Invalid transaction parameters. Please refresh and try again.";
   }
-  
+
   // Handle market paused errors
-  if (errorMessage.toLowerCase().includes('paused')) {
+  if (errorMessage.toLowerCase().includes("paused")) {
     return "This market is currently paused. Please try again later.";
   }
-  
+
   // Handle token not found errors
-  if (errorMessage.toLowerCase().includes('token not found')) {
+  if (errorMessage.toLowerCase().includes("token not found")) {
     return "Token configuration not found. Please refresh the page and try again.";
   }
-  
+
   // Handle liquidity errors
-  if (errorMessage.toLowerCase().includes('liquidity') && 
-      errorMessage.toLowerCase().includes('insufficient')) {
+  if (
+    errorMessage.toLowerCase().includes("liquidity") &&
+    errorMessage.toLowerCase().includes("insufficient")
+  ) {
     return "Insufficient liquidity available. Please try a smaller amount or try again later.";
   }
-  
+
   // Handle transaction already exists errors
-  if (errorMessage.toLowerCase().includes('already exists') ||
-      errorMessage.toLowerCase().includes('duplicate')) {
+  if (
+    errorMessage.toLowerCase().includes("already exists") ||
+    errorMessage.toLowerCase().includes("duplicate")
+  ) {
     return "This transaction has already been submitted. Please wait for confirmation.";
   }
-  
+
   // Return original message if no specific pattern matches
   return errorMessage;
 }
-

@@ -486,7 +486,13 @@ const PortfolioModals = ({
       );
 
       if (!result.success) {
-        throw new Error((result as any).error || "Withdraw failed");
+        if ((result as any).error) {
+          const message = (result as any).error.toLowerCase();
+          if (message.includes("insufficient liquidity for withdraw")) {
+            throw new Error(message);
+          }
+          throw new Error((result as any).error || "Withdraw failed");
+        }
       }
 
       console.log("Withdraw result:", result);
