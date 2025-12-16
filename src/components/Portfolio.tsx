@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import {
@@ -7,6 +7,7 @@ import {
   fetchUserBorrowBalance,
   fetchUserDepositBalance,
   enhanceAVMMarketInfo,
+  fetchMarketInfo,
 } from "@/services/lendingService";
 import dorkfiAPIService from "@/services/dorkfiAPIService";
 import { ARC200Service } from "@/services/arc200Service";
@@ -356,9 +357,314 @@ const Portfolio = () => {
     }
   };
 
-  // Separate deposits and borrows from user positions
-  const deposits = userPositions.filter((pos) => pos.type === "deposit");
-  const borrows = userPositions.filter((pos) => pos.type === "borrow");
+  // Transform user.computed.deposits and user.computed.borrows into table format
+  const transformedDepositsAndBorrows = useMemo(() => {
+    const transformedDeposits: any[] = [];
+    const transformedBorrows: any[] = [];
+
+    if (user?.computed?.deposits && Array.isArray(user.computed.deposits)) {
+      user.computed.deposits.forEach((item: any) => {
+        try {
+          const networkId = item.network;
+          const marketId =
+            item.marketId?.toString() || item.underlyingContractId?.toString();
+          const appId = item.appId?.toString() || item.poolId?.toString();
+
+          if (!networkId || !marketId || !appId) {
+            console.warn("Missing required fields for deposit item:", item);
+            return;
+          }
+
+          // Get tokens for this network
+          const tokens = getAllTokensWithDisplayInfo(networkId as any);
+
+          // Find token matching marketId and poolId
+          const token = tokens.find(
+            (t) =>
+              (t.underlyingContractId === marketId ||
+                t.originalContractId === marketId) &&
+              t.poolId === appId
+          );
+
+          if (!token) {
+            console.warn(
+              `Token not found for marketId ${marketId}, appId ${appId} on network ${networkId}`
+            );
+            return;
+          }
+
+          // Find market data
+          const market = marketData.find(
+            (m) =>
+              m.symbol === token.symbol &&
+              (m.poolId === appId || m.appId === appId)
+          );
+
+          console.log("[Portfolio] Market data:", {
+            market,
+            marketDataLength: marketData.length,
+            symbol: token.symbol,
+            appId,
+            marketId,
+          });
+
+          // Calculate actual balance from scaled deposits
+          // Formula: actual_deposits = (scaled_deposits * current_deposit_index) / SCALE
+          // SCALE = 1e18
+          const SCALE = BigInt(1e18);
+          // Handle scaledDeposits as string or number from API
+          const scaledDepositsValue =
+            typeof item.scaledDeposits === "string"
+              ? item.scaledDeposits
+              : (item.scaledDeposits || 0).toString();
+          const scaledDeposits = BigInt(scaledDepositsValue);
+
+          // Get depositIndex from market data - it should be a string representation of BigInt
+          // If not available, use default SCALE (1e18) as fallback to still show the item
+          let depositIndex: bigint;
+          let depositIndexStr: string;
+          if (!market?.depositIndex) {
+            console.warn(
+              `[Portfolio] depositIndex not found for ${token.symbol} (poolId: ${appId}), using default SCALE`
+            );
+            depositIndex = SCALE;
+            depositIndexStr = SCALE.toString();
+          } else {
+            depositIndexStr = market.depositIndex.toString();
+            depositIndex = BigInt(depositIndexStr);
+          }
+
+          const actualDepositsRaw =
+            scaledDeposits === 0n
+              ? 0n
+              : (scaledDeposits * depositIndex) / SCALE;
+
+          // actualDepositsRaw is in the smallest unit (e.g., micro-units for 6 decimals)
+          // Divide by token decimals to get human-readable amount
+          const actualBalance =
+            Number(actualDepositsRaw) / Math.pow(10, token.decimals);
+
+          // Sanity check: if balance seems unreasonably high (> 1e10), there might be a conversion issue
+          if (actualBalance > 1e10) {
+            console.error(
+              `[Portfolio] Unreasonably high balance calculated for ${token.symbol}:`,
+              {
+                scaledDeposits: scaledDepositsValue,
+                depositIndex: depositIndexStr,
+                actualDepositsRaw: actualDepositsRaw.toString(),
+                tokenDecimals: token.decimals,
+                actualBalance,
+                item: item,
+              }
+            );
+            return; // Skip this item if calculation seems wrong
+          }
+
+          // Debug logging
+          console.log(
+            `[Portfolio] Deposit transformation for ${token.symbol}:`,
+            {
+              scaledDeposits: scaledDepositsValue,
+              depositIndex: depositIndexStr,
+              actualDepositsRaw: actualDepositsRaw.toString(),
+              tokenDecimals: token.decimals,
+              actualBalance,
+              marketFound: !!market,
+            }
+          );
+
+          if (actualBalance <= 0) {
+            return; // Skip zero balances
+          }
+
+          // Get token price
+          const tokenPrice = market?.price
+            ? formatPriceFromContract(market.price, token.decimals)
+            : 1;
+
+          // Get APY
+          const apy =
+            market?.apyCalculation?.apy ||
+            (market?.supplyRate ? market.supplyRate * 100 : 0);
+
+          transformedDeposits.push({
+            asset: token.symbol,
+            icon: token.logoPath,
+            balance: actualBalance,
+            value: actualBalance * tokenPrice,
+            apy: apy,
+            tokenPrice: tokenPrice,
+            poolId: appId,
+            network: networkId,
+            type: "deposit",
+          });
+        } catch (error) {
+          console.error("Error transforming deposit item:", error, item);
+        }
+      });
+    }
+
+    if (user?.computed?.borrows && Array.isArray(user.computed.borrows)) {
+      user.computed.borrows.forEach((item: any) => {
+        try {
+          const networkId = item.network;
+          const marketId =
+            item.marketId?.toString() || item.underlyingContractId?.toString();
+          const appId = item.appId?.toString() || item.poolId?.toString();
+
+          if (!networkId || !marketId || !appId) {
+            console.warn("Missing required fields for borrow item:", item);
+            return;
+          }
+
+          // Get tokens for this network
+          const tokens = getAllTokensWithDisplayInfo(networkId as any);
+
+          // Find token matching marketId and poolId
+          const token = tokens.find(
+            (t) =>
+              (t.underlyingContractId === marketId ||
+                t.originalContractId === marketId) &&
+              t.poolId === appId
+          );
+
+          if (!token) {
+            console.warn(
+              `Token not found for marketId ${marketId}, appId ${appId} on network ${networkId}`
+            );
+            return;
+          }
+
+          // Find market data
+          const market = marketData.find(
+            (m) =>
+              m.symbol === token.symbol &&
+              (m.poolId === appId || m.appId === appId)
+          );
+
+          // Calculate actual balance from scaled borrows
+          // Formula: actual_borrows = (scaled_borrows * current_borrow_index) / SCALE
+          // SCALE = 1e18
+          const SCALE = BigInt(1e18);
+          // Handle scaledBorrows as string or number from API
+          const scaledBorrowsValue =
+            typeof item.scaledBorrows === "string"
+              ? item.scaledBorrows
+              : (item.scaledBorrows || 0).toString();
+          const scaledBorrows = BigInt(scaledBorrowsValue);
+
+          // Get borrowIndex from market data - it should be a string representation of BigInt
+          // If not available, use default SCALE (1e18) as fallback to still show the item
+          let borrowIndex: bigint;
+          let borrowIndexStr: string;
+          if (!market?.borrowIndex) {
+            console.warn(
+              `[Portfolio] borrowIndex not found for ${token.symbol} (poolId: ${appId}), using default SCALE`
+            );
+            borrowIndex = SCALE;
+            borrowIndexStr = SCALE.toString();
+          } else {
+            borrowIndexStr = market.borrowIndex.toString();
+            borrowIndex = BigInt(borrowIndexStr);
+          }
+
+          const actualBorrowsRaw =
+            scaledBorrows === 0n ? 0n : (scaledBorrows * borrowIndex) / SCALE;
+
+          // actualBorrowsRaw is in the smallest unit (e.g., micro-units for 6 decimals)
+          // Divide by token decimals to get human-readable amount
+          const actualBalance =
+            Number(actualBorrowsRaw) / Math.pow(10, token.decimals);
+
+          // Sanity check: if balance seems unreasonably high (> 1e10), there might be a conversion issue
+          if (actualBalance > 1e10) {
+            console.error(
+              `[Portfolio] Unreasonably high balance calculated for ${token.symbol}:`,
+              {
+                scaledBorrows: scaledBorrowsValue,
+                borrowIndex: borrowIndexStr,
+                actualBorrowsRaw: actualBorrowsRaw.toString(),
+                tokenDecimals: token.decimals,
+                actualBalance,
+                item: item,
+              }
+            );
+            return; // Skip this item if calculation seems wrong
+          }
+
+          // Debug logging
+          console.log(
+            `[Portfolio] Borrow transformation for ${token.symbol}:`,
+            {
+              scaledBorrows: scaledBorrowsValue,
+              borrowIndex: borrowIndexStr,
+              actualBorrowsRaw: actualBorrowsRaw.toString(),
+              tokenDecimals: token.decimals,
+              actualBalance,
+              marketFound: !!market,
+            }
+          );
+
+          if (actualBalance <= 0) {
+            return; // Skip zero balances
+          }
+
+          // Get token price
+          const tokenPrice = market?.price
+            ? formatPriceFromContract(market.price, token.decimals)
+            : 1;
+
+          // Get APY
+          const apy =
+            market?.borrowApyCalculation?.apy ||
+            (market?.borrowRateCurrent ? market.borrowRateCurrent * 100 : 0);
+
+          transformedBorrows.push({
+            asset: token.symbol,
+            icon: token.logoPath,
+            balance: actualBalance,
+            value: actualBalance * tokenPrice,
+            apy: apy,
+            tokenPrice: tokenPrice,
+            poolId: appId,
+            network: networkId,
+            type: "borrow",
+          });
+        } catch (error) {
+          console.error("Error transforming borrow item:", error, item);
+        }
+      });
+    }
+
+    return { deposits: transformedDeposits, borrows: transformedBorrows };
+  }, [user?.computed?.deposits, user?.computed?.borrows, marketData]);
+
+  // Use transformed deposits and borrows from user.computed, fallback to userPositions
+  // If user.computed exists but transformation resulted in empty arrays, fall back to userPositions
+  const hasComputedData = user?.computed?.deposits || user?.computed?.borrows;
+  const deposits =
+    hasComputedData && transformedDepositsAndBorrows.deposits.length > 0
+      ? transformedDepositsAndBorrows.deposits
+      : userPositions.filter((pos) => pos.type === "deposit");
+  const borrows =
+    hasComputedData && transformedDepositsAndBorrows.borrows.length > 0
+      ? transformedDepositsAndBorrows.borrows
+      : userPositions.filter((pos) => pos.type === "borrow");
+
+  // Debug logging
+  console.log("[Portfolio] Final deposits and borrows:", {
+    hasComputedData,
+    transformedDepositsCount: transformedDepositsAndBorrows.deposits.length,
+    transformedBorrowsCount: transformedDepositsAndBorrows.borrows.length,
+    userPositionsDepositsCount: userPositions.filter(
+      (pos) => pos.type === "deposit"
+    ).length,
+    userPositionsBorrowsCount: userPositions.filter(
+      (pos) => pos.type === "borrow"
+    ).length,
+    finalDepositsCount: deposits.length,
+    finalBorrowsCount: borrows.length,
+  });
 
   // Calculate totals - prioritize computed global values from API, then fallback to local calculations
   const totalCollateral =
@@ -847,15 +1153,15 @@ const Portfolio = () => {
       console.log("[Portfolio] API response:", apiResponse);
 
       if (apiResponse.success && apiResponse.data) {
-        const userData = apiResponse.data;
-        console.log("[Portfolio] User data fetched from API:", userData);
-        const networks = userData.networks;
+        const user = apiResponse.data;
+        console.log("[Portfolio] User data fetched from API:", user);
+        const networks = user.networks;
         console.log(
           "[Portfolio] User data globalUserData:",
-          userData.globalUserData
+          user.globalUserData
         );
         const globalCollateralValue =
-          userData.globalUserData
+          user.globalUserData
             .map((item: any) => BigInt(item.totalCollateralValue))
             .reduce((acc: bigint, curr: bigint) => acc + curr, BigInt(0)) /
           BigInt(1e12);
@@ -864,7 +1170,7 @@ const Portfolio = () => {
           globalCollateralValue
         );
         const globalBorrowValue =
-          userData.globalUserData
+          user.globalUserData
             .map((item: any) => BigInt(item.totalBorrowValue))
             .reduce((acc: bigint, curr: bigint) => acc + curr, BigInt(0)) /
           BigInt(1e12);
@@ -886,8 +1192,8 @@ const Portfolio = () => {
           }
         > = {};
 
-        if (userData.globalUserData && Array.isArray(userData.globalUserData)) {
-          userData.globalUserData.forEach((item: any) => {
+        if (user.globalUserData && Array.isArray(user.globalUserData)) {
+          user.globalUserData.forEach((item: any) => {
             const network = item.network || "unknown";
             const collateralValue = Number(
               BigInt(item.totalCollateralValue) / BigInt(1e12)
@@ -909,15 +1215,27 @@ const Portfolio = () => {
             networkValues[network].borrow += borrowValue;
             networkValues[network].netValue += netValue;
           });
-          setUser({
-            ...userData,
+          const deposits = [];
+          const borrows = [];
+          if (user.userData && Array.isArray(user.userData)) {
+            user.userData.forEach((item: any) => {
+              if (BigInt(item.scaledDeposits) > BigInt(0)) deposits.push(item);
+              if (BigInt(item.scaledBorrows) > BigInt(0)) borrows.push(item);
+            });
+          }
+          const computedUser = {
+            ...user,
             computed: {
-              globalCollateralValue: globalCollateralValue,
-              globalBorrowValue: globalBorrowValue,
-              globalNetPortfolioValue: globalNetPortfolioValue,
+              globalCollateralValue: Number(globalCollateralValue),
+              globalBorrowValue: Number(globalBorrowValue),
+              globalNetPortfolioValue: Number(globalNetPortfolioValue),
               networkValues: networkValues,
+              deposits,
+              borrows,
             },
-          });
+          };
+          console.log("[Portfolio] User:", computedUser);
+          setUser(computedUser);
         }
 
         console.log("[Portfolio] Network values:", networkValues);
@@ -935,154 +1253,192 @@ const Portfolio = () => {
     }
   }, [activeAccount?.address]);
 
-  // Fetch user global data and market data when wallet connects
+  // Fetch market data for all enabled networks when user data is available
   useEffect(() => {
-    const fetchData = async () => {
-      if (!activeAccount?.address || !currentNetwork) {
-        setUserGlobalData(null);
-        setMarketData([]);
-        return;
+    const fetchMarketDataForAllNetworks = async () => {
+      if (!user?.computed) {
+        return; // Wait for user data to be available
       }
 
-      setIsLoadingData(true);
-      setDataError(null);
-
       try {
-        console.log(
-          "Fetching user global data for:",
-          activeAccount.address,
-          "on network:",
-          currentNetwork
-        );
-
-        // fetch market data from api for faster response on page load
-        // Fetch markets first, then global data (so we can pass marketData for healthFactorIndex calculation)
-        const markets = await fetchAllMarkets(currentNetwork);
-        const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-        const marketDataResponse =
-          await dorkfiAPIService.getAllMarketDataByNetwork(currentNetwork);
-        const freshMarketData = marketDataResponse.success
-          ? marketDataResponse.data.map((item: any) => {
-              // Try multiple matching strategies to find the correct token
-              let token = tokens.find(
-                (t) =>
-                  t.originalContractId === `${item.marketId}` &&
-                  t.poolId === `${item.appId}`
-              );
-
-              // If not found, try matching by underlyingContractId
-              if (!token) {
-                token = tokens.find(
-                  (t) =>
-                    t.underlyingContractId === `${item.marketId}` &&
-                    t.poolId === `${item.appId}`
-                );
-              }
-
-              // If still not found, try matching by poolId and marketId "0" (for network tokens like VOI)
-              if (!token && item.marketId === "0") {
-                token = tokens.find(
-                  (t) =>
-                    t.poolId === `${item.appId}` &&
-                    (t.assetId === "0" || t.originalContractId === "0")
-                );
-              }
-
-              // Log if token not found for debugging
-              if (!token) {
-                console.warn(
-                  `Token not found for marketId ${item.marketId}, appId ${item.appId}`,
-                  {
-                    availableTokens: tokens.map((t) => ({
-                      symbol: t.symbol,
-                      originalContractId: t.originalContractId,
-                      underlyingContractId: t.underlyingContractId,
-                      poolId: t.poolId,
-                    })),
-                  }
-                );
-              }
-
-              return enhanceAVMMarketInfo(item, token as any);
-            })
-          : [];
-        const marketData = markets;
-
-        const globalData = await fetchUserGlobalData(
-          activeAccount.address,
-          currentNetwork,
-          marketData
-        );
-
-        // Fetch user positions from all enabled networks
         const enabledNetworks = getEnabledNetworks();
-        const allPositions = [];
+        const allMarketData: any[] = [];
 
+        // Fetch market data for each enabled network
         for (const networkId of enabledNetworks) {
           try {
-            const networkMarkets = await fetchAllMarkets(networkId);
-            const networkPositions = await fetchUserPositions(
-              activeAccount.address,
-              networkId,
-              networkMarkets
-            );
-            allPositions.push(...networkPositions);
+            const markets = await fetchAllMarkets(networkId as any);
+            allMarketData.push(...markets);
           } catch (error) {
             console.error(
-              `Error fetching positions for network ${networkId}:`,
+              `Error fetching market data for network ${networkId}:`,
               error
             );
           }
         }
 
-        console.log({
-          markets,
-          freshMarketData,
-          marketData,
-          globalData: globalData,
-          positions: allPositions,
+        console.log("[Portfolio] Fetched market data for all networks:", {
+          count: allMarketData.length,
+          networks: enabledNetworks,
         });
 
-        if (globalData) {
-          console.log("User global data fetched:", globalData);
-          setUserGlobalData(globalData);
-        } else {
-          console.log("No user global data found");
-          setUserGlobalData(null);
-        }
-
-        if (freshMarketData) {
-          console.log("Market data fetched:", freshMarketData);
-          setMarketData(freshMarketData);
-        } else {
-          console.log("No market data found");
-          setMarketData([]);
-        }
-
-        if (allPositions && allPositions.length > 0) {
-          console.log(
-            "User positions fetched from all networks:",
-            allPositions
-          );
-          setUserPositions(allPositions);
-        } else {
-          console.log("No user positions found");
-          setUserPositions([]);
-        }
+        setMarketData(allMarketData);
       } catch (error) {
-        console.error("Error fetching data:", error);
-        setDataError(
-          error instanceof Error ? error.message : "Failed to fetch data"
-        );
-        setUserGlobalData(null);
-        setMarketData([]);
-      } finally {
-        setIsLoadingData(false);
+        console.error("Error fetching market data:", error);
       }
     };
 
-    fetchData();
-  }, [activeAccount?.address, currentNetwork]);
+    fetchMarketDataForAllNetworks();
+  }, [user?.computed, activeAccount?.address]);
+
+  // Fetch user global data and market data when wallet connects
+  // useEffect(() => {
+  //   const fetchData = async () => {
+  //     if (!activeAccount?.address || !currentNetwork) {
+  //       setUserGlobalData(null);
+  //       setMarketData([]);
+  //       return;
+  //     }
+
+  //     setIsLoadingData(true);
+  //     setDataError(null);
+
+  //     try {
+  //       console.log(
+  //         "Fetching user global data for:",
+  //         activeAccount.address,
+  //         "on network:",
+  //         currentNetwork
+  //       );
+
+  //       // fetch market data from api for faster response on page load
+  //       // Fetch markets first, then global data (so we can pass marketData for healthFactorIndex calculation)
+  //       const markets = await fetchAllMarkets(currentNetwork);
+  //       const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+  //       const marketDataResponse =
+  //         await dorkfiAPIService.getAllMarketDataByNetwork(currentNetwork);
+  //       const freshMarketData = marketDataResponse.success
+  //         ? marketDataResponse.data.map((item: any) => {
+  //             // Try multiple matching strategies to find the correct token
+  //             let token = tokens.find(
+  //               (t) =>
+  //                 t.originalContractId === `${item.marketId}` &&
+  //                 t.poolId === `${item.appId}`
+  //             );
+
+  //             // If not found, try matching by underlyingContractId
+  //             if (!token) {
+  //               token = tokens.find(
+  //                 (t) =>
+  //                   t.underlyingContractId === `${item.marketId}` &&
+  //                   t.poolId === `${item.appId}`
+  //               );
+  //             }
+
+  //             // If still not found, try matching by poolId and marketId "0" (for network tokens like VOI)
+  //             if (!token && item.marketId === "0") {
+  //               token = tokens.find(
+  //                 (t) =>
+  //                   t.poolId === `${item.appId}` &&
+  //                   (t.assetId === "0" || t.originalContractId === "0")
+  //               );
+  //             }
+
+  //             // Log if token not found for debugging
+  //             if (!token) {
+  //               console.warn(
+  //                 `Token not found for marketId ${item.marketId}, appId ${item.appId}`,
+  //                 {
+  //                   availableTokens: tokens.map((t) => ({
+  //                     symbol: t.symbol,
+  //                     originalContractId: t.originalContractId,
+  //                     underlyingContractId: t.underlyingContractId,
+  //                     poolId: t.poolId,
+  //                   })),
+  //                 }
+  //               );
+  //             }
+
+  //             return enhanceAVMMarketInfo(item, token as any);
+  //           })
+  //         : [];
+  //       const marketData = markets;
+
+  //       const globalData = await fetchUserGlobalData(
+  //         activeAccount.address,
+  //         currentNetwork,
+  //         marketData
+  //       );
+
+  //       // Fetch user positions from all enabled networks
+  //       const enabledNetworks = getEnabledNetworks();
+  //       const allPositions = [];
+
+  //       for (const networkId of enabledNetworks) {
+  //         try {
+  //           const networkMarkets = await fetchAllMarkets(networkId);
+  //           const networkPositions = await fetchUserPositions(
+  //             activeAccount.address,
+  //             networkId,
+  //             networkMarkets
+  //           );
+  //           allPositions.push(...networkPositions);
+  //         } catch (error) {
+  //           console.error(
+  //             `Error fetching positions for network ${networkId}:`,
+  //             error
+  //           );
+  //         }
+  //       }
+
+  //       console.log({
+  //         markets,
+  //         freshMarketData,
+  //         marketData,
+  //         globalData: globalData,
+  //         positions: allPositions,
+  //       });
+
+  //       if (globalData) {
+  //         console.log("User global data fetched:", globalData);
+  //         setUserGlobalData(globalData);
+  //       } else {
+  //         console.log("No user global data found");
+  //         setUserGlobalData(null);
+  //       }
+
+  //       if (freshMarketData) {
+  //         console.log("Market data fetched:", freshMarketData);
+  //         setMarketData(freshMarketData);
+  //       } else {
+  //         console.log("No market data found");
+  //         setMarketData([]);
+  //       }
+
+  //       if (allPositions && allPositions.length > 0) {
+  //         console.log(
+  //           "User positions fetched from all networks:",
+  //           allPositions
+  //         );
+  //         setUserPositions(allPositions);
+  //       } else {
+  //         console.log("No user positions found");
+  //         setUserPositions([]);
+  //       }
+  //     } catch (error) {
+  //       console.error("Error fetching data:", error);
+  //       setDataError(
+  //         error instanceof Error ? error.message : "Failed to fetch data"
+  //       );
+  //       setUserGlobalData(null);
+  //       setMarketData([]);
+  //     } finally {
+  //       setIsLoadingData(false);
+  //     }
+  //   };
+
+  //   fetchData();
+  // }, [activeAccount?.address, currentNetwork]);
 
   // Reset showAllSuppliedAssets when filters change
   useEffect(() => {
@@ -3239,7 +3595,7 @@ const Portfolio = () => {
                 <H1 className="text-xl text-red-500 m-0">At Risk Positions</H1>
               </div>
               <button
-                onClick={handleRefreshPositions}
+                onClick={() => fetchUser(activeAccount.address)}
                 disabled={isLoadingPositions}
                 className="flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Refresh positions data"
@@ -3334,14 +3690,14 @@ const Portfolio = () => {
           deposits={deposits}
           onDepositClick={handleDepositClick}
           onWithdrawClick={handleWithdrawClick}
-          onRefresh={handleRefreshPositions}
+          onRefresh={() => {} handleRefreshPositions}
           isLoading={isLoadingPositions}
         />
         <BorrowsList
           borrows={borrows}
           onBorrowClick={handleBorrowClick}
           onRepayClick={handleRepayClick}
-          onRefresh={handleRefreshPositions}
+          onRefresh={() => {} andleRefreshPositions}
           isLoading={isLoadingPositions}
         />
       </div>*/}
@@ -3390,7 +3746,7 @@ const Portfolio = () => {
           })
         }
         onRefreshWalletBalance={refreshWalletBalance}
-        onRefreshMarket={handleRefreshPositions}
+        onRefreshMarket={() => fetchUser(activeAccount.address)}
       />
     </div>
   );

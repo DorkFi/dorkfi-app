@@ -22,12 +22,17 @@ import {
   borrow,
   fetchUserGlobalData,
 } from "@/services/lendingService";
-import { getTokenConfig, getAllTokensWithDisplayInfo, getAlgorandNetworkFromNetworkId } from "@/config";
+import {
+  getTokenConfig,
+  getAllTokensWithDisplayInfo,
+  getAlgorandNetworkFromNetworkId,
+} from "@/config";
 import algorandService from "@/services/algorandService";
 import algosdk, { waitForConfirmation } from "algosdk";
 import BigNumber from "bignumber.js";
 import { useToast } from "@/hooks/use-toast";
 import { calculateMaxBorrowAmount } from "@/services/adminService";
+import dorkfiAPIService from "@/services/dorkfiAPIService";
 
 interface SupplyBorrowModalProps {
   isOpen: boolean;
@@ -35,6 +40,7 @@ interface SupplyBorrowModalProps {
   asset: string;
   poolId?: string; // Pool ID to identify specific market when multiple markets exist for same symbol
   network?: string; // Network ID for cross-network operations
+  transactionId?: string;
   mode: "deposit" | "borrow";
   assetData: {
     icon: string;
@@ -86,6 +92,9 @@ const SupplyBorrowModal = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [transactionId, setTransactionId] = useState<string | null>(null);
+  const [transactionNetworkId, setTransactionNetworkId] = useState<
+    string | null
+  >(null);
   const [retryCount, setRetryCount] = useState(0);
   const [calculatedMaxBorrow, setCalculatedMaxBorrow] = useState<number | null>(
     null
@@ -96,7 +105,7 @@ const SupplyBorrowModal = ({
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
   const { toast } = useToast();
-  
+
   // Use provided network or fallback to current network
   const networkToUse = network || currentNetwork;
 
@@ -147,7 +156,10 @@ const SupplyBorrowModal = ({
         // Use originalSymbol to look up the config, as asset might be a display symbol
         const originalSymbol =
           "originalSymbol" in token ? (token as any).originalSymbol : asset;
-        const tokenConfigRaw = getTokenConfig(networkToUse as any, originalSymbol);
+        const tokenConfigRaw = getTokenConfig(
+          networkToUse as any,
+          originalSymbol
+        );
         if (!tokenConfigRaw) {
           throw new Error(
             `Token config not found for ${asset} (originalSymbol: ${originalSymbol})`
@@ -279,6 +291,7 @@ const SupplyBorrowModal = ({
       setFiatValue(0);
       setError(null);
       setTransactionId(null);
+      setTransactionNetworkId(null);
       setRetryCount(0);
       if (mode !== "borrow") {
         setCalculatedMaxBorrow(null);
@@ -337,21 +350,23 @@ const SupplyBorrowModal = ({
       let token = poolId
         ? tokens.find((t) => t.symbol === asset && t.poolId === poolId)
         : tokens.find((t) => t.symbol === asset);
-      
+
       // If token not found in specified network, try other enabled networks
       let actualNetwork = networkToUse;
       if (!token && !network) {
-        const { getEnabledNetworks } = await import('@/config');
+        const { getEnabledNetworks } = await import("@/config");
         const enabledNetworks = getEnabledNetworks();
-        
+
         for (const enabledNetwork of enabledNetworks) {
           if (enabledNetwork === networkToUse) continue;
-          
-          const otherTokens = getAllTokensWithDisplayInfo(enabledNetwork as any);
+
+          const otherTokens = getAllTokensWithDisplayInfo(
+            enabledNetwork as any
+          );
           const otherToken = poolId
             ? otherTokens.find((t) => t.symbol === asset && t.poolId === poolId)
             : otherTokens.find((t) => t.symbol === asset);
-          
+
           if (otherToken) {
             // Found token in another network, use that network
             token = otherToken;
@@ -405,7 +420,10 @@ const SupplyBorrowModal = ({
       // Use originalSymbol to look up the config, as asset might be a display symbol
       const originalSymbol =
         "originalSymbol" in token ? (token as any).originalSymbol : asset;
-      const tokenConfigRaw = getTokenConfig(actualNetwork as any, originalSymbol);
+      const tokenConfigRaw = getTokenConfig(
+        actualNetwork as any,
+        originalSymbol
+      );
       if (!tokenConfigRaw) {
         throw new Error(
           `Original token config not found for ${asset} (originalSymbol: ${originalSymbol})`
@@ -509,19 +527,42 @@ const SupplyBorrowModal = ({
 
       // Get the correct algod client for the asset's network (not currentNetwork)
       const finalNetwork = actualNetwork || network || currentNetwork;
-      const algorandNetwork = getAlgorandNetworkFromNetworkId(finalNetwork as any);
+      setTransactionNetworkId(finalNetwork);
+      const algorandNetwork = getAlgorandNetworkFromNetworkId(
+        finalNetwork as any
+      );
       if (!algorandNetwork) {
         throw new Error(`Invalid network: ${finalNetwork}`);
       }
       const algorandClients =
         await algorandService.initializeClientsForTransactions(algorandNetwork);
       const res = await algorandClients.algod.sendRawTransaction(stxns).do();
-      // TODO fix this
-      //await waitForConfirmation(algorandClients.algod, res.txid, 4);
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+      await waitForConfirmation(algorandClients.algod, res.txid, 4);
 
-      //console.log("Transaction confirmed:", res);
-      //setTransactionId(res.txid);
+      Promise.all([
+        dorkfiAPIService.fetchFreshUserData(
+          activeAccount.address,
+          networkToUse,
+          parseInt(token.poolId),
+          parseInt(token.underlyingContractId)
+        ),
+        dorkfiAPIService.fetchFreshMarketData(
+          networkToUse,
+          parseInt(token.poolId),
+          parseInt(token.underlyingContractId)
+        ),
+      ])
+        .then(() => {
+          setTimeout(() => {
+            //onRefreshMarket();
+          }, 1000);
+        })
+        .catch((error) => {
+          console.error("Error calling fetchFreshUserData after repay:", error);
+        });
+
+      console.log("Transaction confirmed:", res);
+      setTransactionId(res.txid);
       setShowSuccess(true);
 
       // Call the success callback to refresh data
@@ -573,14 +614,16 @@ const SupplyBorrowModal = ({
   };
 
   const handleViewTransaction = () => {
+    const networkToUse = network || currentNetwork;
     if (transactionId) {
-      const explorerUrl =
-        currentNetwork === "voi-mainnet"
-          ? "https://voi.observer"
-          : "https://testnet.voi.observer";
-      window.open(`${explorerUrl}/tx/${transactionId}`, "_blank");
+      if (networkToUse === "voi-mainnet") {
+        window.open(`https://voi.observer/tx/${transactionId}`, "_blank");
+      }
+      if (networkToUse === "algorand-mainnet") {
+        window.open(`https://allo.info/tx/${transactionId}`, "_blank");
+      }
     } else {
-      window.open("https://testnet.voi.observer", "_blank");
+      throw new Error("Transaction ID not found");
     }
   };
 
@@ -593,6 +636,8 @@ const SupplyBorrowModal = ({
     setShowSuccess(false);
     setAmount("");
     setFiatValue(0);
+    setTransactionId(null);
+    setTransactionNetworkId(null);
   };
 
   const handleRetry = () => {

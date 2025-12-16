@@ -91,6 +91,16 @@ export interface User {
   [key: string]: any; // Allow additional properties
 }
 
+export interface UserData {
+  scaledDeposits: string;
+  scaledBorrows: string;
+  depositIndex: string;
+  borrowIndex: string;
+  lastUpdateTime: number;
+  lastPrice: string;
+  [key: string]: any; // Allow additional properties
+}
+
 export interface ApiResponse<T> {
   success: boolean;
   data?: T;
@@ -480,6 +490,49 @@ class DorkFiAPIService {
   }
 
   /**
+   * Fetch fresh market data from blockchain
+   * Fetches fresh market data directly from the blockchain for a specific network, app ID, and market ID.
+   * Bypasses the store and returns the fresh data.
+   * @param network - Network identifier (e.g., algorand-mainnet, voi-mainnet)
+   * @param appId - Application ID of the lending pool
+   * @param marketId - Market ID
+   * @returns Promise<ApiResponse<MarketData>>
+   */
+  async fetchFreshMarketData(
+    network: string,
+    appId: number,
+    marketId: number
+  ): Promise<ApiResponse<MarketData>> {
+    try {
+      const response = await fetch(
+        `${this.baseUrl}/market-data/${encodeURIComponent(
+          network
+        )}/${appId}/${marketId}`,
+        {
+          method: "POST",
+        }
+      );
+
+      if (!response.ok) {
+        if (response.status === 400 || response.status === 404 || response.status === 500) {
+          const errorData = await response.json();
+          return errorData;
+        }
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error(
+        `Error fetching fresh market data for network ${network}, appId ${appId}, marketId ${marketId}:`,
+        error
+      );
+      throw error;
+    }
+  }
+
+  /**
    * Get user health for a specific user address
    * @param userAddress - User address
    * @returns Promise<ApiResponse<UserHealth>>
@@ -673,6 +726,50 @@ class DorkFiAPIService {
       return data;
     } catch (error) {
       console.error(`Error fetching user for address ${userAddress}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch fresh user data and update store
+   * Fetches fresh user data from the blockchain for a specific user, network, app ID, and market ID, then updates the store
+   * @param userAddress - User address
+   * @param network - Network identifier (e.g., algorand-mainnet, voi-mainnet)
+   * @param appId - Application ID of the lending pool
+   * @param marketId - Market ID
+   * @returns Promise<ApiResponse<UserData>>
+   */
+  async fetchFreshUserData(
+    userAddress: string,
+    network: string,
+    appId: number,
+    marketId: number
+  ): Promise<ApiResponse<UserData>> {
+    try {
+      const response = await fetch(
+        `${this.baseUrl}/user-data/user/${encodeURIComponent(
+          userAddress
+        )}/${encodeURIComponent(network)}/${appId}/${marketId}`,
+        {
+          method: "POST",
+        }
+      );
+
+      if (!response.ok) {
+        if (response.status === 400 || response.status === 404 || response.status === 500) {
+          const errorData = await response.json();
+          return errorData;
+        }
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error(
+        `Error fetching fresh user data for userAddress ${userAddress}, network ${network}, appId ${appId}, marketId ${marketId}:`,
+        error
+      );
       throw error;
     }
   }
