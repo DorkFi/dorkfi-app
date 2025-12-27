@@ -18,6 +18,10 @@ function formatAlgo(microAlgos: number): string {
 export function getUserFriendlyError(error: unknown): string {
   const errorMessage = error instanceof Error ? error.message : String(error);
 
+  if (errorMessage.includes("compatible wallet")) {
+    return errorMessage;
+  }
+
   if (errorMessage.includes("insufficient liquidity for withdraw")) {
     return "Insufficient liquidity for withdraw. Please check your deposit and borrow balances, add collateral, or repay debt and try again.";
   }

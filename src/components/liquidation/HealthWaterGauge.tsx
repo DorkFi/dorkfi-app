@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { CardTitle } from "@/components/ui/card";
 import { useRiskLevel } from "@/hooks/useRiskLevel";
@@ -8,37 +8,24 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
+import { Edit } from "lucide-react";
 
 type Props = {
   healthFactor: number | null;
   avatarSrc?: string;
+  onEdit?: () => void;
 };
 
-export default function HealthWaterGauge({ healthFactor, avatarSrc }: Props) {
-  // Handle null health factor (no collateral)
-  if (healthFactor === null) {
-    return (
-      <div className="relative w-full max-w-sm mx-auto">
-        <div className="text-center py-8 px-6 rounded-xl bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900 border border-gray-200/50 dark:border-gray-700/50">
-          <div className="text-sm text-muted-foreground mb-1 font-medium">Health Factor</div>
-          <div className="text-5xl font-bold text-gray-500 tracking-tight transition-all duration-300 mb-2">
-            N/A
-          </div>
-          <div className="text-sm font-semibold text-gray-500 uppercase tracking-wide">
-            No Collateral
-          </div>
-          <div className="mt-2 text-xs text-gray-400 font-medium">
-            💡 Add assets to start earning and borrowing
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Allow health factor to go below 0.8 to show critical states accurately
-  const hf = Math.max(0.1, Math.min(3.0, healthFactor));
+export default function HealthWaterGauge({ healthFactor, avatarSrc, onEdit }: Props) {
+  const [isHovered, setIsHovered] = useState(false);
+  
+  // Calculate health factor value (use 0 as default for null to avoid hook order issues)
+  const hf = healthFactor === null ? 0 : Math.max(0.1, Math.min(3.0, healthFactor));
+  
+  // ALWAYS call ALL hooks before any conditional returns
   const riskLevel = useRiskLevel(hf);
-
+  
   // Map HF -> water height (lower HF = less water = higher risk)
   // 0.1 -> 5%, 0.8 -> 10%, 1.2 -> ~25%, 3.0 -> 92%
   const waterPct = useMemo(() => {
@@ -61,6 +48,26 @@ export default function HealthWaterGauge({ healthFactor, avatarSrc }: Props) {
     { hf: 1.5, label: "Moderate", color: "bg-yellow-500/60", position: 59 },
     { hf: 3.0, label: "Safe", color: "bg-green-500/60", position: 81 },
   ], []);
+  
+  // Handle null health factor (no collateral) - AFTER all hooks are called
+  if (healthFactor === null) {
+    return (
+      <div className="relative w-full max-w-sm mx-auto">
+        <div className="text-center py-8 px-6 rounded-xl bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900 border border-gray-200/50 dark:border-gray-700/50">
+          <div className="text-sm text-muted-foreground mb-1 font-medium">Health Factor</div>
+          <div className="text-5xl font-bold text-gray-500 tracking-tight transition-all duration-300 mb-2">
+            N/A
+          </div>
+          <div className="text-sm font-semibold text-gray-500 uppercase tracking-wide">
+            No Collateral
+          </div>
+          <div className="mt-2 text-xs text-gray-400 font-medium">
+            💡 Add assets to start earning and borrowing
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const getThresholdPosition = (thresholdHf: number) => {
     if (thresholdHf <= 0.8) {
@@ -84,22 +91,53 @@ export default function HealthWaterGauge({ healthFactor, avatarSrc }: Props) {
       <div className="relative">
         <Tooltip>
           <TooltipTrigger asChild>
-            <div className="relative h-72 w-full rounded-2xl overflow-hidden bg-gradient-to-b from-[#0e1f29] to-[#061218] border-2 border-white/10 shadow-xl cursor-help hover:border-white/20 transition-all duration-300">
+            <div 
+              className="relative h-72 w-full rounded-2xl overflow-hidden bg-gradient-to-b from-[#0e1f29] to-[#061218] border-2 border-white/10 shadow-xl cursor-help hover:border-white/20 transition-all duration-300"
+              onMouseEnter={() => setIsHovered(true)}
+              onMouseLeave={() => setIsHovered(false)}
+            >
           {/* Optional avatar below the mask */}
           {avatarSrc && (
             <img
               src={avatarSrc}
               alt="avatar"
-              className="absolute inset-0 w-full h-full object-cover opacity-95"
+              className="absolute inset-0 w-full h-full object-cover opacity-95 z-0"
+              loading="eager"
+              decoding="sync"
+              onError={(e) => {
+                console.error("Failed to load avatar image:", avatarSrc);
+                (e.currentTarget as HTMLImageElement).style.display = "none";
+              }}
+              onLoad={() => {
+                console.log("Avatar image loaded successfully:", avatarSrc);
+              }}
             />
           )}
 
-          {/* Base placeholder image */}
-          <img
-            src="/lovable-uploads/dork_health_placeholder_v2.png"
-            alt="Health placeholder"
-            className="absolute inset-0 w-full h-full object-cover"
-          />
+          {/* Base placeholder image - only show if no avatar or as a fallback */}
+          {!avatarSrc && (
+            <img
+              src="/lovable-uploads/dork_health_placeholder_v2.png"
+              alt="Health placeholder"
+              className="absolute inset-0 w-full h-full object-cover z-0"
+            />
+          )}
+
+          {/* Hover overlay with edit button */}
+          {onEdit && isHovered && (
+            <div className="absolute inset-0 bg-black/60 z-30 flex items-center justify-center transition-opacity duration-300">
+              <Button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEdit();
+                }}
+                className="flex items-center gap-2 bg-white text-black hover:bg-gray-100 dark:bg-gray-800 dark:text-white dark:hover:bg-gray-700"
+              >
+                <Edit className="w-4 h-4" />
+                Edit Profile
+              </Button>
+            </div>
+          )}
 
           {/* WATER OVERLAY — masked to the placeholder silhouette */}
           <div

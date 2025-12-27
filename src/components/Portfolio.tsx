@@ -1,6 +1,11 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { useNetwork } from "@/contexts/NetworkContext";
+import { useAddressName } from "@/hooks/useAddressName";
+import { useAvatarImage } from "@/hooks/useAvatarImage";
+import { useToast } from "@/hooks/use-toast";
+import algosdk, { waitForConfirmation } from "algosdk";
+import { ResolverService } from "@/services/resolverService";
 import {
   fetchUserGlobalData,
   fetchAllMarkets,
@@ -24,6 +29,9 @@ import EnhancedHealthFactor from "./EnhancedHealthFactor";
 import DepositsList from "./DepositsList";
 import BorrowsList from "./BorrowsList";
 import PortfolioModals from "./PortfolioModals";
+import NFTSelectionModal from "./liquidation/NFTSelectionModal";
+import ProfileUpdateSuccessModal from "./liquidation/ProfileUpdateSuccessModal";
+import { UserNFT } from "@/hooks/useUserNFTs";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import { H1, Body } from "@/components/ui/Typography";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -65,8 +73,11 @@ import {
 } from "@/components/ui/tooltip";
 
 const Portfolio = () => {
-  const { activeAccount } = useWallet();
+  const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
+  const { name: addressName } = useAddressName(activeAccount?.address);
+  const { avatarImage, isResolved: isAvatarResolved, refetch: refetchAvatar } = useAvatarImage(activeAccount?.address);
+  const { toast } = useToast();
 
   const [depositModal, setDepositModal] = useState<{
     isOpen: boolean;
@@ -143,6 +154,10 @@ const Portfolio = () => {
     column: string | null;
     direction: "asc" | "desc";
   }>({ column: "apy", direction: "asc" });
+  
+  // NFT selection state
+  const [nftModalOpen, setNftModalOpen] = useState(false);
+  const [successModalOpen, setSuccessModalOpen] = useState(false);
 
   console.log("marketData", marketData);
 
@@ -773,6 +788,29 @@ const Portfolio = () => {
   // This represents the safety buffer before liquidation
   const liquidationMargin =
     totalCollateral > 0 ? weightedLiquidationThreshold * 100 - netLTV : 0;
+
+  // Transform deposits and borrows for the success modal
+  const modalDeposits = useMemo(() => {
+    return deposits
+      .filter((deposit) => deposit.value > 0)
+      .map((deposit) => ({
+        asset: deposit.asset,
+        icon: deposit.icon,
+        value: deposit.value,
+        apy: deposit.apy,
+      }));
+  }, [deposits]);
+
+  const modalBorrows = useMemo(() => {
+    return borrows
+      .filter((borrow) => borrow.value > 0)
+      .map((borrow) => ({
+        asset: borrow.asset,
+        icon: borrow.icon,
+        value: borrow.value,
+        apy: borrow.apy,
+      }));
+  }, [borrows]);
 
   // Calculate risk factor for each borrow position
   const calculatePositionRiskFactor = (borrow: any) => {
@@ -1674,6 +1712,41 @@ const Portfolio = () => {
     );
   }
 
+  // Show loading state while avatar check is in progress
+  if (!isAvatarResolved) {
+    return (
+      <div className="space-y-6">
+        {/* Hero Section Skeleton */}
+        <DorkFiCard className="relative text-center overflow-hidden p-6 md:p-8">
+          <div className="space-y-4">
+            <Skeleton className="h-12 w-64 mx-auto" />
+            <Skeleton className="h-6 w-full max-w-2xl mx-auto" />
+            <Skeleton className="h-4 w-48 mx-auto" />
+          </div>
+        </DorkFiCard>
+
+        {/* Health Factor Skeleton */}
+        <DorkFiCard className="p-6 md:p-8">
+          <div className="grid grid-cols-1 xl:grid-cols-[420px,1fr] gap-8 lg:gap-10">
+            <div className="space-y-4">
+              <Skeleton className="h-8 w-32" />
+              <Skeleton className="h-72 w-full rounded-2xl" />
+            </div>
+            <div className="space-y-4">
+              <Skeleton className="h-8 w-40" />
+              <div className="grid grid-cols-2 gap-4">
+                <Skeleton className="h-24 w-full" />
+                <Skeleton className="h-24 w-full" />
+                <Skeleton className="h-24 w-full" />
+                <Skeleton className="h-24 w-full" />
+              </div>
+            </div>
+          </div>
+        </DorkFiCard>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Hero Section */}
@@ -1776,8 +1849,7 @@ const Portfolio = () => {
                 : userGlobalData
                 ? "Live Data"
                 : "No Data"}{" "}
-              • {activeAccount?.address.slice(0, 8)}...
-              {activeAccount?.address.slice(-8)}
+              • {addressName || `${activeAccount?.address.slice(0, 8)}...${activeAccount?.address.slice(-8)}`}
             </span>
             {user?.computed?.globalNetPortfolioValue !== undefined && (
               <span className="ml-2">
@@ -1816,17 +1888,21 @@ const Portfolio = () => {
         </div>
       </DorkFiCard>
 
+      {/* Render health factor section after avatar check is complete */}
+      {isAvatarResolved && (
       <EnhancedHealthFactor
         healthFactor={displayHealthFactor}
         totalCollateral={totalCollateral}
         totalBorrowed={totalBorrowed}
         liquidationMargin={liquidationMargin}
         netLTV={netLTV}
-        dorkNftImage="/lovable-uploads/c70b9b34-79c4-491a-b46d-c35bde947c37.png"
+          dorkNftImage={avatarImage || undefined}
         underwaterBg="/lovable-uploads/44ebe994-a30e-4eb1-a4a1-776aa2978776.png"
         onAddCollateral={handleAddCollateral}
         onBuyVoi={handleBuyVoi}
+        onEditProfile={() => setNftModalOpen(true)}
       />
+      )}
 
       {/* Network Portfolio Breakdown */}
       {user?.computed?.networkValues &&
@@ -3747,6 +3823,122 @@ const Portfolio = () => {
         }
         onRefreshWalletBalance={refreshWalletBalance}
         onRefreshMarket={() => fetchUser(activeAccount.address)}
+      />
+      
+      {/* NFT Selection Modal */}
+      <NFTSelectionModal
+        open={nftModalOpen}
+        onOpenChange={setNftModalOpen}
+        onSelectNFT={(nft: UserNFT) => {
+          // Avatar will be updated via useAvatarImage hook after transaction
+        }}
+        onConfirmNFT={async (nft: UserNFT) => {
+          if (!activeAccount?.address || !signTransactions || !activeWallet) {
+            throw new Error("Wallet not connected");
+          }
+
+          if (!addressName) {
+            throw new Error("You must own an Envoi name to set a profile NFT");
+          }
+
+          try {
+            // Only supported on voi-mainnet
+            if (currentNetwork !== "voi-mainnet") {
+              throw new Error("Profile NFTs are only supported on Voi Mainnet");
+            }
+
+            const resolverNetwork = "mainnet";
+            
+            // Initialize resolver service
+            const resolver = new ResolverService(
+              resolverNetwork,
+              activeAccount.address
+            );
+
+            // Construct arc72 format: arc72:<app_id>:<token_id>
+            const avatarValue = `arc72:${nft.contractId}:${nft.tokenId}`;
+
+            console.log("addressName", addressName);
+            console.log("avatarValue", avatarValue);
+
+            // Set avatar text record using resolver service
+            const setTextResult = await resolver.setText(addressName, "avatar_dorkfi", avatarValue);
+
+            console.log("setTextResult", setTextResult);
+            
+            if (!setTextResult.success) {
+              throw new Error("Failed to prepare transaction");
+            }
+
+            // Show toast notification to prompt user to open wallet
+            const walletName = activeWallet?.metadata?.name || "your wallet";
+            toast({
+              title: "Please Sign Transaction",
+              description: `Please open ${walletName} and sign the transaction`,
+              duration: 10000,
+            });
+
+            // Sign transactions
+            const stxns = await signTransactions(
+              setTextResult.txns.map((txn: string) =>
+                Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+              )
+            );
+
+            // Get the correct algod client for the network
+            const algorandNetwork = getAlgorandNetworkFromNetworkId(
+              currentNetwork as any
+            );
+            if (!algorandNetwork) {
+              throw new Error(`Invalid network: ${currentNetwork}`);
+            }
+            const algorandClients =
+              await algorandService.initializeClientsForTransactions(algorandNetwork);
+            
+            // Send transaction
+            const res = await algorandClients.algod.sendRawTransaction(stxns).do();
+            
+            // Wait for confirmation
+            await waitForConfirmation(algorandClients.algod, res.txid, 4);
+            
+            // Poll the resolver until the new value is reflected or timeout
+            let newAvatarText = await resolver.text(addressName, "avatar_dorkfi");
+            let attempts = 0;
+            while (newAvatarText !== avatarValue && attempts < 10) {
+              await new Promise((resolve) => setTimeout(resolve, 1000));
+              newAvatarText = await resolver.text(addressName, "avatar_dorkfi");
+              attempts++;
+            }
+
+            // Refetch the avatar image to update the UI
+            refetchAvatar();
+
+            // Close NFT selection modal and show success modal
+            setNftModalOpen(false);
+            setSuccessModalOpen(true);
+          } catch (error) {
+            console.error("Error updating profile NFT:", error);
+            toast({
+              title: "Transaction Failed",
+              description: error instanceof Error ? error.message : "Failed to update profile NFT",
+              variant: "destructive",
+            });
+            throw error; // Re-throw to let the modal handle the error
+          }
+        }}
+        currentImageUrl={avatarImage || undefined}
+      />
+
+      {/* Profile Update Success Modal */}
+      <ProfileUpdateSuccessModal
+        open={successModalOpen}
+        onOpenChange={setSuccessModalOpen}
+        avatarImage={avatarImage || undefined}
+        healthFactor={displayHealthFactor}
+        deposits={modalDeposits}
+        borrows={modalBorrows}
+        netLTV={netLTV}
+        addressName={addressName}
       />
     </div>
   );

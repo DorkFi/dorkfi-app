@@ -19,6 +19,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAddressName } from "@/hooks/useAddressName";
 import WalletModal from "./WalletModal";
 import AccountSelector from "./AccountSelector";
 import {
@@ -55,6 +56,7 @@ const WalletNetworkButton = ({
   const [selectedNetwork, setSelectedNetwork] =
     useState<NetworkId>(contextNetwork);
   const { toast } = useToast();
+  const { name: addressName } = useAddressName(activeAccount?.address);
 
   // Determine which networks are supported by the connected wallet
   const getSupportedNetworks = (): NetworkId[] => {
@@ -304,10 +306,10 @@ const WalletNetworkButton = ({
             <Button className="bg-whale-gold hover:bg-whale-gold/90 text-black font-semibold transition-all hover:scale-105 flex items-center gap-2">
               <CheckCircle className="w-4 h-4" />
               <span className="hidden sm:inline">
-                {formatAddress(activeAccount.address)}
+                {addressName || formatAddress(activeAccount.address)}
               </span>
               <span className="sm:hidden">
-                {formatAddress(activeAccount.address)}
+                {addressName || formatAddress(activeAccount.address)}
               </span>
               <ChevronDown className="w-4 h-4 opacity-70" />
             </Button>

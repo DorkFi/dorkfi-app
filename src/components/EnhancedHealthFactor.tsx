@@ -10,10 +10,11 @@ interface EnhancedHealthFactorProps {
   totalBorrowed: number;
   liquidationMargin: number;
   netLTV: number;
-  dorkNftImage: string;
+  dorkNftImage?: string;
   underwaterBg: string;
   onAddCollateral: () => void;
   onBuyVoi: () => void;
+  onEditProfile?: () => void;
 }
 
 const EnhancedHealthFactor = ({
@@ -25,7 +26,8 @@ const EnhancedHealthFactor = ({
   dorkNftImage,
   underwaterBg,
   onAddCollateral,
-  onBuyVoi
+  onBuyVoi,
+  onEditProfile
 }: EnhancedHealthFactorProps) => {
   return (
     <div className="w-full max-w-7xl mx-auto animate-fade-in">
@@ -39,6 +41,7 @@ const EnhancedHealthFactor = ({
                 healthFactor={healthFactor}
                 dorkNftImage={dorkNftImage}
                 underwaterBg={underwaterBg}
+                onEdit={onEditProfile}
               />
             </div>
 

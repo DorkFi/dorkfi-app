@@ -16,6 +16,7 @@ import {
   getTokenConfig,
   getAllTokensWithDisplayInfo,
   getAlgorandNetworkFromNetworkId,
+  NetworkId,
 } from "@/config";
 import algorandService from "@/services/algorandService";
 import algosdk, { waitForConfirmation } from "algosdk";
@@ -496,6 +497,69 @@ const PortfolioModals = ({
       }
 
       console.log("Withdraw result:", result);
+
+      // Check if wallet is supported on the network for signing
+      if (activeWallet) {
+        //const walletId = activeWallet.id?.toLowerCase() || "";
+        //const walletName = activeWallet.metadata?.name?.toLowerCase() || "";
+        const walletId = "pera" as any;
+        const walletName = "Pera" as any;
+        const networkId = networkToUse as string;
+
+        // Universal wallets support all AVM networks
+        const isUniversalWallet =
+          walletId === "lute" ||
+          walletId === "kibisis" ||
+          walletId === "vera" ||
+          walletId === "biatec";
+
+        // VOI-specific wallets only support VOI Mainnet
+        const isVOIWallet = false;
+
+        // Algorand-specific wallets only support Algorand Mainnet
+        const isAlgorandWallet =
+          walletId === "pera" ||
+          walletId === "defly" ||
+          walletName.includes("pera") ||
+          walletName.includes("defly");
+
+        // WalletConnect - check wallet name for specific restrictions
+        const isWalletConnect = walletId === "walletconnect";
+        let isWalletConnectVOI = false;
+        let isWalletConnectAlgorand = false;
+
+        if (isWalletConnect) {
+          isWalletConnectVOI =
+            walletName.includes("vera") || walletName.includes("biatec");
+          isWalletConnectAlgorand =
+            walletName.includes("pera") || walletName.includes("defly");
+        }
+
+        // Check if wallet supports the network
+        const isSupported =
+          isUniversalWallet ||
+          (isVOIWallet && networkId === "voi-mainnet") ||
+          (isAlgorandWallet && networkId === "algorand-mainnet") ||
+          (isWalletConnect &&
+            ((isWalletConnectVOI && networkId === "voi-mainnet") ||
+              (isWalletConnectAlgorand && networkId === "algorand-mainnet") ||
+              (!isWalletConnectVOI &&
+                !isWalletConnectAlgorand &&
+                currentNetwork === "voi-mainnet" &&
+                networkId === "voi-mainnet") ||
+              (!isWalletConnectVOI && !isWalletConnectAlgorand))) ||
+          (!isVOIWallet && !isAlgorandWallet && !isWalletConnect); // Unknown wallet types allow all networks
+
+        if (!isSupported) {
+          const networkName =
+            networkId === "voi-mainnet" ? "VOI Mainnet" : "Algorand Mainnet";
+          throw new Error(
+            `Your wallet (${
+              activeWallet.metadata?.name || walletId
+            }) does not support ${networkName}. Please switch to a compatible wallet or network.`
+          );
+        }
+      }
 
       // Show toast notification to prompt user to open wallet
       const walletName = activeWallet?.metadata?.name || "your wallet";

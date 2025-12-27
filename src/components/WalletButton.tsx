@@ -5,6 +5,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Wallet, Copy, LogOut, CheckCircle, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { useAddressName } from "@/hooks/useAddressName";
 import WalletModal from "./WalletModal";
 import AccountSelector from "./AccountSelector";
 
@@ -13,6 +14,7 @@ const WalletButton = () => {
   const [copied, setCopied] = useState(false);
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
   const { toast } = useToast();
+  const { name: addressName } = useAddressName(activeAccount?.address);
 
   const handleCopyAddress = () => {
     if (activeAccount?.address) {
@@ -140,7 +142,7 @@ const WalletButton = () => {
           <DropdownMenuTrigger asChild>
             <Button className="bg-whale-gold hover:bg-whale-gold/90 text-black font-semibold transition-all hover:scale-105">
               <CheckCircle className="w-4 h-4 mr-2" />
-              {formatAddress(activeAccount.address)}
+              {addressName || formatAddress(activeAccount.address)}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">

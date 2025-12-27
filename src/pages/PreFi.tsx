@@ -625,7 +625,7 @@ const chainApi = {
 
       // For network tokens (like VOI), use assetId "0"
       // For other tokens, use their contractId
-      const [assetType, tokenId] =
+      const [tokenStandard, tokenId] =
         market.assetId === "0"
           ? ["network", "0"]
           : !isNaN(Number(market.assetId))
@@ -635,7 +635,7 @@ const chainApi = {
       const nTokenId = market.nTokenId;
 
       let balance = 0n;
-      if (assetType === "network") {
+      if (tokenStandard === "network") {
         // For network VOI, get account balance minus minimum balance
         const accInfo = await algorandClients.algod
           .accountInformation(address)
@@ -643,20 +643,20 @@ const chainApi = {
         balance = BigInt(
           Math.max(0, Number(accInfo.amount) - Number(accInfo.minBalance) - 1e6)
         );
-      } else if (assetType === "asa") {
+      } else if (tokenStandard === "asa") {
         const accAssetInfo = await algorandClients.algod
           .accountAssetInformation(address, Number(market.assetId))
           .do();
         console.log("accAssetInfo", accAssetInfo);
         balance = BigInt(accAssetInfo.assetHolding.amount);
-      } else if (assetType === "arc200") {
+      } else if (tokenStandard === "arc200") {
         // For other tokens, get balance from ARC200Service
         console.log("tokenId", tokenId);
         const tokenBalance = await ARC200Service.getBalance(address, tokenId);
         console.log("tokenBalance", tokenBalance);
         balance = tokenBalance ? BigInt(tokenBalance) : 0n;
       } else {
-        throw new Error(`Unsupported asset type: ${assetType}`);
+        throw new Error(`Unsupported token standard: ${tokenStandard}`);
       }
 
       let deposited = 0n;
@@ -1464,7 +1464,7 @@ export default function PreFiDashboard() {
         depositResult = await deposit(
           selectedMarket.poolId || "", // poolId - use token's poolId or fallback
           selectedMarket.marketId || "", // marketId
-          selectedMarket.tokenStandard, // assetType - pass the token standard
+          selectedMarket.tokenStandard, // tokenStandard - pass the token standard
           amount, // amount as string
           activeAccount.address, // userAddress
           currentNetwork // networkId

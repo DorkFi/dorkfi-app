@@ -3818,9 +3818,9 @@ export default function AdminDashboard() {
                 );
                 ARC200Service.initialize(algorandClients);
 
-                // Determine asset type and token ID (same logic as PreFi.tsx)
+                // Determine token standard and token ID (same logic as PreFi.tsx)
                 const assetId = token.underlyingAssetId || "0";
-                const [assetType, tokenId] =
+                const [tokenStandard, tokenId] =
                   assetId === "0"
                     ? ["network", "0"]
                     : !isNaN(Number(assetId))
@@ -3830,9 +3830,9 @@ export default function AdminDashboard() {
                 // Get nTokenId for deposited balance
                 const nTokenId = marketInfo.ntokenId;
 
-                // Fetch wallet balance based on asset type
+                // Fetch wallet balance based on token standard
                 let balance = 0n;
-                if (assetType === "network") {
+                if (tokenStandard === "network") {
                   // For network VOI, get account balance minus minimum balance
                   const accInfo = await algorandClients.algod
                     .accountInformation(userAddress)
@@ -3843,12 +3843,12 @@ export default function AdminDashboard() {
                       Number(accInfo.amount) - Number(accInfo.minBalance) - 1e6
                     )
                   );
-                } else if (assetType === "asa") {
+                } else if (tokenStandard === "asa") {
                   const accAssetInfo = await algorandClients.algod
                     .accountAssetInformation(userAddress, Number(assetId))
                     .do();
                   balance = BigInt(accAssetInfo.assetHolding.amount);
-                } else if (assetType === "arc200") {
+                } else if (tokenStandard === "arc200") {
                   const tokenBalance = await ARC200Service.getBalance(
                     userAddress,
                     tokenId
@@ -3900,7 +3900,7 @@ export default function AdminDashboard() {
                 };
 
                 console.log(`✅ REAL user market data for ${token.symbol}:`, {
-                  assetType,
+                  tokenStandard,
                   tokenId,
                   nTokenId,
                   deposited: fromBase(deposited, token.decimals || 6),
