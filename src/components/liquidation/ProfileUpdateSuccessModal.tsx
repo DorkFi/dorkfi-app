@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -8,7 +8,6 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { CheckCircle2 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 
 interface TopAsset {
   asset: string;
@@ -64,109 +63,276 @@ const ProfileUpdateSuccessModal: React.FC<ProfileUpdateSuccessModalProps> = ({
 
   const status = getHealthFactorStatus();
   const [showShareView, setShowShareView] = useState(false);
-  const confettiIntervalRef = useRef<number | null>(null);
+  const [celebrationParticles, setCelebrationParticles] = useState<Array<{
+    id: number;
+    type: 'bubble' | 'coin' | 'fish';
+    x: number;
+    y: number;
+    size: number;
+    speed: number;
+    delay: number;
+    driftX: number;
+    icon?: string;
+  }>>([]);
 
-  // Start continuous confetti when share view is shown
+  // Generate ocean/DeFi themed celebration particles when modal opens
   useEffect(() => {
-    if (showShareView && avatarImage) {
-      // Add global style to position confetti canvas behind modal content
-      const styleId = 'confetti-behind-modal';
+    if (open) {
+      const particles: Array<{
+        id: number;
+        type: 'bubble' | 'coin' | 'fish';
+        x: number;
+        y: number;
+        size: number;
+        speed: number;
+        delay: number;
+        driftX: number;
+        icon?: string;
+      }> = [];
+
+      // Generate bubbles
+      for (let i = 0; i < 15; i++) {
+        particles.push({
+          id: i,
+          type: 'bubble',
+          x: Math.random() * 100,
+          y: 100 + Math.random() * 20,
+          size: 8 + Math.random() * 12,
+          speed: 0.3 + Math.random() * 0.4,
+          delay: Math.random() * 2,
+          driftX: (Math.random() - 0.5) * 100,
+        });
+      }
+
+      // Generate floating coins/tokens (use deposit/borrow icons)
+      const allAssets = [...deposits, ...borrows].filter(asset => asset.icon);
+      for (let i = 0; i < Math.min(8, allAssets.length); i++) {
+        const asset = allAssets[i];
+        particles.push({
+          id: 100 + i,
+          type: 'coin',
+          x: Math.random() * 100,
+          y: 100 + Math.random() * 20,
+          size: 24 + Math.random() * 16,
+          speed: 0.2 + Math.random() * 0.3,
+          delay: Math.random() * 2,
+          driftX: (Math.random() - 0.5) * 100,
+          icon: asset.icon,
+        });
+      }
+
+      // Generate fish emojis
+      for (let i = 0; i < 5; i++) {
+        particles.push({
+          id: 200 + i,
+          type: 'fish',
+          x: Math.random() * 100,
+          y: 100 + Math.random() * 20,
+          size: 20 + Math.random() * 10,
+          speed: 0.25 + Math.random() * 0.25,
+          delay: Math.random() * 2,
+          driftX: (Math.random() - 0.5) * 100,
+        });
+      }
+
+      setCelebrationParticles(particles);
+
+      // Clear particles after animation completes
+      const timer = setTimeout(() => {
+        setCelebrationParticles([]);
+      }, 5000);
+
+      return () => clearTimeout(timer);
+    } else {
+      setCelebrationParticles([]);
+    }
+  }, [open, deposits, borrows]);
+
+  // Add ocean/DeFi themed celebration animations
+  useEffect(() => {
+    if (open) {
+      const styleId = 'ocean-defi-celebration-animations';
       if (!document.getElementById(styleId)) {
         const style = document.createElement('style');
         style.id = styleId;
         style.textContent = `
-          canvas[style*="pointer-events: none"] {
-            z-index: 40 !important;
+          @keyframes ripple {
+            0% {
+              transform: scale(0.8);
+              opacity: 1;
+            }
+            100% {
+              transform: scale(2.5);
+              opacity: 0;
+            }
+          }
+          
+          @keyframes pulse-glow {
+            0%, 100% {
+              box-shadow: 0 0 20px rgba(29, 161, 242, 0.4),
+                          0 0 40px rgba(0, 212, 255, 0.3),
+                          0 0 60px rgba(79, 205, 196, 0.2);
+            }
+            50% {
+              box-shadow: 0 0 30px rgba(29, 161, 242, 0.6),
+                          0 0 60px rgba(0, 212, 255, 0.5),
+                          0 0 90px rgba(79, 205, 196, 0.4);
+            }
+          }
+          
+          @keyframes pulse-scale {
+            0%, 100% {
+              transform: scale(1);
+            }
+            50% {
+              transform: scale(1.02);
+            }
+          }
+
+          @keyframes bubble-rise {
+            0% {
+              transform: translateY(0) translateX(0) scale(0.8);
+              opacity: 0.6;
+            }
+            50% {
+              transform: translateY(-50vh) translateX(var(--drift-x, 0)) scale(1);
+              opacity: 0.8;
+            }
+            100% {
+              transform: translateY(-100vh) translateX(var(--drift-x, 0)) scale(0.6);
+              opacity: 0;
+            }
+          }
+
+          @keyframes coin-float {
+            0% {
+              transform: translateY(0) translateX(0) rotate(0deg) scale(0.8);
+              opacity: 0;
+            }
+            10% {
+              opacity: 1;
+            }
+            50% {
+              transform: translateY(-50vh) translateX(var(--drift-x, 0)) rotate(180deg) scale(1);
+              opacity: 1;
+            }
+            100% {
+              transform: translateY(-100vh) translateX(var(--drift-x, 0)) rotate(360deg) scale(0.6);
+              opacity: 0;
+            }
+          }
+
+          @keyframes fish-swim {
+            0% {
+              transform: translateY(0) translateX(0) scaleX(1);
+              opacity: 0;
+            }
+            10% {
+              opacity: 1;
+            }
+            50% {
+              transform: translateY(-50vh) translateX(var(--drift-x, 0)) scaleX(1);
+              opacity: 1;
+            }
+            51% {
+              transform: translateY(-50vh) translateX(var(--drift-x, 0)) scaleX(-1);
+            }
+            100% {
+              transform: translateY(-100vh) translateX(var(--drift-x, 0)) scaleX(-1);
+              opacity: 0;
+            }
+          }
+
+          @keyframes wave {
+            0%, 100% {
+              transform: translateX(0) translateY(0);
+            }
+            50% {
+              transform: translateX(10px) translateY(-5px);
+            }
+          }
+          
+          .ripple-circle {
+            position: absolute;
+            border-radius: 50%;
+            border: 2px solid;
+            pointer-events: none;
+            animation: ripple 2s ease-out infinite;
+          }
+          
+          .ripple-circle-1 {
+            border-color: rgba(29, 161, 242, 0.6);
+            animation-delay: 0s;
+          }
+          
+          .ripple-circle-2 {
+            border-color: rgba(0, 212, 255, 0.5);
+            animation-delay: 0.4s;
+          }
+          
+          .ripple-circle-3 {
+            border-color: rgba(79, 205, 196, 0.4);
+            animation-delay: 0.8s;
+          }
+          
+          .pulse-glow {
+            animation: pulse-glow 2s ease-in-out infinite;
+          }
+          
+          .pulse-scale {
+            animation: pulse-scale 3s ease-in-out infinite;
+          }
+
+          .celebration-bubble {
+            position: absolute;
+            border-radius: 50%;
+            background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.8), rgba(173, 216, 230, 0.6));
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            pointer-events: none;
+            animation: bubble-rise var(--duration, 4s) ease-out forwards;
+            animation-delay: var(--delay, 0s);
+            box-shadow: 0 0 10px rgba(173, 216, 230, 0.5);
+          }
+
+          .celebration-coin {
+            position: absolute;
+            border-radius: 50%;
+            pointer-events: none;
+            animation: coin-float var(--duration, 5s) ease-in-out forwards;
+            animation-delay: var(--delay, 0s);
+            filter: drop-shadow(0 4px 8px rgba(255, 215, 0, 0.4));
+          }
+
+          .celebration-fish {
+            position: absolute;
+            pointer-events: none;
+            animation: fish-swim var(--duration, 6s) ease-in-out forwards;
+            animation-delay: var(--delay, 0s);
+            filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+          }
+
+          .wave-effect {
+            animation: wave 3s ease-in-out infinite;
           }
         `;
         document.head.appendChild(style);
       }
 
-      // Style confetti canvas to be behind content
-      const styleConfettiCanvas = () => {
-        const canvases = document.querySelectorAll('canvas[style*="pointer-events: none"]');
-        canvases.forEach((canvas) => {
-          const htmlCanvas = canvas as HTMLCanvasElement;
-          htmlCanvas.style.zIndex = '40';
-          htmlCanvas.style.position = 'fixed';
-        });
-      };
-
-      // Initial burst
-      confetti({
-        particleCount: 100,
-        spread: 70,
-        origin: { y: 0.6 },
-        gravity: 1.5, // Increased gravity for faster falling
-        ticks: 200, // Particles last longer to see the effect
-        scalar: 2, // Make confetti 2x bigger
-        colors: ['#1DA1F2', '#00D4FF', '#FFD700', '#FF6B6B', '#4ECDC4', '#45B7D1'],
-      });
-      
-      // Style the canvas after it's created
-      setTimeout(styleConfettiCanvas, 0);
-
-      // Continuous confetti
-      const interval = setInterval(() => {
-        confetti({
-          particleCount: 50,
-          angle: 60,
-          spread: 55,
-          origin: { x: 0 },
-          gravity: 1.5, // Increased gravity for faster falling
-          ticks: 200,
-          scalar: 2, // Make confetti 2x bigger
-          colors: ['#1DA1F2', '#00D4FF', '#FFD700', '#FF6B6B', '#4ECDC4', '#45B7D1'],
-        });
-        confetti({
-          particleCount: 50,
-          angle: 120,
-          spread: 55,
-          origin: { x: 1 },
-          gravity: 1.5, // Increased gravity for faster falling
-          ticks: 200,
-          scalar: 2, // Make confetti 2x bigger
-          colors: ['#1DA1F2', '#00D4FF', '#FFD700', '#FF6B6B', '#4ECDC4', '#45B7D1'],
-        });
-        // Re-style canvas in case new ones are created
-        styleConfettiCanvas();
-      }, 300);
-
-      confettiIntervalRef.current = interval;
-
       return () => {
-        if (confettiIntervalRef.current) {
-          clearInterval(confettiIntervalRef.current);
-          confettiIntervalRef.current = null;
-        }
-        // Remove style tag
+        // Cleanup: remove style tag when component unmounts
         const styleTag = document.getElementById(styleId);
-        if (styleTag) {
+        if (styleTag && !open) {
           styleTag.remove();
         }
-        // Reset confetti
-        confetti.reset();
       };
-    } else {
-      // Stop confetti when share view is closed
-      if (confettiIntervalRef.current) {
-        clearInterval(confettiIntervalRef.current);
-        confettiIntervalRef.current = null;
-      }
-      // Remove style tag
-      const styleTag = document.getElementById('confetti-behind-modal');
-      if (styleTag) {
-        styleTag.remove();
-      }
-      confetti.reset();
     }
-  }, [showShareView, avatarImage]);
+  }, [open]);
 
   const handleShare = () => {
     // First show the enlarged view
     setShowShareView(true);
     
-    // Then open Twitter after a brief delay
+    // Then open Twitter after a 2 second delay
     setTimeout(() => {
     const healthFactorText = healthFactor !== null 
       ? healthFactor >= 2.0 
@@ -192,19 +358,13 @@ const ProfileUpdateSuccessModal: React.FC<ProfileUpdateSuccessModalProps> = ({
     
     const url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
     window.open(url, '_blank', 'noopener,noreferrer');
-    }, 300);
+    }, 3000);
   };
 
   // Reset share view when modal closes
   useEffect(() => {
     if (!open) {
       setShowShareView(false);
-      // Stop confetti when modal closes
-      if (confettiIntervalRef.current) {
-        clearInterval(confettiIntervalRef.current);
-        confettiIntervalRef.current = null;
-      }
-      confetti.reset();
     }
   }, [open]);
 
@@ -212,8 +372,80 @@ const ProfileUpdateSuccessModal: React.FC<ProfileUpdateSuccessModalProps> = ({
   if (showShareView && avatarImage) {
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-2xl lg:max-w-3xl p-0 overflow-hidden [&>button:has(span.sr-only)]:hidden relative z-50">
-          <div className="relative w-full aspect-square max-w-full z-10">
+        <DialogContent className="max-w-2xl lg:max-w-3xl p-0 overflow-hidden [&>button:has(span.sr-only)]:hidden relative z-50 pulse-glow">
+          <div className="relative w-full aspect-square max-w-full z-10 pulse-scale overflow-hidden">
+            {/* Ocean/DeFi Celebration Particles */}
+            {celebrationParticles.map((particle) => {
+              const duration = particle.type === 'bubble' ? 4 : particle.type === 'coin' ? 5 : 6;
+              
+              if (particle.type === 'bubble') {
+                return (
+                  <div
+                    key={particle.id}
+                    className="celebration-bubble"
+                    style={{
+                      left: `${particle.x}%`,
+                      bottom: '0%',
+                      width: `${particle.size}px`,
+                      height: `${particle.size}px`,
+                      '--duration': `${duration}s`,
+                      '--delay': `${particle.delay}s`,
+                      '--drift-x': `${particle.driftX}px`,
+                    } as React.CSSProperties}
+                  />
+                );
+              } else if (particle.type === 'coin' && particle.icon) {
+                return (
+                  <div
+                    key={particle.id}
+                    className="celebration-coin"
+                    style={{
+                      left: `${particle.x}%`,
+                      bottom: '0%',
+                      width: `${particle.size}px`,
+                      height: `${particle.size}px`,
+                      '--duration': `${duration}s`,
+                      '--delay': `${particle.delay}s`,
+                      '--drift-x': `${particle.driftX}px`,
+                    } as React.CSSProperties}
+                  >
+                    <img
+                      src={particle.icon}
+                      alt="Token"
+                      className="w-full h-full rounded-full"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                      }}
+                    />
+                  </div>
+                );
+              } else if (particle.type === 'fish') {
+                return (
+                  <div
+                    key={particle.id}
+                    className="celebration-fish"
+                    style={{
+                      left: `${particle.x}%`,
+                      bottom: '0%',
+                      fontSize: `${particle.size}px`,
+                      '--duration': `${duration}s`,
+                      '--delay': `${particle.delay}s`,
+                      '--drift-x': `${particle.driftX}px`,
+                    } as React.CSSProperties}
+                  >
+                    🐟
+                  </div>
+                );
+              }
+              return null;
+            })}
+            
+            {/* Ripple effects */}
+            <div className="absolute inset-0 flex items-center justify-center z-5 pointer-events-none">
+              <div className="ripple-circle ripple-circle-1 w-32 h-32 lg:w-40 lg:h-40"></div>
+              <div className="ripple-circle ripple-circle-2 w-32 h-32 lg:w-40 lg:h-40"></div>
+              <div className="ripple-circle ripple-circle-3 w-32 h-32 lg:w-40 lg:h-40"></div>
+            </div>
             <img
               src={avatarImage}
               alt="Profile NFT"
@@ -329,10 +561,78 @@ const ProfileUpdateSuccessModal: React.FC<ProfileUpdateSuccessModalProps> = ({
         </DialogHeader>
 
         <div className="space-y-6">
+          {/* Ocean/DeFi Celebration Particles */}
+          <div className="fixed inset-0 pointer-events-none z-[100] overflow-hidden">
+            {celebrationParticles.map((particle) => {
+              const duration = particle.type === 'bubble' ? 4 : particle.type === 'coin' ? 5 : 6;
+              
+              if (particle.type === 'bubble') {
+                return (
+                  <div
+                    key={particle.id}
+                    className="celebration-bubble"
+                    style={{
+                      left: `${particle.x}%`,
+                      bottom: '0%',
+                      width: `${particle.size}px`,
+                      height: `${particle.size}px`,
+                      '--duration': `${duration}s`,
+                      '--delay': `${particle.delay}s`,
+                      '--drift-x': `${particle.driftX}px`,
+                    } as React.CSSProperties}
+                  />
+                );
+              } else if (particle.type === 'coin' && particle.icon) {
+                return (
+                  <div
+                    key={particle.id}
+                    className="celebration-coin"
+                    style={{
+                      left: `${particle.x}%`,
+                      bottom: '0%',
+                      width: `${particle.size}px`,
+                      height: `${particle.size}px`,
+                      '--duration': `${duration}s`,
+                      '--delay': `${particle.delay}s`,
+                      '--drift-x': `${particle.driftX}px`,
+                    } as React.CSSProperties}
+                  >
+                    <img
+                      src={particle.icon}
+                      alt="Token"
+                      className="w-full h-full rounded-full"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                      }}
+                    />
+                  </div>
+                );
+              } else if (particle.type === 'fish') {
+                return (
+                  <div
+                    key={particle.id}
+                    className="celebration-fish"
+                    style={{
+                      left: `${particle.x}%`,
+                      bottom: '0%',
+                      fontSize: `${particle.size}px`,
+                      '--duration': `${duration}s`,
+                      '--delay': `${particle.delay}s`,
+                      '--drift-x': `${particle.driftX}px`,
+                    } as React.CSSProperties}
+                  >
+                    🐟
+                  </div>
+                );
+              }
+              return null;
+            })}
+          </div>
+
           {/* Health Factor Image with Overlay */}
           {avatarImage && (
             <div 
-              className="relative w-full aspect-square max-w-md mx-auto rounded-2xl overflow-hidden border-2 border-ocean-teal/30 bg-gradient-to-br from-blue-50 via-cyan-50 to-sky-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900"
+              className="relative w-full aspect-square max-w-md mx-auto rounded-2xl overflow-hidden border-2 border-ocean-teal/30 bg-gradient-to-br from-blue-50 via-cyan-50 to-sky-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 wave-effect"
             >
               <img
                 src={avatarImage}
