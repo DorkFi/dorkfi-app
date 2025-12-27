@@ -513,10 +513,8 @@ const SupplyBorrowModal = ({
 
       // Check if wallet is supported on the network for signing
       if (activeWallet) {
-        //const walletId = activeWallet.id?.toLowerCase() || "";
-        //const walletName = activeWallet.metadata?.name?.toLowerCase() || "";
-        const walletId = "pera" as any;
-        const walletName = "Pera" as any;
+        const walletId = activeWallet.id?.toLowerCase() || "";
+        const walletName = activeWallet.metadata?.name?.toLowerCase() || "";
         const networkId = actualNetwork as string;
 
         // Universal wallets support all AVM networks
