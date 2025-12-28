@@ -69,6 +69,19 @@ Complete specification for the ARC200 Exchange Extension:
 
 **Perfect for:** Developers implementing token standards, smart contract developers, DeFi protocol builders
 
+### 🎁 [Claim Setup Guide](CLAIM_SETUP.md)
+**Complete guide to setting up reward claim functionality**
+
+Comprehensive guide for configuring and managing the claim system:
+- How the claim system works
+- Adding new rewards to the system
+- Network and contract configuration
+- Testing and troubleshooting
+- Security considerations
+- Example configurations
+
+**Perfect for:** Developers setting up rewards, administrators managing airdrops, those implementing claim functionality
+
 ## Quick Start Guide
 
 ### For New Users
@@ -82,7 +95,8 @@ Complete specification for the ARC200 Exchange Extension:
 1. **Technical Details**: Review [APY Estimation Strategy](APY_ESTIMATION.md) for calculation methods
 2. **Version Control**: Check [Version Management](VERSION_MANAGEMENT.md) for development setup
 3. **Token Standards**: Review [ARC200 Exchange Extension](ARC200_EXCHANGE.md) for token exchange specifications
-4. **Codebase**: Explore the React/TypeScript frontend implementation
+4. **Claim Setup**: Follow the [Claim Setup Guide](CLAIM_SETUP.md) to configure reward claims
+5. **Codebase**: Explore the React/TypeScript frontend implementation
 
 ## Key Features
 

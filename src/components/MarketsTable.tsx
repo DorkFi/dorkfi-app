@@ -184,7 +184,27 @@ const MarketsTable = () => {
       symbol: "VOI",
       decimals: 6,
     },
-    // add more rewards here
+    {
+      id: 2,
+      name: "Phase 1 Incentive",
+      description: "DorkFi Phase 1 Incentive",
+      reward: 4_038_386,
+      icon: "/lovable-uploads/VOI.png",
+      airdropAccount:
+        "57IUOX6D3JAAM3GSPVJPM4CTTOVUYWWWLHOIBGOS275ZC3Q4BUPA4M5R4U",
+      tokenStandard: "network",
+      networks: {
+        "algorand-mainnet": {
+          contractId: "3210709899",
+          assetId: "2320775407",
+        },
+        "voi-mainnet": {
+          contractId: "41877720",
+        },
+      },
+      symbol: "VOI",
+      decimals: 6,
+    },
   ];
 
   const {
@@ -2296,7 +2316,7 @@ const MarketsTable = () => {
                                 formattedTotalClaimable
                               } ${
                                 claimedAmount?.symbol || rewardSymbol
-                              } rewards for PreFi incentives on @dork_fi${networkMentions}${
+                              } rewards on @dork_fi${networkMentions}${
                                 walletName ? ` using ${walletName}` : ""
                               }! 🎉`
                             : `Just claimed ${
@@ -2304,7 +2324,7 @@ const MarketsTable = () => {
                                 formattedTotalClaimable
                               } ${
                                 claimedAmount?.symbol || rewardSymbol
-                              } rewards for PreFi incentives on @dork_fi${networkMentions}${
+                              } rewards on @dork_fi${networkMentions}${
                                 walletName ? ` using ${walletName}` : ""
                               }! 🎉`;
 
