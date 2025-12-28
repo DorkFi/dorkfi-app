@@ -9,7 +9,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
-import { Edit } from "lucide-react";
+import { Edit, HelpCircle } from "lucide-react";
 
 type Props = {
   healthFactor: number | null;
@@ -121,6 +121,33 @@ export default function HealthWaterGauge({ healthFactor, avatarSrc, onEdit }: Pr
               alt="Health placeholder"
               className="absolute inset-0 w-full h-full object-cover z-0"
             />
+          )}
+
+          {/* Question mark icon in top corner - only show when using placeholder image */}
+          {onEdit && !avatarSrc && (
+            <div className="absolute top-2 right-2 z-40">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEdit();
+                    }}
+                    size="icon"
+                    variant="secondary"
+                    className="h-8 w-8 rounded-full bg-white/90 dark:bg-gray-800/90 hover:bg-white dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 shadow-lg hover:shadow-xl transition-all duration-200 ring-2 ring-ocean-teal/50 ring-offset-2 ring-offset-transparent"
+                    aria-label="Edit profile image"
+                  >
+                    <HelpCircle className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="left" className="max-w-[200px]">
+                  <p className="text-sm">
+                    Click to customize your profile image
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </div>
           )}
 
           {/* Hover overlay with edit button */}
