@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { Menu, X } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import WalletNetworkButton from "@/components/WalletNetworkButton";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { getCurrentGasStationSymbols, isFeatureEnabled } from "@/config";
@@ -27,6 +27,8 @@ const Header = ({ activeTab, onTabChange }: HeaderProps) => {
       navigate("/liquidation-markets");
     } else if (value === "gas-station") {
       navigate("/gas-station");
+    } else if (value === "analytics") {
+      navigate("/analytics");
     } else {
       navigate("/");
     }
@@ -38,6 +40,17 @@ const Header = ({ activeTab, onTabChange }: HeaderProps) => {
     navigate("/");
     setIsMobileMenuOpen(false);
   };
+
+  // Sync activeTab with current route
+  useEffect(() => {
+    if (location.pathname === "/analytics") {
+      onTabChange("analytics");
+    } else if (location.pathname === "/liquidation-markets") {
+      onTabChange("liquidations");
+    } else if (location.pathname === "/gas-station") {
+      onTabChange("gas-station");
+    }
+  }, [location.pathname, onTabChange]);
 
   // Check if current network has gas stations available
   const gasStationSymbols = getCurrentGasStationSymbols();
@@ -53,6 +66,7 @@ const Header = ({ activeTab, onTabChange }: HeaderProps) => {
     ...(isFeatureEnabled("enableLiquidations")
       ? [{ value: "liquidations", label: "Liquidations" }]
       : []),
+    { value: "analytics", label: "Analytics" },
     //{ value: 'swap', label: 'Swap' },
     ...(isFeatureEnabled("enableGasStation") && hasGasStation
       ? [{ value: "gas-station", label: "Gas Station" }]

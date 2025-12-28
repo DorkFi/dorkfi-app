@@ -50,29 +50,51 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
 
   // Create WalletManager with current network configuration
   const createWalletManager = (networkId: ConfigNetworkId): WalletManager => {
-    // First update the global config
-    setCurrentNetwork(networkId);
+    try {
+      // First update the global config
+      setCurrentNetwork(networkId);
 
-    // Then get the updated config
-    const networkConfig = getCurrentNetworkConfig();
+      // Then get the updated config
+      const networkConfig = getCurrentNetworkConfig();
 
-    const networks = getNetworks();
+      // Validate network config exists
+      if (!networkConfig) {
+        throw new Error(`Network configuration not found for ${networkId}`);
+      }
 
-    // Determine wallet configuration based on network type
-    const wallets = getWalletsForNetwork(networkId);
+      // Validate walletNetworkId exists
+      if (!networkConfig.walletNetworkId) {
+        throw new Error(`walletNetworkId not found in network config for ${networkId}`);
+      }
 
-    return new WalletManager({
-      wallets,
-      networks,
-      defaultNetwork: networkConfig.walletNetworkId as NetworkId,
-    });
+      const networks = getNetworks();
+
+      // Determine wallet configuration based on network type
+      const wallets = getWalletsForNetwork(networkId);
+
+      // Get the wallet network ID - this should match one of the network IDs in the networks array
+      const walletNetworkId = networkConfig.walletNetworkId as NetworkId;
+
+      // Log for debugging
+      console.log(`Creating WalletManager for networkId: ${networkId}, walletNetworkId: ${walletNetworkId}`);
+      console.log(`Available networks:`, networks);
+
+      return new WalletManager({
+        wallets,
+        networks,
+        defaultNetwork: walletNetworkId,
+      });
+    } catch (error) {
+      console.error(`Error creating WalletManager for ${networkId}:`, error);
+      throw error;
+    }
   };
 
   const getNetworks = () => {
     return new NetworkConfigBuilder()
       .mainnet({
         algod: {
-          baseServer: "https://mainnet-api.voi.dork.fi",
+          baseServer: "https://mainnet-api.4160.nodely.dev",
           port: "443",
           token: "",
         },

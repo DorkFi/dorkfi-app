@@ -816,6 +816,449 @@ class DorkFiAPIService {
       throw error;
     }
   }
+
+  // ==================== Analytics Endpoints ====================
+
+  /**
+   * Get current TVL (Total Value Locked)
+   * @returns Promise<ApiResponse<{ totalTVL: number }>>
+   */
+  async getTVL(): Promise<ApiResponse<{ totalTVL: number }>> {
+    try {
+      const response = await fetch(`${this.baseUrl}/analytics/tvl`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error("Error fetching TVL:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get TVL growth data
+   * @param startTime - Start timestamp in milliseconds
+   * @param endTime - End timestamp in milliseconds
+   * @param period - Period (day, week, month)
+   * @param network - Optional network filter
+   * @returns Promise<ApiResponse<{ growth24h?: number; growth7d?: number; growth30d?: number; dataPoints: Array<{ timestamp: number; value: number; network?: string }> }>>
+   */
+  async getTVLGrowth(
+    startTime?: number,
+    endTime?: number,
+    period: string = "day",
+    network?: string
+  ): Promise<
+    ApiResponse<{
+      growth24h?: number;
+      growth7d?: number;
+      growth30d?: number;
+      dataPoints: Array<{
+        timestamp: number;
+        value: number;
+        network?: string;
+      }>;
+    }>
+  > {
+    try {
+      let url = `${this.baseUrl}/analytics/tvl-growth?period=${period}`;
+      if (startTime) url += `&startTime=${startTime}`;
+      if (endTime) url += `&endTime=${endTime}`;
+      if (network) url += `&network=${encodeURIComponent(network)}`;
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error("Error fetching TVL growth:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get total borrowed amount
+   * @returns Promise<ApiResponse<{ totalBorrowed: number }>>
+   */
+  async getTotalBorrowed(): Promise<ApiResponse<{ totalBorrowed: number }>> {
+    try {
+      const response = await fetch(`${this.baseUrl}/analytics/borrowed`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error("Error fetching total borrowed:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get borrowed growth percentages
+   * @returns Promise<ApiResponse<{ growth24h?: number; growth7d?: number; growth30d?: number }>>
+   */
+  async getBorrowedGrowth(): Promise<
+    ApiResponse<{ growth24h?: number; growth7d?: number; growth30d?: number }>
+  > {
+    try {
+      const response = await fetch(`${this.baseUrl}/analytics/borrowed-growth`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error("Error fetching borrowed growth:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get WAD circulation
+   * @returns Promise<ApiResponse<{ totalWadCirculation: string }>>
+   */
+  async getWADCirculation(): Promise<
+    ApiResponse<{ totalWadCirculation: string }>
+  > {
+    try {
+      const response = await fetch(`${this.baseUrl}/analytics/wad-circulation`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error("Error fetching WAD circulation:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get WAD supply growth data
+   * @param startTime - Start timestamp in milliseconds
+   * @param endTime - End timestamp in milliseconds
+   * @param period - Period (day, week, month)
+   * @param network - Optional network filter
+   * @returns Promise<ApiResponse<{ growth24h?: number; growth7d?: number; growth30d?: number; dataPoints: Array<{ timestamp: number; value: number; network?: string }> }>>
+   */
+  async getWADSupplyGrowth(
+    startTime?: number,
+    endTime?: number,
+    period: string = "day",
+    network?: string
+  ): Promise<
+    ApiResponse<{
+      growth24h?: number;
+      growth7d?: number;
+      growth30d?: number;
+      dataPoints: Array<{
+        timestamp: number;
+        value: number;
+        network?: string;
+      }>;
+    }>
+  > {
+    try {
+      let url = `${this.baseUrl}/analytics/wad-supply-growth?period=${period}`;
+      if (startTime) url += `&startTime=${startTime}`;
+      if (endTime) url += `&endTime=${endTime}`;
+      if (network) url += `&network=${encodeURIComponent(network)}`;
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error("Error fetching WAD supply growth:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get active wallets count
+   * @returns Promise<ApiResponse<{ totalActiveWallets: number }>>
+   */
+  async getActiveWallets(): Promise<
+    ApiResponse<{ totalActiveWallets: number }>
+  > {
+    try {
+      const response = await fetch(`${this.baseUrl}/analytics/active-wallets`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error("Error fetching active wallets:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get active wallets growth percentages
+   * @returns Promise<ApiResponse<{ growth24h?: number; growth7d?: number; growth30d?: number }>>
+   */
+  async getActiveWalletsGrowth(): Promise<
+    ApiResponse<{ growth24h?: number; growth7d?: number; growth30d?: number }>
+  > {
+    try {
+      const response = await fetch(
+        `${this.baseUrl}/analytics/active-wallets-growth`
+      );
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error("Error fetching active wallets growth:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get deposits data
+   * @param startTime - Start timestamp in milliseconds
+   * @param endTime - End timestamp in milliseconds
+   * @param limit - Maximum number of results
+   * @param network - Optional network filter
+   * @returns Promise<ApiResponse<{ deposits: Array<{ timestamp: number; round: number; depositValueUSD: string; network?: string }>; summary: { totalDepositValueUSD: string } }>>
+   */
+  async getDeposits(
+    startTime?: number,
+    endTime?: number,
+    limit: number = 10000,
+    network?: string
+  ): Promise<
+    ApiResponse<{
+      deposits: Array<{
+        timestamp: number;
+        round: number;
+        depositValueUSD: string;
+        network?: string;
+      }>;
+      summary: { totalDepositValueUSD: string };
+    }>
+  > {
+    try {
+      let url = `${this.baseUrl}/analytics/deposits?limit=${limit}`;
+      if (startTime) url += `&startTime=${startTime}`;
+      if (endTime) url += `&endTime=${endTime}`;
+      if (network) url += `&network=${encodeURIComponent(network)}`;
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error("Error fetching deposits:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get withdrawals data
+   * @param startTime - Start timestamp in milliseconds
+   * @param endTime - End timestamp in milliseconds
+   * @param limit - Maximum number of results
+   * @param network - Optional network filter
+   * @returns Promise<ApiResponse<{ withdrawals: Array<{ timestamp: number; round: number; withdrawalValueUSD: string; network?: string }>; summary: { totalWithdrawalValueUSD: string } }>>
+   */
+  async getWithdrawals(
+    startTime?: number,
+    endTime?: number,
+    limit: number = 10000,
+    network?: string
+  ): Promise<
+    ApiResponse<{
+      withdrawals: Array<{
+        timestamp: number;
+        round: number;
+        withdrawalValueUSD: string;
+        network?: string;
+      }>;
+      summary: { totalWithdrawalValueUSD: string };
+    }>
+  > {
+    try {
+      let url = `${this.baseUrl}/analytics/withdrawals?limit=${limit}`;
+      if (startTime) url += `&startTime=${startTime}`;
+      if (endTime) url += `&endTime=${endTime}`;
+      if (network) url += `&network=${encodeURIComponent(network)}`;
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error("Error fetching withdrawals:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get health factor distribution
+   * @param network - Optional network filter
+   * @returns Promise<ApiResponse<{ distribution: Array<{ range: string; count: number }> }>>
+   */
+  async getHealthFactorDistribution(
+    network?: string
+  ): Promise<
+    ApiResponse<{
+      distribution: Array<{ range: string; count: number }>;
+    }>
+  > {
+    try {
+      let url = `${this.baseUrl}/analytics/health-factor-distribution`;
+      if (network) url += `?network=${encodeURIComponent(network)}`;
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error("Error fetching health factor distribution:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get borrows data
+   * @param startTime - Start timestamp in milliseconds
+   * @param endTime - End timestamp in milliseconds
+   * @param limit - Maximum number of results
+   * @param network - Optional network filter
+   * @returns Promise<ApiResponse<{ borrows: Array<{ timestamp: number; round: number; borrowValueUSD: string; network?: string }>; summary: { totalBorrowValueUSD: string } }>>
+   */
+  async getBorrows(
+    startTime?: number,
+    endTime?: number,
+    limit: number = 10000,
+    network?: string
+  ): Promise<
+    ApiResponse<{
+      borrows: Array<{
+        timestamp: number;
+        round: number;
+        borrowValueUSD: string;
+        network?: string;
+      }>;
+      summary: { totalBorrowValueUSD: string };
+    }>
+  > {
+    try {
+      let url = `${this.baseUrl}/analytics/borrows?limit=${limit}`;
+      if (startTime) url += `&startTime=${startTime}`;
+      if (endTime) url += `&endTime=${endTime}`;
+      if (network) url += `&network=${encodeURIComponent(network)}`;
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error("Error fetching borrows:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get repays data
+   * @param startTime - Start timestamp in milliseconds
+   * @param endTime - End timestamp in milliseconds
+   * @param limit - Maximum number of results
+   * @param network - Optional network filter
+   * @returns Promise<ApiResponse<{ repays: Array<{ timestamp: number; round: number; repayValueUSD: string; network?: string }>; summary: { totalRepayValueUSD: string } }>>
+   */
+  async getRepays(
+    startTime?: number,
+    endTime?: number,
+    limit: number = 10000,
+    network?: string
+  ): Promise<
+    ApiResponse<{
+      repays: Array<{
+        timestamp: number;
+        round: number;
+        repayValueUSD: string;
+        network?: string;
+      }>;
+      summary: { totalRepayValueUSD: string };
+    }>
+  > {
+    try {
+      let url = `${this.baseUrl}/analytics/repays?limit=${limit}`;
+      if (startTime) url += `&startTime=${startTime}`;
+      if (endTime) url += `&endTime=${endTime}`;
+      if (network) url += `&network=${encodeURIComponent(network)}`;
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error("Error fetching repays:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get user activity data
+   * @param startTime - Start timestamp in milliseconds
+   * @param endTime - End timestamp in milliseconds
+   * @param type - Activity type (deposit, withdraw, borrow, repay)
+   * @param limit - Maximum number of results
+   * @param network - Optional network filter
+   * @param appId - Optional app ID filter
+   * @param userAddress - Optional user address filter
+   * @returns Promise<ApiResponse<{ activities: Array<any> }>>
+   */
+  async getUserActivity(
+    startTime?: number,
+    endTime?: number,
+    type?: string,
+    limit: number = 10000,
+    network?: string,
+    appId?: number,
+    userAddress?: string
+  ): Promise<ApiResponse<{ activities: Array<any> }>> {
+    try {
+      let url = `${this.baseUrl}/analytics/user-activity?limit=${limit}`;
+      if (startTime) url += `&startTime=${startTime}`;
+      if (endTime) url += `&endTime=${endTime}`;
+      if (type) url += `&type=${encodeURIComponent(type)}`;
+      if (network) url += `&network=${encodeURIComponent(network)}`;
+      if (appId) url += `&appId=${appId}`;
+      if (userAddress) url += `&userAddress=${encodeURIComponent(userAddress)}`;
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error("Error fetching user activity:", error);
+      throw error;
+    }
+  }
 }
 
 // Export a singleton instance
