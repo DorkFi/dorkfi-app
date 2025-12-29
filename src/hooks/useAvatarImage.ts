@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useAddressName } from "./useAddressName";
 import { ResolverService } from "@/services/resolverService";
 import { useNetwork } from "@/contexts/NetworkContext";
+import { useWallet } from "@txnlab/use-wallet-react";
 
 const NFT_INDEXER_BASE_URL = "https://voi-mainnet-mimirapi.nftnavigator.xyz/nft-indexer/v1";
 const PLACEHOLDER_IMAGE = "/lovable-uploads/dork_health_placeholder_v2.png";
@@ -26,6 +27,7 @@ interface NFTTokenResponse {
 export const useAvatarImage = (address: string | undefined | null) => {
   const { name: addressName, isLoading: isLoadingName } = useAddressName(address);
   const { currentNetwork } = useNetwork();
+  const { activeWallet } = useWallet();
   // Start with null - don't render until we check if custom avatar exists
   const [avatarImage, setAvatarImage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -54,9 +56,15 @@ export const useAvatarImage = (address: string | undefined | null) => {
       return;
     }
 
-    // Only fetch avatar on voi-mainnet
-    if (!address || !addressName || currentNetwork !== "voi-mainnet") {
-      // Not on voi-mainnet or missing requirements, mark as resolved (no avatar)
+    // Check if wallet is a universal wallet (Lute, Kibisis, etc.) that supports both networks
+    const walletId = activeWallet?.id?.toLowerCase() || "";
+    const isUniversalWallet = walletId === "lute" || walletId === "kibisis";
+
+    // Fetch avatar on voi-mainnet OR if using a universal wallet (regardless of network)
+    const shouldFetchAvatar = currentNetwork === "voi-mainnet" || isUniversalWallet;
+
+    if (!address || !addressName || !shouldFetchAvatar) {
+      // Not on voi-mainnet (and not using universal wallet) or missing requirements, mark as resolved (no avatar)
       setIsLoading(false);
       setIsResolved(true);
       return;
@@ -215,7 +223,7 @@ export const useAvatarImage = (address: string | undefined | null) => {
     // Fetch immediately when component mounts (before tab transition)
     // This preloads the image so it's ready when the tab becomes visible
     fetchAvatarImage();
-  }, [address, addressName, currentNetwork, isLoadingName, refreshKey]);
+  }, [address, addressName, currentNetwork, isLoadingName, refreshKey, activeWallet]);
 
   const refetch = () => {
     setRefreshKey(prev => prev + 1);

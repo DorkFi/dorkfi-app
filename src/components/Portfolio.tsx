@@ -1889,20 +1889,31 @@ const Portfolio = () => {
       </DorkFiCard>
 
       {/* Render health factor section after avatar check is complete */}
-      {isAvatarResolved && (
-      <EnhancedHealthFactor
-        healthFactor={displayHealthFactor}
-        totalCollateral={totalCollateral}
-        totalBorrowed={totalBorrowed}
-        liquidationMargin={liquidationMargin}
-        netLTV={netLTV}
-          dorkNftImage={avatarImage || undefined}
-        underwaterBg="/lovable-uploads/44ebe994-a30e-4eb1-a4a1-776aa2978776.png"
-        onAddCollateral={handleAddCollateral}
-        onBuyVoi={handleBuyVoi}
-        onEditProfile={() => setNftModalOpen(true)}
-      />
-      )}
+      {isAvatarResolved && (() => {
+        // Check if wallet is Pera or Defly - disable edit profile for these wallets
+        const walletId = activeWallet?.id?.toLowerCase() || "";
+        const walletName = activeWallet?.metadata?.name?.toLowerCase() || "";
+        const isPeraOrDefly = 
+          walletId === "pera" || 
+          walletId === "defly" ||
+          walletName.includes("pera") ||
+          walletName.includes("defly");
+        
+        return (
+          <EnhancedHealthFactor
+            healthFactor={displayHealthFactor}
+            totalCollateral={totalCollateral}
+            totalBorrowed={totalBorrowed}
+            liquidationMargin={liquidationMargin}
+            netLTV={netLTV}
+            dorkNftImage={avatarImage || undefined}
+            underwaterBg="/lovable-uploads/44ebe994-a30e-4eb1-a4a1-776aa2978776.png"
+            onAddCollateral={handleAddCollateral}
+            onBuyVoi={handleBuyVoi}
+            onEditProfile={isPeraOrDefly ? undefined : () => setNftModalOpen(true)}
+          />
+        );
+      })()}
 
       {/* Network Portfolio Breakdown */}
       {user?.computed?.networkValues &&
