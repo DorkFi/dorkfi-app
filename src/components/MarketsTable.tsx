@@ -830,6 +830,7 @@ const MarketsTable = () => {
       let ci: any;
       let customR: any;
       let buildN: any[] = [];
+      let paymentAmount = 28500;
       for (const [rewardId, rewardData] of Object.entries(claimableRewards)) {
         if (rewardData.amount <= 0) continue;
 
@@ -921,7 +922,7 @@ const MarketsTable = () => {
             ).obj;
             buildN.push({
               ...txnO,
-              payment: 28500,
+              payment: paymentAmount++,
               note: Uint8Array.from(
                 Buffer.from(
                   `dorkfi claim reward ${reward.id} transfer (amount: ${rewardData.formatted} ${reward.symbol})`
