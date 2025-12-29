@@ -65,14 +65,13 @@ const ProfileUpdateSuccessModal: React.FC<ProfileUpdateSuccessModalProps> = ({
   const [showShareView, setShowShareView] = useState(false);
   const [celebrationParticles, setCelebrationParticles] = useState<Array<{
     id: number;
-    type: 'bubble' | 'coin' | 'fish';
+    type: 'bubble';
     x: number;
     y: number;
     size: number;
     speed: number;
     delay: number;
     driftX: number;
-    icon?: string;
   }>>([]);
 
   // Generate ocean/DeFi themed celebration particles when modal opens
@@ -80,18 +79,17 @@ const ProfileUpdateSuccessModal: React.FC<ProfileUpdateSuccessModalProps> = ({
     if (open) {
       const particles: Array<{
         id: number;
-        type: 'bubble' | 'coin' | 'fish';
+        type: 'bubble';
         x: number;
         y: number;
         size: number;
         speed: number;
         delay: number;
         driftX: number;
-        icon?: string;
       }> = [];
 
       // Generate bubbles
-      for (let i = 0; i < 15; i++) {
+      for (let i = 0; i < 20; i++) {
         particles.push({
           id: i,
           type: 'bubble',
@@ -99,37 +97,6 @@ const ProfileUpdateSuccessModal: React.FC<ProfileUpdateSuccessModalProps> = ({
           y: 100 + Math.random() * 20,
           size: 8 + Math.random() * 12,
           speed: 0.3 + Math.random() * 0.4,
-          delay: Math.random() * 2,
-          driftX: (Math.random() - 0.5) * 100,
-        });
-      }
-
-      // Generate floating coins/tokens (use deposit/borrow icons)
-      const allAssets = [...deposits, ...borrows].filter(asset => asset.icon);
-      for (let i = 0; i < Math.min(8, allAssets.length); i++) {
-        const asset = allAssets[i];
-        particles.push({
-          id: 100 + i,
-          type: 'coin',
-          x: Math.random() * 100,
-          y: 100 + Math.random() * 20,
-          size: 24 + Math.random() * 16,
-          speed: 0.2 + Math.random() * 0.3,
-          delay: Math.random() * 2,
-          driftX: (Math.random() - 0.5) * 100,
-          icon: asset.icon,
-        });
-      }
-
-      // Generate fish emojis
-      for (let i = 0; i < 5; i++) {
-        particles.push({
-          id: 200 + i,
-          type: 'fish',
-          x: Math.random() * 100,
-          y: 100 + Math.random() * 20,
-          size: 20 + Math.random() * 10,
-          speed: 0.25 + Math.random() * 0.25,
           delay: Math.random() * 2,
           driftX: (Math.random() - 0.5) * 100,
         });
@@ -146,7 +113,7 @@ const ProfileUpdateSuccessModal: React.FC<ProfileUpdateSuccessModalProps> = ({
     } else {
       setCelebrationParticles([]);
     }
-  }, [open, deposits, borrows]);
+  }, [open]);
 
   // Add ocean/DeFi themed celebration animations
   useEffect(() => {
@@ -200,24 +167,6 @@ const ProfileUpdateSuccessModal: React.FC<ProfileUpdateSuccessModalProps> = ({
             }
             100% {
               transform: translateY(-100vh) translateX(var(--drift-x, 0)) scale(0.6);
-              opacity: 0;
-            }
-          }
-
-          @keyframes coin-float {
-            0% {
-              transform: translateY(0) translateX(0) rotate(0deg) scale(0.8);
-              opacity: 0;
-            }
-            10% {
-              opacity: 1;
-            }
-            50% {
-              transform: translateY(-50vh) translateX(var(--drift-x, 0)) rotate(180deg) scale(1);
-              opacity: 1;
-            }
-            100% {
-              transform: translateY(-100vh) translateX(var(--drift-x, 0)) rotate(360deg) scale(0.6);
               opacity: 0;
             }
           }
@@ -294,15 +243,6 @@ const ProfileUpdateSuccessModal: React.FC<ProfileUpdateSuccessModalProps> = ({
             box-shadow: 0 0 10px rgba(173, 216, 230, 0.5);
           }
 
-          .celebration-coin {
-            position: absolute;
-            border-radius: 50%;
-            pointer-events: none;
-            animation: coin-float var(--duration, 5s) ease-in-out forwards;
-            animation-delay: var(--delay, 0s);
-            filter: drop-shadow(0 4px 8px rgba(255, 215, 0, 0.4));
-          }
-
           .celebration-fish {
             position: absolute;
             pointer-events: none;
@@ -347,15 +287,15 @@ const ProfileUpdateSuccessModal: React.FC<ProfileUpdateSuccessModalProps> = ({
     const favoriteDepositText = selectedDeposit ? selectedDeposit.asset : 'N/A';
     const favoriteBorrowText = selectedBorrow ? selectedBorrow.asset : 'N/A';
     
-    const text = `Just updated my DorkFi profile! 🐟\n\n` +
+    const text = `Just updated my DorkFi profile! 🐳\n\n` +
       `Health Factor: ${healthFactor !== null ? healthFactor.toFixed(2) : 'N/A'} (${healthFactorText})\n` +
       `Favorite Deposit: ${favoriteDepositText}\n` +
-      `Favorite Borrow: ${favoriteBorrowText}\n` +
-      `Net LTV: ${netLTV.toFixed(1)}%\n\n` +
-      `Update your profile with Dork, DorkV2, or Chub NFTs today! 🚀\n\n` +
-      `https://app.dork.fi/\n\n` +
+      `Favorite Borrow: ${favoriteBorrowText}\n\n` +
+
+      `Update your profile with @dork_NFTs today! ✔️ \n\n` +
+      `https://app.dork.fi/ | @dork_fi \n\n` +
       `#DorkFi #DeFi #Algorand #VOI`;
-    
+
     const url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
     window.open(url, '_blank', 'noopener,noreferrer');
     }, 3000);
@@ -376,68 +316,21 @@ const ProfileUpdateSuccessModal: React.FC<ProfileUpdateSuccessModalProps> = ({
           <div className="relative w-full aspect-square max-w-full z-10 pulse-scale overflow-hidden">
             {/* Ocean/DeFi Celebration Particles */}
             {celebrationParticles.map((particle) => {
-              const duration = particle.type === 'bubble' ? 4 : particle.type === 'coin' ? 5 : 6;
-              
-              if (particle.type === 'bubble') {
-                return (
-                  <div
-                    key={particle.id}
-                    className="celebration-bubble"
-                    style={{
-                      left: `${particle.x}%`,
-                      bottom: '0%',
-                      width: `${particle.size}px`,
-                      height: `${particle.size}px`,
-                      '--duration': `${duration}s`,
-                      '--delay': `${particle.delay}s`,
-                      '--drift-x': `${particle.driftX}px`,
-                    } as React.CSSProperties}
-                  />
-                );
-              } else if (particle.type === 'coin' && particle.icon) {
-                return (
-                  <div
-                    key={particle.id}
-                    className="celebration-coin"
-                    style={{
-                      left: `${particle.x}%`,
-                      bottom: '0%',
-                      width: `${particle.size}px`,
-                      height: `${particle.size}px`,
-                      '--duration': `${duration}s`,
-                      '--delay': `${particle.delay}s`,
-                      '--drift-x': `${particle.driftX}px`,
-                    } as React.CSSProperties}
-                  >
-                    <img
-                      src={particle.icon}
-                      alt="Token"
-                      className="w-full h-full rounded-full"
-                      onError={(e) => {
-                        e.currentTarget.style.display = 'none';
-                      }}
-                    />
-                  </div>
-                );
-              } else if (particle.type === 'fish') {
-                return (
-                  <div
-                    key={particle.id}
-                    className="celebration-fish"
-                    style={{
-                      left: `${particle.x}%`,
-                      bottom: '0%',
-                      fontSize: `${particle.size}px`,
-                      '--duration': `${duration}s`,
-                      '--delay': `${particle.delay}s`,
-                      '--drift-x': `${particle.driftX}px`,
-                    } as React.CSSProperties}
-                  >
-                    🐟
-                  </div>
-                );
-              }
-              return null;
+              return (
+                <div
+                  key={particle.id}
+                  className="celebration-bubble"
+                  style={{
+                    left: `${particle.x}%`,
+                    bottom: '0%',
+                    width: `${particle.size}px`,
+                    height: `${particle.size}px`,
+                    '--duration': '4s',
+                    '--delay': `${particle.delay}s`,
+                    '--drift-x': `${particle.driftX}px`,
+                  } as React.CSSProperties}
+                />
+              );
             })}
             
             {/* Ripple effects */}
@@ -564,68 +457,21 @@ const ProfileUpdateSuccessModal: React.FC<ProfileUpdateSuccessModalProps> = ({
           {/* Ocean/DeFi Celebration Particles */}
           <div className="fixed inset-0 pointer-events-none z-[100] overflow-hidden">
             {celebrationParticles.map((particle) => {
-              const duration = particle.type === 'bubble' ? 4 : particle.type === 'coin' ? 5 : 6;
-              
-              if (particle.type === 'bubble') {
-                return (
-                  <div
-                    key={particle.id}
-                    className="celebration-bubble"
-                    style={{
-                      left: `${particle.x}%`,
-                      bottom: '0%',
-                      width: `${particle.size}px`,
-                      height: `${particle.size}px`,
-                      '--duration': `${duration}s`,
-                      '--delay': `${particle.delay}s`,
-                      '--drift-x': `${particle.driftX}px`,
-                    } as React.CSSProperties}
-                  />
-                );
-              } else if (particle.type === 'coin' && particle.icon) {
-                return (
-                  <div
-                    key={particle.id}
-                    className="celebration-coin"
-                    style={{
-                      left: `${particle.x}%`,
-                      bottom: '0%',
-                      width: `${particle.size}px`,
-                      height: `${particle.size}px`,
-                      '--duration': `${duration}s`,
-                      '--delay': `${particle.delay}s`,
-                      '--drift-x': `${particle.driftX}px`,
-                    } as React.CSSProperties}
-                  >
-                    <img
-                      src={particle.icon}
-                      alt="Token"
-                      className="w-full h-full rounded-full"
-                      onError={(e) => {
-                        e.currentTarget.style.display = 'none';
-                      }}
-                    />
-                  </div>
-                );
-              } else if (particle.type === 'fish') {
-                return (
-                  <div
-                    key={particle.id}
-                    className="celebration-fish"
-                    style={{
-                      left: `${particle.x}%`,
-                      bottom: '0%',
-                      fontSize: `${particle.size}px`,
-                      '--duration': `${duration}s`,
-                      '--delay': `${particle.delay}s`,
-                      '--drift-x': `${particle.driftX}px`,
-                    } as React.CSSProperties}
-                  >
-                    🐟
-                  </div>
-                );
-              }
-              return null;
+              return (
+                <div
+                  key={particle.id}
+                  className="celebration-bubble"
+                  style={{
+                    left: `${particle.x}%`,
+                    bottom: '0%',
+                    width: `${particle.size}px`,
+                    height: `${particle.size}px`,
+                    '--duration': '4s',
+                    '--delay': `${particle.delay}s`,
+                    '--drift-x': `${particle.driftX}px`,
+                  } as React.CSSProperties}
+                />
+              );
             })}
           </div>
 
