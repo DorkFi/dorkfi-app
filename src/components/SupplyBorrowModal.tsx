@@ -34,6 +34,7 @@ import BigNumber from "bignumber.js";
 import { useToast } from "@/hooks/use-toast";
 import { calculateMaxBorrowAmount } from "@/services/adminService";
 import dorkfiAPIService from "@/services/dorkfiAPIService";
+import { updateTransactionMetadata } from "@/utils/transactionUtils";
 
 interface SupplyBorrowModalProps {
   isOpen: boolean;
@@ -601,6 +602,51 @@ const SupplyBorrowModal = ({
       const res = await algorandClients.algod.sendRawTransaction(stxns).do();
       await waitForConfirmation(algorandClients.algod, res.txid, 4);
 
+      const decodedStxns = stxns.map((txn: Uint8Array<ArrayBufferLike>) => {
+        return algosdk.decodeSignedTransaction(txn);
+      });
+      const poolTxnID = decodedStxns.reverse().find((txn: any) => txn.txn.type === "appl" && Number(txn.txn.applicationCall.appIndex) === parseInt(token.poolId)).txn.txID()
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+      // Retry until metadata update succeeds
+      let metadataUpdated = false;
+      let retryCount = 0;
+      const maxRetries = 10;
+      const apiBaseUrl = import.meta.env.VITE_DORKFI_API_URL || "https://dorkfi-api.nautilus.sh";
+      const networkParam = finalNetwork ? `?network=${finalNetwork}` : "";
+      
+      while (!metadataUpdated && retryCount < maxRetries) {
+        try {
+          const response = await fetch(
+            `${apiBaseUrl}/transaction-metadata/${poolTxnID}${networkParam}`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+            }
+          );
+
+          if (response.ok) {
+            const result = await response.json();
+            console.log("Transaction metadata successfully updated:", result.data);
+            metadataUpdated = true;
+          } else {
+            const error = await response.json();
+            throw new Error(error.error || "Failed to update transaction metadata");
+          }
+        } catch (error) {
+          retryCount++;
+          if (retryCount < maxRetries) {
+            const delay = 1000 * Math.pow(2, retryCount - 1); // Exponential backoff
+            console.warn(`Metadata update attempt ${retryCount} failed, retrying in ${delay}ms:`, error);
+            await new Promise((resolve) => setTimeout(resolve, delay));
+          } else {
+            console.error("Failed to update transaction metadata after all retries:", error);
+          }
+        }
+      }
+
+      // Wait for metadata update to complete, then refresh market data
       Promise.all([
         dorkfiAPIService.fetchFreshUserData(
           activeAccount.address,
@@ -615,22 +661,26 @@ const SupplyBorrowModal = ({
         ),
       ])
         .then(() => {
-          setTimeout(() => {
-            //onRefreshMarket();
-          }, 1000);
+          // Wait a bit more to ensure backend has processed the metadata
+          return new Promise((resolve) => setTimeout(resolve, 2000));
+        })
+        .then(() => {
+          // Call the success callback to refresh data after metadata is processed
+          if (onTransactionSuccess) {
+            onTransactionSuccess();
+          }
         })
         .catch((error) => {
-          console.error("Error calling fetchFreshUserData after repay:", error);
+          console.error("Error calling fetchFreshUserData after transaction:", error);
+          // Still call onTransactionSuccess even if API calls fail
+          if (onTransactionSuccess) {
+            onTransactionSuccess();
+          }
         });
 
       console.log("Transaction confirmed:", res);
       setTransactionId(res.txid);
       setShowSuccess(true);
-
-      // Call the success callback to refresh data
-      if (onTransactionSuccess) {
-        onTransactionSuccess();
-      }
     } catch (error) {
       console.error(`${mode} error:`, error);
 

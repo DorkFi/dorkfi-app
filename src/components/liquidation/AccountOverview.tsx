@@ -21,6 +21,8 @@ import { APP_SPEC as LendingPoolAppSpec } from "../../clients/DorkFiLendingPoolC
 import { abi, CONTRACT } from "ulujs";
 import algosdk from "algosdk";
 import { useWallet } from "@txnlab/use-wallet-react";
+import { updateTransactionMetadata } from "@/utils/transactionUtils";
+import { useNetwork } from "@/contexts/NetworkContext";
 
 interface AccountOverviewProps {
   account: LiquidationAccount;
@@ -41,6 +43,7 @@ export default function AccountOverview({
     refetch,
   } = useUserAssets(account.walletAddress);
   const { signTransactions } = useWallet();
+  const { currentNetwork } = useNetwork();
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncAt, setLastSyncAt] = useState<number | null>(null);
   const [lastSyncedHealth, setLastSyncedHealth] = useState<number | null>(null);
@@ -409,6 +412,9 @@ export default function AccountOverview({
         await algorandService.getCurrentClientsForTransactions();
       const res = await algorandClients.algod.sendRawTransaction(stxns).do();
       await algosdk.waitForConfirmation(algorandClients.algod, res.txid, 4);
+
+      // Immediately update transaction metadata
+      await updateTransactionMetadata(res.txid, currentNetwork);
 
       // Refresh the user assets data after syncing
       await refetch();

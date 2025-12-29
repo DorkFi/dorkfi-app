@@ -38,6 +38,7 @@ import BigNumber from "bignumber.js";
 import { abi, CONTRACT } from "ulujs";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
 import algosdk from "algosdk";
+import { updateTransactionMetadata } from "@/utils/transactionUtils";
 
 // Helper function to convert wallet network ID to config NetworkId
 const getConfigNetworkIdFromWalletNetworkId = (
@@ -307,6 +308,10 @@ export default function EnhancedAccountDetailModal({
         await algorandService.getCurrentClientsForTransactions();
       const res = await algorandClients.algod.sendRawTransaction(stxns).do();
       await algosdk.waitForConfirmation(algorandClients.algod, res.txid, 4);
+
+      // Immediately update transaction metadata
+      const networkId = getConfigNetworkIdFromWalletNetworkId(activeNetwork);
+      await updateTransactionMetadata(res.txid, networkId);
 
       // Show success screen
       setLiquidationStep("success");

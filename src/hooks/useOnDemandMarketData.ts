@@ -219,10 +219,12 @@ export const useOnDemandMarketData = ({
           );
 
           // Fetch market info using the configured pool ID
+          // Use "contract" source when bypassing cache to get fresh blockchain data
           const marketInfo = await fetchMarketInfo(
             tokenPoolId,
             marketId,
-            currentNetwork
+            currentNetwork,
+            bypassCache ? "contract" : "api"
           );
 
           if (marketInfo) {

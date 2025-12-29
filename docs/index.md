@@ -82,6 +82,19 @@ Comprehensive guide for configuring and managing the claim system:
 
 **Perfect for:** Developers setting up rewards, administrators managing airdrops, those implementing claim functionality
 
+### ⚡ [Transaction Metadata Integration](TRANSACTION_METADATA.md)
+**Frontend integration guide for immediate transaction state updates**
+
+Complete guide for integrating the transaction-metadata endpoint to update application state immediately after transaction confirmation:
+- Why use frontend integration vs background indexing
+- API endpoint details and usage
+- Step-by-step implementation guide
+- Best practices and error handling
+- Performance considerations
+- React hook examples
+
+**Perfect for:** Frontend developers, those implementing real-time transaction updates, developers optimizing user experience
+
 ## Quick Start Guide
 
 ### For New Users
@@ -96,7 +109,8 @@ Comprehensive guide for configuring and managing the claim system:
 2. **Version Control**: Check [Version Management](VERSION_MANAGEMENT.md) for development setup
 3. **Token Standards**: Review [ARC200 Exchange Extension](ARC200_EXCHANGE.md) for token exchange specifications
 4. **Claim Setup**: Follow the [Claim Setup Guide](CLAIM_SETUP.md) to configure reward claims
-5. **Codebase**: Explore the React/TypeScript frontend implementation
+5. **Transaction Updates**: Review [Transaction Metadata Integration](TRANSACTION_METADATA.md) for real-time state updates
+6. **Codebase**: Explore the React/TypeScript frontend implementation
 
 ## Key Features
 
