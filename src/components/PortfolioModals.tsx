@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import DepositModal from "./DepositModal";
 import WithdrawModal from "./WithdrawModal";
 import BorrowModal from "./BorrowModal";
@@ -11,14 +11,16 @@ import {
   withdraw,
   repay,
   fetchUserWalletBalance,
+  fetchMarketInfoFromContract,
 } from "@/services/lendingService";
 import {
   getTokenConfig,
   getAllTokensWithDisplayInfo,
   getAlgorandNetworkFromNetworkId,
   NetworkId,
+  getNetworkConfig,
 } from "@/config";
-import algorandService from "@/services/algorandService";
+import algorandService, { AlgorandNetwork } from "@/services/algorandService";
 import algosdk, { waitForConfirmation } from "algosdk";
 import BigNumber from "bignumber.js";
 import { getTokenImagePath } from "@/utils/tokenImageUtils";
@@ -26,6 +28,9 @@ import { useToast } from "@/hooks/use-toast";
 import { getUserFriendlyError } from "@/utils/errorUtils";
 import dorkfiAPIService from "@/services/dorkfiAPIService";
 import { updateTransactionMetadata } from "@/utils/transactionUtils";
+import { CONTRACT } from "ulujs";
+import { APP_SPEC as LendingPoolAppSpec, UserData } from "@/clients/DorkFiLendingPoolClient";
+import { isAlgorandCompatibleNetwork } from "@/config";
 
 interface Deposit {
   asset: string;
@@ -34,7 +39,10 @@ interface Deposit {
   value: number;
   apy: number;
   tokenPrice: number;
-  nTokenBalance?: number;
+  scaledDeposits?: string;
+  userDepositIndex?: string;
+  marketId?: string;
+  appId?: string;
 }
 
 interface Borrow {
@@ -89,6 +97,7 @@ interface PortfolioModalsProps {
   onCloseRepayModal: () => void;
   onRefreshWalletBalance?: (asset: string, networkId?: string) => void;
   onRefreshMarket?: () => void;
+  prefetchWithdrawIndicesRef?: React.MutableRefObject<((asset: string, poolId?: string) => Promise<void>) | null>;
 }
 
 const PortfolioModals = ({
@@ -108,10 +117,108 @@ const PortfolioModals = ({
   onCloseRepayModal,
   onRefreshWalletBalance,
   onRefreshMarket,
+  prefetchWithdrawIndicesRef,
 }: PortfolioModalsProps) => {
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
   const { toast } = useToast();
+  const [userDepositIndexCache, setUserDepositIndexCache] = useState<Record<string, string>>({});
+  const [currentDepositIndexCache, setCurrentDepositIndexCache] = useState<Record<string, string>>({});
+  
+  // Extract fetch indices function to be reusable
+  const fetchIndices = useCallback(async (asset: string, poolId?: string) => {
+    try {
+      const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+      const token = poolId
+        ? tokens.find((t) => t.symbol === asset && t.poolId === poolId)
+        : tokens.find((t) => t.symbol === asset);
+
+      if (!token?.poolId || !token?.underlyingContractId) {
+        return;
+      }
+
+      const cacheKey = `${asset}-${poolId || 'default'}`;
+      const networkConfig = getNetworkConfig(currentNetwork);
+      
+      if (!isAlgorandCompatibleNetwork(currentNetwork)) {
+        return;
+      }
+
+      // Always fetch current deposit index from contract (bypass API cache)
+      try {
+        const marketData = await fetchMarketInfoFromContract(
+          token.poolId,
+          token.underlyingContractId,
+          currentNetwork
+        );
+        
+        if (marketData?.depositIndex) {
+          setCurrentDepositIndexCache(prev => ({
+            ...prev,
+            [cacheKey]: marketData.depositIndex.toString(),
+          }));
+        }
+      } catch (error) {
+        console.error("Error fetching current deposit index:", error);
+      }
+
+      // Always fetch user deposit index from contract if wallet is connected (bypass cache)
+      if (activeAccount?.address) {
+        try {
+          const clients = algorandService.initializeClients(
+            networkConfig.walletNetworkId as AlgorandNetwork
+          );
+
+          const ci = new CONTRACT(
+            Number(token.poolId),
+            clients.algod,
+            undefined,
+            { ...LendingPoolAppSpec.contract, events: [] },
+            {
+              addr: algosdk.encodeAddress(
+                algosdk.getApplicationAddress(Number(token.poolId)).publicKey
+              ),
+              sk: new Uint8Array(),
+            }
+          );
+
+          ci.setFee(2000);
+          const userDataR = await ci.get_user(activeAccount.address, Number(token.underlyingContractId));
+
+          if (userDataR.success) {
+            const userData = UserData(userDataR.returnValue);
+            const userDepositIndex = userData.depositIndex?.toString();
+            
+            if (userDepositIndex) {
+              setUserDepositIndexCache(prev => ({
+                ...prev,
+                [cacheKey]: userDepositIndex,
+              }));
+            }
+          }
+        } catch (error) {
+          console.error("Error fetching user deposit index:", error);
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching indices:", error);
+    }
+  }, [currentNetwork, activeAccount?.address]);
+
+  // Expose prefetch function via ref
+  useEffect(() => {
+    if (prefetchWithdrawIndicesRef) {
+      prefetchWithdrawIndicesRef.current = fetchIndices;
+    }
+  }, [prefetchWithdrawIndicesRef, fetchIndices]);
+
+  // Fetch indices when withdraw modal opens (fallback)
+  useEffect(() => {
+    if (withdrawModal.isOpen && withdrawModal.asset) {
+      fetchIndices(withdrawModal.asset, withdrawModal.poolId);
+    }
+  }, [withdrawModal.isOpen, withdrawModal.asset, withdrawModal.poolId, fetchIndices]);
+
   const getMarketStatsForDeposit = (asset: string, poolId?: string) => {
     // Find matching markets - prefer poolId match if provided
     let market;
@@ -139,6 +246,7 @@ const PortfolioModals = ({
     }
 
     // Find matching deposit - prefer poolId match if provided
+    // Also try to match by marketId and appId if available for more precise matching
     let deposit;
     if (poolId) {
       // If poolId is provided, match by both asset and poolId
@@ -150,11 +258,32 @@ const PortfolioModals = ({
       deposit = deposits.find((d) => d.asset === asset);
     }
 
+    // Only access user-specific data if wallet is connected
+    // User deposit index comes from user.userData array in API response
+    // Each item in user.userData has depositIndex for the matching market (by marketId and appId)
+    const hasWallet = !!activeAccount?.address;
+    const depositAny = deposit as any;
+    
+    // Check cache for indices
+    const cacheKey = `${asset}-${poolId || 'default'}`;
+    const cachedUserDepositIndex = userDepositIndexCache[cacheKey];
+    const cachedCurrentDepositIndex = currentDepositIndexCache[cacheKey];
+    
+    // The depositIndex from user.userData is already included in the deposit object
+    // when it was transformed from user.computed.deposits (which comes from user.userData)
+    // This depositIndex is specific to the matching market (matched by marketId and appId)
+    const userDepositIndexFromDeposit = depositAny?.userDepositIndex?.toString();
+    
     return {
       supplyAPY:
         market?.apyCalculation?.apy ||
         (market?.supplyRate ? market.supplyRate * 100 : 0) ||
         deposit?.apy ||
+        0,
+      borrowAPY:
+        market?.borrowApyCalculation?.apy ||
+        (market?.borrowRateCurrent ? market.borrowRateCurrent * 100 : 0) ||
+        (market?.borrowRate ? market.borrowRate * 100 : 0) ||
         0,
       utilization: market?.utilizationRate ? market.utilizationRate * 100 : 0,
       collateralFactor: market?.collateralFactor
@@ -163,10 +292,29 @@ const PortfolioModals = ({
       tokenPrice: market?.price
         ? parseFloat(market.price) / Math.pow(10, 6)
         : deposit?.tokenPrice || 1,
+      totalDeposits: market?.totalDeposits
+        ? parseFloat(market.totalDeposits)
+        : undefined,
+      marketCapacity: market?.maxTotalDeposits
+        ? parseFloat(market.maxTotalDeposits)
+        : undefined,
       accruedInterest:
         deposit?.accruedInterest !== undefined
           ? deposit.accruedInterest
           : undefined,
+      // Use cached current deposit index (from contract) if available, otherwise fall back to market data
+      currentDepositIndex: cachedCurrentDepositIndex || market?.depositIndex?.toString(),
+      // Use cached value first (from contract), then deposit object (from API user.userData)
+      // The deposit object's userDepositIndex comes from user.userData for the matching market
+      userDepositIndex: hasWallet
+        ? (cachedUserDepositIndex || userDepositIndexFromDeposit || undefined)
+        : undefined,
+      scaledDeposits: hasWallet && depositAny
+        ? (depositAny.scaledDeposits?.toString() || undefined)
+        : undefined,
+      // lastUpdateTime can be a number (timestamp in seconds) or string (ISO)
+      // Check both lastUpdateTime (from contract) and lastUpdated (from MarketInfo)
+      lastUpdateTime: market?.lastUpdateTime || market?.lastUpdated,
     };
   };
 
@@ -211,22 +359,51 @@ const PortfolioModals = ({
     // Calculate health factor from userGlobalData
     // Use healthFactorIndex if available (calculated with individual market collateral factors)
     // Otherwise calculate from totalCollateral and totalBorrowed with 80% collateral factor
-    let healthFactor = 0;
+    let healthFactor: number | null = null;
     if (userGlobalData) {
       if (userGlobalData.healthFactorIndex !== undefined) {
-        healthFactor = userGlobalData.healthFactorIndex;
-        // healthFactorIndex is already capped at 3.0 in the calculation
+        // Validate healthFactorIndex is valid
+        if (userGlobalData.healthFactorIndex > 0 && isFinite(userGlobalData.healthFactorIndex)) {
+          healthFactor = userGlobalData.healthFactorIndex;
+          // healthFactorIndex is already capped at 3.0 in the calculation
+        }
       } else if (userGlobalData.totalBorrowValue > 0) {
-        // Fallback: calculate with standard 80% collateral factor
-        const collateralFactor = 0.8;
-        healthFactor =
-          (userGlobalData.totalCollateralValue * collateralFactor) /
-          userGlobalData.totalBorrowValue;
-        healthFactor = Math.min(healthFactor, 3.0); // Cap at 3.0 for display (consistent with Portfolio)
+        // Fallback: use contract's totalCollateralValue directly
+        // The contract's totalCollateralValue is already weighted with actual market collateral factors:
+        // totalCollateralValue = sum(depositValue_i * collateralFactor_i)
+        // So we can use it directly without applying a fixed 0.8 factor
+        const calculated =
+          userGlobalData.totalCollateralValue / userGlobalData.totalBorrowValue;
+        
+        // Validate calculation result
+        if (calculated > 0 && isFinite(calculated)) {
+          healthFactor = Math.min(calculated, 3.0); // Cap at 3.0 for display (consistent with Portfolio)
+        } else {
+          console.warn("Invalid health factor calculation in getMarketStatsForBorrow:", {
+            totalCollateralValue: userGlobalData.totalCollateralValue,
+            totalBorrowValue: userGlobalData.totalBorrowValue,
+            calculated,
+          });
+          healthFactor = null;
+        }
       } else if (userGlobalData.totalCollateralValue > 0) {
         // No borrows = excellent health (capped at 3.0)
         healthFactor = 3.0;
       }
+    }
+    
+    // If both collateral and borrow are 0 or invalid, return null (data not loaded)
+    // Only set to null if we haven't already calculated a valid health factor
+    if (healthFactor === null && userGlobalData) {
+      const hasCollateral = userGlobalData.totalCollateralValue > 0;
+      const hasBorrows = userGlobalData.totalBorrowValue > 0;
+      if (!hasCollateral && !hasBorrows) {
+        // No position data - return null to indicate data not available
+        healthFactor = null;
+      }
+    } else if (!userGlobalData) {
+      // No userGlobalData at all - return null
+      healthFactor = null;
     }
 
     // Calculate current LTV (Loan-to-Value ratio)
@@ -257,6 +434,9 @@ const PortfolioModals = ({
       tokenPrice: market?.price
         ? parseFloat(market.price) / Math.pow(10, 6)
         : borrow?.tokenPrice || 1,
+      collateralFactor: market?.collateralFactor
+        ? market.collateralFactor * 100
+        : undefined,
     };
 
     // Debug logging for health factor calculation
@@ -286,7 +466,7 @@ const PortfolioModals = ({
             userGlobalData?.healthFactorIndex !== undefined
               ? "userGlobalData.healthFactorIndex"
               : userGlobalData
-              ? "calculated from userGlobalData (80% collateral factor)"
+              ? "calculated from userGlobalData (using actual market collateral factors from contract)"
               : "fallback (0)",
           value: healthFactor,
         },
@@ -1108,14 +1288,13 @@ const PortfolioModals = ({
               tokenSymbol={withdrawModal.asset}
               tokenIcon={getTokenImagePath(withdrawModal.asset)}
               currentlyDeposited={deposit?.balance || 0}
-              nTokenBalance={deposit?.nTokenBalance}
               marketStats={getMarketStatsForDeposit(
                 withdrawModal.asset,
                 withdrawModal.poolId
               )}
               onSubmit={handleWithdrawSubmit}
               onRefreshBalance={() => {
-                // Refresh market data to update nToken balance
+                // Refresh market data
                 if (onRefreshMarket) {
                   onRefreshMarket();
                 }

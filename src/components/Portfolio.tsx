@@ -154,6 +154,15 @@ const Portfolio = () => {
     column: string | null;
     direction: "asc" | "desc";
   }>({ column: "apy", direction: "asc" });
+  const [accruedInterestSearchTerm, setAccruedInterestSearchTerm] =
+    useState<string>("");
+  const [showAllAccruedInterest, setShowAllAccruedInterest] =
+    useState<boolean>(false);
+  const accruedInterestTableRef = useRef<HTMLDivElement>(null);
+  const [accruedInterestSort, setAccruedInterestSort] = useState<{
+    column: string | null;
+    direction: "asc" | "desc";
+  }>({ column: "value", direction: "desc" });
   
   // NFT selection state
   const [nftModalOpen, setNftModalOpen] = useState(false);
@@ -502,6 +511,26 @@ const Portfolio = () => {
             market?.apyCalculation?.apy ||
             (market?.supplyRate ? market.supplyRate * 100 : 0);
 
+          // Extract depositIndex from user.userData item (this is the user's deposit index for this market)
+          // The item comes from user.userData array, which has depositIndex for the matching market
+          const userDepositIndex = item.depositIndex?.toString() || item.userDepositIndex?.toString();
+          
+          // Calculate accrued interest for deposits
+          // Accrued Interest = Current Deposit Value - Original Deposit Amount
+          // Current Deposit Value = (scaledDeposits × currentDepositIndex) ÷ SCALE
+          // Original Deposit Amount = (scaledDeposits × userDepositIndex) ÷ SCALE
+          let accruedInterest = 0;
+          if (userDepositIndex && scaledDeposits > 0n && depositIndex > 0n) {
+            const userDepositIndexBigInt = BigInt(userDepositIndex);
+            if (userDepositIndexBigInt > 0n) {
+              const currentDepositValueRaw = (scaledDeposits * depositIndex) / SCALE;
+              const originalDepositRaw = (scaledDeposits * userDepositIndexBigInt) / SCALE;
+              const currentDepositValue = Number(currentDepositValueRaw) / Math.pow(10, token.decimals);
+              const originalDeposit = Number(originalDepositRaw) / Math.pow(10, token.decimals);
+              accruedInterest = Math.max(0, currentDepositValue - originalDeposit);
+            }
+          }
+          
           transformedDeposits.push({
             asset: token.symbol,
             icon: token.logoPath,
@@ -512,6 +541,12 @@ const Portfolio = () => {
             poolId: appId,
             network: networkId,
             type: "deposit",
+            scaledDeposits: scaledDepositsValue, // Include scaled deposits for interest calculations
+            userDepositIndex: userDepositIndex, // User deposit index from user.userData for this matching market
+            marketId: marketId, // Include marketId for matching
+            appId: appId, // Include appId for matching
+            accruedInterest: accruedInterest, // Accrued interest for deposits
+            accruedInterestValue: accruedInterest * tokenPrice, // Accrued interest in USD
           });
         } catch (error) {
           console.error("Error transforming deposit item:", error, item);
@@ -634,6 +669,41 @@ const Portfolio = () => {
             market?.borrowApyCalculation?.apy ||
             (market?.borrowRateCurrent ? market.borrowRateCurrent * 100 : 0);
 
+          // Extract borrowIndex from user.userData item (this is the user's borrow index for this market)
+          const userBorrowIndex = item.borrowIndex?.toString() || item.userBorrowIndex?.toString();
+          
+          // Calculate accrued interest for borrows
+          // Accrued Interest = Current Borrow Amount - Original Borrow Amount
+          // Current Borrow Amount = (scaledBorrows × currentBorrowIndex) ÷ SCALE
+          // Original Borrow Amount = (scaledBorrows × userBorrowIndex) ÷ SCALE
+          let accruedInterest = 0;
+          if (userBorrowIndex && scaledBorrows > 0n && borrowIndex > 0n) {
+            const userBorrowIndexBigInt = BigInt(userBorrowIndex);
+            if (userBorrowIndexBigInt > 0n) {
+              // Validate: currentBorrowIndex should always be >= userBorrowIndex
+              // (current index increases over time as interest accrues)
+              if (userBorrowIndexBigInt > borrowIndex) {
+                console.warn(
+                  "Invalid borrow index relationship: userBorrowIndex > currentBorrowIndex",
+                  {
+                    userBorrowIndex: userBorrowIndex,
+                    currentBorrowIndex: borrowIndex.toString(),
+                    tokenSymbol: token.symbol,
+                    marketId,
+                  }
+                );
+                // If indices are invalid, assume no interest accrued
+                accruedInterest = 0;
+              } else {
+                const currentBorrowValueRaw = (scaledBorrows * borrowIndex) / SCALE;
+                const originalBorrowRaw = (scaledBorrows * userBorrowIndexBigInt) / SCALE;
+                const currentBorrowValue = Number(currentBorrowValueRaw) / Math.pow(10, token.decimals);
+                const originalBorrow = Number(originalBorrowRaw) / Math.pow(10, token.decimals);
+                accruedInterest = Math.max(0, currentBorrowValue - originalBorrow);
+              }
+            }
+          }
+
           transformedBorrows.push({
             asset: token.symbol,
             icon: token.logoPath,
@@ -644,6 +714,9 @@ const Portfolio = () => {
             poolId: appId,
             network: networkId,
             type: "borrow",
+            interest: accruedInterest, // Accrued interest for borrows (interest owed) - using 'interest' to match Borrow interface
+            accruedInterest: accruedInterest, // Keep for backward compatibility
+            accruedInterestValue: accruedInterest * tokenPrice, // Accrued interest in USD
           });
         } catch (error) {
           console.error("Error transforming borrow item:", error, item);
@@ -665,6 +738,81 @@ const Portfolio = () => {
     hasComputedData && transformedDepositsAndBorrows.borrows.length > 0
       ? transformedDepositsAndBorrows.borrows
       : userPositions.filter((pos) => pos.type === "borrow");
+
+  // Combine deposits and borrows with accrued interest, grouped by market
+  const accruedInterestItems = useMemo(() => {
+    // Group by market key: asset + network + poolId
+    const marketMap = new Map<string, any>();
+    
+    // Process deposits with accrued interest
+    deposits.forEach((deposit) => {
+      const accruedInterest = deposit.accruedInterest || 0;
+      if (accruedInterest > 0) {
+        const marketKey = `${deposit.asset}-${(deposit as any).network || 'unknown'}-${deposit.poolId || 'unknown'}`;
+        const existing = marketMap.get(marketKey);
+        
+        if (existing) {
+          existing.earnedInterest += accruedInterest;
+          existing.earnedInterestValue += deposit.accruedInterestValue || (accruedInterest * (deposit.tokenPrice || 1));
+        } else {
+          marketMap.set(marketKey, {
+            asset: deposit.asset,
+            icon: deposit.icon,
+            network: (deposit as any).network,
+            poolId: deposit.poolId,
+            tokenPrice: deposit.tokenPrice || 1,
+            earnedInterest: accruedInterest,
+            earnedInterestValue: deposit.accruedInterestValue || (accruedInterest * (deposit.tokenPrice || 1)),
+            owedInterest: 0,
+            owedInterestValue: 0,
+          });
+        }
+      }
+    });
+    
+    // Process borrows with accrued interest
+    borrows.forEach((borrow) => {
+      const accruedInterest = borrow.accruedInterest || (borrow as any).interest || 0;
+      if (accruedInterest > 0) {
+        const marketKey = `${borrow.asset}-${(borrow as any).network || 'unknown'}-${borrow.poolId || 'unknown'}`;
+        const existing = marketMap.get(marketKey);
+        
+        if (existing) {
+          existing.owedInterest += accruedInterest;
+          existing.owedInterestValue += borrow.accruedInterestValue || (accruedInterest * (borrow.tokenPrice || 1));
+        } else {
+          marketMap.set(marketKey, {
+            asset: borrow.asset,
+            icon: borrow.icon,
+            network: (borrow as any).network,
+            poolId: borrow.poolId,
+            tokenPrice: borrow.tokenPrice || 1,
+            earnedInterest: 0,
+            earnedInterestValue: 0,
+            owedInterest: accruedInterest,
+            owedInterestValue: borrow.accruedInterestValue || (accruedInterest * (borrow.tokenPrice || 1)),
+          });
+        }
+      }
+    });
+    
+    // Convert map to array and calculate net accrued interest
+    const items = Array.from(marketMap.values()).map((market) => {
+      const netInterest = market.earnedInterest - market.owedInterest;
+      const netInterestValue = market.earnedInterestValue - market.owedInterestValue;
+      
+      return {
+        ...market,
+        netInterest: netInterest,
+        netInterestValue: netInterestValue,
+        // Keep individual values for display if needed
+        accruedInterest: Math.abs(netInterest), // For sorting/comparison
+        accruedInterestValue: Math.abs(netInterestValue), // For sorting/comparison
+      };
+    }).filter((item) => Math.abs(item.netInterest) > 0); // Only show markets with non-zero net interest
+    
+    return items;
+  }, [deposits, borrows]);
 
   // Debug logging
   console.log("[Portfolio] Final deposits and borrows:", {
@@ -752,19 +900,65 @@ const Portfolio = () => {
   const weightedLiquidationThreshold = 0.85; // Fixed 85% threshold
   // const weightedLiquidationThreshold = calculateWeightedLiquidationThreshold();
 
-  // Calculate health factor using collateral factor (80%) for borrowing power
-  // Health factor = (collateralValue * collateralFactor) / totalBorrowed
+  // Calculate weighted average collateral factor based on user's deposits
+  // This gives an average collateral factor across all deposited assets
+  const calculateWeightedCollateralFactor = () => {
+    if (marketData.length === 0 || deposits.length === 0) {
+      // Fallback to standard 80% if no market data or deposits
+      return 0.8;
+    }
+
+    let weightedCollateralFactor = 0;
+    let totalDepositValue = 0;
+
+    deposits.forEach((deposit) => {
+      const market = marketData.find((m) => m.symbol === deposit.asset);
+      if (market && deposit.value > 0) {
+        const collateralFactor = market.collateralFactor || 0.8;
+        weightedCollateralFactor += deposit.value * collateralFactor;
+        totalDepositValue += deposit.value;
+      }
+    });
+
+    const result = totalDepositValue > 0 ? weightedCollateralFactor / totalDepositValue : 0.8;
+    return result;
+  };
+
+  const weightedCollateralFactor = calculateWeightedCollateralFactor();
+
+  // Calculate health factor using actual market collateral factors from contract
+  // The contract's totalCollateralValue is already weighted: sum(depositValue_i * collateralFactor_i)
+  // So we use it directly: health factor = totalCollateralValue / totalBorrowed
   // If no collateral, return null (no calculation possible)
   // If no borrows, return high value (excellent health - no liquidation risk)
-  const collateralFactor = 0.8; // 80% collateral factor
 
   // Helper function to calculate health factor for given collateral and borrow values
   const calculateHealthFactor = (
     collateral: number,
     borrowed: number
   ): number | null => {
+    // If both are 0 or invalid, return null (data not loaded or no position)
+    if ((!collateral || collateral <= 0) && (!borrowed || borrowed <= 0)) {
+      return null;
+    }
+    
     if (collateral > 0 && borrowed > 0) {
-      return (collateral * collateralFactor) / borrowed;
+      // Use collateral value directly - it's already weighted with actual market collateral factors
+      // from the contract: totalCollateralValue = sum(depositValue_i * collateralFactor_i)
+      const calculated = collateral / borrowed;
+      // Ensure health factor is never exactly 0 (should be at least a very small positive number)
+      // If calculation results in 0 or negative, there's likely a data issue
+      if (calculated <= 0 || !isFinite(calculated)) {
+        console.warn("Invalid health factor calculation:", {
+          collateral,
+          borrowed,
+          calculated,
+          note: "Using contract's weighted collateral value (includes actual market collateral factors)",
+        });
+        // Return null to indicate data issue rather than showing 0
+        return null;
+      }
+      return calculated;
     } else if (collateral > 0) {
       return 10.0; // Excellent health when no borrows
     }
@@ -775,6 +969,88 @@ const Portfolio = () => {
   const saturateHealthFactor = (healthFactor: number | null): number | null => {
     if (healthFactor === null) return null;
     return Math.min(healthFactor, 3.0);
+  };
+
+  // Helper function to calculate network health factor using min(liquidation threshold) for markets with deposits
+  // Matches contract formula: (collateral_value * liquidation_threshold) / borrow_value
+  const calculateNetworkHealthFactor = (
+    networkName: string,
+    networkCollateral: number,
+    networkBorrow: number
+  ): number | null => {
+    // If both are 0 or invalid, return null (data not loaded or no position)
+    if ((!networkCollateral || networkCollateral <= 0) && (!networkBorrow || networkBorrow <= 0)) {
+      return null;
+    }
+
+    // If no borrows, return high value (excellent health - no liquidation risk)
+    // Contract returns 10000 (1.0) when borrow_value == 0, but we use 10.0 for display
+    if (networkBorrow === 0 || networkBorrow <= 0) {
+      return 10.0;
+    }
+
+    if (networkCollateral > 0) {
+      // Normalize network name for comparison (case-insensitive, handle variations)
+      const normalizedNetworkName = networkName.toLowerCase().trim();
+      
+      // Find minimum liquidation threshold for markets with deposits in this network
+      const networkDeposits = deposits.filter((deposit) => {
+        if (!deposit.value || deposit.value <= 0) return false;
+        const depositNetwork = (deposit.network || "").toLowerCase().trim();
+        // Match if network names are the same or if one contains the other
+        return (
+          depositNetwork === normalizedNetworkName ||
+          depositNetwork.includes(normalizedNetworkName) ||
+          normalizedNetworkName.includes(depositNetwork)
+        );
+      });
+
+      if (networkDeposits.length === 0) {
+        // No deposits for this network, can't calculate with min(liquidation threshold)
+        // Fall back to standard calculation (assume 85% liquidation threshold)
+        const defaultLiquidationThreshold = 0.85;
+        return (networkCollateral * defaultLiquidationThreshold) / networkBorrow;
+      }
+
+      // Get liquidation thresholds for markets with deposits
+      const liquidationThresholds: number[] = [];
+      networkDeposits.forEach((deposit) => {
+        const market = marketData.find(
+          (m) => m.symbol === deposit.asset && (m.poolId === deposit.poolId || m.appId === deposit.poolId)
+        );
+        if (market && market.liquidationThreshold !== undefined && market.liquidationThreshold !== null) {
+          liquidationThresholds.push(market.liquidationThreshold);
+        }
+      });
+
+      if (liquidationThresholds.length === 0) {
+        // No liquidation thresholds found, fall back to standard calculation
+        console.warn(`No liquidation thresholds found for network ${networkName}, using default 85%`);
+        const defaultLiquidationThreshold = 0.85;
+        return (networkCollateral * defaultLiquidationThreshold) / networkBorrow;
+      }
+
+      // Use minimum liquidation threshold (most conservative)
+      const minLiquidationThreshold = Math.min(...liquidationThresholds);
+      
+      // Calculate using contract formula: (collateral * liquidation_threshold) / borrow
+      const calculated = (networkCollateral * minLiquidationThreshold) / networkBorrow;
+
+      if (calculated <= 0 || !isFinite(calculated)) {
+        console.warn("Invalid network health factor calculation:", {
+          networkName,
+          networkCollateral,
+          networkBorrow,
+          minLiquidationThreshold,
+          calculated,
+        });
+        return null;
+      }
+
+      return calculated;
+    }
+    
+    return null; // No calculation possible when no collateral
   };
 
   const healthFactor = calculateHealthFactor(totalCollateral, totalBorrowed);
@@ -1531,11 +1807,21 @@ const Portfolio = () => {
     }
   };
 
-  const handleWithdrawClick = (
+  const prefetchWithdrawIndicesRef = useRef<((asset: string, poolId?: string) => Promise<void>) | null>(null);
+
+  const handleWithdrawClick = async (
     asset: string,
     poolId?: string,
     networkId?: string
   ) => {
+    // Prefetch indices before opening modal
+    if (prefetchWithdrawIndicesRef.current) {
+      try {
+        await prefetchWithdrawIndicesRef.current(asset, poolId);
+      } catch (error) {
+        console.error("Error prefetching withdraw indices:", error);
+      }
+    }
     setWithdrawModal({ isOpen: true, asset, poolId, network: networkId });
   };
 
@@ -1618,14 +1904,32 @@ const Portfolio = () => {
     }
 
     try {
-      // Fetch wallet balance for the asset before opening modal using the asset's network
-      await refreshWalletBalance(asset, networkId);
+      // Use the asset's network if provided, otherwise fall back to currentNetwork
+      const networkToUse = (networkId || currentNetwork) as any;
 
-      // Open modal after wallet balance is fetched
-      setRepayModal({ isOpen: true, asset, poolId, network: networkId });
+      // Fetch user global data from contract before opening modal (for accurate health factor)
+      if (activeAccount?.address) {
+        // Fetch markets from node api for accurate healthFactorIndex calculation
+        const markets = await fetchAllMarkets(networkToUse);
+        const globalData = await fetchUserGlobalData(
+          activeAccount.address,
+          networkToUse,
+          markets
+        );
+        setUserGlobalData(globalData);
+      } else {
+        // Not connected, set empty data
+        setUserGlobalData(null);
+      }
+
+      // Fetch wallet balance for the asset before opening modal using the asset's network
+      await refreshWalletBalance(asset, networkToUse);
+
+      // Open modal after data is fetched
+      setRepayModal({ isOpen: true, asset, poolId, network: networkToUse });
     } catch (error) {
-      console.error("Error fetching wallet balance for repay:", error);
-      // Still open modal even if wallet balance fetch fails
+      console.error("Error fetching data for repay:", error);
+      // Still open modal even if data fetch fails
       setRepayModal({ isOpen: true, asset, poolId, network: networkId });
     }
   };
@@ -1867,7 +2171,7 @@ const Portfolio = () => {
             )}
             {marketData.length > 0 && totalBorrowed > 0 && (
               <span className="ml-2">
-                • Collateral Factor: {(collateralFactor * 100).toFixed(0)}% •
+                • Collateral Factor: {(weightedCollateralFactor * 100).toFixed(0)}% •
                 Liquidation Threshold:{" "}
                 {(weightedLiquidationThreshold * 100).toFixed(1)}%
               </span>
@@ -2309,7 +2613,8 @@ const Portfolio = () => {
                         const networkCollateral = values.collateral || 0;
                         const networkBorrow = values.borrow || 0;
                         const networkNetValue = values.netValue || 0;
-                        const networkHealthFactorRaw = calculateHealthFactor(
+                        const networkHealthFactorRaw = calculateNetworkHealthFactor(
+                          network,
                           networkCollateral,
                           networkBorrow
                         );
@@ -2614,6 +2919,38 @@ const Portfolio = () => {
                             </button>
                           </TableHead>
                           <TableHead>
+                            <button
+                              onClick={() => {
+                                if (suppliedAssetsSort.column === "accruedInterest") {
+                                  setSuppliedAssetsSort({
+                                    column: "accruedInterest",
+                                    direction:
+                                      suppliedAssetsSort.direction === "asc"
+                                        ? "desc"
+                                        : "asc",
+                                  });
+                                } else {
+                                  setSuppliedAssetsSort({
+                                    column: "accruedInterest",
+                                    direction: "desc",
+                                  });
+                                }
+                              }}
+                              className="flex items-center gap-1 hover:text-foreground transition-colors"
+                            >
+                              Accrued Interest
+                              {suppliedAssetsSort.column === "accruedInterest" ? (
+                                suppliedAssetsSort.direction === "asc" ? (
+                                  <ArrowUp className="w-3 h-3" />
+                                ) : (
+                                  <ArrowDown className="w-3 h-3" />
+                                )
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-50" />
+                              )}
+                            </button>
+                          </TableHead>
+                          <TableHead>
                             <div className="flex items-center gap-1">
                               <button
                                 onClick={() => {
@@ -2656,7 +2993,95 @@ const Portfolio = () => {
                                 <TooltipContent>
                                   <p>
                                     Maximum amount you can borrow against this
-                                    collateral (80% of collateral value)
+                                    collateral (varies by market)
+                                  </p>
+                                </TooltipContent>
+                              </UITooltip>
+                            </div>
+                          </TableHead>
+                          <TableHead>
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => {
+                                  if (suppliedAssetsSort.column === "collateralFactor") {
+                                    setSuppliedAssetsSort({
+                                      column: "collateralFactor",
+                                      direction:
+                                        suppliedAssetsSort.direction === "asc"
+                                          ? "desc"
+                                          : "asc",
+                                    });
+                                  } else {
+                                    setSuppliedAssetsSort({
+                                      column: "collateralFactor",
+                                      direction: "desc",
+                                    });
+                                  }
+                                }}
+                                className="flex items-center gap-1 hover:text-foreground transition-colors"
+                              >
+                                Collateral Factor
+                                {suppliedAssetsSort.column === "collateralFactor" ? (
+                                  suppliedAssetsSort.direction === "asc" ? (
+                                    <ArrowUp className="w-3 h-3" />
+                                  ) : (
+                                    <ArrowDown className="w-3 h-3" />
+                                  )
+                                ) : (
+                                  <ArrowUpDown className="w-3 h-3 opacity-50" />
+                                )}
+                              </button>
+                              <UITooltip>
+                                <TooltipTrigger asChild>
+                                  <Info className="w-4 h-4 text-muted-foreground cursor-help" />
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p>
+                                    Maximum percentage of collateral value that can be borrowed against
+                                  </p>
+                                </TooltipContent>
+                              </UITooltip>
+                            </div>
+                          </TableHead>
+                          <TableHead>
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => {
+                                  if (suppliedAssetsSort.column === "liquidationFactor") {
+                                    setSuppliedAssetsSort({
+                                      column: "liquidationFactor",
+                                      direction:
+                                        suppliedAssetsSort.direction === "asc"
+                                          ? "desc"
+                                          : "asc",
+                                    });
+                                  } else {
+                                    setSuppliedAssetsSort({
+                                      column: "liquidationFactor",
+                                      direction: "desc",
+                                    });
+                                  }
+                                }}
+                                className="flex items-center gap-1 hover:text-foreground transition-colors"
+                              >
+                                Liquidation Factor
+                                {suppliedAssetsSort.column === "liquidationFactor" ? (
+                                  suppliedAssetsSort.direction === "asc" ? (
+                                    <ArrowUp className="w-3 h-3" />
+                                  ) : (
+                                    <ArrowDown className="w-3 h-3" />
+                                  )
+                                ) : (
+                                  <ArrowUpDown className="w-3 h-3 opacity-50" />
+                                )}
+                              </button>
+                              <UITooltip>
+                                <TooltipTrigger asChild>
+                                  <Info className="w-4 h-4 text-muted-foreground cursor-help" />
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p>
+                                    Percentage at which a position becomes liquidatable
                                   </p>
                                 </TooltipContent>
                               </UITooltip>
@@ -2739,13 +3164,123 @@ const Portfolio = () => {
                                 case "apy":
                                   comparison = a.apy - b.apy;
                                   break;
+                                case "accruedInterest":
+                                  const accruedInterestA = (a as any).accruedInterest || 0;
+                                  const accruedInterestB = (b as any).accruedInterest || 0;
+                                  comparison = accruedInterestA - accruedInterestB;
+                                  break;
+                                case "collateralFactor": {
+                                  // Find markets for each deposit to get their collateral factors
+                                  const marketACF = marketData.find(
+                                    (m) => 
+                                      m.symbol === a.asset &&
+                                      (a.poolId ? m.poolId === a.poolId : true)
+                                  );
+                                  const marketBCF = marketData.find(
+                                    (m) => 
+                                      m.symbol === b.asset &&
+                                      (b.poolId ? m.poolId === b.poolId : true)
+                                  );
+                                  let collateralFactorA = 
+                                    marketACF?.collateralFactor ?? 
+                                    marketACF?.marketInfo?.collateralFactor ?? 
+                                    0.8;
+                                  let collateralFactorB = 
+                                    marketBCF?.collateralFactor ?? 
+                                    marketBCF?.marketInfo?.collateralFactor ?? 
+                                    0.8;
+                                  // Convert to number if needed and normalize to decimal format
+                                  if (typeof collateralFactorA === 'string') {
+                                    collateralFactorA = parseFloat(collateralFactorA);
+                                  } else if (typeof collateralFactorA === 'bigint') {
+                                    collateralFactorA = Number(collateralFactorA);
+                                  }
+                                  if (typeof collateralFactorB === 'string') {
+                                    collateralFactorB = parseFloat(collateralFactorB);
+                                  } else if (typeof collateralFactorB === 'bigint') {
+                                    collateralFactorB = Number(collateralFactorB);
+                                  }
+                                  if (collateralFactorA > 1 && collateralFactorA <= 100) {
+                                    collateralFactorA = collateralFactorA / 100;
+                                  } else if (collateralFactorA > 100) {
+                                    collateralFactorA = collateralFactorA / 10000;
+                                  }
+                                  if (collateralFactorB > 1 && collateralFactorB <= 100) {
+                                    collateralFactorB = collateralFactorB / 100;
+                                  } else if (collateralFactorB > 100) {
+                                    collateralFactorB = collateralFactorB / 10000;
+                                  }
+                                  comparison = collateralFactorB - collateralFactorA;
+                                  break;
+                                }
+                                case "liquidationFactor": {
+                                  // Find markets for each deposit to get their liquidation thresholds
+                                  const marketALF = marketData.find(
+                                    (m) => 
+                                      m.symbol === a.asset &&
+                                      (a.poolId ? m.poolId === a.poolId : true)
+                                  );
+                                  const marketBLF = marketData.find(
+                                    (m) => 
+                                      m.symbol === b.asset &&
+                                      (b.poolId ? m.poolId === b.poolId : true)
+                                  );
+                                  let liquidationThresholdA = 
+                                    marketALF?.liquidationThreshold ?? 
+                                    marketALF?.marketInfo?.liquidationThreshold ?? 
+                                    0.85;
+                                  let liquidationThresholdB = 
+                                    marketBLF?.liquidationThreshold ?? 
+                                    marketBLF?.marketInfo?.liquidationThreshold ?? 
+                                    0.85;
+                                  // Convert to number if needed and normalize to decimal format
+                                  if (typeof liquidationThresholdA === 'string') {
+                                    liquidationThresholdA = parseFloat(liquidationThresholdA);
+                                  } else if (typeof liquidationThresholdA === 'bigint') {
+                                    liquidationThresholdA = Number(liquidationThresholdA);
+                                  }
+                                  if (typeof liquidationThresholdB === 'string') {
+                                    liquidationThresholdB = parseFloat(liquidationThresholdB);
+                                  } else if (typeof liquidationThresholdB === 'bigint') {
+                                    liquidationThresholdB = Number(liquidationThresholdB);
+                                  }
+                                  if (liquidationThresholdA > 1 && liquidationThresholdA <= 100) {
+                                    liquidationThresholdA = liquidationThresholdA / 100;
+                                  } else if (liquidationThresholdA > 100) {
+                                    liquidationThresholdA = liquidationThresholdA / 10000;
+                                  }
+                                  if (liquidationThresholdB > 1 && liquidationThresholdB <= 100) {
+                                    liquidationThresholdB = liquidationThresholdB / 100;
+                                  } else if (liquidationThresholdB > 100) {
+                                    liquidationThresholdB = liquidationThresholdB / 10000;
+                                  }
+                                  comparison = liquidationThresholdB - liquidationThresholdA;
+                                  break;
+                                }
                                 case "borrowingPower":
                                 default:
                                   // Default sort by borrowing power
-                                  const borrowingPowerA =
-                                    a.value * collateralFactor;
-                                  const borrowingPowerB =
-                                    b.value * collateralFactor;
+                                  // Find markets for each deposit to get their collateral factors
+                                  const marketA = marketData.find(
+                                    (m) => 
+                                      m.symbol === a.asset &&
+                                      (a.poolId ? m.poolId === a.poolId : true)
+                                  );
+                                  const marketB = marketData.find(
+                                    (m) => 
+                                      m.symbol === b.asset &&
+                                      (b.poolId ? m.poolId === b.poolId : true)
+                                  );
+                                  const collateralFactorA = 
+                                    marketA?.collateralFactor || 
+                                    marketA?.marketInfo?.collateralFactor || 
+                                    0.8;
+                                  const collateralFactorB = 
+                                    marketB?.collateralFactor || 
+                                    marketB?.marketInfo?.collateralFactor || 
+                                    0.8;
+                                  const borrowingPowerA = a.value * collateralFactorA;
+                                  const borrowingPowerB = b.value * collateralFactorB;
                                   comparison =
                                     borrowingPowerB - borrowingPowerA;
                                   break;
@@ -2762,9 +3297,51 @@ const Portfolio = () => {
                           const hasMore = filteredAndSorted.length > 5;
 
                           return displayDeposits.map((deposit, index) => {
+                            // Find market matching both symbol and poolId if available
                             const market = marketData.find(
-                              (m) => m.symbol === deposit.asset
+                              (m) => 
+                                m.symbol === deposit.asset &&
+                                (deposit.poolId ? m.poolId === deposit.poolId : true)
                             );
+                            // Get collateral factor from market, fallback to 0.8 (80%)
+                            // Handle both decimal (0-1) and percentage (0-100) formats, and type conversion
+                            let marketCollateralFactor = 
+                              market?.collateralFactor ?? 
+                              market?.marketInfo?.collateralFactor ?? 
+                              0.8;
+                            // Convert to number if it's a string or BigInt
+                            if (typeof marketCollateralFactor === 'string') {
+                              marketCollateralFactor = parseFloat(marketCollateralFactor);
+                            } else if (typeof marketCollateralFactor === 'bigint') {
+                              marketCollateralFactor = Number(marketCollateralFactor);
+                            }
+                            // If value is > 1, assume it's in percentage format and convert to decimal
+                            if (marketCollateralFactor > 1 && marketCollateralFactor <= 100) {
+                              marketCollateralFactor = marketCollateralFactor / 100;
+                            } else if (marketCollateralFactor > 100) {
+                              // If > 100, might be in basis points (divide by 10000)
+                              marketCollateralFactor = marketCollateralFactor / 10000;
+                            }
+                            
+                            // Get liquidation threshold from market, fallback to 0.85 (85%)
+                            // Handle both decimal (0-1) and percentage (0-100) formats, and type conversion
+                            let marketLiquidationThreshold = 
+                              market?.liquidationThreshold ?? 
+                              market?.marketInfo?.liquidationThreshold ?? 
+                              0.85;
+                            // Convert to number if it's a string or BigInt
+                            if (typeof marketLiquidationThreshold === 'string') {
+                              marketLiquidationThreshold = parseFloat(marketLiquidationThreshold);
+                            } else if (typeof marketLiquidationThreshold === 'bigint') {
+                              marketLiquidationThreshold = Number(marketLiquidationThreshold);
+                            }
+                            // If value is > 1, assume it's in percentage format and convert to decimal
+                            if (marketLiquidationThreshold > 1 && marketLiquidationThreshold <= 100) {
+                              marketLiquidationThreshold = marketLiquidationThreshold / 100;
+                            } else if (marketLiquidationThreshold > 100) {
+                              // If > 100, might be in basis points (divide by 10000)
+                              marketLiquidationThreshold = marketLiquidationThreshold / 10000;
+                            }
                             const isCollateral = deposit.value > 0; // Simplified - in reality, check if it's enabled as collateral
 
                             // Get network name from deposit or infer
@@ -2869,10 +3446,35 @@ const Portfolio = () => {
                                   </span>
                                 </TableCell>
                                 <TableCell>
+                                  {deposit.accruedInterest > 0 ? (
+                                    <div className="flex flex-col">
+                                      <span className="text-sm font-medium">
+                                        {deposit.accruedInterest.toLocaleString("en-US", {
+                                          minimumFractionDigits: 2,
+                                          maximumFractionDigits: 6,
+                                        })}{" "}
+                                        {deposit.asset}
+                                      </span>
+                                      <span className="text-xs text-muted-foreground">
+                                        {(
+                                          deposit.accruedInterestValue || deposit.accruedInterest * (deposit.tokenPrice || 1)
+                                        ).toLocaleString("en-US", {
+                                          style: "currency",
+                                          currency: "USD",
+                                          minimumFractionDigits: 2,
+                                          maximumFractionDigits: 2,
+                                        })}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-muted-foreground">—</span>
+                                  )}
+                                </TableCell>
+                                <TableCell>
                                   {isCollateral ? (
                                     <span className="font-semibold">
                                       {(
-                                        deposit.value * collateralFactor
+                                        deposit.value * marketCollateralFactor
                                       ).toLocaleString("en-US", {
                                         style: "currency",
                                         currency: "USD",
@@ -2885,6 +3487,16 @@ const Portfolio = () => {
                                       —
                                     </span>
                                   )}
+                                </TableCell>
+                                <TableCell>
+                                  <span className="text-muted-foreground">
+                                    {(marketCollateralFactor * 100).toFixed(2)}%
+                                  </span>
+                                </TableCell>
+                                <TableCell>
+                                  <span className="text-muted-foreground">
+                                    {(marketLiquidationThreshold * 100).toFixed(2)}%
+                                  </span>
                                 </TableCell>
                                 <TableCell>
                                   <div className="flex items-center gap-2">
@@ -2927,7 +3539,7 @@ const Portfolio = () => {
                         {deposits.length === 0 && (
                           <TableRow>
                             <TableCell
-                              colSpan={selectedNetworkFilter === "all" ? 7 : 6}
+                              colSpan={selectedNetworkFilter === "all" ? 10 : 9}
                               className="text-center text-muted-foreground py-8"
                             >
                               No supplied assets
@@ -3007,10 +3619,34 @@ const Portfolio = () => {
                           case "apy":
                             comparison = a.apy - b.apy;
                             break;
+                          case "accruedInterest":
+                            const accruedInterestA = (a as any).accruedInterest || 0;
+                            const accruedInterestB = (b as any).accruedInterest || 0;
+                            comparison = accruedInterestA - accruedInterestB;
+                            break;
                           case "borrowingPower":
                           default:
-                            const borrowingPowerA = a.value * collateralFactor;
-                            const borrowingPowerB = b.value * collateralFactor;
+                            // Find markets for each deposit to get their collateral factors
+                            const marketA = marketData.find(
+                              (m) => 
+                                m.symbol === a.asset &&
+                                (a.poolId ? m.poolId === a.poolId : true)
+                            );
+                            const marketB = marketData.find(
+                              (m) => 
+                                m.symbol === b.asset &&
+                                (b.poolId ? m.poolId === b.poolId : true)
+                            );
+                            const collateralFactorA = 
+                              marketA?.collateralFactor || 
+                              marketA?.marketInfo?.collateralFactor || 
+                              0.8;
+                            const collateralFactorB = 
+                              marketB?.collateralFactor || 
+                              marketB?.marketInfo?.collateralFactor || 
+                              0.8;
+                            const borrowingPowerA = a.value * collateralFactorA;
+                            const borrowingPowerB = b.value * collateralFactorB;
                             comparison = borrowingPowerB - borrowingPowerA;
                             break;
                         }
@@ -3082,9 +3718,6 @@ const Portfolio = () => {
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          {selectedNetworkFilter === "all" && (
-                            <TableHead>Network</TableHead>
-                          )}
                           <TableHead>
                             <button
                               onClick={() => {
@@ -3117,6 +3750,9 @@ const Portfolio = () => {
                               )}
                             </button>
                           </TableHead>
+                          {selectedNetworkFilter === "all" && (
+                            <TableHead>Network</TableHead>
+                          )}
                           <TableHead>
                             <button
                               onClick={() => {
@@ -3203,6 +3839,38 @@ const Portfolio = () => {
                             >
                               APY
                               {borrowedAssetsSort.column === "apy" ? (
+                                borrowedAssetsSort.direction === "asc" ? (
+                                  <ArrowUp className="w-3 h-3" />
+                                ) : (
+                                  <ArrowDown className="w-3 h-3" />
+                                )
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-50" />
+                              )}
+                            </button>
+                          </TableHead>
+                          <TableHead>
+                            <button
+                              onClick={() => {
+                                if (borrowedAssetsSort.column === "accruedInterest") {
+                                  setBorrowedAssetsSort({
+                                    column: "accruedInterest",
+                                    direction:
+                                      borrowedAssetsSort.direction === "asc"
+                                        ? "desc"
+                                        : "asc",
+                                  });
+                                } else {
+                                  setBorrowedAssetsSort({
+                                    column: "accruedInterest",
+                                    direction: "desc",
+                                  });
+                                }
+                              }}
+                              className="flex items-center gap-1 hover:text-foreground transition-colors"
+                            >
+                              Accrued Interest
+                              {borrowedAssetsSort.column === "accruedInterest" ? (
                                 borrowedAssetsSort.direction === "asc" ? (
                                   <ArrowUp className="w-3 h-3" />
                                 ) : (
@@ -3330,6 +3998,13 @@ const Portfolio = () => {
                                   comparison = a.value - b.value;
                                   break;
                                 case "apy":
+                                  comparison = a.apy - b.apy;
+                                  break;
+                                case "accruedInterest":
+                                  const accruedInterestA = (a as any).accruedInterest || 0;
+                                  const accruedInterestB = (b as any).accruedInterest || 0;
+                                  comparison = accruedInterestA - accruedInterestB;
+                                  break;
                                 default:
                                   comparison = a.apy - b.apy;
                                   break;
@@ -3446,11 +4121,6 @@ const Portfolio = () => {
 
                             return (
                               <TableRow key={index}>
-                                {selectedNetworkFilter === "all" && (
-                                  <TableCell className="font-medium">
-                                    {networkName}
-                                  </TableCell>
-                                )}
                                 <TableCell>
                                   <div className="flex items-center gap-2">
                                     <img
@@ -3463,6 +4133,11 @@ const Portfolio = () => {
                                     </span>
                                   </div>
                                 </TableCell>
+                                {selectedNetworkFilter === "all" && (
+                                  <TableCell className="font-medium">
+                                    {networkName}
+                                  </TableCell>
+                                )}
                                 <TableCell>
                                   {borrow.balance.toLocaleString("en-US", {
                                     minimumFractionDigits: 2,
@@ -3481,6 +4156,31 @@ const Portfolio = () => {
                                   <span className="text-red-600 dark:text-red-400">
                                     {borrow.apy.toFixed(2)}%
                                   </span>
+                                </TableCell>
+                                <TableCell>
+                                  {borrow.accruedInterest > 0 ? (
+                                    <div className="flex flex-col">
+                                      <span className="text-sm font-medium text-amber-600 dark:text-amber-400">
+                                        {borrow.accruedInterest.toLocaleString("en-US", {
+                                          minimumFractionDigits: 2,
+                                          maximumFractionDigits: 6,
+                                        })}{" "}
+                                        {borrow.asset}
+                                      </span>
+                                      <span className="text-xs text-muted-foreground">
+                                        {(
+                                          borrow.accruedInterestValue || borrow.accruedInterest * (borrow.tokenPrice || 1)
+                                        ).toLocaleString("en-US", {
+                                          style: "currency",
+                                          currency: "USD",
+                                          minimumFractionDigits: 2,
+                                          maximumFractionDigits: 2,
+                                        })}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-muted-foreground">—</span>
+                                  )}
                                 </TableCell>
                                 <TableCell>
                                   <div className="flex items-center gap-2">
@@ -3549,7 +4249,7 @@ const Portfolio = () => {
                         {borrows.length === 0 && (
                           <TableRow>
                             <TableCell
-                              colSpan={selectedNetworkFilter === "all" ? 8 : 7}
+                              colSpan={selectedNetworkFilter === "all" ? 9 : 8}
                               className="text-center text-muted-foreground py-8"
                             >
                               No borrowed assets
@@ -3626,6 +4326,13 @@ const Portfolio = () => {
                             comparison = a.value - b.value;
                             break;
                           case "apy":
+                            comparison = a.apy - b.apy;
+                            break;
+                          case "accruedInterest":
+                            const accruedInterestA = (a as any).accruedInterest || 0;
+                            const accruedInterestB = (b as any).accruedInterest || 0;
+                            comparison = accruedInterestA - accruedInterestB;
+                            break;
                           default:
                             comparison = a.apy - b.apy;
                             break;
@@ -3658,6 +4365,530 @@ const Portfolio = () => {
                           className="w-full"
                         >
                           {showAllBorrowedAssets ? "Show Less" : "Show More"}
+                        </Button>
+                      </div>
+                    ) : null;
+                  })()}
+                </DorkFiCard>
+              )}
+
+              {/* Accrued Interest Table */}
+              {accruedInterestItems.length > 0 && (
+                <DorkFiCard className="p-6 md:p-8">
+                  <div ref={accruedInterestTableRef} className="mb-4">
+                    <H1 className="text-xl md:text-2xl mb-2">
+                      Accrued Interest
+                      {selectedNetworkFilter !== "all" && (
+                        <span className="text-lg text-muted-foreground ml-2">
+                          (
+                          {selectedNetworkFilter.charAt(0).toUpperCase() +
+                            selectedNetworkFilter.slice(1)}
+                          )
+                        </span>
+                      )}
+                    </H1>
+                  </div>
+                  <div className="mb-4">
+                    <div className="relative max-w-md">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
+                      <Input
+                        placeholder="Search assets..."
+                        value={accruedInterestSearchTerm}
+                        onChange={(e) =>
+                          setAccruedInterestSearchTerm(e.target.value)
+                        }
+                        className="pl-10"
+                      />
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>
+                            <button
+                              onClick={() => {
+                                if (accruedInterestSort.column === "asset") {
+                                  setAccruedInterestSort({
+                                    column: "asset",
+                                    direction:
+                                      accruedInterestSort.direction === "asc"
+                                        ? "desc"
+                                        : "asc",
+                                  });
+                                } else {
+                                  setAccruedInterestSort({
+                                    column: "asset",
+                                    direction: "asc",
+                                  });
+                                }
+                              }}
+                              className="flex items-center gap-1 hover:text-foreground transition-colors"
+                            >
+                              Asset
+                              {accruedInterestSort.column === "asset" ? (
+                                accruedInterestSort.direction === "asc" ? (
+                                  <ArrowUp className="w-3 h-3" />
+                                ) : (
+                                  <ArrowDown className="w-3 h-3" />
+                                )
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-50" />
+                              )}
+                            </button>
+                          </TableHead>
+                          {selectedNetworkFilter === "all" && (
+                            <TableHead>
+                              <button
+                                onClick={() => {
+                                  if (accruedInterestSort.column === "network") {
+                                    setAccruedInterestSort({
+                                      column: "network",
+                                      direction:
+                                        accruedInterestSort.direction === "asc"
+                                          ? "desc"
+                                          : "asc",
+                                    });
+                                  } else {
+                                    setAccruedInterestSort({
+                                      column: "network",
+                                      direction: "asc",
+                                    });
+                                  }
+                                }}
+                                className="flex items-center gap-1 hover:text-foreground transition-colors"
+                              >
+                                Network
+                                {accruedInterestSort.column === "network" ? (
+                                  accruedInterestSort.direction === "asc" ? (
+                                    <ArrowUp className="w-3 h-3" />
+                                  ) : (
+                                    <ArrowDown className="w-3 h-3" />
+                                  )
+                                ) : (
+                                  <ArrowUpDown className="w-3 h-3 opacity-50" />
+                                )}
+                              </button>
+                            </TableHead>
+                          )}
+                          <TableHead>
+                            <button
+                              onClick={() => {
+                                if (accruedInterestSort.column === "interest") {
+                                  setAccruedInterestSort({
+                                    column: "interest",
+                                    direction:
+                                      accruedInterestSort.direction === "asc"
+                                        ? "desc"
+                                        : "asc",
+                                  });
+                                } else {
+                                  setAccruedInterestSort({
+                                    column: "interest",
+                                    direction: "desc",
+                                  });
+                                }
+                              }}
+                              className="flex items-center gap-1 hover:text-foreground transition-colors"
+                            >
+                              Net Accrued Interest
+                              {accruedInterestSort.column === "interest" ? (
+                                accruedInterestSort.direction === "asc" ? (
+                                  <ArrowUp className="w-3 h-3" />
+                                ) : (
+                                  <ArrowDown className="w-3 h-3" />
+                                )
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-50" />
+                              )}
+                            </button>
+                          </TableHead>
+                          <TableHead>
+                            <button
+                              onClick={() => {
+                                if (accruedInterestSort.column === "value") {
+                                  setAccruedInterestSort({
+                                    column: "value",
+                                    direction:
+                                      accruedInterestSort.direction === "asc"
+                                        ? "desc"
+                                        : "asc",
+                                  });
+                                } else {
+                                  setAccruedInterestSort({
+                                    column: "value",
+                                    direction: "desc",
+                                  });
+                                }
+                              }}
+                              className="flex items-center gap-1 hover:text-foreground transition-colors"
+                            >
+                              Value (USD)
+                              {accruedInterestSort.column === "value" ? (
+                                accruedInterestSort.direction === "asc" ? (
+                                  <ArrowUp className="w-3 h-3" />
+                                ) : (
+                                  <ArrowDown className="w-3 h-3" />
+                                )
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-50" />
+                              )}
+                            </button>
+                          </TableHead>
+                          <TableHead>Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {(() => {
+                          const filteredAndSorted = accruedInterestItems
+                            .filter((item) => {
+                              // Filter by search term
+                              if (accruedInterestSearchTerm) {
+                                const searchLower =
+                                  accruedInterestSearchTerm.toLowerCase();
+                                const assetMatch = item.asset
+                                  .toLowerCase()
+                                  .includes(searchLower);
+                                if (!assetMatch) {
+                                  return false;
+                                }
+                              }
+
+                              // Filter by network
+                              if (selectedNetworkFilter === "all") {
+                                return true;
+                              }
+
+                              const itemNetwork = (item as any).network;
+                              if (itemNetwork) {
+                                const normalizedNetwork =
+                                  itemNetwork.toLowerCase();
+                                if (selectedNetworkFilter === "algorand") {
+                                  return normalizedNetwork.includes("algorand");
+                                } else if (selectedNetworkFilter === "voi") {
+                                  return normalizedNetwork.includes("voi");
+                                }
+                              }
+
+                              const matchingNetwork = Object.entries(
+                                user?.computed?.networkValues || {}
+                              ).find(([network, values]: [string, any]) => {
+                                const normalizedNetwork = network.toLowerCase();
+                                if (selectedNetworkFilter === "algorand") {
+                                  return normalizedNetwork.includes("algorand");
+                                } else if (selectedNetworkFilter === "voi") {
+                                  return normalizedNetwork.includes("voi");
+                                }
+                                return false;
+                              });
+
+                              return true;
+                            })
+                            .sort((a, b) => {
+                              let comparison = 0;
+
+                              switch (accruedInterestSort.column) {
+                                case "network":
+                                  const networkA = (
+                                    (a as any).network || "Unknown"
+                                  ).toLowerCase();
+                                  const networkB = (
+                                    (b as any).network || "Unknown"
+                                  ).toLowerCase();
+                                  comparison = networkA.localeCompare(networkB);
+                                  break;
+                                case "asset":
+                                  comparison = a.asset.localeCompare(b.asset);
+                                  break;
+                                case "interest":
+                                  comparison =
+                                    (a.netInterest || 0) -
+                                    (b.netInterest || 0);
+                                  break;
+                                case "value":
+                                default:
+                                  comparison =
+                                    (a.netInterestValue || 0) -
+                                    (b.netInterestValue || 0);
+                                  break;
+                              }
+
+                              return accruedInterestSort.direction === "asc"
+                                ? comparison
+                                : -comparison;
+                            });
+
+                          const displayItems = showAllAccruedInterest
+                            ? filteredAndSorted
+                            : filteredAndSorted.slice(0, 5);
+                          const hasMore = filteredAndSorted.length > 5;
+
+                          return displayItems.map((item, index) => {
+                            // Get network name from item or infer
+                            let networkName = "Unknown";
+                            const itemNetwork = (item as any).network;
+                            if (itemNetwork) {
+                              const normalized = itemNetwork.toLowerCase();
+                              if (normalized.includes("algorand")) {
+                                networkName = "Algorand";
+                              } else if (normalized.includes("voi")) {
+                                networkName = "VOI";
+                              } else {
+                                networkName = itemNetwork
+                                  .split("-")
+                                  .map(
+                                    (word) =>
+                                      word.charAt(0).toUpperCase() +
+                                      word.slice(1)
+                                  )
+                                  .join(" ");
+                              }
+                            } else if (selectedNetworkFilter === "all") {
+                              const matchingNetwork = Object.entries(
+                                user.computed.networkValues
+                              ).find(([network, values]: [string, any]) => {
+                                // Try to match by checking if the net interest value is close to any network's values
+                                const netValue = Math.abs(item.netInterestValue || 0);
+                                return (
+                                  Math.abs(values.collateral - netValue) < values.collateral * 0.1 ||
+                                  Math.abs(values.borrow - netValue) < values.borrow * 0.1
+                                );
+                              });
+                              if (matchingNetwork) {
+                                const network = matchingNetwork[0];
+                                const normalized = network.toLowerCase();
+                                if (normalized.includes("algorand")) {
+                                  networkName = "Algorand";
+                                } else if (normalized.includes("voi")) {
+                                  networkName = "VOI";
+                                } else {
+                                  networkName = network
+                                    .split("-")
+                                    .map(
+                                      (word) =>
+                                        word.charAt(0).toUpperCase() +
+                                        word.slice(1)
+                                    )
+                                    .join(" ");
+                                }
+                              }
+                            }
+
+                            const isNetPositive = (item.netInterest || 0) > 0;
+                            const hasDeposits = (item.earnedInterest || 0) > 0;
+                            const hasBorrows = (item.owedInterest || 0) > 0;
+
+                            return (
+                              <TableRow
+                                key={index}
+                                className="cursor-pointer hover:bg-muted/50 transition-colors"
+                                onClick={() => {
+                                  // Only show repay action
+                                  if (hasBorrows) {
+                                    handleRepayClick(
+                                      item.asset,
+                                      item.poolId,
+                                      (item as any).network
+                                    );
+                                  }
+                                }}
+                              >
+                                <TableCell>
+                                  <div className="flex items-center gap-2">
+                                    <img
+                                      src={item.icon}
+                                      alt={item.asset}
+                                      className="w-6 h-6 rounded-full"
+                                    />
+                                    <span className="font-medium">
+                                      {item.asset}
+                                    </span>
+                                  </div>
+                                </TableCell>
+                                {selectedNetworkFilter === "all" && (
+                                  <TableCell className="font-medium">
+                                    {networkName}
+                                  </TableCell>
+                                )}
+                                <TableCell>
+                                  <div className="flex flex-col">
+                                    <span
+                                      className={
+                                        isNetPositive
+                                          ? "text-green-600 dark:text-green-400 font-medium"
+                                          : "text-red-600 dark:text-red-400 font-medium"
+                                      }
+                                    >
+                                      {isNetPositive ? "+" : ""}
+                                      {(item.netInterest || 0).toLocaleString("en-US", {
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 6,
+                                      })}{" "}
+                                      {item.asset}
+                                    </span>
+                                    {(hasDeposits && hasBorrows) && (
+                                      <span className="text-xs text-muted-foreground mt-0.5">
+                                        Earned: {item.earnedInterest.toLocaleString("en-US", {
+                                          minimumFractionDigits: 2,
+                                          maximumFractionDigits: 6,
+                                        })} | Owed: {item.owedInterest.toLocaleString("en-US", {
+                                          minimumFractionDigits: 2,
+                                          maximumFractionDigits: 6,
+                                        })}
+                                      </span>
+                                    )}
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <span
+                                    className={
+                                      isNetPositive
+                                        ? "text-green-600 dark:text-green-400"
+                                        : "text-red-600 dark:text-red-400"
+                                    }
+                                  >
+                                    {isNetPositive ? "+" : ""}
+                                    {(item.netInterestValue || 0).toLocaleString("en-US", {
+                                      style: "currency",
+                                      currency: "USD",
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    })}
+                                  </span>
+                                </TableCell>
+                                <TableCell>
+                                  {hasBorrows && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleRepayClick(
+                                          item.asset,
+                                          item.poolId,
+                                          (item as any).network
+                                        );
+                                      }}
+                                      title="Repay"
+                                    >
+                                      −
+                                    </Button>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          });
+                        })()}
+                        {accruedInterestItems.length === 0 && (
+                          <TableRow>
+                            <TableCell
+                              colSpan={selectedNetworkFilter === "all" ? 5 : 4}
+                              className="text-center text-muted-foreground py-8"
+                            >
+                              No accrued interest
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  {(() => {
+                    const filteredAndSorted = accruedInterestItems
+                      .filter((item) => {
+                        if (accruedInterestSearchTerm) {
+                          const searchLower =
+                            accruedInterestSearchTerm.toLowerCase();
+                          const assetMatch = item.asset
+                            .toLowerCase()
+                            .includes(searchLower);
+                          if (!assetMatch) {
+                            return false;
+                          }
+                        }
+
+                        if (selectedNetworkFilter === "all") {
+                          return true;
+                        }
+
+                        const itemNetwork = (item as any).network;
+                        if (itemNetwork) {
+                          const normalizedNetwork = itemNetwork.toLowerCase();
+                          if (selectedNetworkFilter === "algorand") {
+                            return normalizedNetwork.includes("algorand");
+                          } else if (selectedNetworkFilter === "voi") {
+                            return normalizedNetwork.includes("voi");
+                          }
+                        }
+
+                        const matchingNetwork = Object.entries(
+                          user?.computed?.networkValues || {}
+                        ).find(([network, values]: [string, any]) => {
+                          const normalizedNetwork = network.toLowerCase();
+                          if (selectedNetworkFilter === "algorand") {
+                            return normalizedNetwork.includes("algorand");
+                          } else if (selectedNetworkFilter === "voi") {
+                            return normalizedNetwork.includes("voi");
+                          }
+                          return false;
+                        });
+
+                        return true;
+                      })
+                      .sort((a, b) => {
+                        let comparison = 0;
+
+                        switch (accruedInterestSort.column) {
+                          case "network":
+                            const networkA = (
+                              (a as any).network || "Unknown"
+                            ).toLowerCase();
+                            const networkB = (
+                              (b as any).network || "Unknown"
+                            ).toLowerCase();
+                            comparison = networkA.localeCompare(networkB);
+                            break;
+                          case "asset":
+                            comparison = a.asset.localeCompare(b.asset);
+                            break;
+                          case "interest":
+                            comparison =
+                              (a.netInterest || 0) -
+                              (b.netInterest || 0);
+                            break;
+                          case "value":
+                          default:
+                            comparison =
+                              (a.netInterestValue || 0) -
+                              (b.netInterestValue || 0);
+                            break;
+                        }
+
+                        return accruedInterestSort.direction === "asc"
+                          ? comparison
+                          : -comparison;
+                      });
+
+                    const hasMore = filteredAndSorted.length > 5;
+
+                    return hasMore ? (
+                      <div className="mt-4 text-center">
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            const wasExpanded = showAllAccruedInterest;
+                            setShowAllAccruedInterest(!showAllAccruedInterest);
+                            if (wasExpanded && accruedInterestTableRef.current) {
+                              setTimeout(() => {
+                                accruedInterestTableRef.current?.scrollIntoView({
+                                  behavior: "smooth",
+                                  block: "start",
+                                });
+                              }, 0);
+                            }
+                          }}
+                          className="w-full"
+                        >
+                          {showAllAccruedInterest ? "Show Less" : "Show More"}
                         </Button>
                       </div>
                     ) : null;
@@ -3800,6 +5031,7 @@ const Portfolio = () => {
         marketData={marketData}
         userGlobalData={userGlobalData}
         userBorrowBalance={userBorrowBalance}
+        prefetchWithdrawIndicesRef={prefetchWithdrawIndicesRef}
         onCloseDepositModal={() =>
           setDepositModal({
             isOpen: false,

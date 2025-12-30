@@ -1524,11 +1524,90 @@ export const withdraw = async (
         .multipliedBy(10 ** token.decimals)
         .toFixed(0);
 
+      const formattedAmount = new BigNumber(amountInSmallestUnit)
+        .dividedBy(10 ** token.decimals)
+        .toFixed(token.decimals);
+
       // Get market info
       const marketInfo = await fetchMarketInfo(poolId, marketId, networkId);
       if (!marketInfo) {
         throw new Error("Failed to fetch market info");
       }
+
+      // Calculate accrued interest for logging/validation
+      let accruedInterest: number | undefined;
+      let userScaledDeposits: bigint | null = null;
+      try {
+        const appAddress = algosdk.getApplicationAddress(Number(poolId));
+        const tempCi = new CONTRACT(
+          Number(poolId),
+          clients.algod,
+          undefined,
+          { ...LendingPoolAppSpec.contract, events: [] },
+          {
+            addr:
+              typeof appAddress === "string"
+                ? appAddress
+                : appAddress.toString(),
+            sk: new Uint8Array(),
+          }
+        );
+        tempCi.setFee(2000);
+        const userDataR = await tempCi.get_user(userAddress, Number(marketId));
+
+        if (userDataR.success) {
+          const userData = UserData(userDataR.returnValue);
+          const scaledDeposits = userData.scaledDeposits?.toString();
+          const userDepositIndex = userData.depositIndex?.toString();
+          const currentDepositIndex = marketInfo.depositIndex;
+
+          // Store user's scaled deposits for later use in withdraw validation
+          if (scaledDeposits) {
+            userScaledDeposits = BigInt(scaledDeposits);
+          }
+
+          if (scaledDeposits && userDepositIndex && currentDepositIndex) {
+            const SCALE = BigInt(1e18);
+            const scaledDepositsBigInt = BigInt(scaledDeposits);
+            const currentIndexBigInt = BigInt(currentDepositIndex);
+            const userIndexBigInt = BigInt(userDepositIndex);
+
+            // Current Deposit Value = (scaledDeposits × currentDepositIndex) ÷ SCALE
+            const currentDepositValueRaw =
+              (scaledDepositsBigInt * currentIndexBigInt) / SCALE;
+
+            // Original Deposit Amount = (scaledDeposits × userDepositIndex) ÷ SCALE
+            const originalDepositRaw =
+              (scaledDepositsBigInt * userIndexBigInt) / SCALE;
+
+            // Convert to human-readable format
+            const currentDepositValue =
+              Number(currentDepositValueRaw) / Math.pow(10, token.decimals);
+            const originalDeposit =
+              Number(originalDepositRaw) / Math.pow(10, token.decimals);
+
+            // Accrued Interest = Current Deposit Value - Original Deposit Amount
+            accruedInterest = currentDepositValue - originalDeposit;
+
+            console.log("Accrued interest calculation:", {
+              scaledDeposits,
+              userDepositIndex,
+              currentDepositIndex,
+              currentDepositValue,
+              originalDeposit,
+              accruedInterest,
+            });
+          }
+        }
+      } catch (error) {
+        console.warn(
+          "Failed to calculate accrued interest in withdraw handler:",
+          error
+        );
+        // Don't throw - this is just for logging
+      }
+      accruedInterest = Math.max(accruedInterest, 0);
+      accruedInterest = 0; // disables accrued interest withdraw for now
 
       const ci = new CONTRACT(
         Number(poolId),
@@ -1626,30 +1705,90 @@ export const withdraw = async (
 
       const buildN = [];
 
+      // sync user market for price_change
+      // if (accruedInterest !== undefined && accruedInterest > 0) {
+      //   const txnO = (
+      //     await builder.lending.sync_user_market_for_price_change(
+      //       userAddress,
+      //       Number(marketId)
+      //     )
+      //   ).obj;
+      //   buildN.push({
+      //     ...txnO,
+      //     note: new TextEncoder().encode(`lending sync_market ${marketId}`),
+      //     payment: 1e5,
+      //   });
+      // }
+
       // Withdraw from lending pool
       {
+        const SCALE = BigInt(1e18);
+        const currentDepositIndex = BigInt(marketInfo.depositIndex);
+        
+        const smallAccumulatedInterest = new BigNumber(accruedInterest)
+          .multipliedBy(10 ** token.decimals)
+          .toFixed(0);
+        console.log("smallAccumulatedInterest", { smallAccumulatedInterest });
+        const withdrawAmount =
+          BigInt(amountInSmallestUnit) + BigInt(smallAccumulatedInterest);
+        
+        // Convert actual withdraw amount to scaled deposits
+        // Formula: scaledAmount = (actualAmount * SCALE) / currentDepositIndex
+        let scaledWithdrawAmount = (withdrawAmount * SCALE) / currentDepositIndex;
+        
+        // Safety check: if calculated scaled amount exceeds user's actual scaled deposits,
+        // use the user's actual scaled deposits instead
+        if (userScaledDeposits !== null && scaledWithdrawAmount > userScaledDeposits) {
+          console.warn("Calculated scaled withdraw amount exceeds user's scaled deposits. Capping to user's scaled deposits.", {
+            calculatedScaledAmount: scaledWithdrawAmount.toString(),
+            userScaledDeposits: userScaledDeposits.toString(),
+          });
+          scaledWithdrawAmount = userScaledDeposits;
+        }
+        
+        console.log("Withdraw amount conversion:", {
+          actualAmount: withdrawAmount.toString(),
+          currentDepositIndex: currentDepositIndex.toString(),
+          scaledAmount: scaledWithdrawAmount.toString(),
+          userScaledDeposits: userScaledDeposits?.toString() || "not available",
+        });
+        
+        const formattedAccumulatedInterest = new BigNumber(
+          accruedInterest
+        ).toFixed(token.decimals);
+        const formattedWithdrawAmount = new BigNumber(withdrawAmount)
+          .dividedBy(10 ** token.decimals)
+          .toFixed(token.decimals);
         const txnO = (
-          await builder.lending.withdraw(
-            Number(marketId),
-            BigInt(amountInSmallestUnit)
-          )
+          await builder.lending.withdraw(Number(marketId), scaledWithdrawAmount)
         ).obj as any;
+        const note =
+          accruedInterest !== undefined && accruedInterest > 0
+            ? `lending withdraw ${formattedWithdrawAmount} (includes interest: ${formattedAccumulatedInterest})`
+            : `lending withdraw ${formattedWithdrawAmount}`;
         buildN.push({
           ...txnO,
-          note: new TextEncoder().encode("lending withdraw"),
-          payment: 1e5,
+          note: new TextEncoder().encode(note),
+          payment: 1e5 + 1,
           foreignApps: [46505155], // TODO use value from config
         });
       }
 
       // cond a token withdraw
       if (tokenStandard == "network" || tokenStandard == "asa") {
-        const txnO = (
-          await builder.token.withdraw(BigInt(amountInSmallestUnit))
-        ).obj;
+        const smallAccumulatedInterest = new BigNumber(accruedInterest)
+          .multipliedBy(10 ** token.decimals)
+          .toFixed(0);
+        const withdrawAmount =
+          BigInt(amountInSmallestUnit) + BigInt(smallAccumulatedInterest);
+        const formmatedWithdrawAmount = new BigNumber(withdrawAmount)
+          .dividedBy(10 ** token.decimals)
+          .toFixed(token.decimals);
+        const txnO = (await builder.token.withdraw(withdrawAmount)).obj;
+        const note = `atoken withdraw ${formmatedWithdrawAmount}`;
         buildN.push({
           ...txnO,
-          note: new TextEncoder().encode("atoken withdraw"),
+          note: new TextEncoder().encode(note),
         });
       } else if (tokenStandard == "arc200-exchange") {
         const txnO = (
@@ -1679,6 +1818,16 @@ export const withdraw = async (
       customTx = await ci.custom();
 
       console.log("customTx", { customTx });
+
+      // Log withdrawal details including accrued interest if calculated
+      if (accruedInterest !== undefined) {
+        console.log("Withdrawal details:", {
+          withdrawAmount: amount,
+          accruedInterest,
+          originalDeposit: parseFloat(amount) - accruedInterest,
+          currentDepositValue: parseFloat(amount),
+        });
+      }
 
       if (!customTx.success) {
         if (customTx.error.match(/tried to spend/)) {

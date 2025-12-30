@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { InfoIcon, ChevronDown, ChevronUp } from "lucide-react";
+import { formatRelativeTime, formatRelativeTimeFromISO } from "@/utils/timeUtils";
 import {
   Tooltip,
   TooltipContent,
@@ -24,16 +25,22 @@ interface WithdrawModalProps {
   tokenSymbol: string;
   tokenIcon: string;
   currentlyDeposited: number;
-  nTokenBalance?: number;
   marketStats: {
     supplyAPY: number;
+    borrowAPY: number;
     utilization: number;
     collateralFactor: number;
     tokenPrice: number;
+    totalDeposits?: number;
+    marketCapacity?: number;
     liquidationMargin?: number;
     healthFactor?: number;
     ltv?: number;
     accruedInterest?: number;
+    currentDepositIndex?: string;
+    userDepositIndex?: string;
+    scaledDeposits?: string;
+    lastUpdateTime?: number | string;
   };
   onSubmit?: (amount: string) => void;
   isLoading?: boolean;
@@ -48,7 +55,6 @@ const WithdrawModal = ({
   tokenSymbol,
   tokenIcon,
   currentlyDeposited,
-  nTokenBalance = 0,
   marketStats,
   onSubmit,
   isLoading = false,
@@ -59,21 +65,74 @@ const WithdrawModal = ({
   const [amount, setAmount] = useState("");
   const [fiatValue, setFiatValue] = useState(0);
   const [showSuccess, setShowSuccess] = useState(false);
-  const [expandedDetails, setExpandedDetails] = useState({
-    supplyAPY: false,
-    accruedInterest: false,
-    utilization: false,
-    collateralFactor: false,
-    liquidationMargin: false,
-    healthFactor: false,
-    ltv: false,
-  });
+  const [expandedDetail, setExpandedDetail] = useState<string | null>(null);
+  const [showDebugValues, setShowDebugValues] = useState(false);
 
-  const toggleDetail = (key: keyof typeof expandedDetails) => {
-    setExpandedDetails(prev => ({
-      ...prev,
-      [key]: !prev[key],
-    }));
+  // Calculate values using indices
+  // Formula:
+  // Current Deposit Value = (scaledDeposits × currentDepositIndex) ÷ SCALE
+  // Original Deposit Amount = (scaledDeposits × userDepositIndex) ÷ SCALE
+  // 
+  // Since currentlyDeposited is already calculated correctly using currentDepositIndex,
+  // we can calculate original deposit using the ratio of indices:
+  // Original Deposit = currentlyDeposited × (userDepositIndex / currentDepositIndex)
+  const calculateOriginalDeposit = (): number => {
+    if (marketStats.currentDepositIndex && marketStats.userDepositIndex && currentlyDeposited > 0) {
+      try {
+        const currentIndex = Number(marketStats.currentDepositIndex);
+        const userIndex = Number(marketStats.userDepositIndex);
+        if (currentIndex > 0 && userIndex > 0) {
+          // Validate: currentDepositIndex should always be >= userDepositIndex
+          // (current index increases over time as interest accrues)
+          if (userIndex > currentIndex) {
+            console.warn(
+              "Invalid index relationship: userDepositIndex > currentDepositIndex",
+              {
+                userDepositIndex: userIndex,
+                currentDepositIndex: currentIndex,
+                tokenSymbol,
+              }
+            );
+            // If indices are invalid, fall back to using currentDeposited as original
+            // (assume no interest accrued if indices are wrong)
+            return currentlyDeposited;
+          }
+          // Original Deposit = currentlyDeposited × (userDepositIndex / currentDepositIndex)
+          return currentlyDeposited * (userIndex / currentIndex);
+        }
+      } catch (error) {
+        console.error("Error calculating original deposit:", error);
+      }
+    }
+    // Fallback: calculate from currentlyDeposited and accruedInterest
+    return currentlyDeposited - (marketStats.accruedInterest ?? 0);
+  };
+
+  // Use currentlyDeposited as the current deposit value (it's already calculated correctly)
+  const currentDepositValue = currentlyDeposited;
+  const originalDepositAmount = calculateOriginalDeposit();
+  // Calculate accrued interest from the difference
+  // Ensure accrued interest is never negative (shouldn't happen if indices are correct)
+  const accruedInterest = Math.max(0, currentDepositValue - originalDepositAmount);
+  
+  // Debug logging for index validation
+  if (marketStats.currentDepositIndex && marketStats.userDepositIndex) {
+    const currentIndex = Number(marketStats.currentDepositIndex);
+    const userIndex = Number(marketStats.userDepositIndex);
+    if (userIndex > currentIndex) {
+      console.error("WithdrawModal: Invalid index relationship detected", {
+        tokenSymbol,
+        currentDepositIndex: currentIndex,
+        userDepositIndex: userIndex,
+        currentlyDeposited,
+        calculatedOriginalDeposit: originalDepositAmount,
+        calculatedAccruedInterest: currentDepositValue - originalDepositAmount,
+      });
+    }
+  }
+
+  const handleToggleDetail = (field: string) => {
+    setExpandedDetail(prev => (prev === field ? null : field));
   };
 
   // Reset states when modal opens/closes
@@ -95,7 +154,11 @@ const WithdrawModal = ({
   }, [amount, marketStats.tokenPrice]);
 
   const handleMaxClick = () => {
-    setAmount(currentlyDeposited.toString());
+    // Use originalDepositAmount as the maximum withdrawable amount
+    // Format to reasonable precision (8 decimal places max, remove trailing zeros)
+    // This prevents excessive decimal places from floating point calculations
+    const formattedAmount = parseFloat(originalDepositAmount.toFixed(8)).toString();
+    setAmount(formattedAmount);
   };
 
   const handleSubmit = () => {
@@ -128,11 +191,11 @@ const WithdrawModal = ({
   const isValidAmount =
     amount &&
     parseFloat(amount) > 0 &&
-    parseFloat(amount) <= currentlyDeposited;
+    parseFloat(amount) <= originalDepositAmount;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="w-full max-w-[98vw] sm:max-w-md rounded-t-2xl sm:rounded-xl p-4 sm:p-8 max-h-[90vh] overflow-y-auto">
+      <DialogContent className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-white rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl card-hover hover:shadow-lg hover:border-ocean-teal/40 transition-all max-w-[95vw] md:max-w-md h-[90vh] md:h-auto max-h-[90vh] md:max-h-[85vh] overflow-hidden flex flex-col p-0">
         {showSuccess ? (
           <div className="p-6 overflow-y-auto">
             <SupplyBorrowCongrats
@@ -148,15 +211,8 @@ const WithdrawModal = ({
           </div>
         ) : (
           <div className="flex flex-col h-full">
-            <div className="sticky top-0 z-20 bg-card dark:bg-slate-900 pt-6 px-8 pb-4">
+            <div className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 px-6 pt-4 pb-2 shrink-0">
               <DialogHeader className="pb-0">
-                <DialogTitle className="text-2xl font-bold text-center text-slate-800 dark:text-white">
-                  Withdraw
-                </DialogTitle>
-                <DialogDescription className="text-center mt-1 text-sm text-slate-400 dark:text-slate-400">
-                  Enter the amount to withdraw. Your deposited total and rates are
-                  shown below.
-                </DialogDescription>
                 <div className="flex items-center justify-center gap-3 pb-2 mt-3">
                   <img
                     src={tokenIcon}
@@ -183,7 +239,7 @@ const WithdrawModal = ({
               </DialogHeader>
             </div>
 
-            <div className="flex-1 overflow-y-auto overscroll-contain space-y-6 pt-2 px-8 pb-8 touch-pan-y">
+            <div className="flex-1 overflow-y-auto overscroll-contain px-6 pt-2 pb-4 md:pb-3 space-y-3 touch-pan-y min-h-0">
               <div className="space-y-3">
                 <Label
                   htmlFor="amount"
@@ -220,97 +276,78 @@ const WithdrawModal = ({
                     })}
                   </p>
                 )}
-                {/* Balance Information */}
-                <div className="space-y-3">
-                  {/* nToken Balance Display */}
-                  <div className="p-3 rounded-lg border bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800">
+                {/* Deposited Balance Display */}
+                <div className="p-3 rounded-lg border bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                        <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
-                          nToken Balance
+                      <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                      <span className="text-sm font-medium text-red-700 dark:text-red-300">
+                        Deposited Balance
                         </span>
                         {onRefreshBalance && (
                           <Button
                             size="sm"
                             variant="ghost"
                             onClick={onRefreshBalance}
-                            className="h-6 w-6 p-0 text-blue-600 hover:bg-blue-100 dark:text-blue-400 dark:hover:bg-blue-800"
-                            title="Refresh nToken balance"
+                          className="h-6 w-6 p-0 text-red-600 hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-800"
+                          title="Refresh deposited balance"
+                        >
+                          <svg
+                            className="w-3 h-3"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
                           >
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
                             </svg>
                           </Button>
                         )}
                       </div>
                       <div className="text-right">
-                        <div className="text-sm font-semibold text-blue-800 dark:text-blue-200">
-                          {nTokenBalance.toLocaleString(undefined, { maximumFractionDigits: 6 })} n{tokenSymbol}
+                      <div className="text-sm font-semibold text-red-800 dark:text-red-200">
+                        {originalDepositAmount.toLocaleString()} {tokenSymbol}
                         </div>
-                        <div className="text-xs text-blue-600 dark:text-blue-400">
-                          ≈ {currentlyDeposited.toLocaleString(undefined, { maximumFractionDigits: 6 })} {tokenSymbol}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  {/* Currently Deposited Summary */}
-                  <div className="p-3 rounded-lg border bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full bg-slate-500"></div>
-                        <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                          Total Deposited Value
-                        </span>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">
-                          {currentlyDeposited.toLocaleString(undefined, { maximumFractionDigits: 6 })} {tokenSymbol}
-                        </div>
-                        <div className="text-xs text-slate-600 dark:text-slate-400">
-                          ≈ ${(currentlyDeposited * marketStats.tokenPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </div>
+                      <div className="text-xs text-red-600 dark:text-red-400">
+                        ≈ ${(originalDepositAmount * marketStats.tokenPrice).toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                       </div>
                     </div>
                   </div>
                 </div>
-
-                {/* Position Details Section */}
-                <div className="lg:w-80 lg:flex-shrink-0 mt-6">
-                  <Card className="bg-white/80 dark:bg-slate-800 border-gray-200 dark:border-slate-700 lg:sticky lg:top-4">
-                    <CardContent className="p-3 md:p-5 lg:p-6">
-                      <h3 className="text-xs md:text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2 md:mb-4">Position Details</h3>
-                      <div className="space-y-2 md:space-y-4">
-                        {/* Supply APY */}
-                        <div className="border-b border-gray-200 dark:border-slate-700 pb-2 md:pb-3">
-                          <div className="flex justify-between items-center">
-                            <button onClick={() => toggleDetail('supplyAPY')} className="flex items-center gap-1.5 md:gap-2 hover:opacity-70 transition-opacity" type="button">
-                              <span className="text-xs md:text-sm text-slate-500 dark:text-slate-400">Supply APY</span>
-                              <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
-                              {expandedDetails.supplyAPY ? <ChevronUp className="h-3 w-3 text-slate-400 dark:text-slate-500" /> : <ChevronDown className="h-3 w-3 text-slate-400 dark:text-slate-500" />}
-                            </button>
-                            <span className="text-xs md:text-sm font-medium text-teal-600 dark:text-teal-400">{marketStats.supplyAPY?.toFixed(2)}%</span>
-                          </div>
-                          {expandedDetails.supplyAPY && (
-                            <div className="mt-2 pt-2 border-t border-gray-200 dark:border-slate-700">
-                              <p className="text-xs text-slate-600 dark:text-slate-400">Annual percentage yield for supplying {tokenSymbol}. This is the interest rate you earn for providing liquidity to this market.</p>
-                            </div>
-                          )}
                         </div>
 
+              <Card className="bg-white/80 dark:bg-slate-800 border-gray-200 dark:border-slate-700">
+                <CardContent className="p-3 space-y-2">
                         {/* Utilization */}
                         <div className="border-b border-gray-200 dark:border-slate-700 pb-2 md:pb-3">
                           <div className="flex justify-between items-center">
-                            <button onClick={() => toggleDetail('utilization')} className="flex items-center gap-1.5 md:gap-2 hover:opacity-70 transition-opacity" type="button">
-                              <span className="text-xs md:text-sm text-slate-500 dark:text-slate-400">Utilization</span>
+                      <button
+                        onClick={() => handleToggleDetail("utilization")}
+                        type="button"
+                        className="flex items-center gap-1.5 md:gap-2 hover:opacity-70 transition-opacity"
+                      >
+                        <span className="text-[10px] md:text-sm text-slate-500 dark:text-slate-400">Utilization</span>
                               <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
-                              {expandedDetails.utilization ? <ChevronUp className="h-3 w-3 text-slate-400 dark:text-slate-500" /> : <ChevronDown className="h-3 w-3 text-slate-400 dark:text-slate-500" />}
+                        {expandedDetail === "utilization" ? (
+                          <ChevronUp className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                        ) : (
+                          <ChevronDown className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                        )}
                             </button>
-                            <span className="text-xs md:text-sm font-medium text-fuchsia-600 dark:text-fuchsia-400">{marketStats.utilization?.toFixed(2)}%</span>
+                      <span className="text-sm font-medium text-slate-800 dark:text-white">
+                        {marketStats.utilization.toFixed(2)}%
+                      </span>
                           </div>
-                          {expandedDetails.utilization && (
+                    {expandedDetail === "utilization" && (
                             <div className="mt-2 pt-2 border-t border-gray-200 dark:border-slate-700">
-                              <p className="text-xs text-slate-600 dark:text-slate-400">Current percentage of total deposited assets that are being borrowed. High utilization may increase interest rates and affect withdrawal availability.</p>
+                        <p className="text-xs text-slate-600 dark:text-slate-400">Percentage of supplied assets being borrowed.</p>
                             </div>
                           )}
                         </div>
@@ -318,16 +355,53 @@ const WithdrawModal = ({
                         {/* Collateral Factor */}
                         <div className="border-b border-gray-200 dark:border-slate-700 pb-2 md:pb-3">
                           <div className="flex justify-between items-center">
-                            <button onClick={() => toggleDetail('collateralFactor')} className="flex items-center gap-1.5 md:gap-2 hover:opacity-70 transition-opacity" type="button">
-                              <span className="text-xs md:text-sm text-slate-500 dark:text-slate-400">Collateral Factor</span>
+                      <button
+                        onClick={() => handleToggleDetail("collateralFactor")}
+                        type="button"
+                        className="flex items-center gap-1.5 md:gap-2 hover:opacity-70 transition-opacity"
+                      >
+                        <span className="text-[10px] md:text-sm text-slate-500 dark:text-slate-400">Collateral Factor</span>
+                        <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                        {expandedDetail === "collateralFactor" ? (
+                          <ChevronUp className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                        ) : (
+                          <ChevronDown className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                        )}
+                      </button>
+                      <span className="text-sm font-medium text-slate-800 dark:text-white">
+                        {marketStats.collateralFactor.toFixed(0)}%
+                      </span>
+                    </div>
+                    {expandedDetail === "collateralFactor" && (
+                      <div className="mt-2 pt-2 border-t border-gray-200 dark:border-slate-700">
+                        <p className="text-xs text-slate-600 dark:text-slate-400">Maximum borrowing power from this collateral.</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Estimated APY */}
+                  <div className="border-b border-gray-200 dark:border-slate-700 pb-2 md:pb-3">
+                    <div className="flex justify-between items-center">
+                      <button
+                        onClick={() => handleToggleDetail("depositAPY")}
+                        type="button"
+                        className="flex items-center gap-1.5 md:gap-2 hover:opacity-70 transition-opacity"
+                      >
+                        <span className="text-[10px] md:text-sm text-slate-500 dark:text-slate-400">Estimated APY</span>
                               <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
-                              {expandedDetails.collateralFactor ? <ChevronUp className="h-3 w-3 text-slate-400 dark:text-slate-500" /> : <ChevronDown className="h-3 w-3 text-slate-400 dark:text-slate-500" />}
+                        {expandedDetail === "depositAPY" ? (
+                          <ChevronUp className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                        ) : (
+                          <ChevronDown className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                        )}
                             </button>
-                            <span className="text-xs md:text-sm font-medium text-purple-600 dark:text-purple-400">{marketStats.collateralFactor?.toFixed(0)}%</span>
+                      <span className="text-sm font-medium text-teal-600 dark:text-teal-400">
+                        {marketStats.supplyAPY.toFixed(2)}%
+                      </span>
                           </div>
-                          {expandedDetails.collateralFactor && (
+                    {expandedDetail === "depositAPY" && (
                             <div className="mt-2 pt-2 border-t border-gray-200 dark:border-slate-700">
-                              <p className="text-xs text-slate-600 dark:text-slate-400">The percentage of your deposited {tokenSymbol} value that can be used as collateral for borrowing other assets. Higher collateral factors provide greater borrowing power.</p>
+                        <p className="text-xs text-slate-600 dark:text-slate-400">Annual percentage yield for supplying {tokenSymbol}.</p>
                             </div>
                           )}
                         </div>
@@ -335,116 +409,145 @@ const WithdrawModal = ({
                         {/* Accrued Interest */}
                         <div className="pb-2 md:pb-3">
                           <div className="flex justify-between items-center">
-                            <button onClick={() => toggleDetail('accruedInterest')} className="flex items-center gap-1.5 md:gap-2 hover:opacity-70 transition-opacity" type="button">
-                              <span className="text-xs md:text-sm text-slate-500 dark:text-slate-400">Accrued Interest</span>
+                      <button
+                        onClick={() => handleToggleDetail("accruedInterest")}
+                        type="button"
+                        className="flex items-center gap-1.5 md:gap-2 hover:opacity-70 transition-opacity"
+                      >
+                        <span className="text-[10px] md:text-sm text-slate-500 dark:text-slate-400">Accrued Interest</span>
                               <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
-                              {expandedDetails.accruedInterest ? <ChevronUp className="h-3 w-3 text-slate-400 dark:text-slate-500" /> : <ChevronDown className="h-3 w-3 text-slate-400 dark:text-slate-500" />}
+                        {expandedDetail === "accruedInterest" ? (
+                          <ChevronUp className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                        ) : (
+                          <ChevronDown className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                        )}
                             </button>
-                            <span className="text-xs md:text-sm font-medium text-amber-600 dark:text-amber-400">
-                              {(marketStats.accruedInterest ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })} {tokenSymbol}
+                      <span className={`text-sm font-medium ${
+                        accruedInterest > 0 
+                          ? "text-amber-600 dark:text-amber-400" 
+                          : "text-slate-800 dark:text-white"
+                      }`}>
+                        {accruedInterest.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })} {tokenSymbol}
                             </span>
                           </div>
-                          {expandedDetails.accruedInterest && (
-                            <div className="mt-2 pt-2 border-t border-gray-200 dark:border-slate-700">
-                              <p className="text-xs text-amber-700 dark:text-amber-400 mb-2">The interest you have earned on your supplied {tokenSymbol} since deposit. This is currently included in your nToken balance.</p>
-                              <div className="text-xs text-slate-600 dark:text-slate-400 space-y-1">
-                                {/* Add additional details/breakdown if you wish */}
+                    {expandedDetail === "accruedInterest" && (
+                      <div className="mt-2 pt-2 border-t border-gray-200 dark:border-slate-700">
+                        <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">
+                          {accruedInterest > 0 
+                            ? `Interest earned on your supplied ${tokenSymbol} since deposit.`
+                            : `Interest calculation for your supplied ${tokenSymbol} since deposit.`
+                          }
+                        </p>
+                        <div className="text-xs text-slate-500 dark:text-slate-500 space-y-1">
+                          <p className="font-semibold">How it's calculated:</p>
+                          <p>Accrued Interest = Current Deposit Value - Original Deposit Amount</p>
+                          <p className="mt-1">• Current Deposit Value = (scaledDeposits × currentDepositIndex) ÷ SCALE</p>
+                          <p>• Original Deposit Amount = (scaledDeposits × userDepositIndex) ÷ SCALE</p>
+                          <p className="mt-1 text-slate-400 dark:text-slate-600">The deposit index increases over time as interest accrues, reflecting the growth of your deposit value.</p>
                               </div>
+                        <div className="mt-3 pt-2 border-t border-gray-200 dark:border-slate-700">
+                          <button
+                            onClick={() => setShowDebugValues(!showDebugValues)}
+                            type="button"
+                            className="flex items-center gap-1.5 hover:opacity-70 transition-opacity w-full"
+                          >
+                            <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">Debug Values</span>
+                            <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                            {showDebugValues ? (
+                              <ChevronUp className="h-3 w-3 text-slate-400 dark:text-slate-500 ml-auto" />
+                            ) : (
+                              <ChevronDown className="h-3 w-3 text-slate-400 dark:text-slate-500 ml-auto" />
+                            )}
+                          </button>
+                          {showDebugValues && (
+                            <div className="mt-2 space-y-1 text-xs font-mono text-slate-500 dark:text-slate-500">
+                            <div className="flex justify-between">
+                              <span>Currently Deposited:</span>
+                              <span className="text-slate-700 dark:text-slate-300">{currentDepositValue.toLocaleString(undefined, { maximumFractionDigits: 6 })} {tokenSymbol}</span>
                             </div>
-                          )}
+                            <div className="flex justify-between">
+                              <span>Accrued Interest:</span>
+                              <span className={`${
+                                accruedInterest > 0 
+                                  ? "text-amber-600 dark:text-amber-400" 
+                                  : "text-slate-700 dark:text-slate-300"
+                              }`}>
+                                {accruedInterest.toLocaleString(undefined, { maximumFractionDigits: 6 })} {tokenSymbol}
+                              </span>
                         </div>
-
-                        {/* Liquidation Margin (if available) */}
-                        {marketStats.liquidationMargin !== undefined && (
-                        <div className="border-b border-gray-200 dark:border-slate-700 pb-2 md:pb-3">
-                          <div className="flex justify-between items-center">
-                            <button onClick={() => toggleDetail('liquidationMargin')} className="flex items-center gap-1.5 md:gap-2 hover:opacity-70 transition-opacity" type="button">
-                              <span className="text-xs md:text-sm text-slate-500 dark:text-slate-400">Liquidation Margin</span>
-                              <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
-                              {expandedDetails.liquidationMargin ? <ChevronUp className="h-3 w-3 text-slate-400 dark:text-slate-500" /> : <ChevronDown className="h-3 w-3 text-slate-400 dark:text-slate-500" />}
-                            </button>
-                            <span className="text-xs md:text-sm font-medium text-teal-600 dark:text-teal-400">{marketStats.liquidationMargin?.toFixed(2)}%</span>
+                            <div className="flex justify-between">
+                              <span>Original Deposit:</span>
+                              <span className="text-slate-700 dark:text-slate-300">{originalDepositAmount.toLocaleString(undefined, { maximumFractionDigits: 6 })} {tokenSymbol}</span>
                           </div>
-                          {expandedDetails.liquidationMargin && (
-                            <div className="mt-2 pt-2 border-t border-gray-200 dark:border-slate-700">
-                              <p className="text-xs text-slate-600 dark:text-slate-400">The safety buffer before your position can be liquidated. Higher values mean more safety, lower values approach the liquidation threshold.</p>
+                            <div className="flex justify-between">
+                              <span>Interest Rate (APY):</span>
+                              <span className="text-slate-700 dark:text-slate-300">{marketStats.supplyAPY.toFixed(2)}%</span>
                             </div>
-                          )}
+                            {marketStats.scaledDeposits && (
+                              <div className="flex justify-between">
+                                <span>Scaled Deposits:</span>
+                                <span className="text-slate-700 dark:text-slate-300 font-mono text-[10px]">{marketStats.scaledDeposits}</span>
                         </div>
                         )}
-
-                        {/* Health Factor (if available) */}
-                        {marketStats.healthFactor !== undefined && (
-                        <div className="border-b border-gray-200 dark:border-slate-700 pb-2 md:pb-3">
-                          <div className="flex justify-between items-center">
-                            <button onClick={() => toggleDetail('healthFactor')} className="flex items-center gap-1.5 md:gap-2 hover:opacity-70 transition-opacity" type="button">
-                              <span className="text-xs md:text-sm text-slate-500 dark:text-slate-400">Health Factor</span>
-                              <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
-                              {expandedDetails.healthFactor ? <ChevronUp className="h-3 w-3 text-slate-400 dark:text-slate-500" /> : <ChevronDown className="h-3 w-3 text-slate-400 dark:text-slate-500" />}
-                            </button>
-                            <span className="text-xs md:text-sm font-medium text-green-600 dark:text-green-400">{marketStats.healthFactor?.toFixed(2)}</span>
-                          </div>
-                          {expandedDetails.healthFactor && (
-                            <div className="mt-2 pt-2 border-t border-gray-200 dark:border-slate-700">
-                              <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">Health Factor = (Collateral × 0.8) / Borrowed</p>
-                              <p className="text-xs text-slate-600 dark:text-slate-400">
-                                A measure of your account's safety from liquidation. Higher is safer.
-                              </p>
-                              <div className="text-xs text-slate-600 dark:text-slate-400 space-y-1">
-                                <p>• Safe (≥3.0): Excellent health</p>
-                                <p>• Moderate (≥1.5): Good health</p>
-                                <p>• Caution (≥1.2): Monitor closely</p>
-                                <p>• Critical (≥1.0): At liquidation threshold</p>
-                                <p>• Liquidatable (&lt;1.0): Can be liquidated</p>
+                            {marketStats.currentDepositIndex && (
+                              <div className="flex justify-between">
+                                <span>Current Deposit Index:</span>
+                                <span className="text-slate-700 dark:text-slate-300 font-mono text-[10px]">{marketStats.currentDepositIndex}</span>
                               </div>
+                            )}
+                            <div className="flex justify-between">
+                              <span>User Deposit Index:</span>
+                              <span className="text-slate-700 dark:text-slate-300 font-mono text-[10px]">
+                                {marketStats.userDepositIndex || "N/A"}
+                              </span>
+                            </div>
+                            {marketStats.currentDepositIndex && marketStats.userDepositIndex && (
+                              <div className="flex justify-between">
+                                <span>Index Growth:</span>
+                                <span className="text-slate-700 dark:text-slate-300">
+                                  {((Number(marketStats.currentDepositIndex) / Number(marketStats.userDepositIndex) - 1) * 100).toFixed(4)}%
+                                </span>
+                            </div>
+                          )}
+                            {marketStats.lastUpdateTime && (
+                              <div className="flex justify-between">
+                                <span>Last Update Time:</span>
+                                <span className="text-slate-700 dark:text-slate-300 font-mono text-[10px]">
+                                  {typeof marketStats.lastUpdateTime === 'number' 
+                                    ? formatRelativeTime(marketStats.lastUpdateTime)
+                                    : typeof marketStats.lastUpdateTime === 'string'
+                                    ? formatRelativeTimeFromISO(marketStats.lastUpdateTime)
+                                    : marketStats.lastUpdateTime
+                                  }
+                                </span>
+                        </div>
+                        )}
                             </div>
                           )}
                         </div>
-                        )}
-
-                        {/* LTV (Loan-to-Value ratio, if available) */}
-                        {marketStats.ltv !== undefined && (
-                        <div>
-                          <div className="flex justify-between items-center">
-                            <button onClick={() => toggleDetail('ltv')} className="flex items-center gap-1.5 md:gap-2 hover:opacity-70 transition-opacity" type="button">
-                              <span className="text-xs md:text-sm text-slate-500 dark:text-slate-400">LTV</span>
-                              <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
-                              {expandedDetails.ltv ? <ChevronUp className="h-3 w-3 text-slate-400 dark:text-slate-500" /> : <ChevronDown className="h-3 w-3 text-slate-400 dark:text-slate-500" />}
-                            </button>
-                            <span className="text-xs md:text-sm font-medium text-slate-800 dark:text-white">{marketStats.ltv?.toFixed(2)}%</span>
-                          </div>
-                          {expandedDetails.ltv && (
-                            <div className="mt-2 pt-2 border-t border-gray-200 dark:border-slate-700">
-                              <p className="text-xs text-slate-600 dark:text-slate-400">Loan-to-Value ratio of your position. This shows what percentage of your collateral is being used for borrowing.</p>
-                            </div>
-                          )}
-                        </div>
-                        )}
                       </div>
-                    </CardContent>
-                  </Card>
-                </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
               </div>
 
+            {/* Action Buttons */}
+            <div className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 border-t border-gray-200 dark:border-slate-700 px-6 py-3 flex gap-3 shrink-0">
+              <Button
+                variant="outline"
+                onClick={onClose}
+                disabled={isLoading}
+                className="flex-1"
+              >
+                Cancel
+              </Button>
               <Button
                 onClick={handleSubmit}
                 disabled={!isValidAmount || isLoading}
-                className="w-full font-semibold text-white h-12 bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-1 font-semibold h-11 bg-red-600 hover:bg-red-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isLoading ? "Processing..." : `Withdraw ${showTooltip ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="cursor-help underline decoration-dotted">
-                        {tokenSymbol}
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>{tooltipText}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                ) : (
-                  tokenSymbol
-                )}`}
+                {isLoading ? "Processing..." : `Withdraw ${tokenSymbol}`}
               </Button>
             </div>
           </div>

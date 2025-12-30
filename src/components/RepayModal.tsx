@@ -25,9 +25,10 @@ interface RepayModalProps {
   marketStats: {
     borrowAPY: number;
     liquidationMargin: number;
-    healthFactor: number;
+    healthFactor: number | null;
     currentLTV: number;
     tokenPrice: number;
+    collateralFactor?: number;
   };
   lastUpdateTime?: number;
   network?: string; // Network ID for transaction viewing
@@ -69,8 +70,11 @@ const RepayModal = ({
 
   // Get health factor label and color based on ranges
   const getHealthFactorLabel = (
-    healthFactor: number
+    healthFactor: number | null
   ): { label: string; color: string } => {
+    if (healthFactor === null) {
+      return { label: "N/A", color: "text-gray-400 dark:text-gray-500" };
+    }
     if (healthFactor >= 3.0) {
       return { label: "Safe", color: "text-green-600 dark:text-green-400" };
     } else if (healthFactor >= 1.5) {
@@ -106,6 +110,7 @@ const RepayModal = ({
         liquidationMargin: false,
         healthFactor: false,
         ltv: false,
+        collateralFactor: false,
       });
     }
   }, [isOpen]);
@@ -519,17 +524,27 @@ const RepayModal = ({
                             <span
                               className={`text-xs md:text-sm font-medium ${healthFactorLabel.color}`}
                             >
-                              {healthFactorLabel.label} (
-                              {marketStats.healthFactor.toFixed(2)})
+                              {healthFactorLabel.label}
+                              {marketStats.healthFactor !== null && (
+                                <> ({marketStats.healthFactor.toFixed(2)})</>
+                              )}
                             </span>
                           </div>
                           {expandedDetails.healthFactor && (
                             <div className="mt-2 pt-2 border-t border-gray-200 dark:border-slate-700 space-y-2">
                               <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                                Health Factor = (Collateral × 0.8) / Borrowed
+                                Health Factor = (Weighted Collateral) / Borrowed
+                              </p>
+                              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                                Weighted Collateral = sum(Collateral × Collateral Factor) for each asset
+                              </p>
+                              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                                For each asset: (Collateral × Collateral Factor), then sum all assets.
                               </p>
                               <p className="text-xs text-slate-600 dark:text-slate-400">
-                                {marketStats.healthFactor >= 3.0
+                                {marketStats.healthFactor === null
+                                  ? "Health factor data not available. Please refresh your position data."
+                                  : marketStats.healthFactor >= 3.0
                                   ? `✓ Safe: ${marketStats.healthFactor.toFixed(
                                       2
                                     )} (excellent health)`
@@ -563,6 +578,39 @@ const RepayModal = ({
                             </div>
                           )}
                         </div>
+
+                        {/* Collateral Factor */}
+                        {marketStats.collateralFactor !== undefined && (
+                          <div className="border-b border-gray-200 dark:border-slate-700 pb-2 md:pb-3">
+                            <div className="flex justify-between items-center">
+                              <button
+                                onClick={() => toggleDetail("collateralFactor")}
+                                className="flex items-center gap-1.5 md:gap-2 hover:opacity-70 transition-opacity"
+                              >
+                                <span className="text-xs md:text-sm text-slate-500 dark:text-slate-400">
+                                  Collateral Factor
+                                </span>
+                                <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                                {expandedDetails.collateralFactor ? (
+                                  <ChevronUp className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                                ) : (
+                                  <ChevronDown className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                                )}
+                              </button>
+                              <span className="text-xs md:text-sm font-medium text-slate-800 dark:text-white">
+                                {marketStats.collateralFactor.toFixed(0)}%
+                              </span>
+                            </div>
+                            {expandedDetails.collateralFactor && (
+                              <div className="mt-2 pt-2 border-t border-gray-200 dark:border-slate-700">
+                                <p className="text-xs text-slate-600 dark:text-slate-400">
+                                  Maximum borrowing power from this collateral. This represents
+                                  the percentage of the collateral value that can be used for borrowing.
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        )}
 
                         {/* LTV */}
                         <div>
