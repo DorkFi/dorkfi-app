@@ -23,6 +23,7 @@ import {
   isFeatureEnabled,
   getEnabledNetworks,
   getAlgorandNetworkFromNetworkId,
+  getNetworkConfig,
 } from "@/config";
 import { getAllTokensWithDisplayInfo } from "@/config";
 import EnhancedHealthFactor from "./EnhancedHealthFactor";
@@ -163,6 +164,10 @@ const Portfolio = () => {
     column: string | null;
     direction: "asc" | "desc";
   }>({ column: "value", direction: "desc" });
+  const [atRiskAssetsSort, setAtRiskAssetsSort] = useState<{
+    column: string | null;
+    direction: "asc" | "desc";
+  }>({ column: "riskRatio", direction: "asc" }); // Default sort by risk ratio (most risky first)
   
   // NFT selection state
   const [nftModalOpen, setNftModalOpen] = useState(false);
@@ -926,6 +931,86 @@ const Portfolio = () => {
 
   const weightedCollateralFactor = calculateWeightedCollateralFactor();
 
+  // Calculate at-risk assets: assets where (deposit value * liquidation factor) / total borrow value < 1
+  const atRiskAssets = useMemo(() => {
+    if (totalBorrowed <= 0 || deposits.length === 0) {
+      return [];
+    }
+
+    return deposits
+      .map((deposit) => {
+        // Find market data for this deposit to get liquidation factor
+        const market = marketData.find(
+          (m) =>
+            m.symbol === deposit.asset &&
+            (deposit.poolId ? m.poolId === deposit.poolId : true)
+        );
+
+        const liquidationFactor =
+          market?.liquidationThreshold ??
+          market?.marketInfo?.liquidationThreshold ??
+          0.85;
+
+        // Convert to number if needed
+        const liquidationFactorNum =
+          typeof liquidationFactor === "string"
+            ? parseFloat(liquidationFactor)
+            : typeof liquidationFactor === "bigint"
+            ? Number(liquidationFactor)
+            : liquidationFactor;
+
+        // Calculate risk ratio: (deposit value * liquidation factor) / total borrow value
+        let riskRatio =
+          (deposit.value * liquidationFactorNum) / totalBorrowed;
+
+        // Get pool collateral value and borrows from global user data (API endpoint: /global-user-data)
+        // Match by poolId/appId to find the corresponding global user data entry for this pool
+        let poolCollateralValueUSD = 0;
+        let poolBorrowsUSD = 0;
+
+        if (user?.globalUserData && Array.isArray(user.globalUserData) && deposit.poolId) {
+          const poolGlobalData = user.globalUserData.find(
+            (item: any) => String(item.appId) === String(deposit.poolId)
+          );
+
+          if (poolGlobalData) {
+            console.log("[Portfolio] Pool global data:", poolGlobalData);
+            try {
+              // Global user data values are scaled by 1e12, so divide to get USD
+              // This comes from the global user state of the appId (pool)
+              poolCollateralValueUSD =
+                Number(BigInt(poolGlobalData.totalCollateralValue) / BigInt(1e12)) || 0;
+              poolBorrowsUSD =
+                Number(BigInt(poolGlobalData.totalBorrowValue) / BigInt(1e12)) || 0;
+              
+              riskRatio = poolCollateralValueUSD * liquidationFactorNum / poolBorrowsUSD;
+            } catch (error) {
+              console.warn(
+                `Error parsing global user data for pool ${deposit.poolId}:`,
+                error
+              );
+            }
+          } else {
+            // Log when pool data is not found (helpful for debugging)
+            console.debug(
+              `No global user data found for pool ${deposit.poolId} (asset: ${deposit.asset})`
+            );
+          }
+        }
+
+        return {
+          ...deposit,
+          liquidationFactor: liquidationFactorNum,
+          riskRatio,
+          isAtRisk: riskRatio < 1,
+          poolCollateralValueUSD,
+          poolBorrowsUSD,
+        };
+      })
+      .filter((asset) => asset.isAtRisk && asset.poolBorrowsUSD >= 0.01)
+      .sort((a, b) => a.riskRatio - b.riskRatio); // Sort by risk ratio (most risky first)
+  }, [deposits, marketData, totalBorrowed, user?.globalUserData]);
+
   // Calculate health factor using actual market collateral factors from contract
   // The contract's totalCollateralValue is already weighted: sum(depositValue_i * collateralFactor_i)
   // So we use it directly: health factor = totalCollateralValue / totalBorrowed
@@ -1053,17 +1138,94 @@ const Portfolio = () => {
     return null; // No calculation possible when no collateral
   };
 
+  // Calculate health factor for display
+  // Use the lowest health factor from at-risk assets if available, otherwise use global health factor
   const healthFactor = calculateHealthFactor(totalCollateral, totalBorrowed);
-  const displayHealthFactor = saturateHealthFactor(healthFactor);
+  const lowestAtRiskHealthFactor = atRiskAssets.length > 0
+    ? Math.min(...atRiskAssets.map(asset => asset.riskRatio))
+    : null;
+  
+  // Use the lowest health factor from at-risk assets if it's lower than the global health factor
+  const healthFactorToDisplay = lowestAtRiskHealthFactor !== null && 
+    (healthFactor === null || lowestAtRiskHealthFactor < healthFactor)
+    ? lowestAtRiskHealthFactor
+    : healthFactor;
+  
+  const displayHealthFactor = saturateHealthFactor(healthFactorToDisplay);
 
   // Calculate Net LTV (Loan-to-Value ratio)
   const netLTV =
     totalCollateral > 0 ? (totalBorrowed / totalCollateral) * 100 : 0;
 
-  // Liquidation margin = Liquidation Threshold - Net LTV
-  // This represents the safety buffer before liquidation
-  const liquidationMargin =
-    totalCollateral > 0 ? weightedLiquidationThreshold * 100 - netLTV : 0;
+  // Calculate liquidation margins for all networks and find the lowest
+  // This represents the most critical safety buffer across all networks
+  const calculateLowestLiquidationMargin = (): number => {
+    if (!user?.computed?.networkValues || Object.keys(user.computed.networkValues).length === 0) {
+      // Fallback to global calculation if no network data
+      return totalCollateral > 0 ? weightedLiquidationThreshold * 100 - netLTV : 0;
+    }
+
+    const networkLiquidationMargins = Object.entries(
+      user.computed.networkValues
+    ).map(([network, values]: [string, any]) => {
+      const networkCollateral = values.collateral || 0;
+      const networkBorrow = values.borrow || 0;
+      
+      // Find minimum liquidation threshold for markets with deposits in this network
+      const networkDeposits = deposits.filter((deposit) => {
+        const depositNetwork = (deposit as any).network;
+        if (!depositNetwork) return false;
+        const normalized = depositNetwork.toLowerCase();
+        const normalizedNetwork = network.toLowerCase();
+        return normalized.includes(normalizedNetwork.split("-")[0]);
+      });
+      
+      let networkLiquidationThreshold = weightedLiquidationThreshold;
+      if (networkDeposits.length > 0) {
+        const liquidationThresholds: number[] = [];
+        networkDeposits.forEach((deposit) => {
+          const market = marketData.find(
+            (m) =>
+              m.symbol === deposit.asset &&
+              (deposit.poolId ? m.poolId === deposit.poolId : true)
+          );
+          const threshold =
+            market?.liquidationThreshold ??
+            market?.marketInfo?.liquidationThreshold ??
+            0.85;
+          const thresholdNum =
+            typeof threshold === "string"
+              ? parseFloat(threshold)
+              : typeof threshold === "bigint"
+              ? Number(threshold)
+              : threshold;
+          liquidationThresholds.push(thresholdNum);
+        });
+        if (liquidationThresholds.length > 0) {
+          networkLiquidationThreshold = Math.min(...liquidationThresholds);
+        }
+      }
+      
+      // Calculate network LTV and liquidation margin
+      const networkLTV = networkCollateral > 0 
+        ? (networkBorrow / networkCollateral) * 100 
+        : 0;
+      const networkLiquidationMargin = networkCollateral > 0 
+        ? networkLiquidationThreshold * 100 - networkLTV 
+        : 0;
+      
+      return networkLiquidationMargin;
+    });
+
+    // Return the lowest liquidation margin across all networks
+    return networkLiquidationMargins.length > 0
+      ? Math.min(...networkLiquidationMargins)
+      : totalCollateral > 0 ? weightedLiquidationThreshold * 100 - netLTV : 0;
+  };
+
+  // Liquidation margin = lowest across all networks
+  // This represents the most critical safety buffer before liquidation
+  const liquidationMargin = calculateLowestLiquidationMargin();
 
   // Transform deposits and borrows for the success modal
   const modalDeposits = useMemo(() => {
@@ -2435,6 +2597,85 @@ const Portfolio = () => {
                         Risk Overview
                       </h3>
 
+                      {/* Lowest Liquidation Margin Card */}
+                      {(() => {
+                        // Calculate liquidation margins for all networks and find the lowest
+                        const networkLiquidationMargins = Object.entries(
+                          user?.computed?.networkValues || {}
+                        ).map(([network, values]: [string, any]) => {
+                          const networkCollateral = values.collateral || 0;
+                          const networkBorrow = values.borrow || 0;
+                          
+                          // Find minimum liquidation threshold for markets with deposits in this network
+                          const networkDeposits = deposits.filter((deposit) => {
+                            const depositNetwork = (deposit as any).network;
+                            if (!depositNetwork) return false;
+                            const normalized = depositNetwork.toLowerCase();
+                            const normalizedNetwork = network.toLowerCase();
+                            return normalized.includes(normalizedNetwork.split("-")[0]);
+                          });
+                          
+                          let networkLiquidationThreshold = weightedLiquidationThreshold;
+                          if (networkDeposits.length > 0) {
+                            const liquidationThresholds: number[] = [];
+                            networkDeposits.forEach((deposit) => {
+                              const market = marketData.find(
+                                (m) =>
+                                  m.symbol === deposit.asset &&
+                                  (deposit.poolId ? m.poolId === deposit.poolId : true)
+                              );
+                              const threshold =
+                                market?.liquidationThreshold ??
+                                market?.marketInfo?.liquidationThreshold ??
+                                0.85;
+                              const thresholdNum =
+                                typeof threshold === "string"
+                                  ? parseFloat(threshold)
+                                  : typeof threshold === "bigint"
+                                  ? Number(threshold)
+                                  : threshold;
+                              liquidationThresholds.push(thresholdNum);
+                            });
+                            if (liquidationThresholds.length > 0) {
+                              networkLiquidationThreshold = Math.min(...liquidationThresholds);
+                            }
+                          }
+                          
+                          // Calculate network LTV and liquidation margin
+                          const networkLTV = networkCollateral > 0 
+                            ? (networkBorrow / networkCollateral) * 100 
+                            : 0;
+                          const networkLiquidationMargin = networkCollateral > 0 
+                            ? networkLiquidationThreshold * 100 - networkLTV 
+                            : 0;
+                          
+                          return networkLiquidationMargin;
+                        });
+                        
+                        const lowestLiquidationMargin = networkLiquidationMargins.length > 0
+                          ? Math.min(...networkLiquidationMargins)
+                          : null;
+
+                        return lowestLiquidationMargin !== null ? (
+                          <DorkFiCard className="p-4 border-l-4 border-orange-500">
+                            <div className="flex items-start gap-3">
+                              <AlertTriangle className="w-5 h-5 text-orange-500 mt-0.5" />
+                              <div className="flex-1">
+                                <div className="text-sm font-semibold text-orange-600 dark:text-orange-400 mb-1">
+                                  Lowest Liquidation Margin
+                                </div>
+                                <div className="text-base font-bold">
+                                  {lowestLiquidationMargin.toFixed(2)}%
+                                </div>
+                                <div className="text-xs text-muted-foreground mt-1">
+                                  Across all networks
+                                </div>
+                              </div>
+                            </div>
+                          </DorkFiCard>
+                        ) : null;
+                      })()}
+
                       {/* Top Borrowed Asset Card */}
                       {topBorrowedAsset && topBorrowedPercentage > 0 && (
                         <DorkFiCard className="p-4 border-l-4 border-amber-500">
@@ -2598,6 +2839,63 @@ const Portfolio = () => {
                   );
                 }
 
+                // Calculate liquidation margins for all networks and find the lowest
+                const networkLiquidationMargins = filteredNetworks.map(
+                  ([network, values]: [string, any]) => {
+                    const networkCollateral = values.collateral || 0;
+                    const networkBorrow = values.borrow || 0;
+                    
+                    // Find minimum liquidation threshold for markets with deposits in this network
+                    const networkDeposits = deposits.filter((deposit) => {
+                      const depositNetwork = (deposit as any).network;
+                      if (!depositNetwork) return false;
+                      const normalized = depositNetwork.toLowerCase();
+                      const normalizedNetwork = network.toLowerCase();
+                      return normalized.includes(normalizedNetwork.split("-")[0]);
+                    });
+                    
+                    let networkLiquidationThreshold = weightedLiquidationThreshold;
+                    if (networkDeposits.length > 0) {
+                      const liquidationThresholds: number[] = [];
+                      networkDeposits.forEach((deposit) => {
+                        const market = marketData.find(
+                          (m) =>
+                            m.symbol === deposit.asset &&
+                            (deposit.poolId ? m.poolId === deposit.poolId : true)
+                        );
+                        const threshold =
+                          market?.liquidationThreshold ??
+                          market?.marketInfo?.liquidationThreshold ??
+                          0.85;
+                        const thresholdNum =
+                          typeof threshold === "string"
+                            ? parseFloat(threshold)
+                            : typeof threshold === "bigint"
+                            ? Number(threshold)
+                            : threshold;
+                        liquidationThresholds.push(thresholdNum);
+                      });
+                      if (liquidationThresholds.length > 0) {
+                        networkLiquidationThreshold = Math.min(...liquidationThresholds);
+                      }
+                    }
+                    
+                    // Calculate network LTV and liquidation margin
+                    const networkLTV = networkCollateral > 0 
+                      ? (networkBorrow / networkCollateral) * 100 
+                      : 0;
+                    const networkLiquidationMargin = networkCollateral > 0 
+                      ? networkLiquidationThreshold * 100 - networkLTV 
+                      : 0;
+                    
+                    return { network, liquidationMargin: networkLiquidationMargin };
+                  }
+                );
+                
+                const lowestLiquidationMargin = networkLiquidationMargins.length > 0
+                  ? Math.min(...networkLiquidationMargins.map(n => n.liquidationMargin))
+                  : null;
+
                 return (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {filteredNetworks.map(
@@ -2621,6 +2919,50 @@ const Portfolio = () => {
                         const networkHealthFactor = saturateHealthFactor(
                           networkHealthFactorRaw
                         );
+                        
+                        // Calculate liquidation margin for this network
+                        // Find minimum liquidation threshold for markets with deposits in this network
+                        const networkDeposits = deposits.filter((deposit) => {
+                          const depositNetwork = (deposit as any).network;
+                          if (!depositNetwork) return false;
+                          const normalized = depositNetwork.toLowerCase();
+                          const normalizedNetwork = network.toLowerCase();
+                          return normalized.includes(normalizedNetwork.split("-")[0]);
+                        });
+                        
+                        let networkLiquidationThreshold = weightedLiquidationThreshold;
+                        if (networkDeposits.length > 0) {
+                          const liquidationThresholds: number[] = [];
+                          networkDeposits.forEach((deposit) => {
+                            const market = marketData.find(
+                              (m) =>
+                                m.symbol === deposit.asset &&
+                                (deposit.poolId ? m.poolId === deposit.poolId : true)
+                            );
+                            const threshold =
+                              market?.liquidationThreshold ??
+                              market?.marketInfo?.liquidationThreshold ??
+                              0.85;
+                            const thresholdNum =
+                              typeof threshold === "string"
+                                ? parseFloat(threshold)
+                                : typeof threshold === "bigint"
+                                ? Number(threshold)
+                                : threshold;
+                            liquidationThresholds.push(thresholdNum);
+                          });
+                          if (liquidationThresholds.length > 0) {
+                            networkLiquidationThreshold = Math.min(...liquidationThresholds);
+                          }
+                        }
+                        
+                        // Calculate network LTV and liquidation margin
+                        const networkLTV = networkCollateral > 0 
+                          ? (networkBorrow / networkCollateral) * 100 
+                          : 0;
+                        const networkLiquidationMargin = networkCollateral > 0 
+                          ? networkLiquidationThreshold * 100 - networkLTV 
+                          : 0;
 
                         return (
                           <DorkFiCard
@@ -2683,7 +3025,7 @@ const Portfolio = () => {
                                   </span>
                                 </div>
 
-                                <div className="pt-2 border-t border-border">
+                                <div className="pt-2 border-t border-border space-y-2">
                                   <div className="flex justify-between items-center">
                                     <span className="text-sm text-muted-foreground">
                                       Health Factor:
@@ -2702,6 +3044,24 @@ const Portfolio = () => {
                                       {networkHealthFactor === null
                                         ? "N/A"
                                         : networkHealthFactor.toFixed(2)}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-sm text-muted-foreground">
+                                      Liquidation Margin:
+                                    </span>
+                                    <span
+                                      className={`text-sm font-semibold ${
+                                        networkLiquidationMargin >= 20
+                                          ? "text-green-600 dark:text-green-400"
+                                          : networkLiquidationMargin >= 10
+                                          ? "text-yellow-600 dark:text-yellow-400"
+                                          : networkLiquidationMargin >= 0
+                                          ? "text-orange-600 dark:text-orange-400"
+                                          : "text-red-600 dark:text-red-400"
+                                      }`}
+                                    >
+                                      {networkLiquidationMargin.toFixed(2)}%
                                     </span>
                                   </div>
                                 </div>
@@ -3684,6 +4044,447 @@ const Portfolio = () => {
                   })()}
                 </DorkFiCard>
               )}
+
+              {/* At Risk Assets Table */}
+              {atRiskAssets.length > 0 && (() => {
+                // Check if any asset has non-zero pool borrows
+                const hasPoolBorrows = atRiskAssets.some(
+                  (asset) => asset.poolBorrowsUSD > 0
+                );
+
+                return (
+                  <DorkFiCard className="p-6 md:p-8 border-orange-500/50 bg-orange-500/5">
+                    <div className="mb-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <AlertTriangle className="w-6 h-6 text-orange-500" />
+                        <H1 className="text-xl md:text-2xl text-orange-500">
+                          At Risk Assets
+                        </H1>
+                      </div>
+                      <Body className="text-sm text-muted-foreground">
+                        These assets have a health factor (collateral value × liquidation factor / total borrows) less than 1.0, indicating potential liquidation risk.
+                      </Body>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>
+                              <button
+                                onClick={() => {
+                                  if (atRiskAssetsSort.column === "asset") {
+                                    setAtRiskAssetsSort({
+                                      column: "asset",
+                                      direction:
+                                        atRiskAssetsSort.direction === "asc"
+                                          ? "desc"
+                                          : "asc",
+                                    });
+                                  } else {
+                                    setAtRiskAssetsSort({
+                                      column: "asset",
+                                      direction: "asc",
+                                    });
+                                  }
+                                }}
+                                className="flex items-center gap-1 hover:text-foreground transition-colors"
+                              >
+                                Asset
+                                {atRiskAssetsSort.column === "asset" ? (
+                                  atRiskAssetsSort.direction === "asc" ? (
+                                    <ArrowUp className="w-3 h-3" />
+                                  ) : (
+                                    <ArrowDown className="w-3 h-3" />
+                                  )
+                                ) : (
+                                  <ArrowUpDown className="w-3 h-3 opacity-50" />
+                                )}
+                              </button>
+                            </TableHead>
+                            {selectedNetworkFilter === "all" && (
+                              <TableHead>
+                                <button
+                                  onClick={() => {
+                                    if (atRiskAssetsSort.column === "network") {
+                                      setAtRiskAssetsSort({
+                                        column: "network",
+                                        direction:
+                                          atRiskAssetsSort.direction === "asc"
+                                            ? "desc"
+                                            : "asc",
+                                      });
+                                    } else {
+                                      setAtRiskAssetsSort({
+                                        column: "network",
+                                        direction: "asc",
+                                      });
+                                    }
+                                  }}
+                                  className="flex items-center gap-1 hover:text-foreground transition-colors"
+                                >
+                                  Network
+                                  {atRiskAssetsSort.column === "network" ? (
+                                    atRiskAssetsSort.direction === "asc" ? (
+                                      <ArrowUp className="w-3 h-3" />
+                                    ) : (
+                                      <ArrowDown className="w-3 h-3" />
+                                    )
+                                  ) : (
+                                    <ArrowUpDown className="w-3 h-3 opacity-50" />
+                                  )}
+                                </button>
+                              </TableHead>
+                            )}
+                            <TableHead>
+                              <button
+                                onClick={() => {
+                                  if (atRiskAssetsSort.column === "value") {
+                                    setAtRiskAssetsSort({
+                                      column: "value",
+                                      direction:
+                                        atRiskAssetsSort.direction === "asc"
+                                          ? "desc"
+                                          : "asc",
+                                    });
+                                  } else {
+                                    setAtRiskAssetsSort({
+                                      column: "value",
+                                      direction: "desc",
+                                    });
+                                  }
+                                }}
+                                className="flex items-center gap-1 hover:text-foreground transition-colors"
+                              >
+                                Value (USD)
+                                {atRiskAssetsSort.column === "value" ? (
+                                  atRiskAssetsSort.direction === "asc" ? (
+                                    <ArrowUp className="w-3 h-3" />
+                                  ) : (
+                                    <ArrowDown className="w-3 h-3" />
+                                  )
+                                ) : (
+                                  <ArrowUpDown className="w-3 h-3 opacity-50" />
+                                )}
+                              </button>
+                            </TableHead>
+                            <TableHead>
+                              <button
+                                onClick={() => {
+                                  if (atRiskAssetsSort.column === "liquidationFactor") {
+                                    setAtRiskAssetsSort({
+                                      column: "liquidationFactor",
+                                      direction:
+                                        atRiskAssetsSort.direction === "asc"
+                                          ? "desc"
+                                          : "asc",
+                                    });
+                                  } else {
+                                    setAtRiskAssetsSort({
+                                      column: "liquidationFactor",
+                                      direction: "desc",
+                                    });
+                                  }
+                                }}
+                                className="flex items-center gap-1 hover:text-foreground transition-colors"
+                              >
+                                Liquidation Factor
+                                {atRiskAssetsSort.column === "liquidationFactor" ? (
+                                  atRiskAssetsSort.direction === "asc" ? (
+                                    <ArrowUp className="w-3 h-3" />
+                                  ) : (
+                                    <ArrowDown className="w-3 h-3" />
+                                  )
+                                ) : (
+                                  <ArrowUpDown className="w-3 h-3 opacity-50" />
+                                )}
+                              </button>
+                            </TableHead>
+                            <TableHead>
+                              <button
+                                onClick={() => {
+                                  if (atRiskAssetsSort.column === "depositValue") {
+                                    setAtRiskAssetsSort({
+                                      column: "depositValue",
+                                      direction:
+                                        atRiskAssetsSort.direction === "asc"
+                                          ? "desc"
+                                          : "asc",
+                                    });
+                                  } else {
+                                    setAtRiskAssetsSort({
+                                      column: "depositValue",
+                                      direction: "desc",
+                                    });
+                                  }
+                                }}
+                                className="flex items-center gap-1 hover:text-foreground transition-colors"
+                              >
+                                Deposit Value
+                                {atRiskAssetsSort.column === "depositValue" ? (
+                                  atRiskAssetsSort.direction === "asc" ? (
+                                    <ArrowUp className="w-3 h-3" />
+                                  ) : (
+                                    <ArrowDown className="w-3 h-3" />
+                                  )
+                                ) : (
+                                  <ArrowUpDown className="w-3 h-3 opacity-50" />
+                                )}
+                              </button>
+                            </TableHead>
+                            {hasPoolBorrows && (
+                              <TableHead>
+                                <button
+                                  onClick={() => {
+                                    if (atRiskAssetsSort.column === "borrowValue") {
+                                      setAtRiskAssetsSort({
+                                        column: "borrowValue",
+                                        direction:
+                                          atRiskAssetsSort.direction === "asc"
+                                            ? "desc"
+                                            : "asc",
+                                      });
+                                    } else {
+                                      setAtRiskAssetsSort({
+                                        column: "borrowValue",
+                                        direction: "desc",
+                                      });
+                                    }
+                                  }}
+                                  className="flex items-center gap-1 hover:text-foreground transition-colors"
+                                >
+                                  Borrow Value
+                                  {atRiskAssetsSort.column === "borrowValue" ? (
+                                    atRiskAssetsSort.direction === "asc" ? (
+                                      <ArrowUp className="w-3 h-3" />
+                                    ) : (
+                                      <ArrowDown className="w-3 h-3" />
+                                    )
+                                  ) : (
+                                    <ArrowUpDown className="w-3 h-3 opacity-50" />
+                                  )}
+                                </button>
+                              </TableHead>
+                            )}
+                            <TableHead>
+                              <button
+                                onClick={() => {
+                                  if (atRiskAssetsSort.column === "riskRatio") {
+                                    setAtRiskAssetsSort({
+                                      column: "riskRatio",
+                                      direction:
+                                        atRiskAssetsSort.direction === "asc"
+                                          ? "desc"
+                                          : "asc",
+                                    });
+                                  } else {
+                                    setAtRiskAssetsSort({
+                                      column: "riskRatio",
+                                      direction: "asc",
+                                    });
+                                  }
+                                }}
+                                className="flex items-center gap-1 hover:text-foreground transition-colors"
+                              >
+                                Health Factor
+                                {atRiskAssetsSort.column === "riskRatio" ? (
+                                  atRiskAssetsSort.direction === "asc" ? (
+                                    <ArrowUp className="w-3 h-3" />
+                                  ) : (
+                                    <ArrowDown className="w-3 h-3" />
+                                  )
+                                ) : (
+                                  <ArrowUpDown className="w-3 h-3 opacity-50" />
+                                )}
+                              </button>
+                            </TableHead>
+                            <TableHead>Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                      <TableBody>
+                        {(() => {
+                          // Sort at-risk assets based on selected column
+                          const sortedAtRiskAssets = [...atRiskAssets].sort((a, b) => {
+                            let comparison = 0;
+
+                            switch (atRiskAssetsSort.column) {
+                              case "asset":
+                                comparison = a.asset.localeCompare(b.asset);
+                                break;
+                              case "network":
+                                const networkA = ((a as any).network || "Unknown").toLowerCase();
+                                const networkB = ((b as any).network || "Unknown").toLowerCase();
+                                comparison = networkA.localeCompare(networkB);
+                                break;
+                              case "value":
+                                comparison = a.value - b.value;
+                                break;
+                              case "liquidationFactor":
+                                comparison = a.liquidationFactor - b.liquidationFactor;
+                                break;
+                              case "depositValue":
+                                comparison = a.poolCollateralValueUSD - b.poolCollateralValueUSD;
+                                break;
+                              case "borrowValue":
+                                comparison = a.poolBorrowsUSD - b.poolBorrowsUSD;
+                                break;
+                              case "riskRatio":
+                              default:
+                                comparison = a.riskRatio - b.riskRatio;
+                                break;
+                            }
+
+                            return atRiskAssetsSort.direction === "asc"
+                              ? comparison
+                              : -comparison;
+                          });
+
+                          return sortedAtRiskAssets.map((asset, index) => {
+                          const marketLabel = asset.poolId
+                            ? (() => {
+                                const networkConfig = getNetworkConfig(currentNetwork);
+                                const lendingPools =
+                                  networkConfig?.contracts?.lendingPools || [];
+                                if (lendingPools.length >= 2) {
+                                  if (
+                                    String(asset.poolId) ===
+                                    String(lendingPools[0])
+                                  )
+                                    return "A";
+                                  if (
+                                    String(asset.poolId) ===
+                                    String(lendingPools[1])
+                                  )
+                                    return "B";
+                                }
+                                return null;
+                              })()
+                            : null;
+
+                          return (
+                            <TableRow
+                              key={`${asset.asset}-${asset.poolId || index}`}
+                              className="hover:bg-orange-500/10"
+                            >
+                              <TableCell>
+                                <div className="flex items-center gap-2">
+                                  <div className="relative">
+                                    <img
+                                      src={asset.icon}
+                                      alt={asset.asset}
+                                      className="w-6 h-6 rounded-full"
+                                    />
+                                    {marketLabel && (
+                                      <div
+                                        className={`absolute -top-1 -right-1 w-4 h-4 rounded-full ${
+                                          marketLabel === "A"
+                                            ? "bg-blue-500"
+                                            : "bg-purple-500"
+                                        } border-2 border-white dark:border-slate-800 flex items-center justify-center`}
+                                      >
+                                        <span className="text-xs font-bold text-white">
+                                          {marketLabel}
+                                        </span>
+                                      </div>
+                                    )}
+                                  </div>
+                                  <span className="font-medium">
+                                    {asset.asset}
+                                  </span>
+                                </div>
+                              </TableCell>
+                              {selectedNetworkFilter === "all" && (
+                                <TableCell>
+                                  {(() => {
+                                    const depositNetwork = (asset as any).network;
+                                    if (depositNetwork) {
+                                      // Format network name: "algorand-mainnet" -> "Algorand", "voi-mainnet" -> "VOI"
+                                      const normalized = depositNetwork.toLowerCase();
+                                      if (normalized.includes("algorand")) {
+                                        return "Algorand";
+                                      } else if (normalized.includes("voi")) {
+                                        return "VOI";
+                                      } else {
+                                        // Fallback to formatted name
+                                        return depositNetwork
+                                          .split("-")
+                                          .map(
+                                            (word) =>
+                                              word.charAt(0).toUpperCase() +
+                                              word.slice(1)
+                                          )
+                                          .join(" ");
+                                      }
+                                    }
+                                    return "Unknown";
+                                  })()}
+                                </TableCell>
+                              )}
+                              <TableCell>
+                                ${asset.value.toLocaleString("en-US", {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </TableCell>
+                              <TableCell>
+                                {(asset.liquidationFactor * 100).toFixed(1)}%
+                              </TableCell>
+                              <TableCell>
+                                <span className="text-muted-foreground">
+                                  $
+                                  {asset.poolCollateralValueUSD.toLocaleString(
+                                    "en-US",
+                                    {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    }
+                                  )}
+                                </span>
+                              </TableCell>
+                              {hasPoolBorrows && (
+                                <TableCell>
+                                  <span className="text-muted-foreground">
+                                    $
+                                    {asset.poolBorrowsUSD.toLocaleString("en-US", {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    })}
+                                  </span>
+                                </TableCell>
+                              )}
+                              <TableCell>
+                                <span
+                                  className={`font-semibold ${
+                                    asset.riskRatio < 0.5
+                                      ? "text-red-500"
+                                      : asset.riskRatio < 0.75
+                                      ? "text-orange-500"
+                                      : "text-yellow-500"
+                                  }`}
+                                >
+                                  {asset.riskRatio.toFixed(3)}
+                                </span>
+                              </TableCell>
+                              <TableCell>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() =>
+                                    handleDepositClick(asset.asset, asset.poolId)
+                                  }
+                                >
+                                  +
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          );
+                          });
+                        })()}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </DorkFiCard>
+                );
+              })()}
 
               {/* Borrowed Assets Table */}
               {borrows.length > 0 && (
