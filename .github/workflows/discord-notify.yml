@@ -23,7 +23,7 @@ jobs:
           curl -H "Content-Type: application/json" \
                -X POST \
                -d '{
-                 "content": "**New commit to `next` branch** :rocket:",
+                 "content": "**New commit to dorkfi-app `next` branch** :rocket:",
                  "embeds": [{
                    "title": '"$TITLE"',
                    "description": "[`'"$SHORT_SHA"'`]('"$COMMIT_URL"')\nby '"$COMMIT_AUTHOR"'",
