@@ -1724,35 +1724,42 @@ export const withdraw = async (
       {
         const SCALE = BigInt(1e18);
         const currentDepositIndex = BigInt(marketInfo.depositIndex);
-        
+
         const smallAccumulatedInterest = new BigNumber(accruedInterest)
           .multipliedBy(10 ** token.decimals)
           .toFixed(0);
         console.log("smallAccumulatedInterest", { smallAccumulatedInterest });
         const withdrawAmount =
           BigInt(amountInSmallestUnit) + BigInt(smallAccumulatedInterest);
-        
+
         // Convert actual withdraw amount to scaled deposits
         // Formula: scaledAmount = (actualAmount * SCALE) / currentDepositIndex
-        let scaledWithdrawAmount = (withdrawAmount * SCALE) / currentDepositIndex;
-        
+        let scaledWithdrawAmount =
+          (withdrawAmount * SCALE) / currentDepositIndex;
+
         // Safety check: if calculated scaled amount exceeds user's actual scaled deposits,
         // use the user's actual scaled deposits instead
-        if (userScaledDeposits !== null && scaledWithdrawAmount > userScaledDeposits) {
-          console.warn("Calculated scaled withdraw amount exceeds user's scaled deposits. Capping to user's scaled deposits.", {
-            calculatedScaledAmount: scaledWithdrawAmount.toString(),
-            userScaledDeposits: userScaledDeposits.toString(),
-          });
+        if (
+          userScaledDeposits !== null &&
+          scaledWithdrawAmount > userScaledDeposits
+        ) {
+          console.warn(
+            "Calculated scaled withdraw amount exceeds user's scaled deposits. Capping to user's scaled deposits.",
+            {
+              calculatedScaledAmount: scaledWithdrawAmount.toString(),
+              userScaledDeposits: userScaledDeposits.toString(),
+            }
+          );
           scaledWithdrawAmount = userScaledDeposits;
         }
-        
+
         console.log("Withdraw amount conversion:", {
           actualAmount: withdrawAmount.toString(),
           currentDepositIndex: currentDepositIndex.toString(),
           scaledAmount: scaledWithdrawAmount.toString(),
           userScaledDeposits: userScaledDeposits?.toString() || "not available",
         });
-        
+
         const formattedAccumulatedInterest = new BigNumber(
           accruedInterest
         ).toFixed(token.decimals);
@@ -2606,15 +2613,20 @@ export const migrate = async (
         // to underlying token
         //
         // the user should already have all the arc200 balances setup
-
         // Step 2: Approve new token for lending pool
         {
+          let approvalAmount = bigAmount;
+          // if node use higher approval amount
+          if (networkId === "voi-mainnet" && oldContractId === "410811") {
+            approvalAmount = BigInt(Number.MAX_SAFE_INTEGER);
+          }
           const txnO = (
             await builder.oldToken.arc200_approve(
               algosdk.encodeAddress(
                 algosdk.getApplicationAddress(Number(newPoolId)).publicKey
               ),
-              bigAmount
+              //bigAmount
+              Number.MAX_SAFE_INTEGER
             )
           ).obj;
           buildN.push({
