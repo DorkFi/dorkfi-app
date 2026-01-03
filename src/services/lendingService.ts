@@ -2936,8 +2936,8 @@ export const borrow = async (
       let customTx: any;
 
       // p1 - create balance box user
-      // p2 -
-      // p3 -
+      // p2 - approve spending of token
+      // p3 - deposit to lending pool
       for (const p of [
         [0, 0],
         [1, 0],
@@ -2948,7 +2948,7 @@ export const borrow = async (
         const buildN = [];
 
         // cond create balance box user if needed and network token
-        if (tokenStandard == "network") {
+        if (tokenStandard == "network" || tokenStandard == "asa") {
           if (p1 > 0) {
             const txnO = (await builder.token.createBalanceBox(userAddress))
               .obj;
@@ -2958,7 +2958,7 @@ export const borrow = async (
               note: new TextEncoder().encode("nt200 createBalanceBox"),
             });
           }
-        }
+        } 
 
         // Borrow from lending pool
         {
@@ -3265,7 +3265,6 @@ export const repay = async (
 
         if (tokenStandard == "network") {
           // create balance box for pool
-          // ...
           // create balance box for user
           if (p1 > 0) {
             const txnO = (await builder.token.createBalanceBox(userAddress))
