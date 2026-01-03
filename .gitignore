@@ -26,3 +26,4 @@ dist-ssr
 *.sw?
 .env
 COMMIT_MSG.txt
+DISCORD_SUMMARY.txt
