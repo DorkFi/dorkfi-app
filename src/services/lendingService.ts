@@ -2768,6 +2768,45 @@ export const borrow = async (
         throw new Error("Token not found");
       }
 
+      // Check if user is opted into the asset (for ASA and arc200-exchange tokens)
+      // Note: If not opted in, the transaction will include an opt-in automatically
+      let optIn = {};
+      if (tokenStandard === "asa" || tokenStandard === "arc200-exchange") {
+        if (token.underlyingAssetId) {
+          try {
+            const accountAssetInfo = await clients.algod
+              .accountAssetInformation(userAddress, Number(token.underlyingAssetId))
+              .do();
+            console.log(
+              `User is opted into asset ${token.underlyingAssetId} (${token.symbol})`
+            );
+          } catch (error: any) {
+            // If the error indicates the user is not opted in, log a warning
+            // The transaction will handle the opt-in automatically
+            if (
+              error?.response?.status === 404 ||
+              error?.response?.status === 400 ||
+              error?.message?.includes("not found") ||
+              error?.message?.includes("not opted") ||
+              error?.message?.includes("does not exist")
+            ) {
+              console.warn(
+                `User is not opted into asset ${token.underlyingAssetId} (${token.symbol}). Opt-in will be included in the transaction.`
+              );
+              optIn = {
+                xaid: Number(token.underlyingAssetId),
+                snd: userAddress,
+                arcv: userAddress,
+              };
+            } else {
+              // Re-throw unexpected errors
+              console.error("Error checking asset opt-in status:", error);
+              throw error;
+            }
+          }
+        }
+      }
+
       // Convert amount to proper units (considering decimals)
       const bigAmount = BigInt(amount);
 
@@ -2936,13 +2975,12 @@ export const borrow = async (
       let customTx: any;
 
       // p1 - create balance box user
-      // p2 - approve spending of token
-      // p3 - deposit to lending pool
+      // p2 - payment to approve spending of token
       for (const p of [
-        [0, 0],
-        [1, 0],
-        [1, 1],
-        [0, 1],
+        [0, 0], // no balance box, no approve
+        [1, 0], // balance box, no approve
+        [1, 1], // balance box, approve
+        [0, 1], // no balance box, approve
       ]) {
         const [p1, p2] = p;
         const buildN = [];
@@ -2958,7 +2996,7 @@ export const borrow = async (
               note: new TextEncoder().encode("nt200 createBalanceBox"),
             });
           }
-        } 
+        }
 
         // Borrow from lending pool
         {
@@ -2995,8 +3033,14 @@ export const borrow = async (
         // user withdraws from nnt200 token
         else if (tokenStandard == "asa") {
           const txnO = (await builder.token.withdraw(BigInt(amount))).obj;
+          // const optIn = {
+          //   xaid: Number(token.underlyingAssetId),
+          //   snd: userAddress,
+          //   arcv: userAddress,
+          // };
           buildN.push({
             ...txnO,
+            ...optIn,
             note: new TextEncoder().encode("nt200 withdraw"),
           });
         }
@@ -3005,12 +3049,15 @@ export const borrow = async (
           const txnO = (
             await builder.arc200Exchange.arc200_swapBack(BigInt(amount))
           ).obj;
+          // const optIn = {
+          //   xaid: Number(token.underlyingAssetId),
+          //   snd: userAddress,
+          //   arcv: userAddress,
+          // };
           buildN.push({
             ...txnO,
+            ...optIn,
             note: new TextEncoder().encode("arc200_swapBack"),
-            xaid: Number(token.underlyingAssetId),
-            snd: userAddress,
-            arcv: userAddress,
           });
         }
 
