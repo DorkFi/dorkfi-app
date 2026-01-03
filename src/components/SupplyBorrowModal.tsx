@@ -21,6 +21,7 @@ import {
   deposit,
   borrow,
   fetchUserGlobalData,
+  fetchMarketInfoFromContract,
 } from "@/services/lendingService";
 import {
   getTokenConfig,
@@ -654,10 +655,15 @@ const SupplyBorrowModal = ({
           parseInt(token.poolId),
           parseInt(token.underlyingContractId)
         ),
-        dorkfiAPIService.fetchFreshMarketData(
+        fetchMarketInfoFromContract(
+          token.poolId,
+          token.underlyingContractId,
+          networkToUse as NetworkId
+        ),
+        dorkfiAPIService.fetchFreshUserHealth(
           networkToUse,
           parseInt(token.poolId),
-          parseInt(token.underlyingContractId)
+          activeAccount.address
         ),
       ])
         .then(() => {

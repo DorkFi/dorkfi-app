@@ -1956,6 +1956,58 @@ export const config: GlobalConfig = {
 };
 
 /**
+ * Market label mapping: maps networkId-poolId combinations to market labels (A, B, etc.)
+ * Format: "networkId-poolId" -> "A" | "B" | ...
+ */
+export const marketLabelMap: Record<string, string> = {
+  // VOI Mainnet
+  "voi-mainnet-41760711": "A",
+  "voi-mainnet-44866061": "B",
+  // Algorand Mainnet
+  "algorand-mainnet-47139778": "A",
+  "algorand-mainnet-47139781": "B",
+};
+
+/**
+ * Get market label (A, B, etc.) for a given network and poolId
+ * @param networkId - The network ID (e.g., "voi-mainnet", "algorand-mainnet")
+ * @param poolId - The pool ID
+ * @returns The market label (A, B, etc.) or null if not found
+ */
+export const getMarketLabel = (
+  networkId: NetworkId | string | null | undefined,
+  poolId: string | null | undefined
+): string | null => {
+  if (!networkId || !poolId) {
+    return null;
+  }
+
+  // Normalize networkId to handle variations
+  const normalizedNetworkId = String(networkId).toLowerCase();
+  const normalizedPoolId = String(poolId);
+
+  // Try direct lookup
+  const key = `${normalizedNetworkId}-${normalizedPoolId}`;
+  if (marketLabelMap[key]) {
+    return marketLabelMap[key];
+  }
+
+  // Fallback: try to get from network config
+  try {
+    const networkConfig = getNetworkConfig(normalizedNetworkId as NetworkId);
+    const lendingPools = networkConfig?.contracts?.lendingPools || [];
+    if (lendingPools.length >= 2) {
+      if (String(poolId) === String(lendingPools[0])) return "A";
+      if (String(poolId) === String(lendingPools[1])) return "B";
+    }
+  } catch (e) {
+    // Network not found in config, return null
+  }
+
+  return null;
+};
+
+/**
  * Helper functions for accessing configuration
  */
 export const getNetworkConfig = (networkId: NetworkId): NetworkConfig => {

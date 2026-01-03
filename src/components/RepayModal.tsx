@@ -30,7 +30,8 @@ interface RepayModalProps {
     tokenPrice: number;
     collateralFactor?: number;
   };
-  lastUpdateTime?: number;
+  lastUpdateTime?: number; // Market's last update time (when market indices were updated)
+  userLastUpdateTime?: number; // User's last update time (when user last interacted with market)
   network?: string; // Network ID for transaction viewing
   onSubmit: (amount: string) => Promise<string>; // Returns transaction ID
 }
@@ -45,6 +46,7 @@ const RepayModal = ({
   walletBalance,
   marketStats,
   lastUpdateTime,
+  userLastUpdateTime,
   network,
   onSubmit,
 }: RepayModalProps) => {
@@ -337,9 +339,16 @@ const RepayModal = ({
                               </span>
                             </p>
                             <p className="text-xs text-amber-600 dark:text-amber-500 mt-1">
-                              This is the interest that has accrued on your
-                              borrow since you borrowed. It's included in your
-                              current borrow amount.
+                              This shows how much of your current borrow amount is
+                              interest that has accrued since last interaction. The
+                              current borrow amount above already includes this
+                              interest.
+                              {userLastUpdateTime && (
+                                <span className="block mt-1 text-blue-500 dark:text-blue-400">
+                                  Last interaction:{" "}
+                                  {formatRelativeTime(userLastUpdateTime)}
+                                </span>
+                              )}
                               {lastUpdateTime && (
                                 <span className="block mt-1 text-amber-500 dark:text-amber-400">
                                   Last updated:{" "}
@@ -462,9 +471,15 @@ const RepayModal = ({
                                   })}
                                 </p>
                                 {lastUpdateTime && (
-                                  <p className="text-slate-500 dark:text-slate-400 mt-1">
+                                  <p className="text-slate-500 dark:text-slate-400 mt-1 text-xs">
                                     Last updated:{" "}
                                     {formatRelativeTime(lastUpdateTime)}
+                                  </p>
+                                )}
+                                {userLastUpdateTime && (
+                                  <p className="text-slate-500 dark:text-slate-400 mt-1 text-xs">
+                                    Last interaction:{" "}
+                                    {formatRelativeTime(userLastUpdateTime)}
                                   </p>
                                 )}
                               </div>

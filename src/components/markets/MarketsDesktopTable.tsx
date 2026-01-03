@@ -425,7 +425,7 @@ const MarketsDesktopTable = ({
           ) : (
             <div>
               <div className="font-medium">
-                ${(market.totalSupplyUSD / 1_000_000).toLocaleString()}
+                ${Math.round(market.totalSupplyUSD / 1_000_000).toLocaleString()}
               </div>
               <div className="text-sm text-muted-foreground">
                 {market.totalSupply.toLocaleString(undefined, { maximumFractionDigits: 3 })} {market.asset}
@@ -458,7 +458,7 @@ const MarketsDesktopTable = ({
           ) : (
             <div>
               <div className="font-medium">
-                ${(market.totalBorrowUSD / 1_000_000).toLocaleString()}
+                ${Math.round(market.totalBorrowUSD / 1_000_000).toLocaleString()}
               </div>
               <div className="text-sm text-muted-foreground">
                 {market.totalBorrow.toLocaleString(undefined, { maximumFractionDigits: 3 })} {market.asset}

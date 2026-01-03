@@ -211,7 +211,7 @@ const MarketCardView = ({
                   />
                 </Badge>
                 <div className="text-xs text-muted-foreground mt-1">
-                  ${(market.totalSupplyUSD / 1_000_000).toLocaleString()}
+                  ${Math.round(market.totalSupplyUSD / 1_000_000).toLocaleString()}
                 </div>
               </div>
               <div className="flex flex-col items-center md:items-start">
@@ -225,7 +225,7 @@ const MarketCardView = ({
                   />
                 </Badge>
                 <div className="text-xs text-muted-foreground mt-1">
-                  ${(market.totalBorrowUSD / 1_000_000).toLocaleString()}
+                  ${Math.round(market.totalBorrowUSD / 1_000_000).toLocaleString()}
                 </div>
               </div>
             </div>

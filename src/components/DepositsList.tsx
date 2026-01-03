@@ -17,6 +17,8 @@ interface Deposit {
   tokenPrice: number;
   poolId?: string;
   network?: string;
+  accruedInterest?: number;
+  accruedInterestValue?: number;
 }
 
 interface DepositsListProps {
@@ -68,15 +70,15 @@ const DepositsList = ({ deposits, onDepositClick, onWithdrawClick, onRefresh, is
           return (
             <div 
               key={uniqueKey}
-              className="grid grid-cols-[auto_1fr_auto] gap-x-4 items-center min-h-[100px] p-4 rounded-lg bg-white/50 dark:bg-slate-800/50 border border-gray-200/30 dark:border-ocean-teal/10 transition-all hover:bg-ocean-teal/5 hover:scale-105 hover:border-ocean-teal/40 card-hover cursor-pointer gap-y-1"
+              className="grid grid-cols-[auto_1fr_auto] sm:grid-cols-[auto_1fr_auto] gap-x-2 sm:gap-x-4 items-center min-h-[100px] p-3 sm:p-4 rounded-lg bg-white/50 dark:bg-slate-800/50 border border-gray-200/30 dark:border-ocean-teal/10 transition-all hover:bg-ocean-teal/5 hover:scale-[1.02] sm:hover:scale-105 hover:border-ocean-teal/40 card-hover cursor-pointer gap-y-1"
             >
               {/* Token Icon + Name (column 1) */}
-              <div className="flex flex-col items-center gap-1 w-20">
+              <div className="flex flex-col items-center gap-1 w-16 sm:w-20">
                 <div className="relative flex-shrink-0">
                   <img 
                     src={deposit.icon} 
                     alt={deposit.asset}
-                    className="w-12 h-12 md:w-10 md:h-10 rounded-full"
+                    className="w-10 h-10 sm:w-12 sm:h-12 md:w-10 md:h-10 rounded-full"
                   />
                   {marketLabel && (
                     <div className={`absolute -top-1 -right-1 w-5 h-5 rounded-full ${
@@ -130,6 +132,33 @@ const DepositsList = ({ deposits, onDepositClick, onWithdrawClick, onRefresh, is
                   </Tooltip>
                 </div>
               )}
+              {deposit.accruedInterest !== undefined && deposit.accruedInterest > 0 && (
+                <div className="text-xs text-green-500 dark:text-green-400 flex items-center gap-1 text-center justify-center font-medium">
+                  +{deposit.accruedInterest.toLocaleString("en-US", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 6,
+                  })} {deposit.asset} earned
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Info className="w-3 h-3 cursor-help flex-shrink-0" />
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs">
+                      <p className="font-semibold mb-1">Accrued Interest</p>
+                      <p className="text-sm">
+                        Interest earned on this deposit since you deposited. 
+                        {deposit.accruedInterestValue && (
+                          <span className="block mt-1">
+                            Value: ${deposit.accruedInterestValue.toLocaleString("en-US", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </span>
+                        )}
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+              )}
               <div className="text-xs text-slate-400 dark:text-muted-foreground flex items-center gap-1 text-center justify-center">
                 ${deposit.tokenPrice.toFixed(3)} per token
                 <Tooltip>
@@ -143,9 +172,9 @@ const DepositsList = ({ deposits, onDepositClick, onWithdrawClick, onRefresh, is
               </div>
             </div>
             {/* USD value above Deposit/Withdraw buttons (column 3) */}
-            <div className="flex flex-col items-end gap-2 min-w-[150px] pr-3">
-              <DorkFiButton variant="secondary" onClick={() => onDepositClick(deposit.asset, deposit.poolId)} className="w-full max-w-[148px]">Deposit</DorkFiButton>
-              <DorkFiButton variant="danger-outline" onClick={() => onWithdrawClick(deposit.asset, deposit.poolId, deposit.network)} className="w-full max-w-[148px]">Withdraw</DorkFiButton>
+            <div className="flex flex-col items-end gap-2 min-w-[120px] sm:min-w-[150px] pr-2 sm:pr-3">
+              <DorkFiButton variant="secondary" onClick={() => onDepositClick(deposit.asset, deposit.poolId)} className="w-full max-w-[120px] sm:max-w-[148px] text-xs sm:text-sm">Deposit</DorkFiButton>
+              <DorkFiButton variant="danger-outline" onClick={() => onWithdrawClick(deposit.asset, deposit.poolId, deposit.network)} className="w-full max-w-[120px] sm:max-w-[148px] text-xs sm:text-sm">Withdraw</DorkFiButton>
             </div>
           </div>
           );

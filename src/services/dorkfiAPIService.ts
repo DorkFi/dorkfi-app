@@ -661,6 +661,49 @@ class DorkFiAPIService {
   }
 
   /**
+   * Fetch fresh user health data from blockchain
+   * Fetches fresh user health data directly from the blockchain for a specific network, app ID, and user address.
+   * Bypasses the store and returns the fresh data.
+   * @param network - Network identifier (e.g., algorand-mainnet, voi-mainnet)
+   * @param appId - Application ID of the lending pool
+   * @param userAddress - User address
+   * @returns Promise<ApiResponse<UserHealth>>
+   */
+  async fetchFreshUserHealth(
+    network: string,
+    appId: number,
+    userAddress: string
+  ): Promise<ApiResponse<UserHealth>> {
+    try {
+      const response = await fetch(
+        `${this.baseUrl}/user-health/${encodeURIComponent(
+          network
+        )}/${appId}/${encodeURIComponent(userAddress)}`,
+        {
+          method: "POST",
+        }
+      );
+
+      if (!response.ok) {
+        if (response.status === 400 || response.status === 404 || response.status === 500) {
+          const errorData = await response.json();
+          return errorData;
+        }
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error(
+        `Error fetching fresh user health for network ${network}, appId ${appId}, userAddress ${userAddress}:`,
+        error
+      );
+      throw error;
+    }
+  }
+
+  /**
    * Get all users
    * @returns Promise<ApiListResponse<User>>
    */

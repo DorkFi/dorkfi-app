@@ -3,6 +3,8 @@ import React from 'react';
 import UnderwaterScene from './liquidation/UnderwaterScene';
 import PositionStatsGrid from './liquidation/PositionStatsGrid';
 import HealthFactorActions from './liquidation/HealthFactorActions';
+import { Button } from "@/components/ui/button";
+import { RefreshCw } from "lucide-react";
 
 interface EnhancedHealthFactorProps {
   healthFactor: number | null;
@@ -15,6 +17,8 @@ interface EnhancedHealthFactorProps {
   onAddCollateral: () => void;
   onBuyVoi: () => void;
   onEditProfile?: () => void;
+  onRefreshMarkets?: () => void;
+  isRefreshingMarkets?: boolean;
 }
 
 const EnhancedHealthFactor = ({
@@ -27,7 +31,9 @@ const EnhancedHealthFactor = ({
   underwaterBg,
   onAddCollateral,
   onBuyVoi,
-  onEditProfile
+  onEditProfile,
+  onRefreshMarkets,
+  isRefreshingMarkets
 }: EnhancedHealthFactorProps) => {
   return (
     <div className="w-full max-w-7xl mx-auto animate-fade-in">
@@ -57,6 +63,23 @@ const EnhancedHealthFactor = ({
                     Monitor your portfolio health and manage risk
                   </p>
                 </div>
+                {onRefreshMarkets && (
+                  <Button
+                    onClick={onRefreshMarkets}
+                    disabled={isRefreshingMarkets}
+                    variant="outline"
+                    size="sm"
+                    className="h-9 px-3 text-xs sm:text-sm border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Refresh all market data"
+                  >
+                    <RefreshCw
+                      className={`w-4 h-4 mr-2 ${
+                        isRefreshingMarkets ? "animate-spin" : ""
+                      }`}
+                    />
+                    Refresh
+                  </Button>
+                )}
                 {/*
 <div className={`px-3 py-1 rounded-full text-xs font-semibold ${
   healthFactor === null ? 'bg-gray-500/20 text-gray-400' :

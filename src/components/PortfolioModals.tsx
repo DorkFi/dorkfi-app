@@ -29,7 +29,10 @@ import { getUserFriendlyError } from "@/utils/errorUtils";
 import dorkfiAPIService from "@/services/dorkfiAPIService";
 import { updateTransactionMetadata } from "@/utils/transactionUtils";
 import { CONTRACT } from "ulujs";
-import { APP_SPEC as LendingPoolAppSpec, UserData } from "@/clients/DorkFiLendingPoolClient";
+import {
+  APP_SPEC as LendingPoolAppSpec,
+  UserData,
+} from "@/clients/DorkFiLendingPoolClient";
 import { isAlgorandCompatibleNetwork } from "@/config";
 
 interface Deposit {
@@ -97,7 +100,9 @@ interface PortfolioModalsProps {
   onCloseRepayModal: () => void;
   onRefreshWalletBalance?: (asset: string, networkId?: string) => void;
   onRefreshMarket?: () => void;
-  prefetchWithdrawIndicesRef?: React.MutableRefObject<((asset: string, poolId?: string) => Promise<void>) | null>;
+  prefetchWithdrawIndicesRef?: React.MutableRefObject<
+    ((asset: string, poolId?: string) => Promise<void>) | null
+  >;
 }
 
 const PortfolioModals = ({
@@ -122,88 +127,98 @@ const PortfolioModals = ({
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
   const { toast } = useToast();
-  const [userDepositIndexCache, setUserDepositIndexCache] = useState<Record<string, string>>({});
-  const [currentDepositIndexCache, setCurrentDepositIndexCache] = useState<Record<string, string>>({});
-  
+  const [userDepositIndexCache, setUserDepositIndexCache] = useState<
+    Record<string, string>
+  >({});
+  const [currentDepositIndexCache, setCurrentDepositIndexCache] = useState<
+    Record<string, string>
+  >({});
+
   // Extract fetch indices function to be reusable
-  const fetchIndices = useCallback(async (asset: string, poolId?: string) => {
-    try {
-      const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-      const token = poolId
-        ? tokens.find((t) => t.symbol === asset && t.poolId === poolId)
-        : tokens.find((t) => t.symbol === asset);
-
-      if (!token?.poolId || !token?.underlyingContractId) {
-        return;
-      }
-
-      const cacheKey = `${asset}-${poolId || 'default'}`;
-      const networkConfig = getNetworkConfig(currentNetwork);
-      
-      if (!isAlgorandCompatibleNetwork(currentNetwork)) {
-        return;
-      }
-
-      // Always fetch current deposit index from contract (bypass API cache)
+  const fetchIndices = useCallback(
+    async (asset: string, poolId?: string) => {
       try {
-        const marketData = await fetchMarketInfoFromContract(
-          token.poolId,
-          token.underlyingContractId,
-          currentNetwork
-        );
-        
-        if (marketData?.depositIndex) {
-          setCurrentDepositIndexCache(prev => ({
-            ...prev,
-            [cacheKey]: marketData.depositIndex.toString(),
-          }));
+        const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+        const token = poolId
+          ? tokens.find((t) => t.symbol === asset && t.poolId === poolId)
+          : tokens.find((t) => t.symbol === asset);
+
+        if (!token?.poolId || !token?.underlyingContractId) {
+          return;
         }
-      } catch (error) {
-        console.error("Error fetching current deposit index:", error);
-      }
 
-      // Always fetch user deposit index from contract if wallet is connected (bypass cache)
-      if (activeAccount?.address) {
+        const cacheKey = `${asset}-${poolId || "default"}`;
+        const networkConfig = getNetworkConfig(currentNetwork);
+
+        if (!isAlgorandCompatibleNetwork(currentNetwork)) {
+          return;
+        }
+
+        // Always fetch current deposit index from contract (bypass API cache)
         try {
-          const clients = algorandService.initializeClients(
-            networkConfig.walletNetworkId as AlgorandNetwork
+          const marketData = await fetchMarketInfoFromContract(
+            token.poolId,
+            token.underlyingContractId,
+            currentNetwork
           );
 
-          const ci = new CONTRACT(
-            Number(token.poolId),
-            clients.algod,
-            undefined,
-            { ...LendingPoolAppSpec.contract, events: [] },
-            {
-              addr: algosdk.encodeAddress(
-                algosdk.getApplicationAddress(Number(token.poolId)).publicKey
-              ),
-              sk: new Uint8Array(),
-            }
-          );
-
-          ci.setFee(2000);
-          const userDataR = await ci.get_user(activeAccount.address, Number(token.underlyingContractId));
-
-          if (userDataR.success) {
-            const userData = UserData(userDataR.returnValue);
-            const userDepositIndex = userData.depositIndex?.toString();
-            
-            if (userDepositIndex) {
-              setUserDepositIndexCache(prev => ({
-                ...prev,
-                [cacheKey]: userDepositIndex,
-              }));
-            }
+          if (marketData?.depositIndex) {
+            setCurrentDepositIndexCache((prev) => ({
+              ...prev,
+              [cacheKey]: marketData.depositIndex.toString(),
+            }));
           }
         } catch (error) {
-          console.error("Error fetching user deposit index:", error);
+          console.error("Error fetching current deposit index:", error);
         }
+
+        // Always fetch user deposit index from contract if wallet is connected (bypass cache)
+        if (activeAccount?.address) {
+          try {
+            const clients = algorandService.initializeClients(
+              networkConfig.walletNetworkId as AlgorandNetwork
+            );
+
+            const ci = new CONTRACT(
+              Number(token.poolId),
+              clients.algod,
+              undefined,
+              { ...LendingPoolAppSpec.contract, events: [] },
+              {
+                addr: algosdk.encodeAddress(
+                  algosdk.getApplicationAddress(Number(token.poolId)).publicKey
+                ),
+                sk: new Uint8Array(),
+              }
+            );
+
+            ci.setFee(2000);
+            const userDataR = await ci.get_user(
+              activeAccount.address,
+              Number(token.underlyingContractId)
+            );
+
+            if (userDataR.success) {
+              const userData = UserData(userDataR.returnValue);
+              const userDepositIndex = userData.depositIndex?.toString();
+
+              if (userDepositIndex) {
+                setUserDepositIndexCache((prev) => ({
+                  ...prev,
+                  [cacheKey]: userDepositIndex,
+                }));
+              }
+            }
+          } catch (error) {
+            console.error("Error fetching user deposit index:", error);
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching indices:", error);
       }
-    } catch (error) {
-      console.error("Error fetching indices:", error);
-    }
-  }, [currentNetwork, activeAccount?.address]);
+    },
+    [currentNetwork, activeAccount?.address]
+  );
 
   // Expose prefetch function via ref
   useEffect(() => {
@@ -217,7 +232,12 @@ const PortfolioModals = ({
     if (withdrawModal.isOpen && withdrawModal.asset) {
       fetchIndices(withdrawModal.asset, withdrawModal.poolId);
     }
-  }, [withdrawModal.isOpen, withdrawModal.asset, withdrawModal.poolId, fetchIndices]);
+  }, [
+    withdrawModal.isOpen,
+    withdrawModal.asset,
+    withdrawModal.poolId,
+    fetchIndices,
+  ]);
 
   const getMarketStatsForDeposit = (asset: string, poolId?: string) => {
     // Find matching markets - prefer poolId match if provided
@@ -263,17 +283,18 @@ const PortfolioModals = ({
     // Each item in user.userData has depositIndex for the matching market (by marketId and appId)
     const hasWallet = !!activeAccount?.address;
     const depositAny = deposit as any;
-    
+
     // Check cache for indices
-    const cacheKey = `${asset}-${poolId || 'default'}`;
+    const cacheKey = `${asset}-${poolId || "default"}`;
     const cachedUserDepositIndex = userDepositIndexCache[cacheKey];
     const cachedCurrentDepositIndex = currentDepositIndexCache[cacheKey];
-    
+
     // The depositIndex from user.userData is already included in the deposit object
     // when it was transformed from user.computed.deposits (which comes from user.userData)
     // This depositIndex is specific to the matching market (matched by marketId and appId)
-    const userDepositIndexFromDeposit = depositAny?.userDepositIndex?.toString();
-    
+    const userDepositIndexFromDeposit =
+      depositAny?.userDepositIndex?.toString();
+
     return {
       supplyAPY:
         market?.apyCalculation?.apy ||
@@ -303,15 +324,17 @@ const PortfolioModals = ({
           ? deposit.accruedInterest
           : undefined,
       // Use cached current deposit index (from contract) if available, otherwise fall back to market data
-      currentDepositIndex: cachedCurrentDepositIndex || market?.depositIndex?.toString(),
+      currentDepositIndex:
+        cachedCurrentDepositIndex || market?.depositIndex?.toString(),
       // Use cached value first (from contract), then deposit object (from API user.userData)
       // The deposit object's userDepositIndex comes from user.userData for the matching market
       userDepositIndex: hasWallet
-        ? (cachedUserDepositIndex || userDepositIndexFromDeposit || undefined)
+        ? cachedUserDepositIndex || userDepositIndexFromDeposit || undefined
         : undefined,
-      scaledDeposits: hasWallet && depositAny
-        ? (depositAny.scaledDeposits?.toString() || undefined)
-        : undefined,
+      scaledDeposits:
+        hasWallet && depositAny
+          ? depositAny.scaledDeposits?.toString() || undefined
+          : undefined,
       // lastUpdateTime can be a number (timestamp in seconds) or string (ISO)
       // Check both lastUpdateTime (from contract) and lastUpdated (from MarketInfo)
       lastUpdateTime: market?.lastUpdateTime || market?.lastUpdated,
@@ -363,7 +386,10 @@ const PortfolioModals = ({
     if (userGlobalData) {
       if (userGlobalData.healthFactorIndex !== undefined) {
         // Validate healthFactorIndex is valid
-        if (userGlobalData.healthFactorIndex > 0 && isFinite(userGlobalData.healthFactorIndex)) {
+        if (
+          userGlobalData.healthFactorIndex > 0 &&
+          isFinite(userGlobalData.healthFactorIndex)
+        ) {
           healthFactor = userGlobalData.healthFactorIndex;
           // healthFactorIndex is already capped at 3.0 in the calculation
         }
@@ -374,16 +400,19 @@ const PortfolioModals = ({
         // So we can use it directly without applying a fixed 0.8 factor
         const calculated =
           userGlobalData.totalCollateralValue / userGlobalData.totalBorrowValue;
-        
+
         // Validate calculation result
         if (calculated > 0 && isFinite(calculated)) {
           healthFactor = Math.min(calculated, 3.0); // Cap at 3.0 for display (consistent with Portfolio)
         } else {
-          console.warn("Invalid health factor calculation in getMarketStatsForBorrow:", {
-            totalCollateralValue: userGlobalData.totalCollateralValue,
-            totalBorrowValue: userGlobalData.totalBorrowValue,
-            calculated,
-          });
+          console.warn(
+            "Invalid health factor calculation in getMarketStatsForBorrow:",
+            {
+              totalCollateralValue: userGlobalData.totalCollateralValue,
+              totalBorrowValue: userGlobalData.totalBorrowValue,
+              calculated,
+            }
+          );
           healthFactor = null;
         }
       } else if (userGlobalData.totalCollateralValue > 0) {
@@ -391,7 +420,7 @@ const PortfolioModals = ({
         healthFactor = 3.0;
       }
     }
-    
+
     // If both collateral and borrow are 0 or invalid, return null (data not loaded)
     // Only set to null if we haven't already calculated a valid health factor
     if (healthFactor === null && userGlobalData) {
@@ -771,16 +800,25 @@ const PortfolioModals = ({
       const decodedStxns = stxns.map((txn: Uint8Array) => {
         return algosdk.decodeSignedTransaction(txn);
       });
-      const poolTxnID = decodedStxns.reverse().find((txn: any) => txn.txn.type === "appl" && Number(txn.txn.applicationCall.appIndex) === parseInt(token.poolId))?.txn.txID();
+      const poolTxnID = decodedStxns
+        .reverse()
+        .find(
+          (txn: any) =>
+            txn.txn.type === "appl" &&
+            Number(txn.txn.applicationCall.appIndex) === parseInt(token.poolId)
+        )
+        ?.txn.txID();
       if (poolTxnID) {
         await new Promise((resolve) => setTimeout(resolve, 5000));
         // Retry until metadata update succeeds
         let metadataUpdated = false;
         let retryCount = 0;
         const maxRetries = 10;
-        const apiBaseUrl = import.meta.env.VITE_DORKFI_API_URL || "https://dorkfi-api.nautilus.sh";
+        const apiBaseUrl =
+          import.meta.env.VITE_DORKFI_API_URL ||
+          "https://dorkfi-api.nautilus.sh";
         const networkParam = networkToUse ? `?network=${networkToUse}` : "";
-        
+
         while (!metadataUpdated && retryCount < maxRetries) {
           try {
             const response = await fetch(
@@ -795,20 +833,31 @@ const PortfolioModals = ({
 
             if (response.ok) {
               const result = await response.json();
-              console.log("Transaction metadata successfully updated:", result.data);
+              console.log(
+                "Transaction metadata successfully updated:",
+                result.data
+              );
               metadataUpdated = true;
             } else {
               const error = await response.json();
-              throw new Error(error.error || "Failed to update transaction metadata");
+              throw new Error(
+                error.error || "Failed to update transaction metadata"
+              );
             }
           } catch (error) {
             retryCount++;
             if (retryCount < maxRetries) {
               const delay = 1000 * Math.pow(2, retryCount - 1); // Exponential backoff
-              console.warn(`Metadata update attempt ${retryCount} failed, retrying in ${delay}ms:`, error);
+              console.warn(
+                `Metadata update attempt ${retryCount} failed, retrying in ${delay}ms:`,
+                error
+              );
               await new Promise((resolve) => setTimeout(resolve, delay));
             } else {
-              console.error("Failed to update transaction metadata after all retries:", error);
+              console.error(
+                "Failed to update transaction metadata after all retries:",
+                error
+              );
             }
           }
         }
@@ -828,10 +877,15 @@ const PortfolioModals = ({
           parseInt(token.poolId),
           parseInt(token.underlyingContractId)
         ),
-        dorkfiAPIService.fetchFreshMarketData(
+        fetchMarketInfoFromContract(
+          token.poolId,
+          token.underlyingContractId,
+          networkToUse as NetworkId
+        ),
+        dorkfiAPIService.fetchFreshUserHealth(
           networkToUse,
           parseInt(token.poolId),
-          parseInt(token.underlyingContractId)
+          activeAccount.address
         ),
       ])
         .then(() => {
@@ -1026,16 +1080,25 @@ const PortfolioModals = ({
       const decodedStxns = stxns.map((txn: Uint8Array) => {
         return algosdk.decodeSignedTransaction(txn);
       });
-      const poolTxnID = decodedStxns.reverse().find((txn: any) => txn.txn.type === "appl" && Number(txn.txn.applicationCall.appIndex) === parseInt(token.poolId))?.txn.txID();
+      const poolTxnID = decodedStxns
+        .reverse()
+        .find(
+          (txn: any) =>
+            txn.txn.type === "appl" &&
+            Number(txn.txn.applicationCall.appIndex) === parseInt(token.poolId)
+        )
+        ?.txn.txID();
       if (poolTxnID) {
         await new Promise((resolve) => setTimeout(resolve, 5000));
         // Retry until metadata update succeeds
         let metadataUpdated = false;
         let retryCount = 0;
         const maxRetries = 10;
-        const apiBaseUrl = import.meta.env.VITE_DORKFI_API_URL || "https://dorkfi-api.nautilus.sh";
+        const apiBaseUrl =
+          import.meta.env.VITE_DORKFI_API_URL ||
+          "https://dorkfi-api.nautilus.sh";
         const networkParam = networkToUse ? `?network=${networkToUse}` : "";
-        
+
         while (!metadataUpdated && retryCount < maxRetries) {
           try {
             const response = await fetch(
@@ -1050,20 +1113,31 @@ const PortfolioModals = ({
 
             if (response.ok) {
               const result = await response.json();
-              console.log("Transaction metadata successfully updated:", result.data);
+              console.log(
+                "Transaction metadata successfully updated:",
+                result.data
+              );
               metadataUpdated = true;
             } else {
               const error = await response.json();
-              throw new Error(error.error || "Failed to update transaction metadata");
+              throw new Error(
+                error.error || "Failed to update transaction metadata"
+              );
             }
           } catch (error) {
             retryCount++;
             if (retryCount < maxRetries) {
               const delay = 1000 * Math.pow(2, retryCount - 1); // Exponential backoff
-              console.warn(`Metadata update attempt ${retryCount} failed, retrying in ${delay}ms:`, error);
+              console.warn(
+                `Metadata update attempt ${retryCount} failed, retrying in ${delay}ms:`,
+                error
+              );
               await new Promise((resolve) => setTimeout(resolve, delay));
             } else {
-              console.error("Failed to update transaction metadata after all retries:", error);
+              console.error(
+                "Failed to update transaction metadata after all retries:",
+                error
+              );
             }
           }
         }
@@ -1076,13 +1150,19 @@ const PortfolioModals = ({
         onRefreshWalletBalance(repayModal.asset, networkToUse);
       }
 
-      dorkfiAPIService
-        .fetchFreshUserData(
+      Promise.all([
+        dorkfiAPIService.fetchFreshUserData(
           activeAccount.address,
           networkToUse,
           parseInt(token.poolId),
           parseInt(token.underlyingContractId)
-        )
+        ),
+        dorkfiAPIService.fetchFreshUserHealth(
+          networkToUse,
+          parseInt(token.poolId),
+          activeAccount.address
+        ),
+      ])
         .then(() => {
           setTimeout(() => {
             onRefreshMarket();
@@ -1222,13 +1302,24 @@ const PortfolioModals = ({
                       marketId: marketIdNum,
                     });
 
-                    dorkfiAPIService
-                      .fetchFreshUserData(
+                    Promise.all([
+                      dorkfiAPIService.fetchFreshUserData(
                         activeAccount.address,
                         networkToUse,
                         appIdNum,
                         marketIdNum
-                      )
+                      ),
+                      fetchMarketInfoFromContract(
+                        String(appIdNum),
+                        String(marketIdNum),
+                        networkToUse as NetworkId
+                      ),
+                      dorkfiAPIService.fetchFreshUserHealth(
+                        networkToUse,
+                        appIdNum,
+                        activeAccount.address
+                      ),
+                    ])
                       .then(() => {
                         onRefreshMarket();
                       })
@@ -1356,6 +1447,60 @@ const PortfolioModals = ({
               )
             : borrows.find((b) => b.asset === repayModal.asset);
 
+          // Find the market to get its lastUpdateTime
+          let market;
+          if (repayModal.poolId) {
+            market = marketData.find(
+              (m) =>
+                m.symbol === repayModal.asset && m.poolId === repayModal.poolId
+            );
+          }
+          if (!market) {
+            const matchingMarkets = marketData.filter(
+              (m) => m.symbol === repayModal.asset
+            );
+            if (matchingMarkets.length > 1) {
+              market = matchingMarkets.reduce((prev, current) => {
+                const prevDeposits = parseFloat(prev.totalDeposits || "0");
+                const currentDeposits = parseFloat(current.totalDeposits || "0");
+                return currentDeposits > prevDeposits ? current : prev;
+              });
+            } else {
+              market = matchingMarkets[0];
+            }
+          }
+
+          // Get market's lastUpdateTime (from contract, in seconds)
+          // Prefer lastUpdateTime from contract over lastUpdated (which is just when we fetched it)
+          // formatRelativeTime expects seconds, so we keep it in seconds
+          const marketLastUpdateTime = market?.lastUpdateTime
+            ? typeof market.lastUpdateTime === "string"
+              ? Number(market.lastUpdateTime) // Contract returns seconds as string
+              : typeof market.lastUpdateTime === "number"
+              ? market.lastUpdateTime < 1e12
+                ? market.lastUpdateTime // Already in seconds
+                : Math.floor(market.lastUpdateTime / 1000) // Convert milliseconds to seconds
+              : undefined
+            : market?.lastUpdated
+            ? typeof market.lastUpdated === "string"
+              ? Math.floor(new Date(market.lastUpdated).getTime() / 1000) // Convert ISO to seconds
+              : typeof market.lastUpdated === "number"
+              ? market.lastUpdated < 1e12
+                ? market.lastUpdated // Already in seconds
+                : Math.floor(market.lastUpdated / 1000) // Convert milliseconds to seconds
+              : undefined
+            : undefined;
+
+          // Get user's last update time (when user last interacted with market)
+          // userGlobalData.lastUpdateTime is already in seconds (Unix timestamp)
+          const userLastUpdateTime = userGlobalData?.lastUpdateTime
+            ? typeof userGlobalData.lastUpdateTime === "number"
+              ? userGlobalData.lastUpdateTime < 1e12
+                ? userGlobalData.lastUpdateTime // Already in seconds
+                : Math.floor(userGlobalData.lastUpdateTime / 1000) // Convert milliseconds to seconds
+              : undefined
+            : undefined;
+
           return (
             <RepayModal
               isOpen={repayModal.isOpen}
@@ -1369,7 +1514,8 @@ const PortfolioModals = ({
                 repayModal.asset,
                 repayModal.poolId
               )}
-              lastUpdateTime={userGlobalData?.lastUpdateTime}
+              lastUpdateTime={marketLastUpdateTime}
+              userLastUpdateTime={userLastUpdateTime}
               network={
                 repayModal.network || (borrow as any)?.network || currentNetwork
               }

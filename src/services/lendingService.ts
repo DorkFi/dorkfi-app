@@ -395,7 +395,9 @@ export const fetchMarketInfoFromContract = async (
           sk: new Uint8Array(),
         }
       );
-      const marketR = await ci.get_market(Number(marketId));
+      ci.setFee(5000);
+      const marketR = await ci.sync_market(Number(marketId));
+      console.log("marketR", { marketR });
       if (!marketR.success) {
         console.error(`Contract call failed for market ${marketId}:`, marketR);
         throw new Error(`Failed to get market info for market ${marketId}`);
@@ -738,7 +740,7 @@ export const fetchAllMarkets = async (
             `Fetching market data for ${token.symbol} (marketId: ${marketId}, poolId: ${poolId})`
           );
 
-          const marketInfo = await fetchMarketInfo(poolId, marketId, networkId);
+          const marketInfo = await fetchMarketInfo(poolId, marketId, networkId); // uses API by default
 
           if (marketInfo) {
             console.log(
@@ -1025,8 +1027,14 @@ export const fetchUserBorrowBalance = async (
           return { balance: 0, interest: 0 }; // Return 0 instead of null for no borrows
         }
 
-        // Get current market data to access borrow index
-        const marketInfo = await fetchMarketInfo(poolId, marketId, networkId);
+        // Get current market data to access borrow index - fetch fresh from contract
+        // to ensure we have the latest borrow index for accurate interest calculations
+        const marketInfo = await fetchMarketInfo(
+          poolId,
+          marketId,
+          networkId,
+          "contract"
+        );
         if (!marketInfo) {
           console.warn(`Failed to get market info for market ${marketId}`);
           return null;
@@ -1036,7 +1044,7 @@ export const fetchUserBorrowBalance = async (
         // Formula from docs: underlying_amount = (scaled_borrows * current_borrow_index) / SCALE
         const scaledBorrows = userData.scaledBorrows.toString();
         const userBorrowIndex = userData.borrowIndex.toString(); // User's stored borrow index (when they borrowed)
-        const currentBorrowIndex = marketInfo.borrowIndex; // Current market borrow index (includes accrued interest)
+        const currentBorrowIndex = marketInfo.borrowIndex; // Current market borrow index (includes accrued interest) - fresh from contract
         const SCALE = BigInt(1e18);
 
         console.log({
@@ -2775,7 +2783,10 @@ export const borrow = async (
         if (token.underlyingAssetId) {
           try {
             const accountAssetInfo = await clients.algod
-              .accountAssetInformation(userAddress, Number(token.underlyingAssetId))
+              .accountAssetInformation(
+                userAddress,
+                Number(token.underlyingAssetId)
+              )
               .do();
             console.log(
               `User is opted into asset ${token.underlyingAssetId} (${token.symbol})`

@@ -18,13 +18,13 @@ interface MarketOverviewCardProps {
 // Utility function to format large numbers with appropriate suffixes
 const formatLargeNumber = (value: number): string => {
   if (value >= 1e9) {
-    return `$${(value / 1e9).toFixed(1)}B`;
+    return `$${Math.round(value / 1e9)}B`;
   } else if (value >= 1e6) {
-    return `$${(value / 1e6).toFixed(1)}M`;
+    return `$${Math.round(value / 1e6)}M`;
   } else if (value >= 1e3) {
-    return `$${(value / 1e3).toFixed(1)}K`;
+    return `$${Math.round(value / 1e3)}K`;
   } else {
-    return `$${value.toFixed(0)}`;
+    return `$${Math.round(value)}`;
   }
 };
 

@@ -65,15 +65,15 @@ const BorrowsList = ({ borrows, onBorrowClick, onRepayClick, onRefresh, isLoadin
           return (
             <div
               key={borrow.asset}
-              className="grid grid-cols-[auto_1fr_auto] gap-x-4 items-center min-h-[100px] p-4 rounded-lg bg-red-500/5 border border-red-500/10 transition-all hover:bg-ocean-teal/5 hover:scale-105 hover:border-ocean-teal/40 card-hover cursor-pointer gap-y-1"
+              className="grid grid-cols-[auto_1fr_auto] sm:grid-cols-[auto_1fr_auto] gap-x-2 sm:gap-x-4 items-center min-h-[100px] p-3 sm:p-4 rounded-lg bg-red-500/5 border border-red-500/10 transition-all hover:bg-ocean-teal/5 hover:scale-[1.02] sm:hover:scale-105 hover:border-ocean-teal/40 card-hover cursor-pointer gap-y-1"
             >
               {/* Icon + Asset (left column) */}
-              <div className="flex flex-col items-center gap-1 w-20">
+              <div className="flex flex-col items-center gap-1 w-16 sm:w-20">
                 <div className="relative flex-shrink-0">
                   <img
                     src={borrow.icon}
                     alt={borrow.asset}
-                    className="w-12 h-12 md:w-10 md:h-10 rounded-full"
+                    className="w-10 h-10 sm:w-12 sm:h-12 md:w-10 md:h-10 rounded-full"
                   />
                   {marketLabel && (
                     <div className={`absolute -top-1 -right-1 w-5 h-5 rounded-full ${
@@ -127,16 +127,16 @@ const BorrowsList = ({ borrows, onBorrowClick, onRepayClick, onRefresh, isLoadin
               </div>
             </div>
             {/* Action buttons vertical stack (right column) */}
-            <div className="flex flex-col items-end gap-2 min-w-[140px] pr-3">
+            <div className="flex flex-col items-end gap-2 min-w-[120px] sm:min-w-[140px] pr-2 sm:pr-3">
               <DorkFiButton
                 variant={borrow.asset === "WAD" ? "mint" : "borrow-outline"}
                 onClick={() => onBorrowClick(borrow.asset)}
-                className="w-full max-w-[135px]"
+                className="w-full max-w-[120px] sm:max-w-[135px] text-xs sm:text-sm"
               >{borrow.asset === "WAD" ? "Mint" : "Borrow"}</DorkFiButton>
               <DorkFiButton
                 variant="danger-outline"
                 onClick={() => onRepayClick(borrow.asset, borrow.poolId)}
-                className="w-full max-w-[135px]"
+                className="w-full max-w-[120px] sm:max-w-[135px] text-xs sm:text-sm"
               >Repay</DorkFiButton>
             </div>
           </div>

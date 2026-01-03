@@ -146,7 +146,7 @@ const STokenRow = ({
         ) : (
           <div>
             <div className="font-medium text-purple-700 dark:text-purple-300">
-              ${(market.totalBorrowUSD / 1_000_000).toLocaleString()}
+              ${Math.round(market.totalBorrowUSD / 1_000_000).toLocaleString()}
             </div>
             <div className="text-sm text-muted-foreground">
               {market.totalBorrow.toLocaleString(undefined, { maximumFractionDigits: 3 })} {market.asset}
