@@ -3033,11 +3033,6 @@ export const borrow = async (
         // user withdraws from nnt200 token
         else if (tokenStandard == "asa") {
           const txnO = (await builder.token.withdraw(BigInt(amount))).obj;
-          // const optIn = {
-          //   xaid: Number(token.underlyingAssetId),
-          //   snd: userAddress,
-          //   arcv: userAddress,
-          // };
           buildN.push({
             ...txnO,
             ...optIn,
@@ -3049,11 +3044,6 @@ export const borrow = async (
           const txnO = (
             await builder.arc200Exchange.arc200_swapBack(BigInt(amount))
           ).obj;
-          // const optIn = {
-          //   xaid: Number(token.underlyingAssetId),
-          //   snd: userAddress,
-          //   arcv: userAddress,
-          // };
           buildN.push({
             ...txnO,
             ...optIn,
