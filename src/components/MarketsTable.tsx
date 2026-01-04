@@ -206,6 +206,27 @@ const MarketsTable = () => {
       symbol: "VOI",
       decimals: 6,
     },
+    {
+      id: 3,
+      name: "Phase 1 Incentive",
+      description: "DorkFi Phase 1 Incentive",
+      reward: 807_677,
+      icon: "/lovable-uploads/VOI.png",
+      airdropAccount:
+        "7PVC6COR4DKNETI2KGSKBPNBN75SBRRRNO24ICWMM3P44MSNJ7EOANXCBY",
+      tokenStandard: "network",
+      networks: {
+        "algorand-mainnet": {
+          contractId: "3210709899",
+          assetId: "2320775407",
+        },
+        "voi-mainnet": {
+          contractId: "41877720",
+        },
+      },
+      symbol: "VOI",
+      decimals: 6,
+    },
   ];
 
   const {
@@ -1408,16 +1429,26 @@ const MarketsTable = () => {
       const decodedStxns = signedTxns.map((txn: Uint8Array) => {
         return algosdk.decodeSignedTransaction(txn);
       });
-      const poolTxnID = decodedStxns.reverse().find((txn: any) => txn.txn.type === "appl" && Number(txn.txn.applicationCall.appIndex) === parseInt(voiToken.poolId || ""))?.txn.txID();
+      const poolTxnID = decodedStxns
+        .reverse()
+        .find(
+          (txn: any) =>
+            txn.txn.type === "appl" &&
+            Number(txn.txn.applicationCall.appIndex) ===
+              parseInt(voiToken.poolId || "")
+        )
+        ?.txn.txID();
       if (poolTxnID) {
         await new Promise((resolve) => setTimeout(resolve, 5000));
         // Retry until metadata update succeeds
         let metadataUpdated = false;
         let retryCount = 0;
         const maxRetries = 10;
-        const apiBaseUrl = import.meta.env.VITE_DORKFI_API_URL || "https://dorkfi-api.nautilus.sh";
+        const apiBaseUrl =
+          import.meta.env.VITE_DORKFI_API_URL ||
+          "https://dorkfi-api.nautilus.sh";
         const networkParam = currentNetwork ? `?network=${currentNetwork}` : "";
-        
+
         while (!metadataUpdated && retryCount < maxRetries) {
           try {
             const response = await fetch(
@@ -1432,20 +1463,31 @@ const MarketsTable = () => {
 
             if (response.ok) {
               const result = await response.json();
-              console.log("Transaction metadata successfully updated:", result.data);
+              console.log(
+                "Transaction metadata successfully updated:",
+                result.data
+              );
               metadataUpdated = true;
             } else {
               const error = await response.json();
-              throw new Error(error.error || "Failed to update transaction metadata");
+              throw new Error(
+                error.error || "Failed to update transaction metadata"
+              );
             }
           } catch (error) {
             retryCount++;
             if (retryCount < maxRetries) {
               const delay = 1000 * Math.pow(2, retryCount - 1); // Exponential backoff
-              console.warn(`Metadata update attempt ${retryCount} failed, retrying in ${delay}ms:`, error);
+              console.warn(
+                `Metadata update attempt ${retryCount} failed, retrying in ${delay}ms:`,
+                error
+              );
               await new Promise((resolve) => setTimeout(resolve, delay));
             } else {
-              console.error("Failed to update transaction metadata after all retries:", error);
+              console.error(
+                "Failed to update transaction metadata after all retries:",
+                error
+              );
             }
           }
         }
