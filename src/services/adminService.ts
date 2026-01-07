@@ -13,11 +13,14 @@ import {
   isCurrentNetworkAVM,
   isCurrentNetworkVOI,
   isCurrentNetworkAlgorand,
+  NetworkId,
+  getAllTokens,
 } from "@/config";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
 import { APP_SPEC as MarketControllerAppSpec } from "@/clients/MarketControllerClient";
 import { APP_SPEC as LendingPoolStorageAppSpec } from "@/clients/LendingPoolStorageClient";
-import { CONTRACT } from "ulujs";
+import { APP_SPEC as STokenAppSpec } from "@/clients/STokenClient";
+import { abi, CONTRACT } from "ulujs";
 import algorandService, { AlgorandNetwork } from "./algorandService";
 import algosdk, { TransactionSigner } from "algosdk";
 
@@ -1023,5 +1026,230 @@ export const calculateMaxBorrowAmount = async (
   } catch (error) {
     console.error("Error calculating max borrow amount:", error);
     return null;
+  }
+};
+
+/**
+ * Withdraw reserves from a lending market
+ * @param poolId The lending pool contract ID
+ * @param marketId The market ID to withdraw reserves from
+ * @param amount The amount to withdraw (in smallest unit, already accounting for decimals)
+ * @param userAddress The address of the user performing the withdrawal
+ * @param networkId Optional network ID, defaults to current network
+ * @returns Promise with success status and transaction IDs or error
+ */
+export const withdrawReserves = async (
+  poolId: string,
+  marketId: string,
+  amount: bigint,
+  userAddress: string,
+  networkId?: NetworkId
+): Promise<
+  { success: false; error: any } | { success: true; txns: string[] }
+> => {
+  console.log("withdrawReserves", {
+    poolId,
+    marketId,
+    amount,
+    userAddress,
+    networkId,
+  });
+
+  try {
+    const networkConfig = networkId
+      ? getNetworkConfig(networkId)
+      : getCurrentNetworkConfig();
+
+    if (networkConfig.networkType === "avm") {
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      const tokens = getAllTokens(networkConfig.networkId);
+
+      const token = tokens.find((t) => t.contractId === marketId);
+
+      if (!token) {
+        throw new Error("Token not found");
+      }
+
+      let isOptedIn = false;
+
+      if (token.tokenStandard === "asa") {
+        try {
+          await clients.algod
+            .accountAssetInformation(userAddress, Number(token.assetId))
+            .do();
+        } catch (error) {
+          isOptedIn = false;
+        }
+      }
+
+      // Create contract instance for the lending pool
+      const ci = new CONTRACT(
+        Number(poolId),
+        clients.algod,
+        undefined,
+        abi.custom,
+        {
+          addr: userAddress,
+          sk: new Uint8Array(),
+        }
+      );
+
+      const builder = {
+        lending: new CONTRACT(
+          Number(poolId),
+          clients.algod,
+          undefined,
+          { ...LendingPoolAppSpec.contract, events: [] },
+          {
+            addr: userAddress,
+            sk: new Uint8Array(),
+          },
+          true,
+          false,
+          true
+        ),
+        token: new CONTRACT(
+          Number(marketId),
+          clients.algod,
+          undefined,
+          abi.nt200,
+          {
+            addr: userAddress,
+            sk: new Uint8Array(),
+          },
+          true,
+          false,
+          true
+        ),
+        arc200Exchange: new CONTRACT(
+          Number(token.contractId),
+          clients.algod,
+          undefined,
+          { ...STokenAppSpec.contract, events: [] },
+          {
+            addr: userAddress,
+            sk: new Uint8Array(),
+          },
+          true,
+          false,
+          true
+        ),
+      };
+
+      const optin = isOptedIn
+        ? {}
+        : {
+            xaid: Number(token.assetId),
+            snd: userAddress,
+            arcv: userAddress,
+          };
+
+      const buildN = [];
+
+      let result: any;
+      for (const p of [[0], [1]]) {
+        const [p1] = p;
+
+        // if (p1 > 0) {
+        //   const txnO = (await builder.token.createBalanceBox(userAddress))
+        //     .obj as any;
+        //   const note = new TextEncoder().encode(
+        //     `token createBalanceBox ${token.symbol} for ${userAddress}`
+        //   );
+        //   buildN.push({
+        //     ...txnO,
+        //     ...optin,
+        //     payment: 28500,
+        //     note,
+        //   });
+        // }
+
+        // {
+        //   const txnO = (
+        //     await builder.lending.withdraw_reserves(BigInt(marketId), amount)
+        //   ).obj as any;
+        //   const note = new TextEncoder().encode(
+        //     `lending withdraw_reserves ${
+        //       Number(amount) / 10 ** token.decimals
+        //     } ${token.symbol}`
+        //   );
+        //   buildN.push({
+        //     ...txnO,
+        //     payment: 1e5,
+        //     note,
+        //   });
+        // }
+
+        // if (
+        //   token.tokenStandard === "network" ||
+        //   token.tokenStandard === "asa"
+        // ) {
+        //   const txnO = (await builder.token.withdraw(amount)).obj as any;
+        //   const note = new TextEncoder().encode(
+        //     `token withdraw ${Number(amount) / 10 ** token.decimals} ${
+        //       token.symbol
+        //     }`
+        //   );
+        //   buildN.push({
+        //     ...txnO,
+        //     note,
+        //   });
+        // }
+
+        if (token.tokenStandard === "arc200-exchange") {
+          //const txnO = (await builder.arc200Exchange.arc200_swapBack(amount))
+          const txnO = (
+            await builder.arc200Exchange.arc200_swapBack(19 * 10 ** 6)
+          ).obj as any;
+          // const note = new TextEncoder().encode(
+          //   `arc200_swapBack ${Number(amount) / 10 ** token.decimals} ${
+          //     token.symbol
+          //   }`
+          // );
+          buildN.push({
+            ...txnO,
+            //note,
+          });
+        }
+
+        // Set transaction fee
+        ci.setFee(10000);
+
+        // Call withdraw_reserves method
+        ci.setExtraTxns(buildN);
+        ci.setEnableGroupResourceSharing(true);
+        if (networkConfig.networkId === "algorand-mainnet") {
+          ci.setBeaconId(3209233839); // TODO move this to ulujs
+        }
+        result = await ci.custom();
+
+        console.log("withdrawReserves result", { result });
+        if (result.success) {
+          break;
+        }
+      }
+
+      if (!result.success) {
+        throw new Error(result.error || "Failed to withdraw reserves");
+      }
+
+      return {
+        success: true,
+        txns: result.txns,
+      };
+    } else if (isCurrentNetworkEVM()) {
+      throw new Error("EVM networks are not supported yet");
+    } else {
+      throw new Error("Unsupported network");
+    }
+  } catch (error) {
+    console.error("Error withdrawing reserves:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    };
   }
 };

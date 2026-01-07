@@ -34,6 +34,8 @@ import {
   Hash,
   ArrowLeft,
   ArrowRight,
+  ArrowUp,
+  ArrowDown,
   Calculator,
   Search,
   Wrench,
@@ -120,6 +122,7 @@ import {
   updateMarketMaxDeposits,
   updateMarketMaxBorrows,
   calculateMaxBorrowAmount,
+  withdrawReserves,
 } from "@/services/adminService";
 import {
   fetchAllMarkets,
@@ -320,6 +323,19 @@ export default function AdminDashboard() {
   const [selectedMarketForAnalysis, setSelectedMarketForAnalysis] =
     useState<string>("all");
   const marketAnalysisFetchRef = useRef<boolean>(false);
+
+  // Reserve tab state
+  const [reserveData, setReserveData] = useState<any[]>([]);
+  const [isLoadingReserveData, setIsLoadingReserveData] = useState(false);
+  const [reserveDataError, setReserveDataError] = useState<string | null>(null);
+  const [reserveSortColumn, setReserveSortColumn] = useState<string | null>(null);
+  const [reserveSortDirection, setReserveSortDirection] = useState<"asc" | "desc">("asc");
+  const [withdrawReserveModal, setWithdrawReserveModal] = useState<{
+    open: boolean;
+    market: any | null;
+  }>({ open: false, market: null });
+  const [withdrawReserveAmount, setWithdrawReserveAmount] = useState("");
+  const [isWithdrawingReserve, setIsWithdrawingReserve] = useState(false);
 
   // Test tab state
   const [selectedTestMarket, setSelectedTestMarket] = useState<string>("");
@@ -5622,6 +5638,43 @@ export default function AdminDashboard() {
     activeAccount?.address,
   ]);
 
+  // Fetch reserve data from market-data API
+  const fetchReserveData = useCallback(async () => {
+    setIsLoadingReserveData(true);
+    setReserveDataError(null);
+
+    try {
+      const response = await fetch("https://dorkfi-api.nautilus.sh/market-data");
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.success && data.data) {
+        setReserveData(data.data);
+      } else {
+        throw new Error("Invalid response format");
+      }
+    } catch (error) {
+      console.error("Error fetching reserve data:", error);
+      setReserveDataError(
+        error instanceof Error ? error.message : "Failed to fetch reserve data"
+      );
+      setReserveData([]);
+    } finally {
+      setIsLoadingReserveData(false);
+    }
+  }, []);
+
+  // Load reserve data when reserve tab is active
+  React.useEffect(() => {
+    if (activeTab === "reserve") {
+      fetchReserveData();
+    }
+  }, [activeTab, fetchReserveData]);
+
   return (
     <div className="min-h-screen bg-background relative">
       {/* Light Mode Beach Background */}
@@ -5739,8 +5792,8 @@ export default function AdminDashboard() {
               </TabsTrigger>
             </TabsList>
 
-            {/* Second row for Market Analysis, User Analysis, SToken, Price Feed Manager, Price Oracle and Test */}
-            <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:grid-cols-6">
+            {/* Second row for Market Analysis, User Analysis, SToken, Price Feed Manager, Price Oracle, Reserve and Test */}
+            <TabsList className="grid w-full grid-cols-7 lg:w-auto lg:grid-cols-7">
               <TabsTrigger
                 value="market-analysis"
                 className="flex items-center gap-2"
@@ -5772,6 +5825,10 @@ export default function AdminDashboard() {
               >
                 <Database className="h-4 w-4" />
                 <span>Price Oracle</span>
+              </TabsTrigger>
+              <TabsTrigger value="reserve" className="flex items-center gap-2">
+                <Coins className="h-4 w-4" />
+                <span>Reserve</span>
               </TabsTrigger>
               <TabsTrigger value="test" className="flex items-center gap-2">
                 <TestTube className="h-4 w-4" />
@@ -11714,6 +11771,636 @@ export default function AdminDashboard() {
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
+
+          {/* Reserve Tab */}
+          <TabsContent value="reserve" className="space-y-6">
+            <div className="flex items-center justify-between">
+              <H2>Market Reserve Data</H2>
+              <div className="flex items-center gap-2">
+                <DorkFiButton
+                  onClick={() => {
+                    // Export to CSV
+                    if (reserveData.length === 0) {
+                      toast.error("No data to export");
+                      return;
+                    }
+
+                    // Helper functions (same as in table)
+                    const formatNetworkName = (network: string) => {
+                      if (network === "voi-mainnet") return "Voi";
+                      if (network === "algorand-mainnet") return "Algorand";
+                      return network || "N/A";
+                    };
+
+                    const getTokenInfo = (network: string, marketId: number, appId: number) => {
+                      try {
+                        const networkId = network as NetworkId;
+                        const tokens = getAllTokensWithDisplayInfo(networkId);
+                        
+                        let token = tokens.find(
+                          (t) =>
+                            (t.underlyingContractId === marketId.toString() ||
+                              t.originalContractId === marketId.toString()) &&
+                            t.poolId === appId.toString()
+                        );
+
+                        if (!token) {
+                          token = tokens.find(
+                            (t) =>
+                              t.underlyingContractId === marketId.toString() ||
+                              t.originalContractId === marketId.toString()
+                          );
+                        }
+
+                        if (token) {
+                          return {
+                            symbol: token.symbol || "N/A",
+                            decimals: token.decimals || 6,
+                          };
+                        }
+
+                        return { symbol: "N/A", decimals: 6 };
+                      } catch (error) {
+                        console.error("Error looking up token info:", error);
+                        return { symbol: "N/A", decimals: 6 };
+                      }
+                    };
+
+                    const normalizeReserves = (reserves: string | number, decimals: number) => {
+                      const reservesNum = typeof reserves === "string" ? parseFloat(reserves) : reserves;
+                      const divisor = Math.pow(10, decimals);
+                      return reservesNum / divisor;
+                    };
+
+                    const normalizePrice = (price: string, decimals: number) => {
+                      const priceNum = parseFloat(price);
+                      const exponent = 18 + (12 - decimals);
+                      const divisor = Math.pow(10, exponent);
+                      return priceNum / divisor;
+                    };
+
+                    // Process data
+                    const processedData = reserveData.map((market: any) => {
+                      const tokenInfo = getTokenInfo(
+                        market.network,
+                        market.marketId,
+                        market.appId
+                      );
+
+                      const normalizedReserves = normalizeReserves(
+                        market.reserves || "0",
+                        tokenInfo.decimals
+                      );
+
+                      const normalizedPrice = normalizePrice(
+                        market.price || "0",
+                        tokenInfo.decimals
+                      );
+
+                      const value = normalizedReserves * normalizedPrice;
+
+                      return {
+                        Network: formatNetworkName(market.network),
+                        Symbol: tokenInfo.symbol,
+                        "App ID": market.appId || "N/A",
+                        "Market ID": market.marketId || "N/A",
+                        Reserves: normalizedReserves.toFixed(6),
+                        Price: normalizedPrice.toFixed(6),
+                        Value: value.toFixed(6),
+                        "Last Updated": market.lastUpdated
+                          ? new Date(market.lastUpdated).toLocaleString()
+                          : "N/A",
+                      };
+                    });
+
+                    // Convert to CSV
+                    const headers = Object.keys(processedData[0]);
+                    const csvRows = [
+                      headers.join(","),
+                      ...processedData.map((row: any) =>
+                        headers
+                          .map((header) => {
+                            const value = row[header];
+                            // Escape commas and quotes in values
+                            if (typeof value === "string" && (value.includes(",") || value.includes('"'))) {
+                              return `"${value.replace(/"/g, '""')}"`;
+                            }
+                            return value;
+                          })
+                          .join(",")
+                      ),
+                    ];
+
+                    const csvContent = csvRows.join("\n");
+
+                    // Create download link
+                    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+                    const link = document.createElement("a");
+                    const url = URL.createObjectURL(blob);
+                    link.setAttribute("href", url);
+                    link.setAttribute("download", `reserve-data-${new Date().toISOString().split("T")[0]}.csv`);
+                    link.style.visibility = "hidden";
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+
+                    toast.success("CSV exported successfully");
+                  }}
+                  disabled={isLoadingReserveData || reserveData.length === 0}
+                  className="flex items-center gap-2"
+                >
+                  <Download className="h-4 w-4" />
+                  Export CSV
+                </DorkFiButton>
+                <DorkFiButton
+                  onClick={fetchReserveData}
+                  disabled={isLoadingReserveData}
+                  className="flex items-center gap-2"
+                >
+                  <RefreshCw
+                    className={`h-4 w-4 ${isLoadingReserveData ? "animate-spin" : ""}`}
+                  />
+                  Refresh
+                </DorkFiButton>
+              </div>
+            </div>
+
+            {reserveDataError && (
+              <Card className="border-destructive">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-2 text-destructive">
+                    <AlertTriangle className="h-5 w-5" />
+                    <span>{reserveDataError}</span>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Market Reserves</CardTitle>
+                <CardDescription>
+                  Real-time market data from DorkFi API showing reserves, deposits, borrows, and market parameters
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {isLoadingReserveData ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    <span className="ml-2">Loading reserve data...</span>
+                  </div>
+                ) : reserveData.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    No reserve data available
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    {(() => {
+                      // Helper functions
+                      const formatNetworkName = (network: string) => {
+                        if (network === "voi-mainnet") return "Voi";
+                        if (network === "algorand-mainnet") return "Algorand";
+                        return network || "N/A";
+                      };
+
+                      const getTokenInfo = (network: string, marketId: number, appId: number) => {
+                        try {
+                          const networkId = network as NetworkId;
+                          const tokens = getAllTokensWithDisplayInfo(networkId);
+                          
+                          let token = tokens.find(
+                            (t) =>
+                              (t.underlyingContractId === marketId.toString() ||
+                                t.originalContractId === marketId.toString()) &&
+                              t.poolId === appId.toString()
+                          );
+
+                          if (!token) {
+                            token = tokens.find(
+                              (t) =>
+                                t.underlyingContractId === marketId.toString() ||
+                                t.originalContractId === marketId.toString()
+                            );
+                          }
+
+                          if (token) {
+                            return {
+                              symbol: token.symbol || "N/A",
+                              decimals: token.decimals || 6,
+                            };
+                          }
+
+                          return { symbol: "N/A", decimals: 6 };
+                        } catch (error) {
+                          console.error("Error looking up token info:", error);
+                          return { symbol: "N/A", decimals: 6 };
+                        }
+                      };
+
+                      const normalizeReserves = (reserves: string | number, decimals: number) => {
+                        const reservesNum = typeof reserves === "string" ? parseFloat(reserves) : reserves;
+                        const divisor = Math.pow(10, decimals);
+                        return reservesNum / divisor;
+                      };
+
+                      const normalizePrice = (price: string, decimals: number) => {
+                        const priceNum = parseFloat(price);
+                        const exponent = 18 + (12 - decimals);
+                        const divisor = Math.pow(10, exponent);
+                        return priceNum / divisor;
+                      };
+
+                      // Process and enrich data with computed values
+                      const processedData = reserveData.map((market: any) => {
+                        const tokenInfo = getTokenInfo(
+                          market.network,
+                          market.marketId,
+                          market.appId
+                        );
+
+                        const normalizedReserves = normalizeReserves(
+                          market.reserves || "0",
+                          tokenInfo.decimals
+                        );
+
+                        const normalizedPrice = normalizePrice(
+                          market.price || "0",
+                          tokenInfo.decimals
+                        );
+
+                        const value = normalizedReserves * normalizedPrice;
+
+                        return {
+                          ...market,
+                          tokenInfo,
+                          normalizedReserves,
+                          normalizedPrice,
+                          value,
+                          networkDisplay: formatNetworkName(market.network),
+                        };
+                      });
+
+                      // Sort data
+                      const sortedData = [...processedData].sort((a, b) => {
+                        if (!reserveSortColumn) return 0;
+
+                        let aValue: any;
+                        let bValue: any;
+
+                        switch (reserveSortColumn) {
+                          case "network":
+                            aValue = a.networkDisplay;
+                            bValue = b.networkDisplay;
+                            break;
+                          case "symbol":
+                            aValue = a.tokenInfo.symbol;
+                            bValue = b.tokenInfo.symbol;
+                            break;
+                          case "appId":
+                            aValue = a.appId || 0;
+                            bValue = b.appId || 0;
+                            break;
+                          case "marketId":
+                            aValue = a.marketId || 0;
+                            bValue = b.marketId || 0;
+                            break;
+                          case "reserves":
+                            aValue = a.normalizedReserves;
+                            bValue = b.normalizedReserves;
+                            break;
+                          case "price":
+                            aValue = a.normalizedPrice;
+                            bValue = b.normalizedPrice;
+                            break;
+                          case "value":
+                            aValue = a.value;
+                            bValue = b.value;
+                            break;
+                          case "lastUpdated":
+                            aValue = a.lastUpdated || 0;
+                            bValue = b.lastUpdated || 0;
+                            break;
+                          default:
+                            return 0;
+                        }
+
+                        // Handle string comparison
+                        if (typeof aValue === "string" && typeof bValue === "string") {
+                          return reserveSortDirection === "asc"
+                            ? aValue.localeCompare(bValue)
+                            : bValue.localeCompare(aValue);
+                        }
+
+                        // Handle number comparison
+                        const aNum = Number(aValue) || 0;
+                        const bNum = Number(bValue) || 0;
+                        return reserveSortDirection === "asc" ? aNum - bNum : bNum - aNum;
+                      });
+
+                      const handleSort = (column: string) => {
+                        if (reserveSortColumn === column) {
+                          setReserveSortDirection(
+                            reserveSortDirection === "asc" ? "desc" : "asc"
+                          );
+                        } else {
+                          setReserveSortColumn(column);
+                          setReserveSortDirection("asc");
+                        }
+                      };
+
+                      const SortableHeader = ({
+                        column,
+                        children,
+                        align = "left",
+                      }: {
+                        column: string;
+                        children: React.ReactNode;
+                        align?: "left" | "right";
+                      }) => (
+                        <th
+                          className={`${align === "right" ? "text-right" : "text-left"} p-2 cursor-pointer hover:bg-muted/50 select-none`}
+                          onClick={() => handleSort(column)}
+                        >
+                          <div className={`flex items-center gap-1 ${align === "right" ? "justify-end" : "justify-start"}`}>
+                            {children}
+                            {reserveSortColumn === column && (
+                              reserveSortDirection === "asc" ? (
+                                <ArrowUp className="h-3 w-3" />
+                              ) : (
+                                <ArrowDown className="h-3 w-3" />
+                              )
+                            )}
+                          </div>
+                        </th>
+                      );
+
+                      return (
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b">
+                              <SortableHeader column="network">Network</SortableHeader>
+                              <SortableHeader column="symbol">Symbol</SortableHeader>
+                              <SortableHeader column="appId">App ID</SortableHeader>
+                              <SortableHeader column="marketId">Market ID</SortableHeader>
+                              <SortableHeader column="reserves" align="right">Reserves</SortableHeader>
+                              <SortableHeader column="price" align="right">Price</SortableHeader>
+                              <SortableHeader column="value" align="right">Value</SortableHeader>
+                              <SortableHeader column="lastUpdated" align="right">Last Updated</SortableHeader>
+                              <th className="text-center p-2">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {sortedData.map((market: any, index: number) => {
+                              // Format large numbers
+                              const formatNumber = (value: string | number) => {
+                                const num = typeof value === "string" ? parseFloat(value) : value;
+                                if (num >= 1e12) return (num / 1e12).toFixed(2) + "T";
+                                if (num >= 1e9) return (num / 1e9).toFixed(2) + "B";
+                                if (num >= 1e6) return (num / 1e6).toFixed(2) + "M";
+                                if (num >= 1e3) return (num / 1e3).toFixed(2) + "K";
+                                return num.toFixed(2);
+                              };
+
+                              const formatPrice = (price: number) => {
+                                return price.toFixed(6);
+                              };
+
+                          return (
+                            <tr
+                              key={`${market.network}-${market.appId}-${market.marketId}-${index}`}
+                              className="border-b hover:bg-muted/50"
+                            >
+                              <td className="p-2">
+                                <Badge variant="outline">
+                                  {market.networkDisplay}
+                                </Badge>
+                              </td>
+                              <td className="p-2 font-medium">
+                                {market.tokenInfo.symbol}
+                              </td>
+                              <td className="p-2 font-mono text-xs">
+                                {market.appId || "N/A"}
+                              </td>
+                              <td className="p-2 font-mono text-xs">
+                                {market.marketId || "N/A"}
+                              </td>
+                              <td className="text-right p-2 font-mono">
+                                {formatNumber(market.normalizedReserves)}
+                              </td>
+                              <td className="text-right p-2 font-mono">
+                                {formatPrice(market.normalizedPrice)}
+                              </td>
+                              <td className="text-right p-2 font-mono">
+                                {formatNumber(market.value)}
+                              </td>
+                              <td className="text-right p-2 text-xs text-muted-foreground">
+                                {market.lastUpdated
+                                  ? new Date(market.lastUpdated).toLocaleString()
+                                  : "N/A"}
+                              </td>
+                              <td className="text-center p-2">
+                                <DorkFiButton
+                                  onClick={() => {
+                                    setWithdrawReserveModal({ open: true, market });
+                                  }}
+                                  disabled={!activeAccount || market.normalizedReserves <= 0}
+                                  className="flex items-center gap-1 text-xs px-2 py-1"
+                                >
+                                  <Download className="h-3 w-3" />
+                                  Withdraw
+                                </DorkFiButton>
+                              </td>
+                            </tr>
+                          );
+                            })}
+                          </tbody>
+                        </table>
+                      );
+                    })()}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Withdraw Reserve Modal */}
+            <Dialog
+              open={withdrawReserveModal.open}
+              onOpenChange={(open) =>
+                setWithdrawReserveModal({ open, market: null })
+              }
+            >
+              <DialogContent className="p-6">
+                <DialogHeader className="pb-4">
+                  <DialogTitle>Withdraw Reserves</DialogTitle>
+                  <DialogDescription>
+                    Withdraw reserves from the market. This is an admin-only operation.
+                  </DialogDescription>
+                </DialogHeader>
+                {withdrawReserveModal.market && (
+                  <div className="space-y-4 py-4 px-1">
+                    <div className="space-y-2">
+                      <Label>Market</Label>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline">
+                          {withdrawReserveModal.market.networkDisplay}
+                        </Badge>
+                        <span className="font-medium">
+                          {withdrawReserveModal.market.tokenInfo.symbol}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Available Reserves</Label>
+                      <div className="font-mono text-sm">
+                        {withdrawReserveModal.market.normalizedReserves.toFixed(6)}{" "}
+                        {withdrawReserveModal.market.tokenInfo.symbol}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="withdraw-amount">Amount to Withdraw</Label>
+                      <div className="relative">
+                        <Input
+                          id="withdraw-amount"
+                          type="number"
+                          placeholder="0.00"
+                          value={withdrawReserveAmount}
+                          onChange={(e) => setWithdrawReserveAmount(e.target.value)}
+                          min="0"
+                          max={withdrawReserveModal.market.normalizedReserves}
+                          step="0.000001"
+                          className="pr-16"
+                        />
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() =>
+                            setWithdrawReserveAmount(
+                              withdrawReserveModal.market.normalizedReserves.toFixed(6)
+                            )
+                          }
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-accent hover:bg-accent/10 h-8 px-3"
+                        >
+                          MAX
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Maximum: {withdrawReserveModal.market.normalizedReserves.toFixed(6)}{" "}
+                        {withdrawReserveModal.market.tokenInfo.symbol}
+                      </p>
+                    </div>
+                  </div>
+                )}
+                <DialogFooter className="pt-4">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setWithdrawReserveModal({ open: false, market: null });
+                      setWithdrawReserveAmount("");
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={async () => {
+                      if (!withdrawReserveModal.market || !activeAccount) return;
+
+                      const amount = parseFloat(withdrawReserveAmount);
+                      if (
+                        isNaN(amount) ||
+                        amount <= 0 ||
+                        amount > withdrawReserveModal.market.normalizedReserves
+                      ) {
+                        toast.error("Invalid amount");
+                        return;
+                      }
+
+                      setIsWithdrawingReserve(true);
+
+                      try {
+                        const networkId = withdrawReserveModal.market.network as NetworkId;
+                        
+                        // Convert amount to smallest unit (raw reserves value)
+                        const amountInSmallestUnit = BigInt(
+                          Math.floor(
+                            amount *
+                              Math.pow(
+                                10,
+                                withdrawReserveModal.market.tokenInfo.decimals
+                              )
+                          )
+                        );
+
+                        // Call the admin service method
+                        const result = await withdrawReserves(
+                          withdrawReserveModal.market.appId.toString(),
+                          withdrawReserveModal.market.marketId.toString(),
+                          amountInSmallestUnit,
+                          activeAccount.address,
+                          networkId
+                        );
+
+                        if (!result.success) {
+                          throw new Error(
+                            result.error || "Failed to withdraw reserves"
+                          );
+                        }
+
+                        // Sign and send transaction
+                        const networkConfig = getNetworkConfig(networkId);
+                        const clients = algorandService.initializeClients(
+                          networkConfig.walletNetworkId as AlgorandNetwork
+                        );
+
+                        const stxns = await signTransactions(
+                          result.txns.map((txn: string) =>
+                            Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+                          )
+                        );
+                        const res = await clients.algod
+                          .sendRawTransaction(stxns)
+                          .do();
+                        await waitForConfirmation(clients.algod, res.txid, 4);
+
+                        toast.success("Reserves withdrawn successfully", {
+                          description: `Transaction ID: ${res.txid}`,
+                        });
+
+                        // Refresh reserve data
+                        await fetchReserveData();
+
+                        setWithdrawReserveModal({ open: false, market: null });
+                        setWithdrawReserveAmount("");
+                      } catch (error) {
+                        console.error("Error withdrawing reserves:", error);
+                        toast.error(
+                          error instanceof Error
+                            ? error.message
+                            : "Failed to withdraw reserves"
+                        );
+                      } finally {
+                        setIsWithdrawingReserve(false);
+                      }
+                    }}
+                    disabled={
+                      isWithdrawingReserve ||
+                      !withdrawReserveAmount ||
+                      parseFloat(withdrawReserveAmount || "0") <= 0
+                    }
+                  >
+                    {isWithdrawingReserve ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Withdrawing...
+                      </>
+                    ) : (
+                      "Withdraw"
+                    )}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </TabsContent>
 
           {/* Test Tab */}
