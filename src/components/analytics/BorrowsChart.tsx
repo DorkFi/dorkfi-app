@@ -5,22 +5,22 @@ import { dorkfiAPIService } from '@/services/dorkfiAPIService';
 import { useTheme } from 'next-themes';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
-interface WithdrawalsDataPoint {
+interface BorrowsDataPoint {
   date: string;
   amount: number;
 }
 
 type TimePeriod = '7d' | '30d' | '90d';
 
-const WithdrawalsChart = () => {
+const BorrowsChart = () => {
   const { theme } = useTheme();
-  const [withdrawalsData, setWithdrawalsData] = useState<WithdrawalsDataPoint[]>([]);
-  const [totalWithdrawals, setTotalWithdrawals] = useState<number>(0);
+  const [borrowsData, setBorrowsData] = useState<BorrowsDataPoint[]>([]);
+  const [totalBorrows, setTotalBorrows] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('90d');
 
   useEffect(() => {
-    const fetchWithdrawalsData = async () => {
+    const fetchBorrowsData = async () => {
       setLoading(true);
       try {
         const now = Date.now();
@@ -29,71 +29,65 @@ const WithdrawalsChart = () => {
         
         // Always use total (no network filter)
         const networkFilter = undefined;
-        const response = await dorkfiAPIService.getWithdrawals(
+        const response = await dorkfiAPIService.getBorrows(
           startTime,
           now,
           10000,
           networkFilter
         );
 
-        if (response.success && response.data?.withdrawals) {
-          const withdrawals = response.data.withdrawals;
-          if (withdrawals.length > 0) {
+        if (response.success && response.data?.borrows) {
+          const borrows = response.data.borrows;
+          if (borrows.length > 0) {
             // Group by date and sum amounts (matching demo page approach)
-            const dailyWithdrawals: { [key: string]: number } = {};
+            const dailyBorrows: { [key: string]: number } = {};
             
-            withdrawals.forEach((withdrawal: any) => {
-              const date = new Date(withdrawal.timestamp).toISOString().split('T')[0];
+            borrows.forEach((borrow: any) => {
+              const date = new Date(borrow.timestamp).toISOString().split('T')[0];
               // Convert from micro-units to USD (divide by 1e12, matching demo page)
-              // Demo uses withdrawValueUSD (without "al"), but API types may use withdrawalValueUSD
-              const value = parseFloat(
-                (withdrawal.withdrawValueUSD || withdrawal.withdrawalValueUSD || '0')
-              ) / 1e12;
-              dailyWithdrawals[date] = (dailyWithdrawals[date] || 0) + value;
+              const value = parseFloat(borrow.borrowValueUSD || '0') / 1e12;
+              dailyBorrows[date] = (dailyBorrows[date] || 0) + value;
             });
 
-            const transformed = Object.entries(dailyWithdrawals)
+            const transformed = Object.entries(dailyBorrows)
               .map(([date, amount]) => ({ date, amount }))
               .sort((a, b) => a.date.localeCompare(b.date));
             
-            setWithdrawalsData(transformed);
+            setBorrowsData(transformed);
             
             // Calculate total from summary if available, otherwise sum the daily amounts
-            // Handle both field name variations (demo uses totalWithdrawValueUSD, types use totalWithdrawalValueUSD)
-            const summary = response.data.summary as any;
-            const summaryTotal = summary?.totalWithdrawValueUSD || summary?.totalWithdrawalValueUSD || '0';
-            const totalFromSummary = summaryTotal 
-              ? parseFloat(summaryTotal) / 1e12
+            const totalFromSummary = response.data.summary?.totalBorrowValueUSD 
+              ? parseFloat(response.data.summary.totalBorrowValueUSD) / 1e12
               : transformed.reduce((sum, d) => sum + d.amount, 0);
-            setTotalWithdrawals(totalFromSummary);
+            setTotalBorrows(totalFromSummary);
           } else {
-            setWithdrawalsData([]);
-            setTotalWithdrawals(0);
+            setBorrowsData([]);
+            setTotalBorrows(0);
           }
         } else {
-          console.warn('Withdrawals API returned unsuccessful response');
-          setWithdrawalsData([]);
-          setTotalWithdrawals(0);
+          console.warn('Borrows API returned unsuccessful response');
+          setBorrowsData([]);
+          setTotalBorrows(0);
         }
       } catch (error) {
-        console.error('Error fetching withdrawals data:', error);
-        setWithdrawalsData([]);
-        setTotalWithdrawals(0);
+        console.error('Error fetching borrows data:', error);
+        setBorrowsData([]);
+        setTotalBorrows(0);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchWithdrawalsData();
+    fetchBorrowsData();
   }, [timePeriod]);
 
-  const formattedTotal = totalWithdrawals >= 1_000_000 
-    ? `$${(totalWithdrawals / 1_000_000).toFixed(1)}M`
-    : totalWithdrawals >= 1_000
-    ? `$${(totalWithdrawals / 1_000).toFixed(1)}K`
-    : `$${totalWithdrawals.toFixed(2)}`;
+  const formattedTotal = totalBorrows >= 1_000_000 
+    ? `$${(totalBorrows / 1_000_000).toFixed(1)}M`
+    : totalBorrows >= 1_000
+    ? `$${(totalBorrows / 1_000).toFixed(1)}K`
+    : `$${totalBorrows.toFixed(2)}`;
 
-  const chartData = withdrawalsData.map(d => ({
+  const chartData = borrowsData.map(d => ({
     date: new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
     amount: d.amount, // Use raw dollar amounts
   }));
@@ -107,9 +101,9 @@ const WithdrawalsChart = () => {
   if (loading) {
     return (
       <ChartCard 
-        title="Withdrawals" 
-        subtitle="Total withdrawals: Loading..."
-        tooltip="Monitor daily withdrawal activity to track user outflows and liquidity patterns"
+        title="Borrows" 
+        subtitle="Total borrows: Loading..."
+        tooltip="Track daily borrowing activity to monitor lending demand and protocol utilization"
       >
         <div className="flex items-center justify-center h-full">
           <div className="animate-pulse text-muted-foreground">Loading...</div>
@@ -120,9 +114,9 @@ const WithdrawalsChart = () => {
 
   return (
     <ChartCard 
-      title="Withdrawals" 
-      subtitle={`Total withdrawals: ${formattedTotal}`}
-      tooltip="Monitor daily withdrawal activity to track user outflows and liquidity patterns"
+      title="Borrows" 
+      subtitle={`Total borrows: ${formattedTotal}`}
+      tooltip="Track daily borrowing activity to monitor lending demand and protocol utilization"
       controls={
         <ToggleGroup 
           type="single" 
@@ -137,14 +131,14 @@ const WithdrawalsChart = () => {
         </ToggleGroup>
       }
     >
-      {withdrawalsData.length > 0 ? (
+      {borrowsData.length > 0 ? (
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" stroke={theme === 'dark' ? 'rgb(30, 41, 59)' : 'rgb(226, 232, 240)'} />
             <defs>
-              <linearGradient id="withdrawalsGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="hsl(var(--whale-gold))" stopOpacity={0.3}/>
-                <stop offset="95%" stopColor="hsl(var(--whale-gold))" stopOpacity={0}/>
+              <linearGradient id="borrowsGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="rgb(236, 72, 153)" stopOpacity={0.3}/>
+                <stop offset="95%" stopColor="rgb(236, 72, 153)" stopOpacity={0}/>
               </linearGradient>
             </defs>
             <XAxis 
@@ -176,26 +170,26 @@ const WithdrawalsChart = () => {
                   : value >= 1_000
                   ? `$${(value / 1_000).toFixed(2)}K`
                   : `$${value.toFixed(2)}`;
-                return [formatted, 'Withdrawals'];
+                return [formatted, 'Borrows'];
               }}
             />
             <Area
               type="monotone"
               dataKey="amount"
-              stroke="hsl(var(--whale-gold))"
+              stroke="rgb(236, 72, 153)"
               strokeWidth={2}
-              fill="url(#withdrawalsGradient)"
+              fill="url(#borrowsGradient)"
             />
           </AreaChart>
         </ResponsiveContainer>
       ) : (
         <div className="flex items-center justify-center h-full text-muted-foreground">
-          No withdrawal data available for this period.
+          No borrow data available for this period.
         </div>
       )}
     </ChartCard>
   );
 };
 
-export default WithdrawalsChart;
+export default BorrowsChart;
 

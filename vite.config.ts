@@ -11,6 +11,13 @@ export default defineConfig(({ mode }) => ({
     hmr: {
       protocol: "ws",
     },
+    proxy: {
+      '/api/orca': {
+        target: 'https://orca.nautilus.sh',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/orca/, '/api'),
+      },
+    },
   },
   plugins: [
     react(),

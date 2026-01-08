@@ -4,23 +4,27 @@ import ChartCard from './ChartCard';
 import { dorkfiAPIService } from '@/services/dorkfiAPIService';
 import { formatCurrency, formatChartDate } from '@/utils/analyticsUtils';
 import { useTheme } from 'next-themes';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
 interface WADDataPoint {
   date: string;
   supply: number;
 }
 
+type TimePeriod = '7d' | '30d' | '90d';
+
 const WADCirculationChart = () => {
   const { theme } = useTheme();
   const [wadData, setWadData] = useState<WADDataPoint[]>([]);
   const [loading, setLoading] = useState(true);
+  const [timePeriod, setTimePeriod] = useState<TimePeriod>('90d');
 
   useEffect(() => {
     const fetchWADData = async () => {
       setLoading(true);
       try {
         const now = Date.now();
-        const days = 90; // Fixed to 90 days
+        const days = timePeriod === '7d' ? 7 : timePeriod === '30d' ? 30 : 90;
         const startTime = now - (days * 24 * 60 * 60 * 1000);
         
         // Always use total (no network filter)
@@ -67,7 +71,19 @@ const WADCirculationChart = () => {
     };
 
     fetchWADData();
-  }, []);
+  }, [timePeriod]);
+
+  // Calculate min and max values from the data
+  const yAxisDomain = React.useMemo(() => {
+    if (wadData.length === 0) return ['auto', 'auto'];
+    
+    const values = wadData.map(point => point.supply);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    
+    // Set y-axis to 0.95 * min and 1.05 * max for better visualization
+    return [min * 0.95, max * 1.05];
+  }, [wadData]);
 
   if (loading) {
     return (
@@ -98,6 +114,19 @@ const WADCirculationChart = () => {
     <ChartCard 
       title="WAD Supply Growth" 
       tooltip="Shows the WAD supply growth over time."
+      controls={
+        <ToggleGroup 
+          type="single" 
+          value={timePeriod} 
+          onValueChange={(value) => value && setTimePeriod(value as TimePeriod)}
+          variant="outline"
+          size="sm"
+        >
+          <ToggleGroupItem value="7d" aria-label="7 days">7d</ToggleGroupItem>
+          <ToggleGroupItem value="30d" aria-label="30 days">30d</ToggleGroupItem>
+          <ToggleGroupItem value="90d" aria-label="90 days">90d</ToggleGroupItem>
+        </ToggleGroup>
+      }
     >
       {wadData.length > 0 ? (
         <ResponsiveContainer width="100%" height="100%">
@@ -109,6 +138,7 @@ const WADCirculationChart = () => {
               tickFormatter={(value) => formatChartDate(value)}
             />
             <YAxis 
+              domain={yAxisDomain}
               tick={{ fontSize: 12 }}
               tickFormatter={(value) => formatCurrency(value, 0)}
             />

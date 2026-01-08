@@ -4,6 +4,7 @@ import ChartCard from './ChartCard';
 import { dorkfiAPIService } from '@/services/dorkfiAPIService';
 import { formatCurrency, formatChartDate } from '@/utils/analyticsUtils';
 import { useTheme } from 'next-themes';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
 interface TVLDataPoint {
   date: string;
@@ -14,17 +15,20 @@ interface TVLDataPoint {
   wbtc: number;
 }
 
+type TimePeriod = '7d' | '30d' | '90d';
+
 const TVLChart = () => {
   const { theme } = useTheme();
   const [tvlData, setTvlData] = useState<TVLDataPoint[]>([]);
   const [loading, setLoading] = useState(true);
+  const [timePeriod, setTimePeriod] = useState<TimePeriod>('90d');
 
   useEffect(() => {
     const fetchTVLData = async () => {
       setLoading(true);
       try {
         const now = Date.now();
-        const days = 90; // Fixed to 90 days
+        const days = timePeriod === '7d' ? 7 : timePeriod === '30d' ? 30 : 90;
         const startTime = now - (days * 24 * 60 * 60 * 1000);
         
         // Always use total (no network filter)
@@ -74,7 +78,19 @@ const TVLChart = () => {
     };
 
     fetchTVLData();
-  }, []);
+  }, [timePeriod]);
+
+  // Calculate min and max values from the data
+  const yAxisDomain = React.useMemo(() => {
+    if (tvlData.length === 0) return ['auto', 'auto'];
+    
+    const values = tvlData.map(point => point.total);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    
+    // Set y-axis to 0.95 * min and 1.05 * max for better visualization
+    return [min * 0.95, max * 1.05];
+  }, [tvlData]);
 
   if (loading) {
     return (
@@ -106,6 +122,19 @@ const TVLChart = () => {
     <ChartCard 
       title="TVL Growth" 
       tooltip="Shows the total value locked in the protocol over time."
+      controls={
+        <ToggleGroup 
+          type="single" 
+          value={timePeriod} 
+          onValueChange={(value) => value && setTimePeriod(value as TimePeriod)}
+          variant="outline"
+          size="sm"
+        >
+          <ToggleGroupItem value="7d" aria-label="7 days">7d</ToggleGroupItem>
+          <ToggleGroupItem value="30d" aria-label="30 days">30d</ToggleGroupItem>
+          <ToggleGroupItem value="90d" aria-label="90 days">90d</ToggleGroupItem>
+        </ToggleGroup>
+      }
     >
       {tvlData.length > 0 ? (
         <ResponsiveContainer width="100%" height="100%">
@@ -117,6 +146,7 @@ const TVLChart = () => {
               tickFormatter={(value) => formatChartDate(value)}
             />
             <YAxis 
+              domain={yAxisDomain}
               tick={{ fontSize: 12 }}
               tickFormatter={(value) => formatCurrency(value, 0)}
             />

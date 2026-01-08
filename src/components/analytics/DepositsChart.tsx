@@ -3,24 +3,28 @@ import { Area, AreaChart, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianG
 import ChartCard from './ChartCard';
 import { dorkfiAPIService } from '@/services/dorkfiAPIService';
 import { useTheme } from 'next-themes';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
 interface DepositsDataPoint {
   date: string;
   amount: number;
 }
 
+type TimePeriod = '7d' | '30d' | '90d';
+
 const DepositsChart = () => {
   const { theme } = useTheme();
   const [depositsData, setDepositsData] = useState<DepositsDataPoint[]>([]);
   const [totalDeposits, setTotalDeposits] = useState<number>(0);
   const [loading, setLoading] = useState(true);
+  const [timePeriod, setTimePeriod] = useState<TimePeriod>('90d');
 
   useEffect(() => {
     const fetchDepositsData = async () => {
       setLoading(true);
       try {
         const now = Date.now();
-        const days = 90; // Fixed to 90 days
+        const days = timePeriod === '7d' ? 7 : timePeriod === '30d' ? 30 : 90;
         const startTime = now - (days * 24 * 60 * 60 * 1000);
         
         // Always use total (no network filter)
@@ -75,7 +79,7 @@ const DepositsChart = () => {
     };
 
     fetchDepositsData();
-  }, []);
+  }, [timePeriod]);
 
   const formattedTotal = totalDeposits >= 1_000_000 
     ? `$${(totalDeposits / 1_000_000).toFixed(1)}M`
@@ -113,6 +117,19 @@ const DepositsChart = () => {
       title="Deposits" 
       subtitle={`Total deposits: ${formattedTotal}`}
       tooltip="Track daily deposit volume to monitor user inflows and protocol growth"
+      controls={
+        <ToggleGroup 
+          type="single" 
+          value={timePeriod} 
+          onValueChange={(value) => value && setTimePeriod(value as TimePeriod)}
+          variant="outline"
+          size="sm"
+        >
+          <ToggleGroupItem value="7d" aria-label="7 days">7d</ToggleGroupItem>
+          <ToggleGroupItem value="30d" aria-label="30 days">30d</ToggleGroupItem>
+          <ToggleGroupItem value="90d" aria-label="90 days">90d</ToggleGroupItem>
+        </ToggleGroup>
+      }
     >
       {depositsData.length > 0 ? (
         <ResponsiveContainer width="100%" height="100%">

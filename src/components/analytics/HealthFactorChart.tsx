@@ -20,15 +20,50 @@ const HealthFactorChart = () => {
     const fetchHealthFactorData = async () => {
       setLoading(true);
       try {
-        // Use /user-health endpoint and categorize like demo page (more reliable)
-        const baseUrl = import.meta.env.VITE_DORKFI_API_URL || "https://dorkfi-api.nautilus.sh";
-        const userHealthResponse = await fetch(`${baseUrl}/user-health`);
-        const userHealthData = await userHealthResponse.json();
+        // Fetch opportunities from Orca API
+        // Use proxy in development, direct URL in production
+        const isDev = import.meta.env.DEV;
+        const orcaApiUrl = isDev 
+          ? '/api/orca/opportunities'
+          : 'https://orca.nautilus.sh/api/opportunities';
+        const limit = 1000; // Try to get more in one request
+        const response = await fetch(`${orcaApiUrl}?limit=${limit}`, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+          },
+        });
         
-        console.log('User health API response:', userHealthData);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        console.log('Orca API response:', { count: data.count, total: data.total, opportunitiesLength: data.opportunities?.length });
 
-        if (userHealthData.success && userHealthData.data && Array.isArray(userHealthData.data)) {
-          // Categorize health factors into ranges (matching demo page approach)
+        if (data && data.opportunities && Array.isArray(data.opportunities) && data.opportunities.length > 0) {
+          // Deduplicate by user to count unique users per health factor range
+          // Each user can have multiple opportunities (different collateral/debt pairs)
+          // We'll use the minimum effectiveHF for each user to represent their risk level
+          const userHealthFactors = new Map<string, number>();
+          
+          data.opportunities.forEach((opportunity: any) => {
+            const hf = opportunity.effectiveHF;
+            if (hf === null || hf === undefined || isNaN(hf)) return;
+            
+            const userId = opportunity.user;
+            const normalizedHf = hf / 10000;
+            
+            // Keep the minimum (worst) health factor for each user
+            if (!userHealthFactors.has(userId) || normalizedHf < userHealthFactors.get(userId)!) {
+              userHealthFactors.set(userId, normalizedHf);
+            }
+          });
+          
+          console.log(`Found ${userHealthFactors.size} unique users with health factors`);
+
+          // Categorize health factors into ranges using effectiveHF
           const ranges: { [key: string]: number } = {
             '<1.0': 0,
             '1.0-1.1': 0,
@@ -37,13 +72,7 @@ const HealthFactorChart = () => {
             '>1.5': 0,
           };
 
-          userHealthData.data.forEach((user: any) => {
-            let hf = user.healthFactor;
-            if (hf === null || hf === undefined || isNaN(hf)) return;
-            
-            // Normalize health factor by dividing by 10000 (matching demo)
-            hf = hf / 10000;
-            
+          userHealthFactors.forEach((hf) => {
             if (hf < 1.0) {
               ranges['<1.0']++;
             } else if (hf >= 1.0 && hf < 1.1) {
@@ -56,6 +85,8 @@ const HealthFactorChart = () => {
               ranges['>1.5']++;
             }
           });
+          
+          console.log('Health factor ranges:', ranges);
 
           const distribution = Object.entries(ranges).map(([range, count]) => ({
             range,
@@ -80,11 +111,14 @@ const HealthFactorChart = () => {
           console.log('Transformed health factor data:', transformed);
           setHealthFactorData(transformed);
         } else {
-          console.warn('User health API returned unsuccessful response or no data:', userHealthData);
+          console.warn('No opportunities found in Orca API response', data);
           setHealthFactorData([]);
         }
       } catch (error) {
-        console.error('Error fetching health factor data:', error);
+        console.error('Error fetching health factor data from Orca API:', error);
+        if (error instanceof TypeError && error.message === 'Failed to fetch') {
+          console.error('CORS error - API may not allow direct browser requests. Consider using a proxy server.');
+        }
         setHealthFactorData([]);
       } finally {
         setLoading(false);

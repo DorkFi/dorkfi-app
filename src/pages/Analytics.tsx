@@ -15,6 +15,8 @@ import HealthFactorChart from "@/components/analytics/HealthFactorChart";
 
 import DepositsChart from "@/components/analytics/DepositsChart";
 import WithdrawalsChart from "@/components/analytics/WithdrawalsChart";
+import BorrowsChart from "@/components/analytics/BorrowsChart";
+import RepaysChart from "@/components/analytics/RepaysChart";
 
 interface AnalyticsProps {
   activeTab: string;
@@ -60,6 +62,8 @@ const Analytics = ({
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <DepositsChart />
               <WithdrawalsChart />
+              <BorrowsChart />
+              <RepaysChart />
             </div>
             
             <HealthFactorChart />
