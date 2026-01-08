@@ -7,6 +7,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Admin from "./pages/Admin";
 import GasStation from "./pages/GasStation";
 import LiquidationMarkets from "./pages/LiquidationMarkets";
+import Analytics from "./pages/Analytics";
 import { NetworkProvider } from "./contexts/NetworkContext";
 import Index from "./pages/Index";
 import { isFeatureEnabled } from "./config";
@@ -80,6 +81,15 @@ function App() {
                   }
                 />
               )}
+              <Route
+                path="/analytics"
+                element={
+                  <Analytics
+                    activeTab={activeTab}
+                    onTabChange={setActiveTab}
+                  />
+                }
+              />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </BrowserRouter>
