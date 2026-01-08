@@ -1097,6 +1097,27 @@ export const withdrawReserves = async (
         }
       );
 
+      const ciToken = new CONTRACT(
+        Number(marketId),
+        clients.algod,
+        undefined,
+        abi.nt200,
+        {
+          addr: userAddress,
+          sk: new Uint8Array(),
+        }
+      );
+
+      const arc200_balanceR = await ciToken.arc200_balanceOf(userAddress);
+
+      if (!arc200_balanceR.success) {
+        throw new Error("Failed to get ARC200 balance");
+      }
+
+      const arc200_balance = arc200_balanceR.returnValue;
+
+      console.log("arc200_balance", { arc200_balance });
+
       const builder = {
         lending: new CONTRACT(
           Number(poolId),
@@ -1150,87 +1171,78 @@ export const withdrawReserves = async (
       const buildN = [];
 
       let result: any;
-      for (const p of [[0], [1]]) {
-        const [p1] = p;
 
-        // if (p1 > 0) {
-        //   const txnO = (await builder.token.createBalanceBox(userAddress))
-        //     .obj as any;
-        //   const note = new TextEncoder().encode(
-        //     `token createBalanceBox ${token.symbol} for ${userAddress}`
-        //   );
-        //   buildN.push({
-        //     ...txnO,
-        //     ...optin,
-        //     payment: 28500,
-        //     note,
-        //   });
-        // }
+      // {
+      //   const txnO = (await builder.token.createBalanceBox(userAddress))
+      //     .obj as any;
+      //   const note = new TextEncoder().encode(
+      //     `token createBalanceBox ${token.symbol} for ${userAddress}`
+      //   );
+      //   buildN.push({
+      //     ...txnO,
+      //     ...optin,
+      //     payment: 28500,
+      //     note,
+      //   });
+      // }
 
-        // {
-        //   const txnO = (
-        //     await builder.lending.withdraw_reserves(BigInt(marketId), amount)
-        //   ).obj as any;
-        //   const note = new TextEncoder().encode(
-        //     `lending withdraw_reserves ${
-        //       Number(amount) / 10 ** token.decimals
-        //     } ${token.symbol}`
-        //   );
-        //   buildN.push({
-        //     ...txnO,
-        //     payment: 1e5,
-        //     note,
-        //   });
-        // }
-
-        // if (
-        //   token.tokenStandard === "network" ||
-        //   token.tokenStandard === "asa"
-        // ) {
-        //   const txnO = (await builder.token.withdraw(amount)).obj as any;
-        //   const note = new TextEncoder().encode(
-        //     `token withdraw ${Number(amount) / 10 ** token.decimals} ${
-        //       token.symbol
-        //     }`
-        //   );
-        //   buildN.push({
-        //     ...txnO,
-        //     note,
-        //   });
-        // }
-
-        if (token.tokenStandard === "arc200-exchange") {
-          //const txnO = (await builder.arc200Exchange.arc200_swapBack(amount))
-          const txnO = (
-            await builder.arc200Exchange.arc200_swapBack(19 * 10 ** 6)
-          ).obj as any;
-          // const note = new TextEncoder().encode(
-          //   `arc200_swapBack ${Number(amount) / 10 ** token.decimals} ${
-          //     token.symbol
-          //   }`
-          // );
-          buildN.push({
-            ...txnO,
-            //note,
-          });
-        }
-
-        // Set transaction fee
-        ci.setFee(10000);
-
-        // Call withdraw_reserves method
-        ci.setExtraTxns(buildN);
-        ci.setEnableGroupResourceSharing(true);
-        if (networkConfig.networkId === "algorand-mainnet") {
-          ci.setBeaconId(3209233839); // TODO move this to ulujs
-        }
-        result = await ci.custom();
-
-        console.log("withdrawReserves result", { result });
-        if (result.success) {
-          break;
-        }
+      {
+        const txnO = (
+          await builder.lending.withdraw_reserves(BigInt(marketId), amount)
+        ).obj as any;
+        const note = new TextEncoder().encode(
+          `lending withdraw_reserves ${Number(amount) / 10 ** token.decimals} ${
+            token.symbol
+          }`
+        );
+        buildN.push({
+          ...txnO,
+          payment: 1e5,
+          note,
+        });
       }
+
+      if (token.tokenStandard === "network" || token.tokenStandard === "asa") {
+        const txnO = (await builder.token.withdraw(amount)).obj as any;
+        const note = new TextEncoder().encode(
+          `token withdraw ${Number(amount) / 10 ** token.decimals} ${
+            token.symbol
+          }`
+        );
+        buildN.push({
+          ...txnO,
+          note,
+        });
+      }
+
+      if (token.tokenStandard === "arc200-exchange") {
+        const swapBackAmount = amount + arc200_balance;
+        const txnO = (
+          await builder.arc200Exchange.arc200_swapBack(swapBackAmount)
+        ).obj as any;
+        const note = new TextEncoder().encode(
+          `arc200_swapBack ${Number(swapBackAmount) / 10 ** token.decimals} ${
+            token.symbol
+          }`
+        );
+        buildN.push({
+          ...txnO,
+          note,
+        });
+      }
+
+      // Set transaction fee
+      ci.setFee(10000);
+
+      // Call withdraw_reserves method
+      ci.setExtraTxns(buildN);
+      ci.setEnableGroupResourceSharing(true);
+      if (networkConfig.networkId === "algorand-mainnet") {
+        ci.setBeaconId(3209233839); // TODO move this to ulujs
+      }
+      result = await ci.custom();
+
+      console.log("withdrawReserves result", { result });
 
       if (!result.success) {
         throw new Error(result.error || "Failed to withdraw reserves");
