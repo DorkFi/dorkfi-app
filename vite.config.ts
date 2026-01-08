@@ -13,7 +13,7 @@ export default defineConfig(({ mode }) => ({
     },
     proxy: {
       '/api/orca': {
-        target: 'https://orca.nautilus.sh',
+        target: 'https://orca-api.nautilus.sh',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/orca/, '/api'),
       },

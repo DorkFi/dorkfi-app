@@ -25,7 +25,7 @@ const HealthFactorChart = () => {
         const isDev = import.meta.env.DEV;
         const orcaApiUrl = isDev 
           ? '/api/orca/opportunities'
-          : 'https://orca.nautilus.sh/api/opportunities';
+          : 'https://orca-api.nautilus.sh/api/opportunities';
         const limit = 1000; // Try to get more in one request
         const response = await fetch(`${orcaApiUrl}?limit=${limit}`, {
           method: 'GET',
