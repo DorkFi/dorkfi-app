@@ -774,6 +774,45 @@ class DorkFiAPIService {
   }
 
   /**
+   * Update user profile (notify API that profile has been updated)
+   * @param userAddress - User address
+   * @returns Promise<ApiResponse<any>>
+   */
+  async updateUserProfile(userAddress: string): Promise<ApiResponse<any>> {
+    try {
+      const response = await fetch(
+        `${this.baseUrl}/user-profile`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            address: userAddress,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        if (response.status === 400 || response.status === 404 || response.status === 500) {
+          const errorData = await response.json();
+          return errorData;
+        }
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error(
+        `Error updating user profile for address ${userAddress}:`,
+        error
+      );
+      throw error;
+    }
+  }
+
+  /**
    * Fetch fresh user data and update store
    * Fetches fresh user data from the blockchain for a specific user, network, app ID, and market ID, then updates the store
    * @param userAddress - User address
