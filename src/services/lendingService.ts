@@ -3446,6 +3446,365 @@ export const repay = async (
   }
 };
 
+/**
+ * Repay borrowed tokens on behalf of another user
+ */
+export const repayOnBehalf = async (
+  poolId: string,
+  marketId: string,
+  tokenStandard: TokenStandard,
+  amount: string,
+  userAddress: string,
+  beneficiaryAddress: string,
+  networkId: NetworkId
+): Promise<
+  | { success: boolean; txId?: string; error?: string }
+  | { success: true; txns: string[] }
+> => {
+  console.log("repayOnBehalf", {
+    poolId,
+    marketId,
+    amount,
+    userAddress,
+    beneficiaryAddress,
+    networkId,
+  });
+
+  try {
+    const networkConfig = getNetworkConfig(networkId);
+
+    if (isAlgorandCompatibleNetwork(networkId)) {
+      console.log({ networkConfig });
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      const arc200Service = ARC200Service.initialize(clients);
+      console.log("arc200Service", { arc200Service });
+      const balance = await ARC200Service.getBalance(userAddress, marketId);
+      console.log("balance", { balance });
+      const tokenInfo = await ARC200Service.getTokenInfo(marketId);
+      console.log("tokenInfo", { tokenInfo });
+
+      // Get token information
+      const allTokens = getAllTokensWithDisplayInfo(networkId);
+      console.log(
+        "All available tokens:",
+        allTokens.map((t) => ({
+          symbol: t.symbol,
+          underlyingContractId: t.underlyingContractId,
+          originalContractId: t.originalContractId,
+        }))
+      );
+      console.log("Looking for marketId:", marketId);
+
+      const token = allTokens.find(
+        (token) => token.underlyingContractId === marketId
+      );
+
+      console.log("Token found:", token);
+
+      if (!token) {
+        console.error("Token not found for marketId:", marketId);
+        console.error(
+          "Available underlyingContractIds:",
+          allTokens.map((t) => t.underlyingContractId)
+        );
+        throw new Error("Token not found");
+      }
+
+      // Convert amount to proper units (considering decimals)
+      const bigAmount = BigInt(
+        new BigNumber(amount).multipliedBy(10 ** token.decimals).toFixed(0)
+      );
+
+      const symbol = token.symbol;
+
+      // Check if market is paused
+      const marketPaused = await isMarketPaused(poolId, marketId, networkId);
+      if (marketPaused) {
+        throw new Error("Market is paused");
+      }
+
+      // Get market info
+      console.log({
+        fetchMarketInfo: {
+          poolId,
+          marketId,
+          networkId,
+        },
+      });
+      const marketInfo = await fetchMarketInfo(poolId, marketId, networkId);
+      if (!marketInfo) {
+        throw new Error("Failed to fetch market info");
+      }
+      console.log("marketInfo", { marketInfo });
+      const userPosition = await fetchUserPosition(
+        beneficiaryAddress,
+        marketId,
+        networkId
+      );
+      console.log("userPosition", { userPosition });
+
+      const ci = new CONTRACT(
+        Number(poolId),
+        clients.algod,
+        undefined,
+        abi.custom,
+        {
+          addr: userAddress,
+          sk: new Uint8Array(),
+        }
+      );
+
+      const contractIds = {
+        lending: Number(poolId),
+        token: Number(token.underlyingContractId),
+        ntoken: Number(marketInfo.ntokenId),
+      };
+
+      console.log("contractIds", { contractIds });
+
+      const builder = {
+        lending: new CONTRACT(
+          Number(poolId),
+          clients.algod,
+          undefined,
+          { ...LendingPoolAppSpec.contract, events: [] },
+          {
+            addr: userAddress,
+            sk: new Uint8Array(),
+          },
+          true,
+          false,
+          true
+        ),
+        token: new CONTRACT(
+          Number(token.underlyingContractId),
+          clients.algod,
+          undefined,
+          abi.nt200,
+          {
+            addr: userAddress,
+            sk: new Uint8Array(),
+          },
+          true,
+          false,
+          true
+        ),
+        arc200Exchange: new CONTRACT(
+          Number(token.underlyingContractId),
+          clients.algod,
+          undefined,
+          {
+            name: "arc200Exchange",
+            desc: "arc200Exchange",
+            methods: [
+              // arc200_redeem(uint64)void
+              {
+                name: "arc200_redeem",
+                args: [{ name: "amount", type: "uint64" }],
+                returns: { type: "void" },
+              },
+            ],
+            events: [],
+          },
+          {
+            addr: userAddress,
+            sk: new Uint8Array(),
+          },
+          true,
+          false,
+          true
+        ),
+        ntoken: new CONTRACT(
+          Number(marketInfo.ntokenId),
+          clients.algod,
+          undefined,
+          abi.nt200,
+          {
+            addr: userAddress,
+            sk: new Uint8Array(),
+          },
+          true,
+          false,
+          true
+        ),
+      };
+
+      console.log("repayOnBehalf parameters:", {
+        poolId: Number(poolId),
+        marketId: Number(marketId),
+        amount: bigAmount,
+        userAddress,
+        beneficiaryAddress,
+        tokenStandard,
+      });
+
+      console.log({ tokenStandard });
+
+      let customR: any;
+      for (const [p1, p2] of [
+        [0, 0],
+        [1, 0],
+        [0, 1],
+        [1, 1],
+      ]) {
+        const buildN = [];
+
+        if (tokenStandard == "network") {
+          // create balance box for pool
+          // create balance box for user
+          if (p1 > 0) {
+            const txnO = (await builder.token.createBalanceBox(userAddress))
+              .obj;
+            buildN.push({
+              ...txnO,
+              payment: 28500,
+              note: new TextEncoder().encode("nt200 createBalanceBox"),
+              description: "nt200 createBalanceBox",
+            });
+          }
+          // user withdraws from nt200 token
+          {
+            const txnO = (await builder.token.deposit(bigAmount)).obj;
+            buildN.push({
+              ...txnO,
+              note: new TextEncoder().encode("nt200 deposit"),
+              payment: bigAmount,
+              description: "nt200 deposit",
+            });
+          }
+        } else if (tokenStandard === "asa") {
+          // create balance box for pool
+          // {
+          //   const addr = algosdk.encodeAddress(
+          //     algosdk.getApplicationAddress(Number(poolId)).publicKey
+          //   );
+          //   const txnO = (await builder.token.createBalanceBox(addr)).obj;
+          //   buildN.push({
+          //     ...txnO,
+          //     payment: 28500,
+          //     note: new TextEncoder().encode(
+          //       `nt200 createBalanceBox arc200 ${symbol} token for pool ${addr}`
+          //     ),
+          //   });
+          // }
+          // create balance box for user
+          if (p1 > 0) {
+            const txnO = (await builder.token.createBalanceBox(userAddress))
+              .obj;
+            buildN.push({
+              ...txnO,
+              payment: 28501,
+              note: new TextEncoder().encode(
+                `nt200 createBalanceBox arc200 ${symbol} token for ${userAddress}`
+              ),
+              description: "nt200 createBalanceBox",
+            });
+          }
+          // deposit to arc200
+          {
+            const txnO = (await builder.token.deposit(bigAmount)).obj;
+            const axfer = {
+              aamt: bigAmount,
+              xaid: Number(token.underlyingAssetId),
+            };
+            buildN.push({
+              ...txnO,
+              ...axfer,
+              note: new TextEncoder().encode(
+                `nt200 deposit ${symbol} token for user (${userAddress})`
+              ),
+              description: "nt200 deposit",
+            });
+          }
+        } else if (tokenStandard == "arc200-exchange") {
+          const axfer = {
+            aamt: bigAmount,
+            xaid: Number(token.underlyingAssetId),
+          };
+          const txnO = (await builder.arc200Exchange.arc200_redeem(bigAmount))
+            .obj;
+          buildN.push({
+            ...txnO,
+            ...axfer,
+            note: new TextEncoder().encode("arc200_redeem"),
+            description: "arc200_redeem",
+          });
+        }
+        // all payment to pool are arc200 payments trough approval
+        // approve spending of token (non stoken only)
+        // TODO check if this is needed
+        {
+          const addr = algosdk.encodeAddress(
+            algosdk.getApplicationAddress(Number(poolId)).publicKey
+          );
+          const txnO = (await builder.token.arc200_approve(addr, bigAmount))
+            .obj;
+          buildN.push({
+            ...txnO,
+            note: new TextEncoder().encode(
+              `arc200 approve ${symbol} token spending to pool (${addr}) for user (${userAddress})`
+            ),
+            payment: p2 > 0 ? 28502 : 0,
+            description: "arc200 approve",
+          });
+        }
+        // repay on behalf of beneficiary to lending pool
+        {
+          console.log("repay_on_behalf", {
+            marketId,
+            bigAmount,
+            beneficiaryAddress,
+          });
+          const txnO = (
+            await builder.lending.repay_on_behalf(
+              Number(marketId),
+              bigAmount,
+              beneficiaryAddress
+            )
+          ).obj as any;
+          buildN.push({
+            ...txnO,
+            payment: 2e5,
+            note: new TextEncoder().encode("lending repayOnBehalf"),
+            description: "lending repayOnBehalf",
+          });
+        }
+        console.log("buildN", { buildN });
+        ci.setEnableGroupResourceSharing(true);
+        ci.setExtraTxns(buildN);
+        ci.setFee(1e5);
+        if (networkConfig.networkId === "algorand-mainnet") {
+          ci.setBeaconId(3209233839); // TODO move this to ulujs
+        }
+        customR = await ci.custom();
+        console.log("customR", { customR });
+        if (customR.success) {
+          break;
+        }
+      }
+      console.log("customR", { customR });
+      if (!customR.success) {
+        throw new Error("Failed to create repayOnBehalf transaction");
+      }
+      return {
+        success: true,
+        txns: customR.txns,
+      };
+    } else {
+      throw new Error("EVM networks not yet supported");
+    }
+  } catch (error) {
+    console.error("RepayOnBehalf error:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "RepayOnBehalf failed",
+    };
+  }
+};
+
 export const mint = async (
   userAddress: string,
   poolId: string,

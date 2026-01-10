@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { useAddressName } from "@/hooks/useAddressName";
@@ -6,7 +7,12 @@ import { useAvatarImage } from "@/hooks/useAvatarImage";
 import { useToast } from "@/hooks/use-toast";
 import { useBreakpoint } from "@/hooks/useBreakpoint";
 import algosdk, { waitForConfirmation } from "algosdk";
+import BigNumber from "bignumber.js";
 import { ResolverService } from "@/services/resolverService";
+import { getCurrentNetworkConfig } from "@/config";
+import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
+import { abi, CONTRACT } from "ulujs";
+import { updateTransactionMetadata } from "@/utils/transactionUtils";
 import {
   fetchUserGlobalData,
   fetchAllMarkets,
@@ -14,6 +20,7 @@ import {
   fetchUserDepositBalance,
   enhanceAVMMarketInfo,
   fetchMarketInfo,
+  repayOnBehalf,
 } from "@/services/lendingService";
 import dorkfiAPIService from "@/services/dorkfiAPIService";
 import { ARC200Service } from "@/services/arc200Service";
@@ -29,6 +36,7 @@ import {
   NetworkId,
 } from "@/config";
 import { getAllTokensWithDisplayInfo } from "@/config";
+import { getTokenImagePath } from "@/utils/tokenImageUtils";
 import EnhancedHealthFactor from "./EnhancedHealthFactor";
 import DepositsList from "./DepositsList";
 import BorrowsList from "./BorrowsList";
@@ -87,14 +95,34 @@ import {
 } from "@/components/ui/tooltip";
 
 const Portfolio = () => {
+  const { address: routeAddress } = useParams<{ address: string }>();
+  const navigate = useNavigate();
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
-  const { name: addressName } = useAddressName(activeAccount?.address);
+
+  // Use address from route params if available, otherwise fall back to activeAccount address
+  const displayAddress = routeAddress || activeAccount?.address;
+  // Normalize addresses for comparison (case-insensitive)
+  const normalizedRouteAddress = routeAddress?.toLowerCase();
+  const normalizedActiveAddress = activeAccount?.address?.toLowerCase();
+  const isViewOnly =
+    !!routeAddress && normalizedRouteAddress !== normalizedActiveAddress;
+
+  // Debug log (can be removed later)
+  if (routeAddress) {
+    console.log("[Portfolio] View mode check:", {
+      routeAddress: normalizedRouteAddress,
+      activeAddress: normalizedActiveAddress,
+      isViewOnly,
+    });
+  }
+
+  const { name: addressName } = useAddressName(displayAddress);
   const {
     avatarImage,
     isResolved: isAvatarResolved,
     refetch: refetchAvatar,
-  } = useAvatarImage(activeAccount?.address);
+  } = useAvatarImage(displayAddress);
   const { toast } = useToast();
   const breakpoint = useBreakpoint();
   const isMobile = breakpoint === "mobile";
@@ -218,6 +246,21 @@ const Portfolio = () => {
     column: string | null;
     direction: "asc" | "desc";
   }>({ column: "riskRatio", direction: "asc" }); // Default sort by risk ratio (most risky first)
+
+  // Liquidatable positions state
+  const [liquidatablePositions, setLiquidatablePositions] = useState<any[]>([]);
+  const [isLoadingLiquidatablePositions, setIsLoadingLiquidatablePositions] =
+    useState(false);
+  const [liquidationModalOpen, setLiquidationModalOpen] = useState(false);
+  const [selectedLiquidationPosition, setSelectedLiquidationPosition] =
+    useState<any | null>(null);
+  const [isLiquidating, setIsLiquidating] = useState(false);
+  const [repayModalOpen, setRepayModalOpen] = useState(false);
+  const [selectedRepayPosition, setSelectedRepayPosition] =
+    useState<any | null>(null);
+  const [isRepaying, setIsRepaying] = useState(false);
+  const [repayWalletBalance, setRepayWalletBalance] = useState<number | null>(null);
+  const [isLoadingRepayBalance, setIsLoadingRepayBalance] = useState(false);
 
   // NFT selection state
   const [nftModalOpen, setNftModalOpen] = useState(false);
@@ -1251,6 +1294,218 @@ const Portfolio = () => {
   // Calculate health factor for display
   // Use the lowest health factor from at-risk assets if available, otherwise use global health factor
   const healthFactor = calculateHealthFactor(totalCollateral, totalBorrowed);
+
+  // Fetch liquidatable positions from Orca API when health factor < 1
+  useEffect(() => {
+    const fetchLiquidatablePositions = async () => {
+      // Only fetch when we have an address
+      if (!displayAddress) {
+        console.log(
+          "[Portfolio] No displayAddress, skipping liquidatable positions fetch"
+        );
+        setLiquidatablePositions([]);
+        return;
+      }
+
+      console.log("[Portfolio] Health factor check:", {
+        healthFactor,
+        shouldFetch: healthFactor === null || healthFactor < 1,
+      });
+
+      // Only fetch if health factor is below 1 (or null, which might indicate risk)
+      if (healthFactor !== null && healthFactor >= 1) {
+        console.log("[Portfolio] Health factor >= 1, skipping fetch");
+        setLiquidatablePositions([]);
+        return;
+      }
+
+      setIsLoadingLiquidatablePositions(true);
+      try {
+        const url = `https://orca-api.nautilus.sh/api/opportunities?limit=100`;
+        console.log("[Portfolio] Fetching liquidatable positions from:", url);
+
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(
+            `Failed to fetch liquidatable positions: ${response.statusText}`
+          );
+        }
+        const data = await response.json();
+
+        console.log("[Portfolio] Orca API response:", {
+          count: data.count,
+          total: data.total,
+          opportunitiesCount: data.opportunities?.length || 0,
+        });
+
+        // The API already filters by user, but let's double-check and filter by user address
+        // Show all positions that match the user address and have effectiveHF < 10000
+        const allOpportunities = data.opportunities || [];
+        console.log("[Portfolio] All opportunities from API:", {
+          count: allOpportunities.length,
+          sample: allOpportunities[0],
+          displayAddress,
+        });
+
+        // For debugging: show first few opportunities
+        if (allOpportunities.length > 0) {
+          console.log(
+            "[Portfolio] First 3 opportunities:",
+            allOpportunities.slice(0, 3)
+          );
+        }
+
+        const filtered = allOpportunities.filter((opp: any) => {
+          const userMatches =
+            opp.user?.toLowerCase() === displayAddress.toLowerCase();
+          const effectiveHF = opp.effectiveHF;
+          const hasLowEffectiveHF =
+            effectiveHF !== null &&
+            effectiveHF !== undefined &&
+            effectiveHF < 10000;
+
+          if (!userMatches) {
+            console.log(
+              "[Portfolio] Opportunity filtered out - user mismatch:",
+              {
+                oppUser: opp.user,
+                displayAddress,
+              }
+            );
+          }
+          if (userMatches && !hasLowEffectiveHF) {
+            console.log(
+              "[Portfolio] Opportunity filtered out - effectiveHF too high:",
+              {
+                effectiveHF,
+                threshold: 10000,
+              }
+            );
+          }
+
+          return userMatches && hasLowEffectiveHF;
+        });
+
+        console.log("[Portfolio] Filtered liquidatable positions:", {
+          total: allOpportunities.length,
+          filtered: filtered.length,
+          positions: filtered,
+        });
+        setLiquidatablePositions(filtered);
+      } catch (error) {
+        console.error(
+          "[Portfolio] Error fetching liquidatable positions:",
+          error
+        );
+        setLiquidatablePositions([]);
+      } finally {
+        setIsLoadingLiquidatablePositions(false);
+      }
+    };
+
+    fetchLiquidatablePositions();
+  }, [displayAddress, healthFactor]);
+
+  // Fetch wallet balance when repay modal opens
+  useEffect(() => {
+    const loadRepayWalletBalance = async () => {
+      if (!repayModalOpen || !selectedRepayPosition || !activeAccount?.address) {
+        setRepayWalletBalance(null);
+        return;
+      }
+
+      const debtMarketId = selectedRepayPosition.debtMarketId;
+      const networkId = selectedRepayPosition.networkId;
+      const debtSymbol = selectedRepayPosition.debtSymbol;
+
+      if (!debtMarketId || !networkId) {
+        setRepayWalletBalance(null);
+        return;
+      }
+
+      setIsLoadingRepayBalance(true);
+      try {
+        // Get token information to get decimals
+        const tokens = getAllTokensWithDisplayInfo(networkId);
+        let token = tokens.find(
+          (t) => t.underlyingContractId === debtMarketId?.toString()
+        );
+
+        if (!token && debtSymbol) {
+          token = tokens.find((t) => t.symbol === debtSymbol);
+        }
+
+        if (!token) {
+          console.error("Token not found for debt market:", debtMarketId);
+          setRepayWalletBalance(0);
+          return;
+        }
+
+        // Get token config for decimals
+        const originalSymbol =
+          "originalSymbol" in token
+            ? (token as any).originalSymbol
+            : debtSymbol;
+        const originalTokenConfigRaw = getTokenConfig(networkId, originalSymbol);
+        
+        if (!originalTokenConfigRaw) {
+          console.error("Token config not found for:", originalSymbol);
+          setRepayWalletBalance(0);
+          return;
+        }
+
+        const originalTokenConfig = Array.isArray(originalTokenConfigRaw)
+          ? originalTokenConfigRaw.find(
+              (tc) => String(tc.poolId) === String(selectedRepayPosition.appId)
+            ) || originalTokenConfigRaw[0]
+          : originalTokenConfigRaw;
+
+        // Initialize clients for the network
+        const algorandNetwork = getAlgorandNetworkFromNetworkId(networkId);
+        if (!algorandNetwork) {
+          throw new Error(`Invalid network: ${networkId}`);
+        }
+        const clients = await algorandService.initializeClientsForTransactions(
+          algorandNetwork
+        );
+        ARC200Service.initialize(clients);
+
+        // Fetch balance using contractId directly
+        const contractId = debtMarketId.toString();
+        console.log(
+          `Fetching wallet balance for ${debtSymbol} using contractId: ${contractId}`
+        );
+        const arc200Balance = await ARC200Service.getBalance(
+          activeAccount.address,
+          contractId
+        );
+
+        if (arc200Balance) {
+          // Convert from smallest units to human readable format
+          const balance = parseFloat(
+            ARC200Service.formatBalance(
+              arc200Balance,
+              originalTokenConfig.decimals || token.decimals || 6
+            )
+          );
+          console.log(`Wallet balance for ${debtSymbol}: ${balance}`);
+          setRepayWalletBalance(balance);
+        } else {
+          console.log(`No wallet balance found for ${debtSymbol}`);
+          setRepayWalletBalance(0);
+        }
+      } catch (error) {
+        console.error("Error fetching repay wallet balance:", error);
+        setRepayWalletBalance(0);
+      } finally {
+        setIsLoadingRepayBalance(false);
+      }
+    };
+
+    loadRepayWalletBalance();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repayModalOpen, selectedRepayPosition, activeAccount?.address]);
+
   const lowestAtRiskHealthFactor =
     atRiskAssets.length > 0
       ? Math.min(...atRiskAssets.map((asset) => asset.riskRatio))
@@ -1413,7 +1668,7 @@ const Portfolio = () => {
     networkId?: string,
     doFetch?: boolean
   ) => {
-    if (!activeAccount?.address) {
+    if (!displayAddress) {
       return { balance: 0, balanceUSD: 0 };
     }
 
@@ -1514,7 +1769,7 @@ const Portfolio = () => {
           `Fetching ARC200 balance for ${asset} (contract: ${token.underlyingContractId})`
         );
         const arc200Balance = await ARC200Service.getBalance(
-          activeAccount.address,
+          displayAddress,
           token.underlyingContractId
         );
         console.log("arc200Balance", { arc200Balance });
@@ -1538,7 +1793,7 @@ const Portfolio = () => {
         try {
           // Use the same clients we initialized earlier for this network
           const accountInfo = await clients.algod
-            .accountInformation(activeAccount.address)
+            .accountInformation(displayAddress)
             .do();
           // Convert from micro-units to units (divide by 1,000,000)
           balance = Number(accountInfo.amount) / 1_000_000;
@@ -1562,7 +1817,7 @@ const Portfolio = () => {
           // Use the same clients we initialized earlier for this network
           const assetId = parseInt(token.underlyingAssetId);
           const accAssetInfo = await clients.algod
-            .accountAssetInformation(activeAccount.address, assetId)
+            .accountAssetInformation(displayAddress, assetId)
             .do();
 
           if (accAssetInfo.assetHolding) {
@@ -1588,7 +1843,7 @@ const Portfolio = () => {
           // Use the same clients we initialized earlier for this network
           const assetId = parseInt(token.underlyingAssetId);
           const accAssetInfo = await clients.algod
-            .accountAssetInformation(activeAccount.address, assetId)
+            .accountAssetInformation(displayAddress, assetId)
             .do();
 
           if (accAssetInfo.assetHolding) {
@@ -1680,6 +1935,195 @@ const Portfolio = () => {
     [activeAccount?.address, currentNetwork]
   );
 
+  // Function to sync user markets for price change (required in view-only mode)
+  const syncUserMarketsForPriceChange = useCallback(
+    async (userAddress: string, poolId?: string, marketId?: string) => {
+      if (!signTransactions || !activeAccount?.address) {
+        throw new Error("Wallet not connected");
+      }
+
+      if (!poolId) {
+        console.log("[Portfolio] No poolId provided for sync");
+        return;
+      }
+
+      try {
+        // Find which network this poolId belongs to
+        const enabledNetworks = getEnabledNetworks();
+        let marketNetworkId: NetworkId | null = null;
+
+        for (const networkId of enabledNetworks) {
+          const networkConfig = getNetworkConfig(networkId);
+          const lendingPools = networkConfig?.contracts?.lendingPools || [];
+          if (lendingPools.includes(poolId)) {
+            marketNetworkId = networkId;
+            break;
+          }
+        }
+
+        if (!marketNetworkId) {
+          console.error(
+            `[Portfolio] Could not find network for poolId ${poolId}`
+          );
+          return;
+        }
+
+        // Use the market's network config, not the active network
+        const networkConfig = getNetworkConfig(marketNetworkId);
+        const algorandNetwork =
+          getAlgorandNetworkFromNetworkId(marketNetworkId);
+        if (!algorandNetwork) {
+          console.error(
+            `[Portfolio] Network ${marketNetworkId} is not Algorand-compatible`
+          );
+          return;
+        }
+        const clients = algorandService.initializeClients(algorandNetwork);
+
+        // If marketId is provided, sync only that specific market
+        // Otherwise, sync all markets for the provided poolId
+        let marketsToSync: Array<{ poolId: string; marketId: string }> = [];
+
+        if (marketId) {
+          // Sync only the specific market
+          marketsToSync = [{ poolId, marketId }];
+        } else {
+          // Get all markets for this poolId from the market's network
+          const tokens = getAllTokensWithDisplayInfo(marketNetworkId);
+          const matchingTokens = tokens.filter((t) => t.poolId === poolId);
+
+          for (const token of matchingTokens) {
+            if (token.underlyingContractId) {
+              marketsToSync.push({
+                poolId,
+                marketId: token.underlyingContractId,
+              });
+            }
+          }
+        }
+
+        if (marketsToSync.length === 0) {
+          console.log("[Portfolio] No markets to sync");
+          return;
+        }
+
+        console.log(
+          "[Portfolio] Syncing markets:",
+          marketsToSync,
+          "on network:",
+          marketNetworkId
+        );
+
+        // Create contract instance for this specific poolId
+        const ci = new CONTRACT(
+          Number(poolId),
+          clients.algod,
+          clients.indexer,
+          abi.custom,
+          {
+            addr: activeAccount.address,
+            sk: new Uint8Array(),
+          }
+        );
+
+        const builder = {
+          lending: new CONTRACT(
+            Number(poolId),
+            clients.algod,
+            clients.indexer,
+            { ...LendingPoolAppSpec.contract, events: [] },
+            {
+              addr: activeAccount.address,
+              sk: new Uint8Array(),
+            },
+            true,
+            false,
+            true
+          ),
+        };
+
+        // Build sync transactions for each market
+        const buildN = [];
+        for (const { marketId: syncMarketId } of marketsToSync) {
+          console.log("[Portfolio] Syncing market:", {
+            poolId,
+            marketId: syncMarketId,
+            userAddress,
+          });
+          try {
+            const txnO = (
+              await builder.lending.sync_user_market_for_price_change(
+                userAddress,
+                Number(syncMarketId)
+              )
+            ).obj;
+            buildN.push({
+              ...txnO,
+              note: new TextEncoder().encode(
+                `lending sync_market ${syncMarketId}`
+              ),
+              payment: 1e5,
+            });
+          } catch (error) {
+            console.warn(
+              `[Portfolio] Failed to sync market ${syncMarketId} in pool ${poolId}:`,
+              error
+            );
+          }
+        }
+
+        if (buildN.length === 0) {
+          console.log(`[Portfolio] No sync transactions for pool ${poolId}`);
+          return;
+        }
+
+        ci.setFee(10000);
+        ci.setEnableGroupResourceSharing(true);
+        ci.setExtraTxns(buildN);
+        // Set beacon ID for algorand-mainnet (using market's network, not active network)
+        if (marketNetworkId === "algorand-mainnet") {
+          ci.setBeaconId(3209233839);
+        }
+        const customR = await ci.custom();
+
+        console.log(
+          `[Portfolio] Sync transactions for pool ${poolId}:`,
+          customR
+        );
+
+        // Use clients for the market's network
+        const algorandClients =
+          await algorandService.initializeClientsForTransactions(
+            algorandNetwork
+          );
+
+        const stxns = await signTransactions(
+          customR.txns.map((txn: string) =>
+            Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+          )
+        );
+
+        const res = await algorandClients.algod.sendRawTransaction(stxns).do();
+        await algosdk.waitForConfirmation(algorandClients.algod, res.txid, 4);
+
+        // Update transaction metadata (using market's network, not active network)
+        await updateTransactionMetadata(res.txid, marketNetworkId);
+
+        console.log("[Portfolio] Markets synced successfully");
+      } catch (error) {
+        console.error("[Portfolio] Error syncing markets:", error);
+        throw error;
+      }
+    },
+    [
+      signTransactions,
+      activeAccount?.address,
+      currentNetwork,
+      deposits,
+      borrows,
+    ]
+  );
+
   // Function to refresh positions data
   const handleRefreshPositions = async () => {
     if (!activeAccount?.address || !currentNetwork) {
@@ -1698,8 +2142,13 @@ const Portfolio = () => {
       //   : [];
       const marketData = markets;
 
+      if (!displayAddress) {
+        setIsLoadingPositions(false);
+        return;
+      }
+
       const freshGlobalData = await fetchUserGlobalData(
-        activeAccount.address,
+        displayAddress,
         currentNetwork,
         marketData
       );
@@ -1713,7 +2162,7 @@ const Portfolio = () => {
         try {
           const networkMarkets = await fetchAllMarkets(networkId);
           const networkPositions = await fetchUserPositions(
-            activeAccount.address,
+            displayAddress,
             networkId,
             networkMarkets
           );
@@ -1743,6 +2192,48 @@ const Portfolio = () => {
 
     setIsRefreshingMarkets(true);
     try {
+      // In view-only mode, sync markets first (sync all markets from all pools)
+      if (isViewOnly && displayAddress && signTransactions) {
+        try {
+          toast({
+            title: "Syncing Markets",
+            description:
+              "Please sign the transaction to sync markets before refreshing...",
+            duration: 3000,
+          });
+          // Get all unique poolIds from deposits and borrows
+          const allPoolIds = new Set<string>();
+          deposits.forEach((deposit) => {
+            if (deposit.balance > 0 && deposit.poolId) {
+              allPoolIds.add(deposit.poolId);
+            }
+          });
+          borrows.forEach((borrow) => {
+            if (borrow.balance > 0 && borrow.poolId) {
+              allPoolIds.add(borrow.poolId);
+            }
+          });
+          // Sync each poolId (will sync all markets in each pool)
+          for (const poolId of allPoolIds) {
+            await syncUserMarketsForPriceChange(displayAddress, poolId);
+          }
+          toast({
+            title: "Markets Synced",
+            description: "Markets synced successfully. Refreshing data...",
+            duration: 2000,
+          });
+        } catch (error) {
+          console.error("[Portfolio] Failed to sync markets:", error);
+          toast({
+            title: "Sync Failed",
+            description: "Failed to sync markets. Refresh cancelled.",
+            variant: "destructive",
+            duration: 3000,
+          });
+          setIsRefreshingMarkets(false);
+          return;
+        }
+      }
       const enabledNetworks = getEnabledNetworks();
       let refreshedCount = 0;
       let failedCount = 0;
@@ -1817,10 +2308,15 @@ const Portfolio = () => {
         });
       }
 
-      // Refresh user data after markets are updated
-      if (activeAccount?.address && refreshedCount > 0) {
+      // Refresh user data after markets are updated (only if not in view-only mode)
+      if (displayAddress && refreshedCount > 0 && !isViewOnly) {
         setTimeout(() => {
-          fetchUser(activeAccount.address);
+          fetchUser(displayAddress);
+        }, 1000);
+      } else if (isViewOnly && refreshedCount > 0) {
+        // In view-only mode, just refresh the displayed data without triggering user API refresh
+        setTimeout(() => {
+          handleRefreshPositions();
         }, 1000);
       }
     } catch (error) {
@@ -1834,7 +2330,14 @@ const Portfolio = () => {
     } finally {
       setIsRefreshingMarkets(false);
     }
-  }, [isRefreshingMarkets, activeAccount?.address, toast]);
+  }, [
+    isRefreshingMarkets,
+    displayAddress,
+    toast,
+    isViewOnly,
+    signTransactions,
+    syncUserMarketsForPriceChange,
+  ]);
 
   // Function to refresh markets for a specific section
   const handleRefreshSectionMarkets = useCallback(
@@ -1851,13 +2354,42 @@ const Portfolio = () => {
 
         // Get unique markets from items
         const marketKeys = new Set<string>();
+        const marketIdsToSync = new Set<string>();
         items.forEach((item) => {
           const networkToUse = item.network || currentNetwork;
           const key = `${item.asset}-${
             item.poolId || "default"
           }-${networkToUse}`;
           marketKeys.add(key);
+          if (item.poolId) {
+            marketIdsToSync.add(item.poolId);
+          }
         });
+
+        // In view-only mode, sync only the markets in this section first
+        if (
+          isViewOnly &&
+          displayAddress &&
+          signTransactions &&
+          marketIdsToSync.size > 0
+        ) {
+          try {
+            // Sync each poolId (will sync all markets in each pool)
+            for (const poolIdToSync of marketIdsToSync) {
+              await syncUserMarketsForPriceChange(displayAddress, poolIdToSync);
+            }
+          } catch (error) {
+            console.error("[Portfolio] Failed to sync markets:", error);
+            toast({
+              title: "Sync Failed",
+              description: "Failed to sync markets. Refresh cancelled.",
+              variant: "destructive",
+              duration: 3000,
+            });
+            setRefreshingSection(null);
+            return;
+          }
+        }
 
         // Refresh each unique market
         for (const key of marketKeys) {
@@ -1935,10 +2467,15 @@ const Portfolio = () => {
           });
         }
 
-        // Refresh user data after markets are updated
-        if (activeAccount?.address && refreshedCount > 0) {
+        // Refresh user data after markets are updated (only if not in view-only mode)
+        if (displayAddress && refreshedCount > 0 && !isViewOnly) {
           setTimeout(() => {
-            fetchUser(activeAccount.address);
+            fetchUser(displayAddress);
+          }, 1000);
+        } else if (isViewOnly && refreshedCount > 0) {
+          // In view-only mode, refresh positions data without API user refresh
+          setTimeout(() => {
+            handleRefreshPositions();
           }, 1000);
         }
       } catch (error) {
@@ -1956,7 +2493,15 @@ const Portfolio = () => {
         setRefreshingSection(null);
       }
     },
-    [refreshingSection, currentNetwork, activeAccount?.address, toast]
+    [
+      refreshingSection,
+      currentNetwork,
+      displayAddress,
+      toast,
+      isViewOnly,
+      signTransactions,
+      syncUserMarketsForPriceChange,
+    ]
   );
 
   // Function to refresh a single market
@@ -1990,6 +2535,33 @@ const Portfolio = () => {
         const appId = parseInt(token.poolId);
         const marketId = parseInt(token.underlyingContractId);
 
+        // In view-only mode, sync this specific market first
+        if (
+          isViewOnly &&
+          displayAddress &&
+          signTransactions &&
+          poolId &&
+          marketId
+        ) {
+          try {
+            await syncUserMarketsForPriceChange(
+              displayAddress,
+              poolId,
+              marketId.toString()
+            );
+          } catch (error) {
+            console.error("[Portfolio] Failed to sync market:", error);
+            toast({
+              title: "Sync Failed",
+              description: "Failed to sync market. Refresh cancelled.",
+              variant: "destructive",
+              duration: 3000,
+            });
+            setRefreshingMarket(null);
+            return;
+          }
+        }
+
         console.log(
           `[Portfolio] Refreshing market data for ${asset} (appId: ${appId}, marketId: ${marketId}, network: ${networkToUse})`
         );
@@ -2012,10 +2584,15 @@ const Portfolio = () => {
             duration: 2000,
           });
 
-          // Refresh user data after market is updated
-          if (activeAccount?.address) {
+          // Refresh user data after market is updated (only if not in view-only mode)
+          if (displayAddress && !isViewOnly) {
             setTimeout(() => {
-              fetchUser(activeAccount.address);
+              fetchUser(displayAddress);
+            }, 500);
+          } else if (isViewOnly) {
+            // In view-only mode, refresh positions data without API user refresh
+            setTimeout(() => {
+              handleRefreshPositions();
             }, 500);
           }
         } else {
@@ -2045,7 +2622,16 @@ const Portfolio = () => {
         setRefreshingMarket(null);
       }
     },
-    [refreshingMarket, currentNetwork, activeAccount?.address, toast]
+    [
+      refreshingMarket,
+      currentNetwork,
+      activeAccount?.address,
+      toast,
+      isViewOnly,
+      displayAddress,
+      signTransactions,
+      syncUserMarketsForPriceChange,
+    ]
   );
 
   // Function to refresh markets for Supplied Assets section
@@ -2101,9 +2687,13 @@ const Portfolio = () => {
           duration: 2000,
         });
 
-        if (activeAccount?.address) {
+        if (displayAddress && !isViewOnly) {
           setTimeout(() => {
-            fetchUser(activeAccount.address);
+            fetchUser(displayAddress);
+          }, 500);
+        } else if (isViewOnly) {
+          setTimeout(() => {
+            handleRefreshPositions();
           }, 500);
         }
       }
@@ -2118,13 +2708,7 @@ const Portfolio = () => {
     } finally {
       setRefreshingSection(null);
     }
-  }, [
-    deposits,
-    currentNetwork,
-    refreshingSection,
-    activeAccount?.address,
-    toast,
-  ]);
+  }, [deposits, currentNetwork, refreshingSection, displayAddress, toast]);
 
   // Function to refresh markets for Borrowed Assets section
   const handleRefreshBorrowedAssets = useCallback(async () => {
@@ -2178,9 +2762,13 @@ const Portfolio = () => {
           duration: 2000,
         });
 
-        if (activeAccount?.address) {
+        if (displayAddress && !isViewOnly) {
           setTimeout(() => {
-            fetchUser(activeAccount.address);
+            fetchUser(displayAddress);
+          }, 500);
+        } else if (isViewOnly) {
+          setTimeout(() => {
+            handleRefreshPositions();
           }, 500);
         }
       }
@@ -2259,9 +2847,13 @@ const Portfolio = () => {
           duration: 2000,
         });
 
-        if (activeAccount?.address) {
+        if (displayAddress && !isViewOnly) {
           setTimeout(() => {
-            fetchUser(activeAccount.address);
+            fetchUser(displayAddress);
+          }, 500);
+        } else if (isViewOnly) {
+          setTimeout(() => {
+            handleRefreshPositions();
           }, 500);
         }
       }
@@ -2337,9 +2929,13 @@ const Portfolio = () => {
           duration: 2000,
         });
 
-        if (activeAccount?.address) {
+        if (displayAddress && !isViewOnly) {
           setTimeout(() => {
-            fetchUser(activeAccount.address);
+            fetchUser(displayAddress);
+          }, 500);
+        } else if (isViewOnly) {
+          setTimeout(() => {
+            handleRefreshPositions();
           }, 500);
         }
       }
@@ -2479,10 +3075,10 @@ const Portfolio = () => {
   };
 
   useEffect(() => {
-    if (activeAccount?.address) {
-      fetchUser(activeAccount.address);
+    if (displayAddress) {
+      fetchUser(displayAddress);
     }
-  }, [activeAccount?.address]);
+  }, [displayAddress]);
 
   // Fetch market data for all enabled networks when user data is available
   useEffect(() => {
@@ -2861,6 +3457,490 @@ const Portfolio = () => {
     console.log("Redirect to VOI purchase");
   };
 
+  // Handle liquidation
+  const handleLiquidation = useCallback(async () => {
+    if (
+      !selectedLiquidationPosition ||
+      !activeAccount?.address ||
+      !signTransactions
+    ) {
+      toast({
+        title: "Error",
+        description: "Missing required information for liquidation",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsLiquidating(true);
+    try {
+      const debtSymbol =
+        selectedLiquidationPosition.debtTokenInfo?.data?.symbol;
+      const collateralSymbol =
+        selectedLiquidationPosition.collateralTokenInfo?.data?.symbol;
+      const networkId = selectedLiquidationPosition.network as NetworkId;
+      const userAddress = selectedLiquidationPosition.user;
+      const liquidationValueUsd =
+        selectedLiquidationPosition.liquidationAmount || 0;
+
+      // Get debt market to get price - try multiple matching strategies
+      let debtMarket = marketData.find((m) => {
+        const matchesSymbol = m.symbol === debtSymbol;
+        const matchesNetwork =
+          (m as any).network === networkId ||
+          (networkId && m.network === networkId);
+        const matchesPool =
+          selectedLiquidationPosition.debtMarketId &&
+          (m.poolId === selectedLiquidationPosition.debtMarketId.toString() ||
+            m.appId === selectedLiquidationPosition.debtMarketId.toString());
+        return matchesSymbol && (matchesNetwork || matchesPool);
+      });
+
+      // If not found, try matching by symbol and network only
+      if (!debtMarket) {
+        debtMarket = marketData.find((m) => {
+          const matchesSymbol = m.symbol === debtSymbol;
+          const matchesNetwork =
+            (m as any).network === networkId ||
+            (networkId && m.network === networkId);
+          return matchesSymbol && matchesNetwork;
+        });
+      }
+
+      // If still not found, try matching by symbol only (fallback)
+      if (!debtMarket) {
+        debtMarket = marketData.find((m) => m.symbol === debtSymbol);
+      }
+
+      if (!debtMarket) {
+        console.error("Debt market not found:", {
+          debtSymbol,
+          networkId,
+          debtMarketId: selectedLiquidationPosition.debtMarketId,
+          availableMarkets: marketData.map((m) => ({
+            symbol: m.symbol,
+            poolId: m.poolId,
+            appId: m.appId,
+            network: (m as any).network,
+          })),
+        });
+        throw new Error(
+          `Debt market not found for ${debtSymbol} on ${networkId}`
+        );
+      }
+
+      console.log("Debt market found in handler:", {
+        symbol: debtMarket.symbol,
+        poolId: debtMarket.poolId,
+        appId: debtMarket.appId,
+        network: (debtMarket as any).network,
+      });
+
+      // Get token configs - need to find tokens matching the specific markets
+      const allTokens = getAllTokensWithDisplayInfo(networkId);
+
+      // Use the appId from the opportunity/position data as the poolId
+      // This is the pool that contains the debtMarketId and is the correct pool for liquidation
+      const poolId = selectedLiquidationPosition.appId?.toString();
+
+      if (!poolId) {
+        throw new Error("Pool ID (appId) not found in position data");
+      }
+
+      console.log("Using poolId from opportunity:", {
+        appId: selectedLiquidationPosition.appId,
+        poolId,
+        debtMarketId: selectedLiquidationPosition.debtMarketId,
+        collateralMarketId: selectedLiquidationPosition.collateralMarketId,
+      });
+
+      // Find debt token - match by symbol and poolId from opportunity
+      let debtToken = poolId
+        ? allTokens.find(
+            (t) =>
+              t.symbol === debtSymbol && String(t.poolId) === String(poolId)
+          )
+        : null;
+
+      // Fallback: find by symbol only (for tokens that might not have poolId match)
+      if (!debtToken) {
+        debtToken = allTokens.find((t) => t.symbol === debtSymbol);
+      }
+
+      // Find collateral token - match by symbol and poolId from opportunity
+      // For collateral, we should use the same pool as the debt (since liquidation happens in debt's pool)
+      let collateralToken = poolId
+        ? allTokens.find(
+            (t) =>
+              t.symbol === collateralSymbol &&
+              String(t.poolId) === String(poolId)
+          )
+        : null;
+
+      // If not found in debt pool, try to find by symbol only
+      if (!collateralToken) {
+        collateralToken = allTokens.find((t) => t.symbol === collateralSymbol);
+      }
+
+      if (!debtToken || !collateralToken) {
+        console.error("Token configs not found:", {
+          debtSymbol,
+          collateralSymbol,
+          poolId,
+          debtToken: !!debtToken,
+          collateralToken: !!collateralToken,
+          availableTokens: allTokens.map((t) => ({
+            symbol: t.symbol,
+            poolId: t.poolId,
+          })),
+        });
+        throw new Error("Token configs not found");
+      }
+
+      console.log("Tokens found:", {
+        debtToken: { symbol: debtToken.symbol, poolId: debtToken.poolId },
+        collateralToken: {
+          symbol: collateralToken.symbol,
+          poolId: collateralToken.poolId,
+        },
+        poolIdFromOpportunity: poolId,
+      });
+
+      // Get token price
+      let debtTokenPrice = 0;
+      const token = getAllTokensWithDisplayInfo(networkId).find(
+        (t) => t.symbol === debtSymbol
+      );
+      if (debtMarket.price) {
+        debtTokenPrice = formatPriceFromContract(
+          debtMarket.price,
+          token?.decimals || 6
+        );
+      } else if (debtMarket.marketInfo?.price) {
+        const rawPrice = parseFloat(debtMarket.marketInfo.price);
+        debtTokenPrice =
+          rawPrice > 1000000 ? rawPrice / Math.pow(10, 6) : rawPrice;
+      }
+
+      if (debtTokenPrice === 0) {
+        throw new Error("Debt token price not available");
+      }
+
+      // Calculate debt amount in tokens
+      const debtAmountInTokens = BigInt(
+        new BigNumber(liquidationValueUsd)
+          .dividedBy(debtTokenPrice)
+          .multipliedBy(new BigNumber(10).pow(debtToken.decimals))
+          .toFixed(0)
+      );
+
+      // Get collateral market to get price
+      const collateralMarket = marketData.find((m) => {
+        const matchesSymbol = m.symbol === collateralSymbol;
+        const matchesNetwork =
+          (m as any).network === networkId ||
+          (networkId && m.network === networkId);
+        const matchesPool =
+          selectedLiquidationPosition.collateralMarketId &&
+          (m.poolId ===
+            selectedLiquidationPosition.collateralMarketId.toString() ||
+            m.appId ===
+              selectedLiquidationPosition.collateralMarketId.toString());
+        return matchesSymbol && (matchesNetwork || matchesPool);
+      });
+
+      // If not found, try matching by symbol and network only
+      if (!collateralMarket) {
+        const collateralMarketFallback = marketData.find((m) => {
+          const matchesSymbol = m.symbol === collateralSymbol;
+          const matchesNetwork =
+            (m as any).network === networkId ||
+            (networkId && m.network === networkId);
+          return matchesSymbol && matchesNetwork;
+        });
+        if (collateralMarketFallback) {
+          Object.assign({}, collateralMarket, collateralMarketFallback);
+        }
+      }
+
+      // Get collateral token price
+      let collateralTokenPrice = 0;
+      const collateralTokenConfig = getAllTokensWithDisplayInfo(networkId).find(
+        (t) => t.symbol === collateralSymbol
+      );
+      if (collateralMarket?.price) {
+        collateralTokenPrice = formatPriceFromContract(
+          collateralMarket.price,
+          collateralTokenConfig?.decimals || 6
+        );
+      } else if (collateralMarket?.marketInfo?.price) {
+        const rawPrice = parseFloat(collateralMarket.marketInfo.price);
+        collateralTokenPrice =
+          rawPrice > 1000000 ? rawPrice / Math.pow(10, 6) : rawPrice;
+      }
+
+      if (collateralTokenPrice === 0) {
+        console.warn(
+          "Collateral token price not available, using debt token price as fallback"
+        );
+        collateralTokenPrice = debtTokenPrice;
+      }
+
+      // Get liquidation bonus from the position or market data
+      // The liquidation bonus is the percentage extra collateral the liquidator receives
+      const liquidationBonus =
+        selectedLiquidationPosition.liquidationBonus || 0.2; // Default 20%
+
+      // Calculate min collateral received in collateral token atomic units
+      // Step 1: Normalize liquidation value to dollar amount (it's already in USD)
+      // Step 2: Convert dollar amount to collateral tokens using collateral market price
+      // Step 3: Apply liquidation bonus (liquidator receives more collateral)
+      // Step 4: Convert to atomic units (multiply by 10^decimals)
+      const liquidationValueDollars = new BigNumber(liquidationValueUsd);
+
+      console.log("collateralTokenPrice", collateralTokenPrice);
+
+      // Convert dollar amount to collateral tokens using collateral market price
+      const collateralAmountInTokens = liquidationValueDollars
+        .dividedBy(collateralTokenPrice)
+        .multipliedBy(new BigNumber(1).plus(liquidationBonus));
+
+      console.log(
+        "collateralAmountInTokens",
+        collateralAmountInTokens.toString()
+      );
+
+      // Convert to atomic units by multiplying by 10^decimals
+      const minCollateralReceived = BigInt(
+        collateralAmountInTokens
+          .multipliedBy(new BigNumber(10).pow(collateralToken.decimals))
+          .toFixed(0)
+      );
+
+      console.log("Min collateral received calculation:", {
+        liquidationValueUsd,
+        collateralTokenPrice,
+        liquidationBonus,
+        collateralAmountInTokens: collateralAmountInTokens.toString(),
+        minCollateralReceived: minCollateralReceived.toString(),
+      });
+
+      // Get market IDs
+      const debtMarketId = parseInt(
+        selectedLiquidationPosition.debtMarketId?.toString() || "0"
+      );
+      const collateralMarketIdValue = parseInt(
+        selectedLiquidationPosition.collateralMarketId?.toString() || "0"
+      );
+
+      if (!debtMarketId || !collateralMarketIdValue) {
+        throw new Error("Market IDs not found");
+      }
+
+      // poolId is already set from opportunity's appId above
+      console.log("Using poolId for liquidation:", poolId, {
+        appIdFromOpportunity: selectedLiquidationPosition.appId,
+        debtTokenPoolId: debtToken.poolId,
+        collateralTokenPoolId: collateralToken.poolId,
+        debtMarketId,
+        collateralMarketId: collateralMarketIdValue,
+      });
+
+      // Note: Cross-pool liquidations are supported via liquidate_cross_market
+      // The poolId here is the pool where the liquidation contract call happens (debt's pool)
+
+      // Initialize clients
+      const networkConfig = getNetworkConfig(networkId);
+      const algorandNetwork = getAlgorandNetworkFromNetworkId(networkId);
+      if (!algorandNetwork) {
+        throw new Error("Invalid network");
+      }
+
+      const clients = algorandService.initializeClients(algorandNetwork);
+
+      // Create contract instances
+      const builder = {
+        lending: new CONTRACT(
+          Number(poolId),
+          clients.algod,
+          undefined,
+          { ...LendingPoolAppSpec.contract, events: [] },
+          { addr: activeAccount.address, sk: new Uint8Array() },
+          true,
+          false,
+          true
+        ),
+        debtToken: new CONTRACT(
+          Number(debtToken.underlyingContractId),
+          clients.algod,
+          undefined,
+          abi.nt200,
+          { addr: activeAccount.address, sk: new Uint8Array() },
+          true,
+          false,
+          true
+        ),
+        collateralToken: new CONTRACT(
+          Number(collateralToken.underlyingContractId),
+          clients.algod,
+          undefined,
+          abi.nt200,
+          { addr: activeAccount.address, sk: new Uint8Array() },
+          true,
+          false,
+          true
+        ),
+      };
+
+      const buildN = [];
+
+      // TODO cond don't need for is market is stoken
+      // arc200 approve
+      {
+        const txnO = (
+          await builder.debtToken.arc200_approve(
+            algosdk.getApplicationAddress(Number(poolId)),
+            debtAmountInTokens
+          )
+        ).obj;
+        const note = new TextEncoder().encode(
+          `arc200_approve ${debtSymbol} ${
+            Number(debtAmountInTokens) / 10 ** debtToken.decimals
+          } spendindg to ${algosdk.encodeAddress(
+            algosdk.getApplicationAddress(Number(poolId)).publicKey
+          )}`
+        );
+        buildN.push({ ...txnO, note });
+      }
+
+      // Liquidate cross market
+      {
+        const minCollateralReceived = 0; // TODO calc min collateral received
+        console.log("liquidate_cross_market", {
+          poolId,
+          debtMarketId,
+          collateralMarketIdValue,
+          userAddress,
+          debtAmountInTokens,
+          minCollateralReceived: minCollateralReceived.toString(),
+        });
+        const txnO = (
+          await builder.lending.liquidate_cross_market(
+            debtMarketId,
+            collateralMarketIdValue,
+            userAddress,
+            debtAmountInTokens,
+            minCollateralReceived
+          )
+        ).obj;
+        const minCollateralReceivedString = new BigNumber(
+          collateralAmountInTokens
+        )
+          .dividedBy(10 ** collateralToken.decimals)
+          .toString();
+        const note = new TextEncoder().encode(
+          `liquidate_cross_market ${debtSymbol} ${
+            Number(debtAmountInTokens) / 10 ** debtToken.decimals
+          } to ${algosdk.encodeAddress(
+            algosdk.getApplicationAddress(Number(collateralMarketIdValue))
+              .publicKey
+          )}`
+        );
+        buildN.push({ ...txnO, note, payment: 2e5 });
+      }
+
+      // // Sync account for price change - debt token
+      // {
+      //   const txnO = (
+      //     await builder.lending.sync_user_market_for_price_change(
+      //       userAddress,
+      //       Number(debtMarketId)
+      //     )
+      //   ).obj;
+      //   buildN.push(txnO);
+      // }
+
+      // // Sync account for price change - collateral token
+      // {
+      //   const txnO = (
+      //     await builder.lending.sync_user_market_for_price_change(
+      //       userAddress,
+      //       Number(collateralMarketIdValue)
+      //     )
+      //   ).obj;
+      //   buildN.push(txnO);
+      // }
+
+      console.log("buildN", buildN);
+
+      const ci = new CONTRACT(
+        Number(poolId),
+        clients.algod,
+        undefined,
+        abi.custom,
+        { addr: activeAccount.address, sk: new Uint8Array() }
+      );
+
+      ci.setFee(1e5);
+      ci.setEnableGroupResourceSharing(true);
+      ci.setExtraTxns(buildN);
+
+      if (networkId === "algorand-mainnet") {
+        ci.setBeaconId(3209233839);
+      }
+
+      const customR = await ci.custom();
+
+      console.log("customR", customR);
+
+      const stxns = await signTransactions(
+        customR.txns.map((txn: string) =>
+          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+        )
+      );
+
+      const algorandClients =
+        await algorandService.getCurrentClientsForTransactions();
+      const res = await algorandClients.algod.sendRawTransaction(stxns).do();
+      await algosdk.waitForConfirmation(algorandClients.algod, res.txid, 4);
+
+      // Update transaction metadata
+      await updateTransactionMetadata(res.txid, networkId);
+
+      toast({
+        title: "Liquidation Successful",
+        description: `Transaction confirmed: ${res.txid}`,
+      });
+
+      // Close modal and refresh data
+      setLiquidationModalOpen(false);
+      setSelectedLiquidationPosition(null);
+
+      // Refresh user data
+      if (displayAddress) {
+        await fetchUser(displayAddress);
+      }
+    } catch (error) {
+      console.error("Liquidation error:", error);
+      toast({
+        title: "Liquidation Failed",
+        description:
+          error instanceof Error ? error.message : "Please try again",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLiquidating(false);
+    }
+  }, [
+    selectedLiquidationPosition,
+    activeAccount,
+    signTransactions,
+    marketData,
+    displayAddress,
+    fetchUser,
+    toast,
+  ]);
+
   // Show loading state
   if (isLoadingData) {
     return (
@@ -3140,10 +4220,12 @@ const Portfolio = () => {
                 netLTV={netLTV}
                 dorkNftImage={displayAvatar || undefined}
                 underwaterBg="/lovable-uploads/44ebe994-a30e-4eb1-a4a1-776aa2978776.png"
-                onAddCollateral={handleAddCollateral}
-                onBuyVoi={handleBuyVoi}
+                onAddCollateral={!isViewOnly ? handleAddCollateral : undefined}
+                onBuyVoi={!isViewOnly ? handleBuyVoi : undefined}
                 onEditProfile={
-                  isPeraOrDefly ? undefined : () => setNftModalOpen(true)
+                  !isViewOnly && !isPeraOrDefly
+                    ? () => setNftModalOpen(true)
+                    : undefined
                 }
                 onRefreshMarkets={handleRefreshMarkets}
                 isRefreshingMarkets={isRefreshingMarkets}
@@ -3151,52 +4233,73 @@ const Portfolio = () => {
 
               {/* Quick Actions Panel */}
               <QuickActionsPanel
-                onAddCollateral={handleAddCollateral}
-                onRepayDebt={() => {
-                  // Find the largest borrow position and open repay modal
-                  if (borrows.length > 0) {
-                    const largestBorrow = borrows.reduce((prev, current) =>
-                      current.value > prev.value ? current : prev
-                    );
-                    handleRepayClick(
-                      largestBorrow.asset,
-                      largestBorrow.poolId,
-                      (largestBorrow as any).network
-                    );
-                  }
-                }}
-                onDeposit={(asset) => {
-                  if (asset) {
-                    const deposit = deposits.find((d) => d.asset === asset);
-                    handleDepositClick(
-                      asset,
-                      deposit?.poolId,
-                      (deposit as any)?.network
-                    );
-                  } else {
-                    handleAddCollateral();
-                  }
-                }}
-                onWithdraw={(asset) => {
-                  if (asset) {
-                    const deposit = deposits.find((d) => d.asset === asset);
-                    handleWithdrawClick(
-                      asset,
-                      deposit?.poolId,
-                      (deposit as any)?.network
-                    );
-                  }
-                }}
-                onBorrow={(asset) => {
-                  if (asset) {
-                    const borrow = borrows.find((b) => b.asset === asset);
-                    handleBorrowClick(
-                      asset,
-                      borrow?.poolId,
-                      (borrow as any)?.network
-                    );
-                  }
-                }}
+                onAddCollateral={!isViewOnly ? handleAddCollateral : undefined}
+                onRepayDebt={
+                  !isViewOnly
+                    ? () => {
+                        // Find the largest borrow position and open repay modal
+                        if (borrows.length > 0) {
+                          const largestBorrow = borrows.reduce(
+                            (prev, current) =>
+                              current.value > prev.value ? current : prev
+                          );
+                          handleRepayClick(
+                            largestBorrow.asset,
+                            largestBorrow.poolId,
+                            (largestBorrow as any).network
+                          );
+                        }
+                      }
+                    : undefined
+                }
+                onDeposit={
+                  !isViewOnly
+                    ? (asset) => {
+                        if (asset) {
+                          const deposit = deposits.find(
+                            (d) => d.asset === asset
+                          );
+                          handleDepositClick(
+                            asset,
+                            deposit?.poolId,
+                            (deposit as any)?.network
+                          );
+                        } else {
+                          handleAddCollateral();
+                        }
+                      }
+                    : undefined
+                }
+                onWithdraw={
+                  !isViewOnly
+                    ? (asset) => {
+                        if (asset) {
+                          const deposit = deposits.find(
+                            (d) => d.asset === asset
+                          );
+                          handleWithdrawClick(
+                            asset,
+                            deposit?.poolId,
+                            (deposit as any)?.network
+                          );
+                        }
+                      }
+                    : undefined
+                }
+                onBorrow={
+                  !isViewOnly
+                    ? (asset) => {
+                        if (asset) {
+                          const borrow = borrows.find((b) => b.asset === asset);
+                          handleBorrowClick(
+                            asset,
+                            borrow?.poolId,
+                            (borrow as any)?.network
+                          );
+                        }
+                      }
+                    : undefined
+                }
                 totalBorrowed={totalBorrowed}
                 deposits={deposits.map((d) => ({
                   asset: d.asset,
@@ -3998,6 +5101,329 @@ const Portfolio = () => {
           </DorkFiCard>
         )}
 
+      {/* Liquidatable Positions Section - Only show when health factor < 1 */}
+      {/* Debug: Show section if we have positions or health factor < 1 */}
+      {((healthFactor !== null && healthFactor < 1) ||
+        liquidatablePositions.length > 0) && (
+        <DorkFiCard className="p-6 md:p-8 border-red-500/50 bg-red-50/50 dark:bg-red-950/20">
+          <div className="mb-4">
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle className="w-5 h-5 text-red-500" />
+              <H1 className="text-xl md:text-2xl text-red-600 dark:text-red-400">
+                Liquidatable Positions
+              </H1>
+            </div>
+            <p className="text-sm text-muted-foreground mb-4">
+              Your health factor is below 1.0. These positions are at risk of
+              liquidation.
+            </p>
+          </div>
+
+          {isLoadingLiquidatablePositions ? (
+            <div className="flex items-center justify-center py-8">
+              <Skeleton className="h-8 w-8 rounded-full mr-2" />
+              <span className="text-muted-foreground">
+                Loading liquidatable positions...
+              </span>
+            </div>
+          ) : liquidatablePositions.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <p>No liquidatable positions found.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Debt Asset</TableHead>
+                    <TableHead>Collateral Asset</TableHead>
+                    <TableHead>Network</TableHead>
+                    <TableHead>Market</TableHead>
+                    <TableHead>Debt Value (USD)</TableHead>
+                    <TableHead>Collateral Value (USD)</TableHead>
+                    <TableHead>Debt/Collateral Ratio</TableHead>
+                    <TableHead>Liquidation Amount (USD)</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {liquidatablePositions.map((position, index) => {
+                    // Find market for the debt asset to get close factor
+                    const debtMarketId = position.debtMarketId?.toString();
+                    const debtSymbol = position.debtTokenInfo?.data?.symbol;
+                    const collateralMarketId =
+                      position.collateralMarketId?.toString();
+                    const collateralSymbol =
+                      position.collateralTokenInfo?.data?.symbol;
+                    const networkId = position.network as NetworkId;
+
+                    // Find market matching debt asset and network
+                    const debtMarket = marketData.find((m) => {
+                      const matchesSymbol = m.symbol === debtSymbol;
+                      const matchesNetwork =
+                        (m as any).network === networkId ||
+                        (networkId && m.network === networkId);
+                      const matchesPool =
+                        debtMarketId &&
+                        (m.poolId === debtMarketId || m.appId === debtMarketId);
+                      return matchesSymbol && (matchesNetwork || matchesPool);
+                    });
+
+                    // Find market matching collateral asset and network
+                    const collateralMarket = marketData.find((m) => {
+                      const matchesSymbol = m.symbol === collateralSymbol;
+                      const matchesNetwork =
+                        (m as any).network === networkId ||
+                        (networkId && m.network === networkId);
+                      const matchesPool =
+                        collateralMarketId &&
+                        (m.poolId === collateralMarketId ||
+                          m.appId === collateralMarketId);
+                      return matchesSymbol && (matchesNetwork || matchesPool);
+                    });
+
+                    console.log(
+                      "[Portfolio] Collateral market:",
+                      collateralMarket
+                    );
+
+                    // Debug: Log market lookup
+                    console.log("[Portfolio] Collateral market lookup:", {
+                      collateralSymbol,
+                      collateralMarketId,
+                      networkId,
+                      marketDataLength: marketData.length,
+                      foundMarket: !!collateralMarket,
+                      marketKeys: collateralMarket
+                        ? Object.keys(collateralMarket)
+                        : null,
+                      liquidationBonus: collateralMarket?.liquidationBonus,
+                      marketInfoLiquidationBonus:
+                        collateralMarket?.marketInfo?.liquidationBonus,
+                      allMarkets: marketData.map((m) => ({
+                        symbol: m.symbol,
+                        poolId: m.poolId,
+                        appId: m.appId,
+                        network: (m as any).network,
+                        liquidationBonus: m.liquidationBonus,
+                        marketInfo: m.marketInfo
+                          ? {
+                              liquidationBonus: m.marketInfo.liquidationBonus,
+                            }
+                          : null,
+                      })),
+                    });
+
+                    // Get close factor from debt market (stored as decimal, e.g., 0.5 for 50%)
+                    // If not found, default to 50% (0.5)
+                    const closeFactor =
+                      debtMarket?.closeFactor ??
+                      debtMarket?.marketInfo?.closeFactor ??
+                      0.5;
+
+                    // Get liquidation bonus from collateral market (stored as decimal, e.g., 0.05 for 5%)
+                    // TODO: Once liquidationBonus is available in marketData, use it from there instead of hardcoded 20%
+                    // Check multiple possible locations for liquidation bonus
+                    let liquidationBonus = 0.2; // Default to 20% (0.20) until marketData includes liquidationBonus
+                    if (collateralMarket) {
+                      // Try direct property first
+                      if (
+                        collateralMarket.liquidationBonus !== undefined &&
+                        collateralMarket.liquidationBonus !== null
+                      ) {
+                        liquidationBonus =
+                          typeof collateralMarket.liquidationBonus === "number"
+                            ? collateralMarket.liquidationBonus
+                            : parseFloat(
+                                collateralMarket.liquidationBonus.toString()
+                              ) / 10000; // Convert from basis points if needed
+                      }
+                      // Try marketInfo property
+                      else if (
+                        collateralMarket.marketInfo?.liquidationBonus !==
+                          undefined &&
+                        collateralMarket.marketInfo?.liquidationBonus !== null
+                      ) {
+                        liquidationBonus =
+                          typeof collateralMarket.marketInfo
+                            .liquidationBonus === "number"
+                            ? collateralMarket.marketInfo.liquidationBonus
+                            : parseFloat(
+                                collateralMarket.marketInfo.liquidationBonus.toString()
+                              ) / 10000;
+                      }
+                    }
+
+                    console.log("[Portfolio] Liquidation bonus result:", {
+                      foundMarket: !!collateralMarket,
+                      liquidationBonus,
+                      rawValue: collateralMarket?.liquidationBonus,
+                      marketInfoValue:
+                        collateralMarket?.marketInfo?.liquidationBonus,
+                    });
+
+                    // Calculate liquidation amount: min(collateral value, borrow amount * close factor)
+                    const borrowValueUsd = position.borrowValueUsd || 0;
+                    const collateralValueUsd = position.collateralValueUsd || 0;
+                    const liquidationAmountFromCloseFactor =
+                      borrowValueUsd * closeFactor;
+                    let liquidationAmount = Math.min(
+                      collateralValueUsd,
+                      liquidationAmountFromCloseFactor
+                    );
+
+                    // Reduce liquidation amount by liquidation bonus percentage
+                    // liquidationBonus is a percentage (e.g., 0.05 = 5%), so we subtract that percentage
+                    liquidationAmount =
+                      liquidationAmount * (1 - liquidationBonus);
+
+                    // Format network name for display
+                    const getNetworkDisplayName = (
+                      network: string | undefined
+                    ) => {
+                      if (!network) return "N/A";
+                      if (network === "voi-mainnet") return "Voi";
+                      if (network === "algorand-mainnet") return "Algorand";
+                      return network;
+                    };
+
+                    return (
+                      <TableRow key={index}>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <img
+                              src={getTokenImagePath(
+                                position.debtTokenInfo?.data?.symbol || ""
+                              )}
+                              alt={position.debtTokenInfo?.data?.symbol || ""}
+                              className="w-5 h-5 rounded-full"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).src =
+                                  "/placeholder.svg";
+                              }}
+                            />
+                            <span className="font-medium">
+                              {position.debtTokenInfo?.data?.symbol || "N/A"}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <img
+                              src={getTokenImagePath(
+                                position.collateralTokenInfo?.data?.symbol || ""
+                              )}
+                              alt={
+                                position.collateralTokenInfo?.data?.symbol || ""
+                              }
+                              className="w-5 h-5 rounded-full"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).src =
+                                  "/placeholder.svg";
+                              }}
+                            />
+                            <span className="font-medium">
+                              {position.collateralTokenInfo?.data?.symbol ||
+                                "N/A"}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          {getNetworkDisplayName(position.network)}
+                        </TableCell>
+                        <TableCell>
+                          {getMarketLabel(
+                            networkId,
+                            position.appId?.toString()
+                          ) || "N/A"}
+                        </TableCell>
+                        <TableCell>${borrowValueUsd.toFixed(2)}</TableCell>
+                        <TableCell>
+                          ${position.collateralValueUsd?.toFixed(2) || "0.00"}
+                        </TableCell>
+                        <TableCell>
+                          {position.debtCollateralRatio
+                            ? `${(position.debtCollateralRatio * 100).toFixed(
+                                2
+                              )}%`
+                            : "N/A"}
+                        </TableCell>
+                        <TableCell>
+                          <span className="font-medium">
+                            ${liquidationAmount.toFixed(2)}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          {(() => {
+                            // Check if the connected account matches the position user
+                            const userAddress = position.user?.toLowerCase();
+                            const connectedAddress =
+                              activeAccount?.address?.toLowerCase();
+                            const isOwnPosition =
+                              userAddress === connectedAddress;
+
+                            return (
+                              <div className="flex gap-2">
+                                <Button
+                                  onClick={() => {
+                                    // Open repay modal with position details
+                                    setSelectedRepayPosition({
+                                      ...position,
+                                      borrowValueUsd,
+                                      debtMarket,
+                                      debtSymbol,
+                                      debtMarketId,
+                                      networkId,
+                                    });
+                                    setRepayModalOpen(true);
+                                  }}
+                                  variant="secondary"
+                                  size="sm"
+                                  className="text-xs"
+                                  disabled={!activeAccount?.address}
+                                  title="Repay debt on behalf of this user"
+                                >
+                                  Repay
+                                </Button>
+                                <Button
+                                  onClick={() => {
+                                    // Open liquidation modal with position details
+                                    setSelectedLiquidationPosition({
+                                      ...position,
+                                      liquidationAmount,
+                                      borrowValueUsd,
+                                      collateralValueUsd,
+                                      closeFactor,
+                                      liquidationBonus,
+                                    });
+                                    setLiquidationModalOpen(true);
+                                  }}
+                                  variant="destructive"
+                                  size="sm"
+                                  className="text-xs"
+                                  disabled={isOwnPosition}
+                                  title={
+                                    isOwnPosition
+                                      ? "Cannot liquidate your own position"
+                                      : "Liquidate this position"
+                                  }
+                                >
+                                  Liquidate
+                                </Button>
+                              </div>
+                            );
+                          })()}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </DorkFiCard>
+      )}
+
       {/* Per-Network Asset Tables */}
       {user?.computed?.networkValues &&
         Object.keys(user.computed.networkValues).length > 0 && (
@@ -4015,7 +5441,11 @@ const Portfolio = () => {
                         variant="outline"
                         size="sm"
                         className="h-8 px-3 text-xs border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Refresh market data for supplied assets"
+                        title={
+                          isViewOnly
+                            ? "Refresh market data (view-only mode)"
+                            : "Refresh market data for supplied assets"
+                        }
                       >
                         <RefreshCw
                           className={`w-3 h-3 mr-1.5 ${
@@ -4299,19 +5729,25 @@ const Portfolio = () => {
                                   liquidationFactor={marketLiquidationThreshold}
                                   network={(deposit as any).network}
                                   poolId={deposit.poolId}
-                                  onDepositClick={() =>
-                                    handleDepositClick(
-                                      deposit.asset,
-                                      deposit.poolId,
-                                      (deposit as any).network
-                                    )
+                                  onDepositClick={
+                                    !isViewOnly
+                                      ? () =>
+                                          handleDepositClick(
+                                            deposit.asset,
+                                            deposit.poolId,
+                                            (deposit as any).network
+                                          )
+                                      : undefined
                                   }
-                                  onWithdrawClick={() =>
-                                    handleWithdrawClick(
-                                      deposit.asset,
-                                      deposit.poolId,
-                                      (deposit as any).network
-                                    )
+                                  onWithdrawClick={
+                                    !isViewOnly
+                                      ? () =>
+                                          handleWithdrawClick(
+                                            deposit.asset,
+                                            deposit.poolId,
+                                            (deposit as any).network
+                                          )
+                                      : undefined
                                   }
                                   onRefreshClick={() =>
                                     handleRefreshSingleMarket(
@@ -5306,38 +6742,42 @@ const Portfolio = () => {
                                   </TableCell>
                                   <TableCell>
                                     <div className="flex items-center gap-2">
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleDepositClick(
-                                            deposit.asset,
-                                            deposit.poolId,
-                                            (deposit as any).network
-                                          );
-                                        }}
-                                        title="Deposit"
-                                        className="w-8 h-8 p-0 flex items-center justify-center"
-                                      >
-                                        +
-                                      </Button>
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleWithdrawClick(
-                                            deposit.asset,
-                                            deposit.poolId,
-                                            (deposit as any).network
-                                          );
-                                        }}
-                                        title="Withdraw"
-                                        className="w-8 h-8 p-0 flex items-center justify-center"
-                                      >
-                                        −
-                                      </Button>
+                                      {!isViewOnly && (
+                                        <>
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleDepositClick(
+                                                deposit.asset,
+                                                deposit.poolId,
+                                                (deposit as any).network
+                                              );
+                                            }}
+                                            title="Deposit"
+                                            className="w-8 h-8 p-0 flex items-center justify-center"
+                                          >
+                                            +
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleWithdrawClick(
+                                                deposit.asset,
+                                                deposit.poolId,
+                                                (deposit as any).network
+                                              );
+                                            }}
+                                            title="Withdraw"
+                                            className="w-8 h-8 p-0 flex items-center justify-center"
+                                          >
+                                            −
+                                          </Button>
+                                        </>
+                                      )}
                                       <Button
                                         size="sm"
                                         variant="outline"
@@ -5358,7 +6798,11 @@ const Portfolio = () => {
                                             currentNetwork
                                           }`
                                         }
-                                        title="Refresh market data"
+                                        title={
+                                          isViewOnly
+                                            ? "Refresh market data (view-only)"
+                                            : "Refresh market data"
+                                        }
                                         className="w-8 h-8 p-0 flex items-center justify-center"
                                       >
                                         <RefreshCw
@@ -5565,7 +7009,11 @@ const Portfolio = () => {
                             variant="outline"
                             size="sm"
                             className="h-8 px-3 text-xs border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
-                            title="Refresh market data for at risk assets"
+                            title={
+                              isViewOnly
+                                ? "Refresh market data (view-only mode)"
+                                : "Refresh market data for at risk assets"
+                            }
                           >
                             <RefreshCw
                               className={`w-3 h-3 mr-1.5 ${
@@ -6100,19 +7548,21 @@ const Portfolio = () => {
                                       </TableCell>
                                       <TableCell>
                                         <div className="flex items-center gap-2">
-                                          <Button
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={() =>
-                                              handleDepositClick(
-                                                asset.asset,
-                                                asset.poolId
-                                              )
-                                            }
-                                            className="w-8 h-8 p-0 flex items-center justify-center"
-                                          >
-                                            +
-                                          </Button>
+                                          {!isViewOnly && (
+                                            <Button
+                                              variant="outline"
+                                              size="sm"
+                                              onClick={() =>
+                                                handleDepositClick(
+                                                  asset.asset,
+                                                  asset.poolId
+                                                )
+                                              }
+                                              className="w-8 h-8 p-0 flex items-center justify-center"
+                                            >
+                                              +
+                                            </Button>
+                                          )}
                                           <Button
                                             size="sm"
                                             variant="outline"
@@ -6176,7 +7626,11 @@ const Portfolio = () => {
                         variant="outline"
                         size="sm"
                         className="h-8 px-3 text-xs border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Refresh market data for borrowed assets"
+                        title={
+                          isViewOnly
+                            ? "Refresh market data (view-only mode)"
+                            : "Refresh market data for borrowed assets"
+                        }
                       >
                         <RefreshCw
                           className={`w-3 h-3 mr-1.5 ${
@@ -6441,19 +7895,25 @@ const Portfolio = () => {
                                   liquidationPrice={liquidationPrice}
                                   network={(borrow as any).network}
                                   poolId={borrow.poolId}
-                                  onDepositClick={() =>
-                                    handleBorrowClick(
-                                      borrow.asset,
-                                      borrow.poolId,
-                                      (borrow as any).network
-                                    )
+                                  onDepositClick={
+                                    !isViewOnly
+                                      ? () =>
+                                          handleBorrowClick(
+                                            borrow.asset,
+                                            borrow.poolId,
+                                            (borrow as any).network
+                                          )
+                                      : undefined
                                   }
-                                  onWithdrawClick={() =>
-                                    handleRepayClick(
-                                      borrow.asset,
-                                      borrow.poolId,
-                                      (borrow as any).network
-                                    )
+                                  onWithdrawClick={
+                                    !isViewOnly
+                                      ? () =>
+                                          handleRepayClick(
+                                            borrow.asset,
+                                            borrow.poolId,
+                                            (borrow as any).network
+                                          )
+                                      : undefined
                                   }
                                   onRefreshClick={() =>
                                     handleRefreshSingleMarket(
@@ -7057,38 +8517,42 @@ const Portfolio = () => {
                                   </TableCell>
                                   <TableCell>
                                     <div className="flex items-center gap-2">
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleBorrowClick(
-                                            borrow.asset,
-                                            borrow.poolId,
-                                            (borrow as any).network
-                                          );
-                                        }}
-                                        title="Borrow"
-                                        className="w-8 h-8 p-0 flex items-center justify-center"
-                                      >
-                                        +
-                                      </Button>
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleRepayClick(
-                                            borrow.asset,
-                                            borrow.poolId,
-                                            (borrow as any).network
-                                          );
-                                        }}
-                                        title="Repay"
-                                        className="w-8 h-8 p-0 flex items-center justify-center"
-                                      >
-                                        −
-                                      </Button>
+                                      {!isViewOnly && (
+                                        <>
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleBorrowClick(
+                                                borrow.asset,
+                                                borrow.poolId,
+                                                (borrow as any).network
+                                              );
+                                            }}
+                                            title="Borrow"
+                                            className="w-8 h-8 p-0 flex items-center justify-center"
+                                          >
+                                            +
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleRepayClick(
+                                                borrow.asset,
+                                                borrow.poolId,
+                                                (borrow as any).network
+                                              );
+                                            }}
+                                            title="Repay"
+                                            className="w-8 h-8 p-0 flex items-center justify-center"
+                                          >
+                                            −
+                                          </Button>
+                                        </>
+                                      )}
                                       <Button
                                         size="sm"
                                         variant="outline"
@@ -7290,7 +8754,11 @@ const Portfolio = () => {
                         variant="outline"
                         size="sm"
                         className="h-8 px-3 text-xs border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Refresh market data for accrued interest"
+                        title={
+                          isViewOnly
+                            ? "Refresh market data (view-only mode)"
+                            : "Refresh market data for accrued interest"
+                        }
                       >
                         <RefreshCw
                           className={`w-3 h-3 mr-1.5 ${
@@ -8040,7 +9508,7 @@ const Portfolio = () => {
                 <H1 className="text-xl text-red-500 m-0">At Risk Positions</H1>
               </div>
               <button
-                onClick={() => fetchUser(activeAccount.address)}
+                onClick={() => displayAddress && fetchUser(displayAddress)}
                 disabled={isLoadingPositions}
                 className="flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Refresh positions data"
@@ -8192,7 +9660,7 @@ const Portfolio = () => {
           })
         }
         onRefreshWalletBalance={refreshWalletBalance}
-        onRefreshMarket={() => fetchUser(activeAccount.address)}
+        onRefreshMarket={() => displayAddress && fetchUser(displayAddress)}
       />
 
       {/* NFT Selection Modal */}
@@ -8343,6 +9811,562 @@ const Portfolio = () => {
         netLTV={netLTV}
         addressName={addressName}
       />
+
+      {/* Liquidation Modal */}
+      <Dialog
+        open={liquidationModalOpen}
+        onOpenChange={setLiquidationModalOpen}
+      >
+        <DialogContent className="max-w-2xl p-6">
+          <DialogHeader>
+            <DialogTitle>Liquidate Position</DialogTitle>
+          </DialogHeader>
+          {selectedLiquidationPosition &&
+            (() => {
+              // Calculate liquidation amount in WAD from liquidation value and debt market price
+              const debtSymbol =
+                selectedLiquidationPosition.debtTokenInfo?.data?.symbol;
+              const networkId = selectedLiquidationPosition.network;
+              const liquidationValueUsd =
+                selectedLiquidationPosition.liquidationAmount || 0;
+
+              // Find the debt market to get price - try multiple matching strategies
+              let debtMarket = marketData.find((m) => {
+                const matchesSymbol = m.symbol === debtSymbol;
+                const matchesNetwork =
+                  (m as any).network === networkId ||
+                  (networkId && m.network === networkId);
+                const matchesPool =
+                  selectedLiquidationPosition.debtMarketId &&
+                  (m.poolId ===
+                    selectedLiquidationPosition.debtMarketId.toString() ||
+                    m.appId ===
+                      selectedLiquidationPosition.debtMarketId.toString());
+                return matchesSymbol && (matchesNetwork || matchesPool);
+              });
+
+              // If not found, try matching by symbol and network only
+              if (!debtMarket) {
+                debtMarket = marketData.find((m) => {
+                  const matchesSymbol = m.symbol === debtSymbol;
+                  const matchesNetwork =
+                    (m as any).network === networkId ||
+                    (networkId && m.network === networkId);
+                  return matchesSymbol && matchesNetwork;
+                });
+              }
+
+              // If still not found, try matching by symbol only (fallback)
+              if (!debtMarket) {
+                debtMarket = marketData.find((m) => m.symbol === debtSymbol);
+              }
+
+              // Get token price from market
+              let debtTokenPrice = 0;
+              if (debtMarket) {
+                console.log("debtMarket found:", {
+                  symbol: debtMarket.symbol,
+                  poolId: debtMarket.poolId,
+                  appId: debtMarket.appId,
+                  network: (debtMarket as any).network,
+                  price: debtMarket.price,
+                  marketInfoPrice: debtMarket.marketInfo?.price,
+                });
+
+                const token = getAllTokensWithDisplayInfo(
+                  networkId as NetworkId
+                ).find((t) => t.symbol === debtSymbol);
+
+                // Try multiple price sources
+                if (debtMarket.price) {
+                  // Price from contract (needs formatting)
+                  debtTokenPrice = formatPriceFromContract(
+                    debtMarket.price,
+                    token?.decimals || 6
+                  );
+                  console.log("Using market.price:", {
+                    raw: debtMarket.price,
+                    formatted: debtTokenPrice,
+                    decimals: token?.decimals || 6,
+                  });
+                } else if (debtMarket.marketInfo?.price) {
+                  // MarketInfo price is already formatted (scaled by 10^6)
+                  const rawPrice = parseFloat(debtMarket.marketInfo.price);
+                  // If it's a large number, it might still be scaled
+                  if (rawPrice > 1000000) {
+                    debtTokenPrice = rawPrice / Math.pow(10, 6);
+                  } else {
+                    debtTokenPrice = rawPrice;
+                  }
+                  console.log("Using marketInfo.price:", {
+                    raw: debtMarket.marketInfo.price,
+                    parsed: rawPrice,
+                    final: debtTokenPrice,
+                  });
+                } else {
+                  console.warn("No price found in debtMarket:", debtMarket);
+                }
+              } else {
+                console.warn("Debt market not found:", {
+                  debtSymbol,
+                  networkId,
+                  debtMarketId: selectedLiquidationPosition.debtMarketId,
+                  availableMarkets: marketData.map((m) => ({
+                    symbol: m.symbol,
+                    poolId: m.poolId,
+                    network: (m as any).network,
+                  })),
+                });
+              }
+
+              console.log("Final debtTokenPrice:", debtTokenPrice);
+              console.log("liquidationValueUsd:", liquidationValueUsd);
+
+              // Calculate liquidation amount in tokens from liquidation value
+              const liquidationAmountInTokens =
+                debtTokenPrice > 0 ? liquidationValueUsd / debtTokenPrice : 0;
+
+              const liquidationAmountWad = liquidationAmountInTokens;
+
+              const formattedLiquidationAmount =
+                liquidationAmountWad > 0
+                  ? Math.floor(liquidationAmountWad).toLocaleString("en-US", {
+                      useGrouping: true,
+                    })
+                  : "0";
+
+              return (
+                <div className="space-y-4 pt-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm text-muted-foreground mb-1">
+                        User Address
+                      </p>
+                      <p className="font-mono text-sm break-all">
+                        {selectedLiquidationPosition.user}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground mb-1">
+                        Network
+                      </p>
+                      <p>
+                        {selectedLiquidationPosition.network === "voi-mainnet"
+                          ? "Voi"
+                          : selectedLiquidationPosition.network ===
+                            "algorand-mainnet"
+                          ? "Algorand"
+                          : selectedLiquidationPosition.network || "N/A"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground mb-1">
+                        Debt Asset
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <img
+                          src={getTokenImagePath(
+                            selectedLiquidationPosition.debtTokenInfo?.data
+                              ?.symbol || ""
+                          )}
+                          alt={
+                            selectedLiquidationPosition.debtTokenInfo?.data
+                              ?.symbol || ""
+                          }
+                          className="w-5 h-5 rounded-full"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src =
+                              "/placeholder.svg";
+                          }}
+                        />
+                        <span className="font-medium">
+                          {selectedLiquidationPosition.debtTokenInfo?.data
+                            ?.symbol || "N/A"}
+                        </span>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground mb-1">
+                        Collateral Asset
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <img
+                          src={getTokenImagePath(
+                            selectedLiquidationPosition.collateralTokenInfo
+                              ?.data?.symbol || ""
+                          )}
+                          alt={
+                            selectedLiquidationPosition.collateralTokenInfo
+                              ?.data?.symbol || ""
+                          }
+                          className="w-5 h-5 rounded-full"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src =
+                              "/placeholder.svg";
+                          }}
+                        />
+                        <span className="font-medium">
+                          {selectedLiquidationPosition.collateralTokenInfo?.data
+                            ?.symbol || "N/A"}
+                        </span>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground mb-1">
+                        Debt Value
+                      </p>
+                      <p className="font-medium">
+                        $
+                        {selectedLiquidationPosition.borrowValueUsd?.toFixed(
+                          2
+                        ) || "0.00"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground mb-1">
+                        Collateral Value
+                      </p>
+                      <p className="font-medium">
+                        $
+                        {selectedLiquidationPosition.collateralValueUsd?.toFixed(
+                          2
+                        ) || "0.00"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground mb-1">
+                        Liquidation Value
+                      </p>
+                      <p className="font-medium">
+                        $
+                        {selectedLiquidationPosition.liquidationAmount?.toFixed(
+                          2
+                        ) || "0.00"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground mb-1">
+                        Liquidation Amount
+                      </p>
+                      <p className="font-medium font-mono">
+                        {formattedLiquidationAmount} WAD
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2 pt-4">
+                    <Button
+                      variant="outline"
+                      onClick={() => setLiquidationModalOpen(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={handleLiquidation}
+                      disabled={isLiquidating || debtTokenPrice === 0}
+                    >
+                      {isLiquidating
+                        ? "Processing..."
+                        : "Proceed to Liquidation"}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* Repay Modal */}
+      <Dialog open={repayModalOpen} onOpenChange={setRepayModalOpen}>
+        <DialogContent className="max-w-2xl p-6">
+          <DialogHeader>
+            <DialogTitle>Repay on Behalf</DialogTitle>
+          </DialogHeader>
+          {selectedRepayPosition &&
+            (() => {
+              const debtSymbol = selectedRepayPosition.debtSymbol;
+              const networkId = selectedRepayPosition.networkId;
+              const borrowValueUsd = selectedRepayPosition.borrowValueUsd || 0;
+              const debtMarket = selectedRepayPosition.debtMarket;
+              const debtMarketId = selectedRepayPosition.debtMarketId;
+
+              // Get token information
+              const tokens = getAllTokensWithDisplayInfo(networkId);
+              let token = tokens.find(
+                (t) =>
+                  t.symbol === debtSymbol &&
+                  t.poolId === selectedRepayPosition.appId?.toString()
+              );
+
+              if (!token && debtMarketId) {
+                token = tokens.find(
+                  (t) => t.underlyingContractId === debtMarketId
+                );
+              }
+
+              if (!token) {
+                token = tokens.find((t) => t.symbol === debtSymbol);
+              }
+
+              // Get token price
+              let tokenPrice = 1;
+              if (debtMarket?.price) {
+                tokenPrice =
+                  parseFloat(debtMarket.price) / Math.pow(10, 6);
+              } else if (debtMarket?.marketInfo?.price) {
+                const rawPrice = parseFloat(debtMarket.marketInfo.price);
+                tokenPrice =
+                  rawPrice > 1000000 ? rawPrice / Math.pow(10, 6) : rawPrice;
+              }
+
+              // Calculate token amount from USD value
+              const calculatedTokenAmount = borrowValueUsd / tokenPrice;
+
+              // Use minimum of calculated amount and wallet balance
+              const tokenAmount = repayWalletBalance !== null
+                ? Math.min(calculatedTokenAmount, repayWalletBalance)
+                : calculatedTokenAmount;
+
+              // Handler for repay on behalf
+              const handleRepayOnBehalf = async () => {
+                if (!activeAccount?.address) {
+                  toast({
+                    title: "Error",
+                    description: "Please connect your wallet",
+                    variant: "destructive",
+                  });
+                  return;
+                }
+
+                if (!token) {
+                  toast({
+                    title: "Error",
+                    description: "Token not found",
+                    variant: "destructive",
+                  });
+                  return;
+                }
+
+                try {
+                  setIsRepaying(true);
+
+                  // Get token config for tokenStandard
+                  const originalSymbol =
+                    "originalSymbol" in token
+                      ? (token as any).originalSymbol
+                      : debtSymbol;
+                  const originalTokenConfigRaw = getTokenConfig(
+                    networkId,
+                    originalSymbol
+                  );
+
+                  if (!originalTokenConfigRaw) {
+                    throw new Error("Token config not found");
+                  }
+
+                  const originalTokenConfig = Array.isArray(
+                    originalTokenConfigRaw
+                  )
+                    ? originalTokenConfigRaw.find(
+                        (tc) =>
+                          String(tc.poolId) ===
+                          String(selectedRepayPosition.appId)
+                      ) || originalTokenConfigRaw[0]
+                    : originalTokenConfigRaw;
+
+                  // Use token's underlyingContractId for marketId
+                  const marketId = token.underlyingContractId;
+                  const poolId = selectedRepayPosition.appId?.toString();
+
+                  if (!poolId) {
+                    throw new Error("Pool ID not found");
+                  }
+
+                  if (!marketId) {
+                    throw new Error("Market ID not found");
+                  }
+
+                  // Call repayOnBehalf
+                  const result = await repayOnBehalf(
+                    poolId,
+                    marketId,
+                    originalTokenConfig.tokenStandard,
+                    tokenAmount.toString(),
+                    activeAccount.address,
+                    selectedRepayPosition.user || "",
+                    networkId
+                  );
+
+                  if (!result.success) {
+                    throw new Error(
+                      (result as any).error || "Repay failed"
+                    );
+                  }
+
+                  toast({
+                    title: "Please Sign Transaction",
+                    description: `Please open ${activeWallet?.metadata?.name || "your wallet"} and sign the transaction`,
+                    duration: 10000,
+                  });
+
+                  // Sign and send transactions
+                  const stxns = await signTransactions(
+                    (result as any).txns.map((txn: string) =>
+                      Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+                    )
+                  );
+
+                  // Get the correct algod client for the network
+                  const algorandNetwork =
+                    getAlgorandNetworkFromNetworkId(networkId);
+                  if (!algorandNetwork) {
+                    throw new Error(`Invalid network: ${networkId}`);
+                  }
+                  const algorandClients =
+                    await algorandService.initializeClientsForTransactions(
+                      algorandNetwork
+                    );
+                  const res =
+                    await algorandClients.algod
+                      .sendRawTransaction(stxns)
+                      .do();
+
+                  await waitForConfirmation(
+                    algorandClients.algod,
+                    res.txid,
+                    4
+                  );
+
+                  toast({
+                    title: "Success",
+                    description: "Repay transaction completed successfully",
+                  });
+
+                  // Close modal and refresh data
+                  setRepayModalOpen(false);
+                  setSelectedRepayPosition(null);
+
+                  // Refresh user data
+                  if (displayAddress) {
+                    await fetchUser(displayAddress);
+                  }
+                } catch (error) {
+                  console.error("Repay on behalf error:", error);
+                  toast({
+                    title: "Repay Failed",
+                    description:
+                      error instanceof Error
+                        ? error.message
+                        : "Repay failed",
+                    variant: "destructive",
+                  });
+                } finally {
+                  setIsRepaying(false);
+                }
+              };
+
+              return (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <p className="text-sm text-muted-foreground">
+                      Repay debt on behalf of another user. You will provide
+                      the tokens, and the beneficiary's debt will be reduced.
+                    </p>
+                  </div>
+
+                  <div className="space-y-4 p-4 bg-muted/50 rounded-lg">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-medium">Debt Asset:</span>
+                      <span className="text-sm">{debtSymbol || "N/A"}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-medium">
+                        Debt Value (USD):
+                      </span>
+                      <span className="text-sm">
+                        ${borrowValueUsd.toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-medium">
+                        Token Amount:
+                      </span>
+                      <span className="text-sm">
+                        {isLoadingRepayBalance ? (
+                          "Loading..."
+                        ) : (
+                          <>
+                            {tokenAmount.toFixed(6)} {debtSymbol}
+                            {repayWalletBalance !== null &&
+                              repayWalletBalance < calculatedTokenAmount && (
+                                <span className="text-xs text-muted-foreground ml-2">
+                                  (limited by wallet balance)
+                                </span>
+                              )}
+                          </>
+                        )}
+                      </span>
+                    </div>
+                    {repayWalletBalance !== null && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm font-medium">
+                          Your Wallet Balance:
+                        </span>
+                        <span className="text-sm">
+                          {repayWalletBalance.toFixed(6)} {debtSymbol}
+                        </span>
+                      </div>
+                    )}
+                    {repayWalletBalance !== null &&
+                      repayWalletBalance < calculatedTokenAmount && (
+                        <div className="text-xs text-muted-foreground p-2 bg-yellow-50 dark:bg-yellow-900/20 rounded">
+                          Note: Your wallet balance ({repayWalletBalance.toFixed(6)}) is less than the full debt amount ({calculatedTokenAmount.toFixed(6)}). Only {tokenAmount.toFixed(6)} will be repaid.
+                        </div>
+                      )}
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-medium">Beneficiary:</span>
+                      <span className="text-xs font-mono">
+                        {selectedRepayPosition.user || "N/A"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-medium">Network:</span>
+                      <span className="text-sm">
+                        {networkId === "voi-mainnet"
+                          ? "Voi"
+                          : networkId === "algorand-mainnet"
+                          ? "Algorand"
+                          : networkId}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-4">
+                    <Button
+                      variant="outline"
+                      onClick={() => setRepayModalOpen(false)}
+                      disabled={isRepaying}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="default"
+                      onClick={handleRepayOnBehalf}
+                      disabled={
+                        isRepaying ||
+                        !token ||
+                        !activeAccount?.address ||
+                        tokenPrice === 0
+                      }
+                    >
+                      {isRepaying ? "Processing..." : "Repay"}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })()}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

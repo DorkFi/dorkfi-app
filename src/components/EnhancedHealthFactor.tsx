@@ -14,8 +14,8 @@ interface EnhancedHealthFactorProps {
   netLTV: number;
   dorkNftImage?: string;
   underwaterBg: string;
-  onAddCollateral: () => void;
-  onBuyVoi: () => void;
+  onAddCollateral?: () => void;
+  onBuyVoi?: () => void;
   onEditProfile?: () => void;
   onRefreshMarkets?: () => void;
   isRefreshingMarkets?: boolean;

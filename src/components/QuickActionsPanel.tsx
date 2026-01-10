@@ -6,11 +6,11 @@ import { ChevronDown, ChevronUp, Plus, Minus, ArrowDown, ArrowUp, Zap } from "lu
 import { Button } from "@/components/ui/button";
 
 interface QuickActionsPanelProps {
-  onAddCollateral: () => void;
-  onRepayDebt: () => void;
-  onDeposit: (asset?: string) => void;
-  onWithdraw: (asset?: string) => void;
-  onBorrow: (asset?: string) => void;
+  onAddCollateral?: () => void;
+  onRepayDebt?: () => void;
+  onDeposit?: (asset?: string) => void;
+  onWithdraw?: (asset?: string) => void;
+  onBorrow?: (asset?: string) => void;
   totalBorrowed: number;
   deposits: Array<{ asset: string; value: number }>;
   borrows: Array<{ asset: string; value: number }>;
@@ -76,15 +76,17 @@ const QuickActionsPanel = ({
                   Urgent Actions
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <DorkFiButton
-                    variant="secondary"
-                    onClick={onAddCollateral}
-                    className="w-full justify-start text-sm"
-                  >
-                    <Plus className="w-4 h-4 mr-2" />
-                    Add Collateral
-                  </DorkFiButton>
-                  {hasBorrows && (
+                  {onAddCollateral && (
+                    <DorkFiButton
+                      variant="secondary"
+                      onClick={onAddCollateral}
+                      className="w-full justify-start text-sm"
+                    >
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add Collateral
+                    </DorkFiButton>
+                  )}
+                  {hasBorrows && onRepayDebt && (
                     <DorkFiButton
                       variant="danger-outline"
                       onClick={onRepayDebt}
@@ -99,7 +101,7 @@ const QuickActionsPanel = ({
             )}
 
             {/* Quick Deposit Actions */}
-            {topDeposits.length > 0 && (
+            {topDeposits.length > 0 && onDeposit && (
               <div className="space-y-2">
                 <h3 className="text-sm font-semibold text-green-500 flex items-center gap-2">
                   <ArrowDown className="w-4 h-4" />
@@ -122,7 +124,7 @@ const QuickActionsPanel = ({
             )}
 
             {/* Quick Withdraw Actions */}
-            {topDeposits.length > 0 && (
+            {topDeposits.length > 0 && onWithdraw && (
               <div className="space-y-2">
                 <h3 className="text-sm font-semibold text-blue-500 flex items-center gap-2">
                   <ArrowUp className="w-4 h-4" />
@@ -145,7 +147,7 @@ const QuickActionsPanel = ({
             )}
 
             {/* Quick Repay Actions */}
-            {topBorrows.length > 0 && (
+            {topBorrows.length > 0 && onRepayDebt && (
               <div className="space-y-2">
                 <h3 className="text-sm font-semibold text-red-500 flex items-center gap-2">
                   <ArrowDown className="w-4 h-4" />

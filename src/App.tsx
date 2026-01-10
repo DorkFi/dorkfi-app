@@ -14,6 +14,8 @@ import { isFeatureEnabled } from "./config";
 import CountdownPage from "./pages/Countdown";
 import MarketsTable from "./components/MarketsTable";
 import Dashboard from "./components/Dashboard";
+import Portfolio from "./components/Portfolio";
+import PortfolioPage from "./pages/PortfolioPage";
 
 //const LAUNCH_TIMESTAMP = Date.UTC(2025, 10, 21, 2, 0, 0); // Nov 20, 2025 6:00 PM PST (Nov 21, 2025 2:00 AM UTC)
 const LAUNCH_TIMESTAMP = Date.now();
@@ -90,6 +92,7 @@ function App() {
                   />
                 }
               />
+              <Route path="/portfolio/:address" element={<PortfolioPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </BrowserRouter>

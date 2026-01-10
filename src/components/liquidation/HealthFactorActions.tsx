@@ -7,8 +7,8 @@ import {
 
 interface HealthFactorActionsProps {
   healthFactor: number | null;
-  onAddCollateral: () => void;
-  onBuyVoi: () => void;
+  onAddCollateral?: () => void;
+  onBuyVoi?: () => void;
 }
 
 const HealthFactorActions = ({
