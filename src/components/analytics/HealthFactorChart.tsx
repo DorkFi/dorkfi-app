@@ -43,12 +43,21 @@ const HealthFactorChart = () => {
         console.log('Orca API response:', { count: data.count, total: data.total, opportunitiesLength: data.opportunities?.length });
 
         if (data && data.opportunities && Array.isArray(data.opportunities) && data.opportunities.length > 0) {
+          // Filter out opportunities with collateralValueUsd less than 1.00
+          const filteredOpportunities = data.opportunities.filter((opportunity: any) => {
+            const collateralValueUsd = opportunity.collateralValueUsd;
+            // Include if collateralValueUsd is undefined/null (for backward compatibility) or >= 1.00
+            return collateralValueUsd === undefined || collateralValueUsd === null || collateralValueUsd >= 1.00;
+          });
+          
+          console.log(`Filtered opportunities: ${filteredOpportunities.length} out of ${data.opportunities.length} (excluded ${data.opportunities.length - filteredOpportunities.length} with collateralValueUsd < 1.00)`);
+          
           // Deduplicate by user to count unique users per health factor range
           // Each user can have multiple opportunities (different collateral/debt pairs)
           // We'll use the minimum effectiveHF for each user to represent their risk level
           const userHealthFactors = new Map<string, number>();
           
-          data.opportunities.forEach((opportunity: any) => {
+          filteredOpportunities.forEach((opportunity: any) => {
             const hf = opportunity.effectiveHF;
             if (hf === null || hf === undefined || isNaN(hf)) return;
             
