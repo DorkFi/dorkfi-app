@@ -2445,15 +2445,15 @@ export const migrate = async (
         token,
       });
 
-      // Get old market info
-      const oldMarketInfo = await fetchMarketInfo(
-        oldPoolId,
-        oldContractId,
-        networkId
-      );
-      if (!oldMarketInfo) {
-        throw new Error("Failed to fetch old market info");
-      }
+      // // Get old market info
+      // const oldMarketInfo = await fetchMarketInfo(
+      //   oldPoolId,
+      //   oldContractId,
+      //   networkId
+      // );
+      // if (!oldMarketInfo) {
+      //   throw new Error("Failed to fetch old market info");
+      // }
 
       // Get new market info
       const newMarketInfo = await fetchMarketInfo(
