@@ -67,6 +67,7 @@ const WithdrawModal = ({
   const [showSuccess, setShowSuccess] = useState(false);
   const [expandedDetail, setExpandedDetail] = useState<string | null>(null);
   const [showDebugValues, setShowDebugValues] = useState(false);
+  const [internalLoading, setInternalLoading] = useState(false);
 
   // Calculate values using indices
   // Formula:
@@ -141,6 +142,7 @@ const WithdrawModal = ({
       setShowSuccess(false);
       setAmount("");
       setFiatValue(0);
+      setInternalLoading(false);
     }
   }, [isOpen]);
 
@@ -161,15 +163,22 @@ const WithdrawModal = ({
     setAmount(formattedAmount);
   };
 
-  const handleSubmit = () => {
-    if (onSubmit) {
-      onSubmit(amount);
-    } else {
-      console.log(`Withdraw ${amount} ${tokenSymbol}`);
+  const handleSubmit = async () => {
+    setInternalLoading(true);
+    try {
+      if (onSubmit) {
+        await onSubmit(amount);
+      } else {
+        console.log(`Withdraw ${amount} ${tokenSymbol}`);
 
-      setTimeout(() => {
+        await new Promise((resolve) => setTimeout(resolve, 500));
         setShowSuccess(true);
-      }, 500);
+      }
+    } catch (error) {
+      console.error("Withdraw failed:", error);
+      // Don't show success on error
+    } finally {
+      setInternalLoading(false);
     }
   };
 
@@ -537,17 +546,24 @@ const WithdrawModal = ({
               <Button
                 variant="outline"
                 onClick={onClose}
-                disabled={isLoading}
+                disabled={isLoading || internalLoading}
                 className="flex-1"
               >
                 Cancel
               </Button>
               <Button
                 onClick={handleSubmit}
-                disabled={!isValidAmount || isLoading}
+                disabled={!isValidAmount || isLoading || internalLoading}
                 className="flex-1 font-semibold h-11 bg-red-600 hover:bg-red-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isLoading ? "Processing..." : `Withdraw ${tokenSymbol}`}
+                {isLoading || internalLoading ? (
+                  <div className="flex items-center gap-2 justify-center">
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    Processing...
+                  </div>
+                ) : (
+                  `Withdraw ${tokenSymbol}`
+                )}
               </Button>
             </div>
           </div>

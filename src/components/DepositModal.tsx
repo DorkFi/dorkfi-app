@@ -45,6 +45,7 @@ const DepositModal = ({
   const [amount, setAmount] = useState("");
   const [fiatValue, setFiatValue] = useState(0);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   // Reset states when modal opens/closes
   useEffect(() => {
@@ -52,6 +53,7 @@ const DepositModal = ({
       setShowSuccess(false);
       setAmount("");
       setFiatValue(0);
+      setIsLoading(false);
     }
   }, [isOpen]);
 
@@ -68,12 +70,19 @@ const DepositModal = ({
     setAmount(userBalance.toString());
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    setIsLoading(true);
     console.log(`Deposit ${amount} ${tokenSymbol}`);
 
-    setTimeout(() => {
+    try {
+      // Simulate async deposit operation
+      await new Promise((resolve) => setTimeout(resolve, 500));
       setShowSuccess(true);
-    }, 500);
+    } catch (error) {
+      console.error("Deposit failed:", error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleViewTransaction = () => {
@@ -299,10 +308,17 @@ const DepositModal = ({
 
               <Button
                 onClick={handleSubmit}
-                disabled={!isValidAmount}
+                disabled={!isValidAmount || isLoading}
                 className="w-full font-semibold text-white h-12 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Deposit {tokenSymbol}
+                {isLoading ? (
+                  <div className="flex items-center gap-2 justify-center">
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    Processing...
+                  </div>
+                ) : (
+                  `Deposit ${tokenSymbol}`
+                )}
               </Button>
             </div>
           </>
