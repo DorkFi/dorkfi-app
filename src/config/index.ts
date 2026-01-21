@@ -1949,7 +1949,7 @@ export const config: GlobalConfig = {
     enablePreFi: false,
     enableLiquidations: false,
     enableSwap: false,
-    enableGovernance: false, // Disabled until governance contracts are deployed
+    enableGovernance: true, // Governance UI enabled
     enableMigration: true, // Enable asset migration feature
     enableGasStation: false,
   },

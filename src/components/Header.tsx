@@ -29,6 +29,8 @@ const Header = ({ activeTab, onTabChange }: HeaderProps) => {
       navigate("/gas-station");
     } else if (value === "analytics") {
       navigate("/analytics");
+    } else if (value === "governance") {
+      navigate("/governance");
     } else {
       navigate("/");
     }
@@ -49,6 +51,8 @@ const Header = ({ activeTab, onTabChange }: HeaderProps) => {
       onTabChange("liquidations");
     } else if (location.pathname === "/gas-station") {
       onTabChange("gas-station");
+    } else if (location.pathname === "/governance") {
+      onTabChange("governance");
     }
   }, [location.pathname, onTabChange]);
 
@@ -67,6 +71,9 @@ const Header = ({ activeTab, onTabChange }: HeaderProps) => {
       ? [{ value: "liquidations", label: "Liquidations" }]
       : []),
     { value: "analytics", label: "Analytics" },
+    ...(isFeatureEnabled("enableGovernance")
+      ? [{ value: "governance", label: "Governance" }]
+      : []),
     //{ value: 'swap', label: 'Swap' },
     ...(isFeatureEnabled("enableGasStation") && hasGasStation
       ? [{ value: "gas-station", label: "Gas Station" }]
