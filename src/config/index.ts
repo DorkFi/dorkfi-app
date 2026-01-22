@@ -18,11 +18,16 @@ export type NetworkId =
 
 export type NetworkType = "avm" | "evm";
 
+export interface GovernanceConfig {
+  appId: number;
+  storageAppId: number;
+}
+
 export interface ContractConfig {
   lendingPools: string[];
   priceOracle?: string;
   liquidationEngine?: string;
-  governance?: string;
+  governance?: string | GovernanceConfig;
   treasury?: string;
   marketController?: string;
   sToken?: string;
@@ -817,7 +822,9 @@ const prodContracts = {
   lendingPools: [...prodLendingPools],
   priceOracle: "47138069",
   liquidationEngine: undefined,
-  governance: undefined,
+  governance: {
+    appId: 48458481, storageAppId: 48458476
+  },
   treasury: undefined,
   marketController: "47138067",
   sToken: "47138068",
@@ -2094,7 +2101,7 @@ export const isNetworkEnabled = (networkId: NetworkId): boolean => {
 export const getContractAddress = (
   networkId: NetworkId,
   contractName: keyof ContractConfig
-): string | string[] | undefined => {
+): string | string[] | GovernanceConfig | undefined => {
   return config.networks[networkId].contracts[contractName];
 };
 
