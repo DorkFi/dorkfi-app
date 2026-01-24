@@ -8,20 +8,32 @@ import { getCurrentGasStationSymbols, isFeatureEnabled } from "@/config";
 import { useWallet } from "@txnlab/use-wallet-react";
 
 interface HeaderProps {
-  activeTab: string;
-  onTabChange: (value: string) => void;
+  activeTab?: string;
+  onTabChange?: (value: string) => void;
 }
 
-const Header = ({ activeTab, onTabChange }: HeaderProps) => {
+const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { currentNetwork } = useNetwork();
   const { activeAccount } = useWallet();
 
+  // Determine activeTab from location if not provided
+  const currentActiveTab = activeTab || (() => {
+    if (location.pathname === "/analytics") return "analytics";
+    if (location.pathname === "/liquidation-markets") return "liquidations";
+    if (location.pathname === "/gas-station") return "gas-station";
+    if (location.pathname === "/governance") return "governance";
+    if (location.pathname === "/portfolio") return "portfolio";
+    return "markets";
+  })();
+
   const handleTabChange = (value: string) => {
     console.log("Header tab change:", value);
-    onTabChange(value);
+    if (onTabChange) {
+      onTabChange(value);
+    }
 
     if (value === "liquidations") {
       navigate("/liquidation-markets");
@@ -38,21 +50,25 @@ const Header = ({ activeTab, onTabChange }: HeaderProps) => {
   };
 
   const handleLogoClick = () => {
-    onTabChange("dashboard");
+    if (onTabChange) {
+      onTabChange("dashboard");
+    }
     navigate("/");
     setIsMobileMenuOpen(false);
   };
 
   // Sync activeTab with current route
   useEffect(() => {
-    if (location.pathname === "/analytics") {
-      onTabChange("analytics");
-    } else if (location.pathname === "/liquidation-markets") {
-      onTabChange("liquidations");
-    } else if (location.pathname === "/gas-station") {
-      onTabChange("gas-station");
-    } else if (location.pathname === "/governance") {
-      onTabChange("governance");
+    if (onTabChange) {
+      if (location.pathname === "/analytics") {
+        onTabChange("analytics");
+      } else if (location.pathname === "/liquidation-markets") {
+        onTabChange("liquidations");
+      } else if (location.pathname === "/gas-station") {
+        onTabChange("gas-station");
+      } else if (location.pathname === "/governance") {
+        onTabChange("governance");
+      }
     }
   }, [location.pathname, onTabChange]);
 
@@ -92,7 +108,9 @@ const Header = ({ activeTab, onTabChange }: HeaderProps) => {
             to="/"
             className="flex items-center space-x-3 cursor-pointer hover:opacity-80 transition-opacity"
             onClick={() => {
-              onTabChange("markets");
+              if (onTabChange) {
+                onTabChange("markets");
+              }
               setIsMobileMenuOpen(false);
             }}
             aria-label="Go to DorkFi dashboard"
@@ -125,7 +143,7 @@ const Header = ({ activeTab, onTabChange }: HeaderProps) => {
                     size="sm"
                     onClick={() => handleTabChange(tab.value)}
                     className={`flex-1 inline-flex items-center justify-center whitespace-nowrap rounded-sm px-2 md:px-3 py-1.5 text-xs md:text-sm font-medium transition-all ${
-                      activeTab === tab.value
+                      currentActiveTab === tab.value
                         ? "bg-ocean-teal text-white shadow-sm"
                         : "hover:bg-ocean-teal/10 text-gray-700 dark:text-muted-foreground"
                     }`}
@@ -172,9 +190,9 @@ const Header = ({ activeTab, onTabChange }: HeaderProps) => {
               {tabs.map((tab) => (
                 <Button
                   key={tab.value}
-                  variant={activeTab === tab.value ? "default" : "ghost"}
+                  variant={currentActiveTab === tab.value ? "default" : "ghost"}
                   className={`w-full justify-start ${
-                    activeTab === tab.value
+                    currentActiveTab === tab.value
                       ? "bg-ocean-teal text-white"
                       : "hover:bg-ocean-teal/10 text-gray-700 dark:text-white"
                   }`}

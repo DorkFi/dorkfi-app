@@ -172,6 +172,14 @@ export default {
 						opacity: '0.9',
 						transform: 'scale(1.1) rotate(5deg)'
 					}
+				},
+				'glow-pulse': {
+					'0%, 100%': { 
+						textShadow: '0 0 8px hsl(var(--whale-gold) / 0.4), 0 0 16px hsl(var(--whale-gold) / 0.2)'
+					},
+					'50%': { 
+						textShadow: '0 0 16px hsl(var(--whale-gold) / 0.6), 0 0 32px hsl(var(--whale-gold) / 0.3)'
+					}
 				}
 			},
 			animation: {
@@ -188,7 +196,8 @@ export default {
 				'float-delayed-3': 'float-delayed-3 5.5s ease-in-out infinite',
 				'float-spin': 'float-spin 8s linear infinite',
 				'float-large': 'float-large 8s ease-in-out infinite',
-				'glare-shift': 'glare-shift 4s ease-in-out infinite'
+				'glare-shift': 'glare-shift 4s ease-in-out infinite',
+				'glow-pulse': 'glow-pulse 2s ease-in-out infinite'
 			}
 		}
 	},

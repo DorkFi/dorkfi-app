@@ -21,6 +21,7 @@ export type NetworkType = "avm" | "evm";
 export interface GovernanceConfig {
   appId: number;
   storageAppId: number;
+  powerSources?: number[]; // Array of appIds used as sources of voting power
 }
 
 export interface ContractConfig {
@@ -119,6 +120,7 @@ export interface GlobalConfig {
     enableGovernance: boolean;
     enableMigration: boolean;
     enableGasStation: boolean;
+    enableNFTBoost: boolean;
   };
 }
 
@@ -823,7 +825,11 @@ const prodContracts = {
   priceOracle: "47138069",
   liquidationEngine: undefined,
   governance: {
-    appId: 48458481, storageAppId: 48458476
+    appId: 48458481,
+    storageAppId: 48458688,
+    powerSources: [
+      47148525, // UNIT nToken appId
+    ],
   },
   treasury: undefined,
   marketController: "47138067",
@@ -1959,6 +1965,7 @@ export const config: GlobalConfig = {
     enableGovernance: true, // Governance UI enabled
     enableMigration: true, // Enable asset migration feature
     enableGasStation: false,
+    enableNFTBoost: false, // Enable NFT boost for governance voting power
   },
 };
 

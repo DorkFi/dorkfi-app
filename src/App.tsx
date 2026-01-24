@@ -96,12 +96,7 @@ function App() {
               {isFeatureEnabled("enableGovernance") && (
                 <Route
                   path="/governance"
-                  element={
-                    <Governance
-                      activeTab={activeTab}
-                      onTabChange={setActiveTab}
-                    />
-                  }
+                  element={<Governance />}
                 />
               )}
               <Route path="/portfolio/:address" element={<PortfolioPage />} />

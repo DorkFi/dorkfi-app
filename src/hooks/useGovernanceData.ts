@@ -1,7 +1,10 @@
 import { useState, useEffect } from "react";
 import { Proposal, VotingStats } from "@/types/governanceTypes";
+import { getEvents, decodeProposalCreatedEvent, getProposal } from "@/services/governanceService";
+import { convertServiceProposalToUI } from "@/utils/governanceUtils";
+import { useWallet } from "@txnlab/use-wallet-react";
 
-// Mock data for development
+// Mock data for development (fallback)
 const mockProposals: Proposal[] = [
   {
     id: "prop-001",
@@ -122,60 +125,151 @@ const mockStats: VotingStats = {
   participationRate: 42.5
 };
 
+/**
+ * Calculate voting stats from proposals
+ */
+const calculateStatsFromProposals = (
+  proposals: Proposal[],
+  userVotingPower: number = 0
+): VotingStats => {
+  const activeProposals = proposals.filter((p) => p.status === "active").length;
+  const totalProposals = proposals.length;
+  
+  // Calculate total voting power from all proposals (use max quorum as proxy for total supply)
+  const maxQuorum = proposals.length > 0
+    ? Math.max(...proposals.map((p) => p.quorum))
+    : 0;
+  const totalUnitSupply = maxQuorum > 0 ? maxQuorum * 2 : 10000000; // Estimate if no proposals
+
+  // Calculate participation rate from average of proposals
+  const avgParticipation = proposals.length > 0
+    ? proposals.reduce((sum, p) => {
+        const participation = p.quorum > 0 ? (p.totalVotes / p.quorum) * 100 : 0;
+        return sum + participation;
+      }, 0) / proposals.length
+    : 0;
+
+  return {
+    totalUnitSupply,
+    yourVotingPower: userVotingPower,
+    activeProposals,
+    totalProposals,
+    participationRate: avgParticipation,
+  };
+};
+
 export const useGovernanceData = () => {
+  const { activeAccount } = useWallet();
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [stats, setStats] = useState<VotingStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [userVotes, setUserVotes] = useState<Map<string, boolean>>(new Map());
 
   useEffect(() => {
-    // Simulate API fetch
     const fetchData = async () => {
       setLoading(true);
-      // Simulate network delay
-      await new Promise(resolve => setTimeout(resolve, 500));
-      setProposals(mockProposals);
-      setStats(mockStats);
-      setLoading(false);
+      setError(null);
+      
+      try {
+        // Fetch governance events
+        const events = await getEvents();
+        const eventsArray = Array.isArray(events) ? events : [events];
+
+        // Extract ProposalCreated events and fetch proposal details
+        const proposalCreatedEvents: string[] = [];
+        for (const group of eventsArray) {
+          if (group?.name === "ProposalCreated" && Array.isArray(group?.events)) {
+            for (const ev of group.events) {
+              if (Array.isArray(ev) && ev.length >= 4) {
+                try {
+                  const decoded = decodeProposalCreatedEvent(ev as [string, unknown, unknown, string]);
+                  proposalCreatedEvents.push(decoded.proposal_id);
+                } catch (err) {
+                  console.error("Failed to decode ProposalCreated event:", err);
+                }
+              }
+            }
+          }
+        }
+
+        // Fetch proposal details for each ProposalCreated event
+        const fetchedProposals: Proposal[] = [];
+        for (const proposalId of proposalCreatedEvents) {
+          try {
+            const serviceProposal = await getProposal(proposalId);
+            const uiProposal = convertServiceProposalToUI(serviceProposal, proposalId);
+            fetchedProposals.push(uiProposal);
+          } catch (err: any) {
+            console.error(`Failed to fetch proposal ${proposalId}:`, err);
+            // Continue fetching other proposals even if one fails
+          }
+        }
+
+        // Use fetched proposals if available, otherwise fall back to mock data
+        if (fetchedProposals.length > 0) {
+          setProposals(fetchedProposals);
+          // Calculate stats from fetched proposals
+          const calculatedStats = calculateStatsFromProposals(fetchedProposals, 0);
+          setStats(calculatedStats);
+        } else {
+          // Fallback to mock data if no proposals found
+          console.warn("No proposals found from governance events, using mock data");
+          setProposals(mockProposals);
+          setStats(mockStats);
+        }
+      } catch (err: any) {
+        console.error("Failed to fetch governance data:", err);
+        setError(err?.message || "Failed to load governance data");
+        // Fallback to mock data on error
+        setProposals(mockProposals);
+        setStats(mockStats);
+      } finally {
+        setLoading(false);
+      }
     };
 
     fetchData();
   }, []);
 
   const vote = async (proposalId: string, support: boolean, votingPower: number) => {
-    // Simulate voting transaction
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    setUserVotes(prev => new Map(prev).set(proposalId, support));
-    
-    setProposals(prev => prev.map(p => {
-      if (p.id === proposalId) {
-        return {
-          ...p,
-          votesFor: support ? p.votesFor + votingPower : p.votesFor,
-          votesAgainst: !support ? p.votesAgainst + votingPower : p.votesAgainst,
-          totalVotes: p.totalVotes + votingPower
-        };
-      }
-      return p;
-    }));
+    // TODO: Implement actual voting transaction
+    // For now, simulate voting
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    setUserVotes((prev) => new Map(prev).set(proposalId, support));
+
+    setProposals((prev) =>
+      prev.map((p) => {
+        if (p.id === proposalId) {
+          return {
+            ...p,
+            votesFor: support ? p.votesFor + votingPower : p.votesFor,
+            votesAgainst: !support ? p.votesAgainst + votingPower : p.votesAgainst,
+            totalVotes: p.totalVotes + votingPower,
+          };
+        }
+        return p;
+      })
+    );
   };
 
   const getProposalsByStatus = (status: Proposal["status"]) => {
-    return proposals.filter(p => p.status === status);
+    return proposals.filter((p) => p.status === status);
   };
 
   const getProposalsByCategory = (category: Proposal["category"]) => {
-    return proposals.filter(p => p.category === category);
+    return proposals.filter((p) => p.category === category);
   };
 
   return {
     proposals,
     stats,
     loading,
+    error,
     userVotes,
     vote,
     getProposalsByStatus,
-    getProposalsByCategory
+    getProposalsByCategory,
   };
 };
