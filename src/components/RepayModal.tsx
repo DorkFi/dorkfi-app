@@ -33,7 +33,7 @@ interface RepayModalProps {
   lastUpdateTime?: number; // Market's last update time (when market indices were updated)
   userLastUpdateTime?: number; // User's last update time (when user last interacted with market)
   network?: string; // Network ID for transaction viewing
-  onSubmit: (amount: string) => Promise<string>; // Returns transaction ID
+  onSubmit: (amount: string, isRepayAll?: boolean) => Promise<string>; // Returns transaction ID, isRepayAll indicates if repayAll should be used
 }
 
 const RepayModal = ({
@@ -56,6 +56,7 @@ const RepayModal = ({
   const [showSuccess, setShowSuccess] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [transactionId, setTransactionId] = useState<string | null>(null);
+  const [isRepayAll, setIsRepayAll] = useState(false);
   const [expandedDetails, setExpandedDetails] = useState<{
     borrowAPY: boolean;
     accruedInterest: boolean;
@@ -106,6 +107,7 @@ const RepayModal = ({
       setFiatValue(0);
       setIsLoading(false);
       setTransactionId(null);
+      setIsRepayAll(false);
       setExpandedDetails({
         borrowAPY: false,
         accruedInterest: false,
@@ -140,17 +142,26 @@ const RepayModal = ({
     const roundedMax = Math.round(maxRepayAmount * 1000000) / 1000000;
     // Format to remove unnecessary trailing zeros while preserving up to 6 decimals
     setAmount(roundedMax.toFixed(6).replace(/\.?0+$/, ""));
+    // Only use repayAll if max equals current borrow (full debt repayment)
+    const roundedCurrentBorrow = Math.round(currentBorrow * 1000000) / 1000000;
+    setIsRepayAll(roundedMax === roundedCurrentBorrow);
   };
 
   const handleSubmit = async () => {
-    console.log(`Repay ${amount} ${tokenSymbol}`);
+    // Check if amount equals current borrow (full debt repayment) to determine if repayAll should be used
+    const numAmount = amount ? parseFloat(amount) : 0;
+    const roundedAmount = Math.round(numAmount * 1000000) / 1000000;
+    const roundedCurrentBorrow = Math.round(currentBorrow * 1000000) / 1000000;
+    const shouldUseRepayAll = roundedAmount === roundedCurrentBorrow;
+
+    console.log(`Repay ${amount} ${tokenSymbol}${shouldUseRepayAll ? " (repayAll)" : ""}`);
 
     try {
       setIsLoading(true);
 
-      // Call the onSubmit prop with the amount and wait for it to complete
+      // Call the onSubmit prop with the amount and isRepayAll flag
       // onSubmit now returns the transaction ID
-      const txId = await onSubmit(amount);
+      const txId = await onSubmit(amount, shouldUseRepayAll);
       setTransactionId(txId);
 
       // Only show success modal after transaction is actually completed
@@ -261,7 +272,11 @@ const RepayModal = ({
                         placeholder="0.0"
                         autoFocus
                         value={amount}
-                        onChange={(e) => setAmount(e.target.value)}
+                        onChange={(e) => {
+                          setAmount(e.target.value);
+                          // Reset isRepayAll flag when user manually changes amount
+                          setIsRepayAll(false);
+                        }}
                         className="bg-white/80 dark:bg-slate-800 border-gray-300 dark:border-slate-600 text-slate-800 dark:text-white pr-16 text-lg h-12"
                       />
                       <Button

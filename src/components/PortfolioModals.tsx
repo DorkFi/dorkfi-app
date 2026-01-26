@@ -10,6 +10,7 @@ import { useNetwork } from "@/contexts/NetworkContext";
 import {
   withdraw,
   repay,
+  repayAll,
   fetchUserWalletBalance,
   fetchMarketInfoFromContract,
 } from "@/services/lendingService";
@@ -954,14 +955,14 @@ const PortfolioModals = ({
     onRefreshWalletBalance,
   ]);
 
-  const handleRepaySubmit = async (amount: string) => {
+  const handleRepaySubmit = async (amount: string, isRepayAll?: boolean) => {
     if (!activeAccount?.address || !repayModal.asset) {
       console.error("No active account or asset for repayment");
       return;
     }
 
     try {
-      console.log(`Repaying ${amount} ${repayModal.asset}`);
+      console.log(`Repaying ${amount} ${repayModal.asset}${isRepayAll ? " (repayAll)" : ""}`);
 
       // Find the borrow to get its network
       const borrow = repayModal.poolId
@@ -1030,17 +1031,27 @@ const PortfolioModals = ({
         amount: amount, // Pass amount as string (not atomic units)
         userAddress: activeAccount.address,
         networkId: networkToUse,
+        isRepayAll,
       });
 
-      // Call the lending service repay method (pass amount as string like PreFi)
-      const result = await repay(
-        token.poolId,
-        token.underlyingContractId, // Use underlyingContractId
-        originalTokenConfig.tokenStandard,
-        amount, // Pass amount as string
-        activeAccount.address,
-        networkToUse
-      );
+      // Call the appropriate lending service method based on isRepayAll flag
+      const result = isRepayAll
+        ? await repayAll(
+            token.poolId,
+            token.underlyingContractId, // Use underlyingContractId
+            originalTokenConfig.tokenStandard,
+            amount, // Pass amount as string (though repayAll may not use it)
+            activeAccount.address,
+            networkToUse
+          )
+        : await repay(
+            token.poolId,
+            token.underlyingContractId, // Use underlyingContractId
+            originalTokenConfig.tokenStandard,
+            amount, // Pass amount as string
+            activeAccount.address,
+            networkToUse
+          );
 
       if (!result.success) {
         throw new Error((result as any).error || "Repay failed");
