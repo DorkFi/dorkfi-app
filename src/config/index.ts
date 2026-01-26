@@ -129,6 +129,7 @@ export interface GlobalConfig {
     enableMigration: boolean;
     enableGasStation: boolean;
     enableNFTBoost: boolean;
+    enableLiquidatablePositions: boolean;
   };
 }
 
@@ -1979,6 +1980,7 @@ export const config: GlobalConfig = {
     enableMigration: true, // Enable asset migration feature
     enableGasStation: false,
     enableNFTBoost: true, // Enable NFT boost for governance voting power
+    enableLiquidatablePositions: true, // Enable liquidatable positions section in portfolio
   },
 };
 
@@ -2403,6 +2405,16 @@ export const getEVMNetworks = (): NetworkConfig[] => {
  */
 export const getEnvironmentConfig = (): Partial<GlobalConfig> => {
   const env = process.env.NODE_ENV;
+  
+  // Check for environment variable overrides
+  const envFeatures: Partial<GlobalConfig["features"]> = {};
+  
+  // Check VITE_ENABLE_LIQUIDATABLE_POSITIONS environment variable
+  if (typeof import.meta.env.VITE_ENABLE_LIQUIDATABLE_POSITIONS !== "undefined") {
+    envFeatures.enableLiquidatablePositions = 
+      import.meta.env.VITE_ENABLE_LIQUIDATABLE_POSITIONS === "true" ||
+      import.meta.env.VITE_ENABLE_LIQUIDATABLE_POSITIONS === "1";
+  }
 
   if (env === "development") {
     return {
@@ -2410,6 +2422,7 @@ export const getEnvironmentConfig = (): Partial<GlobalConfig> => {
       features: {
         ...config.features,
         enableGovernance: true, // Enable governance in development for testing
+        ...envFeatures,
       },
     };
   }
@@ -2421,11 +2434,14 @@ export const getEnvironmentConfig = (): Partial<GlobalConfig> => {
         ...config.features,
         enablePreFi: false, // Disable PreFi in tests
         enableMigration: true, // Keep migration enabled in tests
+        ...envFeatures,
       },
     };
   }
 
-  return {}; // No overrides for production
+  return Object.keys(envFeatures).length > 0
+    ? ({ features: envFeatures } as Partial<GlobalConfig>)
+    : {};
 };
 
 /**
@@ -2438,7 +2454,7 @@ export const getConfig = (): GlobalConfig => {
     ...envConfig,
     features: {
       ...config.features,
-      ...envConfig.features,
+      ...(envConfig.features || {}),
     },
   };
 };

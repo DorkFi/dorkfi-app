@@ -1298,6 +1298,15 @@ const Portfolio = () => {
   // Fetch liquidatable positions from Orca API when health factor < 1
   useEffect(() => {
     const fetchLiquidatablePositions = async () => {
+      // Skip if feature is disabled
+      if (!isFeatureEnabled("enableLiquidatablePositions")) {
+        console.log(
+          "[Portfolio] Liquidatable positions feature disabled, skipping fetch"
+        );
+        setLiquidatablePositions([]);
+        return;
+      }
+
       // Only fetch when we have an address
       if (!displayAddress) {
         console.log(
@@ -1324,12 +1333,41 @@ const Portfolio = () => {
         const url = `https://orca-api.nautilus.sh/api/opportunities?limit=100`;
         console.log("[Portfolio] Fetching liquidatable positions from:", url);
 
-        const response = await fetch(url);
+        // Add timeout to prevent hanging requests
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
+        let response: Response;
+        try {
+          response = await fetch(url, {
+            signal: controller.signal,
+            headers: {
+              'Accept': 'application/json',
+            },
+          });
+          clearTimeout(timeoutId);
+        } catch (fetchError: any) {
+          clearTimeout(timeoutId);
+          
+          // Handle different types of fetch errors
+          if (fetchError.name === 'AbortError') {
+            throw new Error('Request timeout: The liquidatable positions API did not respond in time');
+          } else if (fetchError.message?.includes('Failed to fetch') || fetchError instanceof TypeError) {
+            // Network error, CORS issue, or API unreachable
+            console.warn('[Portfolio] Network error fetching liquidatable positions:', fetchError);
+            throw new Error('Network error: Unable to reach the liquidatable positions API. This may be due to network connectivity or CORS restrictions.');
+          } else {
+            throw fetchError;
+          }
+        }
+
         if (!response.ok) {
+          const errorText = await response.text().catch(() => response.statusText);
           throw new Error(
-            `Failed to fetch liquidatable positions: ${response.statusText}`
+            `Failed to fetch liquidatable positions: ${response.status} ${response.statusText}${errorText ? ` - ${errorText}` : ''}`
           );
         }
+        
         const data = await response.json();
 
         console.log("[Portfolio] Orca API response:", {
@@ -1392,12 +1430,24 @@ const Portfolio = () => {
           positions: filtered,
         });
         setLiquidatablePositions(filtered);
-      } catch (error) {
+      } catch (error: any) {
         console.error(
           "[Portfolio] Error fetching liquidatable positions:",
           error
         );
+        
+        // Only log error details, don't show to user unless it's a critical issue
+        // Silently fail and set empty array - the section won't show if there are no positions
         setLiquidatablePositions([]);
+        
+        // Log more details for debugging
+        if (error?.message) {
+          console.warn('[Portfolio] Liquidatable positions fetch error details:', {
+            message: error.message,
+            name: error.name,
+            stack: error.stack,
+          });
+        }
       } finally {
         setIsLoadingLiquidatablePositions(false);
       }
@@ -5101,10 +5151,10 @@ const Portfolio = () => {
           </DorkFiCard>
         )}
 
-      {/* Liquidatable Positions Section - Only show when health factor < 1 */}
-      {/* Debug: Show section if we have positions or health factor < 1 */}
-      {((healthFactor !== null && healthFactor < 1) ||
-        liquidatablePositions.length > 0) && (
+      {/* Liquidatable Positions Section - Only show when health factor < 1 and feature is enabled */}
+      {isFeatureEnabled("enableLiquidatablePositions") &&
+        ((healthFactor !== null && healthFactor < 1) ||
+          liquidatablePositions.length > 0) && (
         <DorkFiCard className="p-6 md:p-8 border-red-500/50 bg-red-50/50 dark:bg-red-950/20">
           <div className="mb-4">
             <div className="flex items-center gap-2 mb-2">
