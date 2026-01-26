@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Proposal } from "@/types/governanceTypes";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
 import { Clock, TrendingUp, TrendingDown, CheckCircle2, XCircle, HourglassIcon } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import DorkFiCard from "@/components/ui/DorkFiCard";
@@ -42,13 +41,24 @@ export const ProposalCard = ({ proposal, onVote, userVote, votingPower = 0 }: Pr
 
   const votesForPercent = (proposal.votesFor / Math.max(proposal.totalVotes, 1)) * 100;
   const votesAgainstPercent = (proposal.votesAgainst / Math.max(proposal.totalVotes, 1)) * 100;
-  const quorumPercent = (proposal.totalVotes / proposal.quorum) * 100;
   
-  const StatusIcon = statusConfig[proposal.status].icon;
+  const StatusIcon = statusConfig[proposal.status]?.icon || statusConfig.pending.icon;
   const isActive = proposal.status === "active";
+  const canVote = isActive && userVote === undefined;
   const timeLeft = isActive ? formatDistanceToNow(proposal.endTime, { addSuffix: true }) : null;
+  
+  // Debug logging
+  console.log("ProposalCard render", {
+    proposalId: proposal.id,
+    status: proposal.status,
+    isActive,
+    userVote,
+    canVote,
+    votingPower,
+  });
 
   const handleVoteClick = (support: boolean) => {
+    console.log("Vote button clicked", { support, proposalId: proposal.id });
     setPendingVoteSupport(support);
     setShowConfirmation(true);
   };
@@ -84,8 +94,10 @@ export const ProposalCard = ({ proposal, onVote, userVote, votingPower = 0 }: Pr
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="space-y-2 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
-              <Badge className={categoryColors[proposal.category]}>
-                {proposal.category.replace("-", " ").toUpperCase()}
+            <Badge className={categoryColors[proposal.category]}>
+                {proposal.category === "collateral-listing" 
+                  ? "MARKET LISTINGS" 
+                  : proposal.category.replace("-", " ").toUpperCase()}
               </Badge>
               <Badge className={statusConfig[proposal.status].bg}>
                 <StatusIcon className={`h-3 w-3 mr-1 ${statusConfig[proposal.status].color}`} />
@@ -130,35 +142,20 @@ export const ProposalCard = ({ proposal, onVote, userVote, votingPower = 0 }: Pr
             </div>
           </div>
 
-          {/* Quorum Progress */}
-          <div className="space-y-1">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>Quorum Progress</span>
-              <span>{quorumPercent.toFixed(1)}%</span>
-            </div>
-            <Progress value={quorumPercent} className="h-1" />
-            <Caption>
-              {proposal.totalVotes.toLocaleString()} / {proposal.quorum.toLocaleString()} UNIT required
-            </Caption>
-          </div>
         </div>
 
         {/* Footer */}
         <div className="flex items-center justify-between pt-4 border-t border-border flex-wrap gap-3">
-          <div className="space-y-1">
-            <Caption>Proposed by</Caption>
-            <Body className="text-xs font-mono">{proposal.proposer.slice(0, 20)}...</Body>
-            {timeLeft && (
-              <Caption className="flex items-center gap-1 text-muted-foreground">
-                <Clock className="h-3 w-3" />
-                Ends {timeLeft}
-              </Caption>
-            )}
-          </div>
+          {timeLeft && (
+            <Caption className="flex items-center gap-1 text-muted-foreground">
+              <Clock className="h-3 w-3" />
+              Ends {timeLeft}
+            </Caption>
+          )}
 
           {isActive && (
             <div className="flex gap-2">
-              {userVote === undefined ? (
+              {canVote ? (
                 <>
                   <Button
                     variant="outline"
@@ -176,11 +173,11 @@ export const ProposalCard = ({ proposal, onVote, userVote, votingPower = 0 }: Pr
                     Vote For
                   </Button>
                 </>
-              ) : (
+              ) : userVote !== undefined ? (
                 <Badge variant={userVote ? "default" : "destructive"} className="px-4 py-2">
                   Voted {userVote ? "For" : "Against"}
                 </Badge>
-              )}
+              ) : null}
             </div>
           )}
         </div>
@@ -190,7 +187,10 @@ export const ProposalCard = ({ proposal, onVote, userVote, votingPower = 0 }: Pr
       {pendingVoteSupport !== null && (
         <VoteConfirmationModal
           open={showConfirmation}
-          onOpenChange={setShowConfirmation}
+          onOpenChange={(open) => {
+            setShowConfirmation(open);
+            if (!open) setPendingVoteSupport(null);
+          }}
           proposal={proposal}
           support={pendingVoteSupport}
           votingPower={votingPower}
@@ -202,7 +202,10 @@ export const ProposalCard = ({ proposal, onVote, userVote, votingPower = 0 }: Pr
       {pendingVoteSupport !== null && (
         <SignatureModal
           open={showSignature}
-          onOpenChange={setShowSignature}
+          onOpenChange={(open) => {
+            setShowSignature(open);
+            if (!open) setPendingVoteSupport(null);
+          }}
           action={`vote ${pendingVoteSupport ? 'for' : 'against'} the proposal`}
           onSign={handleSign}
           onSuccess={handleSignSuccess}

@@ -27,11 +27,12 @@ export const convertServiceProposalToUI = (
   const categoryId = Number(serviceProposal.proposalCategoryId);
   const category = getCategoryFromId(categoryId) || "features";
 
-  // Calculate votes
-  const totalVotes = Number(serviceProposal.proposalTotalVotes);
-  const yesVotes = Number(serviceProposal.proposalYesVotes);
+  // Calculate votes using voting power (divide by 10^8 to convert from raw units)
+  // Use proposalTotalPower and proposalYesPower instead of vote counts for accurate weighted voting
+  const totalVotes = Number(serviceProposal.proposalTotalPower) / 1e8;
+  const yesVotes = Number(serviceProposal.proposalYesPower) / 1e8;
   const votesAgainst = totalVotes - yesVotes;
-  const quorum = Number(serviceProposal.proposalQuorumThreshold);
+  const quorum = Number(serviceProposal.proposalQuorumThreshold) / 1e8;
 
   // Parse timestamps (they're in seconds)
   const startTime = new Date(Number(serviceProposal.votingStartTimestamp) * 1000);

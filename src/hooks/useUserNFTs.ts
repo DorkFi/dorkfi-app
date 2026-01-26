@@ -1,154 +1,84 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useNetwork } from '@/contexts/NetworkContext';
-import { isAlgorandCompatibleNetwork } from '@/config';
+import { useState, useEffect } from "react";
+import { useWallet } from "@txnlab/use-wallet-react";
+import {
+  fetchUserNFTs,
+  filterGovernanceNFTs,
+  parseNFTMetadata,
+  NFTToken,
+} from "@/services/nftService";
+import { GovernanceNFT } from "@/components/governance/NFTMultiplierDropdown";
 
-export interface UserNFT {
-  assetId: number;
-  tokenId: string;
-  name: string;
-  imageUrl: string | null;
-  contractId: number;
-  collectionName: string | null;
-  metadata: any;
-}
+// Governance NFT contract IDs
+const GOVERNANCE_NFT_CONTRACTS = [313597, 894888, 313705];
 
-export interface UserNFTsData {
-  nfts: UserNFT[];
-  isLoading: boolean;
-  error: string | null;
-}
-
-const NFT_INDEXER_BASE_URL = 'https://voi-mainnet-mimirapi.nftnavigator.xyz/nft-indexer/v1';
-// Supported contract IDs for NFT collections
-const CONTRACT_IDS = [313597, 313705, 894888];
-
-export const useUserNFTs = (userAddress: string | null) => {
-  const { currentNetwork } = useNetwork();
-  const [data, setData] = useState<UserNFTsData>({
-    nfts: [],
-    isLoading: false,
-    error: null,
-  });
-
-  const fetchUserNFTs = useCallback(async () => {
-    if (!userAddress || !currentNetwork) {
-      setData({
-        nfts: [],
-        isLoading: false,
-        error: null,
-      });
-      return;
-    }
-
-    if (!isAlgorandCompatibleNetwork(currentNetwork)) {
-      setData({
-        nfts: [],
-        isLoading: false,
-        error: 'NFT fetching is only supported on Algorand networks',
-      });
-      return;
-    }
-
-    setData(prev => ({ ...prev, isLoading: true, error: null }));
-
-    try {
-      console.log('Fetching user NFTs for:', userAddress, 'on network:', currentNetwork);
-      
-      // Fetch NFTs from all contract IDs in parallel
-      const fetchPromises = CONTRACT_IDS.map(async (contractId) => {
-        try {
-          const url = `${NFT_INDEXER_BASE_URL}/tokens?contractId=${contractId}&owner=${userAddress}`;
-          const response = await fetch(url);
-          
-          if (!response.ok) {
-            console.warn(`Failed to fetch NFTs for contract ${contractId}: ${response.status} ${response.statusText}`);
-            return [];
-          }
-          
-          const data = await response.json();
-          return data.tokens || [];
-        } catch (error) {
-          console.error(`Error fetching NFTs for contract ${contractId}:`, error);
-          return [];
-        }
-      });
-      
-      // Wait for all requests to complete
-      const results = await Promise.all(fetchPromises);
-      
-      // Aggregate all tokens from all contract IDs
-      const allTokens = results.flat();
-      const nfts: UserNFT[] = [];
-      
-      for (const token of allTokens) {
-        // Skip burned tokens
-        if (token.isBurned) {
-          continue;
-        }
-        
-        try {
-          // Parse metadata JSON string
-          let metadata = {};
-          let imageUrl: string | null = null;
-          let name = `Token ${token.tokenId}`;
-          
-          if (token.metadata) {
-            try {
-              metadata = typeof token.metadata === 'string' 
-                ? JSON.parse(token.metadata) 
-                : token.metadata;
-              
-              // Extract name and image from metadata
-              if (metadata.name) {
-                name = metadata.name;
-              }
-              if (metadata.image) {
-                imageUrl = metadata.image;
-              }
-            } catch (parseError) {
-              console.error('Error parsing metadata for token', token.tokenId, parseError);
-            }
-          }
-          
-          nfts.push({
-            assetId: token.contractId, // Using contractId as assetId
-            tokenId: token.tokenId,
-            name,
-            imageUrl,
-            contractId: token.contractId,
-            collectionName: token.collectionName || null,
-            metadata,
-          });
-        } catch (error) {
-          console.error(`Error processing token ${token.tokenId}:`, error);
-          // Continue with other tokens
-        }
-      }
-
-      setData({
-        nfts,
-        isLoading: false,
-        error: null,
-      });
-
-      console.log('User NFTs fetched:', nfts);
-    } catch (error) {
-      console.error('Error fetching user NFTs:', error);
-      setData(prev => ({
-        ...prev,
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Failed to fetch user NFTs',
-      }));
-    }
-  }, [userAddress, currentNetwork]);
+/**
+ * Hook to fetch and manage user's governance NFTs
+ * @returns Object containing user NFTs, loading state, and error
+ */
+export const useUserNFTs = () => {
+  const { activeAccount } = useWallet();
+  const [userNFTs, setUserNFTs] = useState<GovernanceNFT[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchUserNFTs();
-  }, [fetchUserNFTs]);
+    const loadNFTs = async () => {
+      if (!activeAccount?.address) {
+        setUserNFTs([]);
+        setError(null);
+        return;
+      }
+
+      setLoading(true);
+      setError(null);
+
+      try {
+        const response = await fetchUserNFTs(
+          activeAccount.address,
+          GOVERNANCE_NFT_CONTRACTS,
+          600
+        );
+
+        // Filter to only governance NFTs and convert to GovernanceNFT format
+        const governanceNFTs = filterGovernanceNFTs(response.tokens);
+        
+        const formattedNFTs: GovernanceNFT[] = governanceNFTs.map((token) => {
+          const metadata = parseNFTMetadata(token.metadata);
+          
+          // Determine collection name for display
+          let collectionName = token.collectionName || "Unknown";
+          if (token.contractId === 313597) {
+            collectionName = "Dorks V1";
+          } else if (token.contractId === 894888) {
+            collectionName = "Dorks V2";
+          } else if (token.contractId === 313705) {
+            collectionName = "Lil Chubs";
+          }
+
+          return {
+            id: `${token.contractId}-${token.tokenId}`,
+            name: metadata.name || collectionName,
+            multiplier: token.multiplier,
+            image: metadata.image || "",
+          };
+        });
+
+        setUserNFTs(formattedNFTs);
+      } catch (err: any) {
+        console.error("Failed to fetch user NFTs:", err);
+        setError(err?.message || "Failed to load NFTs");
+        setUserNFTs([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadNFTs();
+  }, [activeAccount?.address]);
 
   return {
-    ...data,
-    refetch: fetchUserNFTs,
+    userNFTs,
+    loading,
+    error,
   };
 };
-

@@ -71,6 +71,49 @@ export const VoteConfirmationModal = ({
             <span className="font-semibold text-foreground">{votingPower.toLocaleString()} UNIT</span>
           </div>
 
+          {/* Vote Balance Effect */}
+          <div className="p-4 rounded-lg bg-muted/30 border border-border space-y-3">
+            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Projected Balance
+            </div>
+            
+            {/* Projected Vote Distribution */}
+            <div className="space-y-2">
+              <div className="h-4 bg-muted rounded-full overflow-hidden flex relative">
+                <div 
+                  className={`bg-green-500 h-full transition-all ${support ? 'ring-2 ring-green-400 ring-offset-1' : ''}`}
+                  style={{ 
+                    width: `${((support ? proposal.votesFor + votingPower : proposal.votesFor) / Math.max((support ? proposal.votesFor + votingPower : proposal.votesFor) + (!support ? proposal.votesAgainst + votingPower : proposal.votesAgainst), 1)) * 100}%` 
+                  }}
+                />
+                <div 
+                  className={`bg-destructive h-full transition-all ${!support ? 'ring-2 ring-destructive/80 ring-offset-1' : ''}`}
+                  style={{ 
+                    width: `${((!support ? proposal.votesAgainst + votingPower : proposal.votesAgainst) / Math.max((support ? proposal.votesFor + votingPower : proposal.votesFor) + (!support ? proposal.votesAgainst + votingPower : proposal.votesAgainst), 1)) * 100}%` 
+                  }}
+                />
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className={`flex items-center gap-1.5 font-semibold ${support ? 'text-green-500' : 'text-muted-foreground'}`}>
+                  <div className={`w-2.5 h-2.5 rounded-full ${support ? 'bg-green-500 ring-2 ring-green-400' : 'bg-green-500'}`} />
+                  {support 
+                    ? (proposal.votesFor + votingPower).toLocaleString() 
+                    : proposal.votesFor.toLocaleString()
+                  } For
+                  {support && <span className="text-green-400 font-medium ml-1">+{votingPower.toLocaleString()}</span>}
+                </span>
+                <span className={`flex items-center gap-1.5 font-semibold ${!support ? 'text-destructive' : 'text-muted-foreground'}`}>
+                  <div className={`w-2.5 h-2.5 rounded-full ${!support ? 'bg-destructive ring-2 ring-destructive/80' : 'bg-destructive'}`} />
+                  {!support 
+                    ? (proposal.votesAgainst + votingPower).toLocaleString() 
+                    : proposal.votesAgainst.toLocaleString()
+                  } Against
+                  {!support && <span className="text-destructive/80 font-medium ml-1">+{votingPower.toLocaleString()}</span>}
+                </span>
+              </div>
+            </div>
+          </div>
+
           {/* Warning */}
           <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
             <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />

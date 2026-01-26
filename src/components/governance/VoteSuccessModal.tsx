@@ -70,6 +70,49 @@ export const VoteSuccessModal = ({
             </div>
           </div>
 
+          {/* Vote Balance Effect */}
+          <div className="p-4 rounded-lg bg-muted/30 border border-border space-y-3">
+            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Updated Balance
+            </div>
+            
+            {/* Updated Vote Distribution */}
+            <div className="space-y-2">
+              <div className="h-4 bg-muted rounded-full overflow-hidden flex relative">
+                <div 
+                  className={`bg-green-500 h-full transition-all ${support ? 'ring-2 ring-green-400 ring-offset-1 animate-pulse' : ''}`}
+                  style={{ 
+                    width: `${((support ? proposal.votesFor + votingPower : proposal.votesFor) / Math.max((support ? proposal.votesFor + votingPower : proposal.votesFor) + (!support ? proposal.votesAgainst + votingPower : proposal.votesAgainst), 1)) * 100}%` 
+                  }}
+                />
+                <div 
+                  className={`bg-destructive h-full transition-all ${!support ? 'ring-2 ring-destructive/80 ring-offset-1 animate-pulse' : ''}`}
+                  style={{ 
+                    width: `${((!support ? proposal.votesAgainst + votingPower : proposal.votesAgainst) / Math.max((support ? proposal.votesFor + votingPower : proposal.votesFor) + (!support ? proposal.votesAgainst + votingPower : proposal.votesAgainst), 1)) * 100}%` 
+                  }}
+                />
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className={`flex items-center gap-1.5 font-semibold ${support ? 'text-green-500' : 'text-muted-foreground'}`}>
+                  <div className={`w-2.5 h-2.5 rounded-full ${support ? 'bg-green-500 ring-2 ring-green-400 animate-pulse' : 'bg-green-500'}`} />
+                  {support 
+                    ? (proposal.votesFor + votingPower).toLocaleString() 
+                    : proposal.votesFor.toLocaleString()
+                  } For
+                  {support && <span className="text-green-400 font-medium ml-1">+{votingPower.toLocaleString()}</span>}
+                </span>
+                <span className={`flex items-center gap-1.5 font-semibold ${!support ? 'text-destructive' : 'text-muted-foreground'}`}>
+                  <div className={`w-2.5 h-2.5 rounded-full ${!support ? 'bg-destructive ring-2 ring-destructive/80 animate-pulse' : 'bg-destructive'}`} />
+                  {!support 
+                    ? (proposal.votesAgainst + votingPower).toLocaleString() 
+                    : proposal.votesAgainst.toLocaleString()
+                  } Against
+                  {!support && <span className="text-destructive/80 font-medium ml-1">+{votingPower.toLocaleString()}</span>}
+                </span>
+              </div>
+            </div>
+          </div>
+
           {/* Transaction Link Placeholder */}
           <button className="w-full flex items-center justify-center gap-2 p-3 rounded-lg bg-primary/5 border border-primary/20 text-sm text-primary hover:bg-primary/10 transition-colors">
             <ExternalLink className="h-4 w-4" />

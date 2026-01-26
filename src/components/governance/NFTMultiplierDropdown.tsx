@@ -30,6 +30,7 @@ export interface GovernanceNFT {
 interface NFTMultiplierDropdownProps {
   userNFTs?: GovernanceNFT[];
   onMultiplierChange?: (multiplier: number) => void;
+  multiplier?: number; // Optional multiplier to display (if provided, overrides calculation)
 }
 
 // Mock data - in production this would come from wallet
@@ -70,6 +71,7 @@ export const getDefaultNFTs = (): GovernanceNFT[] => mockUserNFTs;
 export const NFTMultiplierDropdown = ({
   userNFTs = mockUserNFTs,
   onMultiplierChange,
+  multiplier: providedMultiplier,
 }: NFTMultiplierDropdownProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const [emblaRef, emblaApi] = useEmblaCarousel({ 
@@ -88,10 +90,13 @@ export const NFTMultiplierDropdown = ({
 
   const hasNFTs = userNFTs.length > 0;
   const totalMultiplier = useMemo(() => {
-    const multiplier = calculateNFTMultiplier(userNFTs);
+    // Use provided multiplier if available, otherwise calculate from NFTs
+    const multiplier = providedMultiplier !== undefined 
+      ? providedMultiplier 
+      : calculateNFTMultiplier(userNFTs);
     onMultiplierChange?.(multiplier);
     return multiplier;
-  }, [userNFTs, onMultiplierChange]);
+  }, [userNFTs, providedMultiplier, onMultiplierChange]);
 
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>

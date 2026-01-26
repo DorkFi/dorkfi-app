@@ -18,10 +18,18 @@ export type NetworkId =
 
 export type NetworkType = "avm" | "evm";
 
+export interface PowerMultiplier {
+  id: string;
+  label: string;
+  contractId: number;
+  bonus: number; // Bonus multiplier as a decimal (e.g., 0.10 for 10%)
+}
+
 export interface GovernanceConfig {
   appId: number;
   storageAppId: number;
   powerSources?: number[]; // Array of appIds used as sources of voting power
+  powerMultipliers?: PowerMultiplier[]; // Array of NFT contracts that provide voting power bonuses
 }
 
 export interface ContractConfig {
@@ -825,10 +833,15 @@ const prodContracts = {
   priceOracle: "47138069",
   liquidationEngine: undefined,
   governance: {
-    appId: 48458481,
+    appId: 48472636,
     storageAppId: 48458688,
     powerSources: [
       47148525, // UNIT nToken appId
+    ],
+    powerMultipliers: [
+      { id: "dorks_v1", label: "Dorks v1", contractId: 313597, bonus: 0.10 },
+      { id: "dorks_v2", label: "Dorks v2", contractId: 894888, bonus: 0.01 },
+      { id: "chubs_v1", label: "Chubs v1", contractId: 313705, bonus: 0.15 },
     ],
   },
   treasury: undefined,
@@ -1965,7 +1978,7 @@ export const config: GlobalConfig = {
     enableGovernance: true, // Governance UI enabled
     enableMigration: true, // Enable asset migration feature
     enableGasStation: false,
-    enableNFTBoost: false, // Enable NFT boost for governance voting power
+    enableNFTBoost: true, // Enable NFT boost for governance voting power
   },
 };
 

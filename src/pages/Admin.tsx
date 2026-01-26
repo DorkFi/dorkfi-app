@@ -148,10 +148,11 @@ import {
   ROLE_PRICE_FEED_MANAGER,
 } from "@/constants/roles";
 import { ProposalCategory, Proposal as UIProposal, ProposalStatus } from "@/types/governanceTypes";
-import { createProposalWithCategory, getEvents, decodeProposalCreatedEvent, getProposal, Proposal as ServiceProposal, snapPower, getPowerSource } from "@/services/governanceService";
+import { createProposalWithCategory, getEvents, decodeProposalCreatedEvent, getProposal, Proposal as ServiceProposal, snapPower, getPowerSource, snapMultiplier } from "@/services/governanceService";
 import { getCategoryFromId } from "@/constants/governanceConstants";
 import { ProposalCard } from "@/components/governance/ProposalCard";
 import { VoterInfoLookup } from "@/components/governance/VoterInfoLookup";
+import { PowerMultiplierLookup } from "@/components/governance/PowerMultiplierLookup";
 import { convertServiceProposalToUI } from "@/utils/governanceUtils";
 
 // Get markets from configuration - now reactive to network changes
@@ -387,6 +388,13 @@ export default function AdminDashboard() {
   const [isSnappingPower, setIsSnappingPower] = useState(false);
   const [snapPowerResult, setSnapPowerResult] = useState<{ snapshot: any; txns: string[] } | null>(null);
   const [snapPowerError, setSnapPowerError] = useState<string | null>(null);
+
+  // Snap multiplier state
+  const [snapMultiplierAddress, setSnapMultiplierAddress] = useState<string>("");
+  const [selectedPowerMultiplier, setSelectedPowerMultiplier] = useState<number | "">("");
+  const [isSnappingMultiplier, setIsSnappingMultiplier] = useState(false);
+  const [snapMultiplierResult, setSnapMultiplierResult] = useState<{ snapshot: any; txns: string[] } | null>(null);
+  const [snapMultiplierError, setSnapMultiplierError] = useState<string | null>(null);
 
   // Get power source state
   const [powerSourceQueryId, setPowerSourceQueryId] = useState<number | "">("");
@@ -13483,6 +13491,229 @@ export default function AdminDashboard() {
               </CardContent>
             </Card>
 
+            {/* Snap Multiplier Component */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Zap className="h-5 w-5" />
+                  Snap Multiplier
+                </CardTitle>
+                <CardDescription>
+                  Snapshot voting power multiplier for an address using a power multiplier
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="snap-multiplier-address">Address *</Label>
+                    <Input
+                      id="snap-multiplier-address"
+                      placeholder="Enter address to snap multiplier for"
+                      value={snapMultiplierAddress}
+                      onChange={(e) => setSnapMultiplierAddress(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="power-multiplier">Power Multiplier *</Label>
+                    <Select
+                      value={selectedPowerMultiplier === "" ? "" : String(selectedPowerMultiplier)}
+                      onValueChange={(value) => setSelectedPowerMultiplier(value === "" ? "" : Number(value))}
+                    >
+                      <SelectTrigger id="power-multiplier">
+                        <SelectValue placeholder="Select power multiplier" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(() => {
+                          const networkConfig = getNetworkConfig(currentNetwork);
+                          const governanceConfig = getContractAddress(
+                            currentNetwork,
+                            "governance"
+                          ) as GovernanceConfig | string | undefined;
+                          
+                          if (!governanceConfig || typeof governanceConfig === "string") {
+                            return (
+                              <SelectItem value="" disabled>
+                                No power multipliers configured
+                              </SelectItem>
+                            );
+                          }
+
+                          const powerMultipliers = governanceConfig.powerMultipliers || [];
+                          
+                          if (powerMultipliers.length === 0) {
+                            return (
+                              <SelectItem value="" disabled>
+                                No power multipliers configured
+                              </SelectItem>
+                            );
+                          }
+
+                          return powerMultipliers.map((multiplier) => (
+                            <SelectItem key={multiplier.id} value={String(multiplier.contractId)}>
+                              {multiplier.label} (ID: {multiplier.contractId})
+                            </SelectItem>
+                          ));
+                        })()}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Result Messages */}
+                {snapMultiplierResult && (
+                  <div className="p-3 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400 mt-0.5" />
+                      <div className="text-sm flex-1">
+                        <p className="font-medium text-green-800 dark:text-green-200">
+                          Multiplier Snapped Successfully
+                        </p>
+                        <div className="mt-2 space-y-1 text-green-700 dark:text-green-300">
+                          <p className="font-mono text-xs break-all">
+                            Power Multiplier ID: {snapMultiplierResult.snapshot.powerMultiplierId.toString()}
+                          </p>
+                          <p className="font-mono text-xs break-all">
+                            Power Multiplier Amount: {snapMultiplierResult.snapshot.powerMultiplierAmount.toString()}
+                          </p>
+                          <p className="font-mono text-xs break-all">
+                            Power Multiplier Granted: {snapMultiplierResult.snapshot.powerMultiplierGranted.toString()}
+                          </p>
+                          <p className="font-mono text-xs break-all">
+                            Power Multiplier Owner: {snapMultiplierResult.snapshot.powerMultiplierOwner}
+                          </p>
+                          <p className="font-mono text-xs break-all">
+                            Unlock Timestamp: {snapMultiplierResult.snapshot.powerMultiplierUnlockTimestamp.toString()}
+                          </p>
+                          <p className="font-mono text-xs break-all">
+                            Lockup Duration: {snapMultiplierResult.snapshot.powerMultiplierLockupDuration.toString()}
+                          </p>
+                          <p className="font-mono text-xs break-all">
+                            Lockup Bonus Multiplier: {snapMultiplierResult.snapshot.powerMultiplierLockupBonusMultiplier.toString()}
+                          </p>
+                          {snapMultiplierResult.txns.length > 0 && (
+                            <p className="font-mono text-xs break-all">
+                              Transaction IDs: {snapMultiplierResult.txns.join(", ")}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {snapMultiplierError && (
+                  <div className="p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 text-red-600 dark:text-red-400 mt-0.5" />
+                      <div className="text-sm">
+                        <p className="font-medium text-red-800 dark:text-red-200">
+                          Snap Multiplier Failed
+                        </p>
+                        <p className="text-red-700 dark:text-red-300">
+                          {snapMultiplierError}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Action Buttons */}
+                <div className="flex gap-2 pt-4">
+                  <DorkFiButton
+                    variant="primary"
+                    className="flex-1"
+                    onClick={async () => {
+                      if (!activeAccount?.address || !transactionSigner) {
+                        toast.error("Please connect your wallet");
+                        return;
+                      }
+
+                      if (!snapMultiplierAddress.trim()) {
+                        toast.error("Please enter an address");
+                        return;
+                      }
+
+                      if (selectedPowerMultiplier === "") {
+                        toast.error("Please select a power multiplier");
+                        return;
+                      }
+
+                      setIsSnappingMultiplier(true);
+                      setSnapMultiplierError(null);
+                      setSnapMultiplierResult(null);
+
+                      try {
+                        const result = await snapMultiplier(
+                          selectedPowerMultiplier as number,
+                          transactionSigner,
+                          snapMultiplierAddress.trim(),
+                          currentNetwork
+                        );
+
+                        setSnapMultiplierResult(result);
+
+                        // Sign and send transactions if any
+                        if (result.txns && result.txns.length > 0) {
+                          const clients = algorandService.initializeClients(
+                            getNetworkConfig(currentNetwork).walletNetworkId as AlgorandNetwork
+                          );
+
+                          const stxns = await signTransactions(
+                            result.txns.map((txn: string) =>
+                              Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+                            )
+                          );
+                          const res = await clients.algod.sendRawTransaction(stxns).do();
+                          await waitForConfirmation(clients.algod, res.txid, 4);
+
+                          toast.success("Multiplier snapped successfully", {
+                            description: `Transaction confirmed: ${res.txid}`,
+                          });
+                        } else {
+                          toast.success("Multiplier snapped successfully");
+                        }
+                      } catch (error: any) {
+                        console.error("Failed to snap multiplier:", error);
+                        setSnapMultiplierError(error?.message || "Failed to snap multiplier");
+                        toast.error("Failed to snap multiplier", {
+                          description: error?.message || "Unknown error occurred",
+                        });
+                      } finally {
+                        setIsSnappingMultiplier(false);
+                      }
+                    }}
+                    disabled={isSnappingMultiplier || !snapMultiplierAddress.trim() || selectedPowerMultiplier === "" || !activeAccount?.address}
+                  >
+                    {isSnappingMultiplier ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Snapping Multiplier...
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="h-4 w-4 mr-2" />
+                        Snap Multiplier
+                      </>
+                    )}
+                  </DorkFiButton>
+                  <DorkFiButton
+                    variant="secondary"
+                    onClick={() => {
+                      setSnapMultiplierAddress("");
+                      setSelectedPowerMultiplier("");
+                      setSnapMultiplierResult(null);
+                      setSnapMultiplierError(null);
+                    }}
+                    disabled={isSnappingMultiplier}
+                  >
+                    <RefreshCcw className="h-4 w-4 mr-2" />
+                    Clear
+                  </DorkFiButton>
+                </div>
+              </CardContent>
+            </Card>
+
             {/* Get Power Source Component */}
             <Card>
               <CardHeader>
@@ -13648,6 +13879,9 @@ export default function AdminDashboard() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Power Multiplier Lookup Component */}
+            <PowerMultiplierLookup />
 
             {/* Governance Proposals */}
             <Card>

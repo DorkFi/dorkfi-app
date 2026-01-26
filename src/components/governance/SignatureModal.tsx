@@ -139,7 +139,7 @@ export const SignatureModal = ({
             <div className="space-y-3">
               <div className="p-3 rounded-lg bg-muted/50 border border-border">
                 <p className="text-xs text-center text-muted-foreground">
-                  This signature request will not cost any gas fees
+                  This signature may incur network transaction fees
                 </p>
               </div>
               <Button onClick={handleSign} className="w-full">

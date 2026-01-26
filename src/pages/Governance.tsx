@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import Header from "@/components/Header";
 import { GovernanceHero } from "@/components/governance/GovernanceHero";
 import { GovernanceDashboardCard } from "@/components/governance/GovernanceDashboardCard";
@@ -7,16 +7,46 @@ import { useGovernanceData } from "@/hooks/useGovernanceData";
 import { ProposalStatus } from "@/types/governanceTypes";
 import { Loader2 } from "lucide-react";
 import { H2 } from "@/components/ui/Typography";
+import { calculateNFTMultiplier } from "@/components/governance/NFTMultiplierDropdown";
+import { isFeatureEnabled } from "@/config";
+import { useUserNFTs } from "@/hooks/useUserNFTs";
 
 const Governance = () => {
-  const { proposals, stats, loading, userVotes, vote } = useGovernanceData();
+  const { proposals, stats, loading, userVotes, vote, userVoterInfo } = useGovernanceData();
   const [selectedStatus, setSelectedStatus] = useState<ProposalStatus | "all">("all");
+  const nftBoostEnabled = isFeatureEnabled("enableNFTBoost");
+  const { userNFTs } = useUserNFTs();
+
+  // Calculate effective voting power (same logic as GovernanceDashboardCard)
+  const effectiveVotingPower = useMemo(() => {
+    // Calculate base power
+    const basePower = userVoterInfo 
+      ? Number(userVoterInfo.voteBasePower) / 1e8 
+      : (stats?.yourVotingPower ?? 0);
+
+    // Calculate NFT multiplier
+    const nftMultiplier = (() => {
+      if (!nftBoostEnabled) return 1;
+      // If voter info exists, use contract multiplier (divide by 10000)
+      if (userVoterInfo) {
+        return Number(userVoterInfo.voteMultiplier) / 10000;
+      }
+      // Otherwise calculate from fetched user NFTs
+      return calculateNFTMultiplier(userNFTs);
+    })();
+
+    // Calculate effective power
+    if (userVoterInfo) {
+      return Number(userVoterInfo.voteTotalPower) / 1e8;
+    }
+    return Math.floor(basePower * nftMultiplier);
+  }, [userVoterInfo, stats?.yourVotingPower, nftBoostEnabled, userNFTs]);
 
   const handleVote = async (proposalId: string, support: boolean) => {
     if (!stats) {
       throw new Error("Voting stats not loaded");
     }
-    await vote(proposalId, support, stats.yourVotingPower);
+    await vote(proposalId, support, effectiveVotingPower);
   };
 
   const filteredProposals = proposals.filter((proposal) => {
@@ -50,6 +80,7 @@ const Governance = () => {
                 stats={stats}
                 selectedStatus={selectedStatus}
                 onStatusChange={setSelectedStatus}
+                userVoterInfo={userVoterInfo}
               />
             </div>
 
@@ -71,7 +102,7 @@ const Governance = () => {
                       proposal={proposal}
                       onVote={handleVote}
                       userVote={userVotes.get(proposal.id)}
-                      votingPower={stats?.yourVotingPower ?? 0}
+                      votingPower={effectiveVotingPower}
                     />
                   ))}
                 </div>

@@ -3,13 +3,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Loader2, UserCheck, AlertTriangle, CheckCircle2 } from "lucide-react";
-import { getVoter, Voter } from "@/services/governanceService";
+import { Loader2, Zap, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { getVoterBasePower } from "@/services/governanceService";
 import { toast } from "sonner";
 
-export const VoterInfoLookup = () => {
+export const VoterBasePowerLookup = () => {
   const [voterAddress, setVoterAddress] = useState("");
-  const [voterData, setVoterData] = useState<Voter | null>(null);
+  const [basePower, setBasePower] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,14 +21,14 @@ export const VoterInfoLookup = () => {
 
     setLoading(true);
     setError(null);
-    setVoterData(null);
+    setBasePower(null);
 
     try {
-      const voter = await getVoter(voterAddress.trim());
-      setVoterData(voter);
-      toast.success("Voter information retrieved successfully");
+      const power = await getVoterBasePower(voterAddress.trim());
+      setBasePower(power);
+      toast.success("Voter base power retrieved successfully");
     } catch (err: any) {
-      const errorMsg = err?.message || "Failed to retrieve voter information";
+      const errorMsg = err?.message || "Failed to retrieve voter base power";
       setError(errorMsg);
       toast.error(errorMsg);
     } finally {
@@ -38,14 +38,8 @@ export const VoterInfoLookup = () => {
 
   const handleClear = () => {
     setVoterAddress("");
-    setVoterData(null);
+    setBasePower(null);
     setError(null);
-  };
-
-  const formatTimestamp = (timestamp: string) => {
-    const ts = Number(timestamp);
-    if (isNaN(ts) || ts === 0) return "Never";
-    return new Date(ts * 1000).toLocaleString();
   };
 
   const formatVotePower = (power: string) => {
@@ -58,20 +52,20 @@ export const VoterInfoLookup = () => {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <UserCheck className="h-5 w-5" />
-          Voter Information Lookup
+          <Zap className="h-5 w-5" />
+          Voter Base Power Lookup
         </CardTitle>
         <CardDescription>
-          Look up voter information by address
+          Look up the base voting power for a voter address
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Input Section */}
         <div className="space-y-2">
-          <Label htmlFor="voter-address">Voter Address</Label>
+          <Label htmlFor="voter-base-power-address">Voter Address</Label>
           <div className="flex gap-2">
             <Input
-              id="voter-address"
+              id="voter-base-power-address"
               placeholder="Enter voter address (e.g., ABC123...)"
               value={voterAddress}
               onChange={(e) => setVoterAddress(e.target.value)}
@@ -94,10 +88,13 @@ export const VoterInfoLookup = () => {
                   Looking up...
                 </>
               ) : (
-                "Lookup"
+                <>
+                  <Zap className="h-4 w-4 mr-2" />
+                  Lookup
+                </>
               )}
             </Button>
-            {voterData && (
+            {basePower && (
               <Button
                 onClick={handleClear}
                 disabled={loading}
@@ -124,93 +121,30 @@ export const VoterInfoLookup = () => {
           </div>
         )}
 
-        {/* Voter Data Display */}
-        {voterData && (
+        {/* Base Power Display */}
+        {basePower && (
           <div className="space-y-4 p-4 bg-muted/30 rounded-lg border">
             <div className="flex items-center gap-2 mb-4">
               <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
-              <h3 className="font-semibold text-lg">Voter Information</h3>
+              <h3 className="font-semibold text-lg">Voter Base Power</h3>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4">
               <div>
                 <Label className="text-sm font-medium text-muted-foreground">
                   Voter Address
                 </Label>
                 <p className="text-sm font-mono mt-1 break-all">
-                  {voterData.voterAddress}
+                  {voterAddress}
                 </p>
               </div>
 
               <div>
                 <Label className="text-sm font-medium text-muted-foreground">
-                  Vote Base Power
+                  Base Power
                 </Label>
-                <p className="text-sm font-semibold mt-1">
-                  {formatVotePower(voterData.voteBasePower)} UNIT
-                </p>
-              </div>
-
-              <div>
-                <Label className="text-sm font-medium text-muted-foreground">
-                  Vote Multiplier
-                </Label>
-                <p className="text-sm font-semibold mt-1">
-                  {formatVotePower(voterData.voteMultiplier)}×
-                </p>
-              </div>
-
-              <div>
-                <Label className="text-sm font-medium text-muted-foreground">
-                  Vote Total Power
-                </Label>
-                <p className="text-sm font-semibold mt-1 text-primary">
-                  {formatVotePower(voterData.voteTotalPower)} UNIT
-                </p>
-              </div>
-
-              <div>
-                <Label className="text-sm font-medium text-muted-foreground">
-                  Vote Timestamp
-                </Label>
-                <p className="text-sm mt-1">
-                  {formatTimestamp(voterData.voteTimestamp)}
-                </p>
-              </div>
-
-              <div>
-                <Label className="text-sm font-medium text-muted-foreground">
-                  Proposals Participated
-                </Label>
-                <p className="text-sm font-semibold mt-1">
-                  {voterData.proposalsParticipated}
-                </p>
-              </div>
-
-              <div>
-                <Label className="text-sm font-medium text-muted-foreground">
-                  Last Participation Timestamp
-                </Label>
-                <p className="text-sm mt-1">
-                  {formatTimestamp(voterData.lastParticipationTimestamp)}
-                </p>
-              </div>
-
-              <div>
-                <Label className="text-sm font-medium text-muted-foreground">
-                  Last Snapshot Timestamp
-                </Label>
-                <p className="text-sm mt-1">
-                  {formatTimestamp(voterData.lastSnapshotTimestamp)}
-                </p>
-              </div>
-
-              <div>
-                <Label className="text-sm font-medium text-muted-foreground">
-                  Last Proposal Node
-                </Label>
-                <p className="text-sm font-mono mt-1 break-all">
-                  {voterData.lastProposalNode || "None"}
+                <p className="text-2xl font-bold mt-1 text-primary">
+                  {formatVotePower(basePower)} UNIT
                 </p>
               </div>
             </div>

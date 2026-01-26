@@ -1,8 +1,12 @@
 import { useState, useEffect } from "react";
 import { Proposal, VotingStats } from "@/types/governanceTypes";
-import { getEvents, decodeProposalCreatedEvent, getProposal } from "@/services/governanceService";
+import { getEvents, decodeProposalCreatedEvent, getProposal, getVoter, Voter, castVote, getVote } from "@/services/governanceService";
 import { convertServiceProposalToUI } from "@/utils/governanceUtils";
 import { useWallet } from "@txnlab/use-wallet-react";
+import algorandService, { AlgorandNetwork } from "@/services/algorandService";
+import { getCurrentNetworkConfig, getAlgorandNetworkFromNetworkId } from "@/config";
+import algosdk, { waitForConfirmation } from "algosdk";
+import { toast } from "@/hooks/use-toast";
 
 // Mock data for development (fallback)
 const mockProposals: Proposal[] = [
@@ -159,12 +163,13 @@ const calculateStatsFromProposals = (
 };
 
 export const useGovernanceData = () => {
-  const { activeAccount } = useWallet();
+  const { activeAccount, signTransactions, activeWallet } = useWallet();
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [stats, setStats] = useState<VotingStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [userVotes, setUserVotes] = useState<Map<string, boolean>>(new Map());
+  const [userVoterInfo, setUserVoterInfo] = useState<Voter | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -210,6 +215,7 @@ export const useGovernanceData = () => {
         if (fetchedProposals.length > 0) {
           setProposals(fetchedProposals);
           // Calculate stats from fetched proposals
+          // Voting power will be updated when voter info is fetched
           const calculatedStats = calculateStatsFromProposals(fetchedProposals, 0);
           setStats(calculatedStats);
         } else {
@@ -232,26 +238,221 @@ export const useGovernanceData = () => {
     fetchData();
   }, []);
 
-  const vote = async (proposalId: string, support: boolean, votingPower: number) => {
-    // TODO: Implement actual voting transaction
-    // For now, simulate voting
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    setUserVotes((prev) => new Map(prev).set(proposalId, support));
-
-    setProposals((prev) =>
-      prev.map((p) => {
-        if (p.id === proposalId) {
+  // Fetch voter info when active account changes
+  useEffect(() => {
+    const fetchVoterInfo = async () => {
+      if (!activeAccount?.address) {
+        setUserVoterInfo(null);
+        setUserVotes(new Map()); // Clear votes when wallet disconnects
+        // Reset voting power in stats when wallet disconnects
+        setStats((prevStats) => {
+          if (!prevStats) return prevStats;
           return {
-            ...p,
-            votesFor: support ? p.votesFor + votingPower : p.votesFor,
-            votesAgainst: !support ? p.votesAgainst + votingPower : p.votesAgainst,
-            totalVotes: p.totalVotes + votingPower,
+            ...prevStats,
+            yourVotingPower: 0,
           };
+        });
+        return;
+      }
+
+      try {
+        const voterInfo = await getVoter(activeAccount.address);
+        setUserVoterInfo(voterInfo);
+        
+        // Update stats with actual voting power from voter info
+        const basePower = Number(voterInfo.voteBasePower) / 1e8;
+        setStats((prevStats) => {
+          if (!prevStats) return prevStats;
+          return {
+            ...prevStats,
+            yourVotingPower: basePower,
+          };
+        });
+      } catch (err: any) {
+        console.error("Failed to fetch voter info:", err);
+        // Don't set error state here, just log it - voter info is optional
+        setUserVoterInfo(null);
+        // Reset voting power on error
+        setStats((prevStats) => {
+          if (!prevStats) return prevStats;
+          return {
+            ...prevStats,
+            yourVotingPower: 0,
+          };
+        });
+      }
+    };
+
+    fetchVoterInfo();
+  }, [activeAccount?.address]);
+
+  // Fetch user votes for all proposals when proposals or active account changes
+  useEffect(() => {
+    const fetchUserVotes = async () => {
+      if (!activeAccount?.address || proposals.length === 0) {
+        return;
+      }
+
+      try {
+        const votesMap = new Map<string, boolean>();
+        
+        // Fetch vote for each proposal
+        await Promise.all(
+          proposals.map(async (proposal) => {
+            try {
+              const voteValue = await getVote(proposal.id, activeAccount.address);
+              // Vote value: "0" = voted against, "1" = voted for, "2" = hasn't voted
+              // If "2", don't set vote (leave undefined) so vote buttons show
+              // Otherwise, set the vote result
+              if (voteValue === "1") {
+                votesMap.set(proposal.id, true); // Voted for
+              } else if (voteValue === "0") {
+                votesMap.set(proposal.id, false); // Voted against
+              }
+              // If voteValue === "2", don't set anything (userVote will be undefined, showing vote buttons)
+            } catch (err: any) {
+              // If get_vote fails, just skip it - vote buttons will show
+              console.debug(`No vote found for proposal ${proposal.id}:`, err?.message);
+            }
+          })
+        );
+
+        setUserVotes(votesMap);
+      } catch (err: any) {
+        console.error("Failed to fetch user votes:", err);
+        // Don't throw - just log the error, votes are optional
+      }
+    };
+
+    fetchUserVotes();
+  }, [proposals, activeAccount?.address]);
+
+  const vote = async (proposalId: string, support: boolean, votingPower: number) => {
+    if (!activeAccount?.address) {
+      throw new Error("Wallet not connected");
+    }
+
+    if (!signTransactions) {
+      throw new Error("Transaction signer not available");
+    }
+
+    try {
+      // Call castVote to get the transaction
+      const voteResult = await castVote({
+        proposalId,
+        support,
+        sender: activeAccount.address,
+      });
+
+      if (!voteResult.success || !voteResult.txns || voteResult.txns.length === 0) {
+        throw new Error(voteResult.error || "Failed to create vote transaction");
+      }
+
+      // Show toast notification to prompt user to open wallet
+      const walletName = activeWallet?.metadata?.name || "your wallet";
+      toast({
+        title: "Please Sign Transaction",
+        description: `Please open ${walletName} and sign the vote transaction`,
+        duration: 10000,
+      });
+
+      // Sign transactions
+      const stxns = await signTransactions(
+        voteResult.txns.map((txn: string) =>
+          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+        )
+      );
+
+      // Get the correct algod client for the network
+      const networkConfig = getCurrentNetworkConfig();
+      const algorandNetwork = getAlgorandNetworkFromNetworkId(
+        networkConfig.networkId as any
+      );
+      if (!algorandNetwork) {
+        throw new Error(`Invalid network: ${networkConfig.networkId}`);
+      }
+
+      const algorandClients =
+        await algorandService.initializeClientsForTransactions(algorandNetwork);
+
+      // Send transaction
+      const res = await algorandClients.algod.sendRawTransaction(stxns).do();
+
+      // Wait for confirmation
+      await waitForConfirmation(
+        algorandClients.algod,
+        res.txid,
+        4
+      );
+
+      // Refresh vote from contract to ensure accuracy
+      // Add a small delay to ensure the contract state is updated
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      try {
+        const voteValue = await getVote(proposalId, activeAccount.address);
+        // Vote value: "0" = voted against, "1" = voted for, "2" = hasn't voted
+        // Update vote state based on contract value
+        if (voteValue === "1") {
+          setUserVotes((prev) => new Map(prev).set(proposalId, true));
+        } else if (voteValue === "0") {
+          setUserVotes((prev) => new Map(prev).set(proposalId, false));
+        } else if (voteValue === "2") {
+          // If still "2" after voting, remove from map to show vote buttons again
+          setUserVotes((prev) => {
+            const newMap = new Map(prev);
+            newMap.delete(proposalId);
+            return newMap;
+          });
+        } else {
+          // Fallback to optimistic update if value is unexpected
+          console.warn(`Unexpected vote value: ${voteValue}, using optimistic update`);
+          setUserVotes((prev) => new Map(prev).set(proposalId, support));
         }
-        return p;
-      })
-    );
+      } catch (err) {
+        console.error("Failed to refresh vote after casting:", err);
+        // Fallback to optimistic update - we know what we voted
+        setUserVotes((prev) => new Map(prev).set(proposalId, support));
+      }
+
+      // Refresh proposal data to get updated vote counts
+      try {
+        const updatedProposal = await getProposal(proposalId);
+        const uiProposal = convertServiceProposalToUI(updatedProposal, proposalId);
+        setProposals((prev) =>
+          prev.map((p) => (p.id === proposalId ? uiProposal : p))
+        );
+      } catch (err) {
+        console.error("Failed to refresh proposal after vote:", err);
+        // Still update optimistically if refresh fails
+        setProposals((prev) =>
+          prev.map((p) => {
+            if (p.id === proposalId) {
+              return {
+                ...p,
+                votesFor: support ? p.votesFor + votingPower : p.votesFor,
+                votesAgainst: !support ? p.votesAgainst + votingPower : p.votesAgainst,
+                totalVotes: p.totalVotes + votingPower,
+              };
+            }
+            return p;
+          })
+        );
+      }
+
+      toast({
+        title: "Vote Submitted",
+        description: `Your vote has been successfully recorded on-chain`,
+      });
+    } catch (err: any) {
+      console.error("Failed to cast vote:", err);
+      toast({
+        title: "Vote Failed",
+        description: err?.message || "Failed to submit vote. Please try again.",
+        variant: "destructive",
+      });
+      throw err;
+    }
   };
 
   const getProposalsByStatus = (status: Proposal["status"]) => {
@@ -268,6 +469,7 @@ export const useGovernanceData = () => {
     loading,
     error,
     userVotes,
+    userVoterInfo,
     vote,
     getProposalsByStatus,
     getProposalsByCategory,

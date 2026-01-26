@@ -5,34 +5,56 @@ import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import { VotingStats, ProposalStatus } from "@/types/governanceTypes";
 import { Zap } from "lucide-react";
-import { NFTMultiplierDropdown, calculateNFTMultiplier, getDefaultNFTs } from "./NFTMultiplierDropdown";
+import { NFTMultiplierDropdown, calculateNFTMultiplier } from "./NFTMultiplierDropdown";
 import { isFeatureEnabled } from "@/config";
+import { Voter } from "@/services/governanceService";
+import { useUserNFTs } from "@/hooks/useUserNFTs";
 
 interface GovernanceDashboardCardProps {
   stats: VotingStats | null;
   selectedStatus: ProposalStatus | "all";
   onStatusChange: (status: ProposalStatus | "all") => void;
+  userVoterInfo?: Voter | null;
 }
 
 export const GovernanceDashboardCard = ({
   stats,
   selectedStatus,
   onStatusChange,
+  userVoterInfo,
 }: GovernanceDashboardCardProps) => {
-  const hasVotingPower = stats && stats.yourVotingPower > 0;
   const statuses: (ProposalStatus | "all")[] = ["all", "active", "passed", "rejected"];
   const nftBoostEnabled = isFeatureEnabled("enableNFTBoost");
+  const { userNFTs } = useUserNFTs();
 
-  // Calculate NFT multiplier and effective power
+  // Use voter info if available, otherwise fall back to stats
+  const basePower = userVoterInfo 
+    ? Number(userVoterInfo.voteBasePower) / 1e8 
+    : (stats?.yourVotingPower ?? 0);
+
+  const hasVotingPower = basePower > 0;
+
+  // Calculate NFT multiplier - use contract multiplier if available, otherwise calculate from NFTs
   const nftMultiplier = useMemo(() => {
     if (!nftBoostEnabled) return 1;
-    return calculateNFTMultiplier(getDefaultNFTs());
-  }, [nftBoostEnabled]);
-  const supplyPercentage = stats 
-    ? (stats.yourVotingPower / stats.totalUnitSupply) * 100 
-    : 0;
-  const effectivePower = stats 
-    ? Math.floor(stats.yourVotingPower * nftMultiplier) 
+    // If voter info exists, use contract multiplier (divide by 10000)
+    if (userVoterInfo) {
+      return Number(userVoterInfo.voteMultiplier) / 10000;
+    }
+    // Otherwise calculate from fetched user NFTs
+    return calculateNFTMultiplier(userNFTs);
+  }, [userVoterInfo, nftBoostEnabled, userNFTs]);
+  
+  // Use voteTotalPower from voter info if available, otherwise calculate from basePower * nftMultiplier
+  const effectivePower = userVoterInfo 
+    ? Number(userVoterInfo.voteTotalPower) / 1e8 
+    : Math.floor(basePower * nftMultiplier);
+  
+  // Calculate supply percentage using basePower (not effectivePower)
+  // Use hardcoded total supply of 420,069
+  const totalSupply = 420069;
+  const supplyPercentage = totalSupply > 0
+    ? (basePower / totalSupply) * 100 
     : 0;
 
   return (
@@ -53,30 +75,32 @@ export const GovernanceDashboardCard = ({
         <div className="p-4 rounded-lg bg-primary/5 border border-primary/30 shadow-[0_0_15px_rgba(var(--primary),0.15)]">
           <div className="text-xs text-muted-foreground mb-1">Base Power</div>
           <div className="text-4xl md:text-5xl font-bold text-whale-gold animate-fade-in">
-            {stats ? stats.yourVotingPower.toLocaleString() : "—"}
+            {basePower > 0 ? basePower.toLocaleString() : "—"}
           </div>
           <div className="text-sm text-muted-foreground mt-1">UNIT tokens</div>
           
           {/* Supply Progress Bar */}
-          <div className="mt-4">
-            <Progress 
-              value={supplyPercentage} 
-              className="h-2 bg-muted/30"
-            />
-            <div className="flex justify-between items-center mt-2 text-xs text-muted-foreground">
-              <span>{supplyPercentage.toFixed(1)}% of supply</span>
-              <span>{stats?.totalUnitSupply.toLocaleString()} total</span>
+          {totalSupply > 0 && (
+            <div className="mt-4">
+              <Progress 
+                value={supplyPercentage} 
+                className="h-2 bg-muted/30"
+              />
+              <div className="flex justify-between items-center mt-2 text-xs text-muted-foreground">
+                <span>{supplyPercentage.toFixed(1)}% of supply</span>
+                <span>{totalSupply.toLocaleString()} total</span>
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Right Column - Effective Power Card */}
         <div className="flex flex-col justify-center">
           <div className="p-4 rounded-lg bg-primary/5 border border-primary/30 shadow-[0_0_15px_rgba(var(--primary),0.15)]">
-            {/* NFT Boost */}
+            {/* NFT Boost - Always show */}
             <div className="mb-4">
               <div className="text-xs text-muted-foreground mb-1">NFT Boost</div>
-              <div className={`text-2xl font-bold ${nftBoostEnabled && nftMultiplier > 1 ? 'text-whale-gold' : 'text-muted-foreground'}`}>
+              <div className={`text-2xl font-bold ${nftMultiplier > 1 ? 'text-whale-gold' : 'text-muted-foreground'}`}>
                 {nftMultiplier.toFixed(2)}x
               </div>
             </div>
@@ -85,13 +109,9 @@ export const GovernanceDashboardCard = ({
             <Separator className="mb-4" />
             <div>
               <div className="text-xs text-muted-foreground mb-1">Effective Voting Power</div>
-              {hasVotingPower && nftBoostEnabled && nftMultiplier > 1 ? (
-                <div className="text-3xl font-bold text-whale-gold animate-glow-pulse">
+              {hasVotingPower ? (
+                <div className={`text-3xl font-bold ${userVoterInfo && Number(userVoterInfo.voteTotalPower) > Number(userVoterInfo.voteBasePower) ? 'text-whale-gold animate-glow-pulse' : 'text-whale-gold'}`}>
                   {effectivePower.toLocaleString()} <span className="text-sm font-normal text-muted-foreground">UNIT</span>
-                </div>
-              ) : hasVotingPower ? (
-                <div className="text-3xl font-bold text-whale-gold">
-                  {stats.yourVotingPower.toLocaleString()} <span className="text-sm font-normal text-muted-foreground">UNIT</span>
                 </div>
               ) : (
                 <div className="text-3xl font-bold text-muted-foreground/50">
@@ -106,7 +126,7 @@ export const GovernanceDashboardCard = ({
       {/* NFT Multipliers Section */}
       {nftBoostEnabled && (
         <>
-          <NFTMultiplierDropdown />
+          <NFTMultiplierDropdown userNFTs={userNFTs} multiplier={nftMultiplier} />
           <Separator className="my-4" />
         </>
       )}
