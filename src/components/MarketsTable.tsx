@@ -619,10 +619,10 @@ const MarketsTable = () => {
           // Otherwise, fall back to finding by symbol only (for backward compatibility)
           const token = borrowModal.poolId
             ? tokens.find(
-                (t) =>
-                  t.symbol === borrowModal.asset &&
-                  t.poolId === borrowModal.poolId
-              )
+              (t) =>
+                t.symbol === borrowModal.asset &&
+                t.poolId === borrowModal.poolId
+            )
             : tokens.find((t) => t.symbol === borrowModal.asset);
 
           if (token && token.poolId && token.underlyingContractId) {
@@ -835,9 +835,9 @@ const MarketsTable = () => {
   const formattedTotalClaimable =
     totalClaimableAmount > 0
       ? ARC200Service.formatBalance(
-          totalClaimableAmount.toString(),
-          rewardDecimals
-        )
+        totalClaimableAmount.toString(),
+        rewardDecimals
+      )
       : "0";
 
   // Get VOI token confiag to find poolId for deposit
@@ -1002,10 +1002,10 @@ const MarketsTable = () => {
               const txnW = (await builder.token.withdraw(allowance)).obj;
               const optinW = voiToken.underlyingAssetId
                 ? {
-                    xaid: Number(voiToken.underlyingAssetId),
-                    snd: activeAccount.address,
-                    arcv: activeAccount.address,
-                  }
+                  xaid: Number(voiToken.underlyingAssetId),
+                  snd: activeAccount.address,
+                  arcv: activeAccount.address,
+                }
                 : {};
               buildN.push({
                 ...txnW,
@@ -1022,9 +1022,8 @@ const MarketsTable = () => {
           console.error(`Error claiming reward ${reward.id}:`, error);
           toast({
             title: "Claim Error",
-            description: `Failed to claim ${reward.name}: ${
-              error instanceof Error ? error.message : "Unknown error"
-            }`,
+            description: `Failed to claim ${reward.name}: ${error instanceof Error ? error.message : "Unknown error"
+              }`,
             variant: "destructive",
           });
           // Continue with other rewards even if one fails
@@ -1286,9 +1285,8 @@ const MarketsTable = () => {
           console.error(`Error claiming reward ${reward.id}:`, error);
           toast({
             title: "Claim Error",
-            description: `Failed to claim ${reward.name}: ${
-              error instanceof Error ? error.message : "Unknown error"
-            }`,
+            description: `Failed to claim ${reward.name}: ${error instanceof Error ? error.message : "Unknown error"
+              }`,
             variant: "destructive",
           });
         }
@@ -1477,7 +1475,7 @@ const MarketsTable = () => {
           (txn: any) =>
             txn.txn.type === "appl" &&
             Number(txn.txn.applicationCall.appIndex) ===
-              parseInt(voiToken.poolId || "")
+            parseInt(voiToken.poolId || "")
         )
         ?.txn.txID();
       if (poolTxnID) {
@@ -1636,8 +1634,7 @@ const MarketsTable = () => {
 
       if (!token) {
         console.error(
-          `Token ${asset} not found in network config${
-            poolId ? ` with poolId ${poolId}` : ""
+          `Token ${asset} not found in network config${poolId ? ` with poolId ${poolId}` : ""
           }`
         );
         return { balance: 0, balanceUSD: 0 };
@@ -1659,8 +1656,8 @@ const MarketsTable = () => {
       // Compare poolIds as strings to ensure exact match
       const originalTokenConfig = Array.isArray(tokenConfigRaw)
         ? tokenConfigRaw.find(
-            (tc) => String(tc.poolId) === String(token.poolId)
-          ) || tokenConfigRaw[0]
+          (tc) => String(tc.poolId) === String(token.poolId)
+        ) || tokenConfigRaw[0]
         : tokenConfigRaw;
 
       if (!originalTokenConfig) {
@@ -1673,6 +1670,17 @@ const MarketsTable = () => {
       // Initialize ARC200Service with current clients
       const clients = await getSyncedClientsForReads();
       ARC200Service.initialize(clients);
+
+      // Debug: Log token config details
+      console.log("[MarketsTable] Token config for balance fetch:", {
+        asset,
+        network: currentNetwork,
+        tokenStandard: originalTokenConfig.tokenStandard,
+        underlyingContractId: token.underlyingContractId,
+        underlyingAssetId: token.underlyingAssetId,
+        poolId: token.poolId,
+        address: activeAccount.address,
+      });
 
       let balance = 0;
 
@@ -1705,15 +1713,25 @@ const MarketsTable = () => {
         }
       } else if (originalTokenConfig.tokenStandard === "network") {
         // For network tokens (like VOI), fetch native balance
+        console.log(`[MarketsTable] Entering network token balance fetch for ${asset}`, {
+          tokenStandard: originalTokenConfig.tokenStandard,
+          address: activeAccount.address,
+          network: currentNetwork,
+        });
         console.log(`Fetching network token balance for ${asset}`);
         try {
           const clients = await getSyncedClientsForReads();
           const accountInfo = await clients.algod
             .accountInformation(activeAccount.address)
             .do();
+          console.log(`[MarketsTable] accountInfo for ${asset}:`, accountInfo);
           // Convert from micro-units to units (divide by 1,000,000)
-          balance = Number(accountInfo.amount) / 1_000_000;
-          console.log(`Network token balance for ${asset}: ${balance}`);
+          balance = Math.max(0, Number(accountInfo.amount) - Number(accountInfo.minBalance) - 1e6) / 1e6;
+          console.log(`[MarketsTable] Network token balance for ${asset}:`, {
+            rawAmount: accountInfo.amount,
+            balance,
+            minBalance: accountInfo.minBalance,
+          });
         } catch (error) {
           console.error(
             `Error fetching network token balance for ${asset}:`,
@@ -2025,7 +2043,7 @@ const MarketsTable = () => {
             onDeposit={() => handleDepositClick(detailModal.asset!)}
             onWithdraw={() => handleWithdrawClick(detailModal.asset!)}
             onBorrow={() => handleBorrowClick(detailModal.asset!)}
-            onRepay={() => {}}
+            onRepay={() => { }}
           />
         )}
 
@@ -2210,9 +2228,8 @@ const MarketsTable = () => {
                     >
                       {isClaiming
                         ? "Claiming..."
-                        : `Claim ${
-                            formattedTotalClaimable || "0"
-                          } ${rewardSymbol}`}
+                        : `Claim ${formattedTotalClaimable || "0"
+                        } ${rewardSymbol}`}
                     </button>
                     {voiToken &&
                       (() => {
@@ -2237,7 +2254,7 @@ const MarketsTable = () => {
                           const matchingMarket = markets.find(
                             (m) =>
                               m.asset?.toLowerCase() ===
-                                voiToken.symbol.toLowerCase() &&
+                              voiToken.symbol.toLowerCase() &&
                               (!voiToken.poolId || m.poolId === voiToken.poolId)
                           );
                           if (matchingMarket) {
@@ -2288,8 +2305,8 @@ const MarketsTable = () => {
                         const depositButtonText = isClaiming
                           ? "Processing..."
                           : apy === 0
-                          ? "Direct Deposit into Market"
-                          : `Deposit & Earn ${formattedAPY}% APY`;
+                            ? "Direct Deposit into Market"
+                            : `Deposit & Earn ${formattedAPY}% APY`;
 
                         return (
                           <>
@@ -2424,8 +2441,8 @@ const MarketsTable = () => {
                           const networkMentions = isCurrentNetworkVOI()
                             ? " @Voi_Net"
                             : isCurrentNetworkAlgorand()
-                            ? " @AlgoFoundation"
-                            : "";
+                              ? " @AlgoFoundation"
+                              : "";
 
                           // Get wallet name
                           const rawWalletName =
@@ -2447,22 +2464,16 @@ const MarketsTable = () => {
                           }
 
                           const shareText = claimedAmount?.wasDeposited
-                            ? `Just claimed and deposited ${
-                                claimedAmount?.formatted ||
-                                formattedTotalClaimable
-                              } ${
-                                claimedAmount?.symbol || rewardSymbol
-                              } rewards on @dork_fi${networkMentions}${
-                                walletName ? ` using ${walletName}` : ""
-                              }! 🎉`
-                            : `Just claimed ${
-                                claimedAmount?.formatted ||
-                                formattedTotalClaimable
-                              } ${
-                                claimedAmount?.symbol || rewardSymbol
-                              } rewards on @dork_fi${networkMentions}${
-                                walletName ? ` using ${walletName}` : ""
-                              }! 🎉`;
+                            ? `Just claimed and deposited ${claimedAmount?.formatted ||
+                            formattedTotalClaimable
+                            } ${claimedAmount?.symbol || rewardSymbol
+                            } rewards on @dork_fi${networkMentions}${walletName ? ` using ${walletName}` : ""
+                            }! 🎉`
+                            : `Just claimed ${claimedAmount?.formatted ||
+                            formattedTotalClaimable
+                            } ${claimedAmount?.symbol || rewardSymbol
+                            } rewards on @dork_fi${networkMentions}${walletName ? ` using ${walletName}` : ""
+                            }! 🎉`;
 
                           return (
                             <a

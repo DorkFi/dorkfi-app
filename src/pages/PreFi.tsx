@@ -633,17 +633,37 @@ const chainApi = {
           ? ["asa", market.assetId]
           : ["arc200", market.marketId];
 
+      console.log(`[PreFi] getMarketBalance for ${market.symbol}:`, {
+        assetId: market.assetId,
+        marketId: market.marketId,
+        tokenStandard,
+        tokenId,
+        address,
+      });
+
       const nTokenId = market.nTokenId;
 
       let balance = 0n;
       if (tokenStandard === "network") {
         // For network VOI, get account balance minus minimum balance
+        console.log(`[PreFi] Fetching network token balance for ${market.symbol}`, {
+          address,
+          assetId: market.assetId,
+          tokenStandard,
+          network: networkConfig.networkId,
+        });
         const accInfo = await algorandClients.algod
           .accountInformation(address)
           .do();
+        console.log(`[PreFi] accountInfo for ${market.symbol}:`, accInfo);
         balance = BigInt(
           Math.max(0, Number(accInfo.amount) - Number(accInfo.minBalance) - 1e6)
         );
+        console.log(`[PreFi] Calculated balance for ${market.symbol}:`, {
+          amount: accInfo.amount,
+          minBalance: accInfo.minBalance,
+          calculatedBalance: balance.toString(),
+        });
       } else if (tokenStandard === "asa") {
         const accAssetInfo = await algorandClients.algod
           .accountAssetInformation(address, Number(market.assetId))

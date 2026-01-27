@@ -1269,14 +1269,13 @@ export const fetchUserWalletBalance = async (
         const accountInfo = await clients.algod
           .accountInformation(userAddress)
           .do();
-        balance = BigInt(accountInfo.amount);
+        balance = (x => x >= BigInt(0) ? x : BigInt(0))(BigInt(accountInfo.amount) - BigInt(accountInfo.minBalance) - BigInt(1e6));
       } else if (tokenConfig.tokenStandard === "asa") {
         // For ASA tokens, get balance from account asset information
         const accountAssetInfo = await clients.algod
           .accountAssetInformation(userAddress, Number(tokenConfig.assetId))
           .do();
-        console.log("accountAssetInfo", accountAssetInfo);
-        balance = BigInt(accountAssetInfo?.amount || 0);
+        balance = BigInt(accountAssetInfo?.amount || 0)
       } else if (
         tokenConfig.tokenStandard === "arc200" &&
         (tokenConfig.contractId || token.underlyingContractId)
