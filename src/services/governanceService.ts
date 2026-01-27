@@ -1176,7 +1176,7 @@ export const castVote = async (
       buildN.push({
         ...txnO,
         note: new TextEncoder().encode(`governance cast vote ${Buffer.from(proposalNode).toString('hex').slice(0, 8)}`),
-        payment: 100000,
+        payment: 2e5,
         foreignApps: [storageAppId],
       });
     }
