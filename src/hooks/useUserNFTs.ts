@@ -4,6 +4,7 @@ import {
   fetchUserNFTs,
   filterGovernanceNFTs,
   parseNFTMetadata,
+  getNFTMultiplier,
   NFTToken,
 } from "@/services/nftService";
 import { GovernanceNFT } from "@/components/governance/NFTMultiplierDropdown";
@@ -99,7 +100,7 @@ export const useUserNFTs = (address?: string | null) => {
   const userNFTs: GovernanceNFT[] = nfts.map((nft) => ({
     id: `${nft.contractId}-${nft.tokenId}`,
     name: nft.name,
-    multiplier: 0, // Will be calculated by governance components
+    multiplier: getNFTMultiplier(nft.contractId),
     image: nft.imageUrl,
   }));
 

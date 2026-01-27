@@ -56,6 +56,20 @@ export const GovernanceDashboardCard = ({
   const supplyPercentage = totalSupply > 0
     ? (basePower / totalSupply) * 100 
     : 0;
+  
+  // Apply non-linear transformation to progress bar for better visibility
+  // Use tighter curve for 0-10%, then linear for values over 10%
+  // Formula: visual = (actual / 10)^0.3 * 100 for 0-10%, actual for >10%
+  const curveThreshold = 10; // Use curve up to 10%
+  const visualProgressPercentage = useMemo(() => {
+    if (supplyPercentage <= 0) return 0;
+    if (supplyPercentage <= curveThreshold) {
+      // Tighter power curve (0.3): makes small percentages fill bar more aggressively
+      return Math.pow(supplyPercentage / curveThreshold, 0.3) * 100;
+    }
+    // For values over 10%, show actual percentage (capped at 100% visually)
+    return Math.min(supplyPercentage, 100);
+  }, [supplyPercentage]);
 
   return (
     <DorkFiCard className="p-4 md:p-6">
@@ -83,12 +97,11 @@ export const GovernanceDashboardCard = ({
           {totalSupply > 0 && (
             <div className="mt-4">
               <Progress 
-                value={supplyPercentage} 
+                value={visualProgressPercentage} 
                 className="h-2 bg-muted/30"
               />
-              <div className="flex justify-between items-center mt-2 text-xs text-muted-foreground">
+              <div className="mt-2 text-xs text-muted-foreground">
                 <span>{supplyPercentage.toFixed(1)}% of supply</span>
-                <span>{totalSupply.toLocaleString()} total</span>
               </div>
             </div>
           )}
