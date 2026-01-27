@@ -35,6 +35,10 @@ export const SignatureModal = ({
     if (open) {
       setStatus("pending");
       setError(null);
+    } else {
+      // Reset state when modal closes
+      setStatus("pending");
+      setError(null);
     }
   }, [open]);
 

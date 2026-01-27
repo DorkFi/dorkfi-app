@@ -30,13 +30,21 @@ export const VoteConfirmationModal = ({
 }: VoteConfirmationModalProps) => {
   const [isConfirming, setIsConfirming] = useState(false);
 
+  // Reset confirming state when modal closes
+  const handleOpenChange = (newOpen: boolean) => {
+    if (!newOpen) {
+      setIsConfirming(false);
+    }
+    onOpenChange(newOpen);
+  };
+
   const handleConfirm = () => {
     setIsConfirming(true);
     onConfirm();
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader className="pt-6 px-6">
           <div className="mx-auto mb-4">

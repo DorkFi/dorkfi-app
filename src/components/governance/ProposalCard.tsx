@@ -57,6 +57,16 @@ export const ProposalCard = ({ proposal, onVote, userVote, votingPower = 0 }: Pr
     setShowSignature(true);
   };
 
+  const handleConfirmationClose = (open: boolean) => {
+    if (!open) {
+      // Reset state when confirmation modal is cancelled
+      setPendingVoteSupport(null);
+      setShowConfirmation(false);
+    } else {
+      setShowConfirmation(open);
+    }
+  };
+
   const handleSign = async () => {
     if (pendingVoteSupport === null) return;
     await onVote(proposal.id, pendingVoteSupport);
@@ -69,6 +79,19 @@ export const ProposalCard = ({ proposal, onVote, userVote, votingPower = 0 }: Pr
 
   const handleSignError = () => {
     // Error is handled in the signature modal
+    // Reset state on error so user can try again
+    setShowSignature(false);
+    setPendingVoteSupport(null);
+  };
+
+  const handleSignatureClose = (open: boolean) => {
+    if (!open) {
+      // Reset state when signature modal is cancelled/closed
+      setPendingVoteSupport(null);
+      setShowSignature(false);
+    } else {
+      setShowSignature(open);
+    }
   };
 
   const handleSuccessClose = () => {
@@ -176,7 +199,7 @@ export const ProposalCard = ({ proposal, onVote, userVote, votingPower = 0 }: Pr
       {pendingVoteSupport !== null && (
         <VoteConfirmationModal
           open={showConfirmation}
-          onOpenChange={setShowConfirmation}
+          onOpenChange={handleConfirmationClose}
           proposal={proposal}
           support={pendingVoteSupport}
           votingPower={votingPower}
@@ -188,7 +211,7 @@ export const ProposalCard = ({ proposal, onVote, userVote, votingPower = 0 }: Pr
       {pendingVoteSupport !== null && (
         <SignatureModal
           open={showSignature}
-          onOpenChange={setShowSignature}
+          onOpenChange={handleSignatureClose}
           action={`vote ${pendingVoteSupport ? 'for' : 'against'} the proposal`}
           onSign={handleSign}
           onSuccess={handleSignSuccess}
