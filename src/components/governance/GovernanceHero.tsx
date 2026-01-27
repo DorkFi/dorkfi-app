@@ -67,7 +67,7 @@ export const GovernanceHero = ({ stats }: GovernanceHeroProps) => {
           <span className="hero-header">Governance</span>
         </H1>
         <Body className="text-sm sm:text-base md:text-lg lg:text-xl max-w-2xl mx-auto">
-          Vote on protocol changes, interest rates, collateral listings, and treasury allocation using your UNIT tokens.
+          Vote on protocol changes using your UNIT.
         </Body>
       </div>
     </DorkFiCard>

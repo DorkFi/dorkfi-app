@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import Header from "@/components/Header";
 import { GovernanceHero } from "@/components/governance/GovernanceHero";
 import { GovernanceDashboardCard } from "@/components/governance/GovernanceDashboardCard";
+import { GovernanceVotingInfoCard } from "@/components/governance/GovernanceVotingInfoCard";
 import { ProposalCard } from "@/components/governance/ProposalCard";
 import { useGovernanceData } from "@/hooks/useGovernanceData";
 import { ProposalStatus } from "@/types/governanceTypes";
@@ -74,6 +75,11 @@ const Governance = () => {
           </div>
         ) : (
           <>
+            {/* Governance Voting Info Card */}
+            <div className="mt-6">
+              <GovernanceVotingInfoCard />
+            </div>
+
             {/* Unified Dashboard Card */}
             <div className="mt-6">
               <GovernanceDashboardCard

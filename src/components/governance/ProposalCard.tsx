@@ -41,24 +41,13 @@ export const ProposalCard = ({ proposal, onVote, userVote, votingPower = 0 }: Pr
 
   const votesForPercent = (proposal.votesFor / Math.max(proposal.totalVotes, 1)) * 100;
   const votesAgainstPercent = (proposal.votesAgainst / Math.max(proposal.totalVotes, 1)) * 100;
+  const quorumPercent = (proposal.totalVotes / proposal.quorum) * 100;
   
-  const StatusIcon = statusConfig[proposal.status]?.icon || statusConfig.pending.icon;
+  const StatusIcon = statusConfig[proposal.status].icon;
   const isActive = proposal.status === "active";
-  const canVote = isActive && userVote === undefined;
   const timeLeft = isActive ? formatDistanceToNow(proposal.endTime, { addSuffix: true }) : null;
-  
-  // Debug logging
-  console.log("ProposalCard render", {
-    proposalId: proposal.id,
-    status: proposal.status,
-    isActive,
-    userVote,
-    canVote,
-    votingPower,
-  });
 
   const handleVoteClick = (support: boolean) => {
-    console.log("Vote button clicked", { support, proposalId: proposal.id });
     setPendingVoteSupport(support);
     setShowConfirmation(true);
   };
@@ -118,7 +107,7 @@ export const ProposalCard = ({ proposal, onVote, userVote, votingPower = 0 }: Pr
               <TrendingUp className="h-4 w-4" />
               For: {votesForPercent.toFixed(1)}%
             </span>
-            <span className="flex items-center gap-1 text-destructive">
+            <span className="flex items-center gap-1 text-red-500 dark:text-red-400">
               <TrendingDown className="h-4 w-4" />
               Against: {votesAgainstPercent.toFixed(1)}%
             </span>
@@ -132,7 +121,7 @@ export const ProposalCard = ({ proposal, onVote, userVote, votingPower = 0 }: Pr
                 style={{ width: `${votesForPercent}%` }}
               />
               <div 
-                className="bg-destructive h-full transition-all" 
+                className="bg-red-500 dark:bg-red-400 h-full transition-all" 
                 style={{ width: `${votesAgainstPercent}%` }}
               />
             </div>
@@ -155,13 +144,13 @@ export const ProposalCard = ({ proposal, onVote, userVote, votingPower = 0 }: Pr
 
           {isActive && (
             <div className="flex gap-2">
-              {canVote ? (
+              {userVote === undefined ? (
                 <>
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => handleVoteClick(false)}
-                    className="border-destructive text-destructive hover:bg-destructive hover:text-white"
+                    className="border-red-500 text-red-500 hover:bg-transparent hover:text-red-500 dark:border-red-400 dark:text-red-400 dark:hover:text-red-400"
                   >
                     Vote Against
                   </Button>
@@ -173,11 +162,11 @@ export const ProposalCard = ({ proposal, onVote, userVote, votingPower = 0 }: Pr
                     Vote For
                   </Button>
                 </>
-              ) : userVote !== undefined ? (
+              ) : (
                 <Badge variant={userVote ? "default" : "destructive"} className="px-4 py-2">
                   Voted {userVote ? "For" : "Against"}
                 </Badge>
-              ) : null}
+              )}
             </div>
           )}
         </div>
@@ -187,10 +176,7 @@ export const ProposalCard = ({ proposal, onVote, userVote, votingPower = 0 }: Pr
       {pendingVoteSupport !== null && (
         <VoteConfirmationModal
           open={showConfirmation}
-          onOpenChange={(open) => {
-            setShowConfirmation(open);
-            if (!open) setPendingVoteSupport(null);
-          }}
+          onOpenChange={setShowConfirmation}
           proposal={proposal}
           support={pendingVoteSupport}
           votingPower={votingPower}
@@ -202,10 +188,7 @@ export const ProposalCard = ({ proposal, onVote, userVote, votingPower = 0 }: Pr
       {pendingVoteSupport !== null && (
         <SignatureModal
           open={showSignature}
-          onOpenChange={(open) => {
-            setShowSignature(open);
-            if (!open) setPendingVoteSupport(null);
-          }}
+          onOpenChange={setShowSignature}
           action={`vote ${pendingVoteSupport ? 'for' : 'against'} the proposal`}
           onSign={handleSign}
           onSuccess={handleSignSuccess}
