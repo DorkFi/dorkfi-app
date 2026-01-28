@@ -1074,6 +1074,20 @@ export interface CastVoteResult {
   error?: any;
 }
 
+export interface BatchVoteParams {
+  votes: Array<{
+    proposalId: string | Uint8Array;
+    support: boolean;
+  }>;
+  sender: string;
+}
+
+export interface BatchVoteResult {
+  success: boolean;
+  txns?: string[];
+  error?: any;
+}
+
 /**
  * Casts a vote on a governance proposal
  * @param params Vote parameters including proposal ID, support (true = for, false = against), and sender
@@ -1201,6 +1215,151 @@ export const castVote = async (
     };
   } catch (error: any) {
     console.error("Failed to cast vote:", error);
+    return {
+      success: false,
+      error: error?.message || "Unknown error occurred",
+    };
+  }
+};
+
+/**
+ * Casts multiple votes on governance proposals in a single batch transaction
+ * @param params Batch vote parameters including array of votes and sender
+ * @param networkId Optional network ID, defaults to current network
+ * @returns Promise<BatchVoteResult> The result of the batch vote transaction
+ */
+export const castBatchVote = async (
+  params: BatchVoteParams,
+  networkId?: NetworkId
+): Promise<BatchVoteResult> => {
+  try {
+    if (params.votes.length === 0) {
+      throw new Error("No votes provided");
+    }
+
+    const networkConfig = networkId
+      ? getNetworkConfig(networkId)
+      : getCurrentNetworkConfig();
+
+    if (!isCurrentNetworkAVM()) {
+      throw new Error("Governance voting is only supported on AVM networks");
+    }
+
+    const governanceConfig = getContractAddress(
+      networkId || (networkConfig.networkId as NetworkId),
+      "governance",
+    ) as GovernanceConfig | string | undefined;
+
+    if (!governanceConfig) {
+      throw new Error("Governance contract not configured for this network");
+    }
+
+    const appId =
+      typeof governanceConfig === "string"
+        ? Number(governanceConfig)
+        : governanceConfig.appId;
+
+    // Get storage app ID from governance config
+    if (typeof governanceConfig === "string") {
+      throw new Error("Governance config must be a GovernanceConfig object with storageAppId");
+    }
+    const storageAppId = governanceConfig.storageAppId;
+
+    const clients = algorandService.initializeClients(
+      networkConfig.walletNetworkId as AlgorandNetwork
+    );
+
+    // Create contract instance
+    const ci = new CONTRACT(
+      appId,
+      clients.algod,
+      undefined,
+      abi.custom,
+      {
+        addr: params.sender,
+        sk: new Uint8Array(),
+      },
+    );
+    const builder = {
+      governance: new CONTRACT(
+        appId,
+        clients.algod,
+        undefined,
+        {
+          ...UNITGovernanceAppSpec.contract,
+          events: [],
+        },
+        {
+          addr: params.sender,
+          sk: new Uint8Array(),
+        },
+        true,
+        false,
+        true
+      )
+    }
+
+    const buildN = [];
+
+    // Calculate total payment amount: number of votes * 1e5
+    const totalPayment = params.votes.length * 1e5;
+
+    // Build vote transactions for each proposal
+    for (let index = 0; index < params.votes.length; index++) {
+      const vote = params.votes[index];
+      // Convert proposalId to Uint8Array if it's a hex string
+      let proposalNode: Uint8Array;
+      if (typeof vote.proposalId === "string") {
+        // Remove 0x prefix if present and ensure it's 64 hex chars (32 bytes)
+        const hex = vote.proposalId.startsWith("0x") ? vote.proposalId.slice(2) : vote.proposalId;
+        // Pad to 64 hex chars if needed (32 bytes)
+        const paddedHex = hex.padStart(64, "0").slice(0, 64);
+        proposalNode = Uint8Array.from(Buffer.from(paddedHex, "hex"));
+      } else {
+        proposalNode = vote.proposalId;
+      }
+
+      // Ensure proposalNode is exactly 32 bytes
+      if (proposalNode.length !== 32) {
+        const padded = new Uint8Array(32);
+        padded.set(proposalNode.slice(0, 32));
+        proposalNode = padded;
+      }
+
+      // Vote value: 0 = against, 1 = for
+      const voteValue = vote.support ? BigInt(1) : BigInt(0);
+
+      const txnO = (await builder.governance.cast_vote(proposalNode, voteValue)).obj;
+      buildN.push({
+        ...txnO,
+        note: new TextEncoder().encode(`governance cast vote ${Buffer.from(proposalNode).toString('hex').slice(0, 8)}`),
+        // Only include payment in the first transaction
+        payment: index === 0 ? totalPayment : 0,
+        foreignApps: [storageAppId],
+      });
+    }
+
+    ci.setExtraTxns(buildN);
+    // Adjust fee based on number of votes (base fee + per-vote fee)
+    ci.setFee(8000 + (params.votes.length - 1) * 2000);
+    ci.setEnableGroupResourceSharing(true);
+    const result = await ci.custom();
+
+    console.log("castBatchVote result", { result, voteCount: params.votes.length });
+
+    if (!result.success) {
+      return {
+        success: false,
+        error: result.returnValue || "Failed to cast batch vote",
+      };
+    }
+
+    return {
+      success: true,
+      txns: result.txns || [],
+    };
+  } catch (error: any) {
+    console.error("Failed to cast batch vote:", error);
     return {
       success: false,
       error: error?.message || "Unknown error occurred",

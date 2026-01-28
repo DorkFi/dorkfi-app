@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Proposal, VotingStats } from "@/types/governanceTypes";
-import { getEvents, decodeProposalCreatedEvent, getProposal, getVoter, Voter, castVote, getVote } from "@/services/governanceService";
+import { getEvents, decodeProposalCreatedEvent, getProposal, getVoter, Voter, castVote, castBatchVote, getVote } from "@/services/governanceService";
 import { convertServiceProposalToUI } from "@/utils/governanceUtils";
 import { useWallet } from "@txnlab/use-wallet-react";
 import algorandService, { AlgorandNetwork } from "@/services/algorandService";
@@ -455,6 +455,139 @@ export const useGovernanceData = () => {
     }
   };
 
+  const batchVote = async (votes: Array<{ proposalId: string; support: boolean }>, votingPower: number) => {
+    if (!activeAccount?.address) {
+      throw new Error("Wallet not connected");
+    }
+
+    if (!signTransactions) {
+      throw new Error("Transaction signer not available");
+    }
+
+    if (votes.length === 0) {
+      throw new Error("No votes provided");
+    }
+
+    try {
+      // Call castBatchVote to get the transaction
+      const voteResult = await castBatchVote({
+        votes: votes.map(v => ({
+          proposalId: v.proposalId,
+          support: v.support,
+        })),
+        sender: activeAccount.address,
+      });
+
+      if (!voteResult.success || !voteResult.txns || voteResult.txns.length === 0) {
+        throw new Error(voteResult.error || "Failed to create batch vote transaction");
+      }
+
+      // Show toast notification to prompt user to open wallet
+      const walletName = activeWallet?.metadata?.name || "your wallet";
+      toast({
+        title: "Please Sign Transaction",
+        description: `Please open ${walletName} and sign the batch vote transaction for ${votes.length} proposal${votes.length > 1 ? 's' : ''}`,
+        duration: 10000,
+      });
+
+      // Sign transactions
+      const stxns = await signTransactions(
+        voteResult.txns.map((txn: string) =>
+          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+        )
+      );
+
+      // Get the correct algod client for the network
+      const networkConfig = getCurrentNetworkConfig();
+      const algorandNetwork = getAlgorandNetworkFromNetworkId(
+        networkConfig.networkId as any
+      );
+      if (!algorandNetwork) {
+        throw new Error(`Invalid network: ${networkConfig.networkId}`);
+      }
+
+      const algorandClients =
+        await algorandService.initializeClientsForTransactions(algorandNetwork);
+
+      // Send transaction
+      const res = await algorandClients.algod.sendRawTransaction(stxns).do();
+
+      // Wait for confirmation
+      await waitForConfirmation(
+        algorandClients.algod,
+        res.txid,
+        4
+      );
+
+      // Refresh votes from contract to ensure accuracy
+      // Add a small delay to ensure the contract state is updated
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Update vote state for all voted proposals
+      const updatedVotes = new Map(userVotes);
+      for (const vote of votes) {
+        try {
+          const voteValue = await getVote(vote.proposalId, activeAccount.address);
+          if (voteValue === "1") {
+            updatedVotes.set(vote.proposalId, true);
+          } else if (voteValue === "0") {
+            updatedVotes.set(vote.proposalId, false);
+          } else if (voteValue === "2") {
+            updatedVotes.delete(vote.proposalId);
+          } else {
+            // Fallback to optimistic update
+            updatedVotes.set(vote.proposalId, vote.support);
+          }
+        } catch (err) {
+          console.error(`Failed to refresh vote for proposal ${vote.proposalId}:`, err);
+          // Fallback to optimistic update
+          updatedVotes.set(vote.proposalId, vote.support);
+        }
+      }
+      setUserVotes(updatedVotes);
+
+      // Refresh proposal data to get updated vote counts
+      for (const vote of votes) {
+        try {
+          const updatedProposal = await getProposal(vote.proposalId);
+          const uiProposal = convertServiceProposalToUI(updatedProposal, vote.proposalId);
+          setProposals((prev) =>
+            prev.map((p) => (p.id === vote.proposalId ? uiProposal : p))
+          );
+        } catch (err) {
+          console.error(`Failed to refresh proposal ${vote.proposalId} after vote:`, err);
+          // Still update optimistically if refresh fails
+          setProposals((prev) =>
+            prev.map((p) => {
+              if (p.id === vote.proposalId) {
+                return {
+                  ...p,
+                  votesFor: vote.support ? p.votesFor + votingPower : p.votesFor,
+                  votesAgainst: !vote.support ? p.votesAgainst + votingPower : p.votesAgainst,
+                  totalVotes: p.totalVotes + votingPower,
+                };
+              }
+              return p;
+            })
+          );
+        }
+      }
+
+      toast({
+        title: "Batch Vote Submitted",
+        description: `Your votes for ${votes.length} proposal${votes.length > 1 ? 's have' : ' has'} been successfully recorded on-chain`,
+      });
+    } catch (err: any) {
+      console.error("Failed to cast batch vote:", err);
+      toast({
+        title: "Batch Vote Failed",
+        description: err?.message || "Failed to submit batch vote. Please try again.",
+        variant: "destructive",
+      });
+      throw err;
+    }
+  };
+
   const getProposalsByStatus = (status: Proposal["status"]) => {
     return proposals.filter((p) => p.status === status);
   };
@@ -471,6 +604,7 @@ export const useGovernanceData = () => {
     userVotes,
     userVoterInfo,
     vote,
+    batchVote,
     getProposalsByStatus,
     getProposalsByCategory,
   };

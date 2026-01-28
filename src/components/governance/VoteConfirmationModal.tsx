@@ -17,7 +17,8 @@ interface VoteConfirmationModalProps {
   proposal: Proposal;
   support: boolean;
   votingPower: number;
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
+  isVoting?: boolean;
 }
 
 export const VoteConfirmationModal = ({
@@ -27,6 +28,7 @@ export const VoteConfirmationModal = ({
   support,
   votingPower,
   onConfirm,
+  isVoting = false,
 }: VoteConfirmationModalProps) => {
   const [isConfirming, setIsConfirming] = useState(false);
 
@@ -38,15 +40,20 @@ export const VoteConfirmationModal = ({
     onOpenChange(newOpen);
   };
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     setIsConfirming(true);
-    onConfirm();
+    try {
+      await onConfirm();
+    } finally {
+      // Don't reset isConfirming here - let the parent component handle state
+      // The modal will close when onOpenChange is called
+    }
   };
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader className="pt-6 px-6">
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogHeader className="pt-4 sm:pt-6 px-4 sm:px-6">
           <div className="mx-auto mb-4">
             <div className={`p-4 rounded-full ${support ? 'bg-green-500/10' : 'bg-destructive/10'}`}>
               {support ? (
@@ -66,7 +73,7 @@ export const VoteConfirmationModal = ({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="px-6 py-4 space-y-4">
+        <div className="px-4 sm:px-6 py-4 space-y-4">
           {/* Proposal Summary */}
           <div className="p-4 rounded-lg bg-muted/50 border border-border space-y-2">
             <h4 className="font-medium text-foreground line-clamp-2">{proposal.title}</h4>
@@ -131,24 +138,24 @@ export const VoteConfirmationModal = ({
           </div>
         </div>
 
-        <DialogFooter className="px-6 pb-6 gap-2">
+        <DialogFooter className="px-4 sm:px-6 pb-4 sm:pb-6 gap-2 flex-col sm:flex-row">
           <Button
             variant="outline"
             onClick={() => onOpenChange(false)}
-            disabled={isConfirming}
-            className="flex-1"
+            disabled={isConfirming || isVoting}
+            className="flex-1 w-full sm:w-auto min-h-[44px]"
           >
             Cancel
           </Button>
           <Button
             onClick={handleConfirm}
-            disabled={isConfirming}
-            className={`flex-1 ${support ? 'bg-green-600 hover:bg-green-700' : 'bg-destructive hover:bg-destructive/90'}`}
+            disabled={isConfirming || isVoting}
+            className={`flex-1 w-full sm:w-auto min-h-[44px] ${support ? 'bg-green-600 hover:bg-green-700' : 'bg-destructive hover:bg-destructive/90'}`}
           >
-            {isConfirming ? (
-              <span className="flex items-center gap-2">
+            {(isConfirming || isVoting) ? (
+              <span className="flex items-center justify-center gap-2">
                 <span className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                Confirming...
+                {isVoting ? 'Submitting Vote...' : 'Confirming...'}
               </span>
             ) : (
               `Vote ${support ? 'For' : 'Against'}`
