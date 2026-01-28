@@ -262,6 +262,7 @@ export const ProposalCard = ({
           votingPower={votingPower}
           onConfirm={handleConfirmVote}
           isVoting={isVoting}
+          userVote={userVote}
         />
       )}
 
@@ -273,6 +274,7 @@ export const ProposalCard = ({
           proposal={proposal}
           support={pendingVoteSupport}
           votingPower={votingPower}
+          userVote={userVote}
         />
       )}
     </>

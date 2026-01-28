@@ -19,6 +19,7 @@ interface VoteConfirmationModalProps {
   votingPower: number;
   onConfirm: () => void | Promise<void>;
   isVoting?: boolean;
+  userVote?: boolean; // undefined = no vote, true = voted for, false = voted against
 }
 
 export const VoteConfirmationModal = ({
@@ -29,8 +30,18 @@ export const VoteConfirmationModal = ({
   votingPower,
   onConfirm,
   isVoting = false,
+  userVote,
 }: VoteConfirmationModalProps) => {
   const [isConfirming, setIsConfirming] = useState(false);
+
+  // Calculate projected vote counts, accounting for existing vote if present
+  // If user has already voted, subtract their existing vote before adding the new one
+  const currentVotesFor = proposal.votesFor - (userVote === true ? votingPower : 0);
+  const currentVotesAgainst = proposal.votesAgainst - (userVote === false ? votingPower : 0);
+  
+  const projectedVotesFor = support ? currentVotesFor + votingPower : currentVotesFor;
+  const projectedVotesAgainst = !support ? currentVotesAgainst + votingPower : currentVotesAgainst;
+  const projectedTotal = projectedVotesFor + projectedVotesAgainst;
 
   // Reset confirming state when modal closes
   const handleOpenChange = (newOpen: boolean) => {
@@ -98,32 +109,28 @@ export const VoteConfirmationModal = ({
                 <div 
                   className={`bg-green-500 h-full transition-all ${support ? 'ring-2 ring-green-400 ring-offset-1' : ''}`}
                   style={{ 
-                    width: `${((support ? proposal.votesFor + votingPower : proposal.votesFor) / Math.max((support ? proposal.votesFor + votingPower : proposal.votesFor) + (!support ? proposal.votesAgainst + votingPower : proposal.votesAgainst), 1)) * 100}%` 
+                    width: `${(projectedVotesFor / Math.max(projectedTotal, 1)) * 100}%` 
                   }}
                 />
                 <div 
                   className={`bg-destructive h-full transition-all ${!support ? 'ring-2 ring-destructive/80 ring-offset-1' : ''}`}
                   style={{ 
-                    width: `${((!support ? proposal.votesAgainst + votingPower : proposal.votesAgainst) / Math.max((support ? proposal.votesFor + votingPower : proposal.votesFor) + (!support ? proposal.votesAgainst + votingPower : proposal.votesAgainst), 1)) * 100}%` 
+                    width: `${(projectedVotesAgainst / Math.max(projectedTotal, 1)) * 100}%` 
                   }}
                 />
               </div>
               <div className="flex items-center justify-between text-xs">
                 <span className={`flex items-center gap-1.5 font-semibold ${support ? 'text-green-500' : 'text-muted-foreground'}`}>
                   <div className={`w-2.5 h-2.5 rounded-full ${support ? 'bg-green-500 ring-2 ring-green-400' : 'bg-green-500'}`} />
-                  {support 
-                    ? (proposal.votesFor + votingPower).toLocaleString() 
-                    : proposal.votesFor.toLocaleString()
-                  } For
+                  {projectedVotesFor.toLocaleString()} For
                   {support && <span className="text-green-400 font-medium ml-1">+{votingPower.toLocaleString()}</span>}
+                  {userVote === true && !support && <span className="text-muted-foreground font-medium ml-1">-{votingPower.toLocaleString()}</span>}
                 </span>
                 <span className={`flex items-center gap-1.5 font-semibold ${!support ? 'text-destructive' : 'text-muted-foreground'}`}>
                   <div className={`w-2.5 h-2.5 rounded-full ${!support ? 'bg-destructive ring-2 ring-destructive/80' : 'bg-destructive'}`} />
-                  {!support 
-                    ? (proposal.votesAgainst + votingPower).toLocaleString() 
-                    : proposal.votesAgainst.toLocaleString()
-                  } Against
+                  {projectedVotesAgainst.toLocaleString()} Against
                   {!support && <span className="text-destructive/80 font-medium ml-1">+{votingPower.toLocaleString()}</span>}
+                  {userVote === false && support && <span className="text-muted-foreground font-medium ml-1">-{votingPower.toLocaleString()}</span>}
                 </span>
               </div>
             </div>

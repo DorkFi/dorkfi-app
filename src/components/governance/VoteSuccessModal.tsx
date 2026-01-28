@@ -15,6 +15,7 @@ interface VoteSuccessModalProps {
   proposal: Proposal;
   support: boolean;
   votingPower: number;
+  userVote?: boolean; // undefined = no vote, true = voted for, false = voted against
 }
 
 export const VoteSuccessModal = ({
@@ -23,7 +24,17 @@ export const VoteSuccessModal = ({
   proposal,
   support,
   votingPower,
+  userVote,
 }: VoteSuccessModalProps) => {
+  // Calculate updated vote counts, accounting for existing vote if present
+  // If user has already voted, subtract their existing vote before adding the new one
+  const currentVotesFor = proposal.votesFor - (userVote === true ? votingPower : 0);
+  const currentVotesAgainst = proposal.votesAgainst - (userVote === false ? votingPower : 0);
+  
+  const updatedVotesFor = support ? currentVotesFor + votingPower : currentVotesFor;
+  const updatedVotesAgainst = !support ? currentVotesAgainst + votingPower : currentVotesAgainst;
+  const updatedTotal = updatedVotesFor + updatedVotesAgainst;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
@@ -82,32 +93,28 @@ export const VoteSuccessModal = ({
                 <div 
                   className={`bg-green-500 h-full transition-all ${support ? 'ring-2 ring-green-400 ring-offset-1 animate-pulse' : ''}`}
                   style={{ 
-                    width: `${((support ? proposal.votesFor + votingPower : proposal.votesFor) / Math.max((support ? proposal.votesFor + votingPower : proposal.votesFor) + (!support ? proposal.votesAgainst + votingPower : proposal.votesAgainst), 1)) * 100}%` 
+                    width: `${(updatedVotesFor / Math.max(updatedTotal, 1)) * 100}%` 
                   }}
                 />
                 <div 
                   className={`bg-destructive h-full transition-all ${!support ? 'ring-2 ring-destructive/80 ring-offset-1 animate-pulse' : ''}`}
                   style={{ 
-                    width: `${((!support ? proposal.votesAgainst + votingPower : proposal.votesAgainst) / Math.max((support ? proposal.votesFor + votingPower : proposal.votesFor) + (!support ? proposal.votesAgainst + votingPower : proposal.votesAgainst), 1)) * 100}%` 
+                    width: `${(updatedVotesAgainst / Math.max(updatedTotal, 1)) * 100}%` 
                   }}
                 />
               </div>
               <div className="flex items-center justify-between text-xs">
                 <span className={`flex items-center gap-1.5 font-semibold ${support ? 'text-green-500' : 'text-muted-foreground'}`}>
                   <div className={`w-2.5 h-2.5 rounded-full ${support ? 'bg-green-500 ring-2 ring-green-400 animate-pulse' : 'bg-green-500'}`} />
-                  {support 
-                    ? (proposal.votesFor + votingPower).toLocaleString() 
-                    : proposal.votesFor.toLocaleString()
-                  } For
+                  {updatedVotesFor.toLocaleString()} For
                   {support && <span className="text-green-400 font-medium ml-1">+{votingPower.toLocaleString()}</span>}
+                  {userVote === true && !support && <span className="text-muted-foreground font-medium ml-1">-{votingPower.toLocaleString()}</span>}
                 </span>
                 <span className={`flex items-center gap-1.5 font-semibold ${!support ? 'text-destructive' : 'text-muted-foreground'}`}>
                   <div className={`w-2.5 h-2.5 rounded-full ${!support ? 'bg-destructive ring-2 ring-destructive/80 animate-pulse' : 'bg-destructive'}`} />
-                  {!support 
-                    ? (proposal.votesAgainst + votingPower).toLocaleString() 
-                    : proposal.votesAgainst.toLocaleString()
-                  } Against
+                  {updatedVotesAgainst.toLocaleString()} Against
                   {!support && <span className="text-destructive/80 font-medium ml-1">+{votingPower.toLocaleString()}</span>}
+                  {userVote === false && support && <span className="text-muted-foreground font-medium ml-1">-{votingPower.toLocaleString()}</span>}
                 </span>
               </div>
             </div>
