@@ -296,6 +296,35 @@ const PortfolioModals = ({
     const userDepositIndexFromDeposit =
       depositAny?.userDepositIndex?.toString();
 
+    // Calculate tokenPrice properly accounting for token decimals
+    // The price oracle contract stores prices in a 12-decimal scale
+    // This converts from contract format back to token's native decimal format
+    let tokenPrice = deposit?.tokenPrice || 1;
+    if (market?.price) {
+      try {
+        // Get token config to find decimals
+        const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+        const token = poolId
+          ? tokens.find((t) => t.symbol === asset && t.poolId === poolId)
+          : tokens.find((t) => t.symbol === asset);
+        
+        const tokenDecimals = token?.decimals ?? 6; // Default to 6 if not found
+        
+        // Calculate adjustment: 12 (oracle decimals) - token decimals
+        const targetAdjustment = 12 - tokenDecimals;
+        const divisor = Math.pow(10, targetAdjustment);
+        
+        const price = parseFloat(market.price);
+        if (price && price > 0) {
+          tokenPrice = price / divisor;
+        }
+      } catch (error) {
+        console.error("Error calculating tokenPrice:", error);
+        // Fallback to simple division by 10^6 if calculation fails
+        tokenPrice = parseFloat(market.price) / Math.pow(10, 6);
+      }
+    }
+
     return {
       supplyAPY:
         market?.apyCalculation?.apy ||
@@ -311,9 +340,7 @@ const PortfolioModals = ({
       collateralFactor: market?.collateralFactor
         ? market.collateralFactor * 100
         : 0,
-      tokenPrice: market?.price
-        ? parseFloat(market.price) / Math.pow(10, 6)
-        : deposit?.tokenPrice || 1,
+      tokenPrice,
       totalDeposits: market?.totalDeposits
         ? parseFloat(market.totalDeposits)
         : undefined,
