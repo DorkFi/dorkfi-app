@@ -549,6 +549,7 @@ const MintModal = ({
               hideButton={true}
               isLoadingMaxBorrow={isLoadingMaxBorrow}
               maxBorrowError={maxBorrowError}
+              network={network || currentNetwork}
             />
 
             <SupplyBorrowStats

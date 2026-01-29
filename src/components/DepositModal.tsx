@@ -42,6 +42,7 @@ const DepositModal = ({
   userBalance,
   marketStats,
 }: DepositModalProps) => {
+
   const [amount, setAmount] = useState("");
   const [fiatValue, setFiatValue] = useState(0);
   const [showSuccess, setShowSuccess] = useState(false);
