@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -34,6 +35,15 @@ export const VoteSuccessModal = ({
   const updatedVotesFor = support ? currentVotesFor + votingPower : currentVotesFor;
   const updatedVotesAgainst = !support ? currentVotesAgainst + votingPower : currentVotesAgainst;
   const updatedTotal = updatedVotesFor + updatedVotesAgainst;
+
+  const [shareButtonClicked, setShareButtonClicked] = useState(false);
+
+  // Truncate proposal title for tweet (leave room for fixed text ~60 chars)
+  const titleForShare = proposal.title.length > 100
+    ? `${proposal.title.slice(0, 97)}...`
+    : proposal.title;
+  const voteLabel = support ? "For" : "Against";
+  const shareText = `Just voted ${voteLabel} on "${titleForShare}" on @dork_fi! 🗳️`;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -125,6 +135,35 @@ export const VoteSuccessModal = ({
             <ExternalLink className="h-4 w-4" />
             View Transaction
           </button>
+
+          {/* Divider and Share on X - hide when share button is clicked */}
+          {!shareButtonClicked && (
+            <>
+              <div className="flex items-center gap-3 my-2">
+                <div className="flex-1 h-px bg-border" />
+                <span className="text-xs text-muted-foreground">Share</span>
+                <div className="flex-1 h-px bg-border" />
+              </div>
+              <a
+                href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(
+                  shareText
+                )}&url=${encodeURIComponent("https://app.dork.fi")}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full flex items-center justify-center gap-2 py-3 px-6 rounded-lg bg-black hover:bg-gray-900 dark:bg-white dark:hover:bg-gray-100 text-white dark:text-black font-semibold text-base text-center transition border border-border"
+                onClick={() => setShareButtonClicked(true)}
+              >
+                <svg
+                  className="w-5 h-5"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                >
+                  <path d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932ZM17.61 20.644h2.039L6.486 3.24H4.298Z" />
+                </svg>
+                Share on X
+              </a>
+            </>
+          )}
         </div>
 
         <div className="px-6 pb-6">
