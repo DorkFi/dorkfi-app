@@ -2405,13 +2405,13 @@ export const getEVMNetworks = (): NetworkConfig[] => {
  */
 export const getEnvironmentConfig = (): Partial<GlobalConfig> => {
   const env = process.env.NODE_ENV;
-  
+
   // Check for environment variable overrides
   const envFeatures: Partial<GlobalConfig["features"]> = {};
-  
+
   // Check VITE_ENABLE_LIQUIDATABLE_POSITIONS environment variable
   if (typeof import.meta.env.VITE_ENABLE_LIQUIDATABLE_POSITIONS !== "undefined") {
-    envFeatures.enableLiquidatablePositions = 
+    envFeatures.enableLiquidatablePositions =
       import.meta.env.VITE_ENABLE_LIQUIDATABLE_POSITIONS === "true" ||
       import.meta.env.VITE_ENABLE_LIQUIDATABLE_POSITIONS === "1";
   }
