@@ -307,6 +307,8 @@ const MarketsTable = () => {
           contractId: "41877720",
         },
       },
+      symbol: "VOI",
+      decimals: 6,
     }
   ];
 
