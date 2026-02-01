@@ -94,6 +94,8 @@ import {
   getPreFiParameters,
   getAlgorandConfigForReads,
   getEnabledNetworks,
+  getContractAddress,
+  GovernanceConfig,
 } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
@@ -123,6 +125,7 @@ import {
   updateMarketMaxBorrows,
   calculateMaxBorrowAmount,
   withdrawReserves,
+  toggleMarketPause,
 } from "@/services/adminService";
 import {
   fetchAllMarkets,
@@ -145,6 +148,13 @@ import {
   ROLE_MARKET_CONTROLLER,
   ROLE_PRICE_FEED_MANAGER,
 } from "@/constants/roles";
+import { ProposalCategory, Proposal as UIProposal, ProposalStatus } from "@/types/governanceTypes";
+import { createProposalWithCategory, getEvents, decodeProposalCreatedEvent, getProposal, Proposal as ServiceProposal, snapPower, getPowerSource, snapMultiplier } from "@/services/governanceService";
+import { getCategoryFromId } from "@/constants/governanceConstants";
+import { ProposalCard } from "@/components/governance/ProposalCard";
+import { VoterInfoLookup } from "@/components/governance/VoterInfoLookup";
+import { PowerMultiplierLookup } from "@/components/governance/PowerMultiplierLookup";
+import { convertServiceProposalToUI } from "@/utils/governanceUtils";
 
 // Get markets from configuration - now reactive to network changes
 const getMarketsFromConfig = (networkId: NetworkId) => {
@@ -153,7 +163,7 @@ const getMarketsFromConfig = (networkId: NetworkId) => {
 
   return tokens.map((token) => ({
     // Include poolId in id to make it unique for tokens with multiple markets
-    id: token.poolId 
+    id: token.poolId
       ? `${token.symbol.toLowerCase()}-${token.poolId}`
       : token.symbol.toLowerCase(),
     name: token.name, // This will be "Voi" or "Algo" if override is configured
@@ -347,6 +357,52 @@ export default function AdminDashboard() {
   const [contractMarketResult, setContractMarketResult] = useState<any>(null);
   const [testError, setTestError] = useState<string | null>(null);
 
+  // Governance tab state
+  const [proposalCategory, setProposalCategory] = useState<ProposalCategory | "">("");
+  const [proposalTitle, setProposalTitle] = useState("");
+  const [proposalDescription, setProposalDescription] = useState("");
+  const [proposalStartDate, setProposalStartDate] = useState<string>("");
+
+  const [isSubmittingProposal, setIsSubmittingProposal] = useState(false);
+  const [proposalSubmissionResult, setProposalSubmissionResult] = useState<string | null>(null);
+  const [proposalSubmissionError, setProposalSubmissionError] = useState<string | null>(null);
+
+  // Governance events state
+  const [governanceEvents, setGovernanceEvents] = useState<any[] | null>(null);
+  const [governanceEventsLoading, setGovernanceEventsLoading] = useState(false);
+  const [governanceEventsError, setGovernanceEventsError] = useState<string | null>(null);
+
+  // Governance proposals from events
+  const [proposals, setProposals] = useState<UIProposal[]>([]);
+  const [proposalsLoading, setProposalsLoading] = useState(false);
+  const [proposalsError, setProposalsError] = useState<string | null>(null);
+
+  // Governance proposal details state
+  const [selectedProposal, setSelectedProposal] = useState<ServiceProposal | null>(null);
+  const [isProposalModalOpen, setIsProposalModalOpen] = useState(false);
+  const [proposalLoading, setProposalLoading] = useState(false);
+  const [proposalError, setProposalError] = useState<string | null>(null);
+
+  // Snap power state
+  const [snapPowerAddress, setSnapPowerAddress] = useState<string>("");
+  const [selectedPowerSource, setSelectedPowerSource] = useState<number | "">("");
+  const [isSnappingPower, setIsSnappingPower] = useState(false);
+  const [snapPowerResult, setSnapPowerResult] = useState<{ snapshot: any; txns: string[] } | null>(null);
+  const [snapPowerError, setSnapPowerError] = useState<string | null>(null);
+
+  // Snap multiplier state
+  const [snapMultiplierAddress, setSnapMultiplierAddress] = useState<string>("");
+  const [selectedPowerMultiplier, setSelectedPowerMultiplier] = useState<number | "">("");
+  const [isSnappingMultiplier, setIsSnappingMultiplier] = useState(false);
+  const [snapMultiplierResult, setSnapMultiplierResult] = useState<{ snapshot: any; txns: string[] } | null>(null);
+  const [snapMultiplierError, setSnapMultiplierError] = useState<string | null>(null);
+
+  // Get power source state
+  const [powerSourceQueryId, setPowerSourceQueryId] = useState<number | "">("");
+  const [isLoadingPowerSource, setIsLoadingPowerSource] = useState(false);
+  const [powerSourceResult, setPowerSourceResult] = useState<any | null>(null);
+  const [powerSourceError, setPowerSourceError] = useState<string | null>(null);
+
   // Individual Market View state
   const [selectedMarketDetails, setSelectedMarketDetails] = useState<any>(null);
   const [isMarketDetailsModalOpen, setIsMarketDetailsModalOpen] =
@@ -395,7 +451,7 @@ export default function AdminDashboard() {
       name: "MarketController",
       description:
         "Controls market operations, parameters, and lifecycle management",
-      permissions: [],
+      permissions: ["market.pause", "market.edit", "market.create", "price.update"],
       color:
         "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
       icon: "settings",
@@ -519,9 +575,8 @@ export default function AdminDashboard() {
       );
       if (!role_keyR.success) {
         toast.error("Failed to get role key", {
-          description: `Could not retrieve role key for ${
-            roles.find((r) => r.id === roleId)?.name || "selected role"
-          }. Please try again.`,
+          description: `Could not retrieve role key for ${roles.find((r) => r.id === roleId)?.name || "selected role"
+            }. Please try again.`,
         });
         return;
       }
@@ -529,9 +584,8 @@ export default function AdminDashboard() {
       const set_roleR = await ci.set_role(role_keyR.returnValue, false);
       if (!set_roleR.success) {
         toast.error("Failed to revoke role", {
-          description: `Could not revoke role for ${
-            roles.find((r) => r.id === roleId)?.name || "selected role"
-          }. Please try again.`,
+          description: `Could not revoke role for ${roles.find((r) => r.id === roleId)?.name || "selected role"
+            }. Please try again.`,
         });
         return;
       }
@@ -543,9 +597,8 @@ export default function AdminDashboard() {
       const res = await clients.algod.sendRawTransaction(stxns).do();
       await waitForConfirmation(clients.algod, res.txid, 4);
       toast.success("Role revoked successfully", {
-        description: `Successfully revoked ${
-          roles.find((r) => r.id === roleId)?.name || "selected role"
-        } role from ${address}.`,
+        description: `Successfully revoked ${roles.find((r) => r.id === roleId)?.name || "selected role"
+          } role from ${address}.`,
       });
 
       // Refresh current user roles if the revoked role was for the current user
@@ -1055,8 +1108,7 @@ export default function AdminDashboard() {
     } catch (error) {
       console.error(`Error fetching price for ${marketId}:`, error);
       toast.error(
-        `Error fetching price: ${
-          error instanceof Error ? error.message : "Unknown error"
+        `Error fetching price: ${error instanceof Error ? error.message : "Unknown error"
         }`
       );
     }
@@ -1310,9 +1362,8 @@ export default function AdminDashboard() {
 
       if (!result.success) {
         toast.error("Failed to approve feeder", {
-          description: `Could not ${
-            feederApproval ? "approve" : "revoke"
-          } feeder permissions. Please try again.`,
+          description: `Could not ${feederApproval ? "approve" : "revoke"
+            } feeder permissions. Please try again.`,
         });
         return;
       }
@@ -1326,9 +1377,8 @@ export default function AdminDashboard() {
       await waitForConfirmation(clients.algod, res.txid, 4);
 
       toast.success("Feeder permissions updated", {
-        description: `Successfully ${
-          feederApproval ? "approved" : "revoked"
-        } feeder permissions for ${feederAddress} on token ${tokenId}.`,
+        description: `Successfully ${feederApproval ? "approved" : "revoked"
+          } feeder permissions for ${feederAddress} on token ${tokenId}.`,
       });
 
       // Reset form
@@ -1428,9 +1478,8 @@ export default function AdminDashboard() {
       await waitForConfirmation(clients.algod, res.txid, 4);
 
       toast.success("Price updated successfully", {
-        description: `Successfully set price for ${
-          selectedMarket?.symbol
-        } to $${price.toFixed(6)}.`,
+        description: `Successfully set price for ${selectedMarket?.symbol
+          } to $${price.toFixed(6)}.`,
       });
 
       // Refresh price data
@@ -1619,9 +1668,8 @@ export default function AdminDashboard() {
 
       const link = document.createElement("a");
       link.href = url;
-      link.download = `oracle-data-${currentNetwork}-${
-        new Date().toISOString().split("T")[0]
-      }.json`;
+      link.download = `oracle-data-${currentNetwork}-${new Date().toISOString().split("T")[0]
+        }.json`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -2057,10 +2105,9 @@ export default function AdminDashboard() {
       await waitForConfirmation(algorandClients.algod, res.txid, 4);
 
       setMinterApprovalResult(
-        `Minter approval successful! Transaction ID: ${res.txid}${
-          !isNaN(appId) && appId > 0
-            ? ` (App ID ${appId} → ${actualMinterAddress})`
-            : ""
+        `Minter approval successful! Transaction ID: ${res.txid}${!isNaN(appId) && appId > 0
+          ? ` (App ID ${appId} → ${actualMinterAddress})`
+          : ""
         }`
       );
       setMinterAddress("");
@@ -2135,10 +2182,9 @@ export default function AdminDashboard() {
       await waitForConfirmation(algorandClients.algod, res.txid, 4);
 
       setMinterRevocationResult(
-        `Minter revocation successful! Transaction ID: ${res.txid}${
-          !isNaN(appId) && appId > 0
-            ? ` (App ID ${appId} → ${actualMinterAddress})`
-            : ""
+        `Minter revocation successful! Transaction ID: ${res.txid}${!isNaN(appId) && appId > 0
+          ? ` (App ID ${appId} → ${actualMinterAddress})`
+          : ""
         }`
       );
 
@@ -2371,7 +2417,7 @@ export default function AdminDashboard() {
   const [isLoadingPausedState, setIsLoadingPausedState] = useState(false);
   const [isLoadingSystemHealth, setIsLoadingSystemHealth] = useState(false);
   const [isTogglingPause, setIsTogglingPause] = useState(false);
-  
+
   // Pool paused state - track paused state for each lending pool
   const [poolPausedStates, setPoolPausedStates] = useState<
     Record<string, PausedState>
@@ -2523,6 +2569,7 @@ export default function AdminDashboard() {
   const [isMaxDepositsUpdateModalOpen, setIsMaxDepositsUpdateModalOpen] =
     useState(false);
   const [selectedMarket, setSelectedMarket] = useState<any>(null);
+  const [pausingMarketId, setPausingMarketId] = useState<string | null>(null);
   const [priceUpdateData, setPriceUpdateData] = useState<{
     marketId: string;
     poolId: string;
@@ -2699,10 +2746,10 @@ export default function AdminDashboard() {
           marketType === "prefi"
             ? BigInt(0)
             : BigInt(
-                new BigNumber(newMarket.maxTotalBorrows)
-                  .multipliedBy(10 ** decimals)
-                  .toFixed(0)
-              ),
+              new BigNumber(newMarket.maxTotalBorrows)
+                .multipliedBy(10 ** decimals)
+                .toFixed(0)
+            ),
         liquidationBonus: BigInt(
           BigNumber(newMarket.liquidationBonus).multipliedBy(10000).toFixed(0)
         ),
@@ -2766,6 +2813,156 @@ export default function AdminDashboard() {
   const handleTokenContractSelect = (contractId: string, tokenInfo?: any) => {
     setNewMarket((prev) => ({ ...prev, tokenContractId: contractId }));
     setIsTokenContractModalOpen(false);
+  };
+
+  const fetchGovernanceEvents = async () => {
+    setGovernanceEventsLoading(true);
+    setProposalsLoading(true);
+    setGovernanceEventsError(null);
+    setProposalsError(null);
+    try {
+      const events = await getEvents();
+      const eventsArray = Array.isArray(events) ? events : [events];
+      setGovernanceEvents(eventsArray);
+
+      // Extract ProposalCreated events and fetch proposal details
+      const proposalCreatedEvents: string[] = [];
+      for (const group of eventsArray) {
+        if (group?.name === "ProposalCreated" && Array.isArray(group?.events)) {
+          for (const ev of group.events) {
+            if (Array.isArray(ev) && ev.length >= 4) {
+              try {
+                const decoded = decodeProposalCreatedEvent(ev as [string, unknown, unknown, string]);
+                proposalCreatedEvents.push(decoded.proposal_id);
+              } catch (err) {
+                console.error("Failed to decode ProposalCreated event:", err);
+              }
+            }
+          }
+        }
+      }
+
+      // Fetch proposal details for each ProposalCreated event
+      const fetchedProposals: UIProposal[] = [];
+      for (const proposalId of proposalCreatedEvents) {
+        try {
+          const serviceProposal = await getProposal(proposalId);
+          const uiProposal = convertServiceProposalToUI(serviceProposal, proposalId);
+          fetchedProposals.push(uiProposal);
+        } catch (err: any) {
+          console.error(`Failed to fetch proposal ${proposalId}:`, err);
+          // Continue fetching other proposals even if one fails
+        }
+      }
+
+      setProposals(fetchedProposals);
+    } catch (err: any) {
+      const errorMsg = err?.message ?? "Failed to load governance events";
+      setGovernanceEventsError(errorMsg);
+      setProposalsError(errorMsg);
+      setGovernanceEvents(null);
+      setProposals([]);
+    } finally {
+      setGovernanceEventsLoading(false);
+      setProposalsLoading(false);
+    }
+  };
+
+  const fetchProposalDetails = async (proposalId: string) => {
+    setProposalLoading(true);
+    setProposalError(null);
+    setIsProposalModalOpen(true);
+    try {
+      const proposal = await getProposal(proposalId);
+      setSelectedProposal(proposal);
+    } catch (err: any) {
+      setProposalError(err?.message ?? "Failed to load proposal details");
+      setSelectedProposal(null);
+    } finally {
+      setProposalLoading(false);
+    }
+  };
+
+  const handleSubmitProposal = async () => {
+    if (!activeAccount) {
+      toast.error("Please connect your wallet first");
+      return;
+    }
+
+    if (!proposalCategory || !proposalTitle.trim() || !proposalDescription.trim() || !proposalStartDate) {
+      toast.error("Please fill in all required fields (Category, Title, Description, Start Date)");
+      return;
+    }
+
+    // Validate start date is in the future
+    const startTimestamp = new Date(proposalStartDate).getTime();
+    const now = Date.now();
+    if (startTimestamp <= now) {
+      toast.error("Start date must be in the future");
+      return;
+    }
+
+    setIsSubmittingProposal(true);
+    setProposalSubmissionError(null);
+    setProposalSubmissionResult(null);
+
+    try {
+      // Calculate timestamps
+      const startTimestamp = Math.floor(new Date(proposalStartDate).getTime() / 1000); // Convert to Unix timestamp (seconds)
+      const endTimestamp = startTimestamp + (7 * 24 * 60 * 60); // Add 7 days in seconds
+
+      if (!transactionSigner || !activeAccount?.address) {
+        throw new Error("Wallet not properly connected");
+      }
+
+      // Create proposal using governance service
+      const result = await createProposalWithCategory(
+        proposalTitle,
+        proposalDescription,
+        proposalCategory as ProposalCategory,
+        startTimestamp,
+        transactionSigner,
+        activeAccount.address,
+        currentNetwork
+      );
+
+      if (!result.success) {
+        throw new Error(result.error || "Failed to create proposal");
+      }
+
+      const stxns = await signTransactions(
+        result.txns.map((txn: string) =>
+          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+        )
+      );
+
+      const algorandClients = await algorandService.getCurrentClientsForTransactions();
+
+      const res = await algorandClients.algod.sendRawTransaction(stxns).do();
+      await waitForConfirmation(algorandClients.algod, res.txid, 4);
+
+      const proposalId = result.proposalId || `prop-${Date.now()}`;
+      setProposalSubmissionResult(
+        `Proposal created successfully! Proposal ID: ${proposalId}\n` +
+        `Start Timestamp: ${startTimestamp}\n` +
+        `End Timestamp: ${endTimestamp}` +
+        (result.txns && result.txns.length > 0 ? `\nTransaction IDs: ${result.txns.join(", ")}` : "")
+      );
+      toast.success("Proposal submitted successfully!");
+
+      // Reset form
+      setProposalCategory("");
+      setProposalTitle("");
+      setProposalDescription("");
+      setProposalStartDate("");
+
+    } catch (error: any) {
+      console.error("Error submitting proposal:", error);
+      setProposalSubmissionError(error?.message || "Failed to submit proposal");
+      toast.error("Failed to submit proposal");
+    } finally {
+      setIsSubmittingProposal(false);
+    }
   };
 
   const handleViewMarket = async (market: any) => {
@@ -2892,6 +3089,75 @@ export default function AdminDashboard() {
       newMaxBorrows: "",
     });
     setIsMaxBorrowsUpdateModalOpen(true);
+  };
+
+  const handlePauseMarket = async (
+    configMarket: { id: string; poolId?: string; underlyingContractId?: string },
+    market: { marketInfo?: { marketId?: string; poolId?: string } } | undefined,
+    pause: boolean
+  ) => {
+    if (!activeAccount?.address) {
+      toast.error("Please connect your wallet first");
+      return;
+    }
+
+    const poolId =
+      configMarket.poolId ||
+      market?.marketInfo?.poolId ||
+      getLendingPools(currentNetwork)[0];
+    const tokenId =
+      configMarket.underlyingContractId || market?.marketInfo?.marketId || "";
+
+    if (!poolId || !tokenId) {
+      toast.error("Missing pool or market identifier");
+      return;
+    }
+
+    setPausingMarketId(configMarket.id);
+    try {
+      if (isCurrentNetworkAlgorandCompatible()) {
+        const result = await toggleMarketPause(
+          poolId,
+          tokenId,
+          pause,
+          activeAccount.address
+        );
+        if (result.success) {
+          const networkConfig = getNetworkConfig(currentNetwork);
+          const algorandClients = algorandService.initializeClients(
+            networkConfig.walletNetworkId as AlgorandNetwork
+          );
+          const stxns = await signTransactions(
+            result.txns.map((txn) =>
+              Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+            )
+          );
+          const res = await algorandClients.algod
+            .sendRawTransaction(stxns)
+            .do();
+          await waitForConfirmation(algorandClients.algod, res.txid, 4);
+          toast.success(
+            pause ? "Market paused successfully" : "Market unpaused successfully",
+            { description: `Transaction ID: ${res.txid}` }
+          );
+          loadAllMarkets();
+        } else if (!result.success) {
+          const err = result.error;
+          toast.error("Failed to update market pause state", {
+            description: err instanceof Error ? err.message : String(err),
+          });
+        }
+      } else if (isCurrentNetworkEVM()) {
+        toast.error("EVM networks are not supported yet");
+      }
+    } catch (error) {
+      console.error("Error toggling market pause:", error);
+      toast.error("Failed to update market pause state", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    } finally {
+      setPausingMarketId(null);
+    }
   };
 
   const handleUpdatePrice = async () => {
@@ -3840,8 +4106,8 @@ export default function AdminDashboard() {
                   assetId === "0"
                     ? ["network", "0"]
                     : !isNaN(Number(assetId))
-                    ? ["asa", assetId]
-                    : ["arc200", token.underlyingContractId];
+                      ? ["asa", assetId]
+                      : ["arc200", token.underlyingContractId];
 
                 // Get nTokenId for deposited balance
                 const nTokenId = marketInfo.ntokenId;
@@ -4702,14 +4968,14 @@ export default function AdminDashboard() {
           BigInt(userDepositIndex) === 0n
             ? 0n
             : (BigInt(scaledDeposits) * BigInt(currentDepositIndex)) /
-              BigInt(userDepositIndex);
+            BigInt(userDepositIndex);
 
         // Handle case where borrow_index is 0 (no borrows yet)
         const actualBorrowsRaw =
           BigInt(userBorrowIndex) === 0n
             ? 0n
             : (BigInt(scaledBorrows) * BigInt(currentBorrowIndex)) /
-              BigInt(userBorrowIndex);
+            BigInt(userBorrowIndex);
 
         console.log(`🔍 BigInt calculations for ${market.symbol}:`, {
           actualDepositsRaw: actualDepositsRaw.toString(),
@@ -4862,14 +5128,14 @@ export default function AdminDashboard() {
           BigInt(userDepositIndex) === 0n
             ? 0n
             : (BigInt(scaledDeposits) * BigInt(currentDepositIndex)) /
-              BigInt(userDepositIndex);
+            BigInt(userDepositIndex);
 
         // Handle case where borrow_index is 0 (no borrows yet)
         const actualBorrowsRaw =
           BigInt(userBorrowIndex) === 0n
             ? 0n
             : (BigInt(scaledBorrows) * BigInt(currentBorrowIndex)) /
-              BigInt(userBorrowIndex);
+            BigInt(userBorrowIndex);
 
         // Convert to numbers - the contract already returns amounts in correct units
         // No need to apply decimal normalization as get_user returns the actual token amounts
@@ -4884,8 +5150,8 @@ export default function AdminDashboard() {
           currentPrice > 0
             ? currentPrice
             : lastPrice > 0
-            ? lastPrice
-            : currentPrice;
+              ? lastPrice
+              : currentPrice;
         const depositUSD = actualDepositsNum * priceToUse;
         const borrowUSD = actualBorrowsNum * priceToUse;
         const netPosition = depositUSD - borrowUSD;
@@ -4900,15 +5166,15 @@ export default function AdminDashboard() {
         const depositInterestRaw =
           BigInt(userDepositIndex) > 0n
             ? (BigInt(scaledDeposits) *
-                (BigInt(currentDepositIndex) - BigInt(userDepositIndex))) /
-              BigInt(userDepositIndex)
+              (BigInt(currentDepositIndex) - BigInt(userDepositIndex))) /
+            BigInt(userDepositIndex)
             : 0n;
 
         const borrowInterestRaw =
           BigInt(userBorrowIndex) > 0n
             ? (BigInt(scaledBorrows) *
-                (BigInt(currentBorrowIndex) - BigInt(userBorrowIndex))) /
-              BigInt(userBorrowIndex)
+              (BigInt(currentBorrowIndex) - BigInt(userBorrowIndex))) /
+            BigInt(userBorrowIndex)
             : 0n;
 
         const depositInterestNum =
@@ -5148,7 +5414,7 @@ export default function AdminDashboard() {
         10,
         ((highRiskMarkets.length * 3 + mediumRiskMarkets.length * 1.5) /
           realMarkets.length) *
-          10
+        10
       );
 
       // Debug risk analysis
@@ -5316,8 +5582,8 @@ export default function AdminDashboard() {
           recommendations: [
             highRiskMarkets.length > 0
               ? `Monitor ${highRiskMarkets.join(
-                  ", "
-                )} markets closely due to high utilization rates`
+                ", "
+              )} markets closely due to high utilization rates`
               : "All markets have healthy utilization rates",
             avgUtilizationRate > 0.7
               ? "Consider increasing interest rates to manage high utilization"
@@ -5645,13 +5911,13 @@ export default function AdminDashboard() {
 
     try {
       const response = await fetch("https://dorkfi-api.nautilus.sh/market-data");
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const data = await response.json();
-      
+
       if (data.success && data.data) {
         setReserveData(data.data);
       } else {
@@ -5674,6 +5940,13 @@ export default function AdminDashboard() {
       fetchReserveData();
     }
   }, [activeTab, fetchReserveData]);
+
+  // Load governance events when governance tab is active
+  React.useEffect(() => {
+    if (activeTab === "governance") {
+      fetchGovernanceEvents();
+    }
+  }, [activeTab]);
 
   return (
     <div className="min-h-screen bg-background relative">
@@ -5792,8 +6065,8 @@ export default function AdminDashboard() {
               </TabsTrigger>
             </TabsList>
 
-            {/* Second row for Market Analysis, User Analysis, SToken, Price Feed Manager, Price Oracle, Reserve and Test */}
-            <TabsList className="grid w-full grid-cols-7 lg:w-auto lg:grid-cols-7">
+            {/* Second row for Market Analysis, User Analysis, SToken, Price Feed Manager, Price Oracle, Reserve, Test and Governance */}
+            <TabsList className="grid w-full grid-cols-8 lg:w-auto lg:grid-cols-8">
               <TabsTrigger
                 value="market-analysis"
                 className="flex items-center gap-2"
@@ -5833,6 +6106,10 @@ export default function AdminDashboard() {
               <TabsTrigger value="test" className="flex items-center gap-2">
                 <TestTube className="h-4 w-4" />
                 <span>Test</span>
+              </TabsTrigger>
+              <TabsTrigger value="governance" className="flex items-center gap-2">
+                <Crown className="h-4 w-4" />
+                <span>Governance</span>
               </TabsTrigger>
             </TabsList>
           </div>
@@ -6040,11 +6317,10 @@ export default function AdminDashboard() {
 
             {/* Paused State Display */}
             <Card
-              className={`${
-                pausedState?.isPaused
-                  ? "border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/20"
-                  : "border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/20"
-              }`}
+              className={`${pausedState?.isPaused
+                ? "border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/20"
+                : "border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/20"
+                }`}
             >
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
@@ -6056,11 +6332,10 @@ export default function AdminDashboard() {
                     )}
                     <div>
                       <h3
-                        className={`font-semibold ${
-                          pausedState?.isPaused
-                            ? "text-red-800 dark:text-red-200"
-                            : "text-green-800 dark:text-green-200"
-                        }`}
+                        className={`font-semibold ${pausedState?.isPaused
+                          ? "text-red-800 dark:text-red-200"
+                          : "text-green-800 dark:text-green-200"
+                          }`}
                       >
                         {pausedState?.isPaused
                           ? "Protocol Paused"
@@ -6167,13 +6442,12 @@ export default function AdminDashboard() {
                     <div className="flex items-center gap-2">
                       <div className="w-24 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                         <div
-                          className={`h-2 rounded-full transition-all ${
-                            (systemHealth?.overall || 0) >= 90
-                              ? "bg-green-500"
-                              : (systemHealth?.overall || 0) >= 70
+                          className={`h-2 rounded-full transition-all ${(systemHealth?.overall || 0) >= 90
+                            ? "bg-green-500"
+                            : (systemHealth?.overall || 0) >= 70
                               ? "bg-yellow-500"
                               : "bg-red-500"
-                          }`}
+                            }`}
                           style={{ width: `${systemHealth?.overall || 0}%` }}
                         />
                       </div>
@@ -6331,222 +6605,251 @@ export default function AdminDashboard() {
                       const marketKey = configMarket.id;
                       const market = marketsData[marketKey];
                       const hasData = market && market.isLoaded && !market.error;
-                      
+
                       return (
-                      <Card
-                        key={configMarket.id}
-                        className="hover:shadow-lg transition-shadow"
-                      >
-                        <CardHeader className="pb-3">
-                          <div className="flex items-center justify-between">
-                            <CardTitle className="text-lg">
-                              {configMarket.symbol}
-                            </CardTitle>
-                        <div className="flex items-center gap-2">
-                          <Badge
-                            variant={
-                              hasData
-                                ? "default"
-                                : market?.isLoading
-                                ? "secondary"
-                                : market?.error
-                                ? "destructive"
-                                : "outline"
-                            }
-                          >
-                            {hasData
-                              ? "Active"
-                              : market?.isLoading
-                              ? "Loading..."
-                              : market?.error
-                              ? "Error"
-                              : "No Data"}
-                          </Badge>
-                          {market?.isLoading && (
-                            <Badge variant="outline" className="text-xs">
-                              Loading...
-                            </Badge>
-                          )}
-                          {market?.error && (
-                            <Badge variant="destructive" className="text-xs">
-                              Error
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                      <p className="text-sm text-muted-foreground">
-                        {configMarket.name} •{" "}
-                        {hasData ? "Loaded" : "Not loaded"}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {hasData && market.marketInfo
-                          ? `Contract: ${market.marketInfo.tokenContractId}`
-                          : configMarket.underlyingContractId
-                          ? `Contract: ${configMarket.underlyingContractId}`
-                          : "Contract: Not available"}
-                      </p>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div>
-                          <p className="text-muted-foreground">
-                            Total Deposits
-                          </p>
-                          <p className="font-semibold">
-                            {hasData && market.marketInfo
-                              ? `$${(() => {
-                                  // Get token decimals for proper price scaling
-                                  const tokenDecimals = configMarket.decimals || 6;
-
-                                  const value =
-                                    parseFloat(
-                                      market.marketInfo.totalDeposits
-                                    ) *
-                                    (parseFloat(market.marketInfo.price) /
-                                      Math.pow(10, tokenDecimals));
-                                  if (value >= 1000000000) {
-                                    return `${(value / 1000000000).toFixed(
-                                      2
-                                    )}B`;
-                                  } else if (value >= 1000000) {
-                                    return `${(value / 1000000).toFixed(2)}M`;
-                                  } else if (value >= 1000) {
-                                    return `${(value / 1000).toFixed(2)}K`;
-                                  } else {
-                                    return value.toFixed(2);
+                        <Card
+                          key={configMarket.id}
+                          className="hover:shadow-lg transition-shadow"
+                        >
+                          <CardHeader className="pb-3">
+                            <div className="flex items-center justify-between">
+                              <CardTitle className="text-lg">
+                                {configMarket.symbol}
+                              </CardTitle>
+                              <div className="flex items-center gap-2">
+                                <Badge
+                                  variant={
+                                    hasData
+                                      ? "default"
+                                      : market?.isLoading
+                                        ? "secondary"
+                                        : market?.error
+                                          ? "destructive"
+                                          : "outline"
                                   }
-                                })()}`
-                              : "N/A"}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-muted-foreground">Total Borrows</p>
-                          <p className="font-semibold">
-                            {hasData && market.marketInfo
-                              ? `$${(() => {
-                                  // Get token decimals for proper price scaling
-                                  const tokenDecimals = configMarket.decimals || 6;
+                                >
+                                  {hasData
+                                    ? "Active"
+                                    : market?.isLoading
+                                      ? "Loading..."
+                                      : market?.error
+                                        ? "Error"
+                                        : "No Data"}
+                                </Badge>
+                                {market?.isLoading && (
+                                  <Badge variant="outline" className="text-xs">
+                                    Loading...
+                                  </Badge>
+                                )}
+                                {market?.error && (
+                                  <Badge variant="destructive" className="text-xs">
+                                    Error
+                                  </Badge>
+                                )}
+                                {hasData && market?.marketInfo?.isPaused && (
+                                  <Badge variant="secondary" className="text-xs">
+                                    Paused
+                                  </Badge>
+                                )}
+                              </div>
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                              {configMarket.name} •{" "}
+                              {hasData ? "Loaded" : "Not loaded"}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {hasData && market.marketInfo
+                                ? `Contract: ${market.marketInfo.tokenContractId}`
+                                : configMarket.underlyingContractId
+                                  ? `Contract: ${configMarket.underlyingContractId}`
+                                  : "Contract: Not available"}
+                            </p>
+                          </CardHeader>
+                          <CardContent className="space-y-4">
+                            <div className="grid grid-cols-2 gap-4 text-sm">
+                              <div>
+                                <p className="text-muted-foreground">
+                                  Total Deposits
+                                </p>
+                                <p className="font-semibold">
+                                  {hasData && market.marketInfo
+                                    ? `$${(() => {
+                                      // Get token decimals for proper price scaling
+                                      const tokenDecimals = configMarket.decimals || 6;
 
-                                  const value =
-                                    parseFloat(market.marketInfo.totalBorrows) *
-                                    (parseFloat(market.marketInfo.price) /
-                                      Math.pow(10, tokenDecimals));
-                                  if (value >= 1000000000) {
-                                    return `${(value / 1000000000).toFixed(
+                                      const value =
+                                        parseFloat(
+                                          market.marketInfo.totalDeposits
+                                        ) *
+                                        (parseFloat(market.marketInfo.price) /
+                                          Math.pow(10, tokenDecimals));
+                                      if (value >= 1000000000) {
+                                        return `${(value / 1000000000).toFixed(
+                                          2
+                                        )}B`;
+                                      } else if (value >= 1000000) {
+                                        return `${(value / 1000000).toFixed(2)}M`;
+                                      } else if (value >= 1000) {
+                                        return `${(value / 1000).toFixed(2)}K`;
+                                      } else {
+                                        return value.toFixed(2);
+                                      }
+                                    })()}`
+                                    : "N/A"}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-muted-foreground">Total Borrows</p>
+                                <p className="font-semibold">
+                                  {hasData && market.marketInfo
+                                    ? `$${(() => {
+                                      // Get token decimals for proper price scaling
+                                      const tokenDecimals = configMarket.decimals || 6;
+
+                                      const value =
+                                        parseFloat(market.marketInfo.totalBorrows) *
+                                        (parseFloat(market.marketInfo.price) /
+                                          Math.pow(10, tokenDecimals));
+                                      if (value >= 1000000000) {
+                                        return `${(value / 1000000000).toFixed(
+                                          2
+                                        )}B`;
+                                      } else if (value >= 1000000) {
+                                        return `${(value / 1000000).toFixed(2)}M`;
+                                      } else if (value >= 1000) {
+                                        return `${(value / 1000).toFixed(2)}K`;
+                                      } else {
+                                        return value.toFixed(2);
+                                      }
+                                    })()}`
+                                    : "N/A"}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4 text-sm">
+                              <div>
+                                <p className="text-muted-foreground">Supply Rate</p>
+                                <p className="font-semibold">
+                                  {hasData && market.marketInfo
+                                    ? `${(market.marketInfo.supplyRate * 100).toFixed(
                                       2
-                                    )}B`;
-                                  } else if (value >= 1000000) {
-                                    return `${(value / 1000000).toFixed(2)}M`;
-                                  } else if (value >= 1000) {
-                                    return `${(value / 1000).toFixed(2)}K`;
-                                  } else {
-                                    return value.toFixed(2);
+                                    )}%`
+                                    : "N/A"}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-muted-foreground">Borrow Rate</p>
+                                <p className="font-semibold">
+                                  {hasData && market.marketInfo
+                                    ? `${(
+                                      market.marketInfo.borrowRateCurrent * 100
+                                    ).toFixed(2)}%`
+                                    : "N/A"}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="text-sm">
+                              <p className="text-muted-foreground">
+                                Utilization Rate
+                              </p>
+                              <p className="font-semibold">
+                                {hasData && market.marketInfo
+                                  ? `${(
+                                    market.marketInfo.utilizationRate * 100
+                                  ).toFixed(1)}%`
+                                  : "N/A"}
+                              </p>
+                            </div>
+
+                            <div className="space-y-2">
+                              {/* First row: Main actions */}
+                              <div className="flex gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="flex-1"
+                                  onClick={() => handleViewMarket(market ? { ...market, id: configMarket.id } : { asset: configMarket.symbol, id: configMarket.id })}
+                                  disabled={!hasData}
+                                >
+                                  <Eye className="h-3 w-3 mr-1" />
+                                  View
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="flex-1"
+                                  onClick={() => handleEditMarket(market || { asset: configMarket.symbol })}
+                                  disabled={!hasData}
+                                >
+                                  <Edit className="h-3 w-3 mr-1" />
+                                  Edit Price
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="flex-1"
+                                  onClick={() =>
+                                    handlePauseMarket(
+                                      configMarket,
+                                      market,
+                                      !market?.marketInfo?.isPaused
+                                    )
                                   }
-                                })()}`
-                              : "N/A"}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div>
-                          <p className="text-muted-foreground">Supply Rate</p>
-                          <p className="font-semibold">
-                            {hasData && market.marketInfo
-                              ? `${(market.marketInfo.supplyRate * 100).toFixed(
-                                  2
-                                )}%`
-                              : "N/A"}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-muted-foreground">Borrow Rate</p>
-                          <p className="font-semibold">
-                            {hasData && market.marketInfo
-                              ? `${(
-                                  market.marketInfo.borrowRateCurrent * 100
-                                ).toFixed(2)}%`
-                              : "N/A"}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="text-sm">
-                        <p className="text-muted-foreground">
-                          Utilization Rate
-                        </p>
-                        <p className="font-semibold">
-                          {hasData && market.marketInfo
-                            ? `${(
-                                market.marketInfo.utilizationRate * 100
-                              ).toFixed(1)}%`
-                            : "N/A"}
-                        </p>
-                      </div>
+                                  disabled={
+                                    !hasData ||
+                                    pausingMarketId === configMarket.id
+                                  }
+                                >
+                                  {pausingMarketId === configMarket.id ? (
+                                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                  ) : market?.marketInfo?.isPaused ? (
+                                    "Unpause"
+                                  ) : (
+                                    "Pause"
+                                  )}
+                                </Button>
+                              </div>
 
-                      <div className="space-y-2">
-                        {/* First row: Main actions */}
-                        <div className="flex gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="flex-1"
-                            onClick={() => handleViewMarket(market ? { ...market, id: configMarket.id } : { asset: configMarket.symbol, id: configMarket.id })}
-                            disabled={!hasData}
-                          >
-                            <Eye className="h-3 w-3 mr-1" />
-                            View
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="flex-1"
-                            onClick={() => handleEditMarket(market || { asset: configMarket.symbol })}
-                            disabled={!hasData}
-                          >
-                            <Edit className="h-3 w-3 mr-1" />
-                            Edit Price
-                          </Button>
-                        </div>
-
-                        {/* Second row: Max limits and delete */}
-                        <div className="flex gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="flex-1"
-                            onClick={() => handleEditMaxDeposits(market || { asset: configMarket.symbol })}
-                            disabled={!hasData}
-                          >
-                            <Edit className="h-3 w-3 mr-1" />
-                            Max Deposits
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="flex-1"
-                            onClick={() => handleEditMaxBorrows(market || { asset: configMarket.symbol })}
-                            disabled={!hasData}
-                          >
-                            <Edit className="h-3 w-3 mr-1" />
-                            Max Borrows
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="text-destructive hover:text-destructive flex-1"
-                            disabled={!hasData}
-                          >
-                            <Trash2 className="h-3 w-3 mr-1" />
-                            Delete
-                          </Button>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                    );
-                  })}
-                </>
-              );
-            })()}
+                              {/* Second row: Max limits and delete */}
+                              <div className="flex gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="flex-1"
+                                  onClick={() => handleEditMaxDeposits(market || { asset: configMarket.symbol })}
+                                  disabled={!hasData}
+                                >
+                                  <Edit className="h-3 w-3 mr-1" />
+                                  Max Deposits
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="flex-1"
+                                  onClick={() => handleEditMaxBorrows(market || { asset: configMarket.symbol })}
+                                  disabled={!hasData}
+                                >
+                                  <Edit className="h-3 w-3 mr-1" />
+                                  Max Borrows
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="text-destructive hover:text-destructive flex-1"
+                                  disabled={!hasData}
+                                >
+                                  <Trash2 className="h-3 w-3 mr-1" />
+                                  Delete
+                                </Button>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </>
+                );
+              })()}
             </div>
           </TabsContent>
 
@@ -6763,13 +7066,12 @@ export default function AdminDashboard() {
                                   <div className="flex items-center justify-end gap-1">
                                     <span>{market.utilizationRate}%</span>
                                     <div
-                                      className={`w-2 h-2 rounded-full ${
-                                        market.utilizationRate > 80
-                                          ? "bg-red-500"
-                                          : market.utilizationRate > 60
+                                      className={`w-2 h-2 rounded-full ${market.utilizationRate > 80
+                                        ? "bg-red-500"
+                                        : market.utilizationRate > 60
                                           ? "bg-yellow-500"
                                           : "bg-green-500"
-                                      }`}
+                                        }`}
                                     />
                                   </div>
                                 </td>
@@ -6788,11 +7090,10 @@ export default function AdminDashboard() {
                                 </td>
                                 <td className="text-right p-2">
                                   <span
-                                    className={`${
-                                      market.priceChange24h >= 0
-                                        ? "text-green-600 dark:text-green-400"
-                                        : "text-red-600 dark:text-red-400"
-                                    }`}
+                                    className={`${market.priceChange24h >= 0
+                                      ? "text-green-600 dark:text-green-400"
+                                      : "text-red-600 dark:text-red-400"
+                                      }`}
                                   >
                                     {market.priceChange24h >= 0 ? "+" : ""}
                                     {market.priceChange24h.toFixed(2)}%
@@ -6807,8 +7108,8 @@ export default function AdminDashboard() {
                                       market.riskLevel === "High"
                                         ? "destructive"
                                         : market.riskLevel === "Medium"
-                                        ? "default"
-                                        : "secondary"
+                                          ? "default"
+                                          : "secondary"
                                     }
                                     className="text-xs"
                                   >
@@ -6856,12 +7157,11 @@ export default function AdminDashboard() {
                             <div
                               className="bg-red-500 h-2 rounded-full"
                               style={{
-                                width: `${
-                                  (marketAnalysisData.riskAnalysis
-                                    .overallRiskScore /
-                                    10) *
+                                width: `${(marketAnalysisData.riskAnalysis
+                                  .overallRiskScore /
+                                  10) *
                                   100
-                                }%`,
+                                  }%`,
                               }}
                             />
                           </div>
@@ -7203,12 +7503,11 @@ export default function AdminDashboard() {
                             )}
                           </div>
                           <p
-                            className={`text-xs ${
-                              selectedMarketDetails.currentMetrics
-                                .priceChange24h >= 0
-                                ? "text-green-600 dark:text-green-400"
-                                : "text-red-600 dark:text-red-400"
-                            }`}
+                            className={`text-xs ${selectedMarketDetails.currentMetrics
+                              .priceChange24h >= 0
+                              ? "text-green-600 dark:text-green-400"
+                              : "text-red-600 dark:text-red-400"
+                              }`}
                           >
                             {selectedMarketDetails.currentMetrics
                               .priceChange24h >= 0
@@ -7317,10 +7616,9 @@ export default function AdminDashboard() {
                               <div
                                 className="bg-blue-500 h-2 rounded-full"
                                 style={{
-                                  width: `${
-                                    selectedMarketDetails.riskMetrics
-                                      .correlationWithETH * 100
-                                  }%`,
+                                  width: `${selectedMarketDetails.riskMetrics
+                                    .correlationWithETH * 100
+                                    }%`,
                                 }}
                               />
                             </div>
@@ -7456,9 +7754,9 @@ export default function AdminDashboard() {
                                     <span className="text-xs font-mono">
                                       {depositor.address
                                         ? `${depositor.address.slice(
-                                            0,
-                                            6
-                                          )}...${depositor.address.slice(-4)}`
+                                          0,
+                                          6
+                                        )}...${depositor.address.slice(-4)}`
                                         : "N/A"}
                                     </span>
                                   </div>
@@ -7735,18 +8033,18 @@ export default function AdminDashboard() {
                           Diff: $
                           {Math.abs(
                             userGlobalDeposited -
-                              userGlobalDepositedFromContract
+                            userGlobalDepositedFromContract
                           ).toLocaleString()}
                           (
                           {userGlobalDeposited > 0
                             ? (
-                                (Math.abs(
-                                  userGlobalDeposited -
-                                    userGlobalDepositedFromContract
-                                ) /
-                                  userGlobalDeposited) *
-                                100
-                              ).toFixed(2)
+                              (Math.abs(
+                                userGlobalDeposited -
+                                userGlobalDepositedFromContract
+                              ) /
+                                userGlobalDeposited) *
+                              100
+                            ).toFixed(2)
                             : "0"}
                           %)
                         </div>
@@ -7863,23 +8161,21 @@ export default function AdminDashboard() {
                           {method1Breakdown.map((market, index) => (
                             <div
                               key={market.symbol}
-                              className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
-                                market.status === "Active"
-                                  ? "border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/20"
-                                  : market.status === "No Deposits"
+                              className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${market.status === "Active"
+                                ? "border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/20"
+                                : market.status === "No Deposits"
                                   ? "border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950/20"
                                   : "border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/20"
-                              }`}
+                                }`}
                             >
                               <div className="flex items-center gap-3">
                                 <div
-                                  className={`w-3 h-3 rounded-full ${
-                                    market.status === "Active"
-                                      ? "bg-green-500"
-                                      : market.status === "No Deposits"
+                                  className={`w-3 h-3 rounded-full ${market.status === "Active"
+                                    ? "bg-green-500"
+                                    : market.status === "No Deposits"
                                       ? "bg-gray-400"
                                       : "bg-red-500"
-                                  }`}
+                                    }`}
                                 />
                                 <div>
                                   <div className="font-medium text-sm">
@@ -7983,29 +8279,27 @@ export default function AdminDashboard() {
                             return (
                               <div
                                 key={market.symbol}
-                                className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
-                                  maxBorrowData?.loading
-                                    ? "border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-950/20"
-                                    : maxBorrowData?.error
+                                className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${maxBorrowData?.loading
+                                  ? "border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-950/20"
+                                  : maxBorrowData?.error
                                     ? "border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/20"
                                     : maxBorrowData?.maxBorrow &&
                                       maxBorrowData.maxBorrow > 0n
-                                    ? "border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/20"
-                                    : "border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950/20"
-                                }`}
+                                      ? "border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/20"
+                                      : "border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950/20"
+                                  }`}
                               >
                                 <div className="flex items-center gap-3">
                                   <div
-                                    className={`w-3 h-3 rounded-full ${
-                                      maxBorrowData?.loading
-                                        ? "bg-yellow-500 animate-pulse"
-                                        : maxBorrowData?.error
+                                    className={`w-3 h-3 rounded-full ${maxBorrowData?.loading
+                                      ? "bg-yellow-500 animate-pulse"
+                                      : maxBorrowData?.error
                                         ? "bg-red-500"
                                         : maxBorrowData?.maxBorrow &&
                                           maxBorrowData.maxBorrow > 0n
-                                        ? "bg-green-500"
-                                        : "bg-gray-400"
-                                    }`}
+                                          ? "bg-green-500"
+                                          : "bg-gray-400"
+                                      }`}
                                   />
                                   <div>
                                     <div className="font-medium text-sm">
@@ -8015,12 +8309,12 @@ export default function AdminDashboard() {
                                       {maxBorrowData?.loading
                                         ? "Loading..."
                                         : maxBorrowData?.error
-                                        ? `Error: ${maxBorrowData.error}`
-                                        : maxBorrowData?.maxBorrow === null
-                                        ? "No data"
-                                        : maxBorrowData.maxBorrow === 0n
-                                        ? "No borrow capacity"
-                                        : "Available"}
+                                          ? `Error: ${maxBorrowData.error}`
+                                          : maxBorrowData?.maxBorrow === null
+                                            ? "No data"
+                                            : maxBorrowData.maxBorrow === 0n
+                                              ? "No borrow capacity"
+                                              : "Available"}
                                     </div>
                                   </div>
                                 </div>
@@ -8111,11 +8405,10 @@ export default function AdminDashboard() {
                         </div>
                         <div className="text-center">
                           <div
-                            className={`text-2xl font-bold ${
-                              method2Breakdown.status === "Active"
-                                ? "text-green-400"
-                                : "text-gray-400"
-                            }`}
+                            className={`text-2xl font-bold ${method2Breakdown.status === "Active"
+                              ? "text-green-400"
+                              : "text-gray-400"
+                              }`}
                           >
                             {method2Breakdown.status}
                           </div>
@@ -8207,11 +8500,10 @@ export default function AdminDashboard() {
                         </h4>
 
                         <div
-                          className={`p-4 rounded-lg border ${
-                            method2Breakdown.status === "Active"
-                              ? "border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/20"
-                              : "border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950/20"
-                          }`}
+                          className={`p-4 rounded-lg border ${method2Breakdown.status === "Active"
+                            ? "border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/20"
+                            : "border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950/20"
+                            }`}
                         >
                           <div className="space-y-3">
                             <div className="flex items-center justify-between">
@@ -8239,8 +8531,8 @@ export default function AdminDashboard() {
                               <span className="text-sm font-mono">
                                 {method2Breakdown.lastUpdateTime > 0
                                   ? new Date(
-                                      method2Breakdown.lastUpdateTime * 1000
-                                    ).toLocaleString()
+                                    method2Breakdown.lastUpdateTime * 1000
+                                  ).toLocaleString()
                                   : "Never"}
                               </span>
                             </div>
@@ -8251,9 +8543,9 @@ export default function AdminDashboard() {
                               <span className="text-sm font-mono">
                                 {method2Breakdown.totalBorrowValue > 0
                                   ? (
-                                      method2Breakdown.totalCollateralValue /
-                                      method2Breakdown.totalBorrowValue
-                                    ).toFixed(2)
+                                    method2Breakdown.totalCollateralValue /
+                                    method2Breakdown.totalBorrowValue
+                                  ).toFixed(2)
                                   : "∞"}
                               </span>
                             </div>
@@ -8399,11 +8691,10 @@ export default function AdminDashboard() {
                           </div>
                           <div className="text-right">
                             <div
-                              className={`text-2xl font-bold ${
-                                userGlobalMarketData.netPosition >= 0
-                                  ? "text-green-400"
-                                  : "text-red-400"
-                              }`}
+                              className={`text-2xl font-bold ${userGlobalMarketData.netPosition >= 0
+                                ? "text-green-400"
+                                : "text-red-400"
+                                }`}
                             >
                               $
                               {userGlobalMarketData.netPosition.toLocaleString()}
@@ -8477,11 +8768,10 @@ export default function AdminDashboard() {
                                     )}
                                   </td>
                                   <td
-                                    className={`text-right p-2 font-medium ${
-                                      market.netPosition >= 0
-                                        ? "text-green-400"
-                                        : "text-red-400"
-                                    }`}
+                                    className={`text-right p-2 font-medium ${market.netPosition >= 0
+                                      ? "text-green-400"
+                                      : "text-red-400"
+                                      }`}
                                   >
                                     $
                                     {market.netPosition.toLocaleString(
@@ -8626,11 +8916,10 @@ export default function AdminDashboard() {
                           </div>
                           <div className="text-right">
                             <div
-                              className={`text-2xl font-bold ${
-                                userGlobalFromGetUser.netPosition >= 0
-                                  ? "text-green-400"
-                                  : "text-red-400"
-                              }`}
+                              className={`text-2xl font-bold ${userGlobalFromGetUser.netPosition >= 0
+                                ? "text-green-400"
+                                : "text-red-400"
+                                }`}
                             >
                               $
                               {userGlobalFromGetUser.netPosition.toLocaleString()}
@@ -8648,57 +8937,57 @@ export default function AdminDashboard() {
                       {method4Breakdown.some(
                         (market) =>
                           market.userDepositIndex !==
-                            market.currentDepositIndex ||
+                          market.currentDepositIndex ||
                           market.userBorrowIndex !== market.currentBorrowIndex
                       ) && (
-                        <div className="p-4 bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800 rounded-lg">
-                          <div className="flex items-start gap-3">
-                            <AlertTriangle className="h-5 w-5 text-orange-600 dark:text-orange-400 mt-0.5" />
-                            <div>
-                              <h4 className="text-sm font-medium text-orange-800 dark:text-orange-200">
-                                Index Discrepancies Detected
-                              </h4>
-                              <p className="text-sm text-orange-700 dark:text-orange-300 mt-1">
-                                Some markets show differences between user's
-                                stored indices and current market indices. This
-                                indicates accrued interest since the user's last
-                                interaction.
-                              </p>
-                              <div className="mt-2 text-xs text-orange-600 dark:text-orange-400">
-                                <p>
-                                  <strong>Markets with discrepancies:</strong>
+                          <div className="p-4 bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800 rounded-lg">
+                            <div className="flex items-start gap-3">
+                              <AlertTriangle className="h-5 w-5 text-orange-600 dark:text-orange-400 mt-0.5" />
+                              <div>
+                                <h4 className="text-sm font-medium text-orange-800 dark:text-orange-200">
+                                  Index Discrepancies Detected
+                                </h4>
+                                <p className="text-sm text-orange-700 dark:text-orange-300 mt-1">
+                                  Some markets show differences between user's
+                                  stored indices and current market indices. This
+                                  indicates accrued interest since the user's last
+                                  interaction.
                                 </p>
-                                <ul className="list-disc list-inside mt-1">
-                                  {method4Breakdown
-                                    .filter(
-                                      (market) =>
-                                        market.userDepositIndex !==
+                                <div className="mt-2 text-xs text-orange-600 dark:text-orange-400">
+                                  <p>
+                                    <strong>Markets with discrepancies:</strong>
+                                  </p>
+                                  <ul className="list-disc list-inside mt-1">
+                                    {method4Breakdown
+                                      .filter(
+                                        (market) =>
+                                          market.userDepositIndex !==
                                           market.currentDepositIndex ||
-                                        market.userBorrowIndex !==
+                                          market.userBorrowIndex !==
                                           market.currentBorrowIndex
-                                    )
-                                    .map((market) => (
-                                      <li key={market.symbol}>
-                                        {market.symbol}: Deposit{" "}
-                                        {market.depositInterest > 0
-                                          ? `+${market.depositInterest.toFixed(
+                                      )
+                                      .map((market) => (
+                                        <li key={market.symbol}>
+                                          {market.symbol}: Deposit{" "}
+                                          {market.depositInterest > 0
+                                            ? `+${market.depositInterest.toFixed(
                                               6
                                             )}`
-                                          : "0"}
-                                        , Borrow{" "}
-                                        {market.borrowInterest > 0
-                                          ? `+${market.borrowInterest.toFixed(
+                                            : "0"}
+                                          , Borrow{" "}
+                                          {market.borrowInterest > 0
+                                            ? `+${market.borrowInterest.toFixed(
                                               6
                                             )}`
-                                          : "0"}
-                                      </li>
-                                    ))}
-                                </ul>
+                                            : "0"}
+                                        </li>
+                                      ))}
+                                  </ul>
+                                </div>
                               </div>
                             </div>
                           </div>
-                        </div>
-                      )}
+                        )}
 
                       {/* Market Details Table */}
                       <div className="space-y-2">
@@ -8802,11 +9091,10 @@ export default function AdminDashboard() {
                                     )}
                                   </td>
                                   <td
-                                    className={`text-right p-2 font-medium ${
-                                      market.netPosition >= 0
-                                        ? "text-green-400"
-                                        : "text-red-400"
-                                    }`}
+                                    className={`text-right p-2 font-medium ${market.netPosition >= 0
+                                      ? "text-green-400"
+                                      : "text-red-400"
+                                      }`}
                                   >
                                     $
                                     {market.netPosition.toLocaleString(
@@ -9250,9 +9538,8 @@ export default function AdminDashboard() {
                 className="flex items-center gap-2"
               >
                 <RefreshCcw
-                  className={`h-4 w-4 ${
-                    isLoadingStokenInfo ? "animate-spin" : ""
-                  }`}
+                  className={`h-4 w-4 ${isLoadingStokenInfo ? "animate-spin" : ""
+                    }`}
                 />
                 Refresh
               </DorkFiButton>
@@ -9632,13 +9919,13 @@ export default function AdminDashboard() {
                                     {stokenMarketInfo.marketInfo
                                       .collateralFactor
                                       ? `${(
-                                          (Number(
-                                            stokenMarketInfo.marketInfo
-                                              .collateralFactor
-                                          ) /
-                                            10000) *
-                                          100
-                                        ).toFixed(1)}%`
+                                        (Number(
+                                          stokenMarketInfo.marketInfo
+                                            .collateralFactor
+                                        ) /
+                                          10000) *
+                                        100
+                                      ).toFixed(1)}%`
                                       : "N/A"}
                                   </span>
                                 </div>
@@ -9650,13 +9937,13 @@ export default function AdminDashboard() {
                                     {stokenMarketInfo.marketInfo
                                       .liquidationThreshold
                                       ? `${(
-                                          (Number(
-                                            stokenMarketInfo.marketInfo
-                                              .liquidationThreshold
-                                          ) /
-                                            10000) *
-                                          100
-                                        ).toFixed(1)}%`
+                                        (Number(
+                                          stokenMarketInfo.marketInfo
+                                            .liquidationThreshold
+                                        ) /
+                                          10000) *
+                                        100
+                                      ).toFixed(1)}%`
                                       : "N/A"}
                                   </span>
                                 </div>
@@ -9667,13 +9954,13 @@ export default function AdminDashboard() {
                                   <span className="ml-2 font-mono">
                                     {stokenMarketInfo.marketInfo.reserveFactor
                                       ? `${(
-                                          (Number(
-                                            stokenMarketInfo.marketInfo
-                                              .reserveFactor
-                                          ) /
-                                            10000) *
-                                          100
-                                        ).toFixed(1)}%`
+                                        (Number(
+                                          stokenMarketInfo.marketInfo
+                                            .reserveFactor
+                                        ) /
+                                          10000) *
+                                        100
+                                      ).toFixed(1)}%`
                                       : "N/A"}
                                   </span>
                                 </div>
@@ -9684,13 +9971,13 @@ export default function AdminDashboard() {
                                   <span className="ml-2 font-mono">
                                     {stokenMarketInfo.marketInfo.borrowRate
                                       ? `${(
-                                          (Number(
-                                            stokenMarketInfo.marketInfo
-                                              .borrowRate
-                                          ) /
-                                            10000) *
-                                          100
-                                        ).toFixed(2)}%`
+                                        (Number(
+                                          stokenMarketInfo.marketInfo
+                                            .borrowRate
+                                        ) /
+                                          10000) *
+                                        100
+                                      ).toFixed(2)}%`
                                       : "N/A"}
                                   </span>
                                 </div>
@@ -9711,17 +9998,16 @@ export default function AdminDashboard() {
                                     {stokenMarketInfo.marketInfo
                                       .maxTotalDeposits
                                       ? `${new BigNumber(
-                                          stokenMarketInfo.marketInfo.maxTotalDeposits
-                                        )
-                                          .dividedBy(
-                                            Math.pow(
-                                              10,
-                                              Number(stokenInfo?.decimals) || 6
-                                            )
+                                        stokenMarketInfo.marketInfo.maxTotalDeposits
+                                      )
+                                        .dividedBy(
+                                          Math.pow(
+                                            10,
+                                            Number(stokenInfo?.decimals) || 6
                                           )
-                                          .toFixed(0)} ${
-                                          stokenInfo?.symbol || "SToken"
-                                        }`
+                                        )
+                                        .toFixed(0)} ${stokenInfo?.symbol || "SToken"
+                                      }`
                                       : "N/A"}
                                   </span>
                                 </div>
@@ -9732,17 +10018,16 @@ export default function AdminDashboard() {
                                   <span className="ml-2 font-mono">
                                     {stokenMarketInfo.marketInfo.maxTotalBorrows
                                       ? `${new BigNumber(
-                                          stokenMarketInfo.marketInfo.maxTotalBorrows
-                                        )
-                                          .dividedBy(
-                                            Math.pow(
-                                              10,
-                                              Number(stokenInfo?.decimals) || 6
-                                            )
+                                        stokenMarketInfo.marketInfo.maxTotalBorrows
+                                      )
+                                        .dividedBy(
+                                          Math.pow(
+                                            10,
+                                            Number(stokenInfo?.decimals) || 6
                                           )
-                                          .toFixed(0)} ${
-                                          stokenInfo?.symbol || "SToken"
-                                        }`
+                                        )
+                                        .toFixed(0)} ${stokenInfo?.symbol || "SToken"
+                                      }`
                                       : "N/A"}
                                   </span>
                                 </div>
@@ -9762,17 +10047,16 @@ export default function AdminDashboard() {
                                   <span className="ml-2 font-mono">
                                     {stokenMarketInfo.marketInfo.totalDeposits
                                       ? `${new BigNumber(
-                                          stokenMarketInfo.marketInfo.totalDeposits
-                                        )
-                                          .dividedBy(
-                                            Math.pow(
-                                              10,
-                                              Number(stokenInfo?.decimals) || 6
-                                            )
+                                        stokenMarketInfo.marketInfo.totalDeposits
+                                      )
+                                        .dividedBy(
+                                          Math.pow(
+                                            10,
+                                            Number(stokenInfo?.decimals) || 6
                                           )
-                                          .toFixed(2)} ${
-                                          stokenInfo?.symbol || "SToken"
-                                        }`
+                                        )
+                                        .toFixed(2)} ${stokenInfo?.symbol || "SToken"
+                                      }`
                                       : "N/A"}
                                   </span>
                                 </div>
@@ -9783,17 +10067,16 @@ export default function AdminDashboard() {
                                   <span className="ml-2 font-mono">
                                     {stokenMarketInfo.marketInfo.totalBorrows
                                       ? `${new BigNumber(
-                                          stokenMarketInfo.marketInfo.totalBorrows
-                                        )
-                                          .dividedBy(
-                                            Math.pow(
-                                              10,
-                                              Number(stokenInfo?.decimals) || 6
-                                            )
+                                        stokenMarketInfo.marketInfo.totalBorrows
+                                      )
+                                        .dividedBy(
+                                          Math.pow(
+                                            10,
+                                            Number(stokenInfo?.decimals) || 6
                                           )
-                                          .toFixed(2)} ${
-                                          stokenInfo?.symbol || "SToken"
-                                        }`
+                                        )
+                                        .toFixed(2)} ${stokenInfo?.symbol || "SToken"
+                                      }`
                                       : "N/A"}
                                   </span>
                                 </div>
@@ -9804,18 +10087,18 @@ export default function AdminDashboard() {
                                   <span className="ml-2 font-mono">
                                     {stokenMarketInfo.marketInfo
                                       .totalDeposits &&
-                                    stokenMarketInfo.marketInfo.totalBorrows
+                                      stokenMarketInfo.marketInfo.totalBorrows
                                       ? `${(
-                                          (Number(
+                                        (Number(
+                                          stokenMarketInfo.marketInfo
+                                            .totalBorrows
+                                        ) /
+                                          Number(
                                             stokenMarketInfo.marketInfo
-                                              .totalBorrows
-                                          ) /
-                                            Number(
-                                              stokenMarketInfo.marketInfo
-                                                .totalDeposits
-                                            )) *
-                                          100
-                                        ).toFixed(2)}%`
+                                              .totalDeposits
+                                          )) *
+                                        100
+                                      ).toFixed(2)}%`
                                       : "N/A"}
                                   </span>
                                 </div>
@@ -9826,8 +10109,8 @@ export default function AdminDashboard() {
                                   <span className="ml-2 font-mono">
                                     {stokenMarketInfo.marketInfo.price
                                       ? `$${Number(
-                                          stokenMarketInfo.marketInfo.price
-                                        ).toFixed(4)}`
+                                        stokenMarketInfo.marketInfo.price
+                                      ).toFixed(4)}`
                                       : "N/A"}
                                   </span>
                                 </div>
@@ -9979,9 +10262,8 @@ export default function AdminDashboard() {
                     className="flex items-center gap-2"
                   >
                     <RefreshCcw
-                      className={`h-4 w-4 ${
-                        isLoadingAllMarketParameters ? "animate-spin" : ""
-                      }`}
+                      className={`h-4 w-4 ${isLoadingAllMarketParameters ? "animate-spin" : ""
+                        }`}
                     />
                     Refresh
                   </DorkFiButton>
@@ -10051,15 +10333,15 @@ export default function AdminDashboard() {
                             <td className="p-2 text-right font-mono">
                               {market.collateralFactor != null
                                 ? `${(market.collateralFactor * 100).toFixed(
-                                    1
-                                  )}%`
+                                  1
+                                )}%`
                                 : "N/A"}
                             </td>
                             <td className="p-2 text-right font-mono">
                               {market.liquidationThreshold != null
                                 ? `${(
-                                    market.liquidationThreshold * 100
-                                  ).toFixed(1)}%`
+                                  market.liquidationThreshold * 100
+                                ).toFixed(1)}%`
                                 : "N/A"}
                             </td>
                             <td className="p-2 text-right font-mono">
@@ -10095,8 +10377,8 @@ export default function AdminDashboard() {
                             <td className="p-2 text-right font-mono">
                               {market.utilizationRate != null
                                 ? `${(market.utilizationRate * 100).toFixed(
-                                    2
-                                  )}%`
+                                  2
+                                )}%`
                                 : "N/A"}
                             </td>
                             <td className="p-2 text-right font-mono">
@@ -10174,9 +10456,9 @@ export default function AdminDashboard() {
                         revoke, check) will be performed on Pool{" "}
                         {String.fromCharCode(
                           65 +
-                            getLendingPools(currentNetwork).indexOf(
-                              selectedLendingPool
-                            )
+                          getLendingPools(currentNetwork).indexOf(
+                            selectedLendingPool
+                          )
                         )}{" "}
                         ({selectedLendingPool})
                       </p>
@@ -10306,9 +10588,9 @@ export default function AdminDashboard() {
                           <span className="font-mono">
                             {activeAccount?.address
                               ? `${activeAccount.address.slice(
-                                  0,
-                                  8
-                                )}...${activeAccount.address.slice(-8)}`
+                                0,
+                                8
+                              )}...${activeAccount.address.slice(-8)}`
                               : "N/A"}
                           </span>
                         </div>
@@ -11034,18 +11316,18 @@ export default function AdminDashboard() {
                                 variant="outline"
                                 className={
                                   marketData[market.id]?.price &&
-                                  marketData[market.id]!.price > 0n
+                                    marketData[market.id]!.price > 0n
                                     ? "text-purple-600 border-purple-600"
                                     : "text-gray-600 border-gray-600"
                                 }
                               >
                                 <DollarSign className="h-3 w-3 mr-1" />
                                 {marketData[market.id]?.price &&
-                                marketData[market.id]!.price > 0n
+                                  marketData[market.id]!.price > 0n
                                   ? `$${(
-                                      Number(marketData[market.id]!.price) /
-                                      1e24
-                                    ).toFixed(6)}`
+                                    Number(marketData[market.id]!.price) /
+                                    1e24
+                                  ).toFixed(6)}`
                                   : "No Market Price"}
                               </Badge>
                               {!hasPriceFeed && (
@@ -11113,7 +11395,7 @@ export default function AdminDashboard() {
                                   </span>
                                   <span className="ml-2">
                                     {lendingPoolPriceFeed.providerAppId ===
-                                    0n ? (
+                                      0n ? (
                                       <Badge
                                         variant="outline"
                                         className="text-gray-600 border-gray-600"
@@ -11215,17 +11497,16 @@ export default function AdminDashboard() {
                         </h4>
                         <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
                           {oracleContractInfo.contractId &&
-                          oracleContractInfo.isDeployed
+                            oracleContractInfo.isDeployed
                             ? `The price oracle contract (${oracleContractInfo.contractId}) is deployed and operational. ` +
-                              `It automatically aggregates price data from multiple sources to ensure accurate pricing. ` +
-                              `${
-                                hasPriceFeedManagerRole()
-                                  ? "You have Price Feed Manager role permissions."
-                                  : "You do not have Price Feed Manager role permissions."
-                              }`
+                            `It automatically aggregates price data from multiple sources to ensure accurate pricing. ` +
+                            `${hasPriceFeedManagerRole()
+                              ? "You have Price Feed Manager role permissions."
+                              : "You do not have Price Feed Manager role permissions."
+                            }`
                             : oracleContractInfo.contractId
-                            ? `The price oracle contract (${oracleContractInfo.contractId}) is configured but not deployed on this network.`
-                            : "No price oracle contract is configured for this network. Price updates are handled directly through the lending pool contracts."}
+                              ? `The price oracle contract (${oracleContractInfo.contractId}) is configured but not deployed on this network.`
+                              : "No price oracle contract is configured for this network. Price updates are handled directly through the lending pool contracts."}
                         </p>
                       </div>
                     </div>
@@ -11669,17 +11950,16 @@ export default function AdminDashboard() {
                       </h4>
                       <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
                         {oracleContractInfo.contractId &&
-                        oracleContractInfo.isDeployed
+                          oracleContractInfo.isDeployed
                           ? `The price oracle contract (${oracleContractInfo.contractId}) is deployed and operational. ` +
-                            `It provides centralized price data for all supported assets. ` +
-                            `${
-                              hasPriceFeedManagerRole()
-                                ? "You have Price Feed Manager role permissions."
-                                : "You do not have Price Feed Manager role permissions."
-                            }`
+                          `It provides centralized price data for all supported assets. ` +
+                          `${hasPriceFeedManagerRole()
+                            ? "You have Price Feed Manager role permissions."
+                            : "You do not have Price Feed Manager role permissions."
+                          }`
                           : oracleContractInfo.contractId
-                          ? `The price oracle contract (${oracleContractInfo.contractId}) is configured but not deployed on this network.`
-                          : "No price oracle contract is configured for this network."}
+                            ? `The price oracle contract (${oracleContractInfo.contractId}) is configured but not deployed on this network.`
+                            : "No price oracle contract is configured for this network."}
                       </p>
                     </div>
                   </div>
@@ -11797,7 +12077,7 @@ export default function AdminDashboard() {
                       try {
                         const networkId = network as NetworkId;
                         const tokens = getAllTokensWithDisplayInfo(networkId);
-                        
+
                         let token = tokens.find(
                           (t) =>
                             (t.underlyingContractId === marketId.toString() ||
@@ -11969,7 +12249,7 @@ export default function AdminDashboard() {
                         try {
                           const networkId = network as NetworkId;
                           const tokens = getAllTokensWithDisplayInfo(networkId);
-                          
+
                           let token = tokens.find(
                             (t) =>
                               (t.underlyingContractId === marketId.toString() ||
@@ -12167,53 +12447,53 @@ export default function AdminDashboard() {
                                 return price.toFixed(6);
                               };
 
-                          return (
-                            <tr
-                              key={`${market.network}-${market.appId}-${market.marketId}-${index}`}
-                              className="border-b hover:bg-muted/50"
-                            >
-                              <td className="p-2">
-                                <Badge variant="outline">
-                                  {market.networkDisplay}
-                                </Badge>
-                              </td>
-                              <td className="p-2 font-medium">
-                                {market.tokenInfo.symbol}
-                              </td>
-                              <td className="p-2 font-mono text-xs">
-                                {market.appId || "N/A"}
-                              </td>
-                              <td className="p-2 font-mono text-xs">
-                                {market.marketId || "N/A"}
-                              </td>
-                              <td className="text-right p-2 font-mono">
-                                {formatNumber(market.normalizedReserves)}
-                              </td>
-                              <td className="text-right p-2 font-mono">
-                                {formatPrice(market.normalizedPrice)}
-                              </td>
-                              <td className="text-right p-2 font-mono">
-                                {formatNumber(market.value)}
-                              </td>
-                              <td className="text-right p-2 text-xs text-muted-foreground">
-                                {market.lastUpdated
-                                  ? new Date(market.lastUpdated).toLocaleString()
-                                  : "N/A"}
-                              </td>
-                              <td className="text-center p-2">
-                                <DorkFiButton
-                                  onClick={() => {
-                                    setWithdrawReserveModal({ open: true, market });
-                                  }}
-                                  disabled={!activeAccount || market.normalizedReserves <= 0}
-                                  className="flex items-center gap-1 text-xs px-2 py-1"
+                              return (
+                                <tr
+                                  key={`${market.network}-${market.appId}-${market.marketId}-${index}`}
+                                  className="border-b hover:bg-muted/50"
                                 >
-                                  <Download className="h-3 w-3" />
-                                  Withdraw
-                                </DorkFiButton>
-                              </td>
-                            </tr>
-                          );
+                                  <td className="p-2">
+                                    <Badge variant="outline">
+                                      {market.networkDisplay}
+                                    </Badge>
+                                  </td>
+                                  <td className="p-2 font-medium">
+                                    {market.tokenInfo.symbol}
+                                  </td>
+                                  <td className="p-2 font-mono text-xs">
+                                    {market.appId || "N/A"}
+                                  </td>
+                                  <td className="p-2 font-mono text-xs">
+                                    {market.marketId || "N/A"}
+                                  </td>
+                                  <td className="text-right p-2 font-mono">
+                                    {formatNumber(market.normalizedReserves)}
+                                  </td>
+                                  <td className="text-right p-2 font-mono">
+                                    {formatPrice(market.normalizedPrice)}
+                                  </td>
+                                  <td className="text-right p-2 font-mono">
+                                    {formatNumber(market.value)}
+                                  </td>
+                                  <td className="text-right p-2 text-xs text-muted-foreground">
+                                    {market.lastUpdated
+                                      ? new Date(market.lastUpdated).toLocaleString()
+                                      : "N/A"}
+                                  </td>
+                                  <td className="text-center p-2">
+                                    <DorkFiButton
+                                      onClick={() => {
+                                        setWithdrawReserveModal({ open: true, market });
+                                      }}
+                                      disabled={!activeAccount || market.normalizedReserves <= 0}
+                                      className="flex items-center gap-1 text-xs px-2 py-1"
+                                    >
+                                      <Download className="h-3 w-3" />
+                                      Withdraw
+                                    </DorkFiButton>
+                                  </td>
+                                </tr>
+                              );
                             })}
                           </tbody>
                         </table>
@@ -12320,15 +12600,15 @@ export default function AdminDashboard() {
 
                       try {
                         const networkId = withdrawReserveModal.market.network as NetworkId;
-                        
+
                         // Convert amount to smallest unit (raw reserves value)
                         const amountInSmallestUnit = BigInt(
                           Math.floor(
                             amount *
-                              Math.pow(
-                                10,
-                                withdrawReserveModal.market.tokenInfo.decimals
-                              )
+                            Math.pow(
+                              10,
+                              withdrawReserveModal.market.tokenInfo.decimals
+                            )
                           )
                         );
 
@@ -12673,13 +12953,13 @@ export default function AdminDashboard() {
                       {(() => {
                         const apiData = apiMarketsResult.data;
                         const contractData = contractMarketResult;
-                        
+
                         // Get all unique keys from both objects
                         const allKeys = new Set([
                           ...Object.keys(apiData || {}),
                           ...Object.keys(contractData || {}),
                         ]);
-                        
+
                         // Fields that might need special comparison (numeric comparisons)
                         const numericFields = new Set([
                           'borrowRate',
@@ -12702,7 +12982,7 @@ export default function AdminDashboard() {
                           'borrowIndex',
                           'closeFactor',
                         ]);
-                        
+
                         const comparisons: Array<{
                           field: string;
                           apiValue: any;
@@ -12711,29 +12991,29 @@ export default function AdminDashboard() {
                           onlyInApi: boolean;
                           onlyInContract: boolean;
                         }> = [];
-                        
+
                         allKeys.forEach((key) => {
                           const apiValue = apiData?.[key];
                           const contractValue = contractData?.[key];
                           const onlyInApi = apiValue !== undefined && contractValue === undefined;
                           const onlyInContract = contractValue !== undefined && apiValue === undefined;
-                          
+
                           let match = false;
                           if (!onlyInApi && !onlyInContract) {
                             // Compare values
                             if (numericFields.has(key)) {
                               // For numeric fields, compare as numbers
-                              const apiNum = typeof apiValue === 'string' 
-                                ? parseFloat(apiValue) 
-                                : typeof apiValue === 'number' 
-                                ? apiValue 
-                                : null;
+                              const apiNum = typeof apiValue === 'string'
+                                ? parseFloat(apiValue)
+                                : typeof apiValue === 'number'
+                                  ? apiValue
+                                  : null;
                               const contractNum = typeof contractValue === 'string'
                                 ? parseFloat(contractValue)
                                 : typeof contractValue === 'number'
-                                ? contractValue
-                                : null;
-                              
+                                  ? contractValue
+                                  : null;
+
                               if (apiNum !== null && contractNum !== null) {
                                 // Allow small floating point differences
                                 match = Math.abs(apiNum - contractNum) < 0.0001;
@@ -12744,7 +13024,7 @@ export default function AdminDashboard() {
                               match = String(apiValue) === String(contractValue);
                             }
                           }
-                          
+
                           comparisons.push({
                             field: key,
                             apiValue,
@@ -12754,7 +13034,7 @@ export default function AdminDashboard() {
                             onlyInContract,
                           });
                         });
-                        
+
                         // Sort: mismatches first, then matches, then only-in-one
                         comparisons.sort((a, b) => {
                           if (a.onlyInApi || a.onlyInContract) return 1;
@@ -12763,12 +13043,12 @@ export default function AdminDashboard() {
                           if (a.match && !b.match) return 1;
                           return 0;
                         });
-                        
+
                         const matchCount = comparisons.filter(c => c.match && !c.onlyInApi && !c.onlyInContract).length;
                         const mismatchCount = comparisons.filter(c => !c.match && !c.onlyInApi && !c.onlyInContract).length;
                         const onlyInApiCount = comparisons.filter(c => c.onlyInApi).length;
                         const onlyInContractCount = comparisons.filter(c => c.onlyInContract).length;
-                        
+
                         return (
                           <div className="space-y-4">
                             {/* Summary Stats */}
@@ -12790,19 +13070,18 @@ export default function AdminDashboard() {
                                 <div className="text-2xl font-bold text-blue-600">{onlyInContractCount}</div>
                               </div>
                             </div>
-                            
+
                             {/* Field-by-field comparison */}
                             <div className="space-y-2 max-h-96 overflow-auto">
                               {comparisons.map((comp) => (
                                 <div
                                   key={comp.field}
-                                  className={`p-3 rounded-md border ${
-                                    comp.onlyInApi || comp.onlyInContract
-                                      ? 'bg-yellow-50 dark:bg-yellow-950/20 border-yellow-200 dark:border-yellow-800'
-                                      : comp.match
+                                  className={`p-3 rounded-md border ${comp.onlyInApi || comp.onlyInContract
+                                    ? 'bg-yellow-50 dark:bg-yellow-950/20 border-yellow-200 dark:border-yellow-800'
+                                    : comp.match
                                       ? 'bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800'
                                       : 'bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800'
-                                  }`}
+                                    }`}
                                 >
                                   <div className="flex items-start justify-between gap-4">
                                     <div className="flex-1">
@@ -12899,7 +13178,7 @@ export default function AdminDashboard() {
                               </Label>
                               <div className="mt-2">
                                 {apiMarketsResult.data.marketId?.toString() ===
-                                testMarketId.toString() ? (
+                                  testMarketId.toString() ? (
                                   <Badge variant="default" className="mt-2">
                                     <CheckCircle2 className="h-3 w-3 mr-1" />
                                     Market IDs match
@@ -12919,6 +13198,1040 @@ export default function AdminDashboard() {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* Governance Tab */}
+          <TabsContent value="governance" className="space-y-6">
+            <div className="flex items-center justify-between">
+              <H2>Create Governance Proposal</H2>
+            </div>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Crown className="h-5 w-5" />
+                  New Proposal
+                </CardTitle>
+                <CardDescription>
+                  Create a new governance proposal for the DorkFi protocol
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Basic Proposal Information */}
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="proposal-category">Proposal Category *</Label>
+                    <Select
+                      value={proposalCategory}
+                      onValueChange={(value) => setProposalCategory(value as ProposalCategory)}
+                    >
+                      <SelectTrigger id="proposal-category">
+                        <SelectValue placeholder="Select proposal category" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="interest-rates">Interest Rates</SelectItem>
+                        <SelectItem value="collateral-listing">Collateral Listing</SelectItem>
+                        <SelectItem value="liquidation-settings">Liquidation Settings</SelectItem>
+                        <SelectItem value="treasury">Treasury</SelectItem>
+                        <SelectItem value="features">Features</SelectItem>
+                        <SelectItem value="governance">Governance</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="proposal-title">Proposal Title *</Label>
+                    <Input
+                      id="proposal-title"
+                      placeholder="Enter proposal title"
+                      value={proposalTitle}
+                      onChange={(e) => setProposalTitle(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="proposal-description">Proposal Description *</Label>
+                    <Textarea
+                      id="proposal-description"
+                      placeholder="Describe your proposal in detail..."
+                      rows={5}
+                      value={proposalDescription}
+                      onChange={(e) => setProposalDescription(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="proposal-start-date">Proposal Start Date & Time *</Label>
+                    <Input
+                      id="proposal-start-date"
+                      type="datetime-local"
+                      value={proposalStartDate}
+                      onChange={(e) => {
+                        let dateValue = e.target.value;
+                        // Ensure time defaults to 00:00 if not specified
+                        if (dateValue) {
+                          // If the value doesn't have a time portion, add 00:00
+                          if (!dateValue.includes('T') || dateValue.split('T')[1] === '') {
+                            const datePart = dateValue.split('T')[0];
+                            dateValue = datePart + 'T00:00';
+                          }
+                        }
+                        setProposalStartDate(dateValue);
+                      }}
+                      onBlur={(e) => {
+                        // On blur, if time is not set, default to 00:00
+                        let dateValue = e.target.value;
+                        if (dateValue && (!dateValue.includes('T') || !dateValue.split('T')[1])) {
+                          const datePart = dateValue.split('T')[0];
+                          setProposalStartDate(datePart + 'T00:00');
+                        }
+                      }}
+                      min={new Date().toISOString().slice(0, 16)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Select when the proposal voting period should start. The proposal will run for 7 days from this date. Time defaults to 00:00 if not specified.
+                    </p>
+                    {proposalStartDate && (
+                      <div className="text-xs text-muted-foreground mt-1">
+                        <div>Start: {new Date(proposalStartDate).toLocaleString()}</div>
+                        <div>End: {new Date(new Date(proposalStartDate).getTime() + 7 * 24 * 60 * 60 * 1000).toLocaleString()}</div>
+                        <div className="font-mono mt-1">
+                          Timestamp: {Math.floor(new Date(proposalStartDate).getTime() / 1000)}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Proposal Preview */}
+                {(proposalCategory || proposalTitle.trim() || proposalDescription.trim()) && (
+                  <div className="space-y-2">
+                    <Label className="text-muted-foreground">Preview</Label>
+                    <p className="text-xs text-muted-foreground">
+                      How your proposal will appear to voters
+                    </p>
+                    <ProposalCard
+                      proposal={{
+                        id: "preview",
+                        title: proposalTitle.trim() || "Proposal title",
+                        description: proposalDescription.trim() || "Describe your proposal in detail...",
+                        category: (proposalCategory || "features") as ProposalCategory,
+                        proposer: activeAccount?.address ?? "—",
+                        status: "pending" as ProposalStatus,
+                        votesFor: 0,
+                        votesAgainst: 0,
+                        totalVotes: 0,
+                        quorum: 1,
+                        startTime: proposalStartDate ? new Date(proposalStartDate) : new Date(),
+                        endTime: proposalStartDate
+                          ? new Date(new Date(proposalStartDate).getTime() + 7 * 24 * 60 * 60 * 1000)
+                          : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                        details: {
+                          type: (proposalCategory || "features") as ProposalCategory,
+                        },
+                      }}
+                      onVote={async () => {}}
+                    />
+                  </div>
+                )}
+
+                {/* Submission Result Messages */}
+                {proposalSubmissionResult && (
+                  <div className="p-3 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400 mt-0.5" />
+                      <div className="text-sm">
+                        <p className="font-medium text-green-800 dark:text-green-200">
+                          Proposal Submitted Successfully
+                        </p>
+                        <p className="text-green-700 dark:text-green-300 break-all">
+                          {proposalSubmissionResult}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {proposalSubmissionError && (
+                  <div className="p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 text-red-600 dark:text-red-400 mt-0.5" />
+                      <div className="text-sm">
+                        <p className="font-medium text-red-800 dark:text-red-200">
+                          Submission Failed
+                        </p>
+                        <p className="text-red-700 dark:text-red-300">
+                          {proposalSubmissionError}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Submit Button */}
+                <div className="flex gap-2 pt-4">
+                  <DorkFiButton
+                    variant="primary"
+                    className="flex-1"
+                    onClick={handleSubmitProposal}
+                    disabled={isSubmittingProposal || !proposalCategory || !proposalTitle.trim() || !proposalDescription.trim() || !proposalStartDate}
+                  >
+                    {isSubmittingProposal ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Submitting...
+                      </>
+                    ) : (
+                      <>
+                        <Crown className="h-4 w-4 mr-2" />
+                        Submit Proposal
+                      </>
+                    )}
+                  </DorkFiButton>
+                  <DorkFiButton
+                    variant="secondary"
+                    onClick={() => {
+                      setProposalCategory("");
+                      setProposalTitle("");
+                      setProposalDescription("");
+                      setProposalStartDate("");
+                      setProposalSubmissionResult(null);
+                      setProposalSubmissionError(null);
+                    }}
+                    disabled={isSubmittingProposal}
+                  >
+                    <RefreshCcw className="h-4 w-4 mr-2" />
+                    Clear Form
+                  </DorkFiButton>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Voter Info Lookup */}
+            <VoterInfoLookup />
+
+            {/* Snap Power Component */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Zap className="h-5 w-5" />
+                  Snap Power
+                </CardTitle>
+                <CardDescription>
+                  Snapshot voting power for an address using a power source
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="snap-power-address">Address *</Label>
+                    <Input
+                      id="snap-power-address"
+                      placeholder="Enter address to snap power for"
+                      value={snapPowerAddress}
+                      onChange={(e) => setSnapPowerAddress(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="power-source">Power Source *</Label>
+                    <Select
+                      value={selectedPowerSource === "" ? "" : String(selectedPowerSource)}
+                      onValueChange={(value) => setSelectedPowerSource(value === "" ? "" : Number(value))}
+                    >
+                      <SelectTrigger id="power-source">
+                        <SelectValue placeholder="Select power source" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(() => {
+                          const networkConfig = getNetworkConfig(currentNetwork);
+                          const governanceConfig = getContractAddress(
+                            currentNetwork,
+                            "governance"
+                          ) as GovernanceConfig | string | undefined;
+                          
+                          if (!governanceConfig || typeof governanceConfig === "string") {
+                            return (
+                              <SelectItem value="" disabled>
+                                No power sources configured
+                              </SelectItem>
+                            );
+                          }
+
+                          const powerSources = governanceConfig.powerSources || [];
+                          
+                          if (powerSources.length === 0) {
+                            return (
+                              <SelectItem value="" disabled>
+                                No power sources configured
+                              </SelectItem>
+                            );
+                          }
+
+                          return powerSources.map((appId) => (
+                            <SelectItem key={appId} value={String(appId)}>
+                              App ID: {appId}
+                            </SelectItem>
+                          ));
+                        })()}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Result Messages */}
+                {snapPowerResult && (
+                  <div className="p-3 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400 mt-0.5" />
+                      <div className="text-sm flex-1">
+                        <p className="font-medium text-green-800 dark:text-green-200">
+                          Power Snapped Successfully
+                        </p>
+                        <div className="mt-2 space-y-1 text-green-700 dark:text-green-300">
+                          <p className="font-mono text-xs break-all">
+                            Power Source ID: {snapPowerResult.snapshot.powerSourceId.toString()}
+                          </p>
+                          <p className="font-mono text-xs break-all">
+                            Power Granted: {snapPowerResult.snapshot.powerGranted.toString()}
+                          </p>
+                          <p className="font-mono text-xs break-all">
+                            Power Source Amount: {snapPowerResult.snapshot.powerSourceAmount.toString()}
+                          </p>
+                          <p className="font-mono text-xs break-all">
+                            Power Source Owner: {snapPowerResult.snapshot.powerSourceOwner}
+                          </p>
+                          {snapPowerResult.txns.length > 0 && (
+                            <p className="font-mono text-xs break-all">
+                              Transaction IDs: {snapPowerResult.txns.join(", ")}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {snapPowerError && (
+                  <div className="p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 text-red-600 dark:text-red-400 mt-0.5" />
+                      <div className="text-sm">
+                        <p className="font-medium text-red-800 dark:text-red-200">
+                          Snap Power Failed
+                        </p>
+                        <p className="text-red-700 dark:text-red-300">
+                          {snapPowerError}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Action Buttons */}
+                <div className="flex gap-2 pt-4">
+                  <DorkFiButton
+                    variant="primary"
+                    className="flex-1"
+                    onClick={async () => {
+                      if (!activeAccount?.address || !transactionSigner) {
+                        toast.error("Please connect your wallet");
+                        return;
+                      }
+
+                      if (!snapPowerAddress.trim()) {
+                        toast.error("Please enter an address");
+                        return;
+                      }
+
+                      if (selectedPowerSource === "") {
+                        toast.error("Please select a power source");
+                        return;
+                      }
+
+                      setIsSnappingPower(true);
+                      setSnapPowerError(null);
+                      setSnapPowerResult(null);
+
+                      try {
+                        const result = await snapPower(
+                          selectedPowerSource as number,
+                          transactionSigner,
+                          snapPowerAddress.trim(),
+                          currentNetwork
+                        );
+
+                        setSnapPowerResult(result);
+
+                        // Sign and send transactions if any
+                        if (result.txns && result.txns.length > 0) {
+                          const clients = algorandService.initializeClients(
+                            getNetworkConfig(currentNetwork).walletNetworkId as AlgorandNetwork
+                          );
+
+                          const stxns = await signTransactions(
+                            result.txns.map((txn: string) =>
+                              Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+                            )
+                          );
+                          const res = await clients.algod.sendRawTransaction(stxns).do();
+                          await waitForConfirmation(clients.algod, res.txid, 4);
+
+                          toast.success("Power snapped successfully", {
+                            description: `Transaction confirmed: ${res.txid}`,
+                          });
+                        } else {
+                          toast.success("Power snapped successfully");
+                        }
+                      } catch (error: any) {
+                        console.error("Failed to snap power:", error);
+                        setSnapPowerError(error?.message || "Failed to snap power");
+                        toast.error("Failed to snap power", {
+                          description: error?.message || "Unknown error occurred",
+                        });
+                      } finally {
+                        setIsSnappingPower(false);
+                      }
+                    }}
+                    disabled={isSnappingPower || !snapPowerAddress.trim() || selectedPowerSource === "" || !activeAccount?.address}
+                  >
+                    {isSnappingPower ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Snapping Power...
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="h-4 w-4 mr-2" />
+                        Snap Power
+                      </>
+                    )}
+                  </DorkFiButton>
+                  <DorkFiButton
+                    variant="secondary"
+                    onClick={() => {
+                      setSnapPowerAddress("");
+                      setSelectedPowerSource("");
+                      setSnapPowerResult(null);
+                      setSnapPowerError(null);
+                    }}
+                    disabled={isSnappingPower}
+                  >
+                    <RefreshCcw className="h-4 w-4 mr-2" />
+                    Clear
+                  </DorkFiButton>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Snap Multiplier Component */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Zap className="h-5 w-5" />
+                  Snap Multiplier
+                </CardTitle>
+                <CardDescription>
+                  Snapshot voting power multiplier for an address using a power multiplier
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="snap-multiplier-address">Address *</Label>
+                    <Input
+                      id="snap-multiplier-address"
+                      placeholder="Enter address to snap multiplier for"
+                      value={snapMultiplierAddress}
+                      onChange={(e) => setSnapMultiplierAddress(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="power-multiplier">Power Multiplier *</Label>
+                    <Select
+                      value={selectedPowerMultiplier === "" ? "" : String(selectedPowerMultiplier)}
+                      onValueChange={(value) => setSelectedPowerMultiplier(value === "" ? "" : Number(value))}
+                    >
+                      <SelectTrigger id="power-multiplier">
+                        <SelectValue placeholder="Select power multiplier" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(() => {
+                          const networkConfig = getNetworkConfig(currentNetwork);
+                          const governanceConfig = getContractAddress(
+                            currentNetwork,
+                            "governance"
+                          ) as GovernanceConfig | string | undefined;
+                          
+                          if (!governanceConfig || typeof governanceConfig === "string") {
+                            return (
+                              <SelectItem value="" disabled>
+                                No power multipliers configured
+                              </SelectItem>
+                            );
+                          }
+
+                          const powerMultipliers = governanceConfig.powerMultipliers || [];
+                          
+                          if (powerMultipliers.length === 0) {
+                            return (
+                              <SelectItem value="" disabled>
+                                No power multipliers configured
+                              </SelectItem>
+                            );
+                          }
+
+                          return powerMultipliers.map((multiplier) => (
+                            <SelectItem key={multiplier.id} value={String(multiplier.contractId)}>
+                              {multiplier.label} (ID: {multiplier.contractId})
+                            </SelectItem>
+                          ));
+                        })()}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Result Messages */}
+                {snapMultiplierResult && (
+                  <div className="p-3 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400 mt-0.5" />
+                      <div className="text-sm flex-1">
+                        <p className="font-medium text-green-800 dark:text-green-200">
+                          Multiplier Snapped Successfully
+                        </p>
+                        <div className="mt-2 space-y-1 text-green-700 dark:text-green-300">
+                          <p className="font-mono text-xs break-all">
+                            Power Multiplier ID: {snapMultiplierResult.snapshot.powerMultiplierId.toString()}
+                          </p>
+                          <p className="font-mono text-xs break-all">
+                            Power Multiplier Amount: {snapMultiplierResult.snapshot.powerMultiplierAmount.toString()}
+                          </p>
+                          <p className="font-mono text-xs break-all">
+                            Power Multiplier Granted: {snapMultiplierResult.snapshot.powerMultiplierGranted.toString()}
+                          </p>
+                          <p className="font-mono text-xs break-all">
+                            Power Multiplier Owner: {snapMultiplierResult.snapshot.powerMultiplierOwner}
+                          </p>
+                          <p className="font-mono text-xs break-all">
+                            Unlock Timestamp: {snapMultiplierResult.snapshot.powerMultiplierUnlockTimestamp.toString()}
+                          </p>
+                          <p className="font-mono text-xs break-all">
+                            Lockup Duration: {snapMultiplierResult.snapshot.powerMultiplierLockupDuration.toString()}
+                          </p>
+                          <p className="font-mono text-xs break-all">
+                            Lockup Bonus Multiplier: {snapMultiplierResult.snapshot.powerMultiplierLockupBonusMultiplier.toString()}
+                          </p>
+                          {snapMultiplierResult.txns.length > 0 && (
+                            <p className="font-mono text-xs break-all">
+                              Transaction IDs: {snapMultiplierResult.txns.join(", ")}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {snapMultiplierError && (
+                  <div className="p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 text-red-600 dark:text-red-400 mt-0.5" />
+                      <div className="text-sm">
+                        <p className="font-medium text-red-800 dark:text-red-200">
+                          Snap Multiplier Failed
+                        </p>
+                        <p className="text-red-700 dark:text-red-300">
+                          {snapMultiplierError}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Action Buttons */}
+                <div className="flex gap-2 pt-4">
+                  <DorkFiButton
+                    variant="primary"
+                    className="flex-1"
+                    onClick={async () => {
+                      if (!activeAccount?.address || !transactionSigner) {
+                        toast.error("Please connect your wallet");
+                        return;
+                      }
+
+                      if (!snapMultiplierAddress.trim()) {
+                        toast.error("Please enter an address");
+                        return;
+                      }
+
+                      if (selectedPowerMultiplier === "") {
+                        toast.error("Please select a power multiplier");
+                        return;
+                      }
+
+                      setIsSnappingMultiplier(true);
+                      setSnapMultiplierError(null);
+                      setSnapMultiplierResult(null);
+
+                      try {
+                        const result = await snapMultiplier(
+                          selectedPowerMultiplier as number,
+                          transactionSigner,
+                          snapMultiplierAddress.trim(),
+                          currentNetwork
+                        );
+
+                        setSnapMultiplierResult(result);
+
+                        // Sign and send transactions if any
+                        if (result.txns && result.txns.length > 0) {
+                          const clients = algorandService.initializeClients(
+                            getNetworkConfig(currentNetwork).walletNetworkId as AlgorandNetwork
+                          );
+
+                          const stxns = await signTransactions(
+                            result.txns.map((txn: string) =>
+                              Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+                            )
+                          );
+                          const res = await clients.algod.sendRawTransaction(stxns).do();
+                          await waitForConfirmation(clients.algod, res.txid, 4);
+
+                          toast.success("Multiplier snapped successfully", {
+                            description: `Transaction confirmed: ${res.txid}`,
+                          });
+                        } else {
+                          toast.success("Multiplier snapped successfully");
+                        }
+                      } catch (error: any) {
+                        console.error("Failed to snap multiplier:", error);
+                        setSnapMultiplierError(error?.message || "Failed to snap multiplier");
+                        toast.error("Failed to snap multiplier", {
+                          description: error?.message || "Unknown error occurred",
+                        });
+                      } finally {
+                        setIsSnappingMultiplier(false);
+                      }
+                    }}
+                    disabled={isSnappingMultiplier || !snapMultiplierAddress.trim() || selectedPowerMultiplier === "" || !activeAccount?.address}
+                  >
+                    {isSnappingMultiplier ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Snapping Multiplier...
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="h-4 w-4 mr-2" />
+                        Snap Multiplier
+                      </>
+                    )}
+                  </DorkFiButton>
+                  <DorkFiButton
+                    variant="secondary"
+                    onClick={() => {
+                      setSnapMultiplierAddress("");
+                      setSelectedPowerMultiplier("");
+                      setSnapMultiplierResult(null);
+                      setSnapMultiplierError(null);
+                    }}
+                    disabled={isSnappingMultiplier}
+                  >
+                    <RefreshCcw className="h-4 w-4 mr-2" />
+                    Clear
+                  </DorkFiButton>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Get Power Source Component */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Eye className="h-5 w-5" />
+                  Get Power Source
+                </CardTitle>
+                <CardDescription>
+                  Query power source information by power source ID
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="power-source-query-select">Power Source *</Label>
+                    <Select
+                      value={powerSourceQueryId === "" ? "" : String(powerSourceQueryId)}
+                      onValueChange={(value) => setPowerSourceQueryId(value === "" ? "" : Number(value))}
+                    >
+                      <SelectTrigger id="power-source-query-select">
+                        <SelectValue placeholder="Select power source" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(() => {
+                          const networkConfig = getNetworkConfig(currentNetwork);
+                          const governanceConfig = getContractAddress(
+                            currentNetwork,
+                            "governance"
+                          ) as GovernanceConfig | string | undefined;
+                          
+                          if (!governanceConfig || typeof governanceConfig === "string") {
+                            return (
+                              <SelectItem value="" disabled>
+                                No power sources configured
+                              </SelectItem>
+                            );
+                          }
+
+                          const powerSources = governanceConfig.powerSources || [];
+                          
+                          if (powerSources.length === 0) {
+                            return (
+                              <SelectItem value="" disabled>
+                                No power sources configured
+                              </SelectItem>
+                            );
+                          }
+
+                          return powerSources.map((appId) => (
+                            <SelectItem key={appId} value={String(appId)}>
+                              App ID: {appId}
+                            </SelectItem>
+                          ));
+                        })()}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      Select a power source from the configured sources
+                    </p>
+                  </div>
+                </div>
+
+                {/* Result Messages */}
+                {powerSourceResult && (
+                  <div className="p-3 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400 mt-0.5" />
+                      <div className="text-sm flex-1">
+                        <p className="font-medium text-green-800 dark:text-green-200">
+                          Power Source Information
+                        </p>
+                        <div className="mt-2 space-y-1 text-green-700 dark:text-green-300">
+                          <p className="font-mono text-xs break-all">
+                            Power Source ID: {powerSourceResult.powerSourceId.toString()}
+                          </p>
+                          <p className="font-mono text-xs break-all">
+                            Power Multiplier: {powerSourceResult.powerMultiplier.toString()}
+                          </p>
+                          <p className="font-mono text-xs break-all">
+                            Supported Modes: {powerSourceResult.powerSourceSupportedModes.toString()}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {powerSourceError && (
+                  <div className="p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 text-red-600 dark:text-red-400 mt-0.5" />
+                      <div className="text-sm">
+                        <p className="font-medium text-red-800 dark:text-red-200">
+                          Query Failed
+                        </p>
+                        <p className="text-red-700 dark:text-red-300">
+                          {powerSourceError}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Action Buttons */}
+                <div className="flex gap-2 pt-4">
+                  <DorkFiButton
+                    variant="primary"
+                    className="flex-1"
+                    onClick={async () => {
+                      if (powerSourceQueryId === "") {
+                        toast.error("Please select a power source");
+                        return;
+                      }
+
+                      setIsLoadingPowerSource(true);
+                      setPowerSourceError(null);
+                      setPowerSourceResult(null);
+
+                      try {
+                        const result = await getPowerSource(
+                          powerSourceQueryId as number,
+                          currentNetwork
+                        );
+
+                        setPowerSourceResult(result);
+                        toast.success("Power source information retrieved successfully");
+                      } catch (error: any) {
+                        console.error("Failed to get power source:", error);
+                        setPowerSourceError(error?.message || "Failed to get power source");
+                        toast.error("Failed to get power source", {
+                          description: error?.message || "Unknown error occurred",
+                        });
+                      } finally {
+                        setIsLoadingPowerSource(false);
+                      }
+                    }}
+                    disabled={isLoadingPowerSource || powerSourceQueryId === ""}
+                  >
+                    {isLoadingPowerSource ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Querying...
+                      </>
+                    ) : (
+                      <>
+                        <Eye className="h-4 w-4 mr-2" />
+                        Get Power Source
+                      </>
+                    )}
+                  </DorkFiButton>
+                  <DorkFiButton
+                    variant="secondary"
+                    onClick={() => {
+                      setPowerSourceQueryId("");
+                      setPowerSourceResult(null);
+                      setPowerSourceError(null);
+                    }}
+                    disabled={isLoadingPowerSource}
+                  >
+                    <RefreshCcw className="h-4 w-4 mr-2" />
+                    Clear
+                  </DorkFiButton>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Power Multiplier Lookup Component */}
+            <PowerMultiplierLookup />
+
+            {/* Governance Proposals */}
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <Activity className="h-5 w-5" />
+                    Governance Proposals
+                  </CardTitle>
+                  <CardDescription>
+                    Proposals created from governance events
+                  </CardDescription>
+                </div>
+                <DorkFiButton
+                  variant="secondary"
+                  size="sm"
+                  onClick={fetchGovernanceEvents}
+                  disabled={governanceEventsLoading || proposalsLoading}
+                >
+                  {(governanceEventsLoading || proposalsLoading) ? (
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Refresh
+                    </>
+                  )}
+                </DorkFiButton>
+              </CardHeader>
+              <CardContent>
+                {(governanceEventsLoading || proposalsLoading) && proposals.length === 0 && (
+                  <div className="flex items-center justify-center py-8 text-muted-foreground">
+                    <RefreshCw className="h-5 w-5 animate-spin mr-2" />
+                    Loading proposals...
+                  </div>
+                )}
+                {(governanceEventsError || proposalsError) && (
+                  <div className="p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg">
+                    <p className="text-sm text-red-700 dark:text-red-300">
+                      {governanceEventsError || proposalsError}
+                    </p>
+                  </div>
+                )}
+                {!governanceEventsLoading && !proposalsLoading && !governanceEventsError && !proposalsError && (
+                  <>
+                    {proposals.length === 0 ? (
+                      <p className="text-sm text-muted-foreground py-4">No proposals found. Click Refresh to load proposals from governance events.</p>
+                    ) : (
+                      <div className="space-y-4 max-h-[600px] overflow-y-auto">
+                        {proposals.map((proposal) => (
+                          <ProposalCard
+                            key={proposal.id}
+                            proposal={proposal}
+                            onVote={async (proposalId: string, support: boolean) => {
+                              // Voting functionality can be implemented here if needed
+                              toast.info(`Vote ${support ? 'for' : 'against'} proposal ${proposalId} - Not implemented yet`);
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Proposal Details Modal */}
+            <Dialog open={isProposalModalOpen} onOpenChange={setIsProposalModalOpen}>
+              <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <Crown className="h-5 w-5" />
+                    Proposal Details
+                  </DialogTitle>
+                  <DialogDescription>
+                    View detailed information about the governance proposal
+                  </DialogDescription>
+                </DialogHeader>
+
+                {proposalLoading ? (
+                  <div className="flex items-center justify-center py-12 px-4">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    <span className="ml-3 text-muted-foreground">Loading proposal details...</span>
+                  </div>
+                ) : proposalError ? (
+                  <div className="p-4 mx-4 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg">
+                    <p className="text-sm text-red-700 dark:text-red-300">{proposalError}</p>
+                  </div>
+                ) : selectedProposal ? (
+                  <div className="space-y-6 p-4">
+                    {/* Basic Information */}
+                    <div className="space-y-4">
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Title</Label>
+                        <p className="text-base font-semibold mt-1">
+                          {selectedProposal.proposalTitle?.replace(/\0/g, "").trim() || "—"}
+                        </p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Description</Label>
+                        <p className="text-sm mt-1 whitespace-pre-wrap">
+                          {selectedProposal.proposalDescription?.replace(/\0/g, "").trim() || "—"}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Proposal Metadata */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Proposer</Label>
+                        <p className="text-sm font-mono mt-1 break-all">{selectedProposal.proposer || "—"}</p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Category</Label>
+                        <p className="text-sm mt-1">
+                          {selectedProposal.proposalCategoryId ? (getCategoryFromId(Number(selectedProposal.proposalCategoryId)) || `Category ${selectedProposal.proposalCategoryId}`) : "—"}
+                        </p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Status</Label>
+                        <p className="text-sm mt-1">Status {selectedProposal.proposalStatus || "—"}</p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Proposal Index</Label>
+                        <p className="text-sm mt-1">{selectedProposal.proposalIndex || "—"}</p>
+                      </div>
+                    </div>
+
+                    {/* Voting Information */}
+                    <div className="space-y-4">
+                      <H3 className="text-lg">Voting Information</H3>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Total Votes</Label>
+                          <p className="text-sm mt-1">{selectedProposal.proposalTotalVotes || "—"}</p>
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Yes Votes</Label>
+                          <p className="text-sm mt-1">{selectedProposal.proposalYesVotes || "—"}</p>
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Total Power</Label>
+                          <p className="text-sm mt-1">{selectedProposal.proposalTotalPower || "—"}</p>
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Yes Power</Label>
+                          <p className="text-sm mt-1">{selectedProposal.proposalYesPower || "—"}</p>
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Quorum Threshold</Label>
+                          <p className="text-sm mt-1">{selectedProposal.proposalQuorumThreshold || "—"}</p>
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Quorum Met</Label>
+                          <p className="text-sm mt-1">
+                            {selectedProposal.proposalQuorumMet === true ? (
+                              <span className="text-green-600 dark:text-green-400">Yes</span>
+                            ) : selectedProposal.proposalQuorumMet === false ? (
+                              <span className="text-red-600 dark:text-red-400">No</span>
+                            ) : (
+                              "—"
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Timestamps */}
+                    <div className="space-y-4">
+                      <H3 className="text-lg">Timeline</H3>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Created At</Label>
+                          <p className="text-sm mt-1">
+                            {selectedProposal.createdAtTimestamp ? new Date(Number(selectedProposal.createdAtTimestamp) * 1000).toLocaleString() : "—"}
+                          </p>
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Voting Start</Label>
+                          <p className="text-sm mt-1">
+                            {selectedProposal.votingStartTimestamp ? new Date(Number(selectedProposal.votingStartTimestamp) * 1000).toLocaleString() : "—"}
+                          </p>
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Voting End</Label>
+                          <p className="text-sm mt-1">
+                            {selectedProposal.votingEndTimestamp ? new Date(Number(selectedProposal.votingEndTimestamp) * 1000).toLocaleString() : "—"}
+                          </p>
+                        </div>
+                        {selectedProposal.executedAtTimestamp && Number(selectedProposal.executedAtTimestamp) > 0 && (
+                          <div>
+                            <Label className="text-sm font-medium text-muted-foreground">Executed At</Label>
+                            <p className="text-sm mt-1">
+                              {new Date(Number(selectedProposal.executedAtTimestamp) * 1000).toLocaleString()}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Proposal Node */}
+                    <div>
+                      <Label className="text-sm font-medium text-muted-foreground">Proposal Node (Hex)</Label>
+                      <p className="text-xs font-mono mt-1 break-all bg-muted/50 p-2 rounded">
+                        {selectedProposal.proposalNode || "—"}
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
+
+                <DialogFooter>
+                  <DorkFiButton variant="secondary" onClick={() => setIsProposalModalOpen(false)}>
+                    Close
+                  </DorkFiButton>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </TabsContent>
         </Tabs>
       </main>
@@ -12954,18 +14267,16 @@ export default function AdminDashboard() {
                 <div key={step} className="flex items-center">
                   <button
                     onClick={() => handleStepChange(step)}
-                    className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors ${
-                      step === currentStep
-                        ? "bg-primary text-primary-foreground"
-                        : step < currentStep
+                    className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors ${step === currentStep
+                      ? "bg-primary text-primary-foreground"
+                      : step < currentStep
                         ? "bg-primary/20 text-primary"
                         : "bg-muted text-muted-foreground"
-                    } ${
-                      step <= currentStep ||
-                      (step === currentStep + 1 && canProceedToNextStep())
+                      } ${step <= currentStep ||
+                        (step === currentStep + 1 && canProceedToNextStep())
                         ? "cursor-pointer hover:bg-primary/80"
                         : "cursor-not-allowed"
-                    }`}
+                      }`}
                   >
                     {step < currentStep ? (
                       <CheckCircle2 className="h-4 w-4" />
@@ -12975,9 +14286,8 @@ export default function AdminDashboard() {
                   </button>
                   {step < 3 && (
                     <div
-                      className={`w-8 h-0.5 mx-2 ${
-                        step < currentStep ? "bg-primary" : "bg-muted"
-                      }`}
+                      className={`w-8 h-0.5 mx-2 ${step < currentStep ? "bg-primary" : "bg-muted"
+                        }`}
                     />
                   )}
                 </div>
@@ -13730,11 +15040,10 @@ export default function AdminDashboard() {
                 </div>
 
                 <div
-                  className={`p-4 border rounded-lg ${
-                    marketType === "prefi"
-                      ? "bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800"
-                      : "bg-yellow-50 dark:bg-yellow-950/20 border-yellow-200 dark:border-yellow-800"
-                  }`}
+                  className={`p-4 border rounded-lg ${marketType === "prefi"
+                    ? "bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800"
+                    : "bg-yellow-50 dark:bg-yellow-950/20 border-yellow-200 dark:border-yellow-800"
+                    }`}
                 >
                   <div className="flex items-start gap-3">
                     {marketType === "prefi" ? (
@@ -13744,22 +15053,20 @@ export default function AdminDashboard() {
                     )}
                     <div>
                       <h4
-                        className={`text-sm font-medium ${
-                          marketType === "prefi"
-                            ? "text-green-800 dark:text-green-200"
-                            : "text-yellow-800 dark:text-yellow-200"
-                        }`}
+                        className={`text-sm font-medium ${marketType === "prefi"
+                          ? "text-green-800 dark:text-green-200"
+                          : "text-yellow-800 dark:text-yellow-200"
+                          }`}
                       >
                         {marketType === "prefi"
                           ? "PreFi Market Ready"
                           : "Confirm Market Creation"}
                       </h4>
                       <p
-                        className={`text-sm mt-1 ${
-                          marketType === "prefi"
-                            ? "text-green-700 dark:text-green-300"
-                            : "text-yellow-700 dark:text-yellow-300"
-                        }`}
+                        className={`text-sm mt-1 ${marketType === "prefi"
+                          ? "text-green-700 dark:text-green-300"
+                          : "text-yellow-700 dark:text-yellow-300"
+                          }`}
                       >
                         {marketType === "prefi"
                           ? "This PreFi market uses optimized parameters for reliable performance. Ready to create!"
@@ -13903,8 +15210,8 @@ export default function AdminDashboard() {
         open={isMarketViewModalOpen}
         onOpenChange={setIsMarketViewModalOpen}
       >
-        <DialogContent className="max-w-2xl p-8">
-          <DialogHeader className="pb-6">
+        <DialogContent className="max-w-2xl max-h-[90vh] p-8 flex flex-col">
+          <DialogHeader className="pb-6 shrink-0">
             <div className="flex items-center justify-between">
               <div>
                 <DialogTitle className="text-xl">Market Details</DialogTitle>
@@ -13940,9 +15247,8 @@ export default function AdminDashboard() {
                   disabled={isLoadingMarketView}
                 >
                   <RefreshCcw
-                    className={`h-4 w-4 mr-2 ${
-                      isLoadingMarketView ? "animate-spin" : ""
-                    }`}
+                    className={`h-4 w-4 mr-2 ${isLoadingMarketView ? "animate-spin" : ""
+                      }`}
                   />
                   Refresh
                 </Button>
@@ -13950,6 +15256,7 @@ export default function AdminDashboard() {
             </div>
           </DialogHeader>
 
+          <div className="overflow-y-auto flex-1 min-h-0 -mx-2 px-2">
           {isLoadingMarketView ? (
             <div className="flex items-center justify-center py-8">
               <div className="flex items-center gap-2 text-muted-foreground">
@@ -14247,8 +15554,9 @@ export default function AdminDashboard() {
               </div>
             </div>
           )}
+          </div>
 
-          <DialogFooter className="pt-6">
+          <DialogFooter className="pt-6 shrink-0">
             <Button
               variant="outline"
               onClick={() => setIsMarketViewModalOpen(false)}
@@ -14750,9 +16058,9 @@ export default function AdminDashboard() {
                             <span className="text-xs text-muted-foreground">
                               {result.address
                                 ? `${result.address.slice(
-                                    0,
-                                    8
-                                  )}...${result.address.slice(-8)}`
+                                  0,
+                                  8
+                                )}...${result.address.slice(-8)}`
                                 : "N/A"}
                             </span>
                           </div>
@@ -14808,8 +16116,8 @@ export default function AdminDashboard() {
                       {envoiName} →{" "}
                       {assignAddress
                         ? `${assignAddress.slice(0, 8)}...${assignAddress.slice(
-                            -8
-                          )}`
+                          -8
+                        )}`
                         : "N/A"}
                     </p>
                   </div>
@@ -14916,9 +16224,8 @@ export default function AdminDashboard() {
                   console.log("role_keyR", role_keyR);
                   if (!role_keyR.success) {
                     toast.error("Failed to get role key", {
-                      description: `Could not retrieve role key for ${
-                        selectedRole?.name || "selected role"
-                      }. Please try again.`,
+                      description: `Could not retrieve role key for ${selectedRole?.name || "selected role"
+                        }. Please try again.`,
                     });
                     return;
                   }
@@ -14930,9 +16237,8 @@ export default function AdminDashboard() {
                   );
                   if (!set_roleR.success) {
                     toast.error("Failed to set role", {
-                      description: `Could not set role for ${
-                        selectedRole?.name || "selected role"
-                      }. Please try again.`,
+                      description: `Could not set role for ${selectedRole?.name || "selected role"
+                        }. Please try again.`,
                     });
                     return;
                   }
@@ -14948,9 +16254,8 @@ export default function AdminDashboard() {
                   await waitForConfirmation(clients.algod, res.txid, 4);
 
                   toast.success("Role assigned successfully", {
-                    description: `Successfully assigned ${
-                      selectedRole?.name || "selected role"
-                    } role to ${targetAddress}.`,
+                    description: `Successfully assigned ${selectedRole?.name || "selected role"
+                      } role to ${targetAddress}.`,
                   });
 
                   // Refresh oracle contract info if this was a Price Oracle role assignment
@@ -15049,9 +16354,9 @@ export default function AdminDashboard() {
                             <div className="text-xs text-muted-foreground font-mono">
                               {result.address
                                 ? `${result.address.slice(
-                                    0,
-                                    8
-                                  )}...${result.address.slice(-8)}`
+                                  0,
+                                  8
+                                )}...${result.address.slice(-8)}`
                                 : "N/A"}
                             </div>
                           </div>

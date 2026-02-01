@@ -1712,6 +1712,17 @@ const MarketsTable = () => {
       const clients = await getSyncedClientsForReads();
       ARC200Service.initialize(clients);
 
+      // Debug: Log token config details
+      console.log("[MarketsTable] Token config for balance fetch:", {
+        asset,
+        network: currentNetwork,
+        tokenStandard: originalTokenConfig.tokenStandard,
+        underlyingContractId: token.underlyingContractId,
+        underlyingAssetId: token.underlyingAssetId,
+        poolId: token.poolId,
+        address: activeAccount.address,
+      });
+
       let balance = 0;
 
       // Handle different token standards
@@ -1743,15 +1754,25 @@ const MarketsTable = () => {
         }
       } else if (originalTokenConfig.tokenStandard === "network") {
         // For network tokens (like VOI), fetch native balance
+        console.log(`[MarketsTable] Entering network token balance fetch for ${asset}`, {
+          tokenStandard: originalTokenConfig.tokenStandard,
+          address: activeAccount.address,
+          network: currentNetwork,
+        });
         console.log(`Fetching network token balance for ${asset}`);
         try {
           const clients = await getSyncedClientsForReads();
           const accountInfo = await clients.algod
             .accountInformation(activeAccount.address)
             .do();
+          console.log(`[MarketsTable] accountInfo for ${asset}:`, accountInfo);
           // Convert from micro-units to units (divide by 1,000,000)
-          balance = Number(accountInfo.amount) / 1_000_000;
-          console.log(`Network token balance for ${asset}: ${balance}`);
+          balance = Math.max(0, Number(accountInfo.amount) - Number(accountInfo.minBalance) - 1e6) / 1e6;
+          console.log(`[MarketsTable] Network token balance for ${asset}:`, {
+            rawAmount: accountInfo.amount,
+            balance,
+            minBalance: accountInfo.minBalance,
+          });
         } catch (error) {
           console.error(
             `Error fetching network token balance for ${asset}:`,

@@ -36,7 +36,7 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
   const [isConfirming, setIsConfirming] = useState(false);
 
   const isLoading = isLoadingNFTs || isLoadingName;
-  const hasNFTs = nfts.length > 0;
+  const hasNFTs = nfts && nfts.length > 0;
   const meetsRequirements = ownsName && hasNFTs;
 
   const handleRefresh = async () => {
@@ -207,7 +207,7 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
                 Make sure you have NFTs in your wallet
               </p>
             </div>
-          ) : nfts.length === 0 ? (
+          ) : !nfts || nfts.length === 0 ? (
             <div className="text-center py-8">
               <ImageIcon className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
               <p className="text-muted-foreground mb-2">No NFTs found in your wallet</p>

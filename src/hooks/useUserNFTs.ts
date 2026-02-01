@@ -1,154 +1,115 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useNetwork } from '@/contexts/NetworkContext';
-import { isAlgorandCompatibleNetwork } from '@/config';
+import { useState, useEffect, useCallback } from "react";
+import { useWallet } from "@txnlab/use-wallet-react";
+import {
+  fetchUserNFTs,
+  filterGovernanceNFTs,
+  parseNFTMetadata,
+  getNFTMultiplier,
+  NFTToken,
+} from "@/services/nftService";
+import { GovernanceNFT } from "@/components/governance/NFTMultiplierDropdown";
 
+// Governance NFT contract IDs
+const GOVERNANCE_NFT_CONTRACTS = [313597, 894888, 313705];
+
+/**
+ * UserNFT type for NFT selection modal and profile customization
+ */
 export interface UserNFT {
-  assetId: number;
+  contractId: number;
   tokenId: string;
   name: string;
-  imageUrl: string | null;
-  contractId: number;
-  collectionName: string | null;
-  metadata: any;
+  imageUrl: string;
+  collectionName?: string;
 }
 
-export interface UserNFTsData {
-  nfts: UserNFT[];
-  isLoading: boolean;
-  error: string | null;
-}
+/**
+ * Hook to fetch and manage user's governance NFTs
+ * @param address Optional address to fetch NFTs for (defaults to activeAccount address)
+ * @returns Object containing user NFTs, loading state, error, and refetch function
+ */
+export const useUserNFTs = (address?: string | null) => {
+  const { activeAccount } = useWallet();
+  const [nfts, setNfts] = useState<UserNFT[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-const NFT_INDEXER_BASE_URL = 'https://voi-mainnet-mimirapi.nftnavigator.xyz/nft-indexer/v1';
-// Supported contract IDs for NFT collections
-const CONTRACT_IDS = [313597, 313705, 894888];
+  const targetAddress = address || activeAccount?.address;
 
-export const useUserNFTs = (userAddress: string | null) => {
-  const { currentNetwork } = useNetwork();
-  const [data, setData] = useState<UserNFTsData>({
-    nfts: [],
-    isLoading: false,
-    error: null,
-  });
-
-  const fetchUserNFTs = useCallback(async () => {
-    if (!userAddress || !currentNetwork) {
-      setData({
-        nfts: [],
-        isLoading: false,
-        error: null,
-      });
+  const loadNFTs = useCallback(async () => {
+    if (!targetAddress) {
+      setNfts([]);
+      setError(null);
       return;
     }
 
-    if (!isAlgorandCompatibleNetwork(currentNetwork)) {
-      setData({
-        nfts: [],
-        isLoading: false,
-        error: 'NFT fetching is only supported on Algorand networks',
-      });
-      return;
-    }
-
-    setData(prev => ({ ...prev, isLoading: true, error: null }));
+    setIsLoading(true);
+    setError(null);
 
     try {
-      console.log('Fetching user NFTs for:', userAddress, 'on network:', currentNetwork);
+      const response = await fetchUserNFTs(
+        targetAddress,
+        GOVERNANCE_NFT_CONTRACTS,
+        600
+      );
+
+      // Filter to only governance NFTs and convert to UserNFT format
+      const governanceNFTs = filterGovernanceNFTs(response.tokens);
       
-      // Fetch NFTs from all contract IDs in parallel
-      const fetchPromises = CONTRACT_IDS.map(async (contractId) => {
-        try {
-          const url = `${NFT_INDEXER_BASE_URL}/tokens?contractId=${contractId}&owner=${userAddress}`;
-          const response = await fetch(url);
-          
-          if (!response.ok) {
-            console.warn(`Failed to fetch NFTs for contract ${contractId}: ${response.status} ${response.statusText}`);
-            return [];
-          }
-          
-          const data = await response.json();
-          return data.tokens || [];
-        } catch (error) {
-          console.error(`Error fetching NFTs for contract ${contractId}:`, error);
-          return [];
-        }
-      });
-      
-      // Wait for all requests to complete
-      const results = await Promise.all(fetchPromises);
-      
-      // Aggregate all tokens from all contract IDs
-      const allTokens = results.flat();
-      const nfts: UserNFT[] = [];
-      
-      for (const token of allTokens) {
-        // Skip burned tokens
-        if (token.isBurned) {
-          continue;
-        }
+      const formattedNFTs: UserNFT[] = governanceNFTs.map((token) => {
+        const metadata = parseNFTMetadata(token.metadata);
         
-        try {
-          // Parse metadata JSON string
-          let metadata = {};
-          let imageUrl: string | null = null;
-          let name = `Token ${token.tokenId}`;
-          
-          if (token.metadata) {
-            try {
-              metadata = typeof token.metadata === 'string' 
-                ? JSON.parse(token.metadata) 
-                : token.metadata;
-              
-              // Extract name and image from metadata
-              if (metadata.name) {
-                name = metadata.name;
-              }
-              if (metadata.image) {
-                imageUrl = metadata.image;
-              }
-            } catch (parseError) {
-              console.error('Error parsing metadata for token', token.tokenId, parseError);
-            }
-          }
-          
-          nfts.push({
-            assetId: token.contractId, // Using contractId as assetId
-            tokenId: token.tokenId,
-            name,
-            imageUrl,
-            contractId: token.contractId,
-            collectionName: token.collectionName || null,
-            metadata,
-          });
-        } catch (error) {
-          console.error(`Error processing token ${token.tokenId}:`, error);
-          // Continue with other tokens
+        // Determine collection name for display
+        let collectionName = token.collectionName || "Unknown";
+        if (token.contractId === 313597) {
+          collectionName = "Dorks V1";
+        } else if (token.contractId === 894888) {
+          collectionName = "Dorks V2";
+        } else if (token.contractId === 313705) {
+          collectionName = "Lil Chubs";
         }
-      }
 
-      setData({
-        nfts,
-        isLoading: false,
-        error: null,
+        return {
+          contractId: token.contractId,
+          tokenId: token.tokenId,
+          name: metadata.name || collectionName,
+          imageUrl: metadata.image || "",
+          collectionName,
+        };
       });
 
-      console.log('User NFTs fetched:', nfts);
-    } catch (error) {
-      console.error('Error fetching user NFTs:', error);
-      setData(prev => ({
-        ...prev,
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Failed to fetch user NFTs',
-      }));
+      setNfts(formattedNFTs);
+    } catch (err: any) {
+      console.error("Failed to fetch user NFTs:", err);
+      setError(err?.message || "Failed to load NFTs");
+      setNfts([]);
+    } finally {
+      setIsLoading(false);
     }
-  }, [userAddress, currentNetwork]);
+  }, [targetAddress]);
 
   useEffect(() => {
-    fetchUserNFTs();
-  }, [fetchUserNFTs]);
+    loadNFTs();
+  }, [loadNFTs]);
+
+  const refetch = useCallback(() => {
+    return loadNFTs();
+  }, [loadNFTs]);
+
+  // Also return userNFTs for backward compatibility with governance components
+  const userNFTs: GovernanceNFT[] = nfts.map((nft) => ({
+    id: `${nft.contractId}-${nft.tokenId}`,
+    name: nft.name,
+    multiplier: getNFTMultiplier(nft.contractId),
+    image: nft.imageUrl,
+  }));
 
   return {
-    ...data,
-    refetch: fetchUserNFTs,
+    nfts,
+    userNFTs, // For backward compatibility
+    isLoading,
+    loading: isLoading, // For backward compatibility
+    error,
+    refetch,
   };
 };
-

@@ -871,6 +871,7 @@ const SupplyBorrowModal = ({
                 hideButton={true}
                 isLoadingMaxBorrow={isLoadingMaxBorrow}
                 maxBorrowError={maxBorrowError}
+                network={networkToUse}
               />
 
               <SupplyBorrowStats

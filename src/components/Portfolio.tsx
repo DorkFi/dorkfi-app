@@ -396,8 +396,8 @@ const Portfolio = () => {
             // Compare poolIds as strings to ensure exact match
             const originalTokenConfig = Array.isArray(originalTokenConfigRaw)
               ? originalTokenConfigRaw.find(
-                  (tc) => String(tc.poolId) === String(token.poolId)
-                ) || originalTokenConfigRaw[0]
+                (tc) => String(tc.poolId) === String(token.poolId)
+              ) || originalTokenConfigRaw[0]
               : originalTokenConfigRaw;
 
             // Fetch ntoken balance for this deposit
@@ -862,9 +862,8 @@ const Portfolio = () => {
     deposits.forEach((deposit) => {
       const accruedInterest = deposit.accruedInterest || 0;
       if (accruedInterest > 0) {
-        const marketKey = `${deposit.asset}-${
-          (deposit as any).network || "unknown"
-        }-${deposit.poolId || "unknown"}`;
+        const marketKey = `${deposit.asset}-${(deposit as any).network || "unknown"
+          }-${deposit.poolId || "unknown"}`;
         const existing = marketMap.get(marketKey);
 
         if (existing) {
@@ -895,9 +894,8 @@ const Portfolio = () => {
       const accruedInterest =
         borrow.accruedInterest || (borrow as any).interest || 0;
       if (accruedInterest > 0) {
-        const marketKey = `${borrow.asset}-${
-          (borrow as any).network || "unknown"
-        }-${borrow.poolId || "unknown"}`;
+        const marketKey = `${borrow.asset}-${(borrow as any).network || "unknown"
+          }-${borrow.poolId || "unknown"}`;
         const existing = marketMap.get(marketKey);
 
         if (existing) {
@@ -964,7 +962,7 @@ const Portfolio = () => {
     user?.computed?.globalCollateralValue !== undefined
       ? Number(user.computed.globalCollateralValue)
       : userGlobalData?.totalCollateralValue ||
-        deposits.reduce((sum, deposit) => sum + deposit.value, 0);
+      deposits.reduce((sum, deposit) => sum + deposit.value, 0);
 
   console.log({
     userGlobalData,
@@ -976,7 +974,7 @@ const Portfolio = () => {
     user?.computed?.globalBorrowValue !== undefined
       ? Number(user.computed.globalBorrowValue)
       : userGlobalData?.totalBorrowValue ||
-        borrows.reduce((sum, borrow) => sum + borrow.value, 0);
+      borrows.reduce((sum, borrow) => sum + borrow.value, 0);
 
   // Calculate weighted liquidation threshold based on borrowed assets only
   // This is more accurate because liquidation risk only applies to markets with active debt
@@ -1084,8 +1082,8 @@ const Portfolio = () => {
           typeof liquidationFactor === "string"
             ? parseFloat(liquidationFactor)
             : typeof liquidationFactor === "bigint"
-            ? Number(liquidationFactor)
-            : liquidationFactor;
+              ? Number(liquidationFactor)
+              : liquidationFactor;
 
         // Calculate risk ratio: (deposit value * liquidation factor) / total borrow value
         let riskRatio = (deposit.value * liquidationFactorNum) / totalBorrowed;
@@ -1298,6 +1296,15 @@ const Portfolio = () => {
   // Fetch liquidatable positions from Orca API when health factor < 1
   useEffect(() => {
     const fetchLiquidatablePositions = async () => {
+      // Skip if feature is disabled
+      if (!isFeatureEnabled("enableLiquidatablePositions")) {
+        console.log(
+          "[Portfolio] Liquidatable positions feature disabled, skipping fetch"
+        );
+        setLiquidatablePositions([]);
+        return;
+      }
+
       // Only fetch when we have an address
       if (!displayAddress) {
         console.log(
@@ -1324,12 +1331,41 @@ const Portfolio = () => {
         const url = `https://orca-api.nautilus.sh/api/opportunities?limit=100`;
         console.log("[Portfolio] Fetching liquidatable positions from:", url);
 
-        const response = await fetch(url);
+        // Add timeout to prevent hanging requests
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
+        let response: Response;
+        try {
+          response = await fetch(url, {
+            signal: controller.signal,
+            headers: {
+              'Accept': 'application/json',
+            },
+          });
+          clearTimeout(timeoutId);
+        } catch (fetchError: any) {
+          clearTimeout(timeoutId);
+
+          // Handle different types of fetch errors
+          if (fetchError.name === 'AbortError') {
+            throw new Error('Request timeout: The liquidatable positions API did not respond in time');
+          } else if (fetchError.message?.includes('Failed to fetch') || fetchError instanceof TypeError) {
+            // Network error, CORS issue, or API unreachable
+            console.warn('[Portfolio] Network error fetching liquidatable positions:', fetchError);
+            throw new Error('Network error: Unable to reach the liquidatable positions API. This may be due to network connectivity or CORS restrictions.');
+          } else {
+            throw fetchError;
+          }
+        }
+
         if (!response.ok) {
+          const errorText = await response.text().catch(() => response.statusText);
           throw new Error(
-            `Failed to fetch liquidatable positions: ${response.statusText}`
+            `Failed to fetch liquidatable positions: ${response.status} ${response.statusText}${errorText ? ` - ${errorText}` : ''}`
           );
         }
+
         const data = await response.json();
 
         console.log("[Portfolio] Orca API response:", {
@@ -1392,12 +1428,24 @@ const Portfolio = () => {
           positions: filtered,
         });
         setLiquidatablePositions(filtered);
-      } catch (error) {
+      } catch (error: any) {
         console.error(
           "[Portfolio] Error fetching liquidatable positions:",
           error
         );
+
+        // Only log error details, don't show to user unless it's a critical issue
+        // Silently fail and set empty array - the section won't show if there are no positions
         setLiquidatablePositions([]);
+
+        // Log more details for debugging
+        if (error?.message) {
+          console.warn('[Portfolio] Liquidatable positions fetch error details:', {
+            message: error.message,
+            name: error.name,
+            stack: error.stack,
+          });
+        }
       } finally {
         setIsLoadingLiquidatablePositions(false);
       }
@@ -1447,7 +1495,7 @@ const Portfolio = () => {
             ? (token as any).originalSymbol
             : debtSymbol;
         const originalTokenConfigRaw = getTokenConfig(networkId, originalSymbol);
-        
+
         if (!originalTokenConfigRaw) {
           console.error("Token config not found for:", originalSymbol);
           setRepayWalletBalance(0);
@@ -1456,8 +1504,8 @@ const Portfolio = () => {
 
         const originalTokenConfig = Array.isArray(originalTokenConfigRaw)
           ? originalTokenConfigRaw.find(
-              (tc) => String(tc.poolId) === String(selectedRepayPosition.appId)
-            ) || originalTokenConfigRaw[0]
+            (tc) => String(tc.poolId) === String(selectedRepayPosition.appId)
+          ) || originalTokenConfigRaw[0]
           : originalTokenConfigRaw;
 
         // Initialize clients for the network
@@ -1514,7 +1562,7 @@ const Portfolio = () => {
   // Use the lowest health factor from at-risk assets if it's lower than the global health factor
   const healthFactorToDisplay =
     lowestAtRiskHealthFactor !== null &&
-    (healthFactor === null || lowestAtRiskHealthFactor < healthFactor)
+      (healthFactor === null || lowestAtRiskHealthFactor < healthFactor)
       ? lowestAtRiskHealthFactor
       : healthFactor;
 
@@ -1569,8 +1617,8 @@ const Portfolio = () => {
             typeof threshold === "string"
               ? parseFloat(threshold)
               : typeof threshold === "bigint"
-              ? Number(threshold)
-              : threshold;
+                ? Number(threshold)
+                : threshold;
           liquidationThresholds.push(thresholdNum);
         });
         if (liquidationThresholds.length > 0) {
@@ -1593,8 +1641,8 @@ const Portfolio = () => {
     return networkLiquidationMargins.length > 0
       ? Math.min(...networkLiquidationMargins)
       : totalCollateral > 0
-      ? weightedLiquidationThreshold * 100 - netLTV
-      : 0;
+        ? weightedLiquidationThreshold * 100 - netLTV
+        : 0;
   };
 
   // Liquidation margin = lowest across all networks
@@ -1734,8 +1782,8 @@ const Portfolio = () => {
       // Compare poolIds as strings to ensure exact match
       const originalTokenConfig = Array.isArray(originalTokenConfigRaw)
         ? originalTokenConfigRaw.find(
-            (tc) => String(tc.poolId) === String(token.poolId)
-          ) || originalTokenConfigRaw[0]
+          (tc) => String(tc.poolId) === String(token.poolId)
+        ) || originalTokenConfigRaw[0]
         : originalTokenConfigRaw;
 
       // Initialize ARC200Service with clients for the specific network
@@ -1758,6 +1806,16 @@ const Portfolio = () => {
       ARC200Service.initialize(clients);
 
       let balance = 0;
+
+      // Debug: Log token config details
+      console.log("[Portfolio] Token config for balance fetch:", {
+        asset,
+        networkToUse,
+        tokenStandard: originalTokenConfig.tokenStandard,
+        underlyingContractId: token.underlyingContractId,
+        underlyingAssetId: token.underlyingAssetId,
+        poolId: token.poolId,
+      });
 
       // Handle different token standards
       if (
@@ -1789,14 +1847,20 @@ const Portfolio = () => {
         }
       } else if (originalTokenConfig.tokenStandard === "network") {
         // For network tokens (like VOI), fetch native balance
+        console.log(`[Portfolio] Entering network token balance fetch for ${asset}`, {
+          tokenStandard: originalTokenConfig.tokenStandard,
+          displayAddress,
+          networkToUse,
+        });
         console.log(`Fetching network token balance for ${asset}`);
         try {
           // Use the same clients we initialized earlier for this network
           const accountInfo = await clients.algod
             .accountInformation(displayAddress)
             .do();
+          console.log("accountInfo", accountInfo);
           // Convert from micro-units to units (divide by 1,000,000)
-          balance = Number(accountInfo.amount) / 1_000_000;
+          balance = Math.max(0, Number(accountInfo.amount) - Number(accountInfo.minBalance) - 1e6) / 1e6;
           console.log(`Network token balance for ${asset}: ${balance}`);
         } catch (error) {
           console.error(
@@ -2294,9 +2358,8 @@ const Portfolio = () => {
       if (refreshedCount > 0) {
         toast({
           title: "Markets Refreshed",
-          description: `Successfully refreshed ${refreshedCount} market${
-            refreshedCount !== 1 ? "s" : ""
-          }${failedCount > 0 ? ` (${failedCount} failed)` : ""}`,
+          description: `Successfully refreshed ${refreshedCount} market${refreshedCount !== 1 ? "s" : ""
+            }${failedCount > 0 ? ` (${failedCount} failed)` : ""}`,
           duration: 3000,
         });
       } else {
@@ -2357,9 +2420,8 @@ const Portfolio = () => {
         const marketIdsToSync = new Set<string>();
         items.forEach((item) => {
           const networkToUse = item.network || currentNetwork;
-          const key = `${item.asset}-${
-            item.poolId || "default"
-          }-${networkToUse}`;
+          const key = `${item.asset}-${item.poolId || "default"
+            }-${networkToUse}`;
           marketKeys.add(key);
           if (item.poolId) {
             marketIdsToSync.add(item.poolId);
@@ -2401,14 +2463,13 @@ const Portfolio = () => {
             const tokens = getAllTokensWithDisplayInfo(networkToUse);
             const token = actualPoolId
               ? tokens.find(
-                  (t) => t.symbol === asset && t.poolId === actualPoolId
-                )
+                (t) => t.symbol === asset && t.poolId === actualPoolId
+              )
               : tokens.find((t) => t.symbol === asset);
 
             if (!token?.poolId || !token?.underlyingContractId) {
               console.warn(
-                `[Portfolio] Cannot refresh market: token not found for ${asset}${
-                  actualPoolId ? ` with poolId ${actualPoolId}` : ""
+                `[Portfolio] Cannot refresh market: token not found for ${asset}${actualPoolId ? ` with poolId ${actualPoolId}` : ""
                 } on network ${networkToUse}`
               );
               continue;
@@ -2453,9 +2514,8 @@ const Portfolio = () => {
         if (refreshedCount > 0) {
           toast({
             title: `${sectionName} Refreshed`,
-            description: `Successfully refreshed ${refreshedCount} market${
-              refreshedCount !== 1 ? "s" : ""
-            }${failedCount > 0 ? ` (${failedCount} failed)` : ""}`,
+            description: `Successfully refreshed ${refreshedCount} market${refreshedCount !== 1 ? "s" : ""
+              }${failedCount > 0 ? ` (${failedCount} failed)` : ""}`,
             duration: 3000,
           });
         } else {
@@ -2507,9 +2567,8 @@ const Portfolio = () => {
   // Function to refresh a single market
   const handleRefreshSingleMarket = useCallback(
     async (asset: string, poolId?: string, networkId?: string) => {
-      const marketKey = `${asset}-${poolId || "default"}-${
-        networkId || currentNetwork
-      }`;
+      const marketKey = `${asset}-${poolId || "default"}-${networkId || currentNetwork
+        }`;
 
       if (refreshingMarket === marketKey) return;
 
@@ -2525,8 +2584,7 @@ const Portfolio = () => {
 
         if (!token?.poolId || !token?.underlyingContractId) {
           console.warn(
-            `[Portfolio] Cannot refresh market: token not found for ${asset}${
-              poolId ? ` with poolId ${poolId}` : ""
+            `[Portfolio] Cannot refresh market: token not found for ${asset}${poolId ? ` with poolId ${poolId}` : ""
             } on network ${networkToUse}`
           );
           return;
@@ -2652,8 +2710,8 @@ const Portfolio = () => {
 
           const token = deposit.poolId
             ? tokens.find(
-                (t) => t.symbol === deposit.asset && t.poolId === deposit.poolId
-              )
+              (t) => t.symbol === deposit.asset && t.poolId === deposit.poolId
+            )
             : tokens.find((t) => t.symbol === deposit.asset);
 
           if (!token?.poolId || !token?.underlyingContractId) continue;
@@ -2681,9 +2739,8 @@ const Portfolio = () => {
       if (refreshedCount > 0) {
         toast({
           title: "Supplied Assets Refreshed",
-          description: `Successfully refreshed ${refreshedCount} market${
-            refreshedCount !== 1 ? "s" : ""
-          }${failedCount > 0 ? ` (${failedCount} failed)` : ""}`,
+          description: `Successfully refreshed ${refreshedCount} market${refreshedCount !== 1 ? "s" : ""
+            }${failedCount > 0 ? ` (${failedCount} failed)` : ""}`,
           duration: 2000,
         });
 
@@ -2727,8 +2784,8 @@ const Portfolio = () => {
 
           const token = borrow.poolId
             ? tokens.find(
-                (t) => t.symbol === borrow.asset && t.poolId === borrow.poolId
-              )
+              (t) => t.symbol === borrow.asset && t.poolId === borrow.poolId
+            )
             : tokens.find((t) => t.symbol === borrow.asset);
 
           if (!token?.poolId || !token?.underlyingContractId) continue;
@@ -2756,9 +2813,8 @@ const Portfolio = () => {
       if (refreshedCount > 0) {
         toast({
           title: "Borrowed Assets Refreshed",
-          description: `Successfully refreshed ${refreshedCount} market${
-            refreshedCount !== 1 ? "s" : ""
-          }${failedCount > 0 ? ` (${failedCount} failed)` : ""}`,
+          description: `Successfully refreshed ${refreshedCount} market${refreshedCount !== 1 ? "s" : ""
+            }${failedCount > 0 ? ` (${failedCount} failed)` : ""}`,
           duration: 2000,
         });
 
@@ -2812,8 +2868,8 @@ const Portfolio = () => {
 
           const token = item.poolId
             ? tokens.find(
-                (t) => t.symbol === item.asset && t.poolId === item.poolId
-              )
+              (t) => t.symbol === item.asset && t.poolId === item.poolId
+            )
             : tokens.find((t) => t.symbol === item.asset);
 
           if (!token?.poolId || !token?.underlyingContractId) continue;
@@ -2841,9 +2897,8 @@ const Portfolio = () => {
       if (refreshedCount > 0) {
         toast({
           title: "Accrued Interest Refreshed",
-          description: `Successfully refreshed ${refreshedCount} market${
-            refreshedCount !== 1 ? "s" : ""
-          }${failedCount > 0 ? ` (${failedCount} failed)` : ""}`,
+          description: `Successfully refreshed ${refreshedCount} market${refreshedCount !== 1 ? "s" : ""
+            }${failedCount > 0 ? ` (${failedCount} failed)` : ""}`,
           duration: 2000,
         });
 
@@ -2894,8 +2949,8 @@ const Portfolio = () => {
 
           const token = asset.poolId
             ? tokens.find(
-                (t) => t.symbol === asset.asset && t.poolId === asset.poolId
-              )
+              (t) => t.symbol === asset.asset && t.poolId === asset.poolId
+            )
             : tokens.find((t) => t.symbol === asset.asset);
 
           if (!token?.poolId || !token?.underlyingContractId) continue;
@@ -2923,9 +2978,8 @@ const Portfolio = () => {
       if (refreshedCount > 0) {
         toast({
           title: "At Risk Assets Refreshed",
-          description: `Successfully refreshed ${refreshedCount} market${
-            refreshedCount !== 1 ? "s" : ""
-          }${failedCount > 0 ? ` (${failedCount} failed)` : ""}`,
+          description: `Successfully refreshed ${refreshedCount} market${refreshedCount !== 1 ? "s" : ""
+            }${failedCount > 0 ? ` (${failedCount} failed)` : ""}`,
           duration: 2000,
         });
 
@@ -3557,9 +3611,9 @@ const Portfolio = () => {
       // Find debt token - match by symbol and poolId from opportunity
       let debtToken = poolId
         ? allTokens.find(
-            (t) =>
-              t.symbol === debtSymbol && String(t.poolId) === String(poolId)
-          )
+          (t) =>
+            t.symbol === debtSymbol && String(t.poolId) === String(poolId)
+        )
         : null;
 
       // Fallback: find by symbol only (for tokens that might not have poolId match)
@@ -3571,10 +3625,10 @@ const Portfolio = () => {
       // For collateral, we should use the same pool as the debt (since liquidation happens in debt's pool)
       let collateralToken = poolId
         ? allTokens.find(
-            (t) =>
-              t.symbol === collateralSymbol &&
-              String(t.poolId) === String(poolId)
-          )
+          (t) =>
+            t.symbol === collateralSymbol &&
+            String(t.poolId) === String(poolId)
+        )
         : null;
 
       // If not found in debt pool, try to find by symbol only
@@ -3645,7 +3699,7 @@ const Portfolio = () => {
           (m.poolId ===
             selectedLiquidationPosition.collateralMarketId.toString() ||
             m.appId ===
-              selectedLiquidationPosition.collateralMarketId.toString());
+            selectedLiquidationPosition.collateralMarketId.toString());
         return matchesSymbol && (matchesNetwork || matchesPool);
       });
 
@@ -3804,8 +3858,7 @@ const Portfolio = () => {
           )
         ).obj;
         const note = new TextEncoder().encode(
-          `arc200_approve ${debtSymbol} ${
-            Number(debtAmountInTokens) / 10 ** debtToken.decimals
+          `arc200_approve ${debtSymbol} ${Number(debtAmountInTokens) / 10 ** debtToken.decimals
           } spendindg to ${algosdk.encodeAddress(
             algosdk.getApplicationAddress(Number(poolId)).publicKey
           )}`
@@ -3839,8 +3892,7 @@ const Portfolio = () => {
           .dividedBy(10 ** collateralToken.decimals)
           .toString();
         const note = new TextEncoder().encode(
-          `liquidate_cross_market ${debtSymbol} ${
-            Number(debtAmountInTokens) / 10 ** debtToken.decimals
+          `liquidate_cross_market ${debtSymbol} ${Number(debtAmountInTokens) / 10 ** debtToken.decimals
           } to ${algosdk.encodeAddress(
             algosdk.getApplicationAddress(Number(collateralMarketIdValue))
               .publicKey
@@ -4142,18 +4194,17 @@ const Portfolio = () => {
           {/* Data Source Indicator */}
           <div className="mt-4 flex items-center justify-center gap-2 text-xs text-muted-foreground">
             <div
-              className={`w-2 h-2 rounded-full ${
-                user?.computed || userGlobalData
-                  ? "bg-green-500"
-                  : "bg-gray-500"
-              }`}
+              className={`w-2 h-2 rounded-full ${user?.computed || userGlobalData
+                ? "bg-green-500"
+                : "bg-gray-500"
+                }`}
             ></div>
             <span>
               {user?.computed
                 ? "Global Portfolio Data"
                 : userGlobalData
-                ? "Live Data"
-                : "No Data"}{" "}
+                  ? "Live Data"
+                  : "No Data"}{" "}
               •{" "}
               {addressName ||
                 `${activeAccount?.address.slice(
@@ -4237,67 +4288,67 @@ const Portfolio = () => {
                 onRepayDebt={
                   !isViewOnly
                     ? () => {
-                        // Find the largest borrow position and open repay modal
-                        if (borrows.length > 0) {
-                          const largestBorrow = borrows.reduce(
-                            (prev, current) =>
-                              current.value > prev.value ? current : prev
-                          );
-                          handleRepayClick(
-                            largestBorrow.asset,
-                            largestBorrow.poolId,
-                            (largestBorrow as any).network
-                          );
-                        }
+                      // Find the largest borrow position and open repay modal
+                      if (borrows.length > 0) {
+                        const largestBorrow = borrows.reduce(
+                          (prev, current) =>
+                            current.value > prev.value ? current : prev
+                        );
+                        handleRepayClick(
+                          largestBorrow.asset,
+                          largestBorrow.poolId,
+                          (largestBorrow as any).network
+                        );
                       }
+                    }
                     : undefined
                 }
                 onDeposit={
                   !isViewOnly
                     ? (asset) => {
-                        if (asset) {
-                          const deposit = deposits.find(
-                            (d) => d.asset === asset
-                          );
-                          handleDepositClick(
-                            asset,
-                            deposit?.poolId,
-                            (deposit as any)?.network
-                          );
-                        } else {
-                          handleAddCollateral();
-                        }
+                      if (asset) {
+                        const deposit = deposits.find(
+                          (d) => d.asset === asset
+                        );
+                        handleDepositClick(
+                          asset,
+                          deposit?.poolId,
+                          (deposit as any)?.network
+                        );
+                      } else {
+                        handleAddCollateral();
                       }
+                    }
                     : undefined
                 }
                 onWithdraw={
                   !isViewOnly
                     ? (asset) => {
-                        if (asset) {
-                          const deposit = deposits.find(
-                            (d) => d.asset === asset
-                          );
-                          handleWithdrawClick(
-                            asset,
-                            deposit?.poolId,
-                            (deposit as any)?.network
-                          );
-                        }
+                      if (asset) {
+                        const deposit = deposits.find(
+                          (d) => d.asset === asset
+                        );
+                        handleWithdrawClick(
+                          asset,
+                          deposit?.poolId,
+                          (deposit as any)?.network
+                        );
                       }
+                    }
                     : undefined
                 }
                 onBorrow={
                   !isViewOnly
                     ? (asset) => {
-                        if (asset) {
-                          const borrow = borrows.find((b) => b.asset === asset);
-                          handleBorrowClick(
-                            asset,
-                            borrow?.poolId,
-                            (borrow as any)?.network
-                          );
-                        }
+                      if (asset) {
+                        const borrow = borrows.find((b) => b.asset === asset);
+                        handleBorrowClick(
+                          asset,
+                          borrow?.poolId,
+                          (borrow as any)?.network
+                        );
                       }
+                    }
                     : undefined
                 }
                 totalBorrowed={totalBorrowed}
@@ -4401,8 +4452,8 @@ const Portfolio = () => {
                 const topBorrowedAsset =
                   borrows.length > 0
                     ? borrows.reduce((top, current) =>
-                        current.value > (top?.value || 0) ? current : top
-                      )
+                      current.value > (top?.value || 0) ? current : top
+                    )
                     : null;
 
                 const topBorrowedPercentage =
@@ -4428,12 +4479,12 @@ const Portfolio = () => {
 
                 const closestToLiquidation =
                   borrows.length > 0 &&
-                  healthFactor !== null &&
-                  healthFactor < 2.0
+                    healthFactor !== null &&
+                    healthFactor < 2.0
                     ? {
-                        asset: "Portfolio",
-                        healthFactor: healthFactor,
-                      }
+                      asset: "Portfolio",
+                      healthFactor: healthFactor,
+                    }
                     : null;
 
                 // Chart colors
@@ -4574,8 +4625,8 @@ const Portfolio = () => {
                                 typeof threshold === "string"
                                   ? parseFloat(threshold)
                                   : typeof threshold === "bigint"
-                                  ? Number(threshold)
-                                  : threshold;
+                                    ? Number(threshold)
+                                    : threshold;
                               liquidationThresholds.push(thresholdNum);
                             });
                             if (liquidationThresholds.length > 0) {
@@ -4686,13 +4737,12 @@ const Portfolio = () => {
                               <div className="text-sm text-muted-foreground mt-1">
                                 Health Factor:{" "}
                                 <span
-                                  className={`font-semibold ${
-                                    closestToLiquidation.healthFactor >= 1.5
-                                      ? "text-green-600 dark:text-green-400"
-                                      : closestToLiquidation.healthFactor >= 1.0
+                                  className={`font-semibold ${closestToLiquidation.healthFactor >= 1.5
+                                    ? "text-green-600 dark:text-green-400"
+                                    : closestToLiquidation.healthFactor >= 1.0
                                       ? "text-yellow-600 dark:text-yellow-400"
                                       : "text-red-600 dark:text-red-400"
-                                  }`}
+                                    }`}
                                 >
                                   {closestToLiquidation.healthFactor.toFixed(2)}
                                 </span>
@@ -4723,20 +4773,19 @@ const Portfolio = () => {
                                     <div className="flex-1">
                                       <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
                                         <div
-                                          className={`h-2.5 rounded-full transition-all ${
-                                            healthFactor >= 2.0
-                                              ? "bg-green-500"
-                                              : healthFactor >= 1.5
+                                          className={`h-2.5 rounded-full transition-all ${healthFactor >= 2.0
+                                            ? "bg-green-500"
+                                            : healthFactor >= 1.5
                                               ? "bg-yellow-500"
                                               : healthFactor >= 1.0
-                                              ? "bg-orange-500"
-                                              : "bg-red-500"
-                                          }`}
+                                                ? "bg-orange-500"
+                                                : "bg-red-500"
+                                            }`}
                                           style={{
                                             width: `${Math.min(
                                               ((displayHealthFactor || 0) /
                                                 3.0) *
-                                                100,
+                                              100,
                                               100
                                             )}%`,
                                           }}
@@ -4753,10 +4802,10 @@ const Portfolio = () => {
                                     {healthFactor >= 2.0
                                       ? "Low Risk"
                                       : healthFactor >= 1.5
-                                      ? "Moderate Risk"
-                                      : healthFactor >= 1.0
-                                      ? "High Risk"
-                                      : "Critical Risk"}
+                                        ? "Moderate Risk"
+                                        : healthFactor >= 1.0
+                                          ? "High Risk"
+                                          : "Critical Risk"}
                                   </div>
                                 </div>
                               </div>
@@ -4872,8 +4921,8 @@ const Portfolio = () => {
                           typeof threshold === "string"
                             ? parseFloat(threshold)
                             : typeof threshold === "bigint"
-                            ? Number(threshold)
-                            : threshold;
+                              ? Number(threshold)
+                              : threshold;
                         liquidationThresholds.push(thresholdNum);
                       });
                       if (liquidationThresholds.length > 0) {
@@ -4903,10 +4952,10 @@ const Portfolio = () => {
                 const lowestLiquidationMargin =
                   networkLiquidationMargins.length > 0
                     ? Math.min(
-                        ...networkLiquidationMargins.map(
-                          (n) => n.liquidationMargin
-                        )
+                      ...networkLiquidationMargins.map(
+                        (n) => n.liquidationMargin
                       )
+                    )
                     : null;
 
                 return (
@@ -4966,8 +5015,8 @@ const Portfolio = () => {
                               typeof threshold === "string"
                                 ? parseFloat(threshold)
                                 : typeof threshold === "bigint"
-                                ? Number(threshold)
-                                : threshold;
+                                  ? Number(threshold)
+                                  : threshold;
                             liquidationThresholds.push(thresholdNum);
                           });
                           if (liquidationThresholds.length > 0) {
@@ -5033,11 +5082,10 @@ const Portfolio = () => {
                                     Net Value:
                                   </span>
                                   <span
-                                    className={`text-sm font-semibold ${
-                                      networkNetValue >= 0
-                                        ? "text-green-600 dark:text-green-400"
-                                        : "text-red-600 dark:text-red-400"
-                                    }`}
+                                    className={`text-sm font-semibold ${networkNetValue >= 0
+                                      ? "text-green-600 dark:text-green-400"
+                                      : "text-red-600 dark:text-red-400"
+                                      }`}
                                   >
                                     {networkNetValue.toLocaleString("en-US", {
                                       style: "currency",
@@ -5054,15 +5102,14 @@ const Portfolio = () => {
                                       Health Factor:
                                     </span>
                                     <span
-                                      className={`text-sm font-semibold ${
-                                        networkHealthFactor === null
-                                          ? "text-muted-foreground"
-                                          : networkHealthFactor >= 1.5
+                                      className={`text-sm font-semibold ${networkHealthFactor === null
+                                        ? "text-muted-foreground"
+                                        : networkHealthFactor >= 1.5
                                           ? "text-green-600 dark:text-green-400"
                                           : networkHealthFactor >= 1.0
-                                          ? "text-yellow-600 dark:text-yellow-400"
-                                          : "text-red-600 dark:text-red-400"
-                                      }`}
+                                            ? "text-yellow-600 dark:text-yellow-400"
+                                            : "text-red-600 dark:text-red-400"
+                                        }`}
                                     >
                                       {networkHealthFactor === null
                                         ? "N/A"
@@ -5074,15 +5121,14 @@ const Portfolio = () => {
                                       Liquidation Margin:
                                     </span>
                                     <span
-                                      className={`text-sm font-semibold ${
-                                        networkLiquidationMargin >= 20
-                                          ? "text-green-600 dark:text-green-400"
-                                          : networkLiquidationMargin >= 10
+                                      className={`text-sm font-semibold ${networkLiquidationMargin >= 20
+                                        ? "text-green-600 dark:text-green-400"
+                                        : networkLiquidationMargin >= 10
                                           ? "text-yellow-600 dark:text-yellow-400"
                                           : networkLiquidationMargin >= 0
-                                          ? "text-orange-600 dark:text-orange-400"
-                                          : "text-red-600 dark:text-red-400"
-                                      }`}
+                                            ? "text-orange-600 dark:text-orange-400"
+                                            : "text-red-600 dark:text-red-400"
+                                        }`}
                                     >
                                       {networkLiquidationMargin.toFixed(2)}%
                                     </span>
@@ -5101,328 +5147,328 @@ const Portfolio = () => {
           </DorkFiCard>
         )}
 
-      {/* Liquidatable Positions Section - Only show when health factor < 1 */}
-      {/* Debug: Show section if we have positions or health factor < 1 */}
-      {((healthFactor !== null && healthFactor < 1) ||
-        liquidatablePositions.length > 0) && (
-        <DorkFiCard className="p-6 md:p-8 border-red-500/50 bg-red-50/50 dark:bg-red-950/20">
-          <div className="mb-4">
-            <div className="flex items-center gap-2 mb-2">
-              <AlertTriangle className="w-5 h-5 text-red-500" />
-              <H1 className="text-xl md:text-2xl text-red-600 dark:text-red-400">
-                Liquidatable Positions
-              </H1>
+      {/* Liquidatable Positions Section - Only show when health factor < 1 and feature is enabled */}
+      {isFeatureEnabled("enableLiquidatablePositions") &&
+        ((healthFactor !== null && healthFactor < 1) ||
+          liquidatablePositions.length > 0) && (
+          <DorkFiCard className="p-6 md:p-8 border-red-500/50 bg-red-50/50 dark:bg-red-950/20">
+            <div className="mb-4">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertTriangle className="w-5 h-5 text-red-500" />
+                <H1 className="text-xl md:text-2xl text-red-600 dark:text-red-400">
+                  Liquidatable Positions
+                </H1>
+              </div>
+              <p className="text-sm text-muted-foreground mb-4">
+                Your health factor is below 1.0. These positions are at risk of
+                liquidation.
+              </p>
             </div>
-            <p className="text-sm text-muted-foreground mb-4">
-              Your health factor is below 1.0. These positions are at risk of
-              liquidation.
-            </p>
-          </div>
 
-          {isLoadingLiquidatablePositions ? (
-            <div className="flex items-center justify-center py-8">
-              <Skeleton className="h-8 w-8 rounded-full mr-2" />
-              <span className="text-muted-foreground">
-                Loading liquidatable positions...
-              </span>
-            </div>
-          ) : liquidatablePositions.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <p>No liquidatable positions found.</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Debt Asset</TableHead>
-                    <TableHead>Collateral Asset</TableHead>
-                    <TableHead>Network</TableHead>
-                    <TableHead>Market</TableHead>
-                    <TableHead>Debt Value (USD)</TableHead>
-                    <TableHead>Collateral Value (USD)</TableHead>
-                    <TableHead>Debt/Collateral Ratio</TableHead>
-                    <TableHead>Liquidation Amount (USD)</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {liquidatablePositions.map((position, index) => {
-                    // Find market for the debt asset to get close factor
-                    const debtMarketId = position.debtMarketId?.toString();
-                    const debtSymbol = position.debtTokenInfo?.data?.symbol;
-                    const collateralMarketId =
-                      position.collateralMarketId?.toString();
-                    const collateralSymbol =
-                      position.collateralTokenInfo?.data?.symbol;
-                    const networkId = position.network as NetworkId;
+            {isLoadingLiquidatablePositions ? (
+              <div className="flex items-center justify-center py-8">
+                <Skeleton className="h-8 w-8 rounded-full mr-2" />
+                <span className="text-muted-foreground">
+                  Loading liquidatable positions...
+                </span>
+              </div>
+            ) : liquidatablePositions.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <p>No liquidatable positions found.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Debt Asset</TableHead>
+                      <TableHead>Collateral Asset</TableHead>
+                      <TableHead>Network</TableHead>
+                      <TableHead>Market</TableHead>
+                      <TableHead>Debt Value (USD)</TableHead>
+                      <TableHead>Collateral Value (USD)</TableHead>
+                      <TableHead>Debt/Collateral Ratio</TableHead>
+                      <TableHead>Liquidation Amount (USD)</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {liquidatablePositions.map((position, index) => {
+                      // Find market for the debt asset to get close factor
+                      const debtMarketId = position.debtMarketId?.toString();
+                      const debtSymbol = position.debtTokenInfo?.data?.symbol;
+                      const collateralMarketId =
+                        position.collateralMarketId?.toString();
+                      const collateralSymbol =
+                        position.collateralTokenInfo?.data?.symbol;
+                      const networkId = position.network as NetworkId;
 
-                    // Find market matching debt asset and network
-                    const debtMarket = marketData.find((m) => {
-                      const matchesSymbol = m.symbol === debtSymbol;
-                      const matchesNetwork =
-                        (m as any).network === networkId ||
-                        (networkId && m.network === networkId);
-                      const matchesPool =
-                        debtMarketId &&
-                        (m.poolId === debtMarketId || m.appId === debtMarketId);
-                      return matchesSymbol && (matchesNetwork || matchesPool);
-                    });
+                      // Find market matching debt asset and network
+                      const debtMarket = marketData.find((m) => {
+                        const matchesSymbol = m.symbol === debtSymbol;
+                        const matchesNetwork =
+                          (m as any).network === networkId ||
+                          (networkId && m.network === networkId);
+                        const matchesPool =
+                          debtMarketId &&
+                          (m.poolId === debtMarketId || m.appId === debtMarketId);
+                        return matchesSymbol && (matchesNetwork || matchesPool);
+                      });
 
-                    // Find market matching collateral asset and network
-                    const collateralMarket = marketData.find((m) => {
-                      const matchesSymbol = m.symbol === collateralSymbol;
-                      const matchesNetwork =
-                        (m as any).network === networkId ||
-                        (networkId && m.network === networkId);
-                      const matchesPool =
-                        collateralMarketId &&
-                        (m.poolId === collateralMarketId ||
-                          m.appId === collateralMarketId);
-                      return matchesSymbol && (matchesNetwork || matchesPool);
-                    });
+                      // Find market matching collateral asset and network
+                      const collateralMarket = marketData.find((m) => {
+                        const matchesSymbol = m.symbol === collateralSymbol;
+                        const matchesNetwork =
+                          (m as any).network === networkId ||
+                          (networkId && m.network === networkId);
+                        const matchesPool =
+                          collateralMarketId &&
+                          (m.poolId === collateralMarketId ||
+                            m.appId === collateralMarketId);
+                        return matchesSymbol && (matchesNetwork || matchesPool);
+                      });
 
-                    console.log(
-                      "[Portfolio] Collateral market:",
-                      collateralMarket
-                    );
+                      console.log(
+                        "[Portfolio] Collateral market:",
+                        collateralMarket
+                      );
 
-                    // Debug: Log market lookup
-                    console.log("[Portfolio] Collateral market lookup:", {
-                      collateralSymbol,
-                      collateralMarketId,
-                      networkId,
-                      marketDataLength: marketData.length,
-                      foundMarket: !!collateralMarket,
-                      marketKeys: collateralMarket
-                        ? Object.keys(collateralMarket)
-                        : null,
-                      liquidationBonus: collateralMarket?.liquidationBonus,
-                      marketInfoLiquidationBonus:
-                        collateralMarket?.marketInfo?.liquidationBonus,
-                      allMarkets: marketData.map((m) => ({
-                        symbol: m.symbol,
-                        poolId: m.poolId,
-                        appId: m.appId,
-                        network: (m as any).network,
-                        liquidationBonus: m.liquidationBonus,
-                        marketInfo: m.marketInfo
-                          ? {
+                      // Debug: Log market lookup
+                      console.log("[Portfolio] Collateral market lookup:", {
+                        collateralSymbol,
+                        collateralMarketId,
+                        networkId,
+                        marketDataLength: marketData.length,
+                        foundMarket: !!collateralMarket,
+                        marketKeys: collateralMarket
+                          ? Object.keys(collateralMarket)
+                          : null,
+                        liquidationBonus: collateralMarket?.liquidationBonus,
+                        marketInfoLiquidationBonus:
+                          collateralMarket?.marketInfo?.liquidationBonus,
+                        allMarkets: marketData.map((m) => ({
+                          symbol: m.symbol,
+                          poolId: m.poolId,
+                          appId: m.appId,
+                          network: (m as any).network,
+                          liquidationBonus: m.liquidationBonus,
+                          marketInfo: m.marketInfo
+                            ? {
                               liquidationBonus: m.marketInfo.liquidationBonus,
                             }
-                          : null,
-                      })),
-                    });
+                            : null,
+                        })),
+                      });
 
-                    // Get close factor from debt market (stored as decimal, e.g., 0.5 for 50%)
-                    // If not found, default to 50% (0.5)
-                    const closeFactor =
-                      debtMarket?.closeFactor ??
-                      debtMarket?.marketInfo?.closeFactor ??
-                      0.5;
+                      // Get close factor from debt market (stored as decimal, e.g., 0.5 for 50%)
+                      // If not found, default to 50% (0.5)
+                      const closeFactor =
+                        debtMarket?.closeFactor ??
+                        debtMarket?.marketInfo?.closeFactor ??
+                        0.5;
 
-                    // Get liquidation bonus from collateral market (stored as decimal, e.g., 0.05 for 5%)
-                    // TODO: Once liquidationBonus is available in marketData, use it from there instead of hardcoded 20%
-                    // Check multiple possible locations for liquidation bonus
-                    let liquidationBonus = 0.2; // Default to 20% (0.20) until marketData includes liquidationBonus
-                    if (collateralMarket) {
-                      // Try direct property first
-                      if (
-                        collateralMarket.liquidationBonus !== undefined &&
-                        collateralMarket.liquidationBonus !== null
-                      ) {
-                        liquidationBonus =
-                          typeof collateralMarket.liquidationBonus === "number"
-                            ? collateralMarket.liquidationBonus
-                            : parseFloat(
+                      // Get liquidation bonus from collateral market (stored as decimal, e.g., 0.05 for 5%)
+                      // TODO: Once liquidationBonus is available in marketData, use it from there instead of hardcoded 20%
+                      // Check multiple possible locations for liquidation bonus
+                      let liquidationBonus = 0.2; // Default to 20% (0.20) until marketData includes liquidationBonus
+                      if (collateralMarket) {
+                        // Try direct property first
+                        if (
+                          collateralMarket.liquidationBonus !== undefined &&
+                          collateralMarket.liquidationBonus !== null
+                        ) {
+                          liquidationBonus =
+                            typeof collateralMarket.liquidationBonus === "number"
+                              ? collateralMarket.liquidationBonus
+                              : parseFloat(
                                 collateralMarket.liquidationBonus.toString()
                               ) / 10000; // Convert from basis points if needed
-                      }
-                      // Try marketInfo property
-                      else if (
-                        collateralMarket.marketInfo?.liquidationBonus !==
+                        }
+                        // Try marketInfo property
+                        else if (
+                          collateralMarket.marketInfo?.liquidationBonus !==
                           undefined &&
-                        collateralMarket.marketInfo?.liquidationBonus !== null
-                      ) {
-                        liquidationBonus =
-                          typeof collateralMarket.marketInfo
-                            .liquidationBonus === "number"
-                            ? collateralMarket.marketInfo.liquidationBonus
-                            : parseFloat(
+                          collateralMarket.marketInfo?.liquidationBonus !== null
+                        ) {
+                          liquidationBonus =
+                            typeof collateralMarket.marketInfo
+                              .liquidationBonus === "number"
+                              ? collateralMarket.marketInfo.liquidationBonus
+                              : parseFloat(
                                 collateralMarket.marketInfo.liquidationBonus.toString()
                               ) / 10000;
+                        }
                       }
-                    }
 
-                    console.log("[Portfolio] Liquidation bonus result:", {
-                      foundMarket: !!collateralMarket,
-                      liquidationBonus,
-                      rawValue: collateralMarket?.liquidationBonus,
-                      marketInfoValue:
-                        collateralMarket?.marketInfo?.liquidationBonus,
-                    });
+                      console.log("[Portfolio] Liquidation bonus result:", {
+                        foundMarket: !!collateralMarket,
+                        liquidationBonus,
+                        rawValue: collateralMarket?.liquidationBonus,
+                        marketInfoValue:
+                          collateralMarket?.marketInfo?.liquidationBonus,
+                      });
 
-                    // Calculate liquidation amount: min(collateral value, borrow amount * close factor)
-                    const borrowValueUsd = position.borrowValueUsd || 0;
-                    const collateralValueUsd = position.collateralValueUsd || 0;
-                    const liquidationAmountFromCloseFactor =
-                      borrowValueUsd * closeFactor;
-                    let liquidationAmount = Math.min(
-                      collateralValueUsd,
-                      liquidationAmountFromCloseFactor
-                    );
+                      // Calculate liquidation amount: min(collateral value, borrow amount * close factor)
+                      const borrowValueUsd = position.borrowValueUsd || 0;
+                      const collateralValueUsd = position.collateralValueUsd || 0;
+                      const liquidationAmountFromCloseFactor =
+                        borrowValueUsd * closeFactor;
+                      let liquidationAmount = Math.min(
+                        collateralValueUsd,
+                        liquidationAmountFromCloseFactor
+                      );
 
-                    // Reduce liquidation amount by liquidation bonus percentage
-                    // liquidationBonus is a percentage (e.g., 0.05 = 5%), so we subtract that percentage
-                    liquidationAmount =
-                      liquidationAmount * (1 - liquidationBonus);
+                      // Reduce liquidation amount by liquidation bonus percentage
+                      // liquidationBonus is a percentage (e.g., 0.05 = 5%), so we subtract that percentage
+                      liquidationAmount =
+                        liquidationAmount * (1 - liquidationBonus);
 
-                    // Format network name for display
-                    const getNetworkDisplayName = (
-                      network: string | undefined
-                    ) => {
-                      if (!network) return "N/A";
-                      if (network === "voi-mainnet") return "Voi";
-                      if (network === "algorand-mainnet") return "Algorand";
-                      return network;
-                    };
+                      // Format network name for display
+                      const getNetworkDisplayName = (
+                        network: string | undefined
+                      ) => {
+                        if (!network) return "N/A";
+                        if (network === "voi-mainnet") return "Voi";
+                        if (network === "algorand-mainnet") return "Algorand";
+                        return network;
+                      };
 
-                    return (
-                      <TableRow key={index}>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <img
-                              src={getTokenImagePath(
-                                position.debtTokenInfo?.data?.symbol || ""
-                              )}
-                              alt={position.debtTokenInfo?.data?.symbol || ""}
-                              className="w-5 h-5 rounded-full"
-                              onError={(e) => {
-                                (e.target as HTMLImageElement).src =
-                                  "/placeholder.svg";
-                              }}
-                            />
-                            <span className="font-medium">
-                              {position.debtTokenInfo?.data?.symbol || "N/A"}
-                            </span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <img
-                              src={getTokenImagePath(
-                                position.collateralTokenInfo?.data?.symbol || ""
-                              )}
-                              alt={
-                                position.collateralTokenInfo?.data?.symbol || ""
-                              }
-                              className="w-5 h-5 rounded-full"
-                              onError={(e) => {
-                                (e.target as HTMLImageElement).src =
-                                  "/placeholder.svg";
-                              }}
-                            />
-                            <span className="font-medium">
-                              {position.collateralTokenInfo?.data?.symbol ||
-                                "N/A"}
-                            </span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="font-medium">
-                          {getNetworkDisplayName(position.network)}
-                        </TableCell>
-                        <TableCell>
-                          {getMarketLabel(
-                            networkId,
-                            position.appId?.toString()
-                          ) || "N/A"}
-                        </TableCell>
-                        <TableCell>${borrowValueUsd.toFixed(2)}</TableCell>
-                        <TableCell>
-                          ${position.collateralValueUsd?.toFixed(2) || "0.00"}
-                        </TableCell>
-                        <TableCell>
-                          {position.debtCollateralRatio
-                            ? `${(position.debtCollateralRatio * 100).toFixed(
+                      return (
+                        <TableRow key={index}>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <img
+                                src={getTokenImagePath(
+                                  position.debtTokenInfo?.data?.symbol || ""
+                                )}
+                                alt={position.debtTokenInfo?.data?.symbol || ""}
+                                className="w-5 h-5 rounded-full"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).src =
+                                    "/placeholder.svg";
+                                }}
+                              />
+                              <span className="font-medium">
+                                {position.debtTokenInfo?.data?.symbol || "N/A"}
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <img
+                                src={getTokenImagePath(
+                                  position.collateralTokenInfo?.data?.symbol || ""
+                                )}
+                                alt={
+                                  position.collateralTokenInfo?.data?.symbol || ""
+                                }
+                                className="w-5 h-5 rounded-full"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).src =
+                                    "/placeholder.svg";
+                                }}
+                              />
+                              <span className="font-medium">
+                                {position.collateralTokenInfo?.data?.symbol ||
+                                  "N/A"}
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            {getNetworkDisplayName(position.network)}
+                          </TableCell>
+                          <TableCell>
+                            {getMarketLabel(
+                              networkId,
+                              position.appId?.toString()
+                            ) || "N/A"}
+                          </TableCell>
+                          <TableCell>${borrowValueUsd.toFixed(2)}</TableCell>
+                          <TableCell>
+                            ${position.collateralValueUsd?.toFixed(2) || "0.00"}
+                          </TableCell>
+                          <TableCell>
+                            {position.debtCollateralRatio
+                              ? `${(position.debtCollateralRatio * 100).toFixed(
                                 2
                               )}%`
-                            : "N/A"}
-                        </TableCell>
-                        <TableCell>
-                          <span className="font-medium">
-                            ${liquidationAmount.toFixed(2)}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          {(() => {
-                            // Check if the connected account matches the position user
-                            const userAddress = position.user?.toLowerCase();
-                            const connectedAddress =
-                              activeAccount?.address?.toLowerCase();
-                            const isOwnPosition =
-                              userAddress === connectedAddress;
+                              : "N/A"}
+                          </TableCell>
+                          <TableCell>
+                            <span className="font-medium">
+                              ${liquidationAmount.toFixed(2)}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            {(() => {
+                              // Check if the connected account matches the position user
+                              const userAddress = position.user?.toLowerCase();
+                              const connectedAddress =
+                                activeAccount?.address?.toLowerCase();
+                              const isOwnPosition =
+                                userAddress === connectedAddress;
 
-                            return (
-                              <div className="flex gap-2">
-                                <Button
-                                  onClick={() => {
-                                    // Open repay modal with position details
-                                    setSelectedRepayPosition({
-                                      ...position,
-                                      borrowValueUsd,
-                                      debtMarket,
-                                      debtSymbol,
-                                      debtMarketId,
-                                      networkId,
-                                    });
-                                    setRepayModalOpen(true);
-                                  }}
-                                  variant="secondary"
-                                  size="sm"
-                                  className="text-xs"
-                                  disabled={!activeAccount?.address}
-                                  title="Repay debt on behalf of this user"
-                                >
-                                  Repay
-                                </Button>
-                                <Button
-                                  onClick={() => {
-                                    // Open liquidation modal with position details
-                                    setSelectedLiquidationPosition({
-                                      ...position,
-                                      liquidationAmount,
-                                      borrowValueUsd,
-                                      collateralValueUsd,
-                                      closeFactor,
-                                      liquidationBonus,
-                                    });
-                                    setLiquidationModalOpen(true);
-                                  }}
-                                  variant="destructive"
-                                  size="sm"
-                                  className="text-xs"
-                                  disabled={isOwnPosition}
-                                  title={
-                                    isOwnPosition
-                                      ? "Cannot liquidate your own position"
-                                      : "Liquidate this position"
-                                  }
-                                >
-                                  Liquidate
-                                </Button>
-                              </div>
-                            );
-                          })()}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </DorkFiCard>
-      )}
+                              return (
+                                <div className="flex gap-2">
+                                  <Button
+                                    onClick={() => {
+                                      // Open repay modal with position details
+                                      setSelectedRepayPosition({
+                                        ...position,
+                                        borrowValueUsd,
+                                        debtMarket,
+                                        debtSymbol,
+                                        debtMarketId,
+                                        networkId,
+                                      });
+                                      setRepayModalOpen(true);
+                                    }}
+                                    variant="secondary"
+                                    size="sm"
+                                    className="text-xs"
+                                    disabled={!activeAccount?.address}
+                                    title="Repay debt on behalf of this user"
+                                  >
+                                    Repay
+                                  </Button>
+                                  <Button
+                                    onClick={() => {
+                                      // Open liquidation modal with position details
+                                      setSelectedLiquidationPosition({
+                                        ...position,
+                                        liquidationAmount,
+                                        borrowValueUsd,
+                                        collateralValueUsd,
+                                        closeFactor,
+                                        liquidationBonus,
+                                      });
+                                      setLiquidationModalOpen(true);
+                                    }}
+                                    variant="destructive"
+                                    size="sm"
+                                    className="text-xs"
+                                    disabled={isOwnPosition}
+                                    title={
+                                      isOwnPosition
+                                        ? "Cannot liquidate your own position"
+                                        : "Liquidate this position"
+                                    }
+                                  >
+                                    Liquidate
+                                  </Button>
+                                </div>
+                              );
+                            })()}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </DorkFiCard>
+        )}
 
       {/* Per-Network Asset Tables */}
       {user?.computed?.networkValues &&
@@ -5448,11 +5494,10 @@ const Portfolio = () => {
                         }
                       >
                         <RefreshCw
-                          className={`w-3 h-3 mr-1.5 ${
-                            refreshingSection === "Supplied Assets"
-                              ? "animate-spin"
-                              : ""
-                          }`}
+                          className={`w-3 h-3 mr-1.5 ${refreshingSection === "Supplied Assets"
+                            ? "animate-spin"
+                            : ""
+                            }`}
                         />
                         Refresh
                       </Button>
@@ -5708,9 +5753,8 @@ const Portfolio = () => {
                               }
                               return (
                                 <PortfolioTableMobileCard
-                                  key={`${deposit.asset}-${
-                                    deposit.poolId || "default"
-                                  }`}
+                                  key={`${deposit.asset}-${deposit.poolId || "default"
+                                    }`}
                                   asset={deposit.asset}
                                   icon={deposit.icon}
                                   value={deposit.value}
@@ -5732,21 +5776,21 @@ const Portfolio = () => {
                                   onDepositClick={
                                     !isViewOnly
                                       ? () =>
-                                          handleDepositClick(
-                                            deposit.asset,
-                                            deposit.poolId,
-                                            (deposit as any).network
-                                          )
+                                        handleDepositClick(
+                                          deposit.asset,
+                                          deposit.poolId,
+                                          (deposit as any).network
+                                        )
                                       : undefined
                                   }
                                   onWithdrawClick={
                                     !isViewOnly
                                       ? () =>
-                                          handleWithdrawClick(
-                                            deposit.asset,
-                                            deposit.poolId,
-                                            (deposit as any).network
-                                          )
+                                        handleWithdrawClick(
+                                          deposit.asset,
+                                          deposit.poolId,
+                                          (deposit as any).network
+                                        )
                                       : undefined
                                   }
                                   onRefreshClick={() =>
@@ -5758,10 +5802,8 @@ const Portfolio = () => {
                                   }
                                   isRefreshing={
                                     refreshingMarket ===
-                                    `${deposit.asset}-${
-                                      deposit.poolId || "default"
-                                    }-${
-                                      (deposit as any).network || currentNetwork
+                                    `${deposit.asset}-${deposit.poolId || "default"
+                                    }-${(deposit as any).network || currentNetwork
                                     }`
                                   }
                                   type="deposit"
@@ -5983,7 +6025,7 @@ const Portfolio = () => {
                                 >
                                   Accrued Interest
                                   {suppliedAssetsSort.column ===
-                                  "accruedInterest" ? (
+                                    "accruedInterest" ? (
                                     suppliedAssetsSort.direction === "asc" ? (
                                       <ArrowUp className="w-3 h-3" />
                                     ) : (
@@ -6039,7 +6081,7 @@ const Portfolio = () => {
                                 >
                                   Borrow Power
                                   {suppliedAssetsSort.column ===
-                                  "borrowingPower" ? (
+                                    "borrowingPower" ? (
                                     suppliedAssetsSort.direction === "asc" ? (
                                       <ArrowUp className="w-3 h-3" />
                                     ) : (
@@ -6093,7 +6135,7 @@ const Portfolio = () => {
                                 >
                                   Collateral Factor
                                   {suppliedAssetsSort.column ===
-                                  "collateralFactor" ? (
+                                    "collateralFactor" ? (
                                     suppliedAssetsSort.direction === "asc" ? (
                                       <ArrowUp className="w-3 h-3" />
                                     ) : (
@@ -6150,7 +6192,7 @@ const Portfolio = () => {
                                 >
                                   Liquidation Factor
                                   {suppliedAssetsSort.column ===
-                                  "liquidationFactor" ? (
+                                    "liquidationFactor" ? (
                                     suppliedAssetsSort.direction === "asc" ? (
                                       <ArrowUp className="w-3 h-3" />
                                     ) : (
@@ -6691,7 +6733,7 @@ const Portfolio = () => {
                                           {(
                                             deposit.accruedInterestValue ||
                                             deposit.accruedInterest *
-                                              (deposit.tokenPrice || 1)
+                                            (deposit.tokenPrice || 1)
                                           ).toLocaleString("en-US", {
                                             style: "currency",
                                             currency: "USD",
@@ -6791,11 +6833,9 @@ const Portfolio = () => {
                                         }}
                                         disabled={
                                           refreshingMarket ===
-                                          `${deposit.asset}-${
-                                            deposit.poolId || "default"
-                                          }-${
-                                            (deposit as any).network ||
-                                            currentNetwork
+                                          `${deposit.asset}-${deposit.poolId || "default"
+                                          }-${(deposit as any).network ||
+                                          currentNetwork
                                           }`
                                         }
                                         title={
@@ -6806,17 +6846,14 @@ const Portfolio = () => {
                                         className="w-8 h-8 p-0 flex items-center justify-center"
                                       >
                                         <RefreshCw
-                                          className={`w-3 h-3 ${
-                                            refreshingMarket ===
-                                            `${deposit.asset}-${
-                                              deposit.poolId || "default"
-                                            }-${
-                                              (deposit as any).network ||
-                                              currentNetwork
+                                          className={`w-3 h-3 ${refreshingMarket ===
+                                            `${deposit.asset}-${deposit.poolId || "default"
+                                            }-${(deposit as any).network ||
+                                            currentNetwork
                                             }`
-                                              ? "animate-spin"
-                                              : ""
-                                          }`}
+                                            ? "animate-spin"
+                                            : ""
+                                            }`}
                                         />
                                       </Button>
                                     </div>
@@ -7016,11 +7053,10 @@ const Portfolio = () => {
                             }
                           >
                             <RefreshCw
-                              className={`w-3 h-3 mr-1.5 ${
-                                refreshingSection === "At Risk Assets"
-                                  ? "animate-spin"
-                                  : ""
-                              }`}
+                              className={`w-3 h-3 mr-1.5 ${refreshingSection === "At Risk Assets"
+                                ? "animate-spin"
+                                : ""
+                                }`}
                             />
                             Refresh
                           </Button>
@@ -7224,7 +7260,7 @@ const Portfolio = () => {
                                 >
                                   Liquidation Factor
                                   {atRiskAssetsSort.column ===
-                                  "liquidationFactor" ? (
+                                    "liquidationFactor" ? (
                                     atRiskAssetsSort.direction === "asc" ? (
                                       <ArrowUp className="w-3 h-3" />
                                     ) : (
@@ -7259,7 +7295,7 @@ const Portfolio = () => {
                                 >
                                   Deposit Value
                                   {atRiskAssetsSort.column ===
-                                  "depositValue" ? (
+                                    "depositValue" ? (
                                     atRiskAssetsSort.direction === "asc" ? (
                                       <ArrowUp className="w-3 h-3" />
                                     ) : (
@@ -7296,7 +7332,7 @@ const Portfolio = () => {
                                   >
                                     Borrow Value
                                     {atRiskAssetsSort.column ===
-                                    "borrowValue" ? (
+                                      "borrowValue" ? (
                                       atRiskAssetsSort.direction === "asc" ? (
                                         <ArrowUp className="w-3 h-3" />
                                       ) : (
@@ -7426,9 +7462,8 @@ const Portfolio = () => {
 
                                   return (
                                     <TableRow
-                                      key={`${asset.asset}-${
-                                        asset.poolId || index
-                                      }`}
+                                      key={`${asset.asset}-${asset.poolId || index
+                                        }`}
                                       className="hover:bg-orange-500/10"
                                     >
                                       <TableCell>
@@ -7441,11 +7476,10 @@ const Portfolio = () => {
                                             />
                                             {marketLabel && (
                                               <div
-                                                className={`absolute -top-1 -right-1 w-4 h-4 rounded-full ${
-                                                  marketLabel === "A"
-                                                    ? "bg-blue-500"
-                                                    : "bg-purple-500"
-                                                } border-2 border-white dark:border-slate-800 flex items-center justify-center`}
+                                                className={`absolute -top-1 -right-1 w-4 h-4 rounded-full ${marketLabel === "A"
+                                                  ? "bg-blue-500"
+                                                  : "bg-purple-500"
+                                                  } border-2 border-white dark:border-slate-800 flex items-center justify-center`}
                                               >
                                                 <span className="text-xs font-bold text-white">
                                                   {marketLabel}
@@ -7535,13 +7569,12 @@ const Portfolio = () => {
                                       )}
                                       <TableCell>
                                         <span
-                                          className={`font-semibold ${
-                                            asset.riskRatio < 0.5
-                                              ? "text-red-500"
-                                              : asset.riskRatio < 0.75
+                                          className={`font-semibold ${asset.riskRatio < 0.5
+                                            ? "text-red-500"
+                                            : asset.riskRatio < 0.75
                                               ? "text-orange-500"
                                               : "text-yellow-500"
-                                          }`}
+                                            }`}
                                         >
                                           {asset.riskRatio.toFixed(3)}
                                         </span>
@@ -7576,28 +7609,23 @@ const Portfolio = () => {
                                             }}
                                             disabled={
                                               refreshingMarket ===
-                                              `${asset.asset}-${
-                                                asset.poolId || "default"
-                                              }-${
-                                                (asset as any).network ||
-                                                currentNetwork
+                                              `${asset.asset}-${asset.poolId || "default"
+                                              }-${(asset as any).network ||
+                                              currentNetwork
                                               }`
                                             }
                                             title="Refresh market data"
                                             className="w-8 h-8 p-0 flex items-center justify-center"
                                           >
                                             <RefreshCw
-                                              className={`w-3 h-3 ${
-                                                refreshingMarket ===
-                                                `${asset.asset}-${
-                                                  asset.poolId || "default"
-                                                }-${
-                                                  (asset as any).network ||
-                                                  currentNetwork
+                                              className={`w-3 h-3 ${refreshingMarket ===
+                                                `${asset.asset}-${asset.poolId || "default"
+                                                }-${(asset as any).network ||
+                                                currentNetwork
                                                 }`
-                                                  ? "animate-spin"
-                                                  : ""
-                                              }`}
+                                                ? "animate-spin"
+                                                : ""
+                                                }`}
                                             />
                                           </Button>
                                         </div>
@@ -7633,11 +7661,10 @@ const Portfolio = () => {
                         }
                       >
                         <RefreshCw
-                          className={`w-3 h-3 mr-1.5 ${
-                            refreshingSection === "Borrowed Assets"
-                              ? "animate-spin"
-                              : ""
-                          }`}
+                          className={`w-3 h-3 mr-1.5 ${refreshingSection === "Borrowed Assets"
+                            ? "animate-spin"
+                            : ""
+                            }`}
                         />
                         Refresh
                       </Button>
@@ -7843,15 +7870,15 @@ const Portfolio = () => {
                                 typeof liquidationThreshold === "string"
                                   ? parseFloat(liquidationThreshold)
                                   : typeof liquidationThreshold === "bigint"
-                                  ? Number(liquidationThreshold)
-                                  : liquidationThreshold;
+                                    ? Number(liquidationThreshold)
+                                    : liquidationThreshold;
                               const normalizedThreshold =
                                 liquidationThresholdNum > 1 &&
-                                liquidationThresholdNum <= 100
+                                  liquidationThresholdNum <= 100
                                   ? liquidationThresholdNum / 100
                                   : liquidationThresholdNum > 100
-                                  ? liquidationThresholdNum / 10000
-                                  : liquidationThresholdNum;
+                                    ? liquidationThresholdNum / 10000
+                                    : liquidationThresholdNum;
 
                               // Calculate LTV Usage
                               const ltvUsage =
@@ -7870,15 +7897,14 @@ const Portfolio = () => {
                               const liquidationPrice =
                                 totalCollateral > 0
                                   ? currentPrice *
-                                    (requiredCollateralForThisBorrow /
-                                      (totalCollateral * borrowRatio || 1))
+                                  (requiredCollateralForThisBorrow /
+                                    (totalCollateral * borrowRatio || 1))
                                   : currentPrice / normalizedThreshold;
 
                               return (
                                 <PortfolioTableMobileCard
-                                  key={`${borrow.asset}-${
-                                    borrow.poolId || "default"
-                                  }`}
+                                  key={`${borrow.asset}-${borrow.poolId || "default"
+                                    }`}
                                   asset={borrow.asset}
                                   icon={borrow.icon}
                                   value={borrow.value}
@@ -7898,21 +7924,21 @@ const Portfolio = () => {
                                   onDepositClick={
                                     !isViewOnly
                                       ? () =>
-                                          handleBorrowClick(
-                                            borrow.asset,
-                                            borrow.poolId,
-                                            (borrow as any).network
-                                          )
+                                        handleBorrowClick(
+                                          borrow.asset,
+                                          borrow.poolId,
+                                          (borrow as any).network
+                                        )
                                       : undefined
                                   }
                                   onWithdrawClick={
                                     !isViewOnly
                                       ? () =>
-                                          handleRepayClick(
-                                            borrow.asset,
-                                            borrow.poolId,
-                                            (borrow as any).network
-                                          )
+                                        handleRepayClick(
+                                          borrow.asset,
+                                          borrow.poolId,
+                                          (borrow as any).network
+                                        )
                                       : undefined
                                   }
                                   onRefreshClick={() =>
@@ -7924,10 +7950,8 @@ const Portfolio = () => {
                                   }
                                   isRefreshing={
                                     refreshingMarket ===
-                                    `${borrow.asset}-${
-                                      borrow.poolId || "default"
-                                    }-${
-                                      (borrow as any).network || currentNetwork
+                                    `${borrow.asset}-${borrow.poolId || "default"
+                                    }-${(borrow as any).network || currentNetwork
                                     }`
                                   }
                                   type="borrow"
@@ -8119,7 +8143,7 @@ const Portfolio = () => {
                               >
                                 Accrued Interest
                                 {borrowedAssetsSort.column ===
-                                "accruedInterest" ? (
+                                  "accruedInterest" ? (
                                   borrowedAssetsSort.direction === "asc" ? (
                                     <ArrowUp className="w-3 h-3" />
                                   ) : (
@@ -8346,8 +8370,8 @@ const Portfolio = () => {
                               const liquidationPrice =
                                 totalCollateral > 0
                                   ? currentPrice *
-                                    (requiredCollateralForThisBorrow /
-                                      (totalCollateral * borrowRatio || 1))
+                                  (requiredCollateralForThisBorrow /
+                                    (totalCollateral * borrowRatio || 1))
                                   : currentPrice / liquidationThreshold;
 
                               // Get network name from borrow or infer
@@ -8468,7 +8492,7 @@ const Portfolio = () => {
                                           {(
                                             borrow.accruedInterestValue ||
                                             borrow.accruedInterest *
-                                              (borrow.tokenPrice || 1)
+                                            (borrow.tokenPrice || 1)
                                           ).toLocaleString("en-US", {
                                             style: "currency",
                                             currency: "USD",
@@ -8566,28 +8590,23 @@ const Portfolio = () => {
                                         }}
                                         disabled={
                                           refreshingMarket ===
-                                          `${borrow.asset}-${
-                                            borrow.poolId || "default"
-                                          }-${
-                                            (borrow as any).network ||
-                                            currentNetwork
+                                          `${borrow.asset}-${borrow.poolId || "default"
+                                          }-${(borrow as any).network ||
+                                          currentNetwork
                                           }`
                                         }
                                         title="Refresh market data"
                                         className="w-8 h-8 p-0 flex items-center justify-center"
                                       >
                                         <RefreshCw
-                                          className={`w-3 h-3 ${
-                                            refreshingMarket ===
-                                            `${borrow.asset}-${
-                                              borrow.poolId || "default"
-                                            }-${
-                                              (borrow as any).network ||
-                                              currentNetwork
+                                          className={`w-3 h-3 ${refreshingMarket ===
+                                            `${borrow.asset}-${borrow.poolId || "default"
+                                            }-${(borrow as any).network ||
+                                            currentNetwork
                                             }`
-                                              ? "animate-spin"
-                                              : ""
-                                          }`}
+                                            ? "animate-spin"
+                                            : ""
+                                            }`}
                                         />
                                       </Button>
                                     </div>
@@ -8761,11 +8780,10 @@ const Portfolio = () => {
                         }
                       >
                         <RefreshCw
-                          className={`w-3 h-3 mr-1.5 ${
-                            refreshingSection === "Accrued Interest"
-                              ? "animate-spin"
-                              : ""
-                          }`}
+                          className={`w-3 h-3 mr-1.5 ${refreshingSection === "Accrued Interest"
+                            ? "animate-spin"
+                            : ""
+                            }`}
                         />
                         Refresh
                       </Button>
@@ -8856,9 +8874,8 @@ const Portfolio = () => {
 
                               return (
                                 <AccruedInterestMobileCard
-                                  key={`${item.asset}-${
-                                    item.poolId || "default"
-                                  }-${(item as any).network || "unknown"}`}
+                                  key={`${item.asset}-${item.poolId || "default"
+                                    }-${(item as any).network || "unknown"}`}
                                   asset={item.asset}
                                   icon={item.icon}
                                   netInterest={item.netInterest || 0}
@@ -8873,11 +8890,11 @@ const Portfolio = () => {
                                   onRepayClick={
                                     hasBorrows
                                       ? () =>
-                                          handleRepayClick(
-                                            item.asset,
-                                            item.poolId,
-                                            (item as any).network
-                                          )
+                                        handleRepayClick(
+                                          item.asset,
+                                          item.poolId,
+                                          (item as any).network
+                                        )
                                       : undefined
                                   }
                                   onRefreshClick={() =>
@@ -8889,10 +8906,8 @@ const Portfolio = () => {
                                   }
                                   isRefreshing={
                                     refreshingMarket ===
-                                    `${item.asset}-${
-                                      item.poolId || "default"
-                                    }-${
-                                      (item as any).network || currentNetwork
+                                    `${item.asset}-${item.poolId || "default"
+                                    }-${(item as any).network || currentNetwork
                                     }`
                                   }
                                 />
@@ -8965,7 +8980,7 @@ const Portfolio = () => {
                                         column: "network",
                                         direction:
                                           accruedInterestSort.direction ===
-                                          "asc"
+                                            "asc"
                                             ? "desc"
                                             : "asc",
                                       });
@@ -9181,9 +9196,9 @@ const Portfolio = () => {
                                   );
                                   return (
                                     Math.abs(values.collateral - netValue) <
-                                      values.collateral * 0.1 ||
+                                    values.collateral * 0.1 ||
                                     Math.abs(values.borrow - netValue) <
-                                      values.borrow * 0.1
+                                    values.borrow * 0.1
                                   );
                                 });
                                 if (matchingNetwork) {
@@ -9336,28 +9351,23 @@ const Portfolio = () => {
                                         }}
                                         disabled={
                                           refreshingMarket ===
-                                          `${item.asset}-${
-                                            item.poolId || "default"
-                                          }-${
-                                            (item as any).network ||
-                                            currentNetwork
+                                          `${item.asset}-${item.poolId || "default"
+                                          }-${(item as any).network ||
+                                          currentNetwork
                                           }`
                                         }
                                         title="Refresh market data"
                                         className="w-8 h-8 p-0 flex items-center justify-center"
                                       >
                                         <RefreshCw
-                                          className={`w-3 h-3 ${
-                                            refreshingMarket ===
-                                            `${item.asset}-${
-                                              item.poolId || "default"
-                                            }-${
-                                              (item as any).network ||
-                                              currentNetwork
+                                          className={`w-3 h-3 ${refreshingMarket ===
+                                            `${item.asset}-${item.poolId || "default"
+                                            }-${(item as any).network ||
+                                            currentNetwork
                                             }`
-                                              ? "animate-spin"
-                                              : ""
-                                          }`}
+                                            ? "animate-spin"
+                                            : ""
+                                            }`}
                                         />
                                       </Button>
                                     </div>
@@ -9514,9 +9524,8 @@ const Portfolio = () => {
                 title="Refresh positions data"
               >
                 <RefreshCw
-                  className={`w-4 h-4 ${
-                    isLoadingPositions ? "animate-spin" : ""
-                  }`}
+                  className={`w-4 h-4 ${isLoadingPositions ? "animate-spin" : ""
+                    }`}
                 />
                 Refresh
               </button>
@@ -9841,7 +9850,7 @@ const Portfolio = () => {
                   (m.poolId ===
                     selectedLiquidationPosition.debtMarketId.toString() ||
                     m.appId ===
-                      selectedLiquidationPosition.debtMarketId.toString());
+                    selectedLiquidationPosition.debtMarketId.toString());
                 return matchesSymbol && (matchesNetwork || matchesPool);
               });
 
@@ -9931,8 +9940,8 @@ const Portfolio = () => {
               const formattedLiquidationAmount =
                 liquidationAmountWad > 0
                   ? Math.floor(liquidationAmountWad).toLocaleString("en-US", {
-                      useGrouping: true,
-                    })
+                    useGrouping: true,
+                  })
                   : "0";
 
               return (
@@ -9955,8 +9964,8 @@ const Portfolio = () => {
                           ? "Voi"
                           : selectedLiquidationPosition.network ===
                             "algorand-mainnet"
-                          ? "Algorand"
-                          : selectedLiquidationPosition.network || "N/A"}
+                            ? "Algorand"
+                            : selectedLiquidationPosition.network || "N/A"}
                       </p>
                     </div>
                     <div>
@@ -10168,10 +10177,10 @@ const Portfolio = () => {
                     originalTokenConfigRaw
                   )
                     ? originalTokenConfigRaw.find(
-                        (tc) =>
-                          String(tc.poolId) ===
-                          String(selectedRepayPosition.appId)
-                      ) || originalTokenConfigRaw[0]
+                      (tc) =>
+                        String(tc.poolId) ===
+                        String(selectedRepayPosition.appId)
+                    ) || originalTokenConfigRaw[0]
                     : originalTokenConfigRaw;
 
                   // Use token's underlyingContractId for marketId
@@ -10335,8 +10344,8 @@ const Portfolio = () => {
                         {networkId === "voi-mainnet"
                           ? "Voi"
                           : networkId === "algorand-mainnet"
-                          ? "Algorand"
-                          : networkId}
+                            ? "Algorand"
+                            : networkId}
                       </span>
                     </div>
                   </div>

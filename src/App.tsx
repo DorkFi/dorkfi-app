@@ -8,6 +8,7 @@ import Admin from "./pages/Admin";
 import GasStation from "./pages/GasStation";
 import LiquidationMarkets from "./pages/LiquidationMarkets";
 import Analytics from "./pages/Analytics";
+import Governance from "./pages/Governance";
 import { NetworkProvider } from "./contexts/NetworkContext";
 import Index from "./pages/Index";
 import { isFeatureEnabled } from "./config";
@@ -92,6 +93,12 @@ function App() {
                   />
                 }
               />
+              {isFeatureEnabled("enableGovernance") && (
+                <Route
+                  path="/governance"
+                  element={<Governance />}
+                />
+              )}
               <Route path="/portfolio/:address" element={<PortfolioPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

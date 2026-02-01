@@ -18,9 +18,18 @@ export type NetworkId =
 
 export type NetworkType = "avm" | "evm";
 
+export interface PowerMultiplier {
+  id: string;
+  label: string;
+  contractId: number;
+  bonus: number; // Bonus multiplier as a decimal (e.g., 0.10 for 10%)
+}
+
 export interface GovernanceConfig {
   appId: number;
   storageAppId: number;
+  powerSources?: number[]; // Array of appIds used as sources of voting power
+  powerMultipliers?: PowerMultiplier[]; // Array of NFT contracts that provide voting power bonuses
 }
 
 export interface ContractConfig {
@@ -119,6 +128,8 @@ export interface GlobalConfig {
     enableGovernance: boolean;
     enableMigration: boolean;
     enableGasStation: boolean;
+    enableNFTBoost: boolean;
+    enableLiquidatablePositions: boolean;
   };
 }
 
@@ -823,7 +834,16 @@ const prodContracts = {
   priceOracle: "47138069",
   liquidationEngine: undefined,
   governance: {
-    appId: 48458481, storageAppId: 48458476
+    appId: 48472636,
+    storageAppId: 48458688,
+    powerSources: [
+      47148525, // UNIT nToken appId
+    ],
+    powerMultipliers: [
+      { id: "dorks_v1", label: "Dorks v1", contractId: 313597, bonus: 0.10 },
+      { id: "dorks_v2", label: "Dorks v2", contractId: 894888, bonus: 0.01 },
+      { id: "chubs_v1", label: "Chubs v1", contractId: 313705, bonus: 0.15 },
+    ],
   },
   treasury: undefined,
   marketController: "47138067",
@@ -1956,9 +1976,11 @@ export const config: GlobalConfig = {
     enablePreFi: false,
     enableLiquidations: false,
     enableSwap: false,
-    enableGovernance: false, // Disabled until governance contracts are deployed
+    enableGovernance: true, // Governance UI enabled
     enableMigration: true, // Enable asset migration feature
     enableGasStation: false,
+    enableNFTBoost: true, // Enable NFT boost for governance voting power
+    enableLiquidatablePositions: true, // Enable liquidatable positions section in portfolio
   },
 };
 
@@ -2384,12 +2406,23 @@ export const getEVMNetworks = (): NetworkConfig[] => {
 export const getEnvironmentConfig = (): Partial<GlobalConfig> => {
   const env = process.env.NODE_ENV;
 
+  // Check for environment variable overrides
+  const envFeatures: Partial<GlobalConfig["features"]> = {};
+
+  // Check VITE_ENABLE_LIQUIDATABLE_POSITIONS environment variable
+  if (typeof import.meta.env.VITE_ENABLE_LIQUIDATABLE_POSITIONS !== "undefined") {
+    envFeatures.enableLiquidatablePositions =
+      import.meta.env.VITE_ENABLE_LIQUIDATABLE_POSITIONS === "true" ||
+      import.meta.env.VITE_ENABLE_LIQUIDATABLE_POSITIONS === "1";
+  }
+
   if (env === "development") {
     return {
       defaultNetwork: "voi-testnet", // Use testnet in development
       features: {
         ...config.features,
         enableGovernance: true, // Enable governance in development for testing
+        ...envFeatures,
       },
     };
   }
@@ -2401,11 +2434,14 @@ export const getEnvironmentConfig = (): Partial<GlobalConfig> => {
         ...config.features,
         enablePreFi: false, // Disable PreFi in tests
         enableMigration: true, // Keep migration enabled in tests
+        ...envFeatures,
       },
     };
   }
 
-  return {}; // No overrides for production
+  return Object.keys(envFeatures).length > 0
+    ? ({ features: envFeatures } as Partial<GlobalConfig>)
+    : {};
 };
 
 /**
@@ -2418,7 +2454,7 @@ export const getConfig = (): GlobalConfig => {
     ...envConfig,
     features: {
       ...config.features,
-      ...envConfig.features,
+      ...(envConfig.features || {}),
     },
   };
 };

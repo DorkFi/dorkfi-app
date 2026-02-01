@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTokenPrice } from "@/hooks/useTokenPrice";
-import { getTokenConfig } from "@/config";
+import { getTokenConfig, NetworkId } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
 
 interface SupplyBorrowFormProps {
@@ -29,6 +29,7 @@ interface SupplyBorrowFormProps {
   hideButton?: boolean;
   isLoadingMaxBorrow?: boolean;
   maxBorrowError?: string | null;
+  network?: string; // Optional network parameter for cross-network operations
 }
 
 const SupplyBorrowForm = ({
@@ -50,17 +51,30 @@ const SupplyBorrowForm = ({
   hideButton = false,
   isLoadingMaxBorrow = false,
   maxBorrowError = null,
+  network,
 }: SupplyBorrowFormProps) => {
   const [amount, setAmount] = useState("");
   const [fiatValue, setFiatValue] = useState(0);
   const [validationError, setValidationError] = useState<string | null>(null);
 
   const { currentNetwork } = useNetwork();
+  // Use provided network or fallback to current network
+  const networkToUse = (network || currentNetwork) as NetworkId;
   const { price: tokenPrice, isLoading: priceLoading } = useTokenPrice(asset);
 
   // Get token config for decimal precision
-  const tokenConfig = getTokenConfig(currentNetwork, asset);
+  const tokenConfigRaw = getTokenConfig(networkToUse, asset);
+  // Handle case where tokenConfig might be an array (multiple markets)
+  const tokenConfig = Array.isArray(tokenConfigRaw)
+    ? tokenConfigRaw[0]
+    : tokenConfigRaw;
   const decimals = tokenConfig?.decimals || 6;
+
+  console.log(`SupplyBorrowForm ${asset} tokenConfig`, {
+    networkToUse,
+    tokenConfig,
+    decimals,
+  });
 
   // Input validation function
   const validateAmount = (value: string): string | null => {
@@ -237,9 +251,8 @@ const SupplyBorrowForm = ({
             placeholder="0.0"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
-            className={`bg-white/70 dark:bg-slate-800 border-gray-300 dark:border-slate-600 text-slate-800 dark:text-white pr-16 text-lg h-12 ${
-              validationError ? "border-red-300 dark:border-red-600" : ""
-            }`}
+            className={`bg-white/70 dark:bg-slate-800 border-gray-300 dark:border-slate-600 text-slate-800 dark:text-white pr-16 text-lg h-12 ${validationError ? "border-red-300 dark:border-red-600" : ""
+              }`}
             step={1 / Math.pow(10, decimals)}
           />
           <Button
@@ -263,24 +276,23 @@ const SupplyBorrowForm = ({
         {/* Quick Amount Buttons */}
         {((mode === "deposit" && walletBalance > 0) ||
           (mode === "borrow" && calculateMaxBorrowable() > 0)) && (
-          <div className="flex gap-2">
-            {[0.25, 0.5, 0.75, 1].map((percentage) => (
-              <Button
-                key={percentage}
-                size="sm"
-                variant="outline"
-                onClick={() => handleQuickAmount(percentage)}
-                className={`flex-1 text-xs h-8 ${
-                  mode === "deposit"
+            <div className="flex gap-2">
+              {[0.25, 0.5, 0.75, 1].map((percentage) => (
+                <Button
+                  key={percentage}
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleQuickAmount(percentage)}
+                  className={`flex-1 text-xs h-8 ${mode === "deposit"
                     ? "border-teal-200 text-teal-600 hover:bg-teal-50 dark:border-teal-800 dark:text-teal-400 dark:hover:bg-teal-900/20"
                     : "border-whale-gold/30 text-whale-gold hover:bg-whale-gold/10 dark:border-whale-gold/50 dark:text-whale-gold dark:hover:bg-whale-gold/20"
-                }`}
-              >
-                {percentage === 1 ? "100%" : `${percentage * 100}%`}
-              </Button>
-            ))}
-          </div>
-        )}
+                    }`}
+                >
+                  {percentage === 1 ? "100%" : `${percentage * 100}%`}
+                </Button>
+              ))}
+            </div>
+          )}
 
         {/* USD Value */}
         {fiatValue > 0 && (
@@ -315,25 +327,22 @@ const SupplyBorrowForm = ({
 
         {/* Wallet Balance / Max Borrowable Display */}
         <div
-          className={`p-3 rounded-lg border ${
-            mode === "deposit"
-              ? "bg-teal-50 dark:bg-teal-900/20 border-teal-200 dark:border-teal-800"
-              : "bg-whale-gold/10 border-whale-gold/30"
-          }`}
+          className={`p-3 rounded-lg border ${mode === "deposit"
+            ? "bg-teal-50 dark:bg-teal-900/20 border-teal-200 dark:border-teal-800"
+            : "bg-whale-gold/10 border-whale-gold/30"
+            }`}
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <div
-                className={`w-2 h-2 rounded-full ${
-                  mode === "deposit" ? "bg-teal-500" : "bg-whale-gold"
-                }`}
+                className={`w-2 h-2 rounded-full ${mode === "deposit" ? "bg-teal-500" : "bg-whale-gold"
+                  }`}
               ></div>
               <span
-                className={`text-sm font-medium ${
-                  mode === "deposit"
-                    ? "text-teal-700 dark:text-teal-300"
-                    : "text-whale-gold"
-                }`}
+                className={`text-sm font-medium ${mode === "deposit"
+                  ? "text-teal-700 dark:text-teal-300"
+                  : "text-whale-gold"
+                  }`}
               >
                 {mode === "deposit" ? "Wallet Balance" : "Max Borrowable"}
               </span>
@@ -342,11 +351,10 @@ const SupplyBorrowForm = ({
                   size="sm"
                   variant="ghost"
                   onClick={onRefreshWalletBalance}
-                  className={`h-6 w-6 p-0 hover:bg-opacity-20 ${
-                    mode === "deposit"
-                      ? "text-teal-600 hover:bg-teal-100 dark:text-teal-400 dark:hover:bg-teal-800"
-                      : "text-whale-gold hover:bg-whale-gold/20"
-                  }`}
+                  className={`h-6 w-6 p-0 hover:bg-opacity-20 ${mode === "deposit"
+                    ? "text-teal-600 hover:bg-teal-100 dark:text-teal-400 dark:hover:bg-teal-800"
+                    : "text-whale-gold hover:bg-whale-gold/20"
+                    }`}
                   title="Refresh wallet balance"
                 >
                   <svg
@@ -367,23 +375,22 @@ const SupplyBorrowForm = ({
             </div>
             <div className="text-right">
               <div
-                className={`text-sm font-semibold ${
-                  mode === "deposit"
-                    ? "text-teal-800 dark:text-teal-200"
-                    : "text-whale-gold"
-                }`}
+                className={`text-sm font-semibold ${mode === "deposit"
+                  ? "text-teal-800 dark:text-teal-200"
+                  : "text-whale-gold"
+                  }`}
               >
                 {mode === "deposit"
                   ? `${walletBalance.toLocaleString(undefined, {
-                      maximumFractionDigits: 6,
-                    })} ${asset}`
+                    maximumFractionDigits: 6,
+                  })} ${asset}`
                   : isLoadingMaxBorrow
-                  ? "Calculating..."
-                  : maxBorrowError
-                  ? "Error"
-                  : `${calculateMaxBorrowable().toLocaleString(undefined, {
-                      maximumFractionDigits: 6,
-                    })} ${asset}`}
+                    ? "Calculating..."
+                    : maxBorrowError
+                      ? "Error"
+                      : `${calculateMaxBorrowable().toLocaleString(undefined, {
+                        maximumFractionDigits: 6,
+                      })} ${asset}`}
               </div>
               {mode === "borrow" && maxBorrowError && (
                 <div className="text-xs text-red-500 dark:text-red-400 mt-1">
@@ -391,25 +398,24 @@ const SupplyBorrowForm = ({
                 </div>
               )}
               <div
-                className={`text-xs ${
-                  mode === "deposit"
-                    ? "text-teal-600 dark:text-teal-400"
-                    : "text-whale-gold/80"
-                }`}
+                className={`text-xs ${mode === "deposit"
+                  ? "text-teal-600 dark:text-teal-400"
+                  : "text-whale-gold/80"
+                  }`}
               >
                 {mode === "deposit"
                   ? `≈ $${walletBalanceUSD.toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}`
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}`
                   : userGlobalData
-                  ? `≈ $${(
+                    ? `≈ $${(
                       calculateMaxBorrowable() * (tokenPrice || 1)
                     ).toLocaleString(undefined, {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2,
                     })}`
-                  : "Connect wallet to see USD value"}
+                    : "Connect wallet to see USD value"}
               </div>
             </div>
           </div>
@@ -435,11 +441,10 @@ const SupplyBorrowForm = ({
         <Button
           onClick={onSubmit}
           disabled={!isValidAmount || isLoading || disabled}
-          className={`w-full font-semibold text-white h-12 transition-all hover:scale-105 ${
-            mode === "deposit"
-              ? "bg-teal-600 hover:bg-teal-700"
-              : "bg-whale-gold hover:bg-whale-gold/90 text-black"
-          } disabled:opacity-50 disabled:cursor-not-allowed`}
+          className={`w-full font-semibold text-white h-12 transition-all hover:scale-105 ${mode === "deposit"
+            ? "bg-teal-600 hover:bg-teal-700"
+            : "bg-whale-gold hover:bg-whale-gold/90 text-black"
+            } disabled:opacity-50 disabled:cursor-not-allowed`}
         >
           {isLoading ? (
             <div className="flex items-center gap-2">
