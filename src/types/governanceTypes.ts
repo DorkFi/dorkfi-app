@@ -5,7 +5,8 @@ export type ProposalCategory =
   | "collateral-listing" 
   | "liquidation-settings" 
   | "treasury" 
-  | "features";
+  | "features" 
+  | "governance";
 
 export interface Proposal {
   id: string;
@@ -29,7 +30,8 @@ export type ProposalDetails =
   | CollateralListingProposal
   | LiquidationSettingsProposal
   | TreasuryProposal
-  | FeaturesProposal;
+  | FeaturesProposal
+  | GovernanceProposal;
 
 export interface InterestRateProposal {
   type: "interest-rates";
@@ -72,6 +74,11 @@ export interface FeaturesProposal {
   description: string;
   blockchain?: string;
   partnerProtocol?: string;
+}
+
+export interface GovernanceProposal {
+  type: "governance";
+  description: string;
 }
 
 export interface Vote {

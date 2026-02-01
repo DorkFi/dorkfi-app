@@ -20,6 +20,9 @@ import { ProposalCategory } from "@/types/governanceTypes";
 import { getCategoryId } from "@/constants/governanceConstants";
 import { APP_SPEC as UNITGovernanceAppSpec, PowerSnapshot, PowerSource, PowerMultiplierSnapshot } from "@/clients/UNITGovernanceClient";
 
+/** Default number of rounds to look back when fetching governance events (ProposalCreated, etc.). */
+export const GOVERNANCE_EVENTS_MIN_ROUNDS_LOOKBACK = 2e6;
+
 export interface CreateProposalParams {
   proposalTitle: string;
   proposalDescription: string;
@@ -298,7 +301,9 @@ export const getEvents = async () => {
   const status = await clients.algod.status().do();
   const lastRound = status.lastRound;
   const events = await ci.getEvents({
-    minRound: Math.max(0, Number(lastRound) - 2e6)
+    minRound: Math.max(15_624_000, Number(lastRound) - GOVERNANCE_EVENTS_MIN_ROUNDS_LOOKBACK) 
+    // Note 15,624,520 is voi network specific
+    // TODO: make this network specific
   });
   console.log("events", { events });
   return events;

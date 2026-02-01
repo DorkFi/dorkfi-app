@@ -10,6 +10,7 @@ export const PROPOSAL_CATEGORY_IDS: Record<ProposalCategory, number> = {
   "liquidation-settings": 3,
   "treasury": 4,
   "features": 5,
+  "governance": 6,
 };
 
 /**
@@ -21,6 +22,7 @@ export const CATEGORY_ID_TO_CATEGORY: Record<number, ProposalCategory> = {
   3: "liquidation-settings",
   4: "treasury",
   5: "features",
+  6: "governance",
 };
 
 /**

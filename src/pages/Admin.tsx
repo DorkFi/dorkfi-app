@@ -13234,6 +13234,7 @@ export default function AdminDashboard() {
                         <SelectItem value="liquidation-settings">Liquidation Settings</SelectItem>
                         <SelectItem value="treasury">Treasury</SelectItem>
                         <SelectItem value="features">Features</SelectItem>
+                        <SelectItem value="governance">Governance</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -13301,6 +13302,38 @@ export default function AdminDashboard() {
                     )}
                   </div>
                 </div>
+
+                {/* Proposal Preview */}
+                {(proposalCategory || proposalTitle.trim() || proposalDescription.trim()) && (
+                  <div className="space-y-2">
+                    <Label className="text-muted-foreground">Preview</Label>
+                    <p className="text-xs text-muted-foreground">
+                      How your proposal will appear to voters
+                    </p>
+                    <ProposalCard
+                      proposal={{
+                        id: "preview",
+                        title: proposalTitle.trim() || "Proposal title",
+                        description: proposalDescription.trim() || "Describe your proposal in detail...",
+                        category: (proposalCategory || "features") as ProposalCategory,
+                        proposer: activeAccount?.address ?? "—",
+                        status: "pending" as ProposalStatus,
+                        votesFor: 0,
+                        votesAgainst: 0,
+                        totalVotes: 0,
+                        quorum: 1,
+                        startTime: proposalStartDate ? new Date(proposalStartDate) : new Date(),
+                        endTime: proposalStartDate
+                          ? new Date(new Date(proposalStartDate).getTime() + 7 * 24 * 60 * 60 * 1000)
+                          : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                        details: {
+                          type: (proposalCategory || "features") as ProposalCategory,
+                        },
+                      }}
+                      onVote={async () => {}}
+                    />
+                  </div>
+                )}
 
                 {/* Submission Result Messages */}
                 {proposalSubmissionResult && (
