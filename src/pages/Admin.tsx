@@ -125,6 +125,7 @@ import {
   updateMarketMaxBorrows,
   calculateMaxBorrowAmount,
   withdrawReserves,
+  toggleMarketPause,
 } from "@/services/adminService";
 import {
   fetchAllMarkets,
@@ -450,7 +451,7 @@ export default function AdminDashboard() {
       name: "MarketController",
       description:
         "Controls market operations, parameters, and lifecycle management",
-      permissions: [],
+      permissions: ["market.pause", "market.edit", "market.create", "price.update"],
       color:
         "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
       icon: "settings",
@@ -2568,6 +2569,7 @@ export default function AdminDashboard() {
   const [isMaxDepositsUpdateModalOpen, setIsMaxDepositsUpdateModalOpen] =
     useState(false);
   const [selectedMarket, setSelectedMarket] = useState<any>(null);
+  const [pausingMarketId, setPausingMarketId] = useState<string | null>(null);
   const [priceUpdateData, setPriceUpdateData] = useState<{
     marketId: string;
     poolId: string;
@@ -3087,6 +3089,75 @@ export default function AdminDashboard() {
       newMaxBorrows: "",
     });
     setIsMaxBorrowsUpdateModalOpen(true);
+  };
+
+  const handlePauseMarket = async (
+    configMarket: { id: string; poolId?: string; underlyingContractId?: string },
+    market: { marketInfo?: { marketId?: string; poolId?: string } } | undefined,
+    pause: boolean
+  ) => {
+    if (!activeAccount?.address) {
+      toast.error("Please connect your wallet first");
+      return;
+    }
+
+    const poolId =
+      configMarket.poolId ||
+      market?.marketInfo?.poolId ||
+      getLendingPools(currentNetwork)[0];
+    const tokenId =
+      configMarket.underlyingContractId || market?.marketInfo?.marketId || "";
+
+    if (!poolId || !tokenId) {
+      toast.error("Missing pool or market identifier");
+      return;
+    }
+
+    setPausingMarketId(configMarket.id);
+    try {
+      if (isCurrentNetworkAlgorandCompatible()) {
+        const result = await toggleMarketPause(
+          poolId,
+          tokenId,
+          pause,
+          activeAccount.address
+        );
+        if (result.success) {
+          const networkConfig = getNetworkConfig(currentNetwork);
+          const algorandClients = algorandService.initializeClients(
+            networkConfig.walletNetworkId as AlgorandNetwork
+          );
+          const stxns = await signTransactions(
+            result.txns.map((txn) =>
+              Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+            )
+          );
+          const res = await algorandClients.algod
+            .sendRawTransaction(stxns)
+            .do();
+          await waitForConfirmation(algorandClients.algod, res.txid, 4);
+          toast.success(
+            pause ? "Market paused successfully" : "Market unpaused successfully",
+            { description: `Transaction ID: ${res.txid}` }
+          );
+          loadAllMarkets();
+        } else if (!result.success) {
+          const err = result.error;
+          toast.error("Failed to update market pause state", {
+            description: err instanceof Error ? err.message : String(err),
+          });
+        }
+      } else if (isCurrentNetworkEVM()) {
+        toast.error("EVM networks are not supported yet");
+      }
+    } catch (error) {
+      console.error("Error toggling market pause:", error);
+      toast.error("Failed to update market pause state", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    } finally {
+      setPausingMarketId(null);
+    }
   };
 
   const handleUpdatePrice = async () => {
@@ -6575,6 +6646,11 @@ export default function AdminDashboard() {
                                     Error
                                   </Badge>
                                 )}
+                                {hasData && market?.marketInfo?.isPaused && (
+                                  <Badge variant="secondary" className="text-xs">
+                                    Paused
+                                  </Badge>
+                                )}
                               </div>
                             </div>
                             <p className="text-sm text-muted-foreground">
@@ -6707,6 +6783,30 @@ export default function AdminDashboard() {
                                 >
                                   <Edit className="h-3 w-3 mr-1" />
                                   Edit Price
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="flex-1"
+                                  onClick={() =>
+                                    handlePauseMarket(
+                                      configMarket,
+                                      market,
+                                      !market?.marketInfo?.isPaused
+                                    )
+                                  }
+                                  disabled={
+                                    !hasData ||
+                                    pausingMarketId === configMarket.id
+                                  }
+                                >
+                                  {pausingMarketId === configMarket.id ? (
+                                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                  ) : market?.marketInfo?.isPaused ? (
+                                    "Unpause"
+                                  ) : (
+                                    "Pause"
+                                  )}
                                 </Button>
                               </div>
 
@@ -15077,8 +15177,8 @@ export default function AdminDashboard() {
         open={isMarketViewModalOpen}
         onOpenChange={setIsMarketViewModalOpen}
       >
-        <DialogContent className="max-w-2xl p-8">
-          <DialogHeader className="pb-6">
+        <DialogContent className="max-w-2xl max-h-[90vh] p-8 flex flex-col">
+          <DialogHeader className="pb-6 shrink-0">
             <div className="flex items-center justify-between">
               <div>
                 <DialogTitle className="text-xl">Market Details</DialogTitle>
@@ -15123,6 +15223,7 @@ export default function AdminDashboard() {
             </div>
           </DialogHeader>
 
+          <div className="overflow-y-auto flex-1 min-h-0 -mx-2 px-2">
           {isLoadingMarketView ? (
             <div className="flex items-center justify-center py-8">
               <div className="flex items-center gap-2 text-muted-foreground">
@@ -15420,8 +15521,9 @@ export default function AdminDashboard() {
               </div>
             </div>
           )}
+          </div>
 
-          <DialogFooter className="pt-6">
+          <DialogFooter className="pt-6 shrink-0">
             <Button
               variant="outline"
               onClick={() => setIsMarketViewModalOpen(false)}

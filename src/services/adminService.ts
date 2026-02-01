@@ -681,6 +681,98 @@ export const updateMarketPrice = async (
 };
 
 /**
+ * Pause or unpause a specific market
+ * @param poolId Lending pool contract ID
+ * @param tokenId Market token ID (underlying contract ID)
+ * @param pause true to pause, false to unpause
+ * @param userAddress Signer address
+ */
+export const toggleMarketPause = async (
+  poolId: string,
+  tokenId: string,
+  pause: boolean,
+  userAddress: string
+): Promise<
+  { success: false; error: any } | { success: true; txns: string[] }
+> => {
+  console.log("toggleMarketPause", { poolId, tokenId, pause, userAddress });
+
+  try {
+    const networkConfig = getCurrentNetworkConfig();
+
+    if (isCurrentNetworkVOI()) {
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      const ci = new CONTRACT(
+        Number(poolId),
+        clients.algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        {
+          addr: userAddress,
+          sk: new Uint8Array(),
+        }
+      );
+
+      const pauseMarketTx = await ci.pause_market(
+        Number(tokenId),
+        pause ? 1 : 0
+      );
+
+      if (!pauseMarketTx.success) {
+        throw new Error("Failed to create pause market transaction");
+      }
+
+      return {
+        success: true,
+        txns: [...pauseMarketTx.txns],
+      };
+    } else if (isCurrentNetworkAlgorand()) {
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      const ci = new CONTRACT(
+        Number(poolId),
+        clients.algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        {
+          addr: userAddress,
+          sk: new Uint8Array(),
+        }
+      );
+
+      const pauseMarketTx = await ci.pause_market(
+        Number(tokenId),
+        pause ? 1 : 0
+      );
+
+      if (!pauseMarketTx.success) {
+        throw new Error("Failed to pause/unpause market");
+      }
+
+      return {
+        success: true,
+        txns: [...pauseMarketTx.txns],
+      };
+    } else if (isCurrentNetworkEVM()) {
+      throw new Error("EVM networks are not supported yet");
+    } else {
+      throw new Error("Unsupported network");
+    }
+  } catch (error) {
+    console.error("Error toggling market pause:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    };
+  }
+};
+
+/**
  * Update max total deposits for a specific market
  */
 export const updateMarketMaxDeposits = async (
