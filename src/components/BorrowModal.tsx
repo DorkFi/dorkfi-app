@@ -8,7 +8,7 @@ import BorrowForm from "./BorrowForm";
 import BorrowStats from "./BorrowStats";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { getAllTokensWithDisplayInfo, getTokenConfig } from "@/config";
+import { getAllTokensWithDisplayInfo, getTokenConfig, getNetworkConfig } from "@/config";
 import { calculateMaxBorrowAmount } from "@/services/adminService";
 import { fetchMarketInfo } from "@/services/lendingService";
 import BigNumber from "bignumber.js";
@@ -86,11 +86,13 @@ const BorrowModal = ({ isOpen, onClose, tokenSymbol, tokenIcon, availableToBorro
           tokenSymbol,
         });
 
+        const storageAppId = getNetworkConfig(currentNetwork)?.contracts?.appStorageId;
+
         const maxBorrowBigInt = await calculateMaxBorrowAmount(
           poolId,
           activeAccount.address,
           marketId,
-          47015119 // TODO get this from config
+          storageAppId ? Number(storageAppId) : undefined
         );
 
         console.log("maxBorrowBigInt", { maxBorrowBigInt });

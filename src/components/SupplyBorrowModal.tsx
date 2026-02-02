@@ -27,6 +27,7 @@ import {
   getTokenConfig,
   getAllTokensWithDisplayInfo,
   getAlgorandNetworkFromNetworkId,
+  getNetworkConfig,
   NetworkId,
 } from "@/config";
 import algorandService from "@/services/algorandService";
@@ -194,11 +195,13 @@ const SupplyBorrowModal = ({
           asset,
         });
 
+        const storageAppId = getNetworkConfig(networkToUse as NetworkId)?.contracts?.appStorageId;
+
         const maxBorrowBigInt = await calculateMaxBorrowAmount(
           marketPoolId,
           activeAccount.address,
           marketId,
-          47015119 // TODO get this from config
+          storageAppId ? Number(storageAppId) : undefined
         );
 
         console.log("SupplyBorrowModal: maxBorrowBigInt result", {

@@ -18,7 +18,7 @@ import SupplyBorrowStats from "./SupplyBorrowStats";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { borrow, fetchUserGlobalData } from "@/services/lendingService";
-import { getTokenConfig, getAllTokensWithDisplayInfo, getAlgorandNetworkFromNetworkId, NetworkId } from "@/config";
+import { getTokenConfig, getAllTokensWithDisplayInfo, getAlgorandNetworkFromNetworkId, getNetworkConfig, NetworkId } from "@/config";
 import algorandService from "@/services/algorandService";
 import algosdk, { waitForConfirmation } from "algosdk";
 import BigNumber from "bignumber.js";
@@ -142,11 +142,14 @@ const MintModal = ({
           asset,
         });
 
+        const networkToUse = network || currentNetwork;
+        const storageAppId = getNetworkConfig(networkToUse as NetworkId)?.contracts?.appStorageId;
+
         const maxBorrowBigInt = await calculateMaxBorrowAmount(
           marketPoolId,
           activeAccount.address,
           marketId,
-          47015119 // TODO get this from config
+          storageAppId ? Number(storageAppId) : undefined
         );
 
         console.log("maxBorrowBigInt", { maxBorrowBigInt });

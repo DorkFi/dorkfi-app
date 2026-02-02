@@ -4299,11 +4299,13 @@ export default function AdminDashboard() {
                 marketId: actualMarketId,
               });
 
+              const storageAppId = networkConfig?.contracts?.appStorageId;
+
               const maxBorrow = await calculateMaxBorrowAmount(
                 poolId,
                 userAddress,
                 actualMarketId,
-                47015119 // TODO get this from config
+                storageAppId ? Number(storageAppId) : undefined
               );
 
               setUserMaxBorrowAmounts((prev) => ({

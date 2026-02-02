@@ -510,11 +510,22 @@ export const fetchMarketInfo = async (
       //   }
       // );
 
-      const token = getAllTokensWithDisplayInfo(networkId).find(
-        (token) => token.underlyingContractId === marketId
+      // Find token matching both marketId and poolId to handle tokens with multiple markets (e.g., WAD)
+      // First try to match by both poolId and underlyingContractId for accuracy
+      let token = getAllTokensWithDisplayInfo(networkId).find(
+        (token) => 
+          token.underlyingContractId === marketId && 
+          String(token.poolId) === String(poolId)
       );
+      
+      // Fallback to matching by marketId only if no match found (for backward compatibility)
+      if (!token) {
+        token = getAllTokensWithDisplayInfo(networkId).find(
+          (token) => token.underlyingContractId === marketId
+        );
+      }
 
-      console.log("fetchMarketInfo token", { token });
+      console.log("fetchMarketInfo token", { token, poolId, marketId });
 
       if (!token) {
         console.error(
@@ -536,8 +547,10 @@ export const fetchMarketInfo = async (
       if (Array.isArray(tokenConfigRaw)) {
         // Find the token config that matches the poolId
         tokenConfig =
-          tokenConfigRaw.find((config) => config.poolId === poolId) ||
+          tokenConfigRaw.find((config) => String(config.poolId) === String(poolId)) ||
           tokenConfigRaw[0];
+      } else {
+        tokenConfig = tokenConfigRaw;
       }
       console.log("fetchMarketInfo tokenConfig", { tokenConfig });
 
