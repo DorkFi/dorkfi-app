@@ -253,6 +253,26 @@ export const useOnDemandMarketData = ({
               ? tokenConfigRaw.find((tc) => tc.poolId === tokenPoolId) || tokenConfigRaw[0]
               : tokenConfigRaw;
 
+            // Safely resolve supplyAPY - avoid NaN when supplyRate is undefined
+            const supplyAPYValue =
+              (typeof marketInfo.apyCalculation?.apy === "number" &&
+                !Number.isNaN(marketInfo.apyCalculation.apy))
+                ? marketInfo.apyCalculation.apy
+                : typeof marketInfo.supplyRate === "number" &&
+                    !Number.isNaN(marketInfo.supplyRate)
+                  ? marketInfo.supplyRate * 100
+                  : 0;
+
+            // Safely resolve borrowAPY - avoid NaN when borrowRateCurrent is undefined
+            const borrowAPYValue =
+              (typeof marketInfo.borrowApyCalculation?.apy === "number" &&
+                !Number.isNaN(marketInfo.borrowApyCalculation.apy))
+                ? marketInfo.borrowApyCalculation.apy
+                : typeof marketInfo.borrowRateCurrent === "number" &&
+                    !Number.isNaN(marketInfo.borrowRateCurrent)
+                  ? marketInfo.borrowRateCurrent * 100
+                  : 0;
+
             const marketData: OnDemandMarketData = {
               asset: token.symbol,
               icon: token.logoPath,
@@ -260,15 +280,12 @@ export const useOnDemandMarketData = ({
               totalSupplyUSD:
                 (totalSupplyAmount * tokenPrice * Math.pow(10, token.decimals)) /
                 Math.pow(10, 6),
-              supplyAPY:
-                marketInfo.apyCalculation?.apy || marketInfo.supplyRate * 100,
+              supplyAPY: supplyAPYValue,
               totalBorrow: totalBorrowAmount,
               totalBorrowUSD:
                 (totalBorrowAmount * tokenPrice * Math.pow(10, token.decimals)) /
                 Math.pow(10, 6),
-              borrowAPY:
-                marketInfo.borrowApyCalculation?.apy ||
-                marketInfo.borrowRateCurrent * 100,
+              borrowAPY: borrowAPYValue,
               utilization: tokenConfig?.isStoken
                 ? 100.0
                 : marketInfo.utilizationRate * 100,

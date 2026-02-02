@@ -325,17 +325,32 @@ const PortfolioModals = ({
       }
     }
 
+    // Safely resolve APY - avoid NaN when rates are undefined
+    const supplyAPYRaw =
+      market?.apyCalculation?.apy ??
+      (typeof market?.supplyRate === "number" ? market.supplyRate * 100 : null) ??
+      deposit?.apy ??
+      null;
+    const supplyAPY =
+      typeof supplyAPYRaw === "number" && Number.isFinite(supplyAPYRaw)
+        ? supplyAPYRaw
+        : 0;
+
+    const borrowAPYRaw =
+      market?.borrowApyCalculation?.apy ??
+      (typeof market?.borrowRateCurrent === "number"
+        ? market.borrowRateCurrent * 100
+        : null) ??
+      (typeof market?.borrowRate === "number" ? market.borrowRate * 100 : null) ??
+      null;
+    const borrowAPY =
+      typeof borrowAPYRaw === "number" && Number.isFinite(borrowAPYRaw)
+        ? borrowAPYRaw
+        : 0;
+
     return {
-      supplyAPY:
-        market?.apyCalculation?.apy ||
-        (market?.supplyRate ? market.supplyRate * 100 : 0) ||
-        deposit?.apy ||
-        0,
-      borrowAPY:
-        market?.borrowApyCalculation?.apy ||
-        (market?.borrowRateCurrent ? market.borrowRateCurrent * 100 : 0) ||
-        (market?.borrowRate ? market.borrowRate * 100 : 0) ||
-        0,
+      supplyAPY,
+      borrowAPY,
       utilization: market?.utilizationRate ? market.utilizationRate * 100 : 0,
       collateralFactor: market?.collateralFactor
         ? market.collateralFactor * 100
@@ -587,13 +602,17 @@ const PortfolioModals = ({
     // This allows the modal to open even when market data isn't available for cross-network assets
     if (!market && deposit) {
       const tokenPrice = deposit.tokenPrice || 1;
+      const depositApy =
+        typeof deposit.apy === "number" && Number.isFinite(deposit.apy)
+          ? deposit.apy
+          : 0;
       return {
         icon: getTokenImagePath(asset),
         totalSupply: 0,
         totalSupplyUSD: 0,
         totalBorrow: 0,
         totalBorrowUSD: 0,
-        supplyAPY: deposit.apy || 0,
+        supplyAPY: depositApy,
         borrowAPY: 0,
         utilization: 0,
         collateralFactor: 80, // Default 80%
@@ -612,18 +631,32 @@ const PortfolioModals = ({
     const totalSupply = parseFloat(market.totalDeposits) || 0;
     const totalBorrow = parseFloat(market.totalBorrows) || 0;
 
+    // Safely resolve APY - avoid NaN in deposit modal
+    const supplyAPYRaw =
+      market.apyCalculation?.apy ??
+      (typeof market.supplyRate === "number" ? market.supplyRate * 100 : null);
+    const supplyAPY =
+      typeof supplyAPYRaw === "number" && Number.isFinite(supplyAPYRaw)
+        ? supplyAPYRaw
+        : 0;
+    const borrowAPYRaw =
+      market.borrowApyCalculation?.apy ??
+      (typeof market.borrowRateCurrent === "number"
+        ? market.borrowRateCurrent * 100
+        : null);
+    const borrowAPY =
+      typeof borrowAPYRaw === "number" && Number.isFinite(borrowAPYRaw)
+        ? borrowAPYRaw
+        : 0;
+
     return {
       icon: getTokenImagePath(asset),
       totalSupply,
       totalSupplyUSD: totalSupply * tokenPrice,
-      supplyAPY:
-        market.apyCalculation?.apy ||
-        (market.supplyRate ? market.supplyRate * 100 : 0),
+      supplyAPY,
       totalBorrow,
       totalBorrowUSD: totalBorrow * tokenPrice,
-      borrowAPY:
-        market.borrowApyCalculation?.apy ||
-        (market.borrowRateCurrent ? market.borrowRateCurrent * 100 : 0),
+      borrowAPY,
       utilization: market.utilizationRate ? market.utilizationRate * 100 : 0,
       collateralFactor: market.collateralFactor
         ? market.collateralFactor * 100

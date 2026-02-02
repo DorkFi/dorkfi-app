@@ -1900,14 +1900,30 @@ const MarketsTable = () => {
 
     if (!market) return null;
 
+    // Safely resolve APY values - avoid NaN in deposit modal
+    const supplyAPY =
+      typeof market.supplyAPY === "number" && !Number.isNaN(market.supplyAPY)
+        ? market.supplyAPY
+        : (typeof market.apyCalculation?.apy === "number" &&
+            !Number.isNaN(market.apyCalculation?.apy))
+          ? market.apyCalculation.apy
+          : 0;
+    const borrowAPY =
+      typeof market.borrowAPY === "number" && !Number.isNaN(market.borrowAPY)
+        ? market.borrowAPY
+        : (typeof market.borrowApyCalculation?.apy === "number" &&
+            !Number.isNaN(market.borrowApyCalculation?.apy))
+          ? market.borrowApyCalculation.apy
+          : 0;
+
     return {
       icon: market.icon,
       totalSupply: market.totalSupply,
       totalSupplyUSD: market.totalSupplyUSD,
-      supplyAPY: market.supplyAPY,
+      supplyAPY,
       totalBorrow: market.totalBorrow,
       totalBorrowUSD: market.totalBorrowUSD,
-      borrowAPY: market.borrowAPY,
+      borrowAPY,
       utilization: market.utilization,
       collateralFactor: market.collateralFactor,
       liquidity: market.totalSupply - market.totalBorrow,
