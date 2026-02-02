@@ -12,13 +12,15 @@ import { VoteSuccessModal } from "./VoteSuccessModal";
 
 interface ProposalCardProps {
   proposal: Proposal;
-  onVote: (proposalId: string, support: boolean) => Promise<void>;
+  onVote: (proposalId: string, support: boolean, networkId?: string) => Promise<void>;
   userVote?: boolean;
   votingPower?: number;
   isSelected?: boolean;
   selectedVote?: boolean | null; // true = for, false = against, null = not selected
   onSelect?: (proposalId: string, selected: boolean) => void;
   onSelectVote?: (proposalId: string, support: boolean | null) => void;
+  /** Network to use when voting (for merged proposals, the current governance network). */
+  voteNetworkId?: string;
   batchMode?: boolean;
   isSelectionDisabled?: boolean;
 }
@@ -49,6 +51,7 @@ export const ProposalCard = ({
   selectedVote = null,
   onSelect,
   onSelectVote,
+  voteNetworkId,
   batchMode = false,
   isSelectionDisabled = false,
 }: ProposalCardProps) => {
@@ -65,6 +68,7 @@ export const ProposalCard = ({
   const StatusIcon = statusConfig[proposal.status].icon;
   const isActive = proposal.status === "active";
   const timeLeft = isActive ? formatDistanceToNow(proposal.endTime, { addSuffix: true }) : null;
+  const canVote = !!(voteNetworkId ?? proposal.networkId);
 
   const handleVoteClick = (support: boolean) => {
     setPendingVoteSupport(support);
@@ -76,7 +80,7 @@ export const ProposalCard = ({
     
     setIsVoting(true);
     try {
-      await onVote(proposal.id, pendingVoteSupport);
+      await onVote(proposal.id, pendingVoteSupport, voteNetworkId ?? proposal.networkId);
       // Close confirmation modal and show success modal
       setShowConfirmation(false);
       setShowSuccess(true);
@@ -125,7 +129,7 @@ export const ProposalCard = ({
         <div className="flex items-start justify-between gap-3 sm:gap-4 flex-wrap">
           <div className="space-y-2 flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              {batchMode && isActive && userVote === undefined && (
+              {batchMode && isActive && canVote && userVote === undefined && (
                 <Checkbox
                   checked={isSelected}
                   onCheckedChange={handleSelectChange}
@@ -243,6 +247,7 @@ export const ProposalCard = ({
                     <Button
                       variant="outline"
                       size="sm"
+                      disabled={!canVote}
                       onClick={() => handleVoteClick(false)}
                       className="flex-1 sm:flex-initial min-h-[44px] border-red-500 text-red-500 hover:bg-transparent hover:text-red-500 dark:border-red-400 dark:text-red-400 dark:hover:text-red-400"
                     >
@@ -250,6 +255,7 @@ export const ProposalCard = ({
                     </Button>
                     <Button
                       size="sm"
+                      disabled={!canVote}
                       onClick={() => handleVoteClick(true)}
                       className="flex-1 sm:flex-initial min-h-[44px] bg-green-600 hover:bg-green-700 text-white"
                     >

@@ -1235,7 +1235,14 @@ const algorandProdAMarket = "3333688282";
 const algorandProdBMarket = "3345940978";
 const algorandProdPriceOracle = "3333688500";
 const algorandProdLiquidationEngine = undefined;
-const algorandProdGovernance = undefined;
+const algorandProdGovernance = {
+  appId: 3436627998,
+  storageAppId: 3436628276,
+  powerSources: [
+    3333783429, // UNIT nToken appId
+  ],
+  powerMultipliers: [],
+}
 const algorandProdTreasury = undefined;
 const algorandProdMarketController = "3333688332";
 const algorandProdSToken = "3333688448";

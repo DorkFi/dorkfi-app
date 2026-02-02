@@ -41,7 +41,7 @@ const Governance = () => {
     ? currentNetwork
     : null;
 
-  const { proposals, stats, loading, userVotes, vote, batchVote, userVoterInfo } =
+  const { proposals, stats, loading, userVotes, vote, batchVote, userVoterInfo, getVoteKey } =
     useGovernanceData(effectiveGovernanceNetwork);
   const [selectedStatus, setSelectedStatus] = useState<ProposalStatus | "all">("all");
   const [batchMode, setBatchMode] = useState(false);
@@ -77,11 +77,11 @@ const Governance = () => {
     return Math.floor(basePower * nftMultiplier);
   }, [userVoterInfo, stats?.yourVotingPower, nftBoostEnabled, userNFTs]);
 
-  const handleVote = async (proposalId: string, support: boolean) => {
+  const handleVote = async (proposalId: string, support: boolean, networkId?: NetworkId) => {
     if (!stats) {
       throw new Error("Voting stats not loaded");
     }
-    await vote(proposalId, support, effectiveVotingPower);
+    await vote(proposalId, support, effectiveVotingPower, networkId);
   };
 
   const handleSelectProposal = (proposalId: string, selected: boolean) => {
@@ -147,27 +147,29 @@ const Governance = () => {
       return;
     }
 
-    // Filter to only proposals that have a vote direction selected
+    // Only include proposals on current network (batch vote is per-network)
     const votesToCast = Array.from(selectedProposals)
       .map((proposalId) => {
         const support = selectedVotes.get(proposalId);
         if (support === undefined) return null;
+        const proposal = proposals.find((p) => p.id === proposalId);
+        if (!proposal) return null;
+        const onCurrentNetwork =
+          (effectiveGovernanceNetwork && proposal.networkIds?.includes(effectiveGovernanceNetwork)) ||
+          proposal.networkId === effectiveGovernanceNetwork;
+        if (effectiveGovernanceNetwork && !onCurrentNetwork) return null;
         return { proposalId, support };
       })
       .filter((v): v is { proposalId: string; support: boolean } => v !== null);
 
-    // Validate that all selected proposals have vote directions
-    if (votesToCast.length !== selectedProposals.size) {
-      const missingCount = selectedProposals.size - votesToCast.length;
-      toast({
-        title: "Missing Vote Directions",
-        description: `${missingCount} proposal${missingCount > 1 ? 's' : ''} ${missingCount === 1 ? 'is' : 'are'} missing a vote direction. Please select For or Against for all selected proposals.`,
-        variant: "destructive",
-      });
-      return;
-    }
-
     if (votesToCast.length === 0) {
+      if (effectiveGovernanceNetwork) {
+        toast({
+          title: "No proposals on current network",
+          description: "Batch vote only includes proposals on the currently selected network. Switch network to vote on the selected proposals.",
+          variant: "destructive",
+        });
+      }
       return;
     }
 
@@ -188,7 +190,11 @@ const Governance = () => {
     return selectedStatus === "all" || proposal.status === selectedStatus;
   });
 
-  const activeProposals = filteredProposals.filter((p) => p.status === "active" && userVotes.get(p.id) === undefined);
+  const activeProposals = filteredProposals.filter(
+    (p) =>
+      p.status === "active" &&
+      userVotes.get(getVoteKey(p, effectiveGovernanceNetwork ?? undefined)) === undefined
+  );
   // Validate that all selected proposals have a vote direction
   const allSelectedHaveVotes = selectedProposals.size > 0 && 
     Array.from(selectedProposals).every((id) => selectedVotes.has(id));
@@ -203,7 +209,7 @@ const Governance = () => {
       setSelectedProposals(new Set());
       setSelectedVotes(new Map());
     } else {
-      // Select up to MAX_SELECTION_LIMIT active proposals
+      // Select up to MAX_SELECTION_LIMIT active proposals (one card per proposalId)
       const proposalsToSelect = activeProposals.slice(0, MAX_SELECTION_LIMIT);
       const selectedIds = new Set(proposalsToSelect.map((p) => p.id));
       setSelectedProposals(selectedIds);
@@ -406,17 +412,23 @@ const Governance = () => {
                   {filteredProposals.map((proposal) => {
                     const isSelected = selectedProposals.has(proposal.id);
                     const isLimitReached = selectedProposals.size >= MAX_SELECTION_LIMIT && !isSelected;
+                    const voteKeyForUser = getVoteKey(proposal, effectiveGovernanceNetwork ?? undefined);
+                    const voteNetworkId =
+                      effectiveGovernanceNetwork && proposal.networkIds?.includes(effectiveGovernanceNetwork)
+                        ? effectiveGovernanceNetwork
+                        : proposal.networkId;
                     return (
                       <ProposalCard
                         key={proposal.id}
                         proposal={proposal}
                         onVote={handleVote}
-                        userVote={userVotes.get(proposal.id)}
+                        userVote={userVotes.get(voteKeyForUser)}
                         votingPower={effectiveVotingPower}
                         isSelected={isSelected}
                         selectedVote={selectedVotes.get(proposal.id) ?? null}
                         onSelect={handleSelectProposal}
                         onSelectVote={handleSelectVote}
+                        voteNetworkId={voteNetworkId}
                         batchMode={batchMode}
                         isSelectionDisabled={isLimitReached}
                       />

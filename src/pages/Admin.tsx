@@ -95,6 +95,7 @@ import {
   getAlgorandConfigForReads,
   getEnabledNetworks,
   getContractAddress,
+  getNetworksWithGovernance,
   GovernanceConfig,
 } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
@@ -358,6 +359,8 @@ export default function AdminDashboard() {
   const [testError, setTestError] = useState<string | null>(null);
 
   // Governance tab state
+  const [selectedNetworkForGovernance, setSelectedNetworkForGovernance] =
+    useState<NetworkId>("algorand-mainnet");
   const [proposalCategory, setProposalCategory] = useState<ProposalCategory | "">("");
   const [proposalTitle, setProposalTitle] = useState("");
   const [proposalDescription, setProposalDescription] = useState("");
@@ -2821,7 +2824,7 @@ export default function AdminDashboard() {
     setGovernanceEventsError(null);
     setProposalsError(null);
     try {
-      const events = await getEvents();
+      const events = await getEvents(selectedNetworkForGovernance);
       const eventsArray = Array.isArray(events) ? events : [events];
       setGovernanceEvents(eventsArray);
 
@@ -2846,7 +2849,7 @@ export default function AdminDashboard() {
       const fetchedProposals: UIProposal[] = [];
       for (const proposalId of proposalCreatedEvents) {
         try {
-          const serviceProposal = await getProposal(proposalId);
+          const serviceProposal = await getProposal(proposalId, selectedNetworkForGovernance);
           const uiProposal = convertServiceProposalToUI(serviceProposal, proposalId);
           fetchedProposals.push(uiProposal);
         } catch (err: any) {
@@ -2873,7 +2876,7 @@ export default function AdminDashboard() {
     setProposalError(null);
     setIsProposalModalOpen(true);
     try {
-      const proposal = await getProposal(proposalId);
+      const proposal = await getProposal(proposalId, selectedNetworkForGovernance);
       setSelectedProposal(proposal);
     } catch (err: any) {
       setProposalError(err?.message ?? "Failed to load proposal details");
@@ -2915,7 +2918,7 @@ export default function AdminDashboard() {
         throw new Error("Wallet not properly connected");
       }
 
-      // Create proposal using governance service
+      // Create proposal using governance service (use selected governance network)
       const result = await createProposalWithCategory(
         proposalTitle,
         proposalDescription,
@@ -2923,7 +2926,7 @@ export default function AdminDashboard() {
         startTimestamp,
         transactionSigner,
         activeAccount.address,
-        currentNetwork
+        selectedNetworkForGovernance
       );
 
       if (!result.success) {
@@ -5941,12 +5944,12 @@ export default function AdminDashboard() {
     }
   }, [activeTab, fetchReserveData]);
 
-  // Load governance events when governance tab is active
+  // Load governance events when governance tab is active or selected network changes
   React.useEffect(() => {
     if (activeTab === "governance") {
       fetchGovernanceEvents();
     }
-  }, [activeTab]);
+  }, [activeTab, selectedNetworkForGovernance]);
 
   return (
     <div className="min-h-screen bg-background relative">
@@ -13202,8 +13205,31 @@ export default function AdminDashboard() {
 
           {/* Governance Tab */}
           <TabsContent value="governance" className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-4">
               <H2>Create Governance Proposal</H2>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="governance-network-select" className="text-sm text-muted-foreground whitespace-nowrap">
+                  Network
+                </Label>
+                <Select
+                  value={selectedNetworkForGovernance}
+                  onValueChange={(value) => setSelectedNetworkForGovernance(value as NetworkId)}
+                >
+                  <SelectTrigger id="governance-network-select" className="w-[200px]">
+                    <SelectValue placeholder="Select network" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {getNetworksWithGovernance().map((networkId) => {
+                      const networkConfig = getNetworkConfig(networkId);
+                      return (
+                        <SelectItem key={networkId} value={networkId}>
+                          {networkConfig.name}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             <Card>
@@ -13452,7 +13478,7 @@ export default function AdminDashboard() {
                           
                           if (!governanceConfig || typeof governanceConfig === "string") {
                             return (
-                              <SelectItem value="" disabled>
+                              <SelectItem value="__no-power-sources__" disabled>
                                 No power sources configured
                               </SelectItem>
                             );
@@ -13462,7 +13488,7 @@ export default function AdminDashboard() {
                           
                           if (powerSources.length === 0) {
                             return (
-                              <SelectItem value="" disabled>
+                              <SelectItem value="__no-power-sources__" disabled>
                                 No power sources configured
                               </SelectItem>
                             );
@@ -13666,7 +13692,7 @@ export default function AdminDashboard() {
                           
                           if (!governanceConfig || typeof governanceConfig === "string") {
                             return (
-                              <SelectItem value="" disabled>
+                              <SelectItem value="__no-power-multipliers__" disabled>
                                 No power multipliers configured
                               </SelectItem>
                             );
@@ -13676,7 +13702,7 @@ export default function AdminDashboard() {
                           
                           if (powerMultipliers.length === 0) {
                             return (
-                              <SelectItem value="" disabled>
+                              <SelectItem value="__no-power-multipliers__" disabled>
                                 No power multipliers configured
                               </SelectItem>
                             );
@@ -13879,7 +13905,7 @@ export default function AdminDashboard() {
                           
                           if (!governanceConfig || typeof governanceConfig === "string") {
                             return (
-                              <SelectItem value="" disabled>
+                              <SelectItem value="__no-power-sources__" disabled>
                                 No power sources configured
                               </SelectItem>
                             );
@@ -13889,7 +13915,7 @@ export default function AdminDashboard() {
                           
                           if (powerSources.length === 0) {
                             return (
-                              <SelectItem value="" disabled>
+                              <SelectItem value="__no-power-sources__" disabled>
                                 No power sources configured
                               </SelectItem>
                             );

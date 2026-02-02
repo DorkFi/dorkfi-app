@@ -6,11 +6,13 @@ import { getCategoryFromId } from "@/constants/governanceConstants";
  * Converts a service Proposal (from governance contract) to UI Proposal format
  * @param serviceProposal The proposal data from the governance service
  * @param proposalId The proposal ID (hex string)
+ * @param networkId Optional network this proposal is on (e.g. "voi-mainnet", "algorand-mainnet")
  * @returns UI Proposal object
  */
 export const convertServiceProposalToUI = (
   serviceProposal: ServiceProposal,
-  proposalId: string
+  proposalId: string,
+  networkId?: string
 ): UIProposal => {
   // Map proposal status from number to ProposalStatus type
   // Status mapping: 0 = pending, 1 = active, 2 = passed, 3 = rejected, 4 = executed
@@ -44,6 +46,7 @@ export const convertServiceProposalToUI = (
 
   return {
     id: proposalId,
+    networkId,
     title: serviceProposal.proposalTitle?.replace(/\0/g, "").trim() || "Untitled Proposal",
     description: serviceProposal.proposalDescription?.replace(/\0/g, "").trim() || "",
     category: category as ProposalCategory,
