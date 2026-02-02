@@ -667,7 +667,10 @@ const PortfolioModals = ({
     };
   };
 
-  const handleWithdrawSubmit = async (amount: string) => {
+  const handleWithdrawSubmit = async (
+    amount: string,
+    options?: { isMaxWithdraw?: boolean }
+  ) => {
     if (!activeAccount?.address || !withdrawModal.asset) {
       console.error("No active account or asset for withdrawal");
       return;
@@ -748,13 +751,15 @@ const PortfolioModals = ({
       });
 
       // Call the lending service withdraw method (pass amount as string like PreFi)
+      // When max withdraw, use withdrawAll to burn full nToken balance (avoids rounding issues)
       const result = await withdraw(
         token.poolId,
         token.underlyingContractId,
         originalTokenConfig.tokenStandard,
         amount,
         activeAccount.address,
-        networkToUse
+        networkToUse,
+        { withdrawAll: options?.isMaxWithdraw }
       );
 
       if (!result.success) {

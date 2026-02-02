@@ -1500,6 +1500,7 @@ export const fetchMarketHealth = async (
 
 /**
  * Withdraw tokens from a lending market
+ * @param options.withdrawAll - When true, withdraws the entire nToken balance (avoids rounding issues with max withdraw)
  */
 export const withdraw = async (
   poolId: string,
@@ -1507,7 +1508,8 @@ export const withdraw = async (
   tokenStandard: TokenStandard,
   amount: string,
   userAddress: string,
-  networkId: NetworkId
+  networkId: NetworkId,
+  options?: { withdrawAll?: boolean }
 ): Promise<
   | { success: boolean; txId?: string; error?: string }
   | { success: true; txns: string[] }
@@ -1728,6 +1730,20 @@ export const withdraw = async (
         ntoken_balance = BigInt(ntoken_balanceR.returnValue);
       }
 
+      // When withdrawAll (max withdraw), use full nToken balance to avoid rounding issues
+      let underlying_amount = BigInt(0);
+      if (options?.withdrawAll && ntoken_balance > BigInt(0)) {
+        console.log("withdraw:withdrawAll - using full nToken balance", {
+          ntoken_balance: ntoken_balance.toString(),
+        });
+        adjustedAmount = ntoken_balance;
+        ciPool.setFee(20000);
+        ciPool.setPaymentAmount(1e5);
+        const underlyingR = await ciPool.withdraw(Number(marketId), ntoken_balance);
+        underlying_amount = BigInt(underlyingR.returnValue);
+        // Skip the search - we'll use these values directly
+      } else {
+
       {
         const arc200_balanceR = await ciToken.arc200_balanceOf(
           algosdk.encodeAddress(
@@ -1781,7 +1797,7 @@ export const withdraw = async (
         Number(marketId),
         adjustedAmount
       );
-      let underlying_amount = BigInt(initialUnderlyingR.returnValue);
+      underlying_amount = BigInt(initialUnderlyingR.returnValue);
       bestUnderlyingAmount = underlying_amount;
 
       console.log("withdraw:initial calculation", {
@@ -2550,6 +2566,7 @@ export const withdraw = async (
           );
         }
       }
+      }
 
       console.log("withdraw:adjustedAmount", {
         adjustedAmount,
@@ -2663,12 +2680,12 @@ export const withdraw = async (
         });
       }
 
-      // cond a token withdraw
+      // cond a token withdraw - use underlying_amount (actual amount received from pool)
       if (tokenStandard == "network" || tokenStandard == "asa") {
-        const formmatedWithdrawAmount = new BigNumber(amountInSmallestUnit)
+        const formmatedWithdrawAmount = new BigNumber(underlying_amount)
           .dividedBy(10 ** token.decimals)
           .toFixed(token.decimals);
-        const txnO = (await builder.token.withdraw(amountInSmallestUnit)).obj;
+        const txnO = (await builder.token.withdraw(underlying_amount)).obj;
         const note = `atoken withdraw ${formmatedWithdrawAmount}`;
         buildN.push({
           ...txnO,
@@ -2678,7 +2695,7 @@ export const withdraw = async (
       } else if (tokenStandard == "arc200-exchange") {
         const txnO = (
           await builder.arc200Exchange.arc200_swapBack(
-            BigInt(amountInSmallestUnit)
+            underlying_amount
           )
         ).obj;
         const note = "arc200_swapBack";

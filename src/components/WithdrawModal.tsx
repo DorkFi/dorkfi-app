@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -42,7 +42,7 @@ interface WithdrawModalProps {
     scaledDeposits?: string;
     lastUpdateTime?: number | string;
   };
-  onSubmit?: (amount: string) => void;
+  onSubmit?: (amount: string, options?: { isMaxWithdraw?: boolean }) => void;
   isLoading?: boolean;
   showTooltip?: boolean;
   tooltipText?: string;
@@ -65,6 +65,7 @@ const WithdrawModal = ({
   const [amount, setAmount] = useState("");
   const [fiatValue, setFiatValue] = useState(0);
   const [showSuccess, setShowSuccess] = useState(false);
+  const maxWithdrawRef = useRef(false);
   const [expandedDetail, setExpandedDetail] = useState<string | null>(null);
   const [showDebugValues, setShowDebugValues] = useState(false);
   const [internalLoading, setInternalLoading] = useState(false);
@@ -159,6 +160,7 @@ const WithdrawModal = ({
     // Use currentDepositValue (currentlyDeposited) as the maximum withdrawable amount
     // Format to reasonable precision (8 decimal places max, remove trailing zeros)
     // This prevents excessive decimal places from floating point calculations
+    maxWithdrawRef.current = true;
     const formattedAmount = parseFloat(currentDepositValue.toFixed(8)).toString();
     setAmount(formattedAmount);
   };
@@ -167,7 +169,9 @@ const WithdrawModal = ({
     setInternalLoading(true);
     try {
       if (onSubmit) {
-        await onSubmit(amount);
+        const isMaxWithdraw = maxWithdrawRef.current;
+        maxWithdrawRef.current = false;
+        await onSubmit(amount, { isMaxWithdraw });
       } else {
         console.log(`Withdraw ${amount} ${tokenSymbol}`);
 
@@ -267,7 +271,10 @@ const WithdrawModal = ({
                     placeholder="0.0"
                     autoFocus
                     value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
+                    onChange={(e) => {
+                      maxWithdrawRef.current = false;
+                      setAmount(e.target.value);
+                    }}
                     className="bg-white/80 dark:bg-slate-800 border-gray-300 dark:border-slate-600 text-slate-800 dark:text-white pr-16 text-lg h-12"
                   />
                   <Button

@@ -3386,7 +3386,7 @@ export default function PreFiDashboard() {
             collateralFactor: 75,
             tokenPrice: withdrawModalPrice,
           }}
-          onSubmit={async (amount) => {
+          onSubmit={async (amount, options) => {
             if (!selectedMarket) return;
 
             const amountNumber = Number(amount);
@@ -3415,15 +3415,18 @@ export default function PreFiDashboard() {
                   amount: amount,
                   userAddress: activeAccount.address,
                   networkId: currentNetwork,
+                  withdrawAll: options?.isMaxWithdraw,
                 });
                 // Call the lending service withdraw method
+                // When max withdraw, use withdrawAll to burn full nToken balance (avoids rounding issues)
                 withdrawResult = await withdraw(
                   selectedMarket.poolId || "", // poolId - use token's poolId or fallback
                   selectedMarket.marketId || "", // marketId
                   selectedMarket.tokenStandard, // tokenStandard
                   amount, // amount as string
                   activeAccount.address, // userAddress
-                  currentNetwork // networkId
+                  currentNetwork, // networkId
+                  { withdrawAll: options?.isMaxWithdraw }
                 );
 
                 if (!withdrawResult.success) {
