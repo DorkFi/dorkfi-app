@@ -56,6 +56,7 @@ export const ProposalCard = ({
   const [showSuccess, setShowSuccess] = useState(false);
   const [pendingVoteSupport, setPendingVoteSupport] = useState<boolean | null>(null);
   const [isVoting, setIsVoting] = useState(false);
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
 
   const votesForPercent = (proposal.votesFor / Math.max(proposal.totalVotes, 1)) * 100;
   const votesAgainstPercent = (proposal.votesAgainst / Math.max(proposal.totalVotes, 1)) * 100;
@@ -145,7 +146,20 @@ export const ProposalCard = ({
               </Badge>
             </div>
             <H3 className="text-base sm:text-lg leading-tight">{proposal.title}</H3>
-            <Body className="text-xs sm:text-sm line-clamp-2 sm:line-clamp-3">{proposal.description}</Body>
+            <div className="space-y-1">
+              <Body
+                className={`text-xs sm:text-sm ${!descriptionExpanded ? "line-clamp-2 sm:line-clamp-3" : ""}`}
+              >
+                {proposal.description}
+              </Body>
+              <button
+                type="button"
+                onClick={() => setDescriptionExpanded((prev) => !prev)}
+                className="text-xs font-medium text-primary hover:underline focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 rounded"
+              >
+                {descriptionExpanded ? "Read Less" : "Read More"}
+              </button>
+            </div>
           </div>
         </div>
 

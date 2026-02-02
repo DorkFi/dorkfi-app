@@ -31,7 +31,7 @@ export const VoteSuccessModal = ({
   // If user has already voted, subtract their existing vote before adding the new one
   const currentVotesFor = proposal.votesFor - (userVote === true ? votingPower : 0);
   const currentVotesAgainst = proposal.votesAgainst - (userVote === false ? votingPower : 0);
-  
+
   const updatedVotesFor = support ? currentVotesFor + votingPower : currentVotesFor;
   const updatedVotesAgainst = !support ? currentVotesAgainst + votingPower : currentVotesAgainst;
   const updatedTotal = updatedVotesFor + updatedVotesAgainst;
@@ -42,8 +42,8 @@ export const VoteSuccessModal = ({
   const titleForShare = proposal.title.length > 100
     ? `${proposal.title.slice(0, 97)}...`
     : proposal.title;
-  const voteLabel = support ? "For" : "Against";
-  const shareText = `Just voted ${voteLabel} on "${titleForShare}" on @dork_fi! 🗳️`;
+  const voteLabel = support ? "YES" : "NO";
+  const shareText = `Voted ${voteLabel} on "${titleForShare}" in @dork_fi governance 🗳️`;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -96,20 +96,20 @@ export const VoteSuccessModal = ({
             <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
               Updated Balance
             </div>
-            
+
             {/* Updated Vote Distribution */}
             <div className="space-y-2">
               <div className="h-4 bg-muted rounded-full overflow-hidden flex relative">
-                <div 
+                <div
                   className={`bg-green-500 h-full transition-all ${support ? 'ring-2 ring-green-400 ring-offset-1 animate-pulse' : ''}`}
-                  style={{ 
-                    width: `${(updatedVotesFor / Math.max(updatedTotal, 1)) * 100}%` 
+                  style={{
+                    width: `${(updatedVotesFor / Math.max(updatedTotal, 1)) * 100}%`
                   }}
                 />
-                <div 
+                <div
                   className={`bg-destructive h-full transition-all ${!support ? 'ring-2 ring-destructive/80 ring-offset-1 animate-pulse' : ''}`}
-                  style={{ 
-                    width: `${(updatedVotesAgainst / Math.max(updatedTotal, 1)) * 100}%` 
+                  style={{
+                    width: `${(updatedVotesAgainst / Math.max(updatedTotal, 1)) * 100}%`
                   }}
                 />
               </div>
