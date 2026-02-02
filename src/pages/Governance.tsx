@@ -7,20 +7,42 @@ import { ProposalCard } from "@/components/governance/ProposalCard";
 import { BatchVoteConfirmationModal } from "@/components/governance/BatchVoteConfirmationModal";
 import { useGovernanceData } from "@/hooks/useGovernanceData";
 import { ProposalStatus, Proposal } from "@/types/governanceTypes";
-import { Loader2 } from "lucide-react";
+import { Loader2, ChevronDown } from "lucide-react";
 import { H2 } from "@/components/ui/Typography";
 import { Button } from "@/components/ui/button";
 import { calculateNFTMultiplier } from "@/components/governance/NFTMultiplierDropdown";
-import { isFeatureEnabled } from "@/config";
+import {
+  isFeatureEnabled,
+  getNetworksWithGovernance,
+  getNetworkConfig,
+  type NetworkId,
+} from "@/config";
+import { useNetwork } from "@/contexts/NetworkContext";
 import { useUserNFTs } from "@/hooks/useUserNFTs";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import { getNetworkLogoPath } from "@/utils/tokenImageUtils";
 
 const MAX_SELECTION_LIMIT = 8;
 
 const Governance = () => {
-  const { proposals, stats, loading, userVotes, vote, batchVote, userVoterInfo } = useGovernanceData();
+  const { currentNetwork, switchNetwork } = useNetwork();
+  const governanceNetworks = useMemo(() => getNetworksWithGovernance(), []);
+  const hasGovernanceOnCurrentNetwork = governanceNetworks.includes(currentNetwork);
+  const effectiveGovernanceNetwork: NetworkId | null = hasGovernanceOnCurrentNetwork
+    ? currentNetwork
+    : null;
+
+  const { proposals, stats, loading, userVotes, vote, batchVote, userVoterInfo } =
+    useGovernanceData(effectiveGovernanceNetwork);
   const [selectedStatus, setSelectedStatus] = useState<ProposalStatus | "all">("all");
   const [batchMode, setBatchMode] = useState(false);
   const [selectedProposals, setSelectedProposals] = useState<Set<string>>(new Set());
@@ -209,10 +231,89 @@ const Governance = () => {
       <Header />
       
       <div className="max-w-[1200px] mx-auto px-2 sm:px-4 md:px-6 py-4 sm:py-6 md:py-8 relative z-10">
+        {/* Network selector and prompt when current network has no governance */}
+        {governanceNetworks.length > 0 && (
+          <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            {!hasGovernanceOnCurrentNetwork ? (
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 dark:bg-amber-900/10 px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
+                <p className="text-sm text-foreground">
+                  Governance is available on{" "}
+                  {governanceNetworks.map((nid) => getNetworkConfig(nid).name).join(", ")}.
+                  Switch network to view and vote on proposals.
+                </p>
+                <Button
+                  size="sm"
+                  onClick={() => switchNetwork(governanceNetworks[0])}
+                  className="shrink-0"
+                >
+                  Switch to {getNetworkConfig(governanceNetworks[0]).name}
+                </Button>
+              </div>
+            ) : (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/30 dark:bg-muted/20 px-3 py-2 cursor-pointer hover:bg-muted/50 transition-colors w-fit">
+                    <img
+                      src={getNetworkLogoPath(currentNetwork)}
+                      alt=""
+                      className="h-5 w-5 rounded-full"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.src = "/placeholder.svg";
+                      }}
+                    />
+                    <span className="text-sm font-medium">
+                      {getNetworkConfig(currentNetwork).name}
+                    </span>
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-56">
+                  <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                    Governance network
+                  </div>
+                  <DropdownMenuSeparator />
+                  {governanceNetworks.map((networkId) => {
+                    const networkConfig = getNetworkConfig(networkId);
+                    const isCurrent = currentNetwork === networkId;
+                    return (
+                      <DropdownMenuItem
+                        key={networkId}
+                        onClick={() => switchNetwork(networkId)}
+                        className="cursor-pointer flex items-center justify-between"
+                      >
+                        <div className="flex items-center gap-2">
+                          <img
+                            src={getNetworkLogoPath(networkId)}
+                            alt=""
+                            className="h-5 w-5 rounded-full"
+                            onError={(e) => {
+                              const target = e.target as HTMLImageElement;
+                              target.src = "/placeholder.svg";
+                            }}
+                          />
+                          <span className="text-sm">{networkConfig.name}</span>
+                        </div>
+                        {isCurrent && (
+                          <span className="w-2 h-2 rounded-full bg-green-500" />
+                        )}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
+        )}
+
         {/* Hero - Full Width */}
         <GovernanceHero stats={stats} />
 
-        {loading ? (
+        {!effectiveGovernanceNetwork ? (
+          <div className="flex items-center justify-center py-20 text-muted-foreground">
+            Switch to a governance-enabled network above to view proposals.
+          </div>
+        ) : loading ? (
           <div className="flex items-center justify-center py-20">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
           </div>

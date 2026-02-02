@@ -10,6 +10,7 @@ import {
   getContractAddress,
   isCurrentNetworkEVM,
   isCurrentNetworkAVM,
+  isAVMNetwork,
   NetworkId,
   GovernanceConfig,
 } from "@/config";
@@ -22,6 +23,11 @@ import { APP_SPEC as UNITGovernanceAppSpec, PowerSnapshot, PowerSource, PowerMul
 
 /** Default number of rounds to look back when fetching governance events (ProposalCreated, etc.). */
 export const GOVERNANCE_EVENTS_MIN_ROUNDS_LOOKBACK = 2e6;
+
+/** Per-network minimum round for governance events (genesis/first governance round). */
+const GOVERNANCE_EVENTS_MIN_ROUND_BY_NETWORK: Partial<Record<NetworkId, number>> = {
+  "voi-mainnet": 15_624_000,
+};
 
 export interface CreateProposalParams {
   proposalTitle: string;
@@ -264,18 +270,29 @@ export const decodeProposalCreatedEvent = (event: ProposalCreatedRawEvent): Prop
   }
 }
 
-export const getEvents = async () => {
-  const networkConfig = getCurrentNetworkConfig();
-  const governanceConfig = getContractAddress(
-    networkConfig.networkId as NetworkId,
-    "governance",
-  ) as GovernanceConfig | string | undefined;
+/**
+ * Fetches governance events (ProposalCreated, etc.) for a network.
+ * @param networkId Optional network ID, defaults to current network
+ */
+export const getEvents = async (networkId?: NetworkId) => {
+  const networkConfig = networkId
+    ? getNetworkConfig(networkId)
+    : getCurrentNetworkConfig();
+  const nid = networkConfig.networkId as NetworkId;
+  const governanceConfig = getContractAddress(nid, "governance") as
+    | GovernanceConfig
+    | string
+    | undefined;
   if (!governanceConfig) {
     throw new Error("Governance contract not configured for this network");
   }
-  const appId = typeof governanceConfig === "string" ? Number(governanceConfig) : governanceConfig.appId;
-  const clients = algorandService.initializeClients(networkConfig.walletNetworkId as AlgorandNetwork);
-  console.log({ appId, clients });
+  const appId =
+    typeof governanceConfig === "string"
+      ? Number(governanceConfig)
+      : governanceConfig.appId;
+  const clients = algorandService.initializeClients(
+    networkConfig.walletNetworkId as AlgorandNetwork
+  );
   const ci = new CONTRACT(
     appId,
     clients.algod,
@@ -294,18 +311,21 @@ export const getEvents = async () => {
       ],
     },
     {
-      addr: (algosdk.encodeAddress(algosdk.getApplicationAddress(appId).publicKey)) as string,
+      addr: algosdk.encodeAddress(
+        algosdk.getApplicationAddress(appId).publicKey
+      ) as string,
       sk: new Uint8Array(),
-    },
+    }
   );
   const status = await clients.algod.status().do();
   const lastRound = status.lastRound;
-  const events = await ci.getEvents({
-    minRound: Math.max(15_624_000, Number(lastRound) - GOVERNANCE_EVENTS_MIN_ROUNDS_LOOKBACK) 
-    // Note 15,624,520 is voi network specific
-    // TODO: make this network specific
-  });
-  console.log("events", { events });
+  const minRoundForNetwork =
+    GOVERNANCE_EVENTS_MIN_ROUND_BY_NETWORK[nid] ?? 0;
+  const minRound = Math.max(
+    minRoundForNetwork,
+    Number(lastRound) - GOVERNANCE_EVENTS_MIN_ROUNDS_LOOKBACK
+  );
+  const events = await ci.getEvents({ minRound });
   return events;
 }
 
@@ -399,13 +419,14 @@ export const getProposal = async (
   const networkConfig = networkId
     ? getNetworkConfig(networkId)
     : getCurrentNetworkConfig();
+  const effectiveNetworkId = (networkId ?? networkConfig.networkId) as NetworkId;
 
-  if (!isCurrentNetworkAVM()) {
+  if (!(networkId ? isAVMNetwork(networkId) : isCurrentNetworkAVM())) {
     throw new Error("Governance proposals are only supported on AVM networks");
   }
 
   const governanceConfig = getContractAddress(
-    networkId || (networkConfig.networkId as NetworkId),
+    effectiveNetworkId,
     "governance",
   ) as GovernanceConfig | string | undefined;
 
@@ -536,13 +557,14 @@ export const getVoter = async (
   const networkConfig = networkId
     ? getNetworkConfig(networkId)
     : getCurrentNetworkConfig();
+  const effectiveNetworkId = (networkId ?? networkConfig.networkId) as NetworkId;
 
-  if (!isCurrentNetworkAVM()) {
+  if (!(networkId ? isAVMNetwork(networkId) : isCurrentNetworkAVM())) {
     throw new Error("Governance proposals are only supported on AVM networks");
   }
 
   const governanceConfig = getContractAddress(
-    networkId || (networkConfig.networkId as NetworkId),
+    effectiveNetworkId,
     "governance",
   ) as GovernanceConfig | string | undefined;
 
@@ -998,13 +1020,14 @@ export const getVote = async (
   const networkConfig = networkId
     ? getNetworkConfig(networkId)
     : getCurrentNetworkConfig();
+  const effectiveNetworkId = (networkId ?? networkConfig.networkId) as NetworkId;
 
-  if (!isCurrentNetworkAVM()) {
+  if (!(networkId ? isAVMNetwork(networkId) : isCurrentNetworkAVM())) {
     throw new Error("Governance get vote is only supported on AVM networks");
   }
 
   const governanceConfig = getContractAddress(
-    networkId || (networkConfig.networkId as NetworkId),
+    effectiveNetworkId,
     "governance",
   ) as GovernanceConfig | string | undefined;
 

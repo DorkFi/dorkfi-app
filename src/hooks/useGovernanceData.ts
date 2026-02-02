@@ -4,7 +4,7 @@ import { getEvents, decodeProposalCreatedEvent, getProposal, getVoter, Voter, ca
 import { convertServiceProposalToUI } from "@/utils/governanceUtils";
 import { useWallet } from "@txnlab/use-wallet-react";
 import algorandService, { AlgorandNetwork } from "@/services/algorandService";
-import { getCurrentNetworkConfig, getAlgorandNetworkFromNetworkId } from "@/config";
+import { getCurrentNetworkConfig, getAlgorandNetworkFromNetworkId, type NetworkId } from "@/config";
 import algosdk, { waitForConfirmation } from "algosdk";
 import { toast } from "@/hooks/use-toast";
 
@@ -162,7 +162,7 @@ const calculateStatsFromProposals = (
   };
 };
 
-export const useGovernanceData = () => {
+export const useGovernanceData = (networkId: NetworkId | null) => {
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [stats, setStats] = useState<VotingStats | null>(null);
@@ -172,16 +172,22 @@ export const useGovernanceData = () => {
   const [userVoterInfo, setUserVoterInfo] = useState<Voter | null>(null);
 
   useEffect(() => {
+    if (!networkId) {
+      setProposals([]);
+      setStats(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     const fetchData = async () => {
       setLoading(true);
       setError(null);
-      
+
       try {
-        // Fetch governance events
-        const events = await getEvents();
+        const events = await getEvents(networkId);
         const eventsArray = Array.isArray(events) ? events : [events];
 
-        // Extract ProposalCreated events and fetch proposal details
         const proposalCreatedEvents: string[] = [];
         for (const group of eventsArray) {
           if (group?.name === "ProposalCreated" && Array.isArray(group?.events)) {
@@ -198,36 +204,28 @@ export const useGovernanceData = () => {
           }
         }
 
-        // Fetch proposal details for each ProposalCreated event
         const fetchedProposals: Proposal[] = [];
         for (const proposalId of proposalCreatedEvents) {
           try {
-            const serviceProposal = await getProposal(proposalId);
+            const serviceProposal = await getProposal(proposalId, networkId);
             const uiProposal = convertServiceProposalToUI(serviceProposal, proposalId);
             fetchedProposals.push(uiProposal);
           } catch (err: any) {
             console.error(`Failed to fetch proposal ${proposalId}:`, err);
-            // Continue fetching other proposals even if one fails
           }
         }
 
-        // Use fetched proposals if available, otherwise fall back to mock data
         if (fetchedProposals.length > 0) {
           setProposals(fetchedProposals);
-          // Calculate stats from fetched proposals
-          // Voting power will be updated when voter info is fetched
           const calculatedStats = calculateStatsFromProposals(fetchedProposals, 0);
           setStats(calculatedStats);
         } else {
-          // Fallback to mock data if no proposals found
-          console.warn("No proposals found from governance events, using mock data");
           setProposals(mockProposals);
           setStats(mockStats);
         }
       } catch (err: any) {
         console.error("Failed to fetch governance data:", err);
         setError(err?.message || "Failed to load governance data");
-        // Fallback to mock data on error
         setProposals(mockProposals);
         setStats(mockStats);
       } finally {
@@ -236,96 +234,70 @@ export const useGovernanceData = () => {
     };
 
     fetchData();
-  }, []);
+  }, [networkId]);
 
-  // Fetch voter info when active account changes
+  // Fetch voter info when active account or network changes
   useEffect(() => {
     const fetchVoterInfo = async () => {
-      if (!activeAccount?.address) {
+      if (!activeAccount?.address || !networkId) {
         setUserVoterInfo(null);
-        setUserVotes(new Map()); // Clear votes when wallet disconnects
-        // Reset voting power in stats when wallet disconnects
+        setUserVotes(new Map());
         setStats((prevStats) => {
           if (!prevStats) return prevStats;
-          return {
-            ...prevStats,
-            yourVotingPower: 0,
-          };
+          return { ...prevStats, yourVotingPower: 0 };
         });
         return;
       }
 
       try {
-        const voterInfo = await getVoter(activeAccount.address);
+        const voterInfo = await getVoter(activeAccount.address, networkId);
         setUserVoterInfo(voterInfo);
-        
-        // Update stats with actual voting power from voter info
         const basePower = Number(voterInfo.voteBasePower) / 1e8;
         setStats((prevStats) => {
           if (!prevStats) return prevStats;
-          return {
-            ...prevStats,
-            yourVotingPower: basePower,
-          };
+          return { ...prevStats, yourVotingPower: basePower };
         });
       } catch (err: any) {
         console.error("Failed to fetch voter info:", err);
-        // Don't set error state here, just log it - voter info is optional
         setUserVoterInfo(null);
-        // Reset voting power on error
         setStats((prevStats) => {
           if (!prevStats) return prevStats;
-          return {
-            ...prevStats,
-            yourVotingPower: 0,
-          };
+          return { ...prevStats, yourVotingPower: 0 };
         });
       }
     };
 
     fetchVoterInfo();
-  }, [activeAccount?.address]);
+  }, [activeAccount?.address, networkId]);
 
-  // Fetch user votes for all proposals when proposals or active account changes
+  // Fetch user votes when proposals, active account, or network changes
   useEffect(() => {
     const fetchUserVotes = async () => {
-      if (!activeAccount?.address || proposals.length === 0) {
+      if (!activeAccount?.address || proposals.length === 0 || !networkId) {
         return;
       }
 
       try {
         const votesMap = new Map<string, boolean>();
-        
-        // Fetch vote for each proposal
         await Promise.all(
           proposals.map(async (proposal) => {
             try {
-              const voteValue = await getVote(proposal.id, activeAccount.address);
-              // Vote value: "0" = voted against, "1" = voted for, "2" = hasn't voted
-              // If "2", don't set vote (leave undefined) so vote buttons show
-              // Otherwise, set the vote result
-              if (voteValue === "1") {
-                votesMap.set(proposal.id, true); // Voted for
-              } else if (voteValue === "0") {
-                votesMap.set(proposal.id, false); // Voted against
-              }
-              // If voteValue === "2", don't set anything (userVote will be undefined, showing vote buttons)
+              const voteValue = await getVote(proposal.id, activeAccount.address, networkId);
+              if (voteValue === "1") votesMap.set(proposal.id, true);
+              else if (voteValue === "0") votesMap.set(proposal.id, false);
             } catch (err: any) {
-              // If get_vote fails, just skip it - vote buttons will show
               console.debug(`No vote found for proposal ${proposal.id}:`, err?.message);
             }
           })
         );
-
         setUserVotes(votesMap);
       } catch (err: any) {
         console.error("Failed to fetch user votes:", err);
-        // Don't throw - just log the error, votes are optional
       }
     };
 
     fetchUserVotes();
-  }, [proposals, activeAccount?.address]);
+  }, [proposals, activeAccount?.address, networkId]);
 
   const vote = async (proposalId: string, support: boolean, votingPower: number) => {
     if (!activeAccount?.address) {

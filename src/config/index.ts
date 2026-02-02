@@ -2108,6 +2108,16 @@ export const getEnabledNetworks = (): NetworkId[] => {
   return config.enabledNetworks;
 };
 
+/**
+ * Get network IDs that have governance contracts configured (for Governance page)
+ */
+export const getNetworksWithGovernance = (): NetworkId[] => {
+  return config.enabledNetworks.filter((networkId) => {
+    const governance = config.networks[networkId].contracts.governance;
+    return governance !== undefined && governance !== null;
+  });
+};
+
 export const isMigrationEnabled = (): boolean => {
   return getConfig().features.enableMigration;
 };
