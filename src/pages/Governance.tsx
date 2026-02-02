@@ -235,19 +235,12 @@ const Governance = () => {
         {governanceNetworks.length > 0 && (
           <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             {!hasGovernanceOnCurrentNetwork ? (
-              <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 dark:bg-amber-900/10 px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 dark:bg-amber-900/10 px-4 py-3">
                 <p className="text-sm text-foreground">
                   Governance is available on{" "}
                   {governanceNetworks.map((nid) => getNetworkConfig(nid).name).join(", ")}.
                   Switch network to view and vote on proposals.
                 </p>
-                <Button
-                  size="sm"
-                  onClick={() => switchNetwork(governanceNetworks[0])}
-                  className="shrink-0"
-                >
-                  Switch to {getNetworkConfig(governanceNetworks[0]).name}
-                </Button>
               </div>
             ) : (
               <DropdownMenu>
