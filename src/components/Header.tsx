@@ -3,6 +3,7 @@ import { useNavigate, useLocation, Link } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 import { useState, useEffect } from "react";
 import WalletNetworkButton from "@/components/WalletNetworkButton";
+import { WalletNetworkUnsupportedBanner } from "@/components/WalletNetworkUnsupportedBanner";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { getCurrentGasStationSymbols, isFeatureEnabled } from "@/config";
 import { useWallet } from "@txnlab/use-wallet-react";
@@ -101,6 +102,7 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-white/80 dark:header-nav-bg backdrop-blur-md supports-[backdrop-filter]:bg-white/70 dark:supports-[backdrop-filter]:header-nav-bg shadow-sm dark:shadow-none">
+      <WalletNetworkUnsupportedBanner />
       <div className="container mx-auto px-4 py-4">
         <div className="flex items-center justify-between">
           {/* Logo */}

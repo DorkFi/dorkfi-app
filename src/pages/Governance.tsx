@@ -36,10 +36,17 @@ const MAX_SELECTION_LIMIT = 8;
 const Governance = () => {
   const { currentNetwork, switchNetwork } = useNetwork();
   const governanceNetworks = useMemo(() => getNetworksWithGovernance(), []);
+  const networkSelectorNetworks = useMemo(
+    () =>
+      Array.from(
+        new Set([...governanceNetworks, "algorand-mainnet" as NetworkId])
+      ),
+    [governanceNetworks]
+  );
+  const isOnAlgorand = currentNetwork === "algorand-mainnet" || currentNetwork === "algorand-testnet";
   const hasGovernanceOnCurrentNetwork = governanceNetworks.includes(currentNetwork);
-  const effectiveGovernanceNetwork: NetworkId | null = hasGovernanceOnCurrentNetwork
-    ? currentNetwork
-    : null;
+  const effectiveGovernanceNetwork: NetworkId | null =
+    isOnAlgorand ? null : hasGovernanceOnCurrentNetwork ? currentNetwork : null;
 
   const { proposals, stats, loading, userVotes, vote, batchVote, userVoterInfo } =
     useGovernanceData(effectiveGovernanceNetwork);
@@ -232,9 +239,21 @@ const Governance = () => {
       
       <div className="max-w-[1200px] mx-auto px-2 sm:px-4 md:px-6 py-4 sm:py-6 md:py-8 relative z-10">
         {/* Network selector and prompt when current network has no governance */}
-        {governanceNetworks.length > 0 && (
+        {networkSelectorNetworks.length > 0 && (
           <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            {!hasGovernanceOnCurrentNetwork ? (
+            {isOnAlgorand ? (
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 dark:bg-amber-900/10 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <p className="text-sm text-foreground">
+                  Governance is available on VOI. Switch network to view and vote on proposals.
+                </p>
+                <Button
+                  onClick={() => switchNetwork("voi-mainnet")}
+                  className="w-fit shrink-0"
+                >
+                  Switch to VOI Network
+                </Button>
+              </div>
+            ) : !hasGovernanceOnCurrentNetwork ? (
               <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 dark:bg-amber-900/10 px-4 py-3">
                 <p className="text-sm text-foreground">
                   Governance is available on{" "}
@@ -266,7 +285,7 @@ const Governance = () => {
                     Governance network
                   </div>
                   <DropdownMenuSeparator />
-                  {governanceNetworks.map((networkId) => {
+                  {networkSelectorNetworks.map((networkId) => {
                     const networkConfig = getNetworkConfig(networkId);
                     const isCurrent = currentNetwork === networkId;
                     return (
@@ -299,12 +318,21 @@ const Governance = () => {
           </div>
         )}
 
-        {/* Hero - Full Width */}
-        <GovernanceHero stats={stats} />
+        {/* Hero - Full Width (only when not on Algorand) */}
+        {!isOnAlgorand && <GovernanceHero stats={stats} />}
 
         {!effectiveGovernanceNetwork ? (
-          <div className="flex items-center justify-center py-20 text-muted-foreground">
-            Switch to a governance-enabled network above to view proposals.
+          <div className="flex flex-col items-center justify-center py-20 gap-4 text-muted-foreground">
+            <p>
+              {isOnAlgorand
+                ? "Governance is available on VOI network."
+                : "Switch to a governance-enabled network above to view proposals."}
+            </p>
+            {isOnAlgorand && (
+              <Button onClick={() => switchNetwork("voi-mainnet")}>
+                Switch to VOI Network
+              </Button>
+            )}
           </div>
         ) : loading ? (
           <div className="flex items-center justify-center py-20">
