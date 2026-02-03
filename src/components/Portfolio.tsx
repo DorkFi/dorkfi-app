@@ -4305,11 +4305,21 @@ const Portfolio = () => {
                 }
                 onDeposit={
                   !isViewOnly
-                    ? (asset) => {
+                    ? (asset, poolId) => {
                       if (asset) {
                         const deposit = deposits.find(
-                          (d) => d.asset === asset
+                          (d) =>
+                            d.asset === asset &&
+                            (poolId ? d.poolId === poolId : true)
                         );
+                        const m = marketData.find(
+                          (mkt) =>
+                            mkt.symbol === asset &&
+                            (deposit?.poolId
+                              ? mkt.poolId === deposit.poolId
+                              : true)
+                        );
+                        if (m?.isPaused) return;
                         handleDepositClick(
                           asset,
                           deposit?.poolId,
@@ -4352,10 +4362,19 @@ const Portfolio = () => {
                     : undefined
                 }
                 totalBorrowed={totalBorrowed}
-                deposits={deposits.map((d) => ({
-                  asset: d.asset,
-                  value: d.value,
-                }))}
+                deposits={deposits.map((d) => {
+                  const m = marketData.find(
+                    (mkt) =>
+                      mkt.symbol === d.asset &&
+                      (d.poolId ? mkt.poolId === d.poolId : true)
+                  );
+                  return {
+                    asset: d.asset,
+                    value: d.value,
+                    poolId: d.poolId,
+                    isPaused: m?.isPaused ?? false,
+                  };
+                })}
                 borrows={borrows.map((b) => ({
                   asset: b.asset,
                   value: b.value,
@@ -5774,7 +5793,7 @@ const Portfolio = () => {
                                   network={(deposit as any).network}
                                   poolId={deposit.poolId}
                                   onDepositClick={
-                                    !isViewOnly
+                                    !isViewOnly && !market?.isPaused
                                       ? () =>
                                         handleDepositClick(
                                           deposit.asset,
@@ -6786,22 +6805,24 @@ const Portfolio = () => {
                                     <div className="flex items-center gap-2">
                                       {!isViewOnly && (
                                         <>
-                                          <Button
-                                            size="sm"
-                                            variant="outline"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              handleDepositClick(
-                                                deposit.asset,
-                                                deposit.poolId,
-                                                (deposit as any).network
-                                              );
-                                            }}
-                                            title="Deposit"
-                                            className="w-8 h-8 p-0 flex items-center justify-center"
-                                          >
-                                            +
-                                          </Button>
+                                          {!market?.isPaused && (
+                                            <Button
+                                              size="sm"
+                                              variant="outline"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleDepositClick(
+                                                  deposit.asset,
+                                                  deposit.poolId,
+                                                  (deposit as any).network
+                                                );
+                                              }}
+                                              title="Deposit"
+                                              className="w-8 h-8 p-0 flex items-center justify-center"
+                                            >
+                                              +
+                                            </Button>
+                                          )}
                                           <Button
                                             size="sm"
                                             variant="outline"
@@ -7581,21 +7602,30 @@ const Portfolio = () => {
                                       </TableCell>
                                       <TableCell>
                                         <div className="flex items-center gap-2">
-                                          {!isViewOnly && (
-                                            <Button
-                                              variant="outline"
-                                              size="sm"
-                                              onClick={() =>
-                                                handleDepositClick(
-                                                  asset.asset,
-                                                  asset.poolId
-                                                )
-                                              }
-                                              className="w-8 h-8 p-0 flex items-center justify-center"
-                                            >
-                                              +
-                                            </Button>
-                                          )}
+                                          {!isViewOnly && (() => {
+                                            const atRiskMarket = marketData.find(
+                                              (m) =>
+                                                m.symbol === asset.asset &&
+                                                (asset.poolId
+                                                  ? m.poolId === asset.poolId
+                                                  : true)
+                                            );
+                                            return !atRiskMarket?.isPaused && (
+                                              <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() =>
+                                                  handleDepositClick(
+                                                    asset.asset,
+                                                    asset.poolId
+                                                  )
+                                                }
+                                                className="w-8 h-8 p-0 flex items-center justify-center"
+                                              >
+                                                +
+                                              </Button>
+                                            );
+                                          })()}
                                           <Button
                                             size="sm"
                                             variant="outline"
@@ -7922,7 +7952,7 @@ const Portfolio = () => {
                                   network={(borrow as any).network}
                                   poolId={borrow.poolId}
                                   onDepositClick={
-                                    !isViewOnly
+                                    !isViewOnly && !market?.isPaused
                                       ? () =>
                                         handleBorrowClick(
                                           borrow.asset,
@@ -8328,7 +8358,11 @@ const Portfolio = () => {
 
                             return displayBorrows.map((borrow, index) => {
                               const market = marketData.find(
-                                (m) => m.symbol === borrow.asset
+                                (m) =>
+                                  m.symbol === borrow.asset &&
+                                  (borrow.poolId
+                                    ? m.poolId === borrow.poolId
+                                    : true)
                               );
                               const liquidationThreshold =
                                 market?.liquidationThreshold || 0.85;
@@ -8543,22 +8577,24 @@ const Portfolio = () => {
                                     <div className="flex items-center gap-2">
                                       {!isViewOnly && (
                                         <>
-                                          <Button
-                                            size="sm"
-                                            variant="outline"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              handleBorrowClick(
-                                                borrow.asset,
-                                                borrow.poolId,
-                                                (borrow as any).network
-                                              );
-                                            }}
-                                            title="Borrow"
-                                            className="w-8 h-8 p-0 flex items-center justify-center"
-                                          >
-                                            +
-                                          </Button>
+                                          {!market?.isPaused && (
+                                            <Button
+                                              size="sm"
+                                              variant="outline"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleBorrowClick(
+                                                  borrow.asset,
+                                                  borrow.poolId,
+                                                  (borrow as any).network
+                                                );
+                                              }}
+                                              title="Borrow"
+                                              className="w-8 h-8 p-0 flex items-center justify-center"
+                                            >
+                                              +
+                                            </Button>
+                                          )}
                                           <Button
                                             size="sm"
                                             variant="outline"

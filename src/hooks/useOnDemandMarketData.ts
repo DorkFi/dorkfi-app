@@ -376,8 +376,12 @@ export const useOnDemandMarketData = ({
 
   // Filter and sort data
   const { filteredData, totalPages, paginatedData } = useMemo(() => {
+    // Filter out paused markets
+    let filtered = marketDataArray.filter(
+      (market) => !market.marketInfo?.isPaused
+    );
     // Filter data based on search term
-    let filtered = marketDataArray.filter((market) =>
+    filtered = filtered.filter((market) =>
       market.asset.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
