@@ -26,7 +26,8 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
     if (location.pathname === "/liquidation-markets") return "liquidations";
     if (location.pathname === "/gas-station") return "gas-station";
     if (location.pathname === "/governance") return "governance";
-    if (location.pathname === "/portfolio") return "portfolio";
+    if (location.pathname === "/portfolio" || location.pathname.startsWith("/portfolio/")) return "portfolio";
+    if (location.pathname === "/market") return "markets";
     return "markets";
   })();
 
@@ -44,6 +45,10 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
       navigate("/analytics");
     } else if (value === "governance") {
       navigate("/governance");
+    } else if (value === "portfolio") {
+      navigate("/portfolio");
+    } else if (value === "markets") {
+      navigate("/market");
     } else {
       navigate("/");
     }
@@ -69,6 +74,10 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
         onTabChange("gas-station");
       } else if (location.pathname === "/governance") {
         onTabChange("governance");
+      } else if (location.pathname === "/portfolio" || location.pathname.startsWith("/portfolio/")) {
+        onTabChange("portfolio");
+      } else if (location.pathname === "/market") {
+        onTabChange("markets");
       }
     }
   }, [location.pathname, onTabChange]);
@@ -107,7 +116,7 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
         <div className="flex items-center justify-between">
           {/* Logo */}
           <Link
-            to="/"
+            to="/market"
             className="flex items-center space-x-3 cursor-pointer hover:opacity-80 transition-opacity"
             onClick={() => {
               if (onTabChange) {

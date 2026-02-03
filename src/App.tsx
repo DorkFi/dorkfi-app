@@ -68,6 +68,15 @@ function App() {
                   />
                 }
               />
+              <Route
+                path="/market"
+                element={
+                  <ConditionalHomePage
+                    activeTab={activeTab}
+                    onTabChange={handleTabChange}
+                  />
+                }
+              />
               <Route path="/admin" element={<Admin />} />
               {isFeatureEnabled("enableGasStation") && (
                 <Route path="/gas-station" element={<GasStation />} />
@@ -99,6 +108,7 @@ function App() {
                   element={<Governance />}
                 />
               )}
+              <Route path="/portfolio" element={<PortfolioPage />} />
               <Route path="/portfolio/:address" element={<PortfolioPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
