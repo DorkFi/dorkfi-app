@@ -56,6 +56,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 
 function normalizeMarketData(md) {
   return {
@@ -83,6 +84,7 @@ function normalizeMarketData(md) {
 }
 
 const MarketsTable = () => {
+  const { formatPercent } = useNumberI18n();
   const [searchTerm, setSearchTerm] = useState("");
   const [sortField, setSortField] = useState<SortField>("totalSupplyUSD");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
@@ -2427,12 +2429,12 @@ const MarketsTable = () => {
                           voiAssetData?.apyCalculation?.apy ||
                           voiAssetData?.supplyAPY ||
                           0;
-                        const formattedAPY = apy.toFixed(2);
+                        const formattedAPY = formatPercent(apy / 100, { maximumFractionDigits: 2 });
                         const depositButtonText = isClaiming
                           ? "Processing..."
                           : apy === 0
                             ? "Direct Deposit into Market"
-                            : `Deposit & Earn ${formattedAPY}% APY`;
+                            : `Deposit & Earn ${formattedAPY} APY`;
 
                         return (
                           <>

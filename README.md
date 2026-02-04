@@ -60,6 +60,25 @@ This project is built with:
 - shadcn-ui
 - Tailwind CSS
 
+## Number formatting and locale (i18n)
+
+Numeric display and input support both **decimal-point** (e.g. 1,234.56) and **decimal-comma** (e.g. 1.234,56 or 1 234,56) locales. The user can choose:
+
+- **Auto**: use the browser locale (`navigator.language`); fallback is `en-US`.
+- **Manual**: pick a BCP-47 locale (e.g. en-US, de-DE, fr-FR) from the header globe control.
+
+**Using the utility**
+
+- **Formatting**: use `formatNumber`, `formatCurrency`, or `formatPercent` from `@/utils/numberI18n` (or the locale-aware wrappers in `@/utils/formatting`). In React, use the `useNumberI18n()` hook from `@/contexts/LocaleSettingsContext` so displayed numbers follow the current locale.
+- **Parsing user input**: use `parseNumber(inputString)` from `@/utils/numberI18n` (or re-exported from `@/utils/formatting`). It returns `number | null`; invalid or ambiguous input returns `null`. Store canonical numeric values internally (e.g. JS numbers with "." as decimal).
+- **Inputs**: use the `LocaleNumberInput` component (`@/components/ui/LocaleNumberInput`) for numeric fields; it displays with locale formatting and parses on blur with inline validation.
+
+**Adding new locales**
+
+1. Add the BCP-47 locale string to `SUPPORTED_MANUAL_LOCALES` in `src/utils/localeSettings.ts`.
+2. Add a label in `MANUAL_LOCALE_LABELS` in `src/components/LocaleNumberSettings.tsx`.
+3. Formatting and parsing use `Intl.NumberFormat` and locale-derived decimal/grouping separators, so no further changes are needed for standard locales.
+
 ## How can I deploy this project?
 
 Simply open [Lovable](https://lovable.dev/projects/453684e9-f8bf-459b-9196-e4f9c0e5b52c) and click on Share -> Publish.

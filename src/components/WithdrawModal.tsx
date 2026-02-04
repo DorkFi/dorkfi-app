@@ -7,8 +7,8 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { LocaleNumberInput } from "@/components/ui/LocaleNumberInput";
 import { Card, CardContent } from "@/components/ui/card";
 import { InfoIcon, ChevronDown, ChevronUp } from "lucide-react";
 import { formatRelativeTime, formatRelativeTimeFromISO } from "@/utils/timeUtils";
@@ -62,7 +62,7 @@ const WithdrawModal = ({
   tooltipText = "",
   onRefreshBalance,
 }: WithdrawModalProps) => {
-  const [amount, setAmount] = useState("");
+  const [amount, setAmount] = useState<number | "">("");
   const [fiatValue, setFiatValue] = useState(0);
   const [showSuccess, setShowSuccess] = useState(false);
   const maxWithdrawRef = useRef(false);
@@ -148,9 +148,8 @@ const WithdrawModal = ({
   }, [isOpen]);
 
   useEffect(() => {
-    if (amount) {
-      const numAmount = parseFloat(amount);
-      setFiatValue(numAmount * marketStats.tokenPrice);
+    if (amount !== "" && typeof amount === "number") {
+      setFiatValue(amount * marketStats.tokenPrice);
     } else {
       setFiatValue(0);
     }
@@ -161,7 +160,7 @@ const WithdrawModal = ({
     // Format to reasonable precision (8 decimal places max, remove trailing zeros)
     // This prevents excessive decimal places from floating point calculations
     maxWithdrawRef.current = true;
-    const formattedAmount = parseFloat(currentDepositValue.toFixed(8)).toString();
+    const formattedAmount = parseFloat(currentDepositValue.toFixed(8))
     setAmount(formattedAmount);
   };
 
@@ -171,9 +170,9 @@ const WithdrawModal = ({
       if (onSubmit) {
         const isMaxWithdraw = maxWithdrawRef.current;
         maxWithdrawRef.current = false;
-        await onSubmit(amount, { isMaxWithdraw });
+        await onSubmit(amount || "", { isMaxWithdraw });
       } else {
-        console.log(`Withdraw ${amount} ${tokenSymbol}`);
+        console.log(`Withdraw ${amount !== "" ? amount.toString() : ""} ${tokenSymbol}`);
 
         await new Promise((resolve) => setTimeout(resolve, 500));
         setShowSuccess(true);
@@ -202,9 +201,10 @@ const WithdrawModal = ({
   };
 
   const isValidAmount =
-    amount &&
-    parseFloat(amount) > 0 &&
-    parseFloat(amount) <= currentDepositValue;
+    amount !== "" &&
+    typeof amount === "number" &&
+    amount > 0 &&
+    amount <= currentDepositValue;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -215,7 +215,7 @@ const WithdrawModal = ({
               transactionType="withdraw"
               asset={tokenSymbol}
               assetIcon={tokenIcon}
-              amount={amount}
+              amount={amount !== "" ? amount.toString() : ""}
               onViewTransaction={handleViewTransaction}
               onGoToPortfolio={handleGoToPortfolio}
               onMakeAnother={handleMakeAnother}
@@ -264,17 +264,13 @@ const WithdrawModal = ({
                   Amount
                 </Label>
                 <div className="relative">
-                  <Input
+                  <LocaleNumberInput
                     id="amount"
-                    type="number"
-                    inputMode="decimal"
                     placeholder="0.0"
                     autoFocus
                     value={amount}
-                    onChange={(e) => {
-                      maxWithdrawRef.current = false;
-                      setAmount(e.target.value);
-                    }}
+                    onChange={(v) => setAmount(v ?? "")}
+                    formatOptions={{ maximumFractionDigits: 8 }}
                     className="bg-white/80 dark:bg-slate-800 border-gray-300 dark:border-slate-600 text-slate-800 dark:text-white pr-16 text-lg h-12"
                   />
                   <Button

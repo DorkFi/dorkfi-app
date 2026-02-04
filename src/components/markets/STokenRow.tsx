@@ -12,6 +12,7 @@ import APYDisplay from "@/components/APYDisplay";
 import BorrowAPYDisplay from "@/components/BorrowAPYDisplay";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { getNetworkConfig } from "@/config";
+import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 
 interface STokenRowProps {
   market: OnDemandMarketData;
@@ -49,8 +50,9 @@ const STokenRow = ({
   isNested = false,
   marketIndex,
 }: STokenRowProps) => {
+  const { formatNumber, formatCurrency } = useNumberI18n();
   const { currentNetwork } = useNetwork();
-  
+
   return (
     <TableRow
       key={market.asset}
@@ -146,10 +148,10 @@ const STokenRow = ({
         ) : (
           <div>
             <div className="font-medium text-purple-700 dark:text-purple-300">
-              ${Math.round(market.totalBorrowUSD / 1_000_000).toLocaleString()}
+              {formatCurrency(Math.round(market.totalBorrowUSD / 1_000_000), "USD", { maximumFractionDigits: 0 })}
             </div>
             <div className="text-sm text-muted-foreground">
-              {market.totalBorrow.toLocaleString(undefined, { maximumFractionDigits: 3 })} {market.asset}
+              {formatNumber(market.totalBorrow, { maximumFractionDigits: 3 })} {market.asset}
             </div>
           </div>
         )}

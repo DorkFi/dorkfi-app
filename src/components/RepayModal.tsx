@@ -6,8 +6,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { LocaleNumberInput } from "@/components/ui/LocaleNumberInput";
 import { Card, CardContent } from "@/components/ui/card";
 import { InfoIcon, ChevronDown, ChevronUp } from "lucide-react";
 import SupplyBorrowCongrats from "./SupplyBorrowCongrats";
@@ -50,7 +50,7 @@ const RepayModal = ({
   network,
   onSubmit,
 }: RepayModalProps) => {
-  const [amount, setAmount] = useState("");
+  const [amount, setAmount] = useState<number | "">("");
   const [fiatValue, setFiatValue] = useState(0);
   const { currentNetwork } = useNetwork();
   const [showSuccess, setShowSuccess] = useState(false);
@@ -127,9 +127,8 @@ const RepayModal = ({
   };
 
   useEffect(() => {
-    if (amount) {
-      const numAmount = parseFloat(amount);
-      setFiatValue(numAmount * marketStats.tokenPrice);
+    if (amount !== "" && typeof amount === "number") {
+      setFiatValue(amount * marketStats.tokenPrice);
     } else {
       setFiatValue(0);
     }
@@ -138,30 +137,25 @@ const RepayModal = ({
   const maxRepayAmount = Math.min(currentBorrow, walletBalance);
 
   const handleMaxClick = () => {
-    // Round to 6 decimal places to match validation logic and avoid precision issues
     const roundedMax = Math.round(maxRepayAmount * 1000000) / 1000000;
-    // Format to remove unnecessary trailing zeros while preserving up to 6 decimals
-    setAmount(roundedMax.toFixed(6).replace(/\.?0+$/, ""));
-    // Only use repayAll if max equals current borrow (full debt repayment)
+    setAmount(roundedMax);
     const roundedCurrentBorrow = Math.round(currentBorrow * 1000000) / 1000000;
     setIsRepayAll(roundedMax === roundedCurrentBorrow);
   };
 
   const handleSubmit = async () => {
-    // Check if amount equals current borrow (full debt repayment) to determine if repayAll should be used
-    const numAmount = amount ? parseFloat(amount) : 0;
+    const numAmount = amount !== "" && typeof amount === "number" ? amount : 0;
     const roundedAmount = Math.round(numAmount * 1000000) / 1000000;
     const roundedCurrentBorrow = Math.round(currentBorrow * 1000000) / 1000000;
     const shouldUseRepayAll = roundedAmount === roundedCurrentBorrow;
 
-    console.log(`Repay ${amount} ${tokenSymbol}${shouldUseRepayAll ? " (repayAll)" : ""}`);
+    const amountStr = amount !== "" ? amount.toString() : "0";
+    console.log(`Repay ${amountStr} ${tokenSymbol}${shouldUseRepayAll ? " (repayAll)" : ""}`);
 
     try {
       setIsLoading(true);
 
-      // Call the onSubmit prop with the amount and isRepayAll flag
-      // onSubmit now returns the transaction ID
-      const txId = await onSubmit(amount, shouldUseRepayAll);
+      const txId = await onSubmit(amountStr, shouldUseRepayAll);
       setTransactionId(txId);
 
       // Only show success modal after transaction is actually completed
@@ -203,13 +197,11 @@ const RepayModal = ({
     setTransactionId(null);
   };
 
-  // Round values to 6 decimal places to avoid floating-point precision issues
-  // Most tokens use 6 decimals, and this ensures consistent comparison
-  const numAmount = amount ? parseFloat(amount) : 0;
+  const numAmount = amount !== "" && typeof amount === "number" ? amount : 0;
   const roundedAmount = Math.round(numAmount * 1000000) / 1000000;
   const roundedMaxRepay = Math.round(maxRepayAmount * 1000000) / 1000000;
   const isValidAmount =
-    amount && numAmount > 0 && roundedAmount <= roundedMaxRepay;
+    amount !== "" && numAmount > 0 && roundedAmount <= roundedMaxRepay;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -220,7 +212,7 @@ const RepayModal = ({
               transactionType="repay"
               asset={tokenSymbol}
               assetIcon={tokenIcon}
-              amount={amount}
+              amount={amount !== "" ? amount.toString() : ""}
               onViewTransaction={handleViewTransaction}
               onGoToPortfolio={handleGoToPortfolio}
               onMakeAnother={handleMakeAnother}
@@ -265,18 +257,16 @@ const RepayModal = ({
                       Amount
                     </Label>
                     <div className="relative">
-                      <Input
+                      <LocaleNumberInput
                         id="amount"
-                        type="number"
-                        inputMode="decimal"
                         placeholder="0.0"
                         autoFocus
                         value={amount}
-                        onChange={(e) => {
-                          setAmount(e.target.value);
-                          // Reset isRepayAll flag when user manually changes amount
+                        onChange={(v) => {
+                          setAmount(v ?? "");
                           setIsRepayAll(false);
                         }}
+                        formatOptions={{ maximumFractionDigits: 6 }}
                         className="bg-white/80 dark:bg-slate-800 border-gray-300 dark:border-slate-600 text-slate-800 dark:text-white pr-16 text-lg h-12"
                       />
                       <Button

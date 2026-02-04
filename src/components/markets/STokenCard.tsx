@@ -5,6 +5,7 @@ import DorkFiCard from "@/components/ui/DorkFiCard";
 import DorkFiButton from "@/components/ui/DorkFiButton";
 import APYDisplay from "@/components/APYDisplay";
 import BorrowAPYDisplay from "@/components/BorrowAPYDisplay";
+import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 
 interface STokenCardProps {
   market: OnDemandMarketData;
@@ -23,6 +24,7 @@ const STokenCard = ({
   onBorrowClick,
   onMintClick
 }: STokenCardProps) => {
+  const { formatCurrency, formatPercent } = useNumberI18n();
   return (
     <DorkFiCard
       key={market.asset}
@@ -55,7 +57,7 @@ const STokenCard = ({
             />
           </Badge>
           <div className="text-xs text-purple-700 dark:text-purple-300 mt-1">
-            ${(market.totalBorrowUSD / 1_000_000).toLocaleString()}
+            {formatCurrency(market.totalBorrowUSD / 1_000_000, "USD", { maximumFractionDigits: 0 })}
           </div>
         </div>
       </div>
@@ -64,7 +66,7 @@ const STokenCard = ({
         <div className="text-center">
           <div className="flex items-center justify-center md:justify-between mb-2">
             <span className="text-sm text-muted-foreground">Utilization</span>
-            <span className="text-sm font-medium ml-2 md:ml-0 text-purple-700 dark:text-purple-300">{market.utilization.toFixed(2)}%</span>
+            <span className="text-sm font-medium ml-2 md:ml-0 text-purple-700 dark:text-purple-300">{formatPercent(market.utilization / 100, { maximumFractionDigits: 2 })}</span>
           </div>
           <div className="flex justify-center md:justify-start">
             <Progress 
