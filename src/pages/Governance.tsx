@@ -191,9 +191,9 @@ const Governance = () => {
     }
   };
 
-  const filteredProposals = proposals.filter((proposal) => {
-    return selectedStatus === "all" || proposal.status === selectedStatus;
-  });
+  const filteredProposals = proposals
+    .filter((proposal) => selectedStatus === "all" || proposal.status === selectedStatus)
+    .sort((a, b) => b.startTime.getTime() - a.startTime.getTime());
 
   const activeProposals = filteredProposals.filter((p) => p.status === "active" && userVotes.get(p.id) === undefined);
   // Validate that all selected proposals have a vote direction

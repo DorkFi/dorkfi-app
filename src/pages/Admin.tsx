@@ -48,6 +48,7 @@ import {
   Database,
   Download,
   TestTube,
+  TimerOff,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import DorkFiCard from "@/components/ui/DorkFiCard";
@@ -149,7 +150,7 @@ import {
   ROLE_PRICE_FEED_MANAGER,
 } from "@/constants/roles";
 import { ProposalCategory, Proposal as UIProposal, ProposalStatus } from "@/types/governanceTypes";
-import { createProposalWithCategory, getEvents, decodeProposalCreatedEvent, getProposal, Proposal as ServiceProposal, snapPower, getPowerSource, snapMultiplier } from "@/services/governanceService";
+import { createProposalWithCategory, getEvents, decodeProposalCreatedEvent, getProposal, Proposal as ServiceProposal, snapPower, getPowerSource, snapMultiplier, closeVotingEarly } from "@/services/governanceService";
 import { getCategoryFromId } from "@/constants/governanceConstants";
 import { ProposalCard } from "@/components/governance/ProposalCard";
 import { VoterInfoLookup } from "@/components/governance/VoterInfoLookup";
@@ -396,6 +397,12 @@ export default function AdminDashboard() {
   const [isSnappingMultiplier, setIsSnappingMultiplier] = useState(false);
   const [snapMultiplierResult, setSnapMultiplierResult] = useState<{ snapshot: any; txns: string[] } | null>(null);
   const [snapMultiplierError, setSnapMultiplierError] = useState<string | null>(null);
+
+  // Close voting early state
+  const [closeVotingProposalId, setCloseVotingProposalId] = useState<string>("");
+  const [isClosingVoting, setIsClosingVoting] = useState(false);
+  const [closeVotingResult, setCloseVotingResult] = useState<string | null>(null);
+  const [closeVotingError, setCloseVotingError] = useState<string | null>(null);
 
   // Get power source state
   const [powerSourceQueryId, setPowerSourceQueryId] = useState<number | "">("");
@@ -14017,6 +14024,175 @@ export default function AdminDashboard() {
 
             {/* Power Multiplier Lookup Component */}
             <PowerMultiplierLookup />
+
+            {/* Close Voting Early */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <TimerOff className="h-5 w-5" />
+                  Close Voting Early
+                </CardTitle>
+                <CardDescription>
+                  Update voting end timestamp to current time so an active proposal may be finalized early. Typically an owner/admin operation.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-4">
+                  {proposals.filter((p) => p.status === "active").length > 0 && (
+                    <div className="space-y-2">
+                      <Label>Quick select active proposal</Label>
+                      <Select
+                        value={
+                          closeVotingProposalId &&
+                          proposals
+                            .filter((p) => p.status === "active")
+                            .some((p) => p.id === closeVotingProposalId)
+                            ? closeVotingProposalId
+                            : "__manual__"
+                        }
+                        onValueChange={(value) => {
+                          setCloseVotingProposalId(value === "__manual__" ? "" : value);
+                          setCloseVotingResult(null);
+                          setCloseVotingError(null);
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select an active proposal" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__manual__">Manual entry</SelectItem>
+                          {proposals
+                            .filter((p) => p.status === "active")
+                            .map((p) => (
+                              <SelectItem key={p.id} value={p.id}>
+                                {p.title} ({p.id.slice(0, 8)}...)
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  <div className="space-y-2">
+                    <Label htmlFor="close-voting-proposal-id">Proposal ID (hex) *</Label>
+                    <Input
+                      id="close-voting-proposal-id"
+                      placeholder="Enter proposal ID (e.g. from governance events)"
+                      value={closeVotingProposalId}
+                      onChange={(e) => {
+                        setCloseVotingProposalId(e.target.value);
+                        setCloseVotingResult(null);
+                        setCloseVotingError(null);
+                      }}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Use the proposal ID from the Governance Proposals list below, or paste a hex string (32 bytes).
+                    </p>
+                  </div>
+                </div>
+
+                {closeVotingResult && (
+                  <div className="p-3 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400 mt-0.5" />
+                      <div className="text-sm flex-1">
+                        <p className="font-medium text-green-800 dark:text-green-200">
+                          Voting Closed Successfully
+                        </p>
+                        <p className="mt-1 text-green-700 dark:text-green-300 break-all">
+                          {closeVotingResult}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {closeVotingError && (
+                  <div className="p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 text-red-600 dark:text-red-400 mt-0.5" />
+                      <div className="text-sm">
+                        <p className="font-medium text-red-800 dark:text-red-200">
+                          Close Voting Failed
+                        </p>
+                        <p className="text-red-700 dark:text-red-300">
+                          {closeVotingError}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex gap-2 pt-4">
+                  <DorkFiButton
+                    variant="primary"
+                    className="flex-1"
+                    onClick={async () => {
+                      if (!activeAccount?.address || !signTransactions) {
+                        toast.error("Please connect your wallet");
+                        return;
+                      }
+
+                      const proposalId = closeVotingProposalId.trim();
+                      if (!proposalId) {
+                        toast.error("Please enter a proposal ID");
+                        return;
+                      }
+
+                      setIsClosingVoting(true);
+                      setCloseVotingResult(null);
+                      setCloseVotingError(null);
+                      try {
+                        const result = await closeVotingEarly(
+                          { proposalId, sender: activeAccount.address },
+                          currentNetwork
+                        );
+                        if (result.success && result.txns?.length) {
+                          toast.info("Please Sign Transaction", {
+                            description: "Please open your wallet and sign the transaction",
+                            duration: 10000,
+                          });
+                          const stxns = await signTransactions(
+                            result.txns.map((txn: string) =>
+                              Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+                            )
+                          );
+                          const clients = algorandService.initializeClients(
+                            getNetworkConfig(currentNetwork).walletNetworkId as AlgorandNetwork
+                          );
+                          const res = await clients.algod.sendRawTransaction(stxns).do();
+                          await waitForConfirmation(clients.algod, res.txid, 4);
+                          setCloseVotingResult(`Transaction confirmed: ${res.txid}`);
+                          toast.success("Voting closed successfully");
+                          fetchGovernanceEvents();
+                        } else {
+                          setCloseVotingError(result.error?.toString() ?? "Unknown error");
+                          toast.error(result.error?.toString());
+                        }
+                      } catch (err: any) {
+                        const msg = err?.message ?? "Failed to close voting early";
+                        setCloseVotingError(msg);
+                        toast.error(msg);
+                      } finally {
+                        setIsClosingVoting(false);
+                      }
+                    }}
+                    disabled={isClosingVoting || !closeVotingProposalId.trim()}
+                  >
+                    {isClosingVoting ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Closing...
+                      </>
+                    ) : (
+                      <>
+                        <TimerOff className="h-4 w-4 mr-2" />
+                        Close Voting Early
+                      </>
+                    )}
+                  </DorkFiButton>
+                </div>
+              </CardContent>
+            </Card>
 
             {/* Governance Proposals */}
             <Card>
