@@ -5,8 +5,9 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { LocaleNumberInput } from "@/components/ui/LocaleNumberInput";
+import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { DollarSign, Info, Calculator, AlertTriangle } from "lucide-react";
 import { LiquidationAccount } from "@/hooks/useLiquidationData";
@@ -40,6 +41,8 @@ export default function AmountInputStep({
   collateralAssets,
   borrowedAssets,
 }: AmountInputStepProps) {
+  const { parseNumber } = useNumberI18n();
+
   // Use real-time asset data instead of stale account data
   const selectedCollateralAsset = collateralAssets?.find(
     (a) => a.symbol === selectedCollateral
@@ -61,27 +64,19 @@ export default function AmountInputStep({
   // Final max amount is the minimum of max liquidatable (with close factor) and debt borrow value
   const finalMaxAmount = Math.min(maxLiquidatableAmount, maxRepayForSelectedDebt);
 
-  // Validation logic
-  const currentAmount = parseFloat(repayAmountUSD) || 0;
+  // Parse amount using locale-aware parsing
+  const parsedAmount = parseNumber(repayAmountUSD);
+  const currentAmount = parsedAmount ?? 0;
   const isAmountValid = currentAmount > 0 && currentAmount <= finalMaxAmount;
   const isAmountExceeded = currentAmount > finalMaxAmount;
-  const isAmountTooSmall = currentAmount <= 0 && repayAmountUSD !== "";
+  const isAmountTooSmall = currentAmount <= 0 && repayAmountUSD.trim() !== "";
 
-  // Handle amount change with validation
-  const handleAmountChange = (value: string) => {
-    // Allow empty string for clearing
-    if (value === "") {
+  const handleAmountChange = (value: number | null) => {
+    if (value === null || value < 0) {
       onAmountChange("");
       return;
     }
-
-    // Only allow positive numbers
-    const numValue = parseFloat(value);
-    if (isNaN(numValue) || numValue < 0) {
-      return;
-    }
-
-    onAmountChange(value);
+    onAmountChange(value.toString());
   };
 
   return (
@@ -142,18 +137,17 @@ export default function AmountInputStep({
                 </Tooltip>
               </div>
               <div className="relative">
-                <Input
+                <LocaleNumberInput
                   id="repay-amount"
-                  type="number"
                   placeholder="0.00"
-                  value={repayAmountUSD}
-                  onChange={(e) => handleAmountChange(e.target.value)}
+                  value={parsedAmount ?? ""}
+                  onChange={handleAmountChange}
+                  formatOptions={{ maximumFractionDigits: 2 }}
                   className={`bg-white/80 dark:bg-slate-700 text-slate-800 dark:text-white h-12 text-lg pr-20 ${
                     isAmountExceeded || isAmountTooSmall
                       ? "border-red-500 dark:border-red-400 focus:border-red-500 dark:focus:border-red-400"
                       : "border-gray-200 dark:border-slate-600"
                   }`}
-                  max={finalMaxAmount}
                   disabled={!selectedDebt}
                 />
                 <button
@@ -275,9 +269,9 @@ export default function AmountInputStep({
                     Debt to Repay:
                   </span>
                   <span className="text-slate-800 dark:text-white font-semibold">
-                    {(parseFloat(repayAmountUSD) / (calculations?.debtPrice || 1)).toFixed(6)} {selectedDebt}
+                    {(currentAmount / (calculations?.debtPrice || 1)).toFixed(6)} {selectedDebt}
                     <span className="text-sm text-muted-foreground ml-2">
-                      (${parseFloat(repayAmountUSD).toLocaleString()})
+                      (${currentAmount.toLocaleString()})
                     </span>
                   </span>
                 </div>
@@ -296,7 +290,7 @@ export default function AmountInputStep({
                   <span className="text-slate-800 dark:text-white font-semibold">
                     $
                     {(
-                      parseFloat(repayAmountUSD) + calculations.liquidationBonus
+                      currentAmount + calculations.liquidationBonus
                     ).toLocaleString()}
                   </span>
                 </div>

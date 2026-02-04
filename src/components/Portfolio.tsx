@@ -93,12 +93,14 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 
 const Portfolio = () => {
   const { address: routeAddress } = useParams<{ address: string }>();
   const navigate = useNavigate();
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
+  const { formatNumber, formatCurrency, formatPercent } = useNumberI18n();
 
   // Use address from route params if available, otherwise fall back to activeAccount address
   const displayAddress = routeAddress || activeAccount?.address;
@@ -4215,22 +4217,14 @@ const Portfolio = () => {
             {user?.computed?.globalNetPortfolioValue !== undefined && (
               <span className="ml-2">
                 • Net Value:{" "}
-                {Number(user.computed.globalNetPortfolioValue).toLocaleString(
-                  "en-US",
-                  {
-                    style: "currency",
-                    currency: "USD",
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  }
-                )}
+                {formatCurrency(Number(user.computed.globalNetPortfolioValue), "USD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
             )}
             {marketData.length > 0 && totalBorrowed > 0 && (
               <span className="ml-2">
                 • Collateral Factor:{" "}
-                {(weightedCollateralFactor * 100).toFixed(0)}% • Liquidation
-                Threshold: {(weightedLiquidationThreshold * 100).toFixed(1)}%
+                {formatPercent(weightedCollateralFactor, { maximumFractionDigits: 0 })} • Liquidation
+                Threshold: {formatPercent(weightedLiquidationThreshold, { maximumFractionDigits: 1 })}
               </span>
             )}
           </div>
@@ -4538,7 +4532,7 @@ const Portfolio = () => {
                                 cy="50%"
                                 labelLine={false}
                                 label={({ name, percent }) =>
-                                  `${name}: ${(percent * 100).toFixed(0)}%`
+                                  `${name}: ${formatPercent(percent, { maximumFractionDigits: 0 })}`
                                 }
                                 outerRadius={80}
                                 fill="#8884d8"
@@ -4553,7 +4547,7 @@ const Portfolio = () => {
                               </Pie>
                               <Tooltip
                                 formatter={(value: number) => [
-                                  `$${value.toLocaleString("en-US", {
+                                  `${formatCurrency(value, "USD", {
                                     minimumFractionDigits: 2,
                                     maximumFractionDigits: 2,
                                   })}`,
@@ -4581,11 +4575,7 @@ const Portfolio = () => {
                                   </span>
                                 </div>
                                 <span className="font-semibold">
-                                  {(
-                                    (item.value / totalAllocation) *
-                                    100
-                                  ).toFixed(1)}
-                                  %
+                                  {formatPercent(item.value / totalAllocation, { maximumFractionDigits: 1 })}
                                 </span>
                               </div>
                             ))}
@@ -4685,7 +4675,7 @@ const Portfolio = () => {
                                       <Info className="w-3 h-3" />
                                     </div>
                                     <div className="text-base font-bold">
-                                      {lowestLiquidationMargin.toFixed(2)}%
+                                      {formatPercent(lowestLiquidationMargin / 100, { maximumFractionDigits: 2 })}
                                     </div>
                                     <div className="text-xs text-muted-foreground mt-1">
                                       Across all networks
@@ -4723,18 +4713,12 @@ const Portfolio = () => {
                                 {topBorrowedAsset.asset}
                               </div>
                               <div className="text-sm text-muted-foreground mt-1">
-                                {topBorrowedPercentage.toFixed(1)}% of total
+                                {formatPercent(topBorrowedPercentage / 100, { maximumFractionDigits: 1 })} of total
                                 borrows
                               </div>
                               <div className="text-xs text-muted-foreground mt-1">
                                 $
-                                {topBorrowedAsset.value.toLocaleString(
-                                  "en-US",
-                                  {
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
-                                  }
-                                )}
+                                {formatNumber(topBorrowedAsset.value, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               </div>
                             </div>
                           </div>
@@ -4763,7 +4747,7 @@ const Portfolio = () => {
                                       : "text-red-600 dark:text-red-400"
                                     }`}
                                 >
-                                  {closestToLiquidation.healthFactor.toFixed(2)}
+                                  {formatNumber(closestToLiquidation.healthFactor, { maximumFractionDigits: 2 })}
                                 </span>
                               </div>
                               {closestToLiquidation.healthFactor < 1.5 && (
@@ -4813,7 +4797,7 @@ const Portfolio = () => {
                                     </div>
                                     <div className="text-sm font-semibold">
                                       {displayHealthFactor !== null
-                                        ? displayHealthFactor.toFixed(2)
+                                        ? formatNumber(displayHealthFactor, { maximumFractionDigits: 2 })
                                         : "N/A"}
                                     </div>
                                   </div>
@@ -5073,12 +5057,7 @@ const Portfolio = () => {
                                     Collateral:
                                   </span>
                                   <span className="text-sm font-semibold">
-                                    {networkCollateral.toLocaleString("en-US", {
-                                      style: "currency",
-                                      currency: "USD",
-                                      minimumFractionDigits: 2,
-                                      maximumFractionDigits: 2,
-                                    })}
+                                    {formatCurrency(networkCollateral, "USD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </span>
                                 </div>
 
@@ -5087,12 +5066,7 @@ const Portfolio = () => {
                                     Borrowed:
                                   </span>
                                   <span className="text-sm font-semibold">
-                                    {networkBorrow.toLocaleString("en-US", {
-                                      style: "currency",
-                                      currency: "USD",
-                                      minimumFractionDigits: 2,
-                                      maximumFractionDigits: 2,
-                                    })}
+                                    {formatCurrency(networkBorrow, "USD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </span>
                                 </div>
 
@@ -5106,12 +5080,7 @@ const Portfolio = () => {
                                       : "text-red-600 dark:text-red-400"
                                       }`}
                                   >
-                                    {networkNetValue.toLocaleString("en-US", {
-                                      style: "currency",
-                                      currency: "USD",
-                                      minimumFractionDigits: 2,
-                                      maximumFractionDigits: 2,
-                                    })}
+                                    {formatCurrency(networkNetValue, "USD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </span>
                                 </div>
 
@@ -5132,7 +5101,7 @@ const Portfolio = () => {
                                     >
                                       {networkHealthFactor === null
                                         ? "N/A"
-                                        : networkHealthFactor.toFixed(2)}
+                                        : formatNumber(networkHealthFactor, { maximumFractionDigits: 2 })}
                                     </span>
                                   </div>
                                   <div className="flex justify-between items-center">
@@ -5149,7 +5118,7 @@ const Portfolio = () => {
                                             : "text-red-600 dark:text-red-400"
                                         }`}
                                     >
-                                      {networkLiquidationMargin.toFixed(2)}%
+                                      {formatPercent(networkLiquidationMargin / 100, { maximumFractionDigits: 2 })}
                                     </span>
                                   </div>
                                 </div>
@@ -5402,20 +5371,18 @@ const Portfolio = () => {
                               position.appId?.toString()
                             ) || "N/A"}
                           </TableCell>
-                          <TableCell>${borrowValueUsd.toFixed(2)}</TableCell>
+                          <TableCell>{formatCurrency(borrowValueUsd, "USD", { maximumFractionDigits: 2 })}</TableCell>
                           <TableCell>
-                            ${position.collateralValueUsd?.toFixed(2) || "0.00"}
+                            {position.collateralValueUsd != null ? formatCurrency(position.collateralValueUsd, "USD", { maximumFractionDigits: 2 }) : formatCurrency(0, "USD", { maximumFractionDigits: 2 })}
                           </TableCell>
                           <TableCell>
-                            {position.debtCollateralRatio
-                              ? `${(position.debtCollateralRatio * 100).toFixed(
-                                2
-                              )}%`
+                            {position.debtCollateralRatio != null
+                              ? formatPercent(position.debtCollateralRatio, { maximumFractionDigits: 2 })
                               : "N/A"}
                           </TableCell>
                           <TableCell>
                             <span className="font-medium">
-                              ${liquidationAmount.toFixed(2)}
+                              {formatCurrency(liquidationAmount, "USD", { maximumFractionDigits: 2 })}
                             </span>
                           </TableCell>
                           <TableCell>
@@ -6717,48 +6684,34 @@ const Portfolio = () => {
                                     {depositMarketLabel || "-"}
                                   </TableCell>
                                   <TableCell>
-                                    {deposit.balance.toLocaleString("en-US", {
-                                      minimumFractionDigits: 2,
-                                      maximumFractionDigits: 6,
-                                    })}
+                                    {formatNumber(deposit.balance, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}
                                   </TableCell>
                                   <TableCell>
-                                    {deposit.value.toLocaleString("en-US", {
-                                      style: "currency",
-                                      currency: "USD",
-                                      minimumFractionDigits: 2,
-                                      maximumFractionDigits: 2,
-                                    })}
+                                    {formatCurrency(deposit.value, "USD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </TableCell>
                                   <TableCell>
                                     <span className="text-green-600 dark:text-green-400">
-                                      {deposit.apy.toFixed(2)}%
+                                      {formatPercent(deposit.apy / 100, { maximumFractionDigits: 2 })}
                                     </span>
                                   </TableCell>
                                   <TableCell>
                                     {deposit.accruedInterest > 0 ? (
                                       <div className="flex flex-col">
                                         <span className="text-sm font-medium">
-                                          {deposit.accruedInterest.toLocaleString(
-                                            "en-US",
-                                            {
-                                              minimumFractionDigits: 2,
-                                              maximumFractionDigits: 6,
-                                            }
-                                          )}{" "}
+                                          {formatNumber(deposit.accruedInterest, {
+                                            minimumFractionDigits: 2,
+                                            maximumFractionDigits: 6,
+                                          })}{" "}
                                           {deposit.asset}
                                         </span>
                                         <span className="text-xs text-muted-foreground">
-                                          {(
+                                          {formatCurrency(
                                             deposit.accruedInterestValue ||
                                             deposit.accruedInterest *
-                                            (deposit.tokenPrice || 1)
-                                          ).toLocaleString("en-US", {
-                                            style: "currency",
-                                            currency: "USD",
-                                            minimumFractionDigits: 2,
-                                            maximumFractionDigits: 2,
-                                          })}
+                                            (deposit.tokenPrice || 1),
+                                            "USD",
+                                            { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+                                          )}
                                         </span>
                                       </div>
                                     ) : (
@@ -6770,14 +6723,11 @@ const Portfolio = () => {
                                   <TableCell>
                                     {isCollateral ? (
                                       <span className="font-semibold">
-                                        {(
-                                          deposit.value * marketCollateralFactor
-                                        ).toLocaleString("en-US", {
-                                          style: "currency",
-                                          currency: "USD",
-                                          minimumFractionDigits: 2,
-                                          maximumFractionDigits: 2,
-                                        })}
+                                        {formatCurrency(
+                                          deposit.value * marketCollateralFactor,
+                                          "USD",
+                                          { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+                                        )}
                                       </span>
                                     ) : (
                                       <span className="text-muted-foreground">
@@ -6787,18 +6737,12 @@ const Portfolio = () => {
                                   </TableCell>
                                   <TableCell>
                                     <span className="text-muted-foreground">
-                                      {(marketCollateralFactor * 100).toFixed(
-                                        2
-                                      )}
-                                      %
+                                      {formatPercent(marketCollateralFactor, { maximumFractionDigits: 2 })}
                                     </span>
                                   </TableCell>
                                   <TableCell>
                                     <span className="text-muted-foreground">
-                                      {(
-                                        marketLiquidationThreshold * 100
-                                      ).toFixed(2)}
-                                      %
+                                      {formatPercent(marketLiquidationThreshold, { maximumFractionDigits: 2 })}
                                     </span>
                                   </TableCell>
                                   <TableCell>
@@ -7551,35 +7495,23 @@ const Portfolio = () => {
                                       </TableCell>
                                       <TableCell>
                                         $
-                                        {asset.value.toLocaleString("en-US", {
-                                          minimumFractionDigits: 2,
-                                          maximumFractionDigits: 2,
-                                        })}
+                                        {formatNumber(asset.value, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                       </TableCell>
                                       <TableCell>
-                                        {(
-                                          asset.liquidationFactor * 100
-                                        ).toFixed(1)}
-                                        %
+                                        {formatPercent(asset.liquidationFactor, { maximumFractionDigits: 1 })}
                                       </TableCell>
                                       <TableCell>
                                         <span className="text-muted-foreground">
-                                          $
-                                          {asset.poolCollateralValueUSD.toLocaleString(
-                                            "en-US",
-                                            {
-                                              minimumFractionDigits: 2,
-                                              maximumFractionDigits: 2,
-                                            }
-                                          )}
+                                          {formatCurrency(asset.poolCollateralValueUSD, "USD", {
+                                            minimumFractionDigits: 2,
+                                            maximumFractionDigits: 2,
+                                          })}
                                         </span>
                                       </TableCell>
                                       {hasPoolBorrows && (
                                         <TableCell>
                                           <span className="text-muted-foreground">
-                                            $
-                                            {asset.poolBorrowsUSD.toLocaleString(
-                                              "en-US",
+                                            {formatCurrency(asset.poolBorrowsUSD, "USD",
                                               {
                                                 minimumFractionDigits: 2,
                                                 maximumFractionDigits: 2,
@@ -7597,7 +7529,7 @@ const Portfolio = () => {
                                               : "text-yellow-500"
                                             }`}
                                         >
-                                          {asset.riskRatio.toFixed(3)}
+                                          {formatNumber(asset.riskRatio, { maximumFractionDigits: 3 })}
                                         </span>
                                       </TableCell>
                                       <TableCell>
@@ -8491,48 +8423,34 @@ const Portfolio = () => {
                                     {borrowMarketLabel || "-"}
                                   </TableCell>
                                   <TableCell>
-                                    {borrow.balance.toLocaleString("en-US", {
-                                      minimumFractionDigits: 2,
-                                      maximumFractionDigits: 6,
-                                    })}
+                                    {formatNumber(borrow.balance, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}
                                   </TableCell>
                                   <TableCell>
-                                    {borrow.value.toLocaleString("en-US", {
-                                      style: "currency",
-                                      currency: "USD",
-                                      minimumFractionDigits: 2,
-                                      maximumFractionDigits: 2,
-                                    })}
+                                    {formatCurrency(borrow.value, "USD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </TableCell>
                                   <TableCell>
                                     <span className="text-red-600 dark:text-red-400">
-                                      {borrow.apy.toFixed(2)}%
+                                      {formatPercent(borrow.apy / 100, { maximumFractionDigits: 2 })}
                                     </span>
                                   </TableCell>
                                   <TableCell>
                                     {borrow.accruedInterest > 0 ? (
                                       <div className="flex flex-col">
                                         <span className="text-sm font-medium text-amber-600 dark:text-amber-400">
-                                          {borrow.accruedInterest.toLocaleString(
-                                            "en-US",
-                                            {
-                                              minimumFractionDigits: 2,
-                                              maximumFractionDigits: 6,
-                                            }
-                                          )}{" "}
+                                          {formatNumber(borrow.accruedInterest, {
+                                            minimumFractionDigits: 2,
+                                            maximumFractionDigits: 6,
+                                          })}{" "}
                                           {borrow.asset}
                                         </span>
                                         <span className="text-xs text-muted-foreground">
-                                          {(
+                                          {formatCurrency(
                                             borrow.accruedInterestValue ||
                                             borrow.accruedInterest *
-                                            (borrow.tokenPrice || 1)
-                                          ).toLocaleString("en-US", {
-                                            style: "currency",
-                                            currency: "USD",
-                                            minimumFractionDigits: 2,
-                                            maximumFractionDigits: 2,
-                                          })}
+                                            (borrow.tokenPrice || 1),
+                                            "USD",
+                                            { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+                                          )}
                                         </span>
                                       </div>
                                     ) : (
@@ -8557,20 +8475,16 @@ const Portfolio = () => {
                                         />
                                       </div>
                                       <span className="text-sm font-medium min-w-[50px]">
-                                        {ltvUsage.toFixed(1)}%
+                                        {formatPercent(ltvUsage / 100, { maximumFractionDigits: 1 })}
                                       </span>
                                     </div>
                                   </TableCell>
                                   <TableCell>
                                     <span className="text-sm">
-                                      $
-                                      {liquidationPrice.toLocaleString(
-                                        "en-US",
-                                        {
-                                          minimumFractionDigits: 2,
-                                          maximumFractionDigits: 4,
-                                        }
-                                      )}
+                                      {formatCurrency(liquidationPrice, "USD", {
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 4,
+                                      })}
                                     </span>
                                   </TableCell>
                                   <TableCell>
@@ -9304,33 +9218,24 @@ const Portfolio = () => {
                                         }
                                       >
                                         {isNetPositive ? "+" : ""}
-                                        {(item.netInterest || 0).toLocaleString(
-                                          "en-US",
-                                          {
-                                            minimumFractionDigits: 2,
-                                            maximumFractionDigits: 6,
-                                          }
-                                        )}{" "}
+                                        {formatNumber(item.netInterest || 0, {
+                                          minimumFractionDigits: 2,
+                                          maximumFractionDigits: 6,
+                                        })}{" "}
                                         {item.asset}
                                       </span>
                                       {hasDeposits && hasBorrows && (
                                         <span className="text-xs text-muted-foreground mt-0.5">
                                           Earned:{" "}
-                                          {item.earnedInterest.toLocaleString(
-                                            "en-US",
-                                            {
-                                              minimumFractionDigits: 2,
-                                              maximumFractionDigits: 6,
-                                            }
-                                          )}{" "}
+                                          {formatNumber(item.earnedInterest, {
+                                            minimumFractionDigits: 2,
+                                            maximumFractionDigits: 6,
+                                          })}{" "}
                                           | Owed:{" "}
-                                          {item.owedInterest.toLocaleString(
-                                            "en-US",
-                                            {
-                                              minimumFractionDigits: 2,
-                                              maximumFractionDigits: 6,
-                                            }
-                                          )}
+                                          {formatNumber(item.owedInterest, {
+                                            minimumFractionDigits: 2,
+                                            maximumFractionDigits: 6,
+                                          })}
                                         </span>
                                       )}
                                     </div>
@@ -9344,11 +9249,7 @@ const Portfolio = () => {
                                       }
                                     >
                                       {isNetPositive ? "+" : ""}
-                                      {(
-                                        item.netInterestValue || 0
-                                      ).toLocaleString("en-US", {
-                                        style: "currency",
-                                        currency: "USD",
+                                      {formatCurrency(item.netInterestValue || 0, "USD", {
                                         minimumFractionDigits: 2,
                                         maximumFractionDigits: 2,
                                       })}
@@ -9576,7 +9477,7 @@ const Portfolio = () => {
                 <div className="text-sm text-red-300 mb-2">Health Factor</div>
                 <div className="text-2xl font-bold text-red-400">
                   {displayHealthFactor !== null
-                    ? displayHealthFactor.toFixed(3)
+                    ? formatNumber(displayHealthFactor, { maximumFractionDigits: 3 })
                     : "N/A"}
                 </div>
                 <div className="text-xs text-red-300 mt-1">
@@ -9588,7 +9489,7 @@ const Portfolio = () => {
                   Liquidation Margin
                 </div>
                 <div className="text-2xl font-bold text-red-400">
-                  {liquidationMargin.toFixed(1)}%
+                  {formatPercent(liquidationMargin / 100, { maximumFractionDigits: 1 })}
                 </div>
                 <div className="text-xs text-red-300 mt-1">
                   Safety buffer remaining
@@ -9619,20 +9520,17 @@ const Portfolio = () => {
                             {borrow.asset}
                           </div>
                           <div className="text-xs text-red-300">
-                            {borrow.balance.toFixed(2)} {borrow.asset}
+                            {formatNumber(borrow.balance, { maximumFractionDigits: 2 })} {borrow.asset}
                           </div>
                         </div>
                       </div>
                       <div className="text-right">
                         <div className="text-sm font-bold text-red-400">
-                          {borrow.value.toLocaleString("en-US", {
-                            style: "currency",
-                            currency: "USD",
-                          })}
+                          {formatCurrency(borrow.value, "USD", { maximumFractionDigits: 2 })}
                         </div>
                         <div className="text-xs text-red-300">
-                          {borrow.apy.toFixed(2)}% APY • Risk:{" "}
-                          {(borrow.riskFactor * 100).toFixed(1)}%
+                          {formatPercent(borrow.apy / 100, { maximumFractionDigits: 2 })} APY • Risk:{" "}
+                          {formatPercent(borrow.riskFactor, { maximumFractionDigits: 1 })}
                         </div>
                       </div>
                     </div>
@@ -10061,10 +9959,7 @@ const Portfolio = () => {
                         Debt Value
                       </p>
                       <p className="font-medium">
-                        $
-                        {selectedLiquidationPosition.borrowValueUsd?.toFixed(
-                          2
-                        ) || "0.00"}
+                        {formatCurrency(selectedLiquidationPosition.borrowValueUsd ?? 0, "USD", { maximumFractionDigits: 2 })}
                       </p>
                     </div>
                     <div>
@@ -10072,10 +9967,7 @@ const Portfolio = () => {
                         Collateral Value
                       </p>
                       <p className="font-medium">
-                        $
-                        {selectedLiquidationPosition.collateralValueUsd?.toFixed(
-                          2
-                        ) || "0.00"}
+                        {formatCurrency(selectedLiquidationPosition.collateralValueUsd ?? 0, "USD", { maximumFractionDigits: 2 })}
                       </p>
                     </div>
                     <div>
@@ -10083,10 +9975,7 @@ const Portfolio = () => {
                         Liquidation Value
                       </p>
                       <p className="font-medium">
-                        $
-                        {selectedLiquidationPosition.liquidationAmount?.toFixed(
-                          2
-                        ) || "0.00"}
+                        {formatCurrency(selectedLiquidationPosition.liquidationAmount ?? 0, "USD", { maximumFractionDigits: 2 })}
                       </p>
                     </div>
                     <div>
@@ -10329,7 +10218,7 @@ const Portfolio = () => {
                         Debt Value (USD):
                       </span>
                       <span className="text-sm">
-                        ${borrowValueUsd.toFixed(2)}
+                        {formatCurrency(borrowValueUsd, "USD", { maximumFractionDigits: 2 })}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
@@ -10341,7 +10230,7 @@ const Portfolio = () => {
                           "Loading..."
                         ) : (
                           <>
-                            {tokenAmount.toFixed(6)} {debtSymbol}
+                            {formatNumber(tokenAmount, { maximumFractionDigits: 6 })} {debtSymbol}
                             {repayWalletBalance !== null &&
                               repayWalletBalance < calculatedTokenAmount && (
                                 <span className="text-xs text-muted-foreground ml-2">
@@ -10358,14 +10247,14 @@ const Portfolio = () => {
                           Your Wallet Balance:
                         </span>
                         <span className="text-sm">
-                          {repayWalletBalance.toFixed(6)} {debtSymbol}
+                          {formatNumber(repayWalletBalance, { maximumFractionDigits: 6 })} {debtSymbol}
                         </span>
                       </div>
                     )}
                     {repayWalletBalance !== null &&
                       repayWalletBalance < calculatedTokenAmount && (
                         <div className="text-xs text-muted-foreground p-2 bg-yellow-50 dark:bg-yellow-900/20 rounded">
-                          Note: Your wallet balance ({repayWalletBalance.toFixed(6)}) is less than the full debt amount ({calculatedTokenAmount.toFixed(6)}). Only {tokenAmount.toFixed(6)} will be repaid.
+                          Note: Your wallet balance ({formatNumber(repayWalletBalance, { maximumFractionDigits: 6 })}) is less than the full debt amount ({formatNumber(calculatedTokenAmount, { maximumFractionDigits: 6 })}). Only {formatNumber(tokenAmount, { maximumFractionDigits: 6 })} will be repaid.
                         </div>
                       )}
                     <div className="flex justify-between items-center">

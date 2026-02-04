@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { LocaleNumberInput } from "@/components/ui/LocaleNumberInput";
 import { useTokenPrice } from "@/hooks/useTokenPrice";
 import { getTokenConfig, NetworkId } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
@@ -53,7 +53,7 @@ const SupplyBorrowForm = ({
   maxBorrowError = null,
   network,
 }: SupplyBorrowFormProps) => {
-  const [amount, setAmount] = useState("");
+  const [amount, setAmount] = useState<number | "">("");
   const [fiatValue, setFiatValue] = useState(0);
   const [validationError, setValidationError] = useState<string | null>(null);
 
@@ -76,44 +76,32 @@ const SupplyBorrowForm = ({
     decimals,
   });
 
-  // Input validation function
-  const validateAmount = (value: string): string | null => {
-    if (!value) return null;
-
-    const numValue = parseFloat(value);
-
-    // Check if it's a valid number
-    if (isNaN(numValue) || numValue < 0) {
-      return "Please enter a valid amount";
+  // Input validation function (amount is number | "" from LocaleNumberInput)
+  const validateAmount = (numValue: number | null): string | null => {
+    if (numValue === null || typeof numValue !== "number" || numValue !== numValue || numValue < 0) {
+      return null;
     }
+    const value = numValue;
 
     // Check wallet balance for deposits
-    if (mode === "deposit" && numValue > walletBalance) {
+    if (mode === "deposit" && value > walletBalance) {
       return "Insufficient wallet balance";
     }
 
     // Check available liquidity for borrows
     if (mode === "borrow") {
-      // Round and apply buffer to availableToSupplyOrBorrow to avoid precision issues
       const buffer = 0.1;
       const maxBorrowable = availableToSupplyOrBorrow * (1 - buffer);
       const roundedMaxBorrowable = Number(maxBorrowable.toFixed(decimals));
 
-      if (numValue > roundedMaxBorrowable) {
-        console.log({
-          availableToSupplyOrBorrow,
-          maxBorrowable,
-          roundedMaxBorrowable,
-          numValue,
-          decimals,
-        });
+      if (value > roundedMaxBorrowable) {
         return "Insufficient liquidity available";
       }
     }
 
     // Check market capacity for deposits
     if (mode === "deposit" && maxTotalDeposits > 0) {
-      const projectedTotalSupply = totalSupply + numValue;
+      const projectedTotalSupply = totalSupply + value;
       if (projectedTotalSupply > maxTotalDeposits) {
         const maxDeposit = Math.max(0, maxTotalDeposits - totalSupply);
         return `Deposit would exceed market capacity. Maximum deposit: ${maxDeposit.toFixed(
@@ -121,21 +109,18 @@ const SupplyBorrowForm = ({
         )} ${asset}`;
       }
 
-      // Warning when approaching capacity (within 5% of limit)
       const capacityThreshold = maxTotalDeposits * 0.95;
       if (projectedTotalSupply > capacityThreshold) {
         const remainingCapacity = maxTotalDeposits - totalSupply;
-        const warningMessage = `Warning: This deposit will use ${(
-          (numValue / remainingCapacity) *
-          100
-        ).toFixed(1)}% of remaining market capacity`;
-        // Don't block the transaction, just show warning
-        console.warn(warningMessage);
+        console.warn(
+          `Warning: This deposit will use ${((value / remainingCapacity) * 100).toFixed(1)}% of remaining market capacity`
+        );
       }
     }
 
-    // Check decimal precision
-    const decimalPlaces = value.split(".")[1]?.length || 0;
+    // Check decimal precision (compare as string to avoid float issues)
+    const valueStr = value.toString();
+    const decimalPlaces = valueStr.split(".")[1]?.length || 0;
     if (decimalPlaces > decimals) {
       return `Maximum ${decimals} decimal places allowed`;
     }
@@ -143,28 +128,31 @@ const SupplyBorrowForm = ({
     return null;
   };
 
+  const numAmount = amount === "" ? null : amount;
+
   // Calculate USD value and projected earnings
   useEffect(() => {
-    const error = validateAmount(amount);
+    const error = validateAmount(numAmount);
     setValidationError(error);
 
-    if (amount && tokenPrice > 0) {
-      const numAmount =
-        parseFloat(amount) * (Math.pow(10, decimals) / Math.pow(10, 6));
-      setFiatValue(numAmount * tokenPrice);
+    if (numAmount !== null && numAmount > 0 && tokenPrice > 0) {
+      const scaled = numAmount * (Math.pow(10, decimals) / Math.pow(10, 6));
+      setFiatValue(scaled * tokenPrice);
     } else {
       setFiatValue(0);
     }
-    onAmountChange(amount, fiatValue);
+    onAmountChange(numAmount !== null ? numAmount.toString() : "", fiatValue);
   }, [
     amount,
     tokenPrice,
-    fiatValue,
     onAmountChange,
     walletBalance,
     availableToSupplyOrBorrow,
+    totalSupply,
+    maxTotalDeposits,
     decimals,
     mode,
+    asset,
   ]);
 
   // Calculate max borrowable amount based on market liquidity only
@@ -176,7 +164,6 @@ const SupplyBorrowForm = ({
 
   const handleMaxClick = () => {
     if (mode === "deposit") {
-      // Use minimum of wallet balance and maximum depositable amount
       let maxDepositable = walletBalance;
 
       if (
@@ -186,21 +173,17 @@ const SupplyBorrowForm = ({
       ) {
         const remainingCapacity = Math.max(0, maxTotalDeposits - totalSupply);
         maxDepositable = Math.min(walletBalance, remainingCapacity);
-
-        // TODO adjust when network token and borrow mode accordingly
       }
 
-      setAmount(maxDepositable.toFixed(decimals));
+      setAmount(Number(maxDepositable.toFixed(decimals)));
     } else {
-      // For borrow mode, use the calculated max borrowable amount
-      const maxBorrowAmount = calculateMaxBorrowable(); // Use actual value
-      setAmount(maxBorrowAmount.toFixed(decimals));
+      const maxBorrowAmount = calculateMaxBorrowable();
+      setAmount(Number(maxBorrowAmount.toFixed(decimals)));
     }
   };
 
   const handleQuickAmount = (percentage: number) => {
     if (mode === "deposit") {
-      // Use 100% of wallet balance for all tokens
       let maxDepositable = walletBalance;
 
       if (
@@ -210,29 +193,16 @@ const SupplyBorrowForm = ({
       ) {
         const remainingCapacity = Math.max(0, maxTotalDeposits - totalSupply);
         maxDepositable = Math.min(walletBalance, remainingCapacity);
-
-        // TODO adjust by min balance + buffer if network token (gas)
-        // Scale down by 5% to handle edge cases and rounding errors
-        //maxDepositable = maxDepositable
       }
 
-      const quickAmount = (maxDepositable * percentage).toFixed(decimals);
-      setAmount(quickAmount);
+      setAmount(Number((maxDepositable * percentage).toFixed(decimals)));
     } else {
-      // For borrow mode, use the calculated max borrowable amount
-      const maxBorrowAmount = calculateMaxBorrowable(); // Use actual value
-      const quickAmount = (maxBorrowAmount * percentage).toFixed(decimals);
-      setAmount(quickAmount);
+      const maxBorrowAmount = calculateMaxBorrowable();
+      setAmount(Number((maxBorrowAmount * percentage).toFixed(decimals)));
     }
   };
 
-  const isValidAmount = amount && parseFloat(amount) > 0 && !validationError;
-
-  // Calculate projected earnings for deposits
-  const projectedEarnings =
-    mode === "deposit" && amount && supplyAPY > 0
-      ? (parseFloat(amount) * supplyAPY) / 100
-      : 0;
+  const isValidAmount = numAmount !== null && numAmount > 0 && !validationError;
 
   return (
     <div className="space-y-3">
@@ -245,15 +215,15 @@ const SupplyBorrowForm = ({
         </Label>
 
         <div className="relative">
-          <Input
+          <LocaleNumberInput
             id="amount"
-            type="number"
             placeholder="0.0"
             value={amount}
-            onChange={(e) => setAmount(e.target.value)}
+            onChange={(v) => setAmount(v ?? "")}
+            formatOptions={{ maximumFractionDigits: decimals }}
+            showValidationMessage={true}
             className={`bg-white/70 dark:bg-slate-800 border-gray-300 dark:border-slate-600 text-slate-800 dark:text-white pr-16 text-lg h-12 ${validationError ? "border-red-300 dark:border-red-600" : ""
               }`}
-            step={1 / Math.pow(10, decimals)}
           />
           <Button
             size="sm"

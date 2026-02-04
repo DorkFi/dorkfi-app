@@ -14,6 +14,7 @@ import { ArrowRightLeft } from "lucide-react";
 import { getTokenConfig, getAllTokensWithDisplayInfo } from "@/config";
 import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
+import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 
 interface MarketCardViewProps {
   markets: OnDemandMarketData[];
@@ -36,6 +37,7 @@ const MarketCardView = ({
 }: MarketCardViewProps) => {
   const { currentNetwork } = useNetwork();
   const { activeAccount } = useWallet();
+  const { formatNumber, formatCurrency, formatPercent } = useNumberI18n();
   const [migrationBalances, setMigrationBalances] = useState<
     Record<string, string | null>
   >({});
@@ -211,7 +213,7 @@ const MarketCardView = ({
                   />
                 </Badge>
                 <div className="text-xs text-muted-foreground mt-1">
-                  ${Math.round(market.totalSupplyUSD / 1_000_000).toLocaleString()}
+                  {formatCurrency(Math.round(market.totalSupplyUSD / 1_000_000), "USD", { maximumFractionDigits: 0 })}
                 </div>
               </div>
               <div className="flex flex-col items-center md:items-start">
@@ -225,7 +227,7 @@ const MarketCardView = ({
                   />
                 </Badge>
                 <div className="text-xs text-muted-foreground mt-1">
-                  ${Math.round(market.totalBorrowUSD / 1_000_000).toLocaleString()}
+                  {formatCurrency(Math.round(market.totalBorrowUSD / 1_000_000), "USD", { maximumFractionDigits: 0 })}
                 </div>
               </div>
             </div>
@@ -234,7 +236,7 @@ const MarketCardView = ({
               <div className="text-center">
                 <div className="flex items-center justify-center md:justify-between mb-2">
                   <span className="text-sm text-muted-foreground">Utilization</span>
-                  <span className="text-sm font-medium ml-2 md:ml-0">{market.utilization.toFixed(2)}%</span>
+                  <span className="text-sm font-medium ml-2 md:ml-0">{formatPercent(market.utilization / 100, { maximumFractionDigits: 2 })}</span>
                 </div>
                 <div className="flex justify-center md:justify-start">
                   <Progress value={market.utilization} className="h-2 w-full max-w-[200px] md:max-w-none" />

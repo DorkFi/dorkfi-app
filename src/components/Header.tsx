@@ -4,6 +4,7 @@ import { Menu, X } from "lucide-react";
 import { useState, useEffect } from "react";
 import WalletNetworkButton from "@/components/WalletNetworkButton";
 import { WalletNetworkUnsupportedBanner } from "@/components/WalletNetworkUnsupportedBanner";
+import { LocaleNumberSettings } from "@/components/LocaleNumberSettings";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { getCurrentGasStationSymbols, isFeatureEnabled } from "@/config";
 import { useWallet } from "@txnlab/use-wallet-react";
@@ -168,6 +169,7 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
 
           {/* Desktop and Tablet Actions */}
           <div className="hidden md:flex items-center gap-2 md:gap-3">
+            <LocaleNumberSettings />
             <WalletNetworkButton />
           </div>
 
@@ -212,7 +214,8 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
                   {tab.label}
                 </Button>
               ))}
-              <div className="mt-4">
+              <div className="mt-4 flex items-center gap-2">
+                <LocaleNumberSettings />
                 <WalletNetworkButton />
               </div>
             </div>

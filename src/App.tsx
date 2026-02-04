@@ -10,6 +10,7 @@ import LiquidationMarkets from "./pages/LiquidationMarkets";
 import Analytics from "./pages/Analytics";
 import Governance from "./pages/Governance";
 import { NetworkProvider } from "./contexts/NetworkContext";
+import { LocaleSettingsProvider } from "./contexts/LocaleSettingsContext";
 import Index from "./pages/Index";
 import { isFeatureEnabled } from "./config";
 import CountdownPage from "./pages/Countdown";
@@ -54,6 +55,7 @@ function App() {
       disableTransitionOnChange
     >
       <NetworkProvider>
+        <LocaleSettingsProvider>
         <TooltipProvider delayDuration={300} skipDelayDuration={100}>
           <Toaster />
           <Sonner />
@@ -114,6 +116,7 @@ function App() {
             </Routes>
           </BrowserRouter>
         </TooltipProvider>
+        </LocaleSettingsProvider>
       </NetworkProvider>
     </ThemeProvider>
   );

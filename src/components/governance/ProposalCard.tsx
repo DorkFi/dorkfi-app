@@ -9,6 +9,7 @@ import DorkFiCard from "@/components/ui/DorkFiCard";
 import { H3, Body, Caption } from "@/components/ui/Typography";
 import { VoteConfirmationModal } from "./VoteConfirmationModal";
 import { VoteSuccessModal } from "./VoteSuccessModal";
+import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 
 interface ProposalCardProps {
   proposal: Proposal;
@@ -57,6 +58,7 @@ export const ProposalCard = ({
   const [pendingVoteSupport, setPendingVoteSupport] = useState<boolean | null>(null);
   const [isVoting, setIsVoting] = useState(false);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
+  const { formatNumber, formatPercent } = useNumberI18n();
 
   const votesForPercent = (proposal.votesFor / Math.max(proposal.totalVotes, 1)) * 100;
   const votesAgainstPercent = (proposal.votesAgainst / Math.max(proposal.totalVotes, 1)) * 100;
@@ -168,11 +170,11 @@ export const ProposalCard = ({
           <div className="flex items-center justify-between text-sm">
             <span className="flex items-center gap-1 text-green-600 dark:text-green-400">
               <TrendingUp className="h-4 w-4" />
-              For: {votesForPercent.toFixed(1)}%
+              For: {formatPercent(votesForPercent / 100, { maximumFractionDigits: 1 })}
             </span>
             <span className="flex items-center gap-1 text-red-500 dark:text-red-400">
               <TrendingDown className="h-4 w-4" />
-              Against: {votesAgainstPercent.toFixed(1)}%
+              Against: {formatPercent(votesAgainstPercent / 100, { maximumFractionDigits: 1 })}
             </span>
           </div>
           
@@ -189,8 +191,8 @@ export const ProposalCard = ({
               />
             </div>
             <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>{proposal.votesFor.toLocaleString()} UNIT</span>
-              <span>{proposal.votesAgainst.toLocaleString()} UNIT</span>
+              <span>{formatNumber(proposal.votesFor, { maximumFractionDigits: 0 })} UNIT</span>
+              <span>{formatNumber(proposal.votesAgainst, { maximumFractionDigits: 0 })} UNIT</span>
             </div>
           </div>
 
