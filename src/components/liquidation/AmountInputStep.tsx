@@ -41,7 +41,7 @@ export default function AmountInputStep({
   collateralAssets,
   borrowedAssets,
 }: AmountInputStepProps) {
-  const { parseNumber } = useNumberI18n();
+  const { formatNumber } = useNumberI18n();
 
   // Use real-time asset data instead of stale account data
   const selectedCollateralAsset = collateralAssets?.find(
@@ -64,8 +64,13 @@ export default function AmountInputStep({
   // Final max amount is the minimum of max liquidatable (with close factor) and debt borrow value
   const finalMaxAmount = Math.min(maxLiquidatableAmount, maxRepayForSelectedDebt);
 
-  // Parse amount using locale-aware parsing
-  const parsedAmount = parseNumber(repayAmountUSD);
+  // repayAmountUSD is always in canonical form (e.g. "1234.56") from onChange/MAX handlers
+  const parsedAmount = (() => {
+    const trimmed = repayAmountUSD.trim();
+    if (trimmed === "") return null;
+    const n = parseFloat(trimmed);
+    return isNaN(n) ? null : n;
+  })();
   const currentAmount = parsedAmount ?? 0;
   const isAmountValid = currentAmount > 0 && currentAmount <= finalMaxAmount;
   const isAmountExceeded = currentAmount > finalMaxAmount;
@@ -129,7 +134,7 @@ export default function AmountInputStep({
                 </div>
                 <Tooltip>
                   <TooltipTrigger className="text-sm text-muted-foreground">
-                    Max: ${finalMaxAmount.toLocaleString()}
+                    Max: ${formatNumber(finalMaxAmount, { maximumFractionDigits: 2 })}
                   </TooltipTrigger>
                   <TooltipContent side="top">
                     Maximum repayable amount is the minimum of collateral value (limited by close factor) and debt borrow value.
@@ -161,7 +166,7 @@ export default function AmountInputStep({
               </div>
               {selectedDebt && (
                 <div className="text-sm text-muted-foreground mt-2">
-                  Available debt: ${maxRepayForSelectedDebt.toLocaleString()}{" "}
+                  Available debt: ${formatNumber(maxRepayForSelectedDebt, { maximumFractionDigits: 2 })}{" "}
                   {selectedDebt}
                 </div>
               )}
@@ -250,7 +255,7 @@ export default function AmountInputStep({
                     {selectedCollateral} Price:
                   </span>
                   <span className="text-slate-800 dark:text-white font-semibold">
-                    ${calculations.collateralPrice.toLocaleString()}
+                    ${formatNumber(calculations.collateralPrice, { maximumFractionDigits: 2 })}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
@@ -271,7 +276,7 @@ export default function AmountInputStep({
                   <span className="text-slate-800 dark:text-white font-semibold">
                     {(currentAmount / (calculations?.debtPrice || 1)).toFixed(6)} {selectedDebt}
                     <span className="text-sm text-muted-foreground ml-2">
-                      (${currentAmount.toLocaleString()})
+                      (${formatNumber(currentAmount, { maximumFractionDigits: 2 })})
                     </span>
                   </span>
                 </div>
@@ -280,7 +285,7 @@ export default function AmountInputStep({
                     Liquidation Bonus (5%):
                   </span>
                   <span className="text-green-600 dark:text-green-400 font-semibold">
-                    ${calculations.liquidationBonus.toLocaleString()}
+                    ${formatNumber(calculations.liquidationBonus, { maximumFractionDigits: 2 })}
                   </span>
                 </div>
                 <div className="flex justify-between items-center mb-2">
@@ -289,9 +294,10 @@ export default function AmountInputStep({
                   </span>
                   <span className="text-slate-800 dark:text-white font-semibold">
                     $
-                    {(
-                      currentAmount + calculations.liquidationBonus
-                    ).toLocaleString()}
+                    {formatNumber(
+                      currentAmount + calculations.liquidationBonus,
+                      { maximumFractionDigits: 2 }
+                    )}
                   </span>
                 </div>
                 <div className="flex justify-between items-center mb-2">
