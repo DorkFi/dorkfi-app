@@ -58,6 +58,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 
+const MAX_CLAIMS_PER_TX = 3;
+
 function normalizeMarketData(md) {
   return {
     icon: md.icon || "",
@@ -310,6 +312,27 @@ const MarketsTable = () => {
       icon: "/lovable-uploads/VOI.png",
       airdropAccount:
         "KUIS6IWPPJZ2Z64LBN2SITONOBJUY2D4RRSELH7CHIG2J6DWSUEHBFVWN4",
+      tokenStandard: "network",
+      networks: {
+        "algorand-mainnet": {
+          contractId: "3210709899",
+          assetId: "2320775407",
+        },
+        "voi-mainnet": {
+          contractId: "41877720",
+        },
+      },
+      symbol: "VOI",
+      decimals: 6,
+    },
+    {
+      id: 8,
+      name: "Phase 1 Incentive",
+      description: "DorkFi Phase 1 Incentive",
+      reward: 807_677,
+      icon: "/lovable-uploads/VOI.png",
+      airdropAccount:
+        "NF7COSO5C6EJBRX4XO5C3JUKAYOLIV4T33HXKNFFJWY24MCX3FWEFKQZRM",
       tokenStandard: "network",
       networks: {
         "algorand-mainnet": {
@@ -894,6 +917,25 @@ const MarketsTable = () => {
       )
       : "0";
 
+  // For display/claim: limit to first 4 (matches MAX_CLAIMS_PER_TX)
+  const claimableRewardsThisBatch = Object.entries(claimableRewards).slice(
+    0,
+    MAX_CLAIMS_PER_TX
+  );
+  const totalClaimableThisBatch = claimableRewardsThisBatch.reduce(
+    (sum, [, r]) => sum + r.amount,
+    0
+  );
+  const formattedTotalThisBatch =
+    totalClaimableThisBatch > 0
+      ? ARC200Service.formatBalance(
+          totalClaimableThisBatch.toString(),
+          rewardDecimals
+        )
+      : "0";
+  const hasMoreRewardsToClaim =
+    Object.keys(claimableRewards).length > MAX_CLAIMS_PER_TX;
+
   // Get VOI token confiag to find poolId for deposit
   const getVOITokenConfig = () => {
     try {
@@ -944,12 +986,12 @@ const MarketsTable = () => {
 
       const allTxns: Uint8Array[] = [];
 
-      // Process each claimable reward
+      // Process each claimable reward (limit to 4 at once)
       let ci: any;
       let customR: any;
       let buildN: any[] = [];
       let paymentAmount = 28500;
-      for (const [rewardId, rewardData] of Object.entries(claimableRewards)) {
+      for (const [rewardId, rewardData] of Object.entries(claimableRewards).slice(0, MAX_CLAIMS_PER_TX)) {
         if (rewardData.amount <= 0) continue;
 
         const reward = rewards.find((r) => r.id.toString() === rewardId);
@@ -1135,7 +1177,7 @@ const MarketsTable = () => {
 
       // Store the claimed amount before clearing rewards (for success message)
       const claimedData = {
-        formatted: formattedTotalClaimable,
+        formatted: formattedTotalThisBatch,
         symbol: rewardSymbol,
         rewardNames, // Store reward names for sharing
       };
@@ -1143,7 +1185,7 @@ const MarketsTable = () => {
 
       toast({
         title: "Claim Successful",
-        description: `Successfully claimed ${formattedTotalClaimable} ${rewardSymbol}`,
+        description: `Successfully claimed ${formattedTotalThisBatch} ${rewardSymbol}`,
       });
 
       // Clear claimable rewards - the useEffect will refresh them automatically
@@ -1227,8 +1269,8 @@ const MarketsTable = () => {
         throw new Error("Token configuration invalid for deposit");
       }
 
-      // Convert claimable amount to atomic units for deposit
-      const depositAmount = totalClaimableAmount.toString();
+      // Convert claimable amount to atomic units for deposit (use batch total since we only claim first 3)
+      const depositAmount = totalClaimableThisBatch.toString();
       const bigAmount = BigInt(depositAmount);
 
       // Check if market is paused
@@ -1258,8 +1300,8 @@ const MarketsTable = () => {
       let claimBuildN: any[] = [];
       let counter = 0;
 
-      // Build claim transactions for each reward
-      for (const [rewardId, rewardData] of Object.entries(claimableRewards)) {
+      // Build claim transactions for each reward (limit to 4 at once)
+      for (const [rewardId, rewardData] of Object.entries(claimableRewards).slice(0, MAX_CLAIMS_PER_TX)) {
         if (rewardData.amount <= 0) continue;
 
         const reward = rewards.find((r) => r.id.toString() === rewardId);
@@ -1597,7 +1639,7 @@ const MarketsTable = () => {
 
       // Store the claimed and deposited amount (for success message)
       const claimedData = {
-        formatted: formattedTotalClaimable,
+        formatted: formattedTotalThisBatch,
         symbol: rewardSymbol,
         wasDeposited: true, // Mark that this was deposited directly
         rewardNames, // Store reward names for sharing
@@ -1606,7 +1648,7 @@ const MarketsTable = () => {
 
       toast({
         title: "Success!",
-        description: `Successfully claimed and deposited ${formattedTotalClaimable} ${rewardSymbol} into the market`,
+        description: `Successfully claimed and deposited ${formattedTotalThisBatch} ${rewardSymbol} into the market`,
       });
 
       // Clear claimable rewards - the useEffect will refresh them automatically
@@ -1918,14 +1960,14 @@ const MarketsTable = () => {
       typeof market.supplyAPY === "number" && !Number.isNaN(market.supplyAPY)
         ? market.supplyAPY
         : (typeof market.apyCalculation?.apy === "number" &&
-            !Number.isNaN(market.apyCalculation?.apy))
+          !Number.isNaN(market.apyCalculation?.apy))
           ? market.apyCalculation.apy
           : 0;
     const borrowAPY =
       typeof market.borrowAPY === "number" && !Number.isNaN(market.borrowAPY)
         ? market.borrowAPY
         : (typeof market.borrowApyCalculation?.apy === "number" &&
-            !Number.isNaN(market.borrowApyCalculation?.apy))
+          !Number.isNaN(market.borrowApyCalculation?.apy))
           ? market.borrowApyCalculation.apy
           : 0;
 
@@ -2311,16 +2353,23 @@ const MarketsTable = () => {
                       Available to Claim
                     </div>
                     <div className="text-3xl font-extrabold text-yellow-300 mb-2">
-                      {formattedTotalClaimable || "0"} {rewardSymbol}
+                      {formattedTotalThisBatch || "0"} {rewardSymbol}
                     </div>
+                    {hasMoreRewardsToClaim && (
+                      <p className="text-xs text-white/50 mt-1">
+                        Showing first {MAX_CLAIMS_PER_TX} of{" "}
+                        {Object.keys(claimableRewards).length} rewards. Claim
+                        again for the rest.
+                      </p>
+                    )}
                   </div>
-                  {Object.keys(claimableRewards).length > 0 && (
+                  {claimableRewardsThisBatch.length > 0 && (
                     <div className="mb-3 px-1">
                       <div className="text-sm text-white/50 mb-2">
                         Breakdown:
                       </div>
                       <div className="space-y-1">
-                        {Object.entries(claimableRewards).map(
+                        {claimableRewardsThisBatch.map(
                           ([rewardId, reward]) => {
                             const rewardInfo = rewards.find(
                               (r) => r.id.toString() === rewardId
@@ -2349,14 +2398,12 @@ const MarketsTable = () => {
                       className="w-full py-3 rounded-lg bg-yellow-400 text-slate-900 font-bold text-lg hover:bg-yellow-300 transition disabled:opacity-50 disabled:cursor-not-allowed"
                       onClick={handleClaimVoi}
                       disabled={
-                        !hasClaimableRewards ||
-                        totalClaimableAmount === 0 ||
-                        isClaiming
+                        totalClaimableThisBatch === 0 || isClaiming
                       }
                     >
                       {isClaiming
                         ? "Claiming..."
-                        : `Claim ${formattedTotalClaimable || "0"
+                        : `Claim ${formattedTotalThisBatch || "0"
                         } ${rewardSymbol}`}
                     </button>
                     {voiToken &&
@@ -2447,9 +2494,7 @@ const MarketsTable = () => {
                               className="w-full py-3 rounded-lg border-2 border-green-600 hover:border-green-700 text-green-600 hover:text-green-700 font-bold text-lg transition disabled:opacity-50 disabled:cursor-not-allowed bg-transparent hover:bg-green-50 dark:hover:bg-green-900/20"
                               onClick={handleDirectDepositToMarket}
                               disabled={
-                                !hasClaimableRewards ||
-                                totalClaimableAmount === 0 ||
-                                isClaiming
+                                totalClaimableThisBatch === 0 || isClaiming
                               }
                             >
                               {depositButtonText}
