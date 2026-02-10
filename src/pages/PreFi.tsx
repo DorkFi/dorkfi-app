@@ -3409,16 +3409,17 @@ export default function PreFiDashboard() {
                   return;
                 }
                 console.log("selectedMarket", selectedMarket);
+                // Only use withdrawAll when user has no borrows (PreFi has no borrow context here, so never use it)
+                const withdrawAll = false;
                 console.log("Withdraw parameters:", {
                   poolId: selectedMarket.poolId || "",
                   marketId: selectedMarket.marketId || "",
                   amount: amount,
                   userAddress: activeAccount.address,
                   networkId: currentNetwork,
-                  withdrawAll: options?.isMaxWithdraw,
+                  withdrawAll,
                 });
                 // Call the lending service withdraw method
-                // When max withdraw, use withdrawAll to burn full nToken balance (avoids rounding issues)
                 withdrawResult = await withdraw(
                   selectedMarket.poolId || "", // poolId - use token's poolId or fallback
                   selectedMarket.marketId || "", // marketId
@@ -3426,7 +3427,7 @@ export default function PreFiDashboard() {
                   amount, // amount as string
                   activeAccount.address, // userAddress
                   currentNetwork, // networkId
-                  { withdrawAll: options?.isMaxWithdraw }
+                  { withdrawAll }
                 );
 
                 if (!withdrawResult.success) {

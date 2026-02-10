@@ -1498,9 +1498,140 @@ export const fetchMarketHealth = async (
   }
 };
 
+const SCALE = 10n ** 18n;
+const BPS = 10000n;
+
+/**
+ * Compute max withdrawable amount from user, market, and global user state.
+ * Matches contract _withdraw_pure checks. All inputs/outputs in contract units (BigInt).
+ */
+export function getMaxWithdrawable(
+  user: { scaled_deposits: bigint },
+  market: {
+    deposit_index: bigint;
+    price: bigint;
+    collateral_factor: bigint;
+  },
+  globalUser: {
+    total_collateral_value: bigint;
+    total_borrow_value: bigint;
+  }
+): { maxWithdrawScaled: bigint; maxWithdrawUnderlying: bigint } {
+  const userScaledDeposits = user.scaled_deposits;
+  const depositIndex = market.deposit_index;
+  const price = market.price;
+  const collateralFactor = market.collateral_factor;
+  const totalCollateralValue = globalUser.total_collateral_value;
+  const totalBorrowValue = globalUser.total_borrow_value;
+
+  const userUnderlying = (userScaledDeposits * depositIndex) / SCALE;
+
+  if (totalBorrowValue === 0n) {
+    return {
+      maxWithdrawScaled: userScaledDeposits,
+      maxWithdrawUnderlying: userUnderlying,
+    };
+  }
+
+  const minRemainingCollateral =
+    (totalBorrowValue * BPS + collateralFactor - 1n) / collateralFactor;
+  const maxWithdrawValue =
+    totalCollateralValue > minRemainingCollateral
+      ? totalCollateralValue - minRemainingCollateral
+      : 0n;
+
+  const cappedValue =
+    maxWithdrawValue > totalCollateralValue
+      ? totalCollateralValue
+      : maxWithdrawValue;
+
+  const maxWithdrawUnderlying =
+    price > 0n ? (cappedValue * SCALE) / price : 0n;
+  const maxWithdrawScaled =
+    depositIndex > 0n ? (maxWithdrawUnderlying * SCALE) / depositIndex : 0n;
+
+  const finalScaled =
+    maxWithdrawScaled > userScaledDeposits ? userScaledDeposits : maxWithdrawScaled;
+  const finalUnderlying = (finalScaled * depositIndex) / SCALE;
+
+  return {
+    maxWithdrawScaled: finalScaled,
+    maxWithdrawUnderlying: finalUnderlying,
+  };
+}
+
+/**
+ * Fetch user, market, and global user from contract and compute max withdrawable.
+ * Returns human-readable underlying amount and scaled amount for contract call.
+ */
+export const getMaxWithdrawableForMarket = async (
+  poolId: string,
+  marketId: string,
+  userAddress: string,
+  networkId: NetworkId,
+  tokenDecimals: number
+): Promise<{ maxWithdrawUnderlying: number; maxWithdrawScaled: bigint } | null> => {
+  try {
+    if (!isAlgorandCompatibleNetwork(networkId)) return null;
+    const networkConfig = getNetworkConfig(networkId);
+    const clients = await algorandService.initializeClientsForReads(
+      networkConfig.walletNetworkId as AlgorandNetwork
+    );
+    const appAddress = algosdk.getApplicationAddress(Number(poolId));
+    const ci = new CONTRACT(
+      Number(poolId),
+      clients.algod,
+      undefined,
+      { ...LendingPoolAppSpec.contract, events: [] },
+      {
+        addr:
+          typeof appAddress === "string"
+            ? appAddress
+            : appAddress.toString(),
+        sk: new Uint8Array(),
+      }
+    );
+    ci.setFee(5000);
+    const [userDataR, marketR, globalUserR] = await Promise.all([
+      ci.get_user(userAddress, Number(marketId)),
+      ci.get_market(Number(marketId)),
+      ci.get_global_user(userAddress),
+    ]);
+    if (!userDataR.success || !marketR.success || !globalUserR.success) return null;
+    const userData = UserData(userDataR.returnValue);
+    const marketData = decodeMarketData(marketR.returnValue);
+    const globalData = GlobalUserData(globalUserR.returnValue);
+    const result = getMaxWithdrawable(
+      { scaled_deposits: BigInt(userData.scaledDeposits?.toString() ?? "0") },
+      {
+        deposit_index: BigInt(marketData.depositIndex),
+        price: BigInt(marketData.price),
+        collateral_factor: BigInt(marketData.collateralFactor),
+      },
+      {
+        total_collateral_value: globalData.totalCollateralValue,
+        total_borrow_value: globalData.totalBorrowValue,
+      }
+    );
+    // Round to 3 decimals to reduce floating point issues when used in UI/validation
+    const raw =
+      Number(result.maxWithdrawUnderlying) / Math.pow(10, tokenDecimals);
+    const maxWithdrawUnderlying =
+      Math.floor(raw * 1e3) / 1e3;
+    return {
+      maxWithdrawUnderlying,
+      maxWithdrawScaled: result.maxWithdrawScaled,
+    };
+  } catch (error) {
+    console.error("getMaxWithdrawableForMarket error:", error);
+    return null;
+  }
+};
+
 /**
  * Withdraw tokens from a lending market
- * @param options.withdrawAll - When true, withdraws the entire nToken balance (avoids rounding issues with max withdraw)
+ * @param options.withdrawAll - When true (withdraw all / max): use full nToken balance or options.maxWithdrawScaled if provided
+ * @param options.maxWithdrawScaled - When set with withdrawAll, use this scaled amount for the contract call (health-factor-safe max)
  */
 export const withdraw = async (
   poolId: string,
@@ -1509,7 +1640,7 @@ export const withdraw = async (
   amount: string,
   userAddress: string,
   networkId: NetworkId,
-  options?: { withdrawAll?: boolean }
+  options?: { withdrawAll?: boolean; maxWithdrawScaled?: bigint }
 ): Promise<
   | { success: boolean; txId?: string; error?: string }
   | { success: true; txns: string[] }
@@ -1730,18 +1861,30 @@ export const withdraw = async (
         ntoken_balance = BigInt(ntoken_balanceR.returnValue);
       }
 
-      // When withdrawAll (max withdraw), use full nToken balance to avoid rounding issues
+      // Withdraw all: use maxWithdrawScaled (health-factor-safe) when provided, else full nToken balance
       let underlying_amount = BigInt(0);
-      if (options?.withdrawAll && ntoken_balance > BigInt(0)) {
-        console.log("withdraw:withdrawAll - using full nToken balance", {
-          ntoken_balance: ntoken_balance.toString(),
+      const maxWithdrawAmount =
+        options?.withdrawAll && options?.maxWithdrawScaled !== undefined
+          ? options.maxWithdrawScaled
+          : ntoken_balance;
+      if (options?.withdrawAll && maxWithdrawAmount > BigInt(0)) {
+        console.log("withdraw:withdrawAll - using amount", {
+          maxWithdrawAmount: maxWithdrawAmount.toString(),
+          source: options?.maxWithdrawScaled !== undefined ? "maxWithdrawScaled" : "ntoken_balance",
         });
-        adjustedAmount = ntoken_balance;
+        adjustedAmount = maxWithdrawAmount
         ciPool.setFee(20000);
         ciPool.setPaymentAmount(1e5);
-        const underlyingR = await ciPool.withdraw(Number(marketId), ntoken_balance);
-        underlying_amount = BigInt(underlyingR.returnValue);
-        // Skip the search - we'll use these values directly
+        const underlyingR = await ciPool.withdraw(Number(marketId), maxWithdrawAmount);
+        const rawReturn = underlyingR?.returnValue ?? (underlyingR as any)?.return ?? (underlyingR as any)?.value;
+        if (rawReturn !== undefined && rawReturn !== null) {
+          underlying_amount = BigInt(rawReturn);
+        } else {
+          console.warn("withdraw:withdrawAll - contract did not return underlying amount", { underlyingR });
+          throw new Error(
+            "Withdraw all failed: contract did not return underlying amount. Try withdrawing a specific amount instead."
+          );
+        }
       } else {
 
         {

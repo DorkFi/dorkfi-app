@@ -42,6 +42,8 @@ interface WithdrawModalProps {
     scaledDeposits?: string;
     lastUpdateTime?: number | string;
   };
+  /** Health-factor-safe max withdraw (from getMaxWithdrawable). When set, Max button and validation use this instead of full deposit. */
+  maxWithdrawUnderlying?: number;
   onSubmit?: (amount: string, options?: { isMaxWithdraw?: boolean }) => void;
   isLoading?: boolean;
   showTooltip?: boolean;
@@ -56,6 +58,7 @@ const WithdrawModal = ({
   tokenIcon,
   currentlyDeposited,
   marketStats,
+  maxWithdrawUnderlying,
   onSubmit,
   isLoading = false,
   showTooltip = false,
@@ -112,6 +115,11 @@ const WithdrawModal = ({
 
   // Use currentlyDeposited as the current deposit value (it's already calculated correctly)
   const currentDepositValue = currentlyDeposited;
+  // Health-factor-safe max: when provided, cap by deposit so we never show more than user has
+  const effectiveMaxWithdraw =
+    maxWithdrawUnderlying != null
+      ? Math.min(maxWithdrawUnderlying, currentDepositValue)
+      : currentDepositValue;
   const originalDepositAmount = calculateOriginalDeposit();
   // Calculate accrued interest from the difference
   // Ensure accrued interest is never negative (shouldn't happen if indices are correct)
@@ -156,11 +164,9 @@ const WithdrawModal = ({
   }, [amount, marketStats.tokenPrice]);
 
   const handleMaxClick = () => {
-    // Use currentDepositValue (currentlyDeposited) as the maximum withdrawable amount
-    // Format to reasonable precision (8 decimal places max, remove trailing zeros)
-    // This prevents excessive decimal places from floating point calculations
+    // Use health-factor-safe max when available (getMaxWithdrawable), else full deposit
     maxWithdrawRef.current = true;
-    const formattedAmount = parseFloat(currentDepositValue.toFixed(8))
+    const formattedAmount = parseFloat(effectiveMaxWithdraw.toFixed(3));
     setAmount(formattedAmount);
   };
 
@@ -170,7 +176,10 @@ const WithdrawModal = ({
       if (onSubmit) {
         const isMaxWithdraw = maxWithdrawRef.current;
         maxWithdrawRef.current = false;
-        await onSubmit(amount || "", { isMaxWithdraw });
+        await onSubmit(
+          amount !== "" && typeof amount === "number" ? String(amount) : "",
+          { isMaxWithdraw }
+        );
       } else {
         console.log(`Withdraw ${amount !== "" ? amount.toString() : ""} ${tokenSymbol}`);
 
@@ -200,11 +209,21 @@ const WithdrawModal = ({
     setFiatValue(0);
   };
 
+  // Use same precision (3 decimals) for comparison to avoid floating point failures
+  const amountRounded =
+    typeof amount === "number" && Number.isFinite(amount)
+      ? Math.floor(amount * 1e3) / 1e3
+      : NaN;
+  const maxRounded =
+    Number.isFinite(effectiveMaxWithdraw)
+      ? Math.floor(effectiveMaxWithdraw * 1e3) / 1e3
+      : 0;
   const isValidAmount =
     amount !== "" &&
     typeof amount === "number" &&
-    amount > 0 &&
-    amount <= currentDepositValue;
+    Number.isFinite(amount) &&
+    amountRounded > 0 &&
+    amountRounded <= maxRounded;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -270,7 +289,7 @@ const WithdrawModal = ({
                     autoFocus
                     value={amount}
                     onChange={(v) => setAmount(v ?? "")}
-                    formatOptions={{ maximumFractionDigits: 8 }}
+                    formatOptions={{ maximumFractionDigits: 3 }}
                     className="bg-white/80 dark:bg-slate-800 border-gray-300 dark:border-slate-600 text-slate-800 dark:text-white pr-16 text-lg h-12"
                   />
                   <Button
@@ -291,6 +310,16 @@ const WithdrawModal = ({
                     })}
                   </p>
                 )}
+                {maxWithdrawUnderlying != null &&
+                  maxWithdrawUnderlying < currentDepositValue && (
+                    <p className="text-sm text-amber-600 dark:text-amber-400">
+                      You can withdraw up to{" "}
+                      {effectiveMaxWithdraw.toLocaleString(undefined, {
+                        maximumFractionDigits: 3,
+                      })}{" "}
+                      {tokenSymbol} (limited by collateral health).
+                    </p>
+                  )}
                 {/* Deposited Balance Display */}
                 <div className="p-3 rounded-lg border bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800">
                   <div className="flex items-center justify-between">
