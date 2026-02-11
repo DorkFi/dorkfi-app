@@ -1,12 +1,14 @@
 export type ProposalStatus = "active" | "passed" | "rejected" | "pending" | "executed";
 
 export type ProposalCategory = 
+  | "general"
   | "interest-rates" 
   | "collateral-listing" 
   | "liquidation-settings" 
   | "treasury" 
   | "features" 
-  | "governance";
+  | "governance"
+  | "infrastructure";
 
 export interface Proposal {
   id: string;

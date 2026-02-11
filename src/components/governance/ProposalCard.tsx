@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Proposal } from "@/types/governanceTypes";
+import { Proposal, ProposalCategory } from "@/types/governanceTypes";
+import { PROPOSAL_CATEGORY_DISPLAY_NAMES } from "@/constants/governanceConstants";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -24,13 +25,15 @@ interface ProposalCardProps {
   isSelectionDisabled?: boolean;
 }
 
-const categoryColors = {
+const categoryColors: Record<ProposalCategory, string> = {
+  "general": "bg-slate-500/10 text-slate-600 dark:text-slate-400",
   "interest-rates": "bg-blue-500/10 text-blue-600 dark:text-blue-400",
   "collateral-listing": "bg-green-500/10 text-green-600 dark:text-green-400",
   "liquidation-settings": "bg-orange-500/10 text-orange-600 dark:text-orange-400",
   "treasury": "bg-purple-500/10 text-purple-600 dark:text-purple-400",
   "features": "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
   "governance": "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  "infrastructure": "bg-teal-500/10 text-teal-600 dark:text-teal-400",
 };
 
 const statusConfig = {
@@ -136,9 +139,7 @@ export const ProposalCard = ({
                 />
               )}
               <Badge className={categoryColors[proposal.category]}>
-                {proposal.category === "collateral-listing" 
-                  ? "MARKET LISTINGS" 
-                  : proposal.category.replace("-", " ").toUpperCase()}
+                {PROPOSAL_CATEGORY_DISPLAY_NAMES[proposal.category]}
               </Badge>
               <Badge className={statusConfig[proposal.status].bg}>
                 <StatusIcon className={`h-3 w-3 mr-1 ${statusConfig[proposal.status].color}`} />

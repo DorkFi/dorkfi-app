@@ -14,8 +14,9 @@ The Governance page allows UNIT token holders to participate in the decentralize
 6. [Batch Voting](#batch-voting)
 7. [Proposal Statuses](#proposal-statuses)
 8. [Proposal Categories](#proposal-categories)
-9. [Mobile Usage](#mobile-usage)
-10. [Troubleshooting](#troubleshooting)
+9. [Adding a New Category (developers)](ADDING_PROPOSAL_CATEGORY.md)
+10. [Mobile Usage](#mobile-usage)
+11. [Troubleshooting](#troubleshooting)
 
 ## What is Governance?
 
@@ -221,6 +222,10 @@ Understanding proposal statuses helps you know when you can vote:
 
 Proposals are organized by category:
 
+### General
+- General-purpose or uncategorized proposals
+- Examples: "Protocol Update Announcement", "Parameter Review"
+
 ### Interest Rates
 - Changes to borrowing and lending rates
 - Adjustments to rate curves and parameters
@@ -245,6 +250,10 @@ Proposals are organized by category:
 - New protocol features and capabilities
 - Network expansions and integrations
 - Examples: "Deploy to Arbitrum Network"
+
+### Infrastructure
+- RPC nodes, indexers, tooling, and operational infrastructure
+- Examples: "Add New RPC Endpoint", "Indexer Upgrade"
 
 ## Mobile Usage
 

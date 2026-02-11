@@ -153,7 +153,7 @@ import {
 } from "@/constants/roles";
 import { ProposalCategory, Proposal as UIProposal, ProposalStatus } from "@/types/governanceTypes";
 import { createProposalWithCategory, getEvents, decodeProposalCreatedEvent, getProposal, Proposal as ServiceProposal, snapPower, getPowerSource, snapMultiplier, closeVotingEarly } from "@/services/governanceService";
-import { getCategoryFromId } from "@/constants/governanceConstants";
+import { getCategoryFromId, PROPOSAL_CATEGORY_DISPLAY_NAMES } from "@/constants/governanceConstants";
 import { ProposalCard } from "@/components/governance/ProposalCard";
 import { VoterInfoLookup } from "@/components/governance/VoterInfoLookup";
 import { PowerMultiplierLookup } from "@/components/governance/PowerMultiplierLookup";
@@ -13560,12 +13560,11 @@ export default function AdminDashboard() {
                         <SelectValue placeholder="Select proposal category" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="interest-rates">Interest Rates</SelectItem>
-                        <SelectItem value="collateral-listing">Collateral Listing</SelectItem>
-                        <SelectItem value="liquidation-settings">Liquidation Settings</SelectItem>
-                        <SelectItem value="treasury">Treasury</SelectItem>
-                        <SelectItem value="features">Features</SelectItem>
-                        <SelectItem value="governance">Governance</SelectItem>
+                        {(Object.keys(PROPOSAL_CATEGORY_DISPLAY_NAMES) as ProposalCategory[]).map((cat) => (
+                          <SelectItem key={cat} value={cat}>
+                            {PROPOSAL_CATEGORY_DISPLAY_NAMES[cat]}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -14630,7 +14629,12 @@ export default function AdminDashboard() {
                       <div>
                         <Label className="text-sm font-medium text-muted-foreground">Category</Label>
                         <p className="text-sm mt-1">
-                          {selectedProposal.proposalCategoryId ? (getCategoryFromId(Number(selectedProposal.proposalCategoryId)) || `Category ${selectedProposal.proposalCategoryId}`) : "—"}
+                          {selectedProposal.proposalCategoryId
+                            ? (() => {
+                                const cat = getCategoryFromId(Number(selectedProposal.proposalCategoryId));
+                                return cat ? PROPOSAL_CATEGORY_DISPLAY_NAMES[cat] : `Category ${selectedProposal.proposalCategoryId}`;
+                              })()
+                            : "—"}
                         </p>
                       </div>
                       <div>
