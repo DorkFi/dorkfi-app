@@ -37,7 +37,7 @@ export interface NFTIndexerResponse {
 
 // NFT contract IDs and their multipliers (from config)
 const NFT_CONTRACT_MULTIPLIERS: Record<number, number> = {
-  313597: 0.10, // Dorks V1
+  313597: 0.169, // Dorks V1
   894888: 0.01, // Dorks V2
   313705: 0.15, // Lil Chubs
 };

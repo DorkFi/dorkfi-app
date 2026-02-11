@@ -97,9 +97,11 @@ import {
   getEnabledNetworks,
   getContractAddress,
   GovernanceConfig,
+  isCurrentNetworkAVM,
 } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
+import { APP_SPEC as UNITGovernanceAppSpec } from "@/clients/UNITGovernanceClient";
 import { APP_SPEC as PriceOracleAppSpec } from "@/clients/PriceOracleClient";
 import algorandService, { AlgorandNetwork } from "@/services/algorandService";
 import { CONTRACT } from "ulujs";
@@ -472,6 +474,43 @@ export default function AdminDashboard() {
     "market-controller": ROLE_MARKET_CONTROLLER,
   };
 
+  // UNIT Governance contract roles (3-byte identifiers)
+  const governanceRoleConstantsMap: Record<
+    string,
+    { bytes: string; name: string; description: string }
+  > = {
+    "rcp": {
+      bytes: "rcp",
+      name: "Create Proposal",
+      description: "Create new governance proposals",
+    },
+    "rap": {
+      bytes: "rap",
+      name: "Activate Proposal",
+      description: "Activate pending proposals",
+    },
+    "rqp": {
+      bytes: "rqp",
+      name: "Queue Proposal",
+      description: "Queue succeeded proposals for execution",
+    },
+    "rep": {
+      bytes: "rep",
+      name: "Execute Proposal",
+      description: "Execute queued proposals",
+    },
+    "rvp": {
+      bytes: "rvp",
+      name: "Veto Proposal",
+      description: "Veto queued proposals",
+    },
+    "rpa": {
+      bytes: "rpa",
+      name: "Proposal Admin",
+      description: "Quorum, voting power, close voting early",
+    },
+  };
+
   const [userRoles, setUserRoles] = useState<UserRole[]>([
     {
       userId: "user1",
@@ -526,6 +565,15 @@ export default function AdminDashboard() {
   const [isCheckingRoles, setIsCheckingRoles] = useState(false);
   const [currentUserRoles, setCurrentUserRoles] = useState<any[]>([]);
   const [isLoadingCurrentUserRoles, setIsLoadingCurrentUserRoles] =
+    useState(false);
+  const [governanceRoleCheckAddress, setGovernanceRoleCheckAddress] =
+    useState("");
+  const [isCheckingGovernanceRoles, setIsCheckingGovernanceRoles] =
+    useState(false);
+  const [currentUserGovernanceRoles, setCurrentUserGovernanceRoles] = useState<
+    { roleId: string; roleName: string; roleConstant: string; hasRole: boolean; error?: string }[]
+  >([]);
+  const [isLoadingCurrentUserGovernanceRoles, setIsLoadingCurrentUserGovernanceRoles] =
     useState(false);
 
   // Role management functions
@@ -719,6 +767,122 @@ export default function AdminDashboard() {
       return [];
     } finally {
       setIsCheckingRoles(false);
+    }
+  };
+
+  // Check UNIT Governance roles for an address
+  const checkGovernanceRoles = async (address: string) => {
+    if (!address.trim()) {
+      toast.error("Please provide an address to check governance roles");
+      return [];
+    }
+    if (!isCurrentNetworkAVM()) {
+      toast.error("Governance roles are only available on AVM networks");
+      return [];
+    }
+    const governanceConfig = getContractAddress(
+      currentNetwork,
+      "governance"
+    ) as GovernanceConfig | string | undefined;
+    if (!governanceConfig) {
+      toast.error("Governance contract not configured for this network");
+      return [];
+    }
+    const appId =
+      typeof governanceConfig === "string"
+        ? Number(governanceConfig)
+        : governanceConfig.appId;
+
+    setIsCheckingGovernanceRoles(true);
+    try {
+      const networkConfig = getNetworkConfig(currentNetwork);
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+      const ci = new CONTRACT(
+        appId,
+        clients.algod,
+        undefined,
+        { ...UNITGovernanceAppSpec.contract, events: [] },
+        { addr: address, sk: new Uint8Array() }
+      );
+      ci.setEnableRawBytes(true);
+
+      const roleChecks: {
+        roleId: string;
+        roleName: string;
+        roleConstant: string;
+        hasRole: boolean;
+        error?: string;
+      }[] = [];
+
+      for (const [roleId, info] of Object.entries(governanceRoleConstantsMap)) {
+        try {
+          const role_keyR = await ci.get_role_key(
+            address,
+            new Uint8Array(Buffer.from(info.bytes, "utf-8"))
+          );
+          if (role_keyR.success) {
+            const hasRoleResult = await ci.has_role(role_keyR.returnValue);
+            if (hasRoleResult.success) {
+              roleChecks.push({
+                roleId,
+                roleName: info.name,
+                roleConstant: info.bytes,
+                hasRole: hasRoleResult.returnValue,
+              });
+            }
+          }
+        } catch (error) {
+          console.error(`Error checking governance role ${roleId}:`, error);
+          roleChecks.push({
+            roleId,
+            roleName: info.name,
+            roleConstant: info.bytes,
+            hasRole: false,
+            error: error instanceof Error ? error.message : "Unknown error",
+          });
+        }
+      }
+
+      const hasAnyRole = roleChecks.some((c) => c.hasRole);
+      const summary = roleChecks.filter((c) => c.hasRole).map((c) => c.roleName).join(", ");
+      if (hasAnyRole) {
+        toast.success("Governance Role Check Complete", {
+          description: `${address.slice(0, 8)}... has: ${summary}`,
+        });
+      } else {
+        toast.info("Governance Role Check Complete", {
+          description: `${address.slice(0, 8)}... has no governance roles.`,
+        });
+      }
+      return roleChecks;
+    } catch (error) {
+      console.error("Error checking governance roles:", error);
+      toast.error("Failed to check governance roles", {
+        description:
+          error instanceof Error ? error.message : "Unknown error occurred",
+      });
+      return [];
+    } finally {
+      setIsCheckingGovernanceRoles(false);
+    }
+  };
+
+  const checkCurrentUserGovernanceRoles = async () => {
+    if (!activeAccount?.address) {
+      setCurrentUserGovernanceRoles([]);
+      return;
+    }
+    setIsLoadingCurrentUserGovernanceRoles(true);
+    try {
+      const roleChecks = await checkGovernanceRoles(activeAccount.address);
+      setCurrentUserGovernanceRoles(roleChecks);
+    } catch (error) {
+      console.error("Error checking current user governance roles:", error);
+      setCurrentUserGovernanceRoles([]);
+    } finally {
+      setIsLoadingCurrentUserGovernanceRoles(false);
     }
   };
 
@@ -10682,6 +10846,164 @@ export default function AdminDashboard() {
                 )}
               </CardContent>
             </Card>
+
+            {/* Governance Roles (UNIT) */}
+            {isCurrentNetworkAVM() &&
+              getContractAddress(currentNetwork, "governance") && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Shield className="h-5 w-5" />
+                    Governance Roles (UNIT)
+                  </CardTitle>
+                  <CardDescription>
+                    Check UNIT Governance contract roles for proposal lifecycle
+                    and administration. Roles are granted/revoked by the
+                    contract owner via set_role.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Enter address to check governance roles..."
+                      value={governanceRoleCheckAddress}
+                      onChange={(e) =>
+                        setGovernanceRoleCheckAddress(e.target.value)
+                      }
+                      className="flex-1"
+                    />
+                    <Button
+                      onClick={() =>
+                        checkGovernanceRoles(governanceRoleCheckAddress)
+                      }
+                      disabled={
+                        !governanceRoleCheckAddress.trim() ||
+                        isCheckingGovernanceRoles
+                      }
+                      className="min-w-[120px]"
+                    >
+                      {isCheckingGovernanceRoles ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Checking...
+                        </>
+                      ) : (
+                        <>
+                          <Search className="h-4 w-4 mr-2" />
+                          Check Roles
+                        </>
+                      )}
+                    </Button>
+                    {activeAccount?.address && (
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setGovernanceRoleCheckAddress(activeAccount.address);
+                          checkCurrentUserGovernanceRoles();
+                        }}
+                        disabled={
+                          isCheckingGovernanceRoles ||
+                          isLoadingCurrentUserGovernanceRoles
+                        }
+                        className="min-w-[140px]"
+                      >
+                        <UserCheck className="h-4 w-4 mr-2" />
+                        Check My Roles
+                      </Button>
+                    )}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    <p className="font-medium mb-2">
+                      Governance role identifiers:
+                    </p>
+                    <ul className="list-disc list-inside space-y-1">
+                      {Object.entries(governanceRoleConstantsMap).map(
+                        ([id, info]) => (
+                          <li key={id}>
+                            <strong>{info.name} ({id}):</strong>{" "}
+                            {info.description}
+                          </li>
+                        )
+                      )}
+                    </ul>
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="font-medium text-sm">
+                        Your Current Governance Roles
+                      </h4>
+                      {activeAccount?.address && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={checkCurrentUserGovernanceRoles}
+                          disabled={isLoadingCurrentUserGovernanceRoles}
+                        >
+                          {isLoadingCurrentUserGovernanceRoles ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <RefreshCcw className="h-4 w-4" />
+                          )}
+                        </Button>
+                      )}
+                    </div>
+                    {activeAccount?.address ? (
+                      <>
+                        {isLoadingCurrentUserGovernanceRoles ? (
+                          <div className="flex items-center justify-center py-6">
+                            <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                            <span className="text-muted-foreground text-sm">
+                              Checking governance roles...
+                            </span>
+                          </div>
+                        ) : currentUserGovernanceRoles.length > 0 ? (
+                          <div className="grid gap-2">
+                            {currentUserGovernanceRoles
+                              .filter((r) => r.hasRole)
+                              .map((r) => (
+                                <div
+                                  key={r.roleId}
+                                  className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <CheckCircle2 className="h-5 w-5 text-green-600" />
+                                    <div>
+                                      <p className="font-medium text-green-800 dark:text-green-200">
+                                        {r.roleName}
+                                      </p>
+                                      <p className="text-xs text-green-600 dark:text-green-400">
+                                        {r.roleConstant} • Governance Role
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                                    Active
+                                  </Badge>
+                                </div>
+                              ))}
+                            {currentUserGovernanceRoles.filter((r) => r.hasRole)
+                              .length === 0 && (
+                              <p className="text-sm text-muted-foreground py-4">
+                                No governance roles assigned to your account.
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-muted-foreground py-4">
+                            No governance roles loaded. Click refresh or Check
+                            My Roles.
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <p className="text-sm text-muted-foreground py-4">
+                        Connect your wallet to view your governance roles.
+                      </p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Predefined Roles */}
             <Card>

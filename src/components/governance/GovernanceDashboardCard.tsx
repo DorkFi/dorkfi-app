@@ -116,7 +116,7 @@ export const GovernanceDashboardCard = ({
             <div className="mb-4">
               <div className="text-xs text-muted-foreground mb-1">NFT Boost</div>
               <div className={`text-2xl font-bold ${nftMultiplier > 1 ? 'text-whale-gold' : 'text-muted-foreground'}`}>
-                {formatNumber(nftMultiplier, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}x
+                {formatNumber(nftMultiplier * 100, { minimumFractionDigits: 2, maximumFractionDigits: 3 })}%
               </div>
             </div>
 

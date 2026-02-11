@@ -87,6 +87,7 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Slider } from "@/components/ui/slider";
 import {
   Tooltip as UITooltip,
   TooltipContent,
@@ -256,6 +257,9 @@ const Portfolio = () => {
   const [liquidationModalOpen, setLiquidationModalOpen] = useState(false);
   const [selectedLiquidationPosition, setSelectedLiquidationPosition] =
     useState<any | null>(null);
+  /** USD amount to liquidate (0 to position.liquidationAmount); enables partial liquidation */
+  const [partialLiquidationAmountUsd, setPartialLiquidationAmountUsd] =
+    useState<number>(0);
   const [isLiquidating, setIsLiquidating] = useState(false);
   const [repayModalOpen, setRepayModalOpen] = useState(false);
   const [selectedRepayPosition, setSelectedRepayPosition] =
@@ -3536,8 +3540,12 @@ const Portfolio = () => {
         selectedLiquidationPosition.collateralTokenInfo?.data?.symbol;
       const networkId = selectedLiquidationPosition.network as NetworkId;
       const userAddress = selectedLiquidationPosition.user;
-      const liquidationValueUsd =
+      const maxLiquidationUsd =
         selectedLiquidationPosition.liquidationAmount || 0;
+      const liquidationValueUsd = Math.min(
+        Math.max(0, partialLiquidationAmountUsd),
+        maxLiquidationUsd
+      );
 
       // Get debt market to get price - try multiple matching strategies
       let debtMarket = marketData.find((m) => {
@@ -5420,14 +5428,16 @@ const Portfolio = () => {
                                   <Button
                                     onClick={() => {
                                       // Open liquidation modal with position details
-                                      setSelectedLiquidationPosition({
+                                      const pos = {
                                         ...position,
                                         liquidationAmount,
                                         borrowValueUsd,
                                         collateralValueUsd,
                                         closeFactor,
                                         liquidationBonus,
-                                      });
+                                      };
+                                      setSelectedLiquidationPosition(pos);
+                                      setPartialLiquidationAmountUsd(liquidationAmount ?? 0);
                                       setLiquidationModalOpen(true);
                                     }}
                                     variant="destructive"
@@ -9758,20 +9768,31 @@ const Portfolio = () => {
       {/* Liquidation Modal */}
       <Dialog
         open={liquidationModalOpen}
-        onOpenChange={setLiquidationModalOpen}
+        onOpenChange={(open) => {
+          setLiquidationModalOpen(open);
+          if (!open && selectedLiquidationPosition) {
+            setPartialLiquidationAmountUsd(
+              selectedLiquidationPosition.liquidationAmount ?? 0
+            );
+          }
+        }}
       >
         <DialogContent className="max-w-2xl p-6">
           <DialogHeader>
             <DialogTitle>Liquidate Position</DialogTitle>
           </DialogHeader>
-          {selectedLiquidationPosition &&
+            {selectedLiquidationPosition &&
             (() => {
-              // Calculate liquidation amount in WAD from liquidation value and debt market price
+              // Calculate liquidation amount in WAD from selected partial amount and debt market price
               const debtSymbol =
                 selectedLiquidationPosition.debtTokenInfo?.data?.symbol;
               const networkId = selectedLiquidationPosition.network;
-              const liquidationValueUsd =
+              const maxLiquidationUsd =
                 selectedLiquidationPosition.liquidationAmount || 0;
+              const liquidationValueUsd = Math.min(
+                Math.max(0, partialLiquidationAmountUsd),
+                maxLiquidationUsd
+              );
 
               // Find the debt market to get price - try multiple matching strategies
               let debtMarket = marketData.find((m) => {
@@ -9972,7 +9993,7 @@ const Portfolio = () => {
                     </div>
                     <div>
                       <p className="text-sm text-muted-foreground mb-1">
-                        Liquidation Value
+                        Max Liquidation Value
                       </p>
                       <p className="font-medium">
                         {formatCurrency(selectedLiquidationPosition.liquidationAmount ?? 0, "USD", { maximumFractionDigits: 2 })}
@@ -9987,6 +10008,43 @@ const Portfolio = () => {
                       </p>
                     </div>
                   </div>
+                  <div className="space-y-3 pt-2">
+                    <p className="text-sm text-muted-foreground">
+                      Amount to liquidate (partial liquidation)
+                    </p>
+                    <div className="flex items-center gap-4">
+                      <Slider
+                        className="flex-1"
+                        value={[
+                          maxLiquidationUsd > 0
+                            ? Math.round(
+                                (liquidationValueUsd / maxLiquidationUsd) * 100
+                              )
+                            : 100,
+                        ]}
+                        onValueChange={([p]) =>
+                          setPartialLiquidationAmountUsd(
+                            (p / 100) * maxLiquidationUsd
+                          )
+                        }
+                        min={0}
+                        max={100}
+                        step={1}
+                      />
+                      <span className="text-sm font-medium tabular-nums w-24 text-right">
+                        {formatCurrency(liquidationValueUsd, "USD", {
+                          maximumFractionDigits: 2,
+                        })}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      0% = no liquidation · 100% = full liquidation (
+                      {formatCurrency(maxLiquidationUsd, "USD", {
+                        maximumFractionDigits: 2,
+                      })}
+                      )
+                    </p>
+                  </div>
                   <div className="flex justify-end gap-2 pt-4">
                     <Button
                       variant="outline"
@@ -9997,7 +10055,11 @@ const Portfolio = () => {
                     <Button
                       variant="destructive"
                       onClick={handleLiquidation}
-                      disabled={isLiquidating || debtTokenPrice === 0}
+                      disabled={
+                        isLiquidating ||
+                        debtTokenPrice === 0 ||
+                        liquidationValueUsd <= 0
+                      }
                     >
                       {isLiquidating
                         ? "Processing..."

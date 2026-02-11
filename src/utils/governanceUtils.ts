@@ -32,7 +32,7 @@ export const convertServiceProposalToUI = (
   if (status === "active" && endTime.getTime() < Date.now()) {
     const totalPower = Number(serviceProposal.proposalTotalPower);
     const yesPower = Number(serviceProposal.proposalYesPower);
-    status = totalPower > 0 && yesPower >= totalPower * 0.5 ? "passed" : "rejected";
+    status = totalPower > 0 && yesPower >= totalPower * 0.69 ? "passed" : "rejected";
   }
 
   // Get category

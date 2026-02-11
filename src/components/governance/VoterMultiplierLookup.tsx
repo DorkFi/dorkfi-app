@@ -46,7 +46,7 @@ export const VoterMultiplierLookup = () => {
     const num = Number(multiplier);
     if (isNaN(num)) return "0";
     // Format as multiplier (e.g., 1.5x, 2.0x)
-    return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 3 });
   };
 
   return (
