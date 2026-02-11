@@ -222,10 +222,6 @@ Understanding proposal statuses helps you know when you can vote:
 
 Proposals are organized by category:
 
-### General
-- General-purpose or uncategorized proposals
-- Examples: "Protocol Update Announcement", "Parameter Review"
-
 ### Interest Rates
 - Changes to borrowing and lending rates
 - Adjustments to rate curves and parameters

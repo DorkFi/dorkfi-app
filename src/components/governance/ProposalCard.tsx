@@ -26,7 +26,6 @@ interface ProposalCardProps {
 }
 
 const categoryColors: Record<ProposalCategory, string> = {
-  "general": "bg-slate-500/10 text-slate-600 dark:text-slate-400",
   "interest-rates": "bg-blue-500/10 text-blue-600 dark:text-blue-400",
   "collateral-listing": "bg-green-500/10 text-green-600 dark:text-green-400",
   "liquidation-settings": "bg-orange-500/10 text-orange-600 dark:text-orange-400",

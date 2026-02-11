@@ -1,7 +1,6 @@
 export type ProposalStatus = "active" | "passed" | "rejected" | "pending" | "executed";
 
 export type ProposalCategory = 
-  | "general"
   | "interest-rates" 
   | "collateral-listing" 
   | "liquidation-settings" 

@@ -105,7 +105,6 @@ If you add a category that is not yet in `categoryColors`, the badge may fall ba
 
 | Value (key)     | ID | Display name        |
 |-----------------|----|---------------------|
-| general         | 0  | General             |
 | interest-rates  | 1  | Interest Rates      |
 | collateral-listing | 2 | Collateral Listing  |
 | liquidation-settings | 3 | Liquidation Settings |
