@@ -96,19 +96,34 @@ dorkfi-app/
 - npm, pnpm, or yarn
 - A compatible crypto wallet
 
-### Installation
 
-```bash
+---
+
+Getting Started
+Prerequisites
+
+Node.js >= 18
+
+npm, pnpm, or yarn
+
+A compatible crypto wallet
+
+Installation
+
 git clone https://github.com/DorkFi/dorkfi-app.git
 cd dorkfi-app
 npm install
+
 Development
+
 npm run dev
 
 Build
+
 npm run build
 
 Preview Production Build
+
 npm run preview
 
 Environment Variables
@@ -119,10 +134,9 @@ VITE_NETWORK=voi
 VITE_RPC_URL=
 VITE_ANALYTICS_ENDPOINT=
 
+---
 
-Additional variables may be required depending on deployed networks, oracle integrations, and analytics configuration.
-
-Governance
+## Governance
 
 DorkFi operates with fully on-chain governance. UNIT token holders can:
 
@@ -138,7 +152,9 @@ Govern cross-chain risk parameters
 
 All approved proposals directly update protocol behavior via smart contracts without centralized intervention.
 
-Security & Risk Considerations
+---
+
+##Security & Risk Considerations
 
 All borrowing is overcollateralized
 
@@ -152,7 +168,9 @@ Parameter updates are governed fully on-chain
 
 Users should understand liquidation risk and collateral volatility before borrowing.
 
-Roadmap
+---
+
+## Roadmap
 
 Cross-chain credit markets (EVM expansion)
 
@@ -164,7 +182,9 @@ Perpetual lending rate optimization
 
 Unified multi-chain governance layer
 
-Contributing
+---
+
+## Contributing
 
 We welcome contributions from developers, researchers, and ecosystem partners.
 
@@ -174,11 +194,15 @@ Create a feature branch
 
 Submit a pull request with clear context and testing notes
 
-License
+---
+
+## License
 
 This project is released under the MIT License.
 
-Links
+---
+
+## Links
 
 App: https://app.dork.fi
 
@@ -188,6 +212,9 @@ Governance Token: UNIT
 
 Stable Credit Unit: WAD
 
-About DorkFi
+---
+
+## About DorkFi
 
 DorkFi is building a unified on-chain credit system designed to scale across multiple blockchain ecosystems. By combining modular lending markets, stable credit issuance, and fully on-chain governance, DorkFi aims to become the foundational liquidity layer for decentralized finance.
+
