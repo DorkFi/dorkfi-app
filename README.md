@@ -1,92 +1,193 @@
-# Welcome to DorkFi Borrow Lend Protocol
+# DorkFi App
 
-## Project info
+The official web application for **DorkFi**, a modular, multi-chain decentralized credit protocol enabling stable borrowing, lending, and liquidity markets powered by fully on-chain governance.
 
-**URL**: https://lovable.dev/projects/453684e9-f8bf-459b-9196-e4f9c0e5b52c
+DorkFi introduces a new primitive: **Stable Credit Markets** — capital-efficient lending markets that unify collateral, credit issuance, and risk management across multiple blockchain ecosystems.
 
-## How can I edit this code?
+---
 
-There are several ways of editing your application.
+## Overview
 
-**Use Lovable**
+DorkFi is a decentralized finance protocol designed to provide:
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/453684e9-f8bf-459b-9196-e4f9c0e5b52c) and start prompting.
+- Overcollateralized lending markets
+- Stablecoin-based credit issuance (WAD)
+- Modular isolated lending markets
+- Fully on-chain governance via UNIT
+- Cross-chain deployment across AVM, EVM, and beyond
 
-Changes made via Lovable will be committed automatically to this repo.
+This repository contains the primary frontend interface for interacting with the DorkFi protocol, including deposit, borrow, repay, governance, and analytics functionality.
 
-**Use your preferred IDE**
+---
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+## Core Concepts
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+### Stable Credit Markets
+DorkFi introduces a modular lending architecture where curated collateral enables stable credit issuance while preserving peg stability and risk isolation.
 
-Follow these steps:
+### WAD — Stable Credit Unit
+WAD is the protocol’s fully collateralized stablecoin used for borrowing, liquidity routing, and cross-market credit settlement.
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+### UNIT — Governance Token
+UNIT governs all protocol parameters on-chain, including:
+- Collateral risk parameters
+- Asset listings
+- Interest rate curves
+- Treasury and reserve policies
+- Cross-chain expansion decisions
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+### Modular Market Architecture
+DorkFi separates markets into distinct layers:
 
-# Step 3: Install the necessary dependencies.
-npm i
+| Market Type | Purpose |
+|-------------|---------|
+| A-Markets | Monetary layer for WAD minting |
+| B-Markets | Cross-collateral liquidity markets |
+| Isolated Markets | Single-collateral, capped risk markets |
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+This architecture improves peg resilience, risk pricing, and scalability across assets and chains.
+
+---
+
+## Features
+
+- Deposit collateral to earn yield
+- Borrow stable credit using WAD
+- Monitor health factors and liquidation thresholds
+- Participate in fully on-chain governance
+- View protocol analytics and utilization metrics
+- Interact with isolated markets for targeted risk exposure
+
+---
+
+## Multichain Strategy
+
+DorkFi is modular by design and can be deployed across multiple blockchain ecosystems.
+
+Current and planned deployments include:
+- AVM-based chains (e.g., Algorand, Voi Network)
+- EVM networks (e.g., Base and others)
+- Future expansion to additional VM environments
+
+This enables unified credit markets with shared governance and cross-chain risk coordination.
+
+---
+
+## Repository Structure
+
+dorkfi-app/
+├── src/
+│ ├── components/ # UI components
+│ ├── pages/ # Application routes and views
+│ ├── hooks/ # Protocol and wallet hooks
+│ ├── services/ # Contract interaction logic
+│ ├── state/ # App state and stores
+│ └── utils/ # Helper utilities
+├── public/ # Static assets
+├── styles/ # Global styles and themes
+└── config/ # Network and protocol configs
+
+---
+
+## Getting Started
+
+### Prerequisites
+- Node.js >= 18
+- npm, pnpm, or yarn
+- A compatible crypto wallet
+
+### Installation
+
+```bash
+git clone https://github.com/DorkFi/dorkfi-app.git
+cd dorkfi-app
+npm install
+Development
 npm run dev
-```
 
-**Edit a file directly in GitHub**
+Build
+npm run build
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+Preview Production Build
+npm run preview
 
-**Use GitHub Codespaces**
+Environment Variables
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+Create a .env file in the root directory:
 
-## What technologies are used for this project?
+VITE_NETWORK=voi
+VITE_RPC_URL=
+VITE_ANALYTICS_ENDPOINT=
 
-This project is built with:
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+Additional variables may be required depending on deployed networks, oracle integrations, and analytics configuration.
 
-## Number formatting and locale (i18n)
+Governance
 
-Numeric display and input support both **decimal-point** (e.g. 1,234.56) and **decimal-comma** (e.g. 1.234,56 or 1 234,56) locales. The user can choose:
+DorkFi operates with fully on-chain governance. UNIT token holders can:
 
-- **Auto**: use the browser locale (`navigator.language`); fallback is `en-US`.
-- **Manual**: pick a BCP-47 locale (e.g. en-US, de-DE, fr-FR) from the header globe control.
+Propose parameter changes
 
-**Using the utility**
+Vote on new market listings
 
-- **Formatting**: use `formatNumber`, `formatCurrency`, or `formatPercent` from `@/utils/numberI18n` (or the locale-aware wrappers in `@/utils/formatting`). In React, use the `useNumberI18n()` hook from `@/contexts/LocaleSettingsContext` so displayed numbers follow the current locale.
-- **Parsing user input**: use `parseNumber(inputString)` from `@/utils/numberI18n` (or re-exported from `@/utils/formatting`). It returns `number | null`; invalid or ambiguous input returns `null`. Store canonical numeric values internally (e.g. JS numbers with "." as decimal).
-- **Inputs**: use the `LocaleNumberInput` component (`@/components/ui/LocaleNumberInput`) for numeric fields; it displays with locale formatting and parses on blur with inline validation.
+Adjust collateral and liquidation thresholds
 
-**Adding new locales**
+Direct treasury allocations
 
-1. Add the BCP-47 locale string to `SUPPORTED_MANUAL_LOCALES` in `src/utils/localeSettings.ts`.
-2. Add a label in `MANUAL_LOCALE_LABELS` in `src/components/LocaleNumberSettings.tsx`.
-3. Formatting and parsing use `Intl.NumberFormat` and locale-derived decimal/grouping separators, so no further changes are needed for standard locales.
+Govern cross-chain risk parameters
 
-## How can I deploy this project?
+All approved proposals directly update protocol behavior via smart contracts without centralized intervention.
 
-Simply open [Lovable](https://lovable.dev/projects/453684e9-f8bf-459b-9196-e4f9c0e5b52c) and click on Share -> Publish.
+Security & Risk Considerations
 
-## Can I connect a custom domain to my Lovable project?
+All borrowing is overcollateralized
 
-Yes, you can!
+Isolated markets prevent contagion across assets
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+Liquidation thresholds enforce solvency
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+Reserve factors help absorb systemic risk
+
+Parameter updates are governed fully on-chain
+
+Users should understand liquidation risk and collateral volatility before borrowing.
+
+Roadmap
+
+Cross-chain credit markets (EVM expansion)
+
+Advanced isolated market routing
+
+DAO treasury credit tools
+
+Perpetual lending rate optimization
+
+Unified multi-chain governance layer
+
+Contributing
+
+We welcome contributions from developers, researchers, and ecosystem partners.
+
+Fork the repository
+
+Create a feature branch
+
+Submit a pull request with clear context and testing notes
+
+License
+
+This project is released under the MIT License.
+
+Links
+
+App: https://app.dork.fi
+
+Website: https://dork.fi
+
+Governance Token: UNIT
+
+Stable Credit Unit: WAD
+
+About DorkFi
+
+DorkFi is building a unified on-chain credit system designed to scale across multiple blockchain ecosystems. By combining modular lending markets, stable credit issuance, and fully on-chain governance, DorkFi aims to become the foundational liquidity layer for decentralized finance.
