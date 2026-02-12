@@ -21,6 +21,7 @@ import {
   enhanceAVMMarketInfo,
   fetchMarketInfo,
   repayOnBehalf,
+  liquidateCrossMarket,
 } from "@/services/lendingService";
 import dorkfiAPIService from "@/services/dorkfiAPIService";
 import { ARC200Service } from "@/services/arc200Service";
@@ -34,6 +35,7 @@ import {
   getNetworkConfig,
   getMarketLabel,
   NetworkId,
+  TokenConfig,
 } from "@/config";
 import { getAllTokensWithDisplayInfo } from "@/config";
 import { getTokenImagePath } from "@/utils/tokenImageUtils";
@@ -3547,6 +3549,8 @@ const Portfolio = () => {
         maxLiquidationUsd
       );
 
+      console.log("marketData", marketData);
+
       // Get debt market to get price - try multiple matching strategies
       let debtMarket = marketData.find((m) => {
         const matchesSymbol = m.symbol === debtSymbol;
@@ -3602,6 +3606,14 @@ const Portfolio = () => {
 
       // Get token configs - need to find tokens matching the specific markets
       const allTokens = getAllTokensWithDisplayInfo(networkId);
+      const dt = allTokens.find(
+        (t) => t.underlyingContractId === debtMarket.appId
+      );
+      console.log("dt", {
+        dt,
+        allTokens,
+        networkId,
+      });
 
       // Use the appId from the opportunity/position data as the poolId
       // This is the pool that contains the debtMarketId and is the correct pool for liquidation
@@ -3618,47 +3630,120 @@ const Portfolio = () => {
         collateralMarketId: selectedLiquidationPosition.collateralMarketId,
       });
 
-      // Find debt token - match by symbol and poolId from opportunity
-      let debtToken = poolId
-        ? allTokens.find(
-          (t) =>
-            t.symbol === debtSymbol && String(t.poolId) === String(poolId)
-        )
-        : null;
-
-      // Fallback: find by symbol only (for tokens that might not have poolId match)
-      if (!debtToken) {
-        debtToken = allTokens.find((t) => t.symbol === debtSymbol);
+      // Resolve full token configs (with tokenStandard) for debt and collateral via getTokenConfig
+      const resolveTokenConfig = (
+        symbol: string,
+        poolIdStr: string
+      ): TokenConfig | null => {
+        const raw = getTokenConfig(networkId, symbol);
+        if (!raw) return null;
+        return Array.isArray(raw)
+          ? raw.find((tc) => String(tc.poolId) === String(poolIdStr)) ??
+          raw[0]
+          : raw;
+      };
+      // Try config key first (symbol), then fall back to display-info lookup for originalSymbol
+      let debtTokenConfig = resolveTokenConfig(debtSymbol, poolId);
+      let collateralTokenConfig = resolveTokenConfig(collateralSymbol, poolId);
+      if (!debtTokenConfig || !collateralTokenConfig) {
+        const allTokens = getAllTokensWithDisplayInfo(networkId);
+        if (!debtTokenConfig) {
+          const debtDisplay = allTokens.find(
+            (t) =>
+              (t.symbol === debtSymbol || t.originalSymbol === debtSymbol) &&
+              (poolId
+                ? String(t.poolId) === String(poolId)
+                : true)
+          ) ?? allTokens.find(
+            (t) => t.symbol === debtSymbol || t.originalSymbol === debtSymbol
+          ) ?? (selectedLiquidationPosition.debtMarketId
+            ? allTokens.find(
+              (t) =>
+                String(t.underlyingContractId) ===
+                String(selectedLiquidationPosition.debtMarketId)
+            )
+            : undefined);
+          const debtKey =
+            debtDisplay && "originalSymbol" in debtDisplay
+              ? (debtDisplay as { originalSymbol?: string }).originalSymbol
+              : debtSymbol;
+          if (debtKey)
+            debtTokenConfig = resolveTokenConfig(debtKey, poolId) ?? null;
+        }
+        if (!collateralTokenConfig) {
+          const collateralDisplay = allTokens.find(
+            (t) =>
+              (t.symbol === collateralSymbol ||
+                t.originalSymbol === collateralSymbol) &&
+              (poolId ? String(t.poolId) === String(poolId) : true)
+          ) ?? allTokens.find(
+            (t) =>
+              t.symbol === collateralSymbol ||
+              t.originalSymbol === collateralSymbol
+          ) ?? (selectedLiquidationPosition.collateralMarketId
+            ? allTokens.find(
+              (t) =>
+                String(t.underlyingContractId) ===
+                String(selectedLiquidationPosition.collateralMarketId)
+            )
+            : undefined);
+          const collateralKey =
+            collateralDisplay && "originalSymbol" in collateralDisplay
+              ? (collateralDisplay as { originalSymbol?: string })
+                .originalSymbol
+              : collateralSymbol;
+          if (collateralKey)
+            collateralTokenConfig =
+              resolveTokenConfig(collateralKey, poolId) ?? null;
+        }
       }
 
-      // Find collateral token - match by symbol and poolId from opportunity
-      // For collateral, we should use the same pool as the debt (since liquidation happens in debt's pool)
-      let collateralToken = poolId
-        ? allTokens.find(
-          (t) =>
-            t.symbol === collateralSymbol &&
-            String(t.poolId) === String(poolId)
-        )
-        : null;
-
-      // If not found in debt pool, try to find by symbol only
-      if (!collateralToken) {
-        collateralToken = allTokens.find((t) => t.symbol === collateralSymbol);
-      }
+      // Build display tokens (symbol, poolId, underlyingContractId, decimals) from configs
+      const toDisplayToken = (
+        cfg: TokenConfig | null
+      ): {
+        symbol: string;
+        originalSymbol: string;
+        poolId?: string;
+        underlyingContractId?: string;
+        underlyingAssetId?: string;
+        decimals: number;
+      } | null => {
+        if (!cfg) return null;
+        const contractId =
+          cfg.marketOverride?.underlyingContractId ?? cfg.contractId;
+        const assetId = cfg.marketOverride?.underlyingAssetId ?? cfg.assetId;
+        return {
+          symbol: cfg.marketOverride?.displaySymbol ?? cfg.symbol,
+          originalSymbol: cfg.symbol,
+          poolId: cfg.poolId,
+          underlyingContractId: contractId,
+          underlyingAssetId: assetId,
+          decimals: cfg.decimals,
+        };
+      };
+      const debtToken = toDisplayToken(debtTokenConfig);
+      const collateralToken = toDisplayToken(collateralTokenConfig);
 
       if (!debtToken || !collateralToken) {
+        const missing = [
+          !debtToken && `debt ${debtSymbol}`,
+          !collateralToken && `collateral ${collateralSymbol}`,
+        ]
+          .filter(Boolean)
+          .join(", ");
         console.error("Token configs not found:", {
           debtSymbol,
           collateralSymbol,
           poolId,
-          debtToken: !!debtToken,
-          collateralToken: !!collateralToken,
-          availableTokens: allTokens.map((t) => ({
-            symbol: t.symbol,
-            poolId: t.poolId,
-          })),
+          debtMarketId: selectedLiquidationPosition.debtMarketId,
+          collateralMarketId: selectedLiquidationPosition.collateralMarketId,
+          debtTokenConfig: !!debtTokenConfig,
+          collateralTokenConfig: !!collateralTokenConfig,
         });
-        throw new Error("Token configs not found");
+        throw new Error(
+          `Token config not found for ${missing}. Ensure the debt and collateral assets are listed in the app config for this network.`
+        );
       }
 
       console.log("Tokens found:", {
@@ -3668,17 +3753,16 @@ const Portfolio = () => {
           poolId: collateralToken.poolId,
         },
         poolIdFromOpportunity: poolId,
+        debtTokenStandard: debtTokenConfig?.tokenStandard,
+        collateralTokenStandard: collateralTokenConfig?.tokenStandard,
       });
 
       // Get token price
       let debtTokenPrice = 0;
-      const token = getAllTokensWithDisplayInfo(networkId).find(
-        (t) => t.symbol === debtSymbol
-      );
       if (debtMarket.price) {
         debtTokenPrice = formatPriceFromContract(
           debtMarket.price,
-          token?.decimals || 6
+          debtToken.decimals ?? 6
         );
       } else if (debtMarket.marketInfo?.price) {
         const rawPrice = parseFloat(debtMarket.marketInfo.price);
@@ -3697,6 +3781,8 @@ const Portfolio = () => {
           .multipliedBy(new BigNumber(10).pow(debtToken.decimals))
           .toFixed(0)
       );
+
+      console.log("debtAmountInTokens", debtAmountInTokens);
 
       // Get collateral market to get price
       const collateralMarket = marketData.find((m) => {
@@ -3729,13 +3815,10 @@ const Portfolio = () => {
 
       // Get collateral token price
       let collateralTokenPrice = 0;
-      const collateralTokenConfig = getAllTokensWithDisplayInfo(networkId).find(
-        (t) => t.symbol === collateralSymbol
-      );
       if (collateralMarket?.price) {
         collateralTokenPrice = formatPriceFromContract(
           collateralMarket.price,
-          collateralTokenConfig?.decimals || 6
+          collateralToken.decimals ?? 6
         );
       } else if (collateralMarket?.marketInfo?.price) {
         const rawPrice = parseFloat(collateralMarket.marketInfo.price);
@@ -3789,171 +3872,30 @@ const Portfolio = () => {
         minCollateralReceived: minCollateralReceived.toString(),
       });
 
-      // Get market IDs
-      const debtMarketId = parseInt(
-        selectedLiquidationPosition.debtMarketId?.toString() || "0"
-      );
-      const collateralMarketIdValue = parseInt(
-        selectedLiquidationPosition.collateralMarketId?.toString() || "0"
-      );
+      // Human-readable amounts for lending service
+      const debtAmountHuman = new BigNumber(debtAmountInTokens.toString())
+        .dividedBy(10 ** debtToken.decimals)
+        .toString();
+      const minCollateralAmountHuman = collateralAmountInTokens.toString();
 
-      if (!debtMarketId || !collateralMarketIdValue) {
-        throw new Error("Market IDs not found");
-      }
-
-      // poolId is already set from opportunity's appId above
-      console.log("Using poolId for liquidation:", poolId, {
-        appIdFromOpportunity: selectedLiquidationPosition.appId,
-        debtTokenPoolId: debtToken.poolId,
-        collateralTokenPoolId: collateralToken.poolId,
-        debtMarketId,
-        collateralMarketId: collateralMarketIdValue,
-      });
-
-      // Note: Cross-pool liquidations are supported via liquidate_cross_market
-      // The poolId here is the pool where the liquidation contract call happens (debt's pool)
-
-      // Initialize clients
-      const networkConfig = getNetworkConfig(networkId);
-      const algorandNetwork = getAlgorandNetworkFromNetworkId(networkId);
-      if (!algorandNetwork) {
-        throw new Error("Invalid network");
-      }
-
-      const clients = algorandService.initializeClients(algorandNetwork);
-
-      // Create contract instances
-      const builder = {
-        lending: new CONTRACT(
-          Number(poolId),
-          clients.algod,
-          undefined,
-          { ...LendingPoolAppSpec.contract, events: [] },
-          { addr: activeAccount.address, sk: new Uint8Array() },
-          true,
-          false,
-          true
-        ),
-        debtToken: new CONTRACT(
-          Number(debtToken.underlyingContractId),
-          clients.algod,
-          undefined,
-          abi.nt200,
-          { addr: activeAccount.address, sk: new Uint8Array() },
-          true,
-          false,
-          true
-        ),
-        collateralToken: new CONTRACT(
-          Number(collateralToken.underlyingContractId),
-          clients.algod,
-          undefined,
-          abi.nt200,
-          { addr: activeAccount.address, sk: new Uint8Array() },
-          true,
-          false,
-          true
-        ),
-      };
-
-      const buildN = [];
-
-      // TODO cond don't need for is market is stoken
-      // arc200 approve
-      {
-        const txnO = (
-          await builder.debtToken.arc200_approve(
-            algosdk.getApplicationAddress(Number(poolId)),
-            debtAmountInTokens
-          )
-        ).obj;
-        const note = new TextEncoder().encode(
-          `arc200_approve ${debtSymbol} ${Number(debtAmountInTokens) / 10 ** debtToken.decimals
-          } spendindg to ${algosdk.encodeAddress(
-            algosdk.getApplicationAddress(Number(poolId)).publicKey
-          )}`
-        );
-        buildN.push({ ...txnO, note });
-      }
-
-      // Liquidate cross market
-      {
-        const minCollateralReceived = 0; // TODO calc min collateral received
-        console.log("liquidate_cross_market", {
-          poolId,
-          debtMarketId,
-          collateralMarketIdValue,
-          userAddress,
-          debtAmountInTokens,
-          minCollateralReceived: minCollateralReceived.toString(),
-        });
-        const txnO = (
-          await builder.lending.liquidate_cross_market(
-            debtMarketId,
-            collateralMarketIdValue,
-            userAddress,
-            debtAmountInTokens,
-            minCollateralReceived
-          )
-        ).obj;
-        const minCollateralReceivedString = new BigNumber(
-          collateralAmountInTokens
-        )
-          .dividedBy(10 ** collateralToken.decimals)
-          .toString();
-        const note = new TextEncoder().encode(
-          `liquidate_cross_market ${debtSymbol} ${Number(debtAmountInTokens) / 10 ** debtToken.decimals
-          } to ${algosdk.encodeAddress(
-            algosdk.getApplicationAddress(Number(collateralMarketIdValue))
-              .publicKey
-          )}`
-        );
-        buildN.push({ ...txnO, note, payment: 2e5 });
-      }
-
-      // // Sync account for price change - debt token
-      // {
-      //   const txnO = (
-      //     await builder.lending.sync_user_market_for_price_change(
-      //       userAddress,
-      //       Number(debtMarketId)
-      //     )
-      //   ).obj;
-      //   buildN.push(txnO);
-      // }
-
-      // // Sync account for price change - collateral token
-      // {
-      //   const txnO = (
-      //     await builder.lending.sync_user_market_for_price_change(
-      //       userAddress,
-      //       Number(collateralMarketIdValue)
-      //     )
-      //   ).obj;
-      //   buildN.push(txnO);
-      // }
-
-      console.log("buildN", buildN);
-
-      const ci = new CONTRACT(
-        Number(poolId),
-        clients.algod,
-        undefined,
-        abi.custom,
-        { addr: activeAccount.address, sk: new Uint8Array() }
+      const result = await liquidateCrossMarket(
+        poolId,
+        debtTokenConfig,
+        collateralTokenConfig,
+        debtAmountHuman,
+        minCollateralAmountHuman,
+        userAddress,
+        activeAccount.address,
+        networkId,
+        undefined as any,
+        undefined as any
       );
 
-      ci.setFee(1e5);
-      ci.setEnableGroupResourceSharing(true);
-      ci.setExtraTxns(buildN);
-
-      if (networkId === "algorand-mainnet") {
-        ci.setBeaconId(3209233839);
+      if (!result.success) {
+        throw new Error(result.error);
       }
 
-      const customR = await ci.custom();
-
-      console.log("customR", customR);
+      const customR = { txns: result.txns };
 
       const stxns = await signTransactions(
         customR.txns.map((txn: string) =>
@@ -4002,6 +3944,148 @@ const Portfolio = () => {
     fetchUser,
     toast,
   ]);
+
+  const handleClaim = useCallback(
+    async (position: {
+      user?: string;
+      network?: string;
+      appId?: string | number;
+      collateralTokenInfo?: { data?: { symbol?: string } };
+      collateralMarketId?: string | number;
+    }) => {
+      if (!activeAccount?.address) {
+        toast({
+          title: "Wallet required",
+          description: "Connect a wallet to claim.",
+          variant: "destructive",
+        });
+        return;
+      }
+      const networkId = position.network as NetworkId;
+      const poolId = position.appId?.toString();
+      const collateralSymbol =
+        position.collateralTokenInfo?.data?.symbol ?? "";
+
+      const resolveTokenConfig = (
+        symbol: string,
+        poolIdStr: string
+      ): TokenConfig | null => {
+        const raw = getTokenConfig(networkId, symbol);
+        if (!raw) return null;
+        return Array.isArray(raw)
+          ? raw.find((tc) => String(tc.poolId) === String(poolIdStr)) ?? raw[0]
+          : raw;
+      };
+
+      let collateralTokenConfig = poolId
+        ? resolveTokenConfig(collateralSymbol, poolId)
+        : null;
+      if (!collateralTokenConfig && poolId) {
+        const allTokens = getAllTokensWithDisplayInfo(networkId);
+        const collateralDisplay =
+          allTokens.find(
+            (t) =>
+              (t.symbol === collateralSymbol ||
+                t.originalSymbol === collateralSymbol) &&
+              String(t.poolId) === String(poolId)
+          ) ??
+          allTokens.find(
+            (t) =>
+              t.symbol === collateralSymbol ||
+              t.originalSymbol === collateralSymbol
+          ) ??
+          (position.collateralMarketId
+            ? allTokens.find(
+              (t) =>
+                String(t.underlyingContractId) ===
+                String(position.collateralMarketId)
+            )
+            : undefined);
+        const collateralKey =
+          collateralDisplay && "originalSymbol" in collateralDisplay
+            ? (collateralDisplay as { originalSymbol?: string }).originalSymbol
+            : collateralSymbol;
+        if (collateralKey) {
+          collateralTokenConfig = resolveTokenConfig(collateralKey, poolId) ?? null;
+        }
+      }
+
+      if (!collateralTokenConfig) {
+        toast({
+          title: "Claim failed",
+          description: `Collateral token config not found for ${collateralSymbol} on this pool.`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      console.log("collateralTokenConfig", collateralTokenConfig);
+
+      const algorandNetwork = getAlgorandNetworkFromNetworkId(networkId);
+      if (!algorandNetwork) {
+        toast({
+          title: "Claim failed",
+          description: `Invalid or unsupported network: ${networkId}`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      try {
+        const clients = await algorandService.initializeClientsForTransactions(
+          algorandNetwork
+        );
+        if (collateralTokenConfig.tokenStandard === "asa") {
+          const ci = new CONTRACT(
+            Number(collateralTokenConfig.contractId),
+            clients.algod,
+            undefined,
+            abi.nt200,
+            { addr: activeAccount.address, sk: new Uint8Array() }
+          );
+          const balanceR = await ci.arc200_balanceOf(activeAccount.address);
+          if (!balanceR.success) {
+            throw new Error(balanceR.error);
+          }
+          const balance = balanceR.returnValue;
+          console.log("balance", balance);
+          ci.setFee(3000);
+          const claimR = await ci.withdraw(balance);
+          console.log("claimR", claimR);
+          if (!claimR.success) {
+            throw new Error(claimR.error);
+          }
+          console.log("claimR", claimR);
+          const stxns = await signTransactions(
+            claimR.txns.map((txn: string) =>
+              Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+            )
+          );
+          const res = await clients.algod.sendRawTransaction(stxns).do();
+          await algosdk.waitForConfirmation(clients.algod, res.txid, 4);
+          await updateTransactionMetadata(res.txid, networkId);
+          toast({
+            title: "Claim Successful",
+            description: `Transaction confirmed: ${res.txid}`,
+          });
+          //} else if (collateralTokenConfig.tokenStandard === "network") {
+        } else {
+          toast({
+            title: "Claim failed",
+            description: "Claim is not yet available for this position.",
+            variant: "destructive",
+          });
+        }
+      } catch (error) {
+        toast({
+          title: "Claim failed",
+          description: error instanceof Error ? error.message : "Please try again",
+          variant: "destructive",
+        });
+      }
+    },
+    [activeAccount?.address, toast]
+  );
 
   // Show loading state
   if (isLoadingData) {
@@ -5451,6 +5535,16 @@ const Portfolio = () => {
                                     }
                                   >
                                     Liquidate
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="text-xs"
+                                    disabled={!activeAccount?.address}
+                                    title="Claim rewards or collateral"
+                                    onClick={() => handleClaim(position)}
+                                  >
+                                    Claim
                                   </Button>
                                 </div>
                               );
@@ -9781,7 +9875,7 @@ const Portfolio = () => {
           <DialogHeader>
             <DialogTitle>Liquidate Position</DialogTitle>
           </DialogHeader>
-            {selectedLiquidationPosition &&
+          {selectedLiquidationPosition &&
             (() => {
               // Calculate liquidation amount in WAD from selected partial amount and debt market price
               const debtSymbol =
@@ -10010,16 +10104,58 @@ const Portfolio = () => {
                   </div>
                   <div className="space-y-3 pt-2">
                     <p className="text-sm text-muted-foreground">
-                      Amount to liquidate (partial liquidation)
+                      Amount to liquidate (USD)
                     </p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <input
+                        type="number"
+                        min={0}
+                        max={maxLiquidationUsd}
+                        step={0.01}
+                        value={
+                          partialLiquidationAmountUsd === 0 &&
+                            maxLiquidationUsd > 0
+                            ? ""
+                            : partialLiquidationAmountUsd
+                        }
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          if (raw === "") {
+                            setPartialLiquidationAmountUsd(0);
+                            return;
+                          }
+                          const v = parseFloat(raw);
+                          if (!Number.isNaN(v)) {
+                            setPartialLiquidationAmountUsd(
+                              Math.min(
+                                Math.max(0, v),
+                                maxLiquidationUsd
+                              )
+                            );
+                          }
+                        }}
+                        placeholder="0"
+                        className="flex-1 min-w-[120px] h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          setPartialLiquidationAmountUsd(maxLiquidationUsd)
+                        }
+                      >
+                        Max
+                      </Button>
+                    </div>
                     <div className="flex items-center gap-4">
                       <Slider
                         className="flex-1"
                         value={[
                           maxLiquidationUsd > 0
                             ? Math.round(
-                                (liquidationValueUsd / maxLiquidationUsd) * 100
-                              )
+                              (liquidationValueUsd / maxLiquidationUsd) * 100
+                            )
                             : 100,
                         ]}
                         onValueChange={([p]) =>
@@ -10146,18 +10282,26 @@ const Portfolio = () => {
                 try {
                   setIsRepaying(true);
 
-                  // Get token config for tokenStandard
+                  // Get token config for tokenStandard (try originalSymbol then debtSymbol)
                   const originalSymbol =
                     "originalSymbol" in token
                       ? (token as any).originalSymbol
                       : debtSymbol;
-                  const originalTokenConfigRaw = getTokenConfig(
+                  let originalTokenConfigRaw = getTokenConfig(
                     networkId,
                     originalSymbol
                   );
+                  if (!originalTokenConfigRaw) {
+                    originalTokenConfigRaw = getTokenConfig(
+                      networkId,
+                      debtSymbol
+                    );
+                  }
 
                   if (!originalTokenConfigRaw) {
-                    throw new Error("Token config not found");
+                    throw new Error(
+                      `Token config not found for ${debtSymbol} (tried: ${originalSymbol}, ${debtSymbol}). Ensure the asset is in the app config for this network.`
+                    );
                   }
 
                   const originalTokenConfig = Array.isArray(

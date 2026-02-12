@@ -5375,3 +5375,193 @@ export const mint = async (
   }
 };
 
+export const liquidateCrossMarket = async (
+  poolId: string,
+  debtToken: TokenConfig,
+  collateralToken: TokenConfig,
+  debtAmount: string,
+  minCollateralAmount: string,
+  userAddress: string,
+  liquidatorAddress: string,
+  networkId: NetworkId,
+  clients: any,
+  signTransactions: any
+) => {
+  console.log("liquidateCrossMarket", { poolId, debtToken, collateralToken, debtAmount, minCollateralAmount, userAddress, networkId });
+
+  try {
+    const networkConfig = getNetworkConfig(networkId);
+    if (isAlgorandCompatibleNetwork(networkId)) {
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+      const builder = {
+        lending: new CONTRACT(
+          Number(poolId),
+          clients.algod,
+          undefined,
+          { ...LendingPoolAppSpec.contract, events: [] },
+          { addr: liquidatorAddress, sk: new Uint8Array() },
+          true,
+          false,
+          true
+        ),
+        debtToken: new CONTRACT(
+          Number(debtToken.contractId),
+          clients.algod,
+          undefined,
+          abi.nt200,
+          { addr: liquidatorAddress, sk: new Uint8Array() },
+          true,
+          false,
+          true
+        ),
+        collateralToken: new CONTRACT(
+          Number(collateralToken.contractId),
+          clients.algod,
+          undefined,
+          abi.nt200,
+          { addr: liquidatorAddress, sk: new Uint8Array() },
+          true,
+          false,
+          true
+        ),
+        debtArc200Exchange: new CONTRACT(
+          Number(debtToken.contractId),
+          clients.algod,
+          undefined,
+          {
+            name: "arc200Exchange",
+            desc: "arc200Exchange",
+            methods: [
+              // arc200_redeem(uint64)void
+              {
+                name: "arc200_redeem",
+                args: [{ name: "amount", type: "uint64" }],
+                returns: { type: "void" },
+              },
+            ],
+            events: [],
+          },
+          {
+            addr: liquidatorAddress,
+            sk: new Uint8Array(),
+          },
+          true,
+          false,
+          true
+        ),
+      };
+
+      const buildN = [];
+
+      const debtAmountBi = BigInt(new BigNumber(debtAmount).multipliedBy(10 ** debtToken.decimals).toFixed(0))
+
+      console.log({
+        debtToken,
+        debtAmountBi,
+        collateralToken,
+      })
+      // TODO handle deposit for network
+      // TODO handle deposit for asa
+      // cond deposit if arc200-exchange 
+      if (debtToken.tokenStandard === "arc200-exchange") {
+        {
+          const txnO = (
+            await builder.debtArc200Exchange.arc200_redeem(debtAmountBi)
+          ).obj;
+          const axfer = {
+            aamt: debtAmountBi,
+            xaid: Number(debtToken.assetId),
+          };
+          const description = `arc200_redeem ${debtToken.symbol} ${debtAmount}`;
+          const note = new TextEncoder().encode(
+            description
+          );
+          buildN.push({ ...txnO, ...axfer, note, description });
+        }
+      }
+
+      // arc200 approve
+      {
+        const txnO = (
+          await builder.debtToken.arc200_approve(
+            algosdk.getApplicationAddress(Number(poolId)),
+            debtAmountBi
+          )
+        ).obj;
+        const note = new TextEncoder().encode(
+          `arc200_approve ${debtToken.symbol} ${debtAmount}
+          } spending to ${algosdk.encodeAddress(
+            algosdk.getApplicationAddress(Number(poolId)).publicKey
+          )}`
+        );
+        buildN.push({ ...txnO, note });
+      }
+
+      // Liquidate cross market
+      // @arc4.abimethod
+      // def liquidate_cross_market(
+      //     self,
+      //     debt_market_id: arc4.UInt64,
+      //     collateral_market_id: arc4.UInt64,
+      //     user: arc4.Address,
+      //     debt_amount: arc4.UInt256,
+      //     min_collateral_received: arc4.UInt256,
+      // ) -> arc4.UInt256:
+      {
+        const minCollateralReceived = 0; // TODO calc min collateral received
+        const txnO = (
+          await builder.lending.liquidate_cross_market(
+            Number(debtToken.contractId),
+            Number(collateralToken.contractId),
+            userAddress,
+            debtAmountBi,
+            minCollateralReceived,
+          )
+        ).obj;
+        const note = new TextEncoder().encode(
+          `liquidate_cross_market ${debtToken.symbol} ${debtAmount}
+          to ${collateralToken.symbol}`
+        );
+        const payment = 2e6;
+        buildN.push({ ...txnO, note, payment, description: "liquidate_cross_market" });
+      }
+
+      console.log("buildN", buildN);
+
+      const ci = new CONTRACT(
+        Number(poolId),
+        clients.algod,
+        undefined,
+        abi.custom,
+        { addr: liquidatorAddress, sk: new Uint8Array() }
+      );
+
+      ci.setFee(1e5);
+      ci.setEnableGroupResourceSharing(true);
+      ci.setExtraTxns(buildN);
+
+      if (networkId === "algorand-mainnet") {
+        ci.setBeaconId(3209233839);
+      }
+
+      const customR = await ci.custom();
+
+      console.log("liquidateCrossMarket customR", { customR });
+
+      if (!customR.success) {
+        throw new Error("Failed to create liquidate cross market transaction");
+      }
+
+      return {
+        success: true,
+        txns: customR.txns,
+      };
+
+    }
+  } catch (error) {
+    console.error("Liquidate cross market error:", error);
+    return { success: false, error: error instanceof Error ? error.message : "Liquidate cross market failed" };
+  }
+};

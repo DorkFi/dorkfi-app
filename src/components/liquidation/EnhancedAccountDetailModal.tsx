@@ -65,13 +65,17 @@ const getConfigNetworkIdFromWalletNetworkId = (
   return configNetworkId;
 };
 
-// Helper function to get token config for a token symbol
+// Helper function to get token config for a token symbol (matches symbol or originalSymbol)
 const getTokenConfig = async (networkId: NetworkId, tokenSymbol: string) => {
   const tokens = getAllTokensWithDisplayInfo(networkId);
 
-  const token = tokens.find((t) => t.symbol === tokenSymbol);
+  let token = tokens.find(
+    (t) => t.symbol === tokenSymbol || t.originalSymbol === tokenSymbol
+  );
   if (!token) {
-    throw new Error(`Token ${tokenSymbol} not found`);
+    throw new Error(
+      `Token config not found for ${tokenSymbol}. Ensure the asset is in the app config for this network.`
+    );
   }
 
   return token;
