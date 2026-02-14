@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Proposal } from "@/types/governanceTypes";
+import { Proposal, ProposalCategory } from "@/types/governanceTypes";
+import { PROPOSAL_CATEGORY_DISPLAY_NAMES } from "@/constants/governanceConstants";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -9,6 +10,7 @@ import DorkFiCard from "@/components/ui/DorkFiCard";
 import { H3, Body, Caption } from "@/components/ui/Typography";
 import { VoteConfirmationModal } from "./VoteConfirmationModal";
 import { VoteSuccessModal } from "./VoteSuccessModal";
+import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 
 interface ProposalCardProps {
   proposal: Proposal;
@@ -25,13 +27,14 @@ interface ProposalCardProps {
   isSelectionDisabled?: boolean;
 }
 
-const categoryColors = {
+const categoryColors: Record<ProposalCategory, string> = {
   "interest-rates": "bg-blue-500/10 text-blue-600 dark:text-blue-400",
   "collateral-listing": "bg-green-500/10 text-green-600 dark:text-green-400",
   "liquidation-settings": "bg-orange-500/10 text-orange-600 dark:text-orange-400",
   "treasury": "bg-purple-500/10 text-purple-600 dark:text-purple-400",
   "features": "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
   "governance": "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  "infrastructure": "bg-teal-500/10 text-teal-600 dark:text-teal-400",
 };
 
 const statusConfig = {
@@ -60,6 +63,7 @@ export const ProposalCard = ({
   const [pendingVoteSupport, setPendingVoteSupport] = useState<boolean | null>(null);
   const [isVoting, setIsVoting] = useState(false);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
+  const { formatNumber, formatPercent } = useNumberI18n();
 
   const votesForPercent = (proposal.votesFor / Math.max(proposal.totalVotes, 1)) * 100;
   const votesAgainstPercent = (proposal.votesAgainst / Math.max(proposal.totalVotes, 1)) * 100;
@@ -138,9 +142,7 @@ export const ProposalCard = ({
                 />
               )}
               <Badge className={categoryColors[proposal.category]}>
-                {proposal.category === "collateral-listing" 
-                  ? "MARKET LISTINGS" 
-                  : proposal.category.replace("-", " ").toUpperCase()}
+                {PROPOSAL_CATEGORY_DISPLAY_NAMES[proposal.category]}
               </Badge>
               <Badge className={statusConfig[proposal.status].bg}>
                 <StatusIcon className={`h-3 w-3 mr-1 ${statusConfig[proposal.status].color}`} />
@@ -172,11 +174,11 @@ export const ProposalCard = ({
           <div className="flex items-center justify-between text-sm">
             <span className="flex items-center gap-1 text-green-600 dark:text-green-400">
               <TrendingUp className="h-4 w-4" />
-              For: {votesForPercent.toFixed(1)}%
+              For: {formatPercent(votesForPercent / 100, { maximumFractionDigits: 1 })}
             </span>
             <span className="flex items-center gap-1 text-red-500 dark:text-red-400">
               <TrendingDown className="h-4 w-4" />
-              Against: {votesAgainstPercent.toFixed(1)}%
+              Against: {formatPercent(votesAgainstPercent / 100, { maximumFractionDigits: 1 })}
             </span>
           </div>
           
@@ -193,8 +195,8 @@ export const ProposalCard = ({
               />
             </div>
             <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>{proposal.votesFor.toLocaleString()} UNIT</span>
-              <span>{proposal.votesAgainst.toLocaleString()} UNIT</span>
+              <span>{formatNumber(proposal.votesFor, { maximumFractionDigits: 0 })} UNIT</span>
+              <span>{formatNumber(proposal.votesAgainst, { maximumFractionDigits: 0 })} UNIT</span>
             </div>
           </div>
 

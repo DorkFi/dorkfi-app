@@ -1424,3 +1424,134 @@ export const castBatchVote = async (
     };
   }
 };
+
+export interface CloseVotingEarlyParams {
+  proposalId: string | Uint8Array;
+  sender: string;
+}
+
+export interface CloseVotingEarlyResult {
+  success: boolean;
+  txns?: string[];
+  error?: any;
+}
+
+/**
+ * Closes voting early for a governance proposal.
+ * Updates voting end timestamp to current time so proposal may be finalized early.
+ * Typically an owner/admin operation.
+ *
+ * @param params Close voting early parameters including proposal ID and sender
+ * @param networkId Optional network ID, defaults to current network
+ * @returns Promise<CloseVotingEarlyResult> The result of the transaction
+ */
+export const closeVotingEarly = async (
+  params: CloseVotingEarlyParams,
+  networkId?: NetworkId
+): Promise<CloseVotingEarlyResult> => {
+  try {
+    const networkConfig = networkId
+      ? getNetworkConfig(networkId)
+      : getCurrentNetworkConfig();
+
+    if (!isCurrentNetworkAVM()) {
+      throw new Error("Governance is only supported on AVM networks");
+    }
+
+    const governanceConfig = getContractAddress(
+      networkId || (networkConfig.networkId as NetworkId),
+      "governance",
+    ) as GovernanceConfig | string | undefined;
+
+    if (!governanceConfig) {
+      throw new Error("Governance contract not configured for this network");
+    }
+
+    const appId =
+      typeof governanceConfig === "string"
+        ? Number(governanceConfig)
+        : governanceConfig.appId;
+
+    const clients = algorandService.initializeClients(
+      networkConfig.walletNetworkId as AlgorandNetwork
+    );
+
+    // Convert proposalId to Uint8Array if it's a hex string
+    let proposalNode: Uint8Array;
+    if (typeof params.proposalId === "string") {
+      const hex = params.proposalId.startsWith("0x") ? params.proposalId.slice(2) : params.proposalId;
+      const paddedHex = hex.padStart(64, "0").slice(0, 64);
+      proposalNode = Uint8Array.from(Buffer.from(paddedHex, "hex"));
+    } else {
+      proposalNode = params.proposalId;
+    }
+
+    if (proposalNode.length !== 32) {
+      const padded = new Uint8Array(32);
+      padded.set(proposalNode.slice(0, 32));
+      proposalNode = padded;
+    }
+
+    const ci = new CONTRACT(
+      appId,
+      clients.algod,
+      undefined,
+      abi.custom,
+      {
+        addr: params.sender,
+        sk: new Uint8Array(),
+      },
+    );
+    const builder = {
+      governance: new CONTRACT(
+        appId,
+        clients.algod,
+        undefined,
+        {
+          ...UNITGovernanceAppSpec.contract,
+          events: [],
+        },
+        {
+          addr: params.sender,
+          sk: new Uint8Array(),
+        },
+        true,
+        false,
+        true
+      )
+    };
+
+    const buildN = [];
+    {
+      const txnO = (await builder.governance.close_voting_early(proposalNode)).obj;
+      buildN.push({
+        ...txnO,
+        note: new TextEncoder().encode(`governance close voting early ${Buffer.from(proposalNode).toString('hex').slice(0, 8)}`),
+        payment: 2e5,
+      });
+    }
+
+    ci.setExtraTxns(buildN);
+    ci.setFee(8000);
+    ci.setEnableGroupResourceSharing(true);
+    const result = await ci.custom();
+
+    if (!result.success) {
+      return {
+        success: false,
+        error: result.returnValue || "Failed to close voting early",
+      };
+    }
+
+    return {
+      success: true,
+      txns: result.txns || [],
+    };
+  } catch (error: any) {
+    console.error("Failed to close voting early:", error);
+    return {
+      success: false,
+      error: error?.message || "Unknown error occurred",
+    };
+  }
+};

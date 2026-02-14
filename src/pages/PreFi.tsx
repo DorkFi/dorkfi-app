@@ -3386,7 +3386,7 @@ export default function PreFiDashboard() {
             collateralFactor: 75,
             tokenPrice: withdrawModalPrice,
           }}
-          onSubmit={async (amount) => {
+          onSubmit={async (amount, options) => {
             if (!selectedMarket) return;
 
             const amountNumber = Number(amount);
@@ -3409,12 +3409,15 @@ export default function PreFiDashboard() {
                   return;
                 }
                 console.log("selectedMarket", selectedMarket);
+                // Only use withdrawAll when user has no borrows (PreFi has no borrow context here, so never use it)
+                const withdrawAll = false;
                 console.log("Withdraw parameters:", {
                   poolId: selectedMarket.poolId || "",
                   marketId: selectedMarket.marketId || "",
                   amount: amount,
                   userAddress: activeAccount.address,
                   networkId: currentNetwork,
+                  withdrawAll,
                 });
                 // Call the lending service withdraw method
                 withdrawResult = await withdraw(
@@ -3423,7 +3426,8 @@ export default function PreFiDashboard() {
                   selectedMarket.tokenStandard, // tokenStandard
                   amount, // amount as string
                   activeAccount.address, // userAddress
-                  currentNetwork // networkId
+                  currentNetwork, // networkId
+                  { withdrawAll }
                 );
 
                 if (!withdrawResult.success) {

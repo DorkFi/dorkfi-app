@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -7,8 +7,8 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { LocaleNumberInput } from "@/components/ui/LocaleNumberInput";
 import { Card, CardContent } from "@/components/ui/card";
 import { InfoIcon, ChevronDown, ChevronUp } from "lucide-react";
 import { formatRelativeTime, formatRelativeTimeFromISO } from "@/utils/timeUtils";
@@ -42,7 +42,9 @@ interface WithdrawModalProps {
     scaledDeposits?: string;
     lastUpdateTime?: number | string;
   };
-  onSubmit?: (amount: string) => void;
+  /** Health-factor-safe max withdraw (from getMaxWithdrawable). When set, Max button and validation use this instead of full deposit. */
+  maxWithdrawUnderlying?: number;
+  onSubmit?: (amount: string, options?: { isMaxWithdraw?: boolean }) => void;
   isLoading?: boolean;
   showTooltip?: boolean;
   tooltipText?: string;
@@ -56,15 +58,17 @@ const WithdrawModal = ({
   tokenIcon,
   currentlyDeposited,
   marketStats,
+  maxWithdrawUnderlying,
   onSubmit,
   isLoading = false,
   showTooltip = false,
   tooltipText = "",
   onRefreshBalance,
 }: WithdrawModalProps) => {
-  const [amount, setAmount] = useState("");
+  const [amount, setAmount] = useState<number | "">("");
   const [fiatValue, setFiatValue] = useState(0);
   const [showSuccess, setShowSuccess] = useState(false);
+  const maxWithdrawRef = useRef(false);
   const [expandedDetail, setExpandedDetail] = useState<string | null>(null);
   const [showDebugValues, setShowDebugValues] = useState(false);
   const [internalLoading, setInternalLoading] = useState(false);
@@ -111,6 +115,11 @@ const WithdrawModal = ({
 
   // Use currentlyDeposited as the current deposit value (it's already calculated correctly)
   const currentDepositValue = currentlyDeposited;
+  // Health-factor-safe max: when provided, cap by deposit so we never show more than user has
+  const effectiveMaxWithdraw =
+    maxWithdrawUnderlying != null
+      ? Math.min(maxWithdrawUnderlying, currentDepositValue)
+      : currentDepositValue;
   const originalDepositAmount = calculateOriginalDeposit();
   // Calculate accrued interest from the difference
   // Ensure accrued interest is never negative (shouldn't happen if indices are correct)
@@ -147,19 +156,17 @@ const WithdrawModal = ({
   }, [isOpen]);
 
   useEffect(() => {
-    if (amount) {
-      const numAmount = parseFloat(amount);
-      setFiatValue(numAmount * marketStats.tokenPrice);
+    if (amount !== "" && typeof amount === "number") {
+      setFiatValue(amount * marketStats.tokenPrice);
     } else {
       setFiatValue(0);
     }
   }, [amount, marketStats.tokenPrice]);
 
   const handleMaxClick = () => {
-    // Use currentDepositValue (currentlyDeposited) as the maximum withdrawable amount
-    // Format to reasonable precision (8 decimal places max, remove trailing zeros)
-    // This prevents excessive decimal places from floating point calculations
-    const formattedAmount = parseFloat(currentDepositValue.toFixed(8)).toString();
+    // Use health-factor-safe max when available (getMaxWithdrawable), else full deposit
+    maxWithdrawRef.current = true;
+    const formattedAmount = parseFloat(effectiveMaxWithdraw.toFixed(3));
     setAmount(formattedAmount);
   };
 
@@ -167,9 +174,14 @@ const WithdrawModal = ({
     setInternalLoading(true);
     try {
       if (onSubmit) {
-        await onSubmit(amount);
+        const isMaxWithdraw = maxWithdrawRef.current;
+        maxWithdrawRef.current = false;
+        await onSubmit(
+          amount !== "" && typeof amount === "number" ? String(amount) : "",
+          { isMaxWithdraw }
+        );
       } else {
-        console.log(`Withdraw ${amount} ${tokenSymbol}`);
+        console.log(`Withdraw ${amount !== "" ? amount.toString() : ""} ${tokenSymbol}`);
 
         await new Promise((resolve) => setTimeout(resolve, 500));
         setShowSuccess(true);
@@ -197,10 +209,21 @@ const WithdrawModal = ({
     setFiatValue(0);
   };
 
+  // Use same precision (3 decimals) for comparison to avoid floating point failures
+  const amountRounded =
+    typeof amount === "number" && Number.isFinite(amount)
+      ? Math.floor(amount * 1e3) / 1e3
+      : NaN;
+  const maxRounded =
+    Number.isFinite(effectiveMaxWithdraw)
+      ? Math.floor(effectiveMaxWithdraw * 1e3) / 1e3
+      : 0;
   const isValidAmount =
-    amount &&
-    parseFloat(amount) > 0 &&
-    parseFloat(amount) <= currentDepositValue;
+    amount !== "" &&
+    typeof amount === "number" &&
+    Number.isFinite(amount) &&
+    amountRounded > 0 &&
+    amountRounded <= maxRounded;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -211,7 +234,7 @@ const WithdrawModal = ({
               transactionType="withdraw"
               asset={tokenSymbol}
               assetIcon={tokenIcon}
-              amount={amount}
+              amount={amount !== "" ? amount.toString() : ""}
               onViewTransaction={handleViewTransaction}
               onGoToPortfolio={handleGoToPortfolio}
               onMakeAnother={handleMakeAnother}
@@ -260,14 +283,13 @@ const WithdrawModal = ({
                   Amount
                 </Label>
                 <div className="relative">
-                  <Input
+                  <LocaleNumberInput
                     id="amount"
-                    type="number"
-                    inputMode="decimal"
                     placeholder="0.0"
                     autoFocus
                     value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
+                    onChange={(v) => setAmount(v ?? "")}
+                    formatOptions={{ maximumFractionDigits: 3 }}
                     className="bg-white/80 dark:bg-slate-800 border-gray-300 dark:border-slate-600 text-slate-800 dark:text-white pr-16 text-lg h-12"
                   />
                   <Button
@@ -288,6 +310,16 @@ const WithdrawModal = ({
                     })}
                   </p>
                 )}
+                {maxWithdrawUnderlying != null &&
+                  maxWithdrawUnderlying < currentDepositValue && (
+                    <p className="text-sm text-amber-600 dark:text-amber-400">
+                      You can withdraw up to{" "}
+                      {effectiveMaxWithdraw.toLocaleString(undefined, {
+                        maximumFractionDigits: 3,
+                      })}{" "}
+                      {tokenSymbol} (limited by collateral health).
+                    </p>
+                  )}
                 {/* Deposited Balance Display */}
                 <div className="p-3 rounded-lg border bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800">
                   <div className="flex items-center justify-between">

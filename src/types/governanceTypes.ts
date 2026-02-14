@@ -6,7 +6,8 @@ export type ProposalCategory =
   | "liquidation-settings" 
   | "treasury" 
   | "features" 
-  | "governance";
+  | "governance"
+  | "infrastructure";
 
 export interface Proposal {
   id: string;

@@ -13,6 +13,7 @@ import {
   repayAll,
   fetchUserWalletBalance,
   fetchMarketInfoFromContract,
+  getMaxWithdrawableForMarket,
 } from "@/services/lendingService";
 import {
   getTokenConfig,
@@ -134,6 +135,10 @@ const PortfolioModals = ({
   const [currentDepositIndexCache, setCurrentDepositIndexCache] = useState<
     Record<string, string>
   >({});
+  const [maxWithdrawData, setMaxWithdrawData] = useState<{
+    maxWithdrawUnderlying: number;
+    maxWithdrawScaled: string;
+  } | null>(null);
 
   // Extract fetch indices function to be reusable
   const fetchIndices = useCallback(
@@ -240,6 +245,58 @@ const PortfolioModals = ({
     fetchIndices,
   ]);
 
+  // Fetch max withdrawable (health-factor-safe) when withdraw modal opens
+  useEffect(() => {
+    if (
+      !withdrawModal.isOpen ||
+      !withdrawModal.asset ||
+      !activeAccount?.address
+    ) {
+      setMaxWithdrawData(null);
+      return;
+    }
+    const networkToUse = withdrawModal.network || currentNetwork;
+    const tokens = getAllTokensWithDisplayInfo(networkToUse);
+    const token = withdrawModal.poolId
+      ? tokens.find(
+          (t) =>
+            t.symbol === withdrawModal.asset &&
+            t.poolId === withdrawModal.poolId
+        )
+      : tokens.find((t) => t.symbol === withdrawModal.asset);
+    if (!token?.poolId || !token?.underlyingContractId) {
+      setMaxWithdrawData(null);
+      return;
+    }
+    let cancelled = false;
+    getMaxWithdrawableForMarket(
+      token.poolId,
+      token.underlyingContractId,
+      activeAccount.address,
+      networkToUse,
+      token.decimals
+    ).then((data) => {
+      if (!cancelled && data) {
+        setMaxWithdrawData({
+          maxWithdrawUnderlying: data.maxWithdrawUnderlying,
+          maxWithdrawScaled: data.maxWithdrawScaled.toString(),
+        });
+      } else if (!cancelled) {
+        setMaxWithdrawData(null);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    withdrawModal.isOpen,
+    withdrawModal.asset,
+    withdrawModal.poolId,
+    withdrawModal.network,
+    activeAccount?.address,
+    currentNetwork,
+  ]);
+
   const getMarketStatsForDeposit = (asset: string, poolId?: string) => {
     // Find matching markets - prefer poolId match if provided
     let market;
@@ -325,17 +382,32 @@ const PortfolioModals = ({
       }
     }
 
+    // Safely resolve APY - avoid NaN when rates are undefined
+    const supplyAPYRaw =
+      market?.apyCalculation?.apy ??
+      (typeof market?.supplyRate === "number" ? market.supplyRate * 100 : null) ??
+      deposit?.apy ??
+      null;
+    const supplyAPY =
+      typeof supplyAPYRaw === "number" && Number.isFinite(supplyAPYRaw)
+        ? supplyAPYRaw
+        : 0;
+
+    const borrowAPYRaw =
+      market?.borrowApyCalculation?.apy ??
+      (typeof market?.borrowRateCurrent === "number"
+        ? market.borrowRateCurrent * 100
+        : null) ??
+      (typeof market?.borrowRate === "number" ? market.borrowRate * 100 : null) ??
+      null;
+    const borrowAPY =
+      typeof borrowAPYRaw === "number" && Number.isFinite(borrowAPYRaw)
+        ? borrowAPYRaw
+        : 0;
+
     return {
-      supplyAPY:
-        market?.apyCalculation?.apy ||
-        (market?.supplyRate ? market.supplyRate * 100 : 0) ||
-        deposit?.apy ||
-        0,
-      borrowAPY:
-        market?.borrowApyCalculation?.apy ||
-        (market?.borrowRateCurrent ? market.borrowRateCurrent * 100 : 0) ||
-        (market?.borrowRate ? market.borrowRate * 100 : 0) ||
-        0,
+      supplyAPY,
+      borrowAPY,
       utilization: market?.utilizationRate ? market.utilizationRate * 100 : 0,
       collateralFactor: market?.collateralFactor
         ? market.collateralFactor * 100
@@ -587,13 +659,17 @@ const PortfolioModals = ({
     // This allows the modal to open even when market data isn't available for cross-network assets
     if (!market && deposit) {
       const tokenPrice = deposit.tokenPrice || 1;
+      const depositApy =
+        typeof deposit.apy === "number" && Number.isFinite(deposit.apy)
+          ? deposit.apy
+          : 0;
       return {
         icon: getTokenImagePath(asset),
         totalSupply: 0,
         totalSupplyUSD: 0,
         totalBorrow: 0,
         totalBorrowUSD: 0,
-        supplyAPY: deposit.apy || 0,
+        supplyAPY: depositApy,
         borrowAPY: 0,
         utilization: 0,
         collateralFactor: 80, // Default 80%
@@ -612,18 +688,32 @@ const PortfolioModals = ({
     const totalSupply = parseFloat(market.totalDeposits) || 0;
     const totalBorrow = parseFloat(market.totalBorrows) || 0;
 
+    // Safely resolve APY - avoid NaN in deposit modal
+    const supplyAPYRaw =
+      market.apyCalculation?.apy ??
+      (typeof market.supplyRate === "number" ? market.supplyRate * 100 : null);
+    const supplyAPY =
+      typeof supplyAPYRaw === "number" && Number.isFinite(supplyAPYRaw)
+        ? supplyAPYRaw
+        : 0;
+    const borrowAPYRaw =
+      market.borrowApyCalculation?.apy ??
+      (typeof market.borrowRateCurrent === "number"
+        ? market.borrowRateCurrent * 100
+        : null);
+    const borrowAPY =
+      typeof borrowAPYRaw === "number" && Number.isFinite(borrowAPYRaw)
+        ? borrowAPYRaw
+        : 0;
+
     return {
       icon: getTokenImagePath(asset),
       totalSupply,
       totalSupplyUSD: totalSupply * tokenPrice,
-      supplyAPY:
-        market.apyCalculation?.apy ||
-        (market.supplyRate ? market.supplyRate * 100 : 0),
+      supplyAPY,
       totalBorrow,
       totalBorrowUSD: totalBorrow * tokenPrice,
-      borrowAPY:
-        market.borrowApyCalculation?.apy ||
-        (market.borrowRateCurrent ? market.borrowRateCurrent * 100 : 0),
+      borrowAPY,
       utilization: market.utilizationRate ? market.utilizationRate * 100 : 0,
       collateralFactor: market.collateralFactor
         ? market.collateralFactor * 100
@@ -634,7 +724,10 @@ const PortfolioModals = ({
     };
   };
 
-  const handleWithdrawSubmit = async (amount: string) => {
+  const handleWithdrawSubmit = async (
+    amount: string,
+    options?: { isMaxWithdraw?: boolean }
+  ) => {
     if (!activeAccount?.address || !withdrawModal.asset) {
       console.error("No active account or asset for withdrawal");
       return;
@@ -715,13 +808,24 @@ const PortfolioModals = ({
       });
 
       // Call the lending service withdraw method (pass amount as string like PreFi)
+      // When max withdraw, use withdrawAll with health-factor-safe maxWithdrawScaled when available.
+      // Only use withdrawAll when the user has no borrows (avoids issues with collateral/health).
+      const hasNoBorrows =
+        !userGlobalData?.totalBorrowValue || userGlobalData.totalBorrowValue === 0;
       const result = await withdraw(
         token.poolId,
         token.underlyingContractId,
         originalTokenConfig.tokenStandard,
         amount,
         activeAccount.address,
-        networkToUse
+        networkToUse,
+        {
+          withdrawAll: false, // options?.isMaxWithdraw && hasNoBorrows, // TODO renable later 
+          maxWithdrawScaled:
+            options?.isMaxWithdraw && maxWithdrawData?.maxWithdrawScaled
+              ? BigInt(maxWithdrawData.maxWithdrawScaled)
+              : undefined,
+        }
       );
 
       if (!result.success) {
@@ -1421,6 +1525,7 @@ const PortfolioModals = ({
                 withdrawModal.asset,
                 withdrawModal.poolId
               )}
+              maxWithdrawUnderlying={maxWithdrawData?.maxWithdrawUnderlying ?? undefined}
               onSubmit={handleWithdrawSubmit}
               onRefreshBalance={() => {
                 // Refresh market data

@@ -9,6 +9,7 @@ import { NFTMultiplierDropdown, calculateNFTMultiplier } from "./NFTMultiplierDr
 import { isFeatureEnabled } from "@/config";
 import { Voter } from "@/services/governanceService";
 import { useUserNFTs } from "@/hooks/useUserNFTs";
+import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 
 interface GovernanceDashboardCardProps {
   stats: VotingStats | null;
@@ -26,6 +27,7 @@ export const GovernanceDashboardCard = ({
   const statuses: (ProposalStatus | "all")[] = ["all", "active", "passed", "rejected"];
   const nftBoostEnabled = isFeatureEnabled("enableNFTBoost");
   const { userNFTs } = useUserNFTs();
+  const { formatNumber, formatPercent } = useNumberI18n();
 
   // Use voter info if available, otherwise fall back to stats
   const basePower = userVoterInfo 
@@ -89,7 +91,7 @@ export const GovernanceDashboardCard = ({
         <div className="p-4 rounded-lg bg-primary/5 border border-primary/30 shadow-[0_0_15px_rgba(var(--primary),0.15)]">
           <div className="text-xs text-muted-foreground mb-1">Base Power</div>
           <div className="text-4xl md:text-5xl font-bold text-whale-gold animate-fade-in">
-            {basePower > 0 ? basePower.toLocaleString() : "—"}
+            {basePower > 0 ? formatNumber(basePower, { maximumFractionDigits: 0 }) : "—"}
           </div>
           <div className="text-sm text-muted-foreground mt-1">UNIT tokens</div>
           
@@ -101,7 +103,7 @@ export const GovernanceDashboardCard = ({
                 className="h-2 bg-muted/30"
               />
               <div className="mt-2 text-xs text-muted-foreground">
-                <span>{supplyPercentage.toFixed(1)}% of supply</span>
+                <span>{formatPercent(supplyPercentage / 100, { maximumFractionDigits: 1 })} of supply</span>
               </div>
             </div>
           )}
@@ -114,7 +116,7 @@ export const GovernanceDashboardCard = ({
             <div className="mb-4">
               <div className="text-xs text-muted-foreground mb-1">NFT Boost</div>
               <div className={`text-2xl font-bold ${nftMultiplier > 1 ? 'text-whale-gold' : 'text-muted-foreground'}`}>
-                {nftMultiplier.toFixed(2)}x
+                {formatNumber(nftMultiplier * 100, { minimumFractionDigits: 2, maximumFractionDigits: 3 })}%
               </div>
             </div>
 
@@ -124,7 +126,7 @@ export const GovernanceDashboardCard = ({
               <div className="text-xs text-muted-foreground mb-1">Effective Voting Power</div>
               {hasVotingPower ? (
                 <div className={`text-3xl font-bold ${userVoterInfo && Number(userVoterInfo.voteTotalPower) > Number(userVoterInfo.voteBasePower) ? 'text-whale-gold animate-glow-pulse' : 'text-whale-gold'}`}>
-                  {effectivePower.toLocaleString()} <span className="text-sm font-normal text-muted-foreground">UNIT</span>
+                  {formatNumber(effectivePower, { maximumFractionDigits: 0 })} <span className="text-sm font-normal text-muted-foreground">UNIT</span>
                 </div>
               ) : (
                 <div className="text-3xl font-bold text-muted-foreground/50">

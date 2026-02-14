@@ -13,6 +13,7 @@ import { useWallet } from "@txnlab/use-wallet-react";
 import { getTokenConfig, getAllTokensWithDisplayInfo, getNetworkConfig } from "@/config";
 import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
+import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 interface MarketsTabletTableProps {
@@ -38,6 +39,7 @@ const MarketsTabletTable = ({
 }: MarketsTabletTableProps) => {
   const { currentNetwork } = useNetwork();
   const { activeAccount } = useWallet();
+  const { formatPercent } = useNumberI18n();
   const [migrationBalances, setMigrationBalances] = useState<
     Record<string, string | null>
   >({});
@@ -412,7 +414,7 @@ const MarketsTabletTable = ({
             <span>&nbsp;</span>
           ) : (
             <div className="flex flex-col items-center space-y-1">
-              <span className="text-sm font-medium">{market.isSToken ? "100.00" : market.utilization.toFixed(2)}%</span>
+              <span className="text-sm font-medium">{market.isSToken ? "100.00%" : formatPercent(market.utilization / 100, { maximumFractionDigits: 2 })}</span>
               <Progress value={market.isSToken ? 100 : market.utilization} className="h-2 w-16" />
             </div>
           )}
@@ -693,7 +695,7 @@ const MarketsTabletTable = ({
                       <span>&nbsp;</span>
                     ) : (
                       <div className="flex flex-col items-center space-y-1">
-                        <span className="text-sm font-medium">{mainMarket.isSToken ? "100.00" : mainMarket.utilization.toFixed(2)}%</span>
+                        <span className="text-sm font-medium">{mainMarket.isSToken ? "100.00%" : formatPercent(mainMarket.utilization / 100, { maximumFractionDigits: 2 })}</span>
                         <Progress value={mainMarket.isSToken ? 100 : mainMarket.utilization} className="h-2 w-16" />
                       </div>
                     )}

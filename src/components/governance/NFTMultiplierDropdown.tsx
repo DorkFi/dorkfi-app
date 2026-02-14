@@ -74,7 +74,7 @@ export const NFTMultiplierDropdown = ({
   multiplier: providedMultiplier,
 }: NFTMultiplierDropdownProps) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [emblaRef, emblaApi] = useEmblaCarousel({ 
+  const [emblaRef, emblaApi] = useEmblaCarousel({
     align: "start",
     slidesToScroll: 1,
     containScroll: "trimSnaps"
@@ -91,8 +91,8 @@ export const NFTMultiplierDropdown = ({
   const hasNFTs = userNFTs.length > 0;
   const totalMultiplier = useMemo(() => {
     // Use provided multiplier if available, otherwise calculate from NFTs
-    const multiplier = providedMultiplier !== undefined 
-      ? providedMultiplier 
+    const multiplier = providedMultiplier !== undefined
+      ? providedMultiplier
       : calculateNFTMultiplier(userNFTs);
     onMultiplierChange?.(multiplier);
     return multiplier;
@@ -126,7 +126,7 @@ export const NFTMultiplierDropdown = ({
               : "bg-muted text-muted-foreground"
           )}
         >
-          {totalMultiplier.toFixed(2)}×
+          {(totalMultiplier * 100).toFixed(3)}%
         </div>
       </CollapsibleTrigger>
 
@@ -164,7 +164,7 @@ export const NFTMultiplierDropdown = ({
                             {nft.name}
                           </p>
                           <span className="text-xs font-semibold text-primary mt-1 px-2 py-0.5 rounded-full bg-primary/10">
-                            +{nft.multiplier.toFixed(2)}×
+                            +{(nft.multiplier).toFixed(3)}%
                           </span>
                         </div>
                       </div>

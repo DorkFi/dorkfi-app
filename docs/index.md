@@ -95,6 +95,16 @@ Complete guide for integrating the transaction-metadata endpoint to update appli
 
 **Perfect for:** Frontend developers, those implementing real-time transaction updates, developers optimizing user experience
 
+### 🗳️ [Adding a Governance Proposal Category](ADDING_PROPOSAL_CATEGORY.md)
+**Step-by-step guide for adding a new proposal category**
+
+How to add a new governance proposal category to the frontend:
+- Update types and constants (IDs, display names)
+- Wire proposal card badge colors
+- Checklist and current category reference
+
+**Perfect for:** Developers adding or changing governance proposal categories
+
 ## Quick Start Guide
 
 ### For New Users
@@ -110,7 +120,8 @@ Complete guide for integrating the transaction-metadata endpoint to update appli
 3. **Token Standards**: Review [ARC200 Exchange Extension](ARC200_EXCHANGE.md) for token exchange specifications
 4. **Claim Setup**: Follow the [Claim Setup Guide](CLAIM_SETUP.md) to configure reward claims
 5. **Transaction Updates**: Review [Transaction Metadata Integration](TRANSACTION_METADATA.md) for real-time state updates
-6. **Codebase**: Explore the React/TypeScript frontend implementation
+6. **Governance Categories**: See [Adding a Proposal Category](ADDING_PROPOSAL_CATEGORY.md) to add new categories
+7. **Codebase**: Explore the React/TypeScript frontend implementation
 
 ## Key Features
 

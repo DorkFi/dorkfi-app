@@ -510,11 +510,22 @@ export const fetchMarketInfo = async (
       //   }
       // );
 
-      const token = getAllTokensWithDisplayInfo(networkId).find(
-        (token) => token.underlyingContractId === marketId
+      // Find token matching both marketId and poolId to handle tokens with multiple markets (e.g., WAD)
+      // First try to match by both poolId and underlyingContractId for accuracy
+      let token = getAllTokensWithDisplayInfo(networkId).find(
+        (token) =>
+          token.underlyingContractId === marketId &&
+          String(token.poolId) === String(poolId)
       );
 
-      console.log("fetchMarketInfo token", { token });
+      // Fallback to matching by marketId only if no match found (for backward compatibility)
+      if (!token) {
+        token = getAllTokensWithDisplayInfo(networkId).find(
+          (token) => token.underlyingContractId === marketId
+        );
+      }
+
+      console.log("fetchMarketInfo token", { token, poolId, marketId });
 
       if (!token) {
         console.error(
@@ -536,8 +547,10 @@ export const fetchMarketInfo = async (
       if (Array.isArray(tokenConfigRaw)) {
         // Find the token config that matches the poolId
         tokenConfig =
-          tokenConfigRaw.find((config) => config.poolId === poolId) ||
+          tokenConfigRaw.find((config) => String(config.poolId) === String(poolId)) ||
           tokenConfigRaw[0];
+      } else {
+        tokenConfig = tokenConfigRaw;
       }
       console.log("fetchMarketInfo tokenConfig", { tokenConfig });
 
@@ -1485,8 +1498,140 @@ export const fetchMarketHealth = async (
   }
 };
 
+const SCALE = 10n ** 18n;
+const BPS = 10000n;
+
+/**
+ * Compute max withdrawable amount from user, market, and global user state.
+ * Matches contract _withdraw_pure checks. All inputs/outputs in contract units (BigInt).
+ */
+export function getMaxWithdrawable(
+  user: { scaled_deposits: bigint },
+  market: {
+    deposit_index: bigint;
+    price: bigint;
+    collateral_factor: bigint;
+  },
+  globalUser: {
+    total_collateral_value: bigint;
+    total_borrow_value: bigint;
+  }
+): { maxWithdrawScaled: bigint; maxWithdrawUnderlying: bigint } {
+  const userScaledDeposits = user.scaled_deposits;
+  const depositIndex = market.deposit_index;
+  const price = market.price;
+  const collateralFactor = market.collateral_factor;
+  const totalCollateralValue = globalUser.total_collateral_value;
+  const totalBorrowValue = globalUser.total_borrow_value;
+
+  const userUnderlying = (userScaledDeposits * depositIndex) / SCALE;
+
+  if (totalBorrowValue === 0n) {
+    return {
+      maxWithdrawScaled: userScaledDeposits,
+      maxWithdrawUnderlying: userUnderlying,
+    };
+  }
+
+  const minRemainingCollateral =
+    (totalBorrowValue * BPS + collateralFactor - 1n) / collateralFactor;
+  const maxWithdrawValue =
+    totalCollateralValue > minRemainingCollateral
+      ? totalCollateralValue - minRemainingCollateral
+      : 0n;
+
+  const cappedValue =
+    maxWithdrawValue > totalCollateralValue
+      ? totalCollateralValue
+      : maxWithdrawValue;
+
+  const maxWithdrawUnderlying =
+    price > 0n ? (cappedValue * SCALE) / price : 0n;
+  const maxWithdrawScaled =
+    depositIndex > 0n ? (maxWithdrawUnderlying * SCALE) / depositIndex : 0n;
+
+  const finalScaled =
+    maxWithdrawScaled > userScaledDeposits ? userScaledDeposits : maxWithdrawScaled;
+  const finalUnderlying = (finalScaled * depositIndex) / SCALE;
+
+  return {
+    maxWithdrawScaled: finalScaled,
+    maxWithdrawUnderlying: finalUnderlying,
+  };
+}
+
+/**
+ * Fetch user, market, and global user from contract and compute max withdrawable.
+ * Returns human-readable underlying amount and scaled amount for contract call.
+ */
+export const getMaxWithdrawableForMarket = async (
+  poolId: string,
+  marketId: string,
+  userAddress: string,
+  networkId: NetworkId,
+  tokenDecimals: number
+): Promise<{ maxWithdrawUnderlying: number; maxWithdrawScaled: bigint } | null> => {
+  try {
+    if (!isAlgorandCompatibleNetwork(networkId)) return null;
+    const networkConfig = getNetworkConfig(networkId);
+    const clients = await algorandService.initializeClientsForReads(
+      networkConfig.walletNetworkId as AlgorandNetwork
+    );
+    const appAddress = algosdk.getApplicationAddress(Number(poolId));
+    const ci = new CONTRACT(
+      Number(poolId),
+      clients.algod,
+      undefined,
+      { ...LendingPoolAppSpec.contract, events: [] },
+      {
+        addr:
+          typeof appAddress === "string"
+            ? appAddress
+            : appAddress.toString(),
+        sk: new Uint8Array(),
+      }
+    );
+    ci.setFee(5000);
+    const [userDataR, marketR, globalUserR] = await Promise.all([
+      ci.get_user(userAddress, Number(marketId)),
+      ci.get_market(Number(marketId)),
+      ci.get_global_user(userAddress),
+    ]);
+    if (!userDataR.success || !marketR.success || !globalUserR.success) return null;
+    const userData = UserData(userDataR.returnValue);
+    const marketData = decodeMarketData(marketR.returnValue);
+    const globalData = GlobalUserData(globalUserR.returnValue);
+    const result = getMaxWithdrawable(
+      { scaled_deposits: BigInt(userData.scaledDeposits?.toString() ?? "0") },
+      {
+        deposit_index: BigInt(marketData.depositIndex),
+        price: BigInt(marketData.price),
+        collateral_factor: BigInt(marketData.collateralFactor),
+      },
+      {
+        total_collateral_value: globalData.totalCollateralValue,
+        total_borrow_value: globalData.totalBorrowValue,
+      }
+    );
+    // Round to 3 decimals to reduce floating point issues when used in UI/validation
+    const raw =
+      Number(result.maxWithdrawUnderlying) / Math.pow(10, tokenDecimals);
+    const maxWithdrawUnderlying =
+      Math.floor(raw * 1e3) / 1e3;
+    return {
+      maxWithdrawUnderlying,
+      maxWithdrawScaled: result.maxWithdrawScaled,
+    };
+  } catch (error) {
+    console.error("getMaxWithdrawableForMarket error:", error);
+    return null;
+  }
+};
+
 /**
  * Withdraw tokens from a lending market
+ * @param options.withdrawAll - When true (withdraw all / max): use full nToken balance or options.maxWithdrawScaled if provided
+ * @param options.maxWithdrawScaled - When set with withdrawAll, use this scaled amount for the contract call (health-factor-safe max)
  */
 export const withdraw = async (
   poolId: string,
@@ -1494,7 +1639,8 @@ export const withdraw = async (
   tokenStandard: TokenStandard,
   amount: string,
   userAddress: string,
-  networkId: NetworkId
+  networkId: NetworkId,
+  options?: { withdrawAll?: boolean; maxWithdrawScaled?: bigint }
 ): Promise<
   | { success: boolean; txId?: string; error?: string }
   | { success: true; txns: string[] }
@@ -1715,826 +1861,856 @@ export const withdraw = async (
         ntoken_balance = BigInt(ntoken_balanceR.returnValue);
       }
 
-      {
-        const arc200_balanceR = await ciToken.arc200_balanceOf(
-          algosdk.encodeAddress(
-            algosdk.getApplicationAddress(Number(poolId)).publicKey
-          )
-        );
-        console.log("withdraw:arc200_balanceR (pool)", { arc200_balanceR });
-      }
-
-      // Optimized search to find the ntoken amount that gives us the EXACT desired underlying amount
-      // If user already has tokens, we can withdraw less from the pool
-      const requestedUnderlyingAmount = BigInt(amountInSmallestUnit);
-      const targetUnderlyingAmount =
-        token_balance > BigInt(0) && requestedUnderlyingAmount > token_balance
-          ? requestedUnderlyingAmount - token_balance
-          : requestedUnderlyingAmount;
-
-      if (
-        token_balance > BigInt(0) &&
-        targetUnderlyingAmount < requestedUnderlyingAmount
-      ) {
-        console.log(
-          "withdraw:adjusted target underlying amount based on user token balance",
-          {
-            requestedUnderlyingAmount: requestedUnderlyingAmount.toString(),
-            userTokenBalance: token_balance.toString(),
-            adjustedTargetUnderlyingAmount: targetUnderlyingAmount.toString(),
-            note: "User already has tokens, so we need to withdraw less from pool",
-          }
-        );
-      }
-      let bestNTokenAmount = adjustedAmount;
-      let bestUnderlyingAmount = BigInt(0);
-      let exactMatchNToken: bigint | null = null;
-
-      // Track best approximations below and above target separately
-      let bestBelowNToken: bigint | null = null;
-      let bestBelowUnderlying: bigint | null = null;
-      let bestBelowDiff: bigint | null = null;
-      let bestAboveNToken: bigint | null = null;
-      let bestAboveUnderlying: bigint | null = null;
-      let bestAboveDiff: bigint | null = null;
-
-      const maxIterations = 15; // Increased to ensure we find exact match
-      const tolerance = BigInt(0); // Must be exact - no tolerance
-
-      // First, check if we need to adjust at all
-      ciPool.setFee(20000);
-      ciPool.setPaymentAmount(1e5);
-      const initialUnderlyingR = await ciPool.withdraw(
-        Number(marketId),
-        adjustedAmount
-      );
-      let underlying_amount = BigInt(initialUnderlyingR.returnValue);
-      bestUnderlyingAmount = underlying_amount;
-
-      console.log("withdraw:initial calculation", {
-        adjustedAmount: adjustedAmount.toString(),
-        underlying_amount: underlying_amount.toString(),
-        targetUnderlyingAmount: targetUnderlyingAmount.toString(),
-        isExact: underlying_amount === targetUnderlyingAmount,
-      });
-
-      // If we already have exact match, use it
-      if (underlying_amount === targetUnderlyingAmount) {
-        console.log("withdraw:exact match on initial calculation");
-        exactMatchNToken = adjustedAmount;
+      // Withdraw all: use maxWithdrawScaled (health-factor-safe) when provided, else full nToken balance
+      let underlying_amount = BigInt(0);
+      const maxWithdrawAmount =
+        options?.withdrawAll && options?.maxWithdrawScaled !== undefined
+          ? options.maxWithdrawScaled
+          : ntoken_balance;
+      if (options?.withdrawAll && maxWithdrawAmount > BigInt(0)) {
+        console.log("withdraw:withdrawAll - using amount", {
+          maxWithdrawAmount: maxWithdrawAmount.toString(),
+          source: options?.maxWithdrawScaled !== undefined ? "maxWithdrawScaled" : "ntoken_balance",
+        });
+        adjustedAmount = maxWithdrawAmount
+        ciPool.setFee(20000);
+        ciPool.setPaymentAmount(1e5);
+        const underlyingR = await ciPool.withdraw(Number(marketId), maxWithdrawAmount);
+        const rawReturn = underlyingR?.returnValue ?? (underlyingR as any)?.return ?? (underlyingR as any)?.value;
+        if (rawReturn !== undefined && rawReturn !== null) {
+          underlying_amount = BigInt(rawReturn);
+        } else {
+          console.warn("withdraw:withdrawAll - contract did not return underlying amount", { underlyingR });
+          throw new Error(
+            "Withdraw all failed: contract did not return underlying amount. Try withdrawing a specific amount instead."
+          );
+        }
       } else {
-        // Track initial value as best below or above
-        if (underlying_amount < targetUnderlyingAmount) {
-          bestBelowNToken = adjustedAmount;
-          bestBelowUnderlying = underlying_amount;
-          bestBelowDiff = targetUnderlyingAmount - underlying_amount;
-        } else if (underlying_amount > targetUnderlyingAmount) {
-          bestAboveNToken = adjustedAmount;
-          bestAboveUnderlying = underlying_amount;
-          bestAboveDiff = underlying_amount - targetUnderlyingAmount;
+
+        {
+          const arc200_balanceR = await ciToken.arc200_balanceOf(
+            algosdk.encodeAddress(
+              algosdk.getApplicationAddress(Number(poolId)).publicKey
+            )
+          );
+          console.log("withdraw:arc200_balanceR (pool)", { arc200_balanceR });
         }
-      }
 
-      if (exactMatchNToken === null) {
-        // Use ratio-based interpolation for faster convergence
-        let currentNToken = adjustedAmount;
-        let currentUnderlying = underlying_amount;
-        let minNTokenAmount = BigInt(0);
-        let maxNTokenAmount = adjustedAmount * BigInt(3); // Wider initial bound
+        // Optimized search to find the ntoken amount that gives us the EXACT desired underlying amount
+        // If user already has tokens, we can withdraw less from the pool
+        const requestedUnderlyingAmount = BigInt(amountInSmallestUnit);
+        const targetUnderlyingAmount =
+          token_balance > BigInt(0) && requestedUnderlyingAmount > token_balance
+            ? requestedUnderlyingAmount - token_balance
+            : requestedUnderlyingAmount;
 
-        // Phase 1: Large steps using ratio interpolation (first 3-4 iterations)
-        for (
-          let iteration = 0;
-          iteration < Math.min(4, maxIterations);
-          iteration++
+        if (
+          token_balance > BigInt(0) &&
+          targetUnderlyingAmount < requestedUnderlyingAmount
         ) {
-          // Calculate ratio to estimate next step
-          const ratio = new BigNumber(currentUnderlying.toString()).dividedBy(
-            targetUnderlyingAmount.toString()
-          );
-
-          // Use interpolation: newNToken = currentNToken * (targetUnderlying / currentUnderlying)
-          // This gives us a better estimate than binary search
-          const estimatedNToken = BigInt(
-            new BigNumber(currentNToken.toString())
-              .multipliedBy(targetUnderlyingAmount.toString())
-              .dividedBy(currentUnderlying.toString())
-              .toFixed(0)
-          );
-
-          // Clamp to reasonable bounds
-          const testNTokenAmount =
-            estimatedNToken < minNTokenAmount
-              ? minNTokenAmount
-              : estimatedNToken > maxNTokenAmount
-                ? maxNTokenAmount
-                : estimatedNToken;
-
-          console.log("withdraw:interpolation step", {
-            iteration,
-            currentNToken: currentNToken.toString(),
-            currentUnderlying: currentUnderlying.toString(),
-            ratio: ratio.toString(),
-            estimatedNToken: estimatedNToken.toString(),
-            testNTokenAmount: testNTokenAmount.toString(),
-          });
-
-          ciPool.setFee(20000);
-          ciPool.setPaymentAmount(1e5);
-          const underlying_amountR = await ciPool.withdraw(
-            Number(marketId),
-            testNTokenAmount
-          );
-          const newUnderlyingAmount = BigInt(underlying_amountR.returnValue);
-
-          // Check for exact match first
-          if (newUnderlyingAmount === targetUnderlyingAmount) {
-            exactMatchNToken = testNTokenAmount;
-            bestNTokenAmount = testNTokenAmount;
-            bestUnderlyingAmount = newUnderlyingAmount;
-            underlying_amount = newUnderlyingAmount;
-            console.log("withdraw:found EXACT match (interpolation)");
-            break;
-          }
-
-          // Track best below and above target separately
-          if (newUnderlyingAmount < targetUnderlyingAmount) {
-            // Below target - track best below
-            const currentDiff = targetUnderlyingAmount - newUnderlyingAmount;
-            if (bestBelowDiff === null || currentDiff < bestBelowDiff) {
-              bestBelowNToken = testNTokenAmount;
-              bestBelowUnderlying = newUnderlyingAmount;
-              bestBelowDiff = currentDiff;
+          console.log(
+            "withdraw:adjusted target underlying amount based on user token balance",
+            {
+              requestedUnderlyingAmount: requestedUnderlyingAmount.toString(),
+              userTokenBalance: token_balance.toString(),
+              adjustedTargetUnderlyingAmount: targetUnderlyingAmount.toString(),
+              note: "User already has tokens, so we need to withdraw less from pool",
             }
-          } else if (newUnderlyingAmount > targetUnderlyingAmount) {
-            // Above target - track best above
-            const currentDiff = newUnderlyingAmount - targetUnderlyingAmount;
-            if (bestAboveDiff === null || currentDiff < bestAboveDiff) {
-              bestAboveNToken = testNTokenAmount;
-              bestAboveUnderlying = newUnderlyingAmount;
-              bestAboveDiff = currentDiff;
-            }
-          }
+          );
+        }
+        let bestNTokenAmount = adjustedAmount;
+        let bestUnderlyingAmount = BigInt(0);
+        let exactMatchNToken: bigint | null = null;
 
-          // Also update overall best for backward compatibility
-          const isCurrentAboveOrEqual =
-            newUnderlyingAmount >= targetUnderlyingAmount;
-          const isBestAboveOrEqual =
-            bestUnderlyingAmount >= targetUnderlyingAmount;
+        // Track best approximations below and above target separately
+        let bestBelowNToken: bigint | null = null;
+        let bestBelowUnderlying: bigint | null = null;
+        let bestBelowDiff: bigint | null = null;
+        let bestAboveNToken: bigint | null = null;
+        let bestAboveUnderlying: bigint | null = null;
+        let bestAboveDiff: bigint | null = null;
 
-          let shouldUpdate = false;
+        const maxIterations = 15; // Increased to ensure we find exact match
+        const tolerance = BigInt(0); // Must be exact - no tolerance
 
-          if (isCurrentAboveOrEqual && !isBestAboveOrEqual) {
-            // Current is >= target, best is below - prefer current
-            shouldUpdate = true;
-          } else if (!isCurrentAboveOrEqual && isBestAboveOrEqual) {
-            // Current is below, best is >= target - keep best
-            shouldUpdate = false;
-          } else {
-            // Both are same side of target - choose closer one
-            const currentDiff = isCurrentAboveOrEqual
-              ? newUnderlyingAmount - targetUnderlyingAmount
-              : targetUnderlyingAmount - newUnderlyingAmount;
-            const bestDiff = isBestAboveOrEqual
-              ? bestUnderlyingAmount - targetUnderlyingAmount
-              : targetUnderlyingAmount - bestUnderlyingAmount;
+        // First, check if we need to adjust at all
+        ciPool.setFee(20000);
+        ciPool.setPaymentAmount(1e5);
+        const initialUnderlyingR = await ciPool.withdraw(
+          Number(marketId),
+          adjustedAmount
+        );
 
-            shouldUpdate = currentDiff < bestDiff;
-          }
+        console.log("withdraw:initialUnderlyingR", { initialUnderlyingR });
 
-          if (shouldUpdate) {
-            bestNTokenAmount = testNTokenAmount;
-            bestUnderlyingAmount = newUnderlyingAmount;
-            underlying_amount = newUnderlyingAmount;
-          }
+        underlying_amount = BigInt(initialUnderlyingR.returnValue);
+        bestUnderlyingAmount = underlying_amount;
 
-          // Update bounds based on result
-          if (newUnderlyingAmount < targetUnderlyingAmount) {
-            // Need more ntoken
-            minNTokenAmount =
-              testNTokenAmount > minNTokenAmount
-                ? testNTokenAmount
-                : minNTokenAmount;
-            if (maxNTokenAmount < testNTokenAmount * BigInt(2)) {
-              maxNTokenAmount = testNTokenAmount * BigInt(2); // Expand upper bound if needed
-            }
-          } else {
-            // Too much underlying, need less ntoken
-            maxNTokenAmount =
-              testNTokenAmount < maxNTokenAmount
-                ? testNTokenAmount
-                : maxNTokenAmount;
-          }
+        console.log("withdraw:initial calculation", {
+          adjustedAmount: adjustedAmount.toString(),
+          underlying_amount: underlying_amount.toString(),
+          targetUnderlyingAmount: targetUnderlyingAmount.toString(),
+          isExact: underlying_amount === targetUnderlyingAmount,
+        });
 
-          currentNToken = testNTokenAmount;
-          currentUnderlying = newUnderlyingAmount;
-
-          // If we're very close, switch to binary search for final refinement
-          const currentDiff =
-            newUnderlyingAmount >= targetUnderlyingAmount
-              ? newUnderlyingAmount - targetUnderlyingAmount
-              : targetUnderlyingAmount - newUnderlyingAmount;
-          const relativeError = new BigNumber(currentDiff.toString())
-            .dividedBy(targetUnderlyingAmount.toString())
-            .toNumber();
-          if (relativeError < 0.01) {
-            // Within 1% - switch to binary search
-            console.log(
-              "withdraw:switching to binary search for final refinement"
-            );
-            break;
+        // If we already have exact match, use it
+        if (underlying_amount === targetUnderlyingAmount) {
+          console.log("withdraw:exact match on initial calculation");
+          exactMatchNToken = adjustedAmount;
+        } else {
+          // Track initial value as best below or above
+          if (underlying_amount < targetUnderlyingAmount) {
+            bestBelowNToken = adjustedAmount;
+            bestBelowUnderlying = underlying_amount;
+            bestBelowDiff = targetUnderlyingAmount - underlying_amount;
+          } else if (underlying_amount > targetUnderlyingAmount) {
+            bestAboveNToken = adjustedAmount;
+            bestAboveUnderlying = underlying_amount;
+            bestAboveDiff = underlying_amount - targetUnderlyingAmount;
           }
         }
 
-        // Phase 2: Binary search for final refinement (remaining iterations)
-        for (let iteration = 4; iteration < maxIterations; iteration++) {
-          // If we found exact match, stop searching
-          if (exactMatchNToken !== null) {
-            break;
-          }
+        if (exactMatchNToken === null) {
+          // Use ratio-based interpolation for faster convergence
+          let currentNToken = adjustedAmount;
+          let currentUnderlying = underlying_amount;
+          let minNTokenAmount = BigInt(0);
+          let maxNTokenAmount = adjustedAmount * BigInt(3); // Wider initial bound
 
-          const testNTokenAmount = BigInt(
-            new BigNumber(minNTokenAmount.toString())
-              .plus(maxNTokenAmount.toString())
-              .dividedBy(2)
-              .toFixed(0)
-          );
+          // Phase 1: Large steps using ratio interpolation (first 3-4 iterations)
+          for (
+            let iteration = 0;
+            iteration < Math.min(4, maxIterations);
+            iteration++
+          ) {
+            // Calculate ratio to estimate next step
+            const ratio = new BigNumber(currentUnderlying.toString()).dividedBy(
+              targetUnderlyingAmount.toString()
+            );
 
-          // Skip if bounds are too close, but check adjacent values for exact match
-          if (maxNTokenAmount - minNTokenAmount <= BigInt(2)) {
-            // Check remaining values in the range for exact match
-            for (
-              let checkAmount = minNTokenAmount;
-              checkAmount <= maxNTokenAmount;
-              checkAmount++
-            ) {
-              if (exactMatchNToken !== null) break;
+            // Use interpolation: newNToken = currentNToken * (targetUnderlying / currentUnderlying)
+            // This gives us a better estimate than binary search
+            const estimatedNToken = BigInt(
+              new BigNumber(currentNToken.toString())
+                .multipliedBy(targetUnderlyingAmount.toString())
+                .dividedBy(currentUnderlying.toString())
+                .toFixed(0)
+            );
 
-              ciPool.setFee(20000);
-              ciPool.setPaymentAmount(1e5);
-              const checkR = await ciPool.withdraw(
-                Number(marketId),
-                checkAmount
-              );
-              const checkUnderlying = BigInt(checkR.returnValue);
+            // Clamp to reasonable bounds
+            const testNTokenAmount =
+              estimatedNToken < minNTokenAmount
+                ? minNTokenAmount
+                : estimatedNToken > maxNTokenAmount
+                  ? maxNTokenAmount
+                  : estimatedNToken;
 
-              if (checkUnderlying === targetUnderlyingAmount) {
-                exactMatchNToken = checkAmount;
-                bestNTokenAmount = checkAmount;
-                bestUnderlyingAmount = checkUnderlying;
-                underlying_amount = checkUnderlying;
-                console.log("withdraw:found EXACT match in final sweep", {
-                  nTokenAmount: checkAmount.toString(),
-                  underlyingAmount: checkUnderlying.toString(),
-                });
-                break;
-              }
+            console.log("withdraw:interpolation step", {
+              iteration,
+              currentNToken: currentNToken.toString(),
+              currentUnderlying: currentUnderlying.toString(),
+              ratio: ratio.toString(),
+              estimatedNToken: estimatedNToken.toString(),
+              testNTokenAmount: testNTokenAmount.toString(),
+            });
 
-              // Track best below and above target separately
-              if (checkUnderlying < targetUnderlyingAmount) {
-                // Below target - track best below
-                const currentDiff = targetUnderlyingAmount - checkUnderlying;
-                if (bestBelowDiff === null || currentDiff < bestBelowDiff) {
-                  bestBelowNToken = checkAmount;
-                  bestBelowUnderlying = checkUnderlying;
-                  bestBelowDiff = currentDiff;
-                }
-              } else if (checkUnderlying > targetUnderlyingAmount) {
-                // Above target - track best above
-                const currentDiff = checkUnderlying - targetUnderlyingAmount;
-                if (bestAboveDiff === null || currentDiff < bestAboveDiff) {
-                  bestAboveNToken = checkAmount;
-                  bestAboveUnderlying = checkUnderlying;
-                  bestAboveDiff = currentDiff;
-                }
-              }
-
-              // Also update overall best for backward compatibility
-              const isCheckAboveOrEqual =
-                checkUnderlying >= targetUnderlyingAmount;
-              const isBestAboveOrEqual =
-                bestUnderlyingAmount >= targetUnderlyingAmount;
-
-              let shouldUpdate = false;
-
-              if (isCheckAboveOrEqual && !isBestAboveOrEqual) {
-                // Check is >= target, best is below - prefer check
-                shouldUpdate = true;
-              } else if (!isCheckAboveOrEqual && isBestAboveOrEqual) {
-                // Check is below, best is >= target - keep best
-                shouldUpdate = false;
-              } else {
-                // Both are same side of target - choose closer one
-                const checkDiff = isCheckAboveOrEqual
-                  ? checkUnderlying - targetUnderlyingAmount
-                  : targetUnderlyingAmount - checkUnderlying;
-                const bestDiff = isBestAboveOrEqual
-                  ? bestUnderlyingAmount - targetUnderlyingAmount
-                  : targetUnderlyingAmount - bestUnderlyingAmount;
-
-                shouldUpdate = checkDiff < bestDiff;
-              }
-
-              if (shouldUpdate) {
-                bestNTokenAmount = checkAmount;
-                bestUnderlyingAmount = checkUnderlying;
-                underlying_amount = checkUnderlying;
-              }
-            }
-            break;
-          }
-
-          console.log("withdraw:binary search refinement", {
-            iteration,
-            testNTokenAmount: testNTokenAmount.toString(),
-            minNTokenAmount: minNTokenAmount.toString(),
-            maxNTokenAmount: maxNTokenAmount.toString(),
-          });
-
-          ciPool.setFee(20000);
-          ciPool.setPaymentAmount(1e5);
-          const underlying_amountR = await ciPool.withdraw(
-            Number(marketId),
-            testNTokenAmount
-          );
-          const newUnderlyingAmount = BigInt(underlying_amountR.returnValue);
-
-          // Check for exact match first
-          if (newUnderlyingAmount === targetUnderlyingAmount) {
-            exactMatchNToken = testNTokenAmount;
-            bestNTokenAmount = testNTokenAmount;
-            bestUnderlyingAmount = newUnderlyingAmount;
-            underlying_amount = newUnderlyingAmount;
-            console.log("withdraw:found EXACT match (binary search)");
-            break;
-          }
-
-          // Track best below and above target separately
-          if (newUnderlyingAmount < targetUnderlyingAmount) {
-            // Below target - track best below
-            const currentDiff = targetUnderlyingAmount - newUnderlyingAmount;
-            if (bestBelowDiff === null || currentDiff < bestBelowDiff) {
-              bestBelowNToken = testNTokenAmount;
-              bestBelowUnderlying = newUnderlyingAmount;
-              bestBelowDiff = currentDiff;
-            }
-          } else if (newUnderlyingAmount > targetUnderlyingAmount) {
-            // Above target - track best above
-            const currentDiff = newUnderlyingAmount - targetUnderlyingAmount;
-            if (bestAboveDiff === null || currentDiff < bestAboveDiff) {
-              bestAboveNToken = testNTokenAmount;
-              bestAboveUnderlying = newUnderlyingAmount;
-              bestAboveDiff = currentDiff;
-            }
-          }
-
-          // Also update overall best for backward compatibility
-          const isCurrentAboveOrEqual =
-            newUnderlyingAmount >= targetUnderlyingAmount;
-          const isBestAboveOrEqual =
-            bestUnderlyingAmount >= targetUnderlyingAmount;
-
-          let shouldUpdate = false;
-
-          if (isCurrentAboveOrEqual && !isBestAboveOrEqual) {
-            // Current is >= target, best is below - prefer current
-            shouldUpdate = true;
-          } else if (!isCurrentAboveOrEqual && isBestAboveOrEqual) {
-            // Current is below, best is >= target - keep best
-            shouldUpdate = false;
-          } else {
-            // Both are same side of target - choose closer one
-            const currentDiff = isCurrentAboveOrEqual
-              ? newUnderlyingAmount - targetUnderlyingAmount
-              : targetUnderlyingAmount - newUnderlyingAmount;
-            const bestDiff = isBestAboveOrEqual
-              ? bestUnderlyingAmount - targetUnderlyingAmount
-              : targetUnderlyingAmount - bestUnderlyingAmount;
-
-            shouldUpdate = currentDiff < bestDiff;
-          }
-
-          if (shouldUpdate) {
-            bestNTokenAmount = testNTokenAmount;
-            bestUnderlyingAmount = newUnderlyingAmount;
-            underlying_amount = newUnderlyingAmount;
-          }
-
-          // Adjust search bounds
-          if (newUnderlyingAmount < targetUnderlyingAmount) {
-            minNTokenAmount = testNTokenAmount + BigInt(1);
-          } else {
-            maxNTokenAmount = testNTokenAmount - BigInt(1);
-          }
-
-          // Check if bounds have converged
-          if (minNTokenAmount >= maxNTokenAmount) {
-            // Check the final value for exact match
-            const finalAmount = minNTokenAmount;
             ciPool.setFee(20000);
             ciPool.setPaymentAmount(1e5);
-            const finalR = await ciPool.withdraw(Number(marketId), finalAmount);
-            const finalUnderlying = BigInt(finalR.returnValue);
+            const underlying_amountR = await ciPool.withdraw(
+              Number(marketId),
+              testNTokenAmount
+            );
+            const newUnderlyingAmount = BigInt(underlying_amountR.returnValue);
 
-            if (finalUnderlying === targetUnderlyingAmount) {
-              exactMatchNToken = finalAmount;
-              bestNTokenAmount = finalAmount;
-              bestUnderlyingAmount = finalUnderlying;
-              underlying_amount = finalUnderlying;
-              console.log("withdraw:found EXACT match at convergence point");
-            } else {
-              // Update best if final value is better (prefer >= target)
-              const isFinalAboveOrEqual =
-                finalUnderlying >= targetUnderlyingAmount;
-              const isBestAboveOrEqual =
-                bestUnderlyingAmount >= targetUnderlyingAmount;
+            // Check for exact match first
+            if (newUnderlyingAmount === targetUnderlyingAmount) {
+              exactMatchNToken = testNTokenAmount;
+              bestNTokenAmount = testNTokenAmount;
+              bestUnderlyingAmount = newUnderlyingAmount;
+              underlying_amount = newUnderlyingAmount;
+              console.log("withdraw:found EXACT match (interpolation)");
+              break;
+            }
 
-              let shouldUpdate = false;
-
-              if (isFinalAboveOrEqual && !isBestAboveOrEqual) {
-                // Final is >= target, best is below - prefer final
-                shouldUpdate = true;
-              } else if (!isFinalAboveOrEqual && isBestAboveOrEqual) {
-                // Final is below, best is >= target - keep best
-                shouldUpdate = false;
-              } else {
-                // Both are same side - choose closer
-                const finalDiff = isFinalAboveOrEqual
-                  ? finalUnderlying - targetUnderlyingAmount
-                  : targetUnderlyingAmount - finalUnderlying;
-                const bestDiff = isBestAboveOrEqual
-                  ? bestUnderlyingAmount - targetUnderlyingAmount
-                  : targetUnderlyingAmount - bestUnderlyingAmount;
-
-                shouldUpdate = finalDiff < bestDiff;
+            // Track best below and above target separately
+            if (newUnderlyingAmount < targetUnderlyingAmount) {
+              // Below target - track best below
+              const currentDiff = targetUnderlyingAmount - newUnderlyingAmount;
+              if (bestBelowDiff === null || currentDiff < bestBelowDiff) {
+                bestBelowNToken = testNTokenAmount;
+                bestBelowUnderlying = newUnderlyingAmount;
+                bestBelowDiff = currentDiff;
               }
+            } else if (newUnderlyingAmount > targetUnderlyingAmount) {
+              // Above target - track best above
+              const currentDiff = newUnderlyingAmount - targetUnderlyingAmount;
+              if (bestAboveDiff === null || currentDiff < bestAboveDiff) {
+                bestAboveNToken = testNTokenAmount;
+                bestAboveUnderlying = newUnderlyingAmount;
+                bestAboveDiff = currentDiff;
+              }
+            }
 
-              if (shouldUpdate) {
+            // Also update overall best for backward compatibility
+            const isCurrentAboveOrEqual =
+              newUnderlyingAmount >= targetUnderlyingAmount;
+            const isBestAboveOrEqual =
+              bestUnderlyingAmount >= targetUnderlyingAmount;
+
+            let shouldUpdate = false;
+
+            if (isCurrentAboveOrEqual && !isBestAboveOrEqual) {
+              // Current is >= target, best is below - prefer current
+              shouldUpdate = true;
+            } else if (!isCurrentAboveOrEqual && isBestAboveOrEqual) {
+              // Current is below, best is >= target - keep best
+              shouldUpdate = false;
+            } else {
+              // Both are same side of target - choose closer one
+              const currentDiff = isCurrentAboveOrEqual
+                ? newUnderlyingAmount - targetUnderlyingAmount
+                : targetUnderlyingAmount - newUnderlyingAmount;
+              const bestDiff = isBestAboveOrEqual
+                ? bestUnderlyingAmount - targetUnderlyingAmount
+                : targetUnderlyingAmount - bestUnderlyingAmount;
+
+              shouldUpdate = currentDiff < bestDiff;
+            }
+
+            if (shouldUpdate) {
+              bestNTokenAmount = testNTokenAmount;
+              bestUnderlyingAmount = newUnderlyingAmount;
+              underlying_amount = newUnderlyingAmount;
+            }
+
+            // Update bounds based on result
+            if (newUnderlyingAmount < targetUnderlyingAmount) {
+              // Need more ntoken
+              minNTokenAmount =
+                testNTokenAmount > minNTokenAmount
+                  ? testNTokenAmount
+                  : minNTokenAmount;
+              if (maxNTokenAmount < testNTokenAmount * BigInt(2)) {
+                maxNTokenAmount = testNTokenAmount * BigInt(2); // Expand upper bound if needed
+              }
+            } else {
+              // Too much underlying, need less ntoken
+              maxNTokenAmount =
+                testNTokenAmount < maxNTokenAmount
+                  ? testNTokenAmount
+                  : maxNTokenAmount;
+            }
+
+            currentNToken = testNTokenAmount;
+            currentUnderlying = newUnderlyingAmount;
+
+            // If we're very close, switch to binary search for final refinement
+            const currentDiff =
+              newUnderlyingAmount >= targetUnderlyingAmount
+                ? newUnderlyingAmount - targetUnderlyingAmount
+                : targetUnderlyingAmount - newUnderlyingAmount;
+            const relativeError = new BigNumber(currentDiff.toString())
+              .dividedBy(targetUnderlyingAmount.toString())
+              .toNumber();
+            if (relativeError < 0.01) {
+              // Within 1% - switch to binary search
+              console.log(
+                "withdraw:switching to binary search for final refinement"
+              );
+              break;
+            }
+          }
+
+          // Phase 2: Binary search for final refinement (remaining iterations)
+          for (let iteration = 4; iteration < maxIterations; iteration++) {
+            // If we found exact match, stop searching
+            if (exactMatchNToken !== null) {
+              break;
+            }
+
+            const testNTokenAmount = BigInt(
+              new BigNumber(minNTokenAmount.toString())
+                .plus(maxNTokenAmount.toString())
+                .dividedBy(2)
+                .toFixed(0)
+            );
+
+            // Skip if bounds are too close, but check adjacent values for exact match
+            if (maxNTokenAmount - minNTokenAmount <= BigInt(2)) {
+              // Check remaining values in the range for exact match
+              for (
+                let checkAmount = minNTokenAmount;
+                checkAmount <= maxNTokenAmount;
+                checkAmount++
+              ) {
+                if (exactMatchNToken !== null) break;
+
+                ciPool.setFee(20000);
+                ciPool.setPaymentAmount(1e5);
+                const checkR = await ciPool.withdraw(
+                  Number(marketId),
+                  checkAmount
+                );
+                const checkUnderlying = BigInt(checkR.returnValue);
+
+                if (checkUnderlying === targetUnderlyingAmount) {
+                  exactMatchNToken = checkAmount;
+                  bestNTokenAmount = checkAmount;
+                  bestUnderlyingAmount = checkUnderlying;
+                  underlying_amount = checkUnderlying;
+                  console.log("withdraw:found EXACT match in final sweep", {
+                    nTokenAmount: checkAmount.toString(),
+                    underlyingAmount: checkUnderlying.toString(),
+                  });
+                  break;
+                }
+
+                // Track best below and above target separately
+                if (checkUnderlying < targetUnderlyingAmount) {
+                  // Below target - track best below
+                  const currentDiff = targetUnderlyingAmount - checkUnderlying;
+                  if (bestBelowDiff === null || currentDiff < bestBelowDiff) {
+                    bestBelowNToken = checkAmount;
+                    bestBelowUnderlying = checkUnderlying;
+                    bestBelowDiff = currentDiff;
+                  }
+                } else if (checkUnderlying > targetUnderlyingAmount) {
+                  // Above target - track best above
+                  const currentDiff = checkUnderlying - targetUnderlyingAmount;
+                  if (bestAboveDiff === null || currentDiff < bestAboveDiff) {
+                    bestAboveNToken = checkAmount;
+                    bestAboveUnderlying = checkUnderlying;
+                    bestAboveDiff = currentDiff;
+                  }
+                }
+
+                // Also update overall best for backward compatibility
+                const isCheckAboveOrEqual =
+                  checkUnderlying >= targetUnderlyingAmount;
+                const isBestAboveOrEqual =
+                  bestUnderlyingAmount >= targetUnderlyingAmount;
+
+                let shouldUpdate = false;
+
+                if (isCheckAboveOrEqual && !isBestAboveOrEqual) {
+                  // Check is >= target, best is below - prefer check
+                  shouldUpdate = true;
+                } else if (!isCheckAboveOrEqual && isBestAboveOrEqual) {
+                  // Check is below, best is >= target - keep best
+                  shouldUpdate = false;
+                } else {
+                  // Both are same side of target - choose closer one
+                  const checkDiff = isCheckAboveOrEqual
+                    ? checkUnderlying - targetUnderlyingAmount
+                    : targetUnderlyingAmount - checkUnderlying;
+                  const bestDiff = isBestAboveOrEqual
+                    ? bestUnderlyingAmount - targetUnderlyingAmount
+                    : targetUnderlyingAmount - bestUnderlyingAmount;
+
+                  shouldUpdate = checkDiff < bestDiff;
+                }
+
+                if (shouldUpdate) {
+                  bestNTokenAmount = checkAmount;
+                  bestUnderlyingAmount = checkUnderlying;
+                  underlying_amount = checkUnderlying;
+                }
+              }
+              break;
+            }
+
+            console.log("withdraw:binary search refinement", {
+              iteration,
+              testNTokenAmount: testNTokenAmount.toString(),
+              minNTokenAmount: minNTokenAmount.toString(),
+              maxNTokenAmount: maxNTokenAmount.toString(),
+            });
+
+            ciPool.setFee(20000);
+            ciPool.setPaymentAmount(1e5);
+            const underlying_amountR = await ciPool.withdraw(
+              Number(marketId),
+              testNTokenAmount
+            );
+            const newUnderlyingAmount = BigInt(underlying_amountR.returnValue);
+
+            // Check for exact match first
+            if (newUnderlyingAmount === targetUnderlyingAmount) {
+              exactMatchNToken = testNTokenAmount;
+              bestNTokenAmount = testNTokenAmount;
+              bestUnderlyingAmount = newUnderlyingAmount;
+              underlying_amount = newUnderlyingAmount;
+              console.log("withdraw:found EXACT match (binary search)");
+              break;
+            }
+
+            // Track best below and above target separately
+            if (newUnderlyingAmount < targetUnderlyingAmount) {
+              // Below target - track best below
+              const currentDiff = targetUnderlyingAmount - newUnderlyingAmount;
+              if (bestBelowDiff === null || currentDiff < bestBelowDiff) {
+                bestBelowNToken = testNTokenAmount;
+                bestBelowUnderlying = newUnderlyingAmount;
+                bestBelowDiff = currentDiff;
+              }
+            } else if (newUnderlyingAmount > targetUnderlyingAmount) {
+              // Above target - track best above
+              const currentDiff = newUnderlyingAmount - targetUnderlyingAmount;
+              if (bestAboveDiff === null || currentDiff < bestAboveDiff) {
+                bestAboveNToken = testNTokenAmount;
+                bestAboveUnderlying = newUnderlyingAmount;
+                bestAboveDiff = currentDiff;
+              }
+            }
+
+            // Also update overall best for backward compatibility
+            const isCurrentAboveOrEqual =
+              newUnderlyingAmount >= targetUnderlyingAmount;
+            const isBestAboveOrEqual =
+              bestUnderlyingAmount >= targetUnderlyingAmount;
+
+            let shouldUpdate = false;
+
+            if (isCurrentAboveOrEqual && !isBestAboveOrEqual) {
+              // Current is >= target, best is below - prefer current
+              shouldUpdate = true;
+            } else if (!isCurrentAboveOrEqual && isBestAboveOrEqual) {
+              // Current is below, best is >= target - keep best
+              shouldUpdate = false;
+            } else {
+              // Both are same side of target - choose closer one
+              const currentDiff = isCurrentAboveOrEqual
+                ? newUnderlyingAmount - targetUnderlyingAmount
+                : targetUnderlyingAmount - newUnderlyingAmount;
+              const bestDiff = isBestAboveOrEqual
+                ? bestUnderlyingAmount - targetUnderlyingAmount
+                : targetUnderlyingAmount - bestUnderlyingAmount;
+
+              shouldUpdate = currentDiff < bestDiff;
+            }
+
+            if (shouldUpdate) {
+              bestNTokenAmount = testNTokenAmount;
+              bestUnderlyingAmount = newUnderlyingAmount;
+              underlying_amount = newUnderlyingAmount;
+            }
+
+            // Adjust search bounds
+            if (newUnderlyingAmount < targetUnderlyingAmount) {
+              minNTokenAmount = testNTokenAmount + BigInt(1);
+            } else {
+              maxNTokenAmount = testNTokenAmount - BigInt(1);
+            }
+
+            // Check if bounds have converged
+            if (minNTokenAmount >= maxNTokenAmount) {
+              // Check the final value for exact match
+              const finalAmount = minNTokenAmount;
+              ciPool.setFee(20000);
+              ciPool.setPaymentAmount(1e5);
+              const finalR = await ciPool.withdraw(Number(marketId), finalAmount);
+              const finalUnderlying = BigInt(finalR.returnValue);
+
+              if (finalUnderlying === targetUnderlyingAmount) {
+                exactMatchNToken = finalAmount;
                 bestNTokenAmount = finalAmount;
                 bestUnderlyingAmount = finalUnderlying;
                 underlying_amount = finalUnderlying;
+                console.log("withdraw:found EXACT match at convergence point");
+              } else {
+                // Update best if final value is better (prefer >= target)
+                const isFinalAboveOrEqual =
+                  finalUnderlying >= targetUnderlyingAmount;
+                const isBestAboveOrEqual =
+                  bestUnderlyingAmount >= targetUnderlyingAmount;
+
+                let shouldUpdate = false;
+
+                if (isFinalAboveOrEqual && !isBestAboveOrEqual) {
+                  // Final is >= target, best is below - prefer final
+                  shouldUpdate = true;
+                } else if (!isFinalAboveOrEqual && isBestAboveOrEqual) {
+                  // Final is below, best is >= target - keep best
+                  shouldUpdate = false;
+                } else {
+                  // Both are same side - choose closer
+                  const finalDiff = isFinalAboveOrEqual
+                    ? finalUnderlying - targetUnderlyingAmount
+                    : targetUnderlyingAmount - finalUnderlying;
+                  const bestDiff = isBestAboveOrEqual
+                    ? bestUnderlyingAmount - targetUnderlyingAmount
+                    : targetUnderlyingAmount - bestUnderlyingAmount;
+
+                  shouldUpdate = finalDiff < bestDiff;
+                }
+
+                if (shouldUpdate) {
+                  bestNTokenAmount = finalAmount;
+                  bestUnderlyingAmount = finalUnderlying;
+                  underlying_amount = finalUnderlying;
+                }
               }
+              console.log("withdraw:search bounds converged");
+              break;
             }
-            console.log("withdraw:search bounds converged");
-            break;
-          }
-        }
-
-        // Use exact match if found, otherwise use best approximation
-        if (exactMatchNToken !== null) {
-          adjustedAmount = exactMatchNToken;
-          // Verify exact match one more time
-          ciPool.setFee(20000);
-          ciPool.setPaymentAmount(1e5);
-          const verifyR = await ciPool.withdraw(
-            Number(marketId),
-            adjustedAmount
-          );
-          underlying_amount = BigInt(verifyR.returnValue);
-          console.log("withdraw:verified exact match", {
-            adjustedAmount: adjustedAmount.toString(),
-            underlying_amount: underlying_amount.toString(),
-            targetUnderlyingAmount: targetUnderlyingAmount.toString(),
-            isExact: underlying_amount === targetUnderlyingAmount,
-          });
-        } else {
-          // First, ensure we have best below target
-          if (
-            bestBelowNToken === null &&
-            underlying_amount < targetUnderlyingAmount
-          ) {
-            bestBelowNToken = bestNTokenAmount;
-            bestBelowUnderlying = bestUnderlyingAmount;
-            bestBelowDiff = targetUnderlyingAmount - bestUnderlyingAmount;
           }
 
-          // Now search for best above target if we don't have it
-          if (bestAboveNToken === null && bestBelowNToken !== null) {
-            console.log(
-              "withdraw:searching for best approximation above target",
-              {
-                bestBelowNToken: bestBelowNToken.toString(),
-                bestBelowUnderlying: bestBelowUnderlying?.toString(),
-                targetUnderlyingAmount: targetUnderlyingAmount.toString(),
-              }
+          // Use exact match if found, otherwise use best approximation
+          if (exactMatchNToken !== null) {
+            adjustedAmount = exactMatchNToken;
+            // Verify exact match one more time
+            ciPool.setFee(20000);
+            ciPool.setPaymentAmount(1e5);
+            const verifyR = await ciPool.withdraw(
+              Number(marketId),
+              adjustedAmount
             );
+            underlying_amount = BigInt(verifyR.returnValue);
+            console.log("withdraw:verified exact match", {
+              adjustedAmount: adjustedAmount.toString(),
+              underlying_amount: underlying_amount.toString(),
+              targetUnderlyingAmount: targetUnderlyingAmount.toString(),
+              isExact: underlying_amount === targetUnderlyingAmount,
+            });
+          } else {
+            // First, ensure we have best below target
+            if (
+              bestBelowNToken === null &&
+              underlying_amount < targetUnderlyingAmount
+            ) {
+              bestBelowNToken = bestNTokenAmount;
+              bestBelowUnderlying = bestUnderlyingAmount;
+              bestBelowDiff = targetUnderlyingAmount - bestUnderlyingAmount;
+            }
 
-            // Start from best below and increment to find best above
-            let testAmount = bestBelowNToken + BigInt(1);
-            const maxAboveSearchAttempts = 100;
-            let aboveSearchAttempts = 0;
-
-            while (aboveSearchAttempts < maxAboveSearchAttempts) {
-              ciPool.setFee(20000);
-              ciPool.setPaymentAmount(1e5);
-              const aboveR = await ciPool.withdraw(
-                Number(marketId),
-                testAmount
+            // Now search for best above target if we don't have it
+            if (bestAboveNToken === null && bestBelowNToken !== null) {
+              console.log(
+                "withdraw:searching for best approximation above target",
+                {
+                  bestBelowNToken: bestBelowNToken.toString(),
+                  bestBelowUnderlying: bestBelowUnderlying?.toString(),
+                  targetUnderlyingAmount: targetUnderlyingAmount.toString(),
+                }
               );
-              const testUnderlying = BigInt(aboveR.returnValue);
 
-              // Check for exact match
-              if (testUnderlying === targetUnderlyingAmount) {
-                exactMatchNToken = testAmount;
-                bestAboveNToken = testAmount;
-                bestAboveUnderlying = testUnderlying;
-                bestAboveDiff = BigInt(0);
-                console.log(
-                  "withdraw:found EXACT match while searching above target"
+              // Start from best below and increment to find best above
+              let testAmount = bestBelowNToken + BigInt(1);
+              const maxAboveSearchAttempts = 100;
+              let aboveSearchAttempts = 0;
+
+              while (aboveSearchAttempts < maxAboveSearchAttempts) {
+                ciPool.setFee(20000);
+                ciPool.setPaymentAmount(1e5);
+                const aboveR = await ciPool.withdraw(
+                  Number(marketId),
+                  testAmount
                 );
-                break;
-              }
+                const testUnderlying = BigInt(aboveR.returnValue);
 
-              // If above target, track it
-              if (testUnderlying > targetUnderlyingAmount) {
-                const testDiff = testUnderlying - targetUnderlyingAmount;
-                if (bestAboveDiff === null || testDiff < bestAboveDiff) {
+                // Check for exact match
+                if (testUnderlying === targetUnderlyingAmount) {
+                  exactMatchNToken = testAmount;
                   bestAboveNToken = testAmount;
                   bestAboveUnderlying = testUnderlying;
-                  bestAboveDiff = testDiff;
-                } else {
-                  // Getting further from target, stop
+                  bestAboveDiff = BigInt(0);
+                  console.log(
+                    "withdraw:found EXACT match while searching above target"
+                  );
                   break;
                 }
-              } else {
-                // Still below target, continue incrementing
-                testAmount = testAmount + BigInt(1);
+
+                // If above target, track it
+                if (testUnderlying > targetUnderlyingAmount) {
+                  const testDiff = testUnderlying - targetUnderlyingAmount;
+                  if (bestAboveDiff === null || testDiff < bestAboveDiff) {
+                    bestAboveNToken = testAmount;
+                    bestAboveUnderlying = testUnderlying;
+                    bestAboveDiff = testDiff;
+                  } else {
+                    // Getting further from target, stop
+                    break;
+                  }
+                } else {
+                  // Still below target, continue incrementing
+                  testAmount = testAmount + BigInt(1);
+                }
+
+                aboveSearchAttempts++;
               }
-
-              aboveSearchAttempts++;
             }
-          }
 
-          // Compare best below and best above, choose closest (prefer above if equal)
-          if (bestBelowNToken !== null && bestAboveNToken !== null) {
-            const belowDiff = bestBelowDiff!;
-            const aboveDiff = bestAboveDiff!;
+            // Compare best below and best above, choose closest (prefer above if equal)
+            if (bestBelowNToken !== null && bestAboveNToken !== null) {
+              const belowDiff = bestBelowDiff!;
+              const aboveDiff = bestAboveDiff!;
 
-            if (aboveDiff <= belowDiff) {
-              // Above is closer or equal - prefer above
+              if (aboveDiff <= belowDiff) {
+                // Above is closer or equal - prefer above
+                adjustedAmount = bestAboveNToken;
+                underlying_amount = bestAboveUnderlying!;
+                console.log("withdraw:chose best above target", {
+                  adjustedAmount: adjustedAmount.toString(),
+                  underlying_amount: underlying_amount.toString(),
+                  targetUnderlyingAmount: targetUnderlyingAmount.toString(),
+                  difference: aboveDiff.toString(),
+                });
+              } else {
+                // Below is closer, but we still prefer above if it exists
+                // So use above but log that below was closer
+                adjustedAmount = bestAboveNToken;
+                underlying_amount = bestAboveUnderlying!;
+                console.log(
+                  "withdraw:chose best above target (below was closer but prefer above)",
+                  {
+                    adjustedAmount: adjustedAmount.toString(),
+                    underlying_amount: underlying_amount.toString(),
+                    targetUnderlyingAmount: targetUnderlyingAmount.toString(),
+                    aboveDifference: aboveDiff.toString(),
+                    belowDifference: belowDiff.toString(),
+                  }
+                );
+              }
+            } else if (bestAboveNToken !== null) {
+              // Only have above
               adjustedAmount = bestAboveNToken;
               underlying_amount = bestAboveUnderlying!;
-              console.log("withdraw:chose best above target", {
+              console.log("withdraw:using best above target (no below found)", {
+                adjustedAmount: adjustedAmount.toString(),
+                underlying_amount: underlying_amount.toString(),
+              });
+            } else if (bestBelowNToken !== null) {
+              // Only have below - increment to get above
+              adjustedAmount = bestBelowNToken;
+              underlying_amount = bestBelowUnderlying!;
+
+              console.log(
+                "withdraw:only have below target, incrementing to get above",
+                {
+                  initialAdjustedAmount: adjustedAmount.toString(),
+                  initialUnderlyingAmount: underlying_amount.toString(),
+                  targetUnderlyingAmount: targetUnderlyingAmount.toString(),
+                }
+              );
+
+              const maxIncrementAttempts = 100; // Safety limit
+              let incrementAttempts = 0;
+
+              while (
+                underlying_amount < targetUnderlyingAmount &&
+                incrementAttempts < maxIncrementAttempts
+              ) {
+                adjustedAmount = adjustedAmount + BigInt(1);
+                incrementAttempts++;
+
+                ciPool.setFee(20000);
+                ciPool.setPaymentAmount(1e5);
+                const incrementR = await ciPool.withdraw(
+                  Number(marketId),
+                  adjustedAmount
+                );
+                underlying_amount = BigInt(incrementR.returnValue);
+
+                // Check for exact match
+                if (underlying_amount === targetUnderlyingAmount) {
+                  exactMatchNToken = adjustedAmount;
+                  console.log("withdraw:found EXACT match while incrementing", {
+                    adjustedAmount: adjustedAmount.toString(),
+                    underlying_amount: underlying_amount.toString(),
+                    attempts: incrementAttempts,
+                  });
+                  break;
+                }
+              }
+
+              if (incrementAttempts >= maxIncrementAttempts) {
+                console.error(
+                  "withdraw:reached max increment attempts, may not be above target",
+                  {
+                    adjustedAmount: adjustedAmount.toString(),
+                    underlying_amount: underlying_amount.toString(),
+                    targetUnderlyingAmount: targetUnderlyingAmount.toString(),
+                  }
+                );
+              } else {
+                console.log("withdraw:incremented to above target", {
+                  finalAdjustedAmount: adjustedAmount.toString(),
+                  finalUnderlyingAmount: underlying_amount.toString(),
+                  targetUnderlyingAmount: targetUnderlyingAmount.toString(),
+                  attempts: incrementAttempts,
+                  isAboveTarget: underlying_amount >= targetUnderlyingAmount,
+                });
+              }
+            } else {
+              // Fallback to original best
+              adjustedAmount = bestNTokenAmount;
+              underlying_amount = bestUnderlyingAmount;
+            }
+
+            // If we still don't have exact match and we're above target, refine
+            if (
+              underlying_amount > targetUnderlyingAmount &&
+              exactMatchNToken === null
+            ) {
+              console.log(
+                "withdraw:best approximation below target, incrementing ntoken amount",
+                {
+                  initialAdjustedAmount: adjustedAmount.toString(),
+                  initialUnderlyingAmount: underlying_amount.toString(),
+                  targetUnderlyingAmount: targetUnderlyingAmount.toString(),
+                }
+              );
+
+              const maxIncrementAttempts = 100; // Safety limit
+              let incrementAttempts = 0;
+
+              while (
+                underlying_amount < targetUnderlyingAmount &&
+                incrementAttempts < maxIncrementAttempts
+              ) {
+                adjustedAmount = adjustedAmount + BigInt(1);
+                incrementAttempts++;
+
+                ciPool.setFee(20000);
+                ciPool.setPaymentAmount(1e5);
+                const incrementR = await ciPool.withdraw(
+                  Number(marketId),
+                  adjustedAmount
+                );
+                underlying_amount = BigInt(incrementR.returnValue);
+
+                // Check for exact match
+                if (underlying_amount === targetUnderlyingAmount) {
+                  exactMatchNToken = adjustedAmount;
+                  console.log("withdraw:found EXACT match while incrementing", {
+                    adjustedAmount: adjustedAmount.toString(),
+                    underlying_amount: underlying_amount.toString(),
+                    attempts: incrementAttempts,
+                  });
+                  break;
+                }
+              }
+
+              if (incrementAttempts >= maxIncrementAttempts) {
+                console.error(
+                  "withdraw:reached max increment attempts, may not be above target",
+                  {
+                    adjustedAmount: adjustedAmount.toString(),
+                    underlying_amount: underlying_amount.toString(),
+                    targetUnderlyingAmount: targetUnderlyingAmount.toString(),
+                  }
+                );
+              } else {
+                console.log("withdraw:incremented to above target", {
+                  finalAdjustedAmount: adjustedAmount.toString(),
+                  finalUnderlyingAmount: underlying_amount.toString(),
+                  targetUnderlyingAmount: targetUnderlyingAmount.toString(),
+                  attempts: incrementAttempts,
+                  isAboveTarget: underlying_amount >= targetUnderlyingAmount,
+                });
+              }
+            }
+
+            // Refinement: If we're above target, try to get closer by decrementing
+            if (
+              underlying_amount > targetUnderlyingAmount &&
+              exactMatchNToken === null
+            ) {
+              console.log("withdraw:refining to get closer to target", {
+                currentAdjustedAmount: adjustedAmount.toString(),
+                currentUnderlyingAmount: underlying_amount.toString(),
+                targetUnderlyingAmount: targetUnderlyingAmount.toString(),
+                currentDifference: (
+                  underlying_amount - targetUnderlyingAmount
+                ).toString(),
+              });
+
+              let bestRefinedAmount = adjustedAmount;
+              let bestRefinedUnderlying = underlying_amount;
+              let bestRefinedDiff = underlying_amount - targetUnderlyingAmount;
+              const maxRefinementAttempts = 50; // Safety limit
+              let refinementAttempts = 0;
+
+              // Try decrementing to find the closest value to target
+              while (refinementAttempts < maxRefinementAttempts) {
+                const testAmount = bestRefinedAmount - BigInt(1);
+
+                // Don't go below the best approximation we found earlier
+                if (testAmount < bestNTokenAmount) {
+                  break;
+                }
+
+                ciPool.setFee(20000);
+                ciPool.setPaymentAmount(1e5);
+                const refineR = await ciPool.withdraw(
+                  Number(marketId),
+                  testAmount
+                );
+                const testUnderlying = BigInt(refineR.returnValue);
+
+                // Check for exact match
+                if (testUnderlying === targetUnderlyingAmount) {
+                  exactMatchNToken = testAmount;
+                  adjustedAmount = testAmount;
+                  underlying_amount = testUnderlying;
+                  console.log("withdraw:found EXACT match during refinement", {
+                    adjustedAmount: adjustedAmount.toString(),
+                    underlying_amount: underlying_amount.toString(),
+                    attempts: refinementAttempts + 1,
+                  });
+                  break;
+                }
+
+                // If still above target, check if it's closer
+                if (testUnderlying >= targetUnderlyingAmount) {
+                  const testDiff = testUnderlying - targetUnderlyingAmount;
+                  if (testDiff < bestRefinedDiff) {
+                    bestRefinedAmount = testAmount;
+                    bestRefinedUnderlying = testUnderlying;
+                    bestRefinedDiff = testDiff;
+                  } else {
+                    // Getting further from target, stop
+                    break;
+                  }
+                } else {
+                  // Went below target, use previous best
+                  break;
+                }
+
+                refinementAttempts++;
+              }
+
+              // Use the best refined value
+              if (exactMatchNToken === null) {
+                adjustedAmount = bestRefinedAmount;
+                underlying_amount = bestRefinedUnderlying;
+                console.log("withdraw:refinement complete", {
+                  refinedAdjustedAmount: adjustedAmount.toString(),
+                  refinedUnderlyingAmount: underlying_amount.toString(),
+                  targetUnderlyingAmount: targetUnderlyingAmount.toString(),
+                  finalDifference: (
+                    underlying_amount - targetUnderlyingAmount
+                  ).toString(),
+                  attempts: refinementAttempts,
+                  isExact: underlying_amount === targetUnderlyingAmount,
+                });
+              }
+            }
+
+            console.warn(
+              "withdraw:no exact match found, using best approximation",
+              {
                 adjustedAmount: adjustedAmount.toString(),
                 underlying_amount: underlying_amount.toString(),
                 targetUnderlyingAmount: targetUnderlyingAmount.toString(),
-                difference: aboveDiff.toString(),
-              });
-            } else {
-              // Below is closer, but we still prefer above if it exists
-              // So use above but log that below was closer
-              adjustedAmount = bestAboveNToken;
-              underlying_amount = bestAboveUnderlying!;
-              console.log(
-                "withdraw:chose best above target (below was closer but prefer above)",
-                {
-                  adjustedAmount: adjustedAmount.toString(),
-                  underlying_amount: underlying_amount.toString(),
-                  targetUnderlyingAmount: targetUnderlyingAmount.toString(),
-                  aboveDifference: aboveDiff.toString(),
-                  belowDifference: belowDiff.toString(),
-                }
-              );
-            }
-          } else if (bestAboveNToken !== null) {
-            // Only have above
-            adjustedAmount = bestAboveNToken;
-            underlying_amount = bestAboveUnderlying!;
-            console.log("withdraw:using best above target (no below found)", {
-              adjustedAmount: adjustedAmount.toString(),
-              underlying_amount: underlying_amount.toString(),
-            });
-          } else if (bestBelowNToken !== null) {
-            // Only have below - increment to get above
-            adjustedAmount = bestBelowNToken;
-            underlying_amount = bestBelowUnderlying!;
-
-            console.log(
-              "withdraw:only have below target, incrementing to get above",
-              {
-                initialAdjustedAmount: adjustedAmount.toString(),
-                initialUnderlyingAmount: underlying_amount.toString(),
-                targetUnderlyingAmount: targetUnderlyingAmount.toString(),
-              }
-            );
-
-            const maxIncrementAttempts = 100; // Safety limit
-            let incrementAttempts = 0;
-
-            while (
-              underlying_amount < targetUnderlyingAmount &&
-              incrementAttempts < maxIncrementAttempts
-            ) {
-              adjustedAmount = adjustedAmount + BigInt(1);
-              incrementAttempts++;
-
-              ciPool.setFee(20000);
-              ciPool.setPaymentAmount(1e5);
-              const incrementR = await ciPool.withdraw(
-                Number(marketId),
-                adjustedAmount
-              );
-              underlying_amount = BigInt(incrementR.returnValue);
-
-              // Check for exact match
-              if (underlying_amount === targetUnderlyingAmount) {
-                exactMatchNToken = adjustedAmount;
-                console.log("withdraw:found EXACT match while incrementing", {
-                  adjustedAmount: adjustedAmount.toString(),
-                  underlying_amount: underlying_amount.toString(),
-                  attempts: incrementAttempts,
-                });
-                break;
-              }
-            }
-
-            if (incrementAttempts >= maxIncrementAttempts) {
-              console.error(
-                "withdraw:reached max increment attempts, may not be above target",
-                {
-                  adjustedAmount: adjustedAmount.toString(),
-                  underlying_amount: underlying_amount.toString(),
-                  targetUnderlyingAmount: targetUnderlyingAmount.toString(),
-                }
-              );
-            } else {
-              console.log("withdraw:incremented to above target", {
-                finalAdjustedAmount: adjustedAmount.toString(),
-                finalUnderlyingAmount: underlying_amount.toString(),
-                targetUnderlyingAmount: targetUnderlyingAmount.toString(),
-                attempts: incrementAttempts,
-                isAboveTarget: underlying_amount >= targetUnderlyingAmount,
-              });
-            }
-          } else {
-            // Fallback to original best
-            adjustedAmount = bestNTokenAmount;
-            underlying_amount = bestUnderlyingAmount;
-          }
-
-          // If we still don't have exact match and we're above target, refine
-          if (
-            underlying_amount > targetUnderlyingAmount &&
-            exactMatchNToken === null
-          ) {
-            console.log(
-              "withdraw:best approximation below target, incrementing ntoken amount",
-              {
-                initialAdjustedAmount: adjustedAmount.toString(),
-                initialUnderlyingAmount: underlying_amount.toString(),
-                targetUnderlyingAmount: targetUnderlyingAmount.toString(),
-              }
-            );
-
-            const maxIncrementAttempts = 100; // Safety limit
-            let incrementAttempts = 0;
-
-            while (
-              underlying_amount < targetUnderlyingAmount &&
-              incrementAttempts < maxIncrementAttempts
-            ) {
-              adjustedAmount = adjustedAmount + BigInt(1);
-              incrementAttempts++;
-
-              ciPool.setFee(20000);
-              ciPool.setPaymentAmount(1e5);
-              const incrementR = await ciPool.withdraw(
-                Number(marketId),
-                adjustedAmount
-              );
-              underlying_amount = BigInt(incrementR.returnValue);
-
-              // Check for exact match
-              if (underlying_amount === targetUnderlyingAmount) {
-                exactMatchNToken = adjustedAmount;
-                console.log("withdraw:found EXACT match while incrementing", {
-                  adjustedAmount: adjustedAmount.toString(),
-                  underlying_amount: underlying_amount.toString(),
-                  attempts: incrementAttempts,
-                });
-                break;
-              }
-            }
-
-            if (incrementAttempts >= maxIncrementAttempts) {
-              console.error(
-                "withdraw:reached max increment attempts, may not be above target",
-                {
-                  adjustedAmount: adjustedAmount.toString(),
-                  underlying_amount: underlying_amount.toString(),
-                  targetUnderlyingAmount: targetUnderlyingAmount.toString(),
-                }
-              );
-            } else {
-              console.log("withdraw:incremented to above target", {
-                finalAdjustedAmount: adjustedAmount.toString(),
-                finalUnderlyingAmount: underlying_amount.toString(),
-                targetUnderlyingAmount: targetUnderlyingAmount.toString(),
-                attempts: incrementAttempts,
-                isAboveTarget: underlying_amount >= targetUnderlyingAmount,
-              });
-            }
-          }
-
-          // Refinement: If we're above target, try to get closer by decrementing
-          if (
-            underlying_amount > targetUnderlyingAmount &&
-            exactMatchNToken === null
-          ) {
-            console.log("withdraw:refining to get closer to target", {
-              currentAdjustedAmount: adjustedAmount.toString(),
-              currentUnderlyingAmount: underlying_amount.toString(),
-              targetUnderlyingAmount: targetUnderlyingAmount.toString(),
-              currentDifference: (
-                underlying_amount - targetUnderlyingAmount
-              ).toString(),
-            });
-
-            let bestRefinedAmount = adjustedAmount;
-            let bestRefinedUnderlying = underlying_amount;
-            let bestRefinedDiff = underlying_amount - targetUnderlyingAmount;
-            const maxRefinementAttempts = 50; // Safety limit
-            let refinementAttempts = 0;
-
-            // Try decrementing to find the closest value to target
-            while (refinementAttempts < maxRefinementAttempts) {
-              const testAmount = bestRefinedAmount - BigInt(1);
-
-              // Don't go below the best approximation we found earlier
-              if (testAmount < bestNTokenAmount) {
-                break;
-              }
-
-              ciPool.setFee(20000);
-              ciPool.setPaymentAmount(1e5);
-              const refineR = await ciPool.withdraw(
-                Number(marketId),
-                testAmount
-              );
-              const testUnderlying = BigInt(refineR.returnValue);
-
-              // Check for exact match
-              if (testUnderlying === targetUnderlyingAmount) {
-                exactMatchNToken = testAmount;
-                adjustedAmount = testAmount;
-                underlying_amount = testUnderlying;
-                console.log("withdraw:found EXACT match during refinement", {
-                  adjustedAmount: adjustedAmount.toString(),
-                  underlying_amount: underlying_amount.toString(),
-                  attempts: refinementAttempts + 1,
-                });
-                break;
-              }
-
-              // If still above target, check if it's closer
-              if (testUnderlying >= targetUnderlyingAmount) {
-                const testDiff = testUnderlying - targetUnderlyingAmount;
-                if (testDiff < bestRefinedDiff) {
-                  bestRefinedAmount = testAmount;
-                  bestRefinedUnderlying = testUnderlying;
-                  bestRefinedDiff = testDiff;
-                } else {
-                  // Getting further from target, stop
-                  break;
-                }
-              } else {
-                // Went below target, use previous best
-                break;
-              }
-
-              refinementAttempts++;
-            }
-
-            // Use the best refined value
-            if (exactMatchNToken === null) {
-              adjustedAmount = bestRefinedAmount;
-              underlying_amount = bestRefinedUnderlying;
-              console.log("withdraw:refinement complete", {
-                refinedAdjustedAmount: adjustedAmount.toString(),
-                refinedUnderlyingAmount: underlying_amount.toString(),
-                targetUnderlyingAmount: targetUnderlyingAmount.toString(),
-                finalDifference: (
-                  underlying_amount - targetUnderlyingAmount
+                difference: (underlying_amount > targetUnderlyingAmount
+                  ? underlying_amount - targetUnderlyingAmount
+                  : targetUnderlyingAmount - underlying_amount
                 ).toString(),
-                attempts: refinementAttempts,
-                isExact: underlying_amount === targetUnderlyingAmount,
-              });
-            }
+                isAboveTarget: underlying_amount >= targetUnderlyingAmount,
+              }
+            );
           }
-
-          console.warn(
-            "withdraw:no exact match found, using best approximation",
-            {
-              adjustedAmount: adjustedAmount.toString(),
-              underlying_amount: underlying_amount.toString(),
-              targetUnderlyingAmount: targetUnderlyingAmount.toString(),
-              difference: (underlying_amount > targetUnderlyingAmount
-                ? underlying_amount - targetUnderlyingAmount
-                : targetUnderlyingAmount - underlying_amount
-              ).toString(),
-              isAboveTarget: underlying_amount >= targetUnderlyingAmount,
-            }
-          );
         }
       }
 
@@ -2650,12 +2826,12 @@ export const withdraw = async (
         });
       }
 
-      // cond a token withdraw
+      // cond a token withdraw - use underlying_amount (actual amount received from pool)
       if (tokenStandard == "network" || tokenStandard == "asa") {
-        const formmatedWithdrawAmount = new BigNumber(amountInSmallestUnit)
+        const formmatedWithdrawAmount = new BigNumber(underlying_amount)
           .dividedBy(10 ** token.decimals)
           .toFixed(token.decimals);
-        const txnO = (await builder.token.withdraw(amountInSmallestUnit)).obj;
+        const txnO = (await builder.token.withdraw(underlying_amount)).obj;
         const note = `atoken withdraw ${formmatedWithdrawAmount}`;
         buildN.push({
           ...txnO,
@@ -2665,7 +2841,7 @@ export const withdraw = async (
       } else if (tokenStandard == "arc200-exchange") {
         const txnO = (
           await builder.arc200Exchange.arc200_swapBack(
-            BigInt(amountInSmallestUnit)
+            underlying_amount
           )
         ).obj;
         const note = "arc200_swapBack";
@@ -4139,11 +4315,7 @@ export const repay = async (
 
       const symbol = token.symbol;
 
-      // Check if market is paused
-      const marketPaused = await isMarketPaused(poolId, marketId, networkId);
-      if (marketPaused) {
-        throw new Error("Market is paused");
-      }
+      // Repay is allowed even when market is paused (users should be able to repay debt)
 
       // Get market info
       console.log({
@@ -4479,11 +4651,7 @@ export const repayOnBehalf = async (
 
       const symbol = token.symbol;
 
-      // Check if market is paused
-      const marketPaused = await isMarketPaused(poolId, marketId, networkId);
-      if (marketPaused) {
-        throw new Error("Market is paused");
-      }
+      // Repay is allowed even when market is paused (users should be able to repay debt)
 
       // Get market info
       console.log({
@@ -4837,11 +5005,7 @@ export const repayAll = async (
 
       const symbol = token.symbol;
 
-      // Check if market is paused
-      const marketPaused = await isMarketPaused(poolId, marketId, networkId);
-      if (marketPaused) {
-        throw new Error("Market is paused");
-      }
+      // Repay is allowed even when market is paused (users should be able to repay debt)
 
       // Get market info
       console.log({
@@ -5211,3 +5375,193 @@ export const mint = async (
   }
 };
 
+export const liquidateCrossMarket = async (
+  poolId: string,
+  debtToken: TokenConfig,
+  collateralToken: TokenConfig,
+  debtAmount: string,
+  minCollateralAmount: string,
+  userAddress: string,
+  liquidatorAddress: string,
+  networkId: NetworkId,
+  clients: any,
+  signTransactions: any
+) => {
+  console.log("liquidateCrossMarket", { poolId, debtToken, collateralToken, debtAmount, minCollateralAmount, userAddress, networkId });
+
+  try {
+    const networkConfig = getNetworkConfig(networkId);
+    if (isAlgorandCompatibleNetwork(networkId)) {
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+      const builder = {
+        lending: new CONTRACT(
+          Number(poolId),
+          clients.algod,
+          undefined,
+          { ...LendingPoolAppSpec.contract, events: [] },
+          { addr: liquidatorAddress, sk: new Uint8Array() },
+          true,
+          false,
+          true
+        ),
+        debtToken: new CONTRACT(
+          Number(debtToken.contractId),
+          clients.algod,
+          undefined,
+          abi.nt200,
+          { addr: liquidatorAddress, sk: new Uint8Array() },
+          true,
+          false,
+          true
+        ),
+        collateralToken: new CONTRACT(
+          Number(collateralToken.contractId),
+          clients.algod,
+          undefined,
+          abi.nt200,
+          { addr: liquidatorAddress, sk: new Uint8Array() },
+          true,
+          false,
+          true
+        ),
+        debtArc200Exchange: new CONTRACT(
+          Number(debtToken.contractId),
+          clients.algod,
+          undefined,
+          {
+            name: "arc200Exchange",
+            desc: "arc200Exchange",
+            methods: [
+              // arc200_redeem(uint64)void
+              {
+                name: "arc200_redeem",
+                args: [{ name: "amount", type: "uint64" }],
+                returns: { type: "void" },
+              },
+            ],
+            events: [],
+          },
+          {
+            addr: liquidatorAddress,
+            sk: new Uint8Array(),
+          },
+          true,
+          false,
+          true
+        ),
+      };
+
+      const buildN = [];
+
+      const debtAmountBi = BigInt(new BigNumber(debtAmount).multipliedBy(10 ** debtToken.decimals).toFixed(0))
+
+      console.log({
+        debtToken,
+        debtAmountBi,
+        collateralToken,
+      })
+      // TODO handle deposit for network
+      // TODO handle deposit for asa
+      // cond deposit if arc200-exchange 
+      if (debtToken.tokenStandard === "arc200-exchange") {
+        {
+          const txnO = (
+            await builder.debtArc200Exchange.arc200_redeem(debtAmountBi)
+          ).obj;
+          const axfer = {
+            aamt: debtAmountBi,
+            xaid: Number(debtToken.assetId),
+          };
+          const description = `arc200_redeem ${debtToken.symbol} ${debtAmount}`;
+          const note = new TextEncoder().encode(
+            description
+          );
+          buildN.push({ ...txnO, ...axfer, note, description });
+        }
+      }
+
+      // arc200 approve
+      {
+        const txnO = (
+          await builder.debtToken.arc200_approve(
+            algosdk.getApplicationAddress(Number(poolId)),
+            debtAmountBi
+          )
+        ).obj;
+        const note = new TextEncoder().encode(
+          `arc200_approve ${debtToken.symbol} ${debtAmount}
+          } spending to ${algosdk.encodeAddress(
+            algosdk.getApplicationAddress(Number(poolId)).publicKey
+          )}`
+        );
+        buildN.push({ ...txnO, note });
+      }
+
+      // Liquidate cross market
+      // @arc4.abimethod
+      // def liquidate_cross_market(
+      //     self,
+      //     debt_market_id: arc4.UInt64,
+      //     collateral_market_id: arc4.UInt64,
+      //     user: arc4.Address,
+      //     debt_amount: arc4.UInt256,
+      //     min_collateral_received: arc4.UInt256,
+      // ) -> arc4.UInt256:
+      {
+        const minCollateralReceived = 0; // TODO calc min collateral received
+        const txnO = (
+          await builder.lending.liquidate_cross_market(
+            Number(debtToken.contractId),
+            Number(collateralToken.contractId),
+            userAddress,
+            debtAmountBi,
+            minCollateralReceived,
+          )
+        ).obj;
+        const note = new TextEncoder().encode(
+          `liquidate_cross_market ${debtToken.symbol} ${debtAmount}
+          to ${collateralToken.symbol}`
+        );
+        const payment = 2e6;
+        buildN.push({ ...txnO, note, payment, description: "liquidate_cross_market" });
+      }
+
+      console.log("buildN", buildN);
+
+      const ci = new CONTRACT(
+        Number(poolId),
+        clients.algod,
+        undefined,
+        abi.custom,
+        { addr: liquidatorAddress, sk: new Uint8Array() }
+      );
+
+      ci.setFee(1e5);
+      ci.setEnableGroupResourceSharing(true);
+      ci.setExtraTxns(buildN);
+
+      if (networkId === "algorand-mainnet") {
+        ci.setBeaconId(3209233839);
+      }
+
+      const customR = await ci.custom();
+
+      console.log("liquidateCrossMarket customR", { customR });
+
+      if (!customR.success) {
+        throw new Error("Failed to create liquidate cross market transaction");
+      }
+
+      return {
+        success: true,
+        txns: customR.txns,
+      };
+
+    }
+  } catch (error) {
+    console.error("Liquidate cross market error:", error);
+    return { success: false, error: error instanceof Error ? error.message : "Liquidate cross market failed" };
+  }
+};

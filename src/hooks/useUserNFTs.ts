@@ -1,16 +1,16 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useWallet } from "@txnlab/use-wallet-react";
 import {
   fetchUserNFTs,
-  filterGovernanceNFTs,
   parseNFTMetadata,
   getNFTMultiplier,
-  NFTToken,
 } from "@/services/nftService";
 import { GovernanceNFT } from "@/components/governance/NFTMultiplierDropdown";
+import { useNetwork } from "@/contexts/NetworkContext";
+import { getContractAddress, GovernanceConfig } from "@/config";
 
-// Governance NFT contract IDs
-const GOVERNANCE_NFT_CONTRACTS = [313597, 894888, 313705];
+// Fallback governance NFT contract IDs when config has no powerMultipliers
+const FALLBACK_GOVERNANCE_NFT_CONTRACTS = [313597, 894888, 313705];
 
 /**
  * UserNFT type for NFT selection modal and profile customization
@@ -30,11 +30,43 @@ export interface UserNFT {
  */
 export const useUserNFTs = (address?: string | null) => {
   const { activeAccount } = useWallet();
+  const { currentNetwork } = useNetwork();
   const [nfts, setNfts] = useState<UserNFT[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const targetAddress = address || activeAccount?.address;
+
+  // Use powerMultipliers from config so NFT multipliers stay in sync with config updates
+  const { contractIds, bonusByContractId, labelByContractId } = useMemo(() => {
+    const governanceConfig = getContractAddress(
+      currentNetwork,
+      "governance"
+    ) as GovernanceConfig | string | undefined;
+
+    const powerMultipliers =
+      governanceConfig && typeof governanceConfig === "object"
+        ? governanceConfig.powerMultipliers ?? []
+        : [];
+
+    if (powerMultipliers.length > 0) {
+      return {
+        contractIds: powerMultipliers.map((p) => p.contractId),
+        bonusByContractId: new Map(
+          powerMultipliers.map((p) => [p.contractId, p.bonus])
+        ),
+        labelByContractId: new Map(
+          powerMultipliers.map((p) => [p.contractId, p.label])
+        ),
+      };
+    }
+
+    return {
+      contractIds: FALLBACK_GOVERNANCE_NFT_CONTRACTS,
+      bonusByContractId: null as Map<number, number> | null,
+      labelByContractId: null as Map<number, string> | null,
+    };
+  }, [currentNetwork]);
 
   const loadNFTs = useCallback(async () => {
     if (!targetAddress) {
@@ -49,25 +81,23 @@ export const useUserNFTs = (address?: string | null) => {
     try {
       const response = await fetchUserNFTs(
         targetAddress,
-        GOVERNANCE_NFT_CONTRACTS,
+        contractIds,
         600
       );
 
-      // Filter to only governance NFTs and convert to UserNFT format
-      const governanceNFTs = filterGovernanceNFTs(response.tokens);
-      
-      const formattedNFTs: UserNFT[] = governanceNFTs.map((token) => {
+      const getMultiplier = (cid: number) =>
+        bonusByContractId?.get(cid) ?? getNFTMultiplier(cid);
+
+      const governanceTokens = response.tokens.filter(
+        (t) => !t.isBurned && getMultiplier(t.contractId) > 0
+      );
+
+      const formattedNFTs: UserNFT[] = governanceTokens.map((token) => {
         const metadata = parseNFTMetadata(token.metadata);
-        
-        // Determine collection name for display
-        let collectionName = token.collectionName || "Unknown";
-        if (token.contractId === 313597) {
-          collectionName = "Dorks V1";
-        } else if (token.contractId === 894888) {
-          collectionName = "Dorks V2";
-        } else if (token.contractId === 313705) {
-          collectionName = "Lil Chubs";
-        }
+        const collectionName =
+          labelByContractId?.get(token.contractId) ??
+          token.collectionName ??
+          "Unknown";
 
         return {
           contractId: token.contractId,
@@ -86,7 +116,7 @@ export const useUserNFTs = (address?: string | null) => {
     } finally {
       setIsLoading(false);
     }
-  }, [targetAddress]);
+  }, [targetAddress, contractIds, bonusByContractId, labelByContractId]);
 
   useEffect(() => {
     loadNFTs();
@@ -100,7 +130,8 @@ export const useUserNFTs = (address?: string | null) => {
   const userNFTs: GovernanceNFT[] = nfts.map((nft) => ({
     id: `${nft.contractId}-${nft.tokenId}`,
     name: nft.name,
-    multiplier: getNFTMultiplier(nft.contractId),
+    multiplier:
+      bonusByContractId?.get(nft.contractId) ?? getNFTMultiplier(nft.contractId),
     image: nft.imageUrl,
   }));
 

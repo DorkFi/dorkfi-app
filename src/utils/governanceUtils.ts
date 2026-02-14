@@ -23,7 +23,19 @@ export const convertServiceProposalToUI = (
     "3": "rejected",
     "4": "executed",
   };
-  const status = statusMap[serviceProposal.proposalStatus] || "pending";
+  let status = statusMap[serviceProposal.proposalStatus] || "pending";
+
+  // Parse timestamps (they're in seconds) - needed for ended check
+  const startTime = new Date(Number(serviceProposal.votingStartTimestamp) * 1000);
+  const endTime = new Date(Number(serviceProposal.votingEndTimestamp) * 1000);
+
+  // If contract still shows active but voting has ended, derive passed/rejected from vote counts
+  // Passed: yes power >= 50% of total power; otherwise rejected
+  if (status === "active" && endTime.getTime() < Date.now()) {
+    const totalPower = Number(serviceProposal.proposalTotalPower);
+    const yesPower = Number(serviceProposal.proposalYesPower);
+    status = totalPower > 0 && yesPower >= totalPower * 0.69 ? "passed" : "rejected";
+  }
 
   // Get category
   const categoryId = Number(serviceProposal.proposalCategoryId);
@@ -35,10 +47,6 @@ export const convertServiceProposalToUI = (
   const yesVotes = Number(serviceProposal.proposalYesPower) / 1e8;
   const votesAgainst = totalVotes - yesVotes;
   const quorum = Number(serviceProposal.proposalQuorumThreshold) / 1e8;
-
-  // Parse timestamps (they're in seconds)
-  const startTime = new Date(Number(serviceProposal.votingStartTimestamp) * 1000);
-  const endTime = new Date(Number(serviceProposal.votingEndTimestamp) * 1000);
   const executionTime =
     serviceProposal.executedAtTimestamp && serviceProposal.executedAtTimestamp !== "0"
       ? new Date(Number(serviceProposal.executedAtTimestamp) * 1000)

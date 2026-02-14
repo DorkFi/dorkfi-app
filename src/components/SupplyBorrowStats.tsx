@@ -44,6 +44,7 @@ interface SupplyBorrowStatsProps {
 const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmount = 0, userBorrowBalance = 0, userDepositBalance = 0, isSToken = false }: SupplyBorrowStatsProps) => {
   // Calculate adjusted utilization and APY based on deposit amount
   const calculateAdjustedMetrics = () => {
+    const safeSupplyAPY = Number.isFinite(assetData.supplyAPY) ? assetData.supplyAPY : 0;
     if (mode === "deposit" && depositAmount > 0 && assetData.apyCalculation) {
       // Utilization = totalBorrow / (totalSupply + depositAmount)
       const currentUtilization = assetData.utilization / 100; // Convert to decimal
@@ -71,15 +72,15 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
       const newUtilizationRate = newUtilization / 100;
       
       // Calculate utilization change ratio
-      const utilizationChangeRatio = newUtilizationRate / currentUtilizationRate;
+      const utilizationChangeRatio = currentUtilizationRate > 0 ? newUtilizationRate / currentUtilizationRate : 1;
       
       // Estimate APY change based on utilization change
       // Typical relationship: APY changes by about 10-20% of utilization change
       const apySensitivity = 0.15; // Conservative sensitivity factor
       const apyChangeRatio = 1 + ((utilizationChangeRatio - 1) * apySensitivity);
       
-      // Calculate new APY
-      const newAPY = Math.max(assetData.supplyAPY * apyChangeRatio, 0);
+      // Calculate new APY (use safeSupplyAPY to avoid NaN)
+      const newAPY = Math.max(safeSupplyAPY * apyChangeRatio, 0);
       
       console.log('APY Calculation Debug:', {
         currentUtilizationRate,
@@ -93,8 +94,8 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
       });
       
       // Calculate percentage change for APY (relative change)
-      const apyChangePercent = assetData.supplyAPY > 0 
-        ? ((newAPY - assetData.supplyAPY) / assetData.supplyAPY) * 100
+      const apyChangePercent = safeSupplyAPY > 0 
+        ? ((newAPY - safeSupplyAPY) / safeSupplyAPY) * 100
         : 0;
 
       return {
@@ -104,9 +105,9 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
           change: newUtilization - assetData.utilization
         },
         apy: {
-          current: assetData.supplyAPY,
+          current: safeSupplyAPY,
           adjusted: Math.max(newAPY, 0), // Ensure non-negative
-          change: newAPY - assetData.supplyAPY, // Absolute change
+          change: newAPY - safeSupplyAPY, // Absolute change
           changePercent: apyChangePercent // Relative change percentage
         }
       };
@@ -119,8 +120,8 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
         change: 0
       },
       apy: {
-        current: assetData.supplyAPY,
-        adjusted: assetData.supplyAPY,
+        current: safeSupplyAPY,
+        adjusted: safeSupplyAPY,
         change: 0,
         changePercent: 0
       }
@@ -161,7 +162,7 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
               {mode === "deposit" && depositAmount > 0 ? (
                 <div className="space-y-1">
                   <div className={`text-sm font-medium ${mode === "deposit" ? "text-teal-600 dark:text-teal-400" : "text-red-600 dark:text-red-400"}`}>
-                    {adjustedMetrics.apy.adjusted.toFixed(2)}%
+                    {(Number.isFinite(adjustedMetrics.apy.adjusted) ? adjustedMetrics.apy.adjusted : 0).toFixed(2)}%
                   </div>
                   <div className={`text-xs flex items-center justify-end gap-1 ${
                     Math.abs(adjustedMetrics.apy.changePercent) > 0.1 
@@ -185,7 +186,10 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
                 </div>
               ) : (
                 <span className={`text-sm font-medium ${mode === "deposit" ? "text-teal-600 dark:text-teal-400" : "text-red-600 dark:text-red-400"}`}>
-                  {(mode === "deposit" ? assetData.supplyAPY : assetData.borrowAPY).toFixed(2)}%
+                    {(Number.isFinite(mode === "deposit" ? assetData.supplyAPY : assetData.borrowAPY)
+                      ? (mode === "deposit" ? assetData.supplyAPY : assetData.borrowAPY)
+                      : 0
+                    ).toFixed(2)}%
                 </span>
               )}
             </div>
@@ -326,7 +330,14 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
                 )}
               </button>
               <span className="text-sm font-medium text-teal-600 dark:text-teal-400">
-                {depositAmount > 0 && adjustedMetrics ? adjustedMetrics.apy.adjusted.toFixed(2) : assetData.supplyAPY.toFixed(2)}%
+                {(depositAmount > 0 && adjustedMetrics
+                  ? Number.isFinite(adjustedMetrics.apy.adjusted)
+                    ? adjustedMetrics.apy.adjusted
+                    : 0
+                  : Number.isFinite(assetData.supplyAPY)
+                    ? assetData.supplyAPY
+                    : 0
+                ).toFixed(2)}%
               </span>
             </div>
             {expandedDetail === "supplyAPY" && (

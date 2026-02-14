@@ -3,6 +3,8 @@ import { useNavigate, useLocation, Link } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 import { useState, useEffect } from "react";
 import WalletNetworkButton from "@/components/WalletNetworkButton";
+import { WalletNetworkUnsupportedBanner } from "@/components/WalletNetworkUnsupportedBanner";
+import { LocaleNumberSettings } from "@/components/LocaleNumberSettings";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { getCurrentGasStationSymbols, isFeatureEnabled } from "@/config";
 import { useWallet } from "@txnlab/use-wallet-react";
@@ -25,7 +27,8 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
     if (location.pathname === "/liquidation-markets") return "liquidations";
     if (location.pathname === "/gas-station") return "gas-station";
     if (location.pathname === "/governance") return "governance";
-    if (location.pathname === "/portfolio") return "portfolio";
+    if (location.pathname === "/portfolio" || location.pathname.startsWith("/portfolio/")) return "portfolio";
+    if (location.pathname === "/market") return "markets";
     return "markets";
   })();
 
@@ -43,6 +46,10 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
       navigate("/analytics");
     } else if (value === "governance") {
       navigate("/governance");
+    } else if (value === "portfolio") {
+      navigate("/portfolio");
+    } else if (value === "markets") {
+      navigate("/market");
     } else {
       navigate("/");
     }
@@ -68,6 +75,10 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
         onTabChange("gas-station");
       } else if (location.pathname === "/governance") {
         onTabChange("governance");
+      } else if (location.pathname === "/portfolio" || location.pathname.startsWith("/portfolio/")) {
+        onTabChange("portfolio");
+      } else if (location.pathname === "/market") {
+        onTabChange("markets");
       }
     }
   }, [location.pathname, onTabChange]);
@@ -101,11 +112,12 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-white/80 dark:header-nav-bg backdrop-blur-md supports-[backdrop-filter]:bg-white/70 dark:supports-[backdrop-filter]:header-nav-bg shadow-sm dark:shadow-none">
+      <WalletNetworkUnsupportedBanner />
       <div className="container mx-auto px-4 py-4">
         <div className="flex items-center justify-between">
           {/* Logo */}
           <Link
-            to="/"
+            to="/market"
             className="flex items-center space-x-3 cursor-pointer hover:opacity-80 transition-opacity"
             onClick={() => {
               if (onTabChange) {
@@ -157,6 +169,7 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
 
           {/* Desktop and Tablet Actions */}
           <div className="hidden md:flex items-center gap-2 md:gap-3">
+            <LocaleNumberSettings />
             <WalletNetworkButton />
           </div>
 
@@ -201,7 +214,8 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
                   {tab.label}
                 </Button>
               ))}
-              <div className="mt-4">
+              <div className="mt-4 flex items-center gap-2">
+                <LocaleNumberSettings />
                 <WalletNetworkButton />
               </div>
             </div>

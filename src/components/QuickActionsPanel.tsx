@@ -8,11 +8,16 @@ import { Button } from "@/components/ui/button";
 interface QuickActionsPanelProps {
   onAddCollateral?: () => void;
   onRepayDebt?: () => void;
-  onDeposit?: (asset?: string) => void;
+  onDeposit?: (asset?: string, poolId?: string) => void;
   onWithdraw?: (asset?: string) => void;
   onBorrow?: (asset?: string) => void;
   totalBorrowed: number;
-  deposits: Array<{ asset: string; value: number }>;
+  deposits: Array<{
+    asset: string;
+    value: number;
+    poolId?: string;
+    isPaused?: boolean;
+  }>;
   borrows: Array<{ asset: string; value: number }>;
   healthFactor: number | null;
 }
@@ -35,6 +40,8 @@ const QuickActionsPanel = ({
     .filter((d) => d.value > 0)
     .sort((a, b) => b.value - a.value)
     .slice(0, 3);
+  // For Quick Deposit, exclude paused markets (deposits not allowed when paused)
+  const topDepositsForDeposit = topDeposits.filter((d) => !d.isPaused);
 
   const topBorrows = borrows
     .filter((b) => b.value > 0)
@@ -100,19 +107,19 @@ const QuickActionsPanel = ({
               </div>
             )}
 
-            {/* Quick Deposit Actions */}
-            {topDeposits.length > 0 && onDeposit && (
+            {/* Quick Deposit Actions - only show for non-paused markets */}
+            {topDepositsForDeposit.length > 0 && onDeposit && (
               <div className="space-y-2">
                 <h3 className="text-sm font-semibold text-green-500 flex items-center gap-2">
                   <ArrowDown className="w-4 h-4" />
                   Quick Deposit
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {topDeposits.map((deposit) => (
+                  {topDepositsForDeposit.map((deposit) => (
                     <DorkFiButton
-                      key={deposit.asset}
+                      key={deposit.poolId ? `${deposit.asset}-${deposit.poolId}` : deposit.asset}
                       variant="secondary"
-                      onClick={() => onDeposit(deposit.asset)}
+                      onClick={() => onDeposit(deposit.asset, deposit.poolId)}
                       className="w-full text-sm"
                     >
                       <Plus className="w-3 h-3 mr-1" />

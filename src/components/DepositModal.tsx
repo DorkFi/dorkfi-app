@@ -7,8 +7,8 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { LocaleNumberInput } from "@/components/ui/LocaleNumberInput";
 import { Card, CardContent } from "@/components/ui/card";
 import { InfoIcon } from "lucide-react";
 import {
@@ -43,7 +43,7 @@ const DepositModal = ({
   marketStats,
 }: DepositModalProps) => {
 
-  const [amount, setAmount] = useState("");
+  const [amount, setAmount] = useState<number | "">("");
   const [fiatValue, setFiatValue] = useState(0);
   const [showSuccess, setShowSuccess] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -59,21 +59,20 @@ const DepositModal = ({
   }, [isOpen]);
 
   useEffect(() => {
-    if (amount) {
-      const numAmount = parseFloat(amount);
-      setFiatValue(numAmount * marketStats.tokenPrice);
+    if (amount !== "" && typeof amount === "number") {
+      setFiatValue(amount * marketStats.tokenPrice);
     } else {
       setFiatValue(0);
     }
   }, [amount, marketStats.tokenPrice]);
 
   const handleMaxClick = () => {
-    setAmount(userBalance.toString());
+    setAmount(userBalance);
   };
 
   const handleSubmit = async () => {
     setIsLoading(true);
-    console.log(`Deposit ${amount} ${tokenSymbol}`);
+    console.log(`Deposit ${amount !== "" ? amount.toString() : ""} ${tokenSymbol}`);
 
     try {
       // Simulate async deposit operation
@@ -102,7 +101,10 @@ const DepositModal = ({
   };
 
   const isValidAmount =
-    amount && parseFloat(amount) > 0 && parseFloat(amount) <= userBalance;
+    amount !== "" &&
+    typeof amount === "number" &&
+    amount > 0 &&
+    amount <= userBalance;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -113,7 +115,7 @@ const DepositModal = ({
               transactionType="deposit"
               asset={tokenSymbol}
               assetIcon={tokenIcon}
-              amount={amount}
+              amount={amount !== "" ? amount.toString() : ""}
               onViewTransaction={handleViewTransaction}
               onGoToPortfolio={handleGoToPortfolio}
               onMakeAnother={handleMakeAnother}
@@ -151,14 +153,13 @@ const DepositModal = ({
                   Amount
                 </Label>
                 <div className="relative">
-                  <Input
+                  <LocaleNumberInput
                     id="amount"
-                    type="number"
-                    inputMode="decimal"
                     placeholder="0.0"
                     autoFocus
                     value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
+                    onChange={(v) => setAmount(v ?? "")}
+                    formatOptions={{ maximumFractionDigits: 6 }}
                     className="bg-white/80 dark:bg-slate-800 border-gray-300 dark:border-slate-600 text-slate-800 dark:text-white pr-16 text-lg h-12"
                   />
                   <Button

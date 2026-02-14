@@ -11,6 +11,7 @@ export const PROPOSAL_CATEGORY_IDS: Record<ProposalCategory, number> = {
   "treasury": 4,
   "features": 5,
   "governance": 6,
+  "infrastructure": 7,
 };
 
 /**
@@ -23,6 +24,21 @@ export const CATEGORY_ID_TO_CATEGORY: Record<number, ProposalCategory> = {
   4: "treasury",
   5: "features",
   6: "governance",
+  7: "infrastructure",
+};
+
+/**
+ * Display names for Admin UI and proposal cards
+ * Value (ID) → Display name
+ */
+export const PROPOSAL_CATEGORY_DISPLAY_NAMES: Record<ProposalCategory, string> = {
+  "interest-rates": "Interest Rates",
+  "collateral-listing": "Collateral Listing",
+  "liquidation-settings": "Liquidation Settings",
+  "treasury": "Treasury",
+  "features": "Features",
+  "governance": "Governance",
+  "infrastructure": "Infrastructure",
 };
 
 /**

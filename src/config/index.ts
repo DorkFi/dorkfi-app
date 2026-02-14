@@ -840,7 +840,7 @@ const prodContracts = {
       47148525, // UNIT nToken appId
     ],
     powerMultipliers: [
-      { id: "dorks_v1", label: "Dorks v1", contractId: 313597, bonus: 0.10 },
+      { id: "dorks_v1", label: "Dorks v1", contractId: 313597, bonus: 0.169 },
       { id: "dorks_v2", label: "Dorks v2", contractId: 894888, bonus: 0.01 },
       { id: "chubs_v1", label: "Chubs v1", contractId: 313705, bonus: 0.15 },
     ],

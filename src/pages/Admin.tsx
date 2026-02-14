@@ -48,6 +48,7 @@ import {
   Database,
   Download,
   TestTube,
+  TimerOff,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import DorkFiCard from "@/components/ui/DorkFiCard";
@@ -97,9 +98,11 @@ import {
   getContractAddress,
   getNetworksWithGovernance,
   GovernanceConfig,
+  isCurrentNetworkAVM,
 } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
+import { APP_SPEC as UNITGovernanceAppSpec } from "@/clients/UNITGovernanceClient";
 import { APP_SPEC as PriceOracleAppSpec } from "@/clients/PriceOracleClient";
 import algorandService, { AlgorandNetwork } from "@/services/algorandService";
 import { CONTRACT } from "ulujs";
@@ -150,8 +153,8 @@ import {
   ROLE_PRICE_FEED_MANAGER,
 } from "@/constants/roles";
 import { ProposalCategory, Proposal as UIProposal, ProposalStatus } from "@/types/governanceTypes";
-import { createProposalWithCategory, getEvents, decodeProposalCreatedEvent, getProposal, Proposal as ServiceProposal, snapPower, getPowerSource, snapMultiplier } from "@/services/governanceService";
-import { getCategoryFromId } from "@/constants/governanceConstants";
+import { createProposalWithCategory, getEvents, decodeProposalCreatedEvent, getProposal, Proposal as ServiceProposal, snapPower, getPowerSource, snapMultiplier, closeVotingEarly } from "@/services/governanceService";
+import { getCategoryFromId, PROPOSAL_CATEGORY_DISPLAY_NAMES } from "@/constants/governanceConstants";
 import { ProposalCard } from "@/components/governance/ProposalCard";
 import { VoterInfoLookup } from "@/components/governance/VoterInfoLookup";
 import { PowerMultiplierLookup } from "@/components/governance/PowerMultiplierLookup";
@@ -400,6 +403,12 @@ export default function AdminDashboard() {
   const [snapMultiplierResult, setSnapMultiplierResult] = useState<{ snapshot: any; txns: string[] } | null>(null);
   const [snapMultiplierError, setSnapMultiplierError] = useState<string | null>(null);
 
+  // Close voting early state
+  const [closeVotingProposalId, setCloseVotingProposalId] = useState<string>("");
+  const [isClosingVoting, setIsClosingVoting] = useState(false);
+  const [closeVotingResult, setCloseVotingResult] = useState<string | null>(null);
+  const [closeVotingError, setCloseVotingError] = useState<string | null>(null);
+
   // Get power source state
   const [powerSourceQueryId, setPowerSourceQueryId] = useState<number | "">("");
   const [isLoadingPowerSource, setIsLoadingPowerSource] = useState(false);
@@ -468,6 +477,43 @@ export default function AdminDashboard() {
     "market-controller": ROLE_MARKET_CONTROLLER,
   };
 
+  // UNIT Governance contract roles (3-byte identifiers)
+  const governanceRoleConstantsMap: Record<
+    string,
+    { bytes: string; name: string; description: string }
+  > = {
+    "rcp": {
+      bytes: "rcp",
+      name: "Create Proposal",
+      description: "Create new governance proposals",
+    },
+    "rap": {
+      bytes: "rap",
+      name: "Activate Proposal",
+      description: "Activate pending proposals",
+    },
+    "rqp": {
+      bytes: "rqp",
+      name: "Queue Proposal",
+      description: "Queue succeeded proposals for execution",
+    },
+    "rep": {
+      bytes: "rep",
+      name: "Execute Proposal",
+      description: "Execute queued proposals",
+    },
+    "rvp": {
+      bytes: "rvp",
+      name: "Veto Proposal",
+      description: "Veto queued proposals",
+    },
+    "rpa": {
+      bytes: "rpa",
+      name: "Proposal Admin",
+      description: "Quorum, voting power, close voting early",
+    },
+  };
+
   const [userRoles, setUserRoles] = useState<UserRole[]>([
     {
       userId: "user1",
@@ -522,6 +568,15 @@ export default function AdminDashboard() {
   const [isCheckingRoles, setIsCheckingRoles] = useState(false);
   const [currentUserRoles, setCurrentUserRoles] = useState<any[]>([]);
   const [isLoadingCurrentUserRoles, setIsLoadingCurrentUserRoles] =
+    useState(false);
+  const [governanceRoleCheckAddress, setGovernanceRoleCheckAddress] =
+    useState("");
+  const [isCheckingGovernanceRoles, setIsCheckingGovernanceRoles] =
+    useState(false);
+  const [currentUserGovernanceRoles, setCurrentUserGovernanceRoles] = useState<
+    { roleId: string; roleName: string; roleConstant: string; hasRole: boolean; error?: string }[]
+  >([]);
+  const [isLoadingCurrentUserGovernanceRoles, setIsLoadingCurrentUserGovernanceRoles] =
     useState(false);
 
   // Role management functions
@@ -715,6 +770,122 @@ export default function AdminDashboard() {
       return [];
     } finally {
       setIsCheckingRoles(false);
+    }
+  };
+
+  // Check UNIT Governance roles for an address
+  const checkGovernanceRoles = async (address: string) => {
+    if (!address.trim()) {
+      toast.error("Please provide an address to check governance roles");
+      return [];
+    }
+    if (!isCurrentNetworkAVM()) {
+      toast.error("Governance roles are only available on AVM networks");
+      return [];
+    }
+    const governanceConfig = getContractAddress(
+      currentNetwork,
+      "governance"
+    ) as GovernanceConfig | string | undefined;
+    if (!governanceConfig) {
+      toast.error("Governance contract not configured for this network");
+      return [];
+    }
+    const appId =
+      typeof governanceConfig === "string"
+        ? Number(governanceConfig)
+        : governanceConfig.appId;
+
+    setIsCheckingGovernanceRoles(true);
+    try {
+      const networkConfig = getNetworkConfig(currentNetwork);
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+      const ci = new CONTRACT(
+        appId,
+        clients.algod,
+        undefined,
+        { ...UNITGovernanceAppSpec.contract, events: [] },
+        { addr: address, sk: new Uint8Array() }
+      );
+      ci.setEnableRawBytes(true);
+
+      const roleChecks: {
+        roleId: string;
+        roleName: string;
+        roleConstant: string;
+        hasRole: boolean;
+        error?: string;
+      }[] = [];
+
+      for (const [roleId, info] of Object.entries(governanceRoleConstantsMap)) {
+        try {
+          const role_keyR = await ci.get_role_key(
+            address,
+            new Uint8Array(Buffer.from(info.bytes, "utf-8"))
+          );
+          if (role_keyR.success) {
+            const hasRoleResult = await ci.has_role(role_keyR.returnValue);
+            if (hasRoleResult.success) {
+              roleChecks.push({
+                roleId,
+                roleName: info.name,
+                roleConstant: info.bytes,
+                hasRole: hasRoleResult.returnValue,
+              });
+            }
+          }
+        } catch (error) {
+          console.error(`Error checking governance role ${roleId}:`, error);
+          roleChecks.push({
+            roleId,
+            roleName: info.name,
+            roleConstant: info.bytes,
+            hasRole: false,
+            error: error instanceof Error ? error.message : "Unknown error",
+          });
+        }
+      }
+
+      const hasAnyRole = roleChecks.some((c) => c.hasRole);
+      const summary = roleChecks.filter((c) => c.hasRole).map((c) => c.roleName).join(", ");
+      if (hasAnyRole) {
+        toast.success("Governance Role Check Complete", {
+          description: `${address.slice(0, 8)}... has: ${summary}`,
+        });
+      } else {
+        toast.info("Governance Role Check Complete", {
+          description: `${address.slice(0, 8)}... has no governance roles.`,
+        });
+      }
+      return roleChecks;
+    } catch (error) {
+      console.error("Error checking governance roles:", error);
+      toast.error("Failed to check governance roles", {
+        description:
+          error instanceof Error ? error.message : "Unknown error occurred",
+      });
+      return [];
+    } finally {
+      setIsCheckingGovernanceRoles(false);
+    }
+  };
+
+  const checkCurrentUserGovernanceRoles = async () => {
+    if (!activeAccount?.address) {
+      setCurrentUserGovernanceRoles([]);
+      return;
+    }
+    setIsLoadingCurrentUserGovernanceRoles(true);
+    try {
+      const roleChecks = await checkGovernanceRoles(activeAccount.address);
+      setCurrentUserGovernanceRoles(roleChecks);
+    } catch (error) {
+      console.error("Error checking current user governance roles:", error);
+      setCurrentUserGovernanceRoles([]);
+    } finally {
+      setIsLoadingCurrentUserGovernanceRoles(false);
     }
   };
 
@@ -4302,11 +4473,13 @@ export default function AdminDashboard() {
                 marketId: actualMarketId,
               });
 
+              const storageAppId = networkConfig?.contracts?.appStorageId;
+
               const maxBorrow = await calculateMaxBorrowAmount(
                 poolId,
                 userAddress,
                 actualMarketId,
-                47015119 // TODO get this from config
+                storageAppId ? Number(storageAppId) : undefined
               );
 
               setUserMaxBorrowAmounts((prev) => ({
@@ -10677,6 +10850,164 @@ export default function AdminDashboard() {
               </CardContent>
             </Card>
 
+            {/* Governance Roles (UNIT) */}
+            {isCurrentNetworkAVM() &&
+              getContractAddress(currentNetwork, "governance") && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Shield className="h-5 w-5" />
+                    Governance Roles (UNIT)
+                  </CardTitle>
+                  <CardDescription>
+                    Check UNIT Governance contract roles for proposal lifecycle
+                    and administration. Roles are granted/revoked by the
+                    contract owner via set_role.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Enter address to check governance roles..."
+                      value={governanceRoleCheckAddress}
+                      onChange={(e) =>
+                        setGovernanceRoleCheckAddress(e.target.value)
+                      }
+                      className="flex-1"
+                    />
+                    <Button
+                      onClick={() =>
+                        checkGovernanceRoles(governanceRoleCheckAddress)
+                      }
+                      disabled={
+                        !governanceRoleCheckAddress.trim() ||
+                        isCheckingGovernanceRoles
+                      }
+                      className="min-w-[120px]"
+                    >
+                      {isCheckingGovernanceRoles ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Checking...
+                        </>
+                      ) : (
+                        <>
+                          <Search className="h-4 w-4 mr-2" />
+                          Check Roles
+                        </>
+                      )}
+                    </Button>
+                    {activeAccount?.address && (
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setGovernanceRoleCheckAddress(activeAccount.address);
+                          checkCurrentUserGovernanceRoles();
+                        }}
+                        disabled={
+                          isCheckingGovernanceRoles ||
+                          isLoadingCurrentUserGovernanceRoles
+                        }
+                        className="min-w-[140px]"
+                      >
+                        <UserCheck className="h-4 w-4 mr-2" />
+                        Check My Roles
+                      </Button>
+                    )}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    <p className="font-medium mb-2">
+                      Governance role identifiers:
+                    </p>
+                    <ul className="list-disc list-inside space-y-1">
+                      {Object.entries(governanceRoleConstantsMap).map(
+                        ([id, info]) => (
+                          <li key={id}>
+                            <strong>{info.name} ({id}):</strong>{" "}
+                            {info.description}
+                          </li>
+                        )
+                      )}
+                    </ul>
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="font-medium text-sm">
+                        Your Current Governance Roles
+                      </h4>
+                      {activeAccount?.address && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={checkCurrentUserGovernanceRoles}
+                          disabled={isLoadingCurrentUserGovernanceRoles}
+                        >
+                          {isLoadingCurrentUserGovernanceRoles ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <RefreshCcw className="h-4 w-4" />
+                          )}
+                        </Button>
+                      )}
+                    </div>
+                    {activeAccount?.address ? (
+                      <>
+                        {isLoadingCurrentUserGovernanceRoles ? (
+                          <div className="flex items-center justify-center py-6">
+                            <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                            <span className="text-muted-foreground text-sm">
+                              Checking governance roles...
+                            </span>
+                          </div>
+                        ) : currentUserGovernanceRoles.length > 0 ? (
+                          <div className="grid gap-2">
+                            {currentUserGovernanceRoles
+                              .filter((r) => r.hasRole)
+                              .map((r) => (
+                                <div
+                                  key={r.roleId}
+                                  className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <CheckCircle2 className="h-5 w-5 text-green-600" />
+                                    <div>
+                                      <p className="font-medium text-green-800 dark:text-green-200">
+                                        {r.roleName}
+                                      </p>
+                                      <p className="text-xs text-green-600 dark:text-green-400">
+                                        {r.roleConstant} • Governance Role
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                                    Active
+                                  </Badge>
+                                </div>
+                              ))}
+                            {currentUserGovernanceRoles.filter((r) => r.hasRole)
+                              .length === 0 && (
+                              <p className="text-sm text-muted-foreground py-4">
+                                No governance roles assigned to your account.
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-muted-foreground py-4">
+                            No governance roles loaded. Click refresh or Check
+                            My Roles.
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <p className="text-sm text-muted-foreground py-4">
+                        Connect your wallet to view your governance roles.
+                      </p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Predefined Roles */}
             <Card>
               <CardHeader>
@@ -13255,12 +13586,11 @@ export default function AdminDashboard() {
                         <SelectValue placeholder="Select proposal category" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="interest-rates">Interest Rates</SelectItem>
-                        <SelectItem value="collateral-listing">Collateral Listing</SelectItem>
-                        <SelectItem value="liquidation-settings">Liquidation Settings</SelectItem>
-                        <SelectItem value="treasury">Treasury</SelectItem>
-                        <SelectItem value="features">Features</SelectItem>
-                        <SelectItem value="governance">Governance</SelectItem>
+                        {(Object.keys(PROPOSAL_CATEGORY_DISPLAY_NAMES) as ProposalCategory[]).map((cat) => (
+                          <SelectItem key={cat} value={cat}>
+                            {PROPOSAL_CATEGORY_DISPLAY_NAMES[cat]}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -14042,6 +14372,175 @@ export default function AdminDashboard() {
             {/* Power Multiplier Lookup Component */}
             <PowerMultiplierLookup />
 
+            {/* Close Voting Early */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <TimerOff className="h-5 w-5" />
+                  Close Voting Early
+                </CardTitle>
+                <CardDescription>
+                  Update voting end timestamp to current time so an active proposal may be finalized early. Typically an owner/admin operation.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-4">
+                  {proposals.filter((p) => p.status === "active").length > 0 && (
+                    <div className="space-y-2">
+                      <Label>Quick select active proposal</Label>
+                      <Select
+                        value={
+                          closeVotingProposalId &&
+                          proposals
+                            .filter((p) => p.status === "active")
+                            .some((p) => p.id === closeVotingProposalId)
+                            ? closeVotingProposalId
+                            : "__manual__"
+                        }
+                        onValueChange={(value) => {
+                          setCloseVotingProposalId(value === "__manual__" ? "" : value);
+                          setCloseVotingResult(null);
+                          setCloseVotingError(null);
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select an active proposal" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__manual__">Manual entry</SelectItem>
+                          {proposals
+                            .filter((p) => p.status === "active")
+                            .map((p) => (
+                              <SelectItem key={p.id} value={p.id}>
+                                {p.title} ({p.id.slice(0, 8)}...)
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  <div className="space-y-2">
+                    <Label htmlFor="close-voting-proposal-id">Proposal ID (hex) *</Label>
+                    <Input
+                      id="close-voting-proposal-id"
+                      placeholder="Enter proposal ID (e.g. from governance events)"
+                      value={closeVotingProposalId}
+                      onChange={(e) => {
+                        setCloseVotingProposalId(e.target.value);
+                        setCloseVotingResult(null);
+                        setCloseVotingError(null);
+                      }}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Use the proposal ID from the Governance Proposals list below, or paste a hex string (32 bytes).
+                    </p>
+                  </div>
+                </div>
+
+                {closeVotingResult && (
+                  <div className="p-3 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400 mt-0.5" />
+                      <div className="text-sm flex-1">
+                        <p className="font-medium text-green-800 dark:text-green-200">
+                          Voting Closed Successfully
+                        </p>
+                        <p className="mt-1 text-green-700 dark:text-green-300 break-all">
+                          {closeVotingResult}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {closeVotingError && (
+                  <div className="p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 text-red-600 dark:text-red-400 mt-0.5" />
+                      <div className="text-sm">
+                        <p className="font-medium text-red-800 dark:text-red-200">
+                          Close Voting Failed
+                        </p>
+                        <p className="text-red-700 dark:text-red-300">
+                          {closeVotingError}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex gap-2 pt-4">
+                  <DorkFiButton
+                    variant="primary"
+                    className="flex-1"
+                    onClick={async () => {
+                      if (!activeAccount?.address || !signTransactions) {
+                        toast.error("Please connect your wallet");
+                        return;
+                      }
+
+                      const proposalId = closeVotingProposalId.trim();
+                      if (!proposalId) {
+                        toast.error("Please enter a proposal ID");
+                        return;
+                      }
+
+                      setIsClosingVoting(true);
+                      setCloseVotingResult(null);
+                      setCloseVotingError(null);
+                      try {
+                        const result = await closeVotingEarly(
+                          { proposalId, sender: activeAccount.address },
+                          currentNetwork
+                        );
+                        if (result.success && result.txns?.length) {
+                          toast.info("Please Sign Transaction", {
+                            description: "Please open your wallet and sign the transaction",
+                            duration: 10000,
+                          });
+                          const stxns = await signTransactions(
+                            result.txns.map((txn: string) =>
+                              Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+                            )
+                          );
+                          const clients = algorandService.initializeClients(
+                            getNetworkConfig(currentNetwork).walletNetworkId as AlgorandNetwork
+                          );
+                          const res = await clients.algod.sendRawTransaction(stxns).do();
+                          await waitForConfirmation(clients.algod, res.txid, 4);
+                          setCloseVotingResult(`Transaction confirmed: ${res.txid}`);
+                          toast.success("Voting closed successfully");
+                          fetchGovernanceEvents();
+                        } else {
+                          setCloseVotingError(result.error?.toString() ?? "Unknown error");
+                          toast.error(result.error?.toString());
+                        }
+                      } catch (err: any) {
+                        const msg = err?.message ?? "Failed to close voting early";
+                        setCloseVotingError(msg);
+                        toast.error(msg);
+                      } finally {
+                        setIsClosingVoting(false);
+                      }
+                    }}
+                    disabled={isClosingVoting || !closeVotingProposalId.trim()}
+                  >
+                    {isClosingVoting ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Closing...
+                      </>
+                    ) : (
+                      <>
+                        <TimerOff className="h-4 w-4 mr-2" />
+                        Close Voting Early
+                      </>
+                    )}
+                  </DorkFiButton>
+                </div>
+              </CardContent>
+            </Card>
+
             {/* Governance Proposals */}
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -14156,7 +14655,12 @@ export default function AdminDashboard() {
                       <div>
                         <Label className="text-sm font-medium text-muted-foreground">Category</Label>
                         <p className="text-sm mt-1">
-                          {selectedProposal.proposalCategoryId ? (getCategoryFromId(Number(selectedProposal.proposalCategoryId)) || `Category ${selectedProposal.proposalCategoryId}`) : "—"}
+                          {selectedProposal.proposalCategoryId
+                            ? (() => {
+                                const cat = getCategoryFromId(Number(selectedProposal.proposalCategoryId));
+                                return cat ? PROPOSAL_CATEGORY_DISPLAY_NAMES[cat] : `Category ${selectedProposal.proposalCategoryId}`;
+                              })()
+                            : "—"}
                         </p>
                       </div>
                       <div>

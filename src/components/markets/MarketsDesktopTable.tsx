@@ -23,6 +23,7 @@ import { useWallet } from "@txnlab/use-wallet-react";
 import { getTokenConfig, getAllTokensWithDisplayInfo, getNetworkConfig } from "@/config";
 import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
+import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 
 interface MarketsDesktopTableProps {
   markets: OnDemandMarketData[];
@@ -70,6 +71,7 @@ const MarketsDesktopTable = ({
 }: MarketsDesktopTableProps) => {
   const { currentNetwork } = useNetwork();
   const { activeAccount } = useWallet();
+  const { formatNumber, formatCurrency, formatPercent } = useNumberI18n();
   const [migrationBalances, setMigrationBalances] = useState<
     Record<string, string | null>
   >({});
@@ -425,10 +427,10 @@ const MarketsDesktopTable = ({
           ) : (
             <div>
               <div className="font-medium">
-                ${Math.round(market.totalSupplyUSD / 1_000_000).toLocaleString()}
+                {formatCurrency(Math.round(market.totalSupplyUSD / 1_000_000), "USD", { maximumFractionDigits: 0 })}
               </div>
               <div className="text-sm text-muted-foreground">
-                {market.totalSupply.toLocaleString(undefined, { maximumFractionDigits: 3 })} {market.asset}
+                {formatNumber(market.totalSupply, { maximumFractionDigits: 3 })} {market.asset}
               </div>
             </div>
           )}
@@ -458,10 +460,10 @@ const MarketsDesktopTable = ({
           ) : (
             <div>
               <div className="font-medium">
-                ${Math.round(market.totalBorrowUSD / 1_000_000).toLocaleString()}
+                {formatCurrency(Math.round(market.totalBorrowUSD / 1_000_000), "USD", { maximumFractionDigits: 0 })}
               </div>
               <div className="text-sm text-muted-foreground">
-                {market.totalBorrow.toLocaleString(undefined, { maximumFractionDigits: 3 })} {market.asset}
+                {formatNumber(market.totalBorrow, { maximumFractionDigits: 3 })} {market.asset}
               </div>
             </div>
           )}
@@ -491,7 +493,7 @@ const MarketsDesktopTable = ({
           ) : (
             <div className="flex flex-col items-center space-y-1">
               <div className="text-sm font-medium">
-                {market.isSToken ? "100.0" : market.utilization.toFixed(1)}%
+                {market.isSToken ? "100.0%" : formatPercent(market.utilization / 100, { maximumFractionDigits: 1 })}
               </div>
               <div className="flex justify-center w-full">
                 <Progress value={market.isSToken ? 100 : market.utilization} className="h-2 w-20" />
@@ -863,10 +865,10 @@ const MarketsDesktopTable = ({
                     ) : (
                       <div>
                         <div className="font-medium">
-                          ${(mainMarket.totalSupplyUSD / 1_000_000).toLocaleString()}
+                          {formatCurrency(mainMarket.totalSupplyUSD / 1_000_000, "USD", { maximumFractionDigits: 0 })}
                         </div>
                         <div className="text-sm text-muted-foreground">
-                          {mainMarket.totalSupply.toLocaleString(undefined, { maximumFractionDigits: 3 })} {mainMarket.asset}
+                          {formatNumber(mainMarket.totalSupply, { maximumFractionDigits: 3 })} {mainMarket.asset}
                         </div>
                       </div>
                     )}
@@ -896,10 +898,10 @@ const MarketsDesktopTable = ({
                     ) : (
                       <div>
                         <div className="font-medium">
-                          ${(mainMarket.totalBorrowUSD / 1_000_000).toLocaleString()}
+                          {formatCurrency(mainMarket.totalBorrowUSD / 1_000_000, "USD", { maximumFractionDigits: 0 })}
                         </div>
                         <div className="text-sm text-muted-foreground">
-                          {mainMarket.totalBorrow.toLocaleString(undefined, { maximumFractionDigits: 3 })} {mainMarket.asset}
+                          {formatNumber(mainMarket.totalBorrow, { maximumFractionDigits: 3 })} {mainMarket.asset}
                         </div>
                       </div>
                     )}
@@ -929,7 +931,7 @@ const MarketsDesktopTable = ({
                     ) : (
                       <div className="flex flex-col items-center space-y-1">
                         <div className="text-sm font-medium">
-                          {mainMarket.isSToken ? "100.0" : mainMarket.utilization.toFixed(1)}%
+                          {mainMarket.isSToken ? "100.0%" : formatPercent(mainMarket.utilization / 100, { maximumFractionDigits: 1 })}
                         </div>
                         <div className="flex justify-center w-full">
                           <Progress value={mainMarket.isSToken ? 100 : mainMarket.utilization} className="h-2 w-20" />
