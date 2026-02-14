@@ -24,6 +24,10 @@ export interface Proposal {
   endTime: Date;
   executionTime?: Date;
   details: ProposalDetails;
+  /** Network this proposal lives on (e.g. "voi-mainnet", "algorand-mainnet"). */
+  networkId?: string;
+  /** When proposals are merged across networks, all source network IDs. */
+  networkIds?: string[];
 }
 
 export type ProposalDetails = 

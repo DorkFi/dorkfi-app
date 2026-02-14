@@ -82,6 +82,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import CanvasBubbles from "@/components/CanvasBubbles";
 import VersionDisplay from "@/components/VersionDisplay";
@@ -96,8 +97,10 @@ import {
   getAlgorandConfigForReads,
   getEnabledNetworks,
   getContractAddress,
+  getNetworksWithGovernance,
   GovernanceConfig,
   isCurrentNetworkAVM,
+  getAlgorandNetworkFromNetworkId,
 } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
@@ -361,10 +364,16 @@ export default function AdminDashboard() {
   const [testError, setTestError] = useState<string | null>(null);
 
   // Governance tab state
+  const [selectedNetworkForGovernance, setSelectedNetworkForGovernance] =
+    useState<NetworkId>("algorand-mainnet");
   const [proposalCategory, setProposalCategory] = useState<ProposalCategory | "">("");
   const [proposalTitle, setProposalTitle] = useState("");
   const [proposalDescription, setProposalDescription] = useState("");
   const [proposalStartDate, setProposalStartDate] = useState<string>("");
+  const [proposalCreateNetworks, setProposalCreateNetworks] = useState<Record<string, boolean>>({
+    "voi-mainnet": true,
+    "algorand-mainnet": true,
+  });
 
   const [isSubmittingProposal, setIsSubmittingProposal] = useState(false);
   const [proposalSubmissionResult, setProposalSubmissionResult] = useState<string | null>(null);
@@ -2992,7 +3001,7 @@ export default function AdminDashboard() {
     setGovernanceEventsError(null);
     setProposalsError(null);
     try {
-      const events = await getEvents();
+      const events = await getEvents(selectedNetworkForGovernance);
       const eventsArray = Array.isArray(events) ? events : [events];
       setGovernanceEvents(eventsArray);
 
@@ -3017,7 +3026,7 @@ export default function AdminDashboard() {
       const fetchedProposals: UIProposal[] = [];
       for (const proposalId of proposalCreatedEvents) {
         try {
-          const serviceProposal = await getProposal(proposalId);
+          const serviceProposal = await getProposal(proposalId, selectedNetworkForGovernance);
           const uiProposal = convertServiceProposalToUI(serviceProposal, proposalId);
           fetchedProposals.push(uiProposal);
         } catch (err: any) {
@@ -3044,7 +3053,7 @@ export default function AdminDashboard() {
     setProposalError(null);
     setIsProposalModalOpen(true);
     try {
-      const proposal = await getProposal(proposalId);
+      const proposal = await getProposal(proposalId, selectedNetworkForGovernance);
       setSelectedProposal(proposal);
     } catch (err: any) {
       setProposalError(err?.message ?? "Failed to load proposal details");
@@ -3065,6 +3074,14 @@ export default function AdminDashboard() {
       return;
     }
 
+    const selectedNetworks = (["voi-mainnet", "algorand-mainnet"] as const).filter(
+      (nid) => proposalCreateNetworks[nid]
+    );
+    if (selectedNetworks.length === 0) {
+      toast.error("Select at least one network to create the proposal on");
+      return;
+    }
+
     // Validate start date is in the future
     const startTimestamp = new Date(proposalStartDate).getTime();
     const now = Date.now();
@@ -3078,50 +3095,57 @@ export default function AdminDashboard() {
     setProposalSubmissionResult(null);
 
     try {
-      // Calculate timestamps
-      const startTimestamp = Math.floor(new Date(proposalStartDate).getTime() / 1000); // Convert to Unix timestamp (seconds)
-      const endTimestamp = startTimestamp + (7 * 24 * 60 * 60); // Add 7 days in seconds
+      const startTimestampSec = Math.floor(new Date(proposalStartDate).getTime() / 1000);
+      const endTimestamp = startTimestampSec + (7 * 24 * 60 * 60);
 
       if (!transactionSigner || !activeAccount?.address) {
         throw new Error("Wallet not properly connected");
       }
 
-      // Create proposal using governance service
-      const result = await createProposalWithCategory(
-        proposalTitle,
-        proposalDescription,
-        proposalCategory as ProposalCategory,
-        startTimestamp,
-        transactionSigner,
-        activeAccount.address,
-        currentNetwork
-      );
+      const results: string[] = [];
+      for (const networkId of selectedNetworks) {
+        const result = await createProposalWithCategory(
+          proposalTitle,
+          proposalDescription,
+          proposalCategory as ProposalCategory,
+          startTimestampSec,
+          transactionSigner,
+          activeAccount.address,
+          networkId
+        );
 
-      if (!result.success) {
-        throw new Error(result.error || "Failed to create proposal");
+        if (!result.success) {
+          throw new Error(result.error || `Failed to create proposal on ${getNetworkConfig(networkId).name}`);
+        }
+
+        const stxns = await signTransactions(
+          result.txns.map((txn: string) =>
+            Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+          )
+        );
+
+        const algorandNetwork = getAlgorandNetworkFromNetworkId(networkId);
+        if (!algorandNetwork) {
+          throw new Error(`Invalid network: ${networkId}`);
+        }
+        const algorandClients = await algorandService.initializeClientsForTransactions(algorandNetwork);
+
+        const res = await algorandClients.algod.sendRawTransaction(stxns).do();
+        await waitForConfirmation(algorandClients.algod, res.txid, 4);
+
+        const proposalId = result.proposalId || `prop-${Date.now()}`;
+        const networkName = getNetworkConfig(networkId).name;
+        results.push(`${networkName}: ${proposalId}${result.txns?.length ? ` (tx: ${res.txid})` : ""}`);
       }
 
-      const stxns = await signTransactions(
-        result.txns.map((txn: string) =>
-          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
-        )
-      );
-
-      const algorandClients = await algorandService.getCurrentClientsForTransactions();
-
-      const res = await algorandClients.algod.sendRawTransaction(stxns).do();
-      await waitForConfirmation(algorandClients.algod, res.txid, 4);
-
-      const proposalId = result.proposalId || `prop-${Date.now()}`;
       setProposalSubmissionResult(
-        `Proposal created successfully! Proposal ID: ${proposalId}\n` +
-        `Start Timestamp: ${startTimestamp}\n` +
-        `End Timestamp: ${endTimestamp}` +
-        (result.txns && result.txns.length > 0 ? `\nTransaction IDs: ${result.txns.join(", ")}` : "")
+        `Proposal created successfully!\n` +
+        `Start Timestamp: ${startTimestampSec}\n` +
+        `End Timestamp: ${endTimestamp}\n\n` +
+        results.join("\n")
       );
       toast.success("Proposal submitted successfully!");
 
-      // Reset form
       setProposalCategory("");
       setProposalTitle("");
       setProposalDescription("");
@@ -6114,12 +6138,12 @@ export default function AdminDashboard() {
     }
   }, [activeTab, fetchReserveData]);
 
-  // Load governance events when governance tab is active
+  // Load governance events when governance tab is active or selected network changes
   React.useEffect(() => {
     if (activeTab === "governance") {
       fetchGovernanceEvents();
     }
-  }, [activeTab]);
+  }, [activeTab, selectedNetworkForGovernance]);
 
   return (
     <div className="min-h-screen bg-background relative">
@@ -13533,8 +13557,31 @@ export default function AdminDashboard() {
 
           {/* Governance Tab */}
           <TabsContent value="governance" className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-4">
               <H2>Create Governance Proposal</H2>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="governance-network-select" className="text-sm text-muted-foreground whitespace-nowrap">
+                  Network
+                </Label>
+                <Select
+                  value={selectedNetworkForGovernance}
+                  onValueChange={(value) => setSelectedNetworkForGovernance(value as NetworkId)}
+                >
+                  <SelectTrigger id="governance-network-select" className="w-[200px]">
+                    <SelectValue placeholder="Select network" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {getNetworksWithGovernance().map((networkId) => {
+                      const networkConfig = getNetworkConfig(networkId);
+                      return (
+                        <SelectItem key={networkId} value={networkId}>
+                          {networkConfig.name}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             <Card>
@@ -13631,6 +13678,33 @@ export default function AdminDashboard() {
                       </div>
                     )}
                   </div>
+
+                  <div className="space-y-2">
+                    <Label>Create proposal on networks</Label>
+                    <div className="flex flex-wrap gap-4">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <Checkbox
+                          checked={!!proposalCreateNetworks["voi-mainnet"]}
+                          onCheckedChange={(checked) =>
+                            setProposalCreateNetworks((prev) => ({ ...prev, "voi-mainnet": !!checked }))
+                          }
+                        />
+                        <span className="text-sm">Voi Network</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <Checkbox
+                          checked={!!proposalCreateNetworks["algorand-mainnet"]}
+                          onCheckedChange={(checked) =>
+                            setProposalCreateNetworks((prev) => ({ ...prev, "algorand-mainnet": !!checked }))
+                          }
+                        />
+                        <span className="text-sm">Algorand</span>
+                      </label>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Select which networks to create this proposal on. You will sign and submit one transaction per network.
+                    </p>
+                  </div>
                 </div>
 
                 {/* Proposal Preview */}
@@ -13704,7 +13778,14 @@ export default function AdminDashboard() {
                     variant="primary"
                     className="flex-1"
                     onClick={handleSubmitProposal}
-                    disabled={isSubmittingProposal || !proposalCategory || !proposalTitle.trim() || !proposalDescription.trim() || !proposalStartDate}
+                    disabled={
+                      isSubmittingProposal ||
+                      !proposalCategory ||
+                      !proposalTitle.trim() ||
+                      !proposalDescription.trim() ||
+                      !proposalStartDate ||
+                      !(proposalCreateNetworks["voi-mainnet"] || proposalCreateNetworks["algorand-mainnet"])
+                    }
                   >
                     {isSubmittingProposal ? (
                       <>
@@ -13725,6 +13806,7 @@ export default function AdminDashboard() {
                       setProposalTitle("");
                       setProposalDescription("");
                       setProposalStartDate("");
+                      setProposalCreateNetworks({ "voi-mainnet": true, "algorand-mainnet": true });
                       setProposalSubmissionResult(null);
                       setProposalSubmissionError(null);
                     }}
@@ -13782,7 +13864,7 @@ export default function AdminDashboard() {
                           
                           if (!governanceConfig || typeof governanceConfig === "string") {
                             return (
-                              <SelectItem value="" disabled>
+                              <SelectItem value="__no-power-sources__" disabled>
                                 No power sources configured
                               </SelectItem>
                             );
@@ -13792,7 +13874,7 @@ export default function AdminDashboard() {
                           
                           if (powerSources.length === 0) {
                             return (
-                              <SelectItem value="" disabled>
+                              <SelectItem value="__no-power-sources__" disabled>
                                 No power sources configured
                               </SelectItem>
                             );
@@ -13996,7 +14078,7 @@ export default function AdminDashboard() {
                           
                           if (!governanceConfig || typeof governanceConfig === "string") {
                             return (
-                              <SelectItem value="" disabled>
+                              <SelectItem value="__no-power-multipliers__" disabled>
                                 No power multipliers configured
                               </SelectItem>
                             );
@@ -14006,7 +14088,7 @@ export default function AdminDashboard() {
                           
                           if (powerMultipliers.length === 0) {
                             return (
-                              <SelectItem value="" disabled>
+                              <SelectItem value="__no-power-multipliers__" disabled>
                                 No power multipliers configured
                               </SelectItem>
                             );
@@ -14209,7 +14291,7 @@ export default function AdminDashboard() {
                           
                           if (!governanceConfig || typeof governanceConfig === "string") {
                             return (
-                              <SelectItem value="" disabled>
+                              <SelectItem value="__no-power-sources__" disabled>
                                 No power sources configured
                               </SelectItem>
                             );
@@ -14219,7 +14301,7 @@ export default function AdminDashboard() {
                           
                           if (powerSources.length === 0) {
                             return (
-                              <SelectItem value="" disabled>
+                              <SelectItem value="__no-power-sources__" disabled>
                                 No power sources configured
                               </SelectItem>
                             );

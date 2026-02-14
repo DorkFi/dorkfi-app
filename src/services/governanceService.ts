@@ -191,6 +191,9 @@ export const createProposal = async (
 
     ci.setExtraTxns(buildN);
     ci.setEnableGroupResourceSharing(true);
+    if (networkConfig.networkId === "algorand-mainnet") {
+      ci.setBeaconId(3209233839); // TODO move this to ulujs
+    }
     const result = await ci.custom();
 
     console.log("createProposal result", { result });
@@ -325,6 +328,9 @@ export const getEvents = async (networkId?: NetworkId) => {
     minRoundForNetwork,
     Number(lastRound) - GOVERNANCE_EVENTS_MIN_ROUNDS_LOOKBACK
   );
+  if (nid === "algorand-mainnet") {
+    ci.setBeaconId(3209233839); // Beacon required for Algorand mainnet governance reads
+  }
   const events = await ci.getEvents({ minRound });
   return events;
 }
@@ -477,6 +483,9 @@ export const getProposal = async (
   );
 
   ci.setEnableRawBytes(true);
+  if (networkConfig.networkId === "algorand-mainnet") {
+    ci.setBeaconId(3209233839); // Beacon required for Algorand mainnet governance reads
+  }
   const result = await ci.get_proposal(proposalNode);
 
   console.log("getProposal result", { result });
@@ -597,6 +606,9 @@ export const getVoter = async (
 
   ci.setFee(7000);
   ci.setEnableRawBytes(true);
+  if (networkConfig.networkId === "algorand-mainnet") {
+    ci.setBeaconId(3209233839); // Beacon required for Algorand mainnet governance reads
+  }
   const result = await ci.get_voter(voterAddress);
 
   console.log("getVoter result", { result });
@@ -660,6 +672,9 @@ export const getPowerSource = async (
 
   ci.setFee(2000);
   ci.setEnableRawBytes(true);
+  if (networkConfig.networkId === "algorand-mainnet") {
+    ci.setBeaconId(3209233839); // Beacon required for Algorand mainnet governance reads
+  }
   const result = await ci.get_power_source(BigInt(powerSourceId));
 
   console.log("getPowerSource result", { result });
@@ -813,6 +828,9 @@ export const getPowerMultiplier = async (
   );
   ci.setFee(2000);
   ci.setEnableRawBytes(true);
+  if (networkConfig.networkId === "algorand-mainnet") {
+    ci.setBeaconId(3209233839); // Beacon required for Algorand mainnet governance reads
+  }
   const result = await ci.get_power_multiplier(BigInt(powerMultiplierId));
 
   console.log("getPowerMultiplier result", { result });
@@ -941,6 +959,9 @@ export const getVoterBasePower = async (
   );
   ci.setFee(7000);
   ci.setEnableRawBytes(true);
+  if (networkConfig.networkId === "algorand-mainnet") {
+    ci.setBeaconId(3209233839); // Beacon required for Algorand mainnet governance reads
+  }
   const result = await ci.get_voter_base_power(voterAddress);
   console.log("getVoterBasePower result", { result });
 
@@ -995,6 +1016,9 @@ export const getVoterMultiplier = async (
   );
   ci.setFee(7000);
   ci.setEnableRawBytes(true);
+  if (networkConfig.networkId === "algorand-mainnet") {
+    ci.setBeaconId(3209233839); // Beacon required for Algorand mainnet governance reads
+  }
   const result = await ci.get_voter_multiplier(voterAddress);
   console.log("getVoterMultiplier result", { result });
 
@@ -1079,6 +1103,9 @@ export const getVote = async (
 
   ci.setFee(2000);
   ci.setEnableRawBytes(true);
+  if (networkConfig.networkId === "algorand-mainnet") {
+    ci.setBeaconId(3209233839); // Beacon required for Algorand mainnet governance reads
+  }
   const result = await ci.get_vote(proposalNode, voterAddress);
 
   console.log("getVote result", { result });
@@ -1131,12 +1158,12 @@ export const castVote = async (
       ? getNetworkConfig(networkId)
       : getCurrentNetworkConfig();
 
-    if (!isCurrentNetworkAVM()) {
+    if (!(networkId ? isAVMNetwork(networkId) : isCurrentNetworkAVM())) {
       throw new Error("Governance voting is only supported on AVM networks");
     }
 
     const governanceConfig = getContractAddress(
-      networkId || (networkConfig.networkId as NetworkId),
+      networkId ?? (networkConfig.networkId as NetworkId),
       "governance",
     ) as GovernanceConfig | string | undefined;
 
@@ -1226,6 +1253,9 @@ export const castVote = async (
     ci.setExtraTxns(buildN);
     ci.setFee(8000);
     ci.setEnableGroupResourceSharing(true);
+    if (networkConfig.networkId === "algorand-mainnet") {
+      ci.setBeaconId(3209233839); // TODO move this to ulujs
+    }
     const result = await ci.custom();
 
     console.log("castVote result", { result });
@@ -1269,12 +1299,12 @@ export const castBatchVote = async (
       ? getNetworkConfig(networkId)
       : getCurrentNetworkConfig();
 
-    if (!isCurrentNetworkAVM()) {
+    if (!(networkId ? isAVMNetwork(networkId) : isCurrentNetworkAVM())) {
       throw new Error("Governance voting is only supported on AVM networks");
     }
 
     const governanceConfig = getContractAddress(
-      networkId || (networkConfig.networkId as NetworkId),
+      networkId ?? (networkConfig.networkId as NetworkId),
       "governance",
     ) as GovernanceConfig | string | undefined;
 

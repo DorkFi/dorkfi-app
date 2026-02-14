@@ -4,23 +4,28 @@ import { PROPOSAL_CATEGORY_DISPLAY_NAMES } from "@/constants/governanceConstants
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Clock, TrendingUp, TrendingDown, CheckCircle2, XCircle, HourglassIcon } from "lucide-react";
+import { Clock, TrendingUp, TrendingDown, CheckCircle2, XCircle, HourglassIcon, Link2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import { H3, Body, Caption } from "@/components/ui/Typography";
 import { VoteConfirmationModal } from "./VoteConfirmationModal";
 import { VoteSuccessModal } from "./VoteSuccessModal";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
+import { getNetworkConfig } from "@/config";
+import { getNetworkLogoPath } from "@/utils/tokenImageUtils";
+import type { NetworkId } from "@/config";
 
 interface ProposalCardProps {
   proposal: Proposal;
-  onVote: (proposalId: string, support: boolean) => Promise<void>;
+  onVote: (proposalId: string, support: boolean, networkId?: string) => Promise<void>;
   userVote?: boolean;
   votingPower?: number;
   isSelected?: boolean;
   selectedVote?: boolean | null; // true = for, false = against, null = not selected
   onSelect?: (proposalId: string, selected: boolean) => void;
   onSelectVote?: (proposalId: string, support: boolean | null) => void;
+  /** Network to use when voting (for merged proposals, the current governance network). */
+  voteNetworkId?: string;
   batchMode?: boolean;
   isSelectionDisabled?: boolean;
 }
@@ -52,6 +57,7 @@ export const ProposalCard = ({
   selectedVote = null,
   onSelect,
   onSelectVote,
+  voteNetworkId,
   batchMode = false,
   isSelectionDisabled = false,
 }: ProposalCardProps) => {
@@ -69,6 +75,7 @@ export const ProposalCard = ({
   const StatusIcon = statusConfig[proposal.status].icon;
   const isActive = proposal.status === "active";
   const timeLeft = isActive ? formatDistanceToNow(proposal.endTime, { addSuffix: true }) : null;
+  const canVote = !!(voteNetworkId ?? proposal.networkId);
 
   const handleVoteClick = (support: boolean) => {
     setPendingVoteSupport(support);
@@ -80,7 +87,7 @@ export const ProposalCard = ({
     
     setIsVoting(true);
     try {
-      await onVote(proposal.id, pendingVoteSupport);
+      await onVote(proposal.id, pendingVoteSupport, voteNetworkId ?? proposal.networkId);
       // Close confirmation modal and show success modal
       setShowConfirmation(false);
       setShowSuccess(true);
@@ -129,7 +136,7 @@ export const ProposalCard = ({
         <div className="flex items-start justify-between gap-3 sm:gap-4 flex-wrap">
           <div className="space-y-2 flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              {batchMode && isActive && userVote === undefined && (
+              {batchMode && isActive && canVote && userVote === undefined && (
                 <Checkbox
                   checked={isSelected}
                   onCheckedChange={handleSelectChange}
@@ -137,6 +144,37 @@ export const ProposalCard = ({
                   className="mr-1 shrink-0 h-5 w-5 sm:h-4 sm:w-4"
                 />
               )}
+              {(() => {
+                const networkIdsList = proposal.networkIds?.length
+                  ? proposal.networkIds
+                  : proposal.networkId
+                    ? [proposal.networkId]
+                    : [];
+                if (networkIdsList.length === 0) return null;
+                if (networkIdsList.length > 1) {
+                  return (
+                    <Badge variant="secondary" className="gap-1.5 font-normal">
+                      <Link2 className="h-3.5 w-3.5 shrink-0" />
+                      <span>Multichain</span>
+                    </Badge>
+                  );
+                }
+                const nid = networkIdsList[0];
+                return (
+                  <Badge key={nid} variant="secondary" className="gap-1.5 font-normal">
+                    <img
+                      src={getNetworkLogoPath(nid as NetworkId)}
+                      alt=""
+                      className="h-3.5 w-3.5 rounded-full shrink-0"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.src = "/placeholder.svg";
+                      }}
+                    />
+                    <span>{getNetworkConfig(nid as NetworkId).name}</span>
+                  </Badge>
+                );
+              })()}
               <Badge className={categoryColors[proposal.category]}>
                 {PROPOSAL_CATEGORY_DISPLAY_NAMES[proposal.category]}
               </Badge>
@@ -245,6 +283,7 @@ export const ProposalCard = ({
                     <Button
                       variant="outline"
                       size="sm"
+                      disabled={!canVote}
                       onClick={() => handleVoteClick(false)}
                       className="flex-1 sm:flex-initial min-h-[44px] border-red-500 text-red-500 hover:bg-transparent hover:text-red-500 dark:border-red-400 dark:text-red-400 dark:hover:text-red-400"
                     >
@@ -252,6 +291,7 @@ export const ProposalCard = ({
                     </Button>
                     <Button
                       size="sm"
+                      disabled={!canVote}
                       onClick={() => handleVoteClick(true)}
                       className="flex-1 sm:flex-initial min-h-[44px] bg-green-600 hover:bg-green-700 text-white"
                     >
