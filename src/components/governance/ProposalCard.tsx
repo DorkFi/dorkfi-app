@@ -4,13 +4,16 @@ import { PROPOSAL_CATEGORY_DISPLAY_NAMES } from "@/constants/governanceConstants
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Clock, TrendingUp, TrendingDown, CheckCircle2, XCircle, HourglassIcon } from "lucide-react";
+import { Clock, TrendingUp, TrendingDown, CheckCircle2, XCircle, HourglassIcon, Link2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import { H3, Body, Caption } from "@/components/ui/Typography";
 import { VoteConfirmationModal } from "./VoteConfirmationModal";
 import { VoteSuccessModal } from "./VoteSuccessModal";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
+import { getNetworkConfig } from "@/config";
+import { getNetworkLogoPath } from "@/utils/tokenImageUtils";
+import type { NetworkId } from "@/config";
 
 interface ProposalCardProps {
   proposal: Proposal;
@@ -141,6 +144,37 @@ export const ProposalCard = ({
                   className="mr-1 shrink-0 h-5 w-5 sm:h-4 sm:w-4"
                 />
               )}
+              {(() => {
+                const networkIdsList = proposal.networkIds?.length
+                  ? proposal.networkIds
+                  : proposal.networkId
+                    ? [proposal.networkId]
+                    : [];
+                if (networkIdsList.length === 0) return null;
+                if (networkIdsList.length > 1) {
+                  return (
+                    <Badge variant="secondary" className="gap-1.5 font-normal">
+                      <Link2 className="h-3.5 w-3.5 shrink-0" />
+                      <span>Multichain</span>
+                    </Badge>
+                  );
+                }
+                const nid = networkIdsList[0];
+                return (
+                  <Badge key={nid} variant="secondary" className="gap-1.5 font-normal">
+                    <img
+                      src={getNetworkLogoPath(nid as NetworkId)}
+                      alt=""
+                      className="h-3.5 w-3.5 rounded-full shrink-0"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.src = "/placeholder.svg";
+                      }}
+                    />
+                    <span>{getNetworkConfig(nid as NetworkId).name}</span>
+                  </Badge>
+                );
+              })()}
               <Badge className={categoryColors[proposal.category]}>
                 {PROPOSAL_CATEGORY_DISPLAY_NAMES[proposal.category]}
               </Badge>

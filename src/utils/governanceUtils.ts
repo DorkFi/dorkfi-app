@@ -54,7 +54,6 @@ export const convertServiceProposalToUI = (
 
   return {
     id: proposalId,
-    networkId,
     title: serviceProposal.proposalTitle?.replace(/\0/g, "").trim() || "Untitled Proposal",
     description: serviceProposal.proposalDescription?.replace(/\0/g, "").trim() || "",
     category: category as ProposalCategory,
@@ -70,5 +69,6 @@ export const convertServiceProposalToUI = (
     details: {
       type: category as ProposalCategory,
     } as any, // Details would need to be parsed from proposalActionHash if available
+    ...(networkId !== undefined && { networkId, networkIds: [networkId] }),
   };
 };

@@ -82,6 +82,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import CanvasBubbles from "@/components/CanvasBubbles";
 import VersionDisplay from "@/components/VersionDisplay";
@@ -99,6 +100,7 @@ import {
   getNetworksWithGovernance,
   GovernanceConfig,
   isCurrentNetworkAVM,
+  getAlgorandNetworkFromNetworkId,
 } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
@@ -368,6 +370,10 @@ export default function AdminDashboard() {
   const [proposalTitle, setProposalTitle] = useState("");
   const [proposalDescription, setProposalDescription] = useState("");
   const [proposalStartDate, setProposalStartDate] = useState<string>("");
+  const [proposalCreateNetworks, setProposalCreateNetworks] = useState<Record<string, boolean>>({
+    "voi-mainnet": true,
+    "algorand-mainnet": true,
+  });
 
   const [isSubmittingProposal, setIsSubmittingProposal] = useState(false);
   const [proposalSubmissionResult, setProposalSubmissionResult] = useState<string | null>(null);
@@ -3068,6 +3074,14 @@ export default function AdminDashboard() {
       return;
     }
 
+    const selectedNetworks = (["voi-mainnet", "algorand-mainnet"] as const).filter(
+      (nid) => proposalCreateNetworks[nid]
+    );
+    if (selectedNetworks.length === 0) {
+      toast.error("Select at least one network to create the proposal on");
+      return;
+    }
+
     // Validate start date is in the future
     const startTimestamp = new Date(proposalStartDate).getTime();
     const now = Date.now();
@@ -3081,50 +3095,57 @@ export default function AdminDashboard() {
     setProposalSubmissionResult(null);
 
     try {
-      // Calculate timestamps
-      const startTimestamp = Math.floor(new Date(proposalStartDate).getTime() / 1000); // Convert to Unix timestamp (seconds)
-      const endTimestamp = startTimestamp + (7 * 24 * 60 * 60); // Add 7 days in seconds
+      const startTimestampSec = Math.floor(new Date(proposalStartDate).getTime() / 1000);
+      const endTimestamp = startTimestampSec + (7 * 24 * 60 * 60);
 
       if (!transactionSigner || !activeAccount?.address) {
         throw new Error("Wallet not properly connected");
       }
 
-      // Create proposal using governance service (use selected governance network)
-      const result = await createProposalWithCategory(
-        proposalTitle,
-        proposalDescription,
-        proposalCategory as ProposalCategory,
-        startTimestamp,
-        transactionSigner,
-        activeAccount.address,
-        selectedNetworkForGovernance
-      );
+      const results: string[] = [];
+      for (const networkId of selectedNetworks) {
+        const result = await createProposalWithCategory(
+          proposalTitle,
+          proposalDescription,
+          proposalCategory as ProposalCategory,
+          startTimestampSec,
+          transactionSigner,
+          activeAccount.address,
+          networkId
+        );
 
-      if (!result.success) {
-        throw new Error(result.error || "Failed to create proposal");
+        if (!result.success) {
+          throw new Error(result.error || `Failed to create proposal on ${getNetworkConfig(networkId).name}`);
+        }
+
+        const stxns = await signTransactions(
+          result.txns.map((txn: string) =>
+            Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+          )
+        );
+
+        const algorandNetwork = getAlgorandNetworkFromNetworkId(networkId);
+        if (!algorandNetwork) {
+          throw new Error(`Invalid network: ${networkId}`);
+        }
+        const algorandClients = await algorandService.initializeClientsForTransactions(algorandNetwork);
+
+        const res = await algorandClients.algod.sendRawTransaction(stxns).do();
+        await waitForConfirmation(algorandClients.algod, res.txid, 4);
+
+        const proposalId = result.proposalId || `prop-${Date.now()}`;
+        const networkName = getNetworkConfig(networkId).name;
+        results.push(`${networkName}: ${proposalId}${result.txns?.length ? ` (tx: ${res.txid})` : ""}`);
       }
 
-      const stxns = await signTransactions(
-        result.txns.map((txn: string) =>
-          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
-        )
-      );
-
-      const algorandClients = await algorandService.getCurrentClientsForTransactions();
-
-      const res = await algorandClients.algod.sendRawTransaction(stxns).do();
-      await waitForConfirmation(algorandClients.algod, res.txid, 4);
-
-      const proposalId = result.proposalId || `prop-${Date.now()}`;
       setProposalSubmissionResult(
-        `Proposal created successfully! Proposal ID: ${proposalId}\n` +
-        `Start Timestamp: ${startTimestamp}\n` +
-        `End Timestamp: ${endTimestamp}` +
-        (result.txns && result.txns.length > 0 ? `\nTransaction IDs: ${result.txns.join(", ")}` : "")
+        `Proposal created successfully!\n` +
+        `Start Timestamp: ${startTimestampSec}\n` +
+        `End Timestamp: ${endTimestamp}\n\n` +
+        results.join("\n")
       );
       toast.success("Proposal submitted successfully!");
 
-      // Reset form
       setProposalCategory("");
       setProposalTitle("");
       setProposalDescription("");
@@ -13657,6 +13678,33 @@ export default function AdminDashboard() {
                       </div>
                     )}
                   </div>
+
+                  <div className="space-y-2">
+                    <Label>Create proposal on networks</Label>
+                    <div className="flex flex-wrap gap-4">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <Checkbox
+                          checked={!!proposalCreateNetworks["voi-mainnet"]}
+                          onCheckedChange={(checked) =>
+                            setProposalCreateNetworks((prev) => ({ ...prev, "voi-mainnet": !!checked }))
+                          }
+                        />
+                        <span className="text-sm">Voi Network</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <Checkbox
+                          checked={!!proposalCreateNetworks["algorand-mainnet"]}
+                          onCheckedChange={(checked) =>
+                            setProposalCreateNetworks((prev) => ({ ...prev, "algorand-mainnet": !!checked }))
+                          }
+                        />
+                        <span className="text-sm">Algorand</span>
+                      </label>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Select which networks to create this proposal on. You will sign and submit one transaction per network.
+                    </p>
+                  </div>
                 </div>
 
                 {/* Proposal Preview */}
@@ -13730,7 +13778,14 @@ export default function AdminDashboard() {
                     variant="primary"
                     className="flex-1"
                     onClick={handleSubmitProposal}
-                    disabled={isSubmittingProposal || !proposalCategory || !proposalTitle.trim() || !proposalDescription.trim() || !proposalStartDate}
+                    disabled={
+                      isSubmittingProposal ||
+                      !proposalCategory ||
+                      !proposalTitle.trim() ||
+                      !proposalDescription.trim() ||
+                      !proposalStartDate ||
+                      !(proposalCreateNetworks["voi-mainnet"] || proposalCreateNetworks["algorand-mainnet"])
+                    }
                   >
                     {isSubmittingProposal ? (
                       <>
@@ -13751,6 +13806,7 @@ export default function AdminDashboard() {
                       setProposalTitle("");
                       setProposalDescription("");
                       setProposalStartDate("");
+                      setProposalCreateNetworks({ "voi-mainnet": true, "algorand-mainnet": true });
                       setProposalSubmissionResult(null);
                       setProposalSubmissionError(null);
                     }}

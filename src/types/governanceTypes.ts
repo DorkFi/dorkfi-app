@@ -11,10 +11,6 @@ export type ProposalCategory =
 
 export interface Proposal {
   id: string;
-  /** Network this proposal lives on (single-network view). Used for voting and user votes. */
-  networkId?: string;
-  /** Networks this proposal exists on (grouped view). When set, voting data is aggregated across these networks. */
-  networkIds?: string[];
   title: string;
   description: string;
   category: ProposalCategory;
@@ -28,6 +24,10 @@ export interface Proposal {
   endTime: Date;
   executionTime?: Date;
   details: ProposalDetails;
+  /** Network this proposal lives on (e.g. "voi-mainnet", "algorand-mainnet"). */
+  networkId?: string;
+  /** When proposals are merged across networks, all source network IDs. */
+  networkIds?: string[];
 }
 
 export type ProposalDetails = 
