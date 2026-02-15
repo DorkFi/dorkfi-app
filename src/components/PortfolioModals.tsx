@@ -405,6 +405,19 @@ const PortfolioModals = ({
         ? borrowAPYRaw
         : 0;
 
+    const toBps = (v: number) => (v > 0 && v <= 1 ? Math.round(v * 10000) : Math.round(v));
+    const apyParameters =
+      market &&
+      typeof market.borrowRate === "number" &&
+      typeof market.slope === "number" &&
+      typeof market.reserveFactor === "number"
+        ? {
+            borrowRateBps: toBps(market.borrowRate),
+            slopeBps: toBps(market.slope),
+            reserveFactorBps: toBps(market.reserveFactor),
+          }
+        : undefined;
+
     return {
       supplyAPY,
       borrowAPY,
@@ -416,6 +429,10 @@ const PortfolioModals = ({
       totalDeposits: market?.totalDeposits
         ? parseFloat(market.totalDeposits)
         : undefined,
+      totalBorrows: market?.totalBorrows
+        ? parseFloat(market.totalBorrows)
+        : undefined,
+      apyParameters,
       marketCapacity: market?.maxTotalDeposits
         ? parseFloat(market.maxTotalDeposits)
         : undefined,
@@ -551,6 +568,32 @@ const PortfolioModals = ({
       : 85; // Default 85%
     const liquidationMargin = Math.max(0, liquidationThreshold - currentLTV);
 
+    const toBps = (v: number) => (v > 0 && v <= 1 ? Math.round(v * 10000) : Math.round(v));
+    const num = (x: unknown): number | undefined =>
+      x === undefined || x === null ? undefined : typeof x === "number" ? x : parseFloat(String(x));
+    const br = num((market as any)?.borrowRate);
+    const sl = num((market as any)?.slope);
+    const rf = num((market as any)?.reserveFactor);
+    const apyParameters =
+      market && br != null && !Number.isNaN(br) && sl != null && !Number.isNaN(sl) && rf != null && !Number.isNaN(rf)
+        ? {
+            borrowRateBps: toBps(br),
+            slopeBps: toBps(sl),
+            reserveFactorBps: toBps(rf),
+          }
+        : undefined;
+
+    const totalDepositsRaw =
+      (market as any)?.totalDeposits ?? (market as any)?.total_deposits;
+    const totalBorrowsRaw =
+      (market as any)?.totalBorrows ?? (market as any)?.total_borrows;
+
+    const parseTotal = (raw: unknown): number | undefined => {
+      if (raw == null || raw === "") return undefined;
+      const n = typeof raw === "number" ? raw : parseFloat(String(raw));
+      return Number.isFinite(n) && n >= 0 ? n : undefined;
+    };
+
     const stats = {
       borrowAPY:
         market?.borrowApyCalculation?.apy ||
@@ -566,6 +609,10 @@ const PortfolioModals = ({
       collateralFactor: market?.collateralFactor
         ? market.collateralFactor * 100
         : undefined,
+      totalDeposits: parseTotal(totalDepositsRaw),
+      totalBorrows: parseTotal(totalBorrowsRaw),
+      apyParameters,
+      isSToken: market?.isSToken ?? false,
     };
 
     // Debug logging for health factor calculation
@@ -674,6 +721,8 @@ const PortfolioModals = ({
         utilization: 0,
         collateralFactor: 80, // Default 80%
         liquidationThreshold: 85, // Default 85%
+        liquidity: 0,
+        liquidityUSD: 0,
         tokenPrice: tokenPrice,
         walletBalance: 0,
         walletBalanceUSD: 0,
@@ -706,6 +755,19 @@ const PortfolioModals = ({
         ? borrowAPYRaw
         : 0;
 
+    // APY parameters for adjusted APY in modal (basis points). Market may have decimals (0-1) or bps.
+    const toBps = (v: number) => (v > 0 && v <= 1 ? Math.round(v * 10000) : Math.round(v));
+    const apyParameters =
+      typeof market.borrowRate === "number" &&
+      typeof market.slope === "number" &&
+      typeof market.reserveFactor === "number"
+        ? {
+            borrowRateBps: toBps(market.borrowRate),
+            slopeBps: toBps(market.slope),
+            reserveFactorBps: toBps(market.reserveFactor),
+          }
+        : undefined;
+
     return {
       icon: getTokenImagePath(asset),
       totalSupply,
@@ -721,6 +783,11 @@ const PortfolioModals = ({
       liquidity: totalSupply - totalBorrow,
       liquidityUSD: (totalSupply - totalBorrow) * tokenPrice,
       maxTotalDeposits: parseFloat(market.maxTotalDeposits) || 0,
+      reserveFactor: market.reserveFactor != null ? (market.reserveFactor <= 1 ? market.reserveFactor * 10000 : market.reserveFactor) : undefined,
+      apyCalculation: market.apyCalculation,
+      borrowApyCalculation: market.borrowApyCalculation,
+      apyParameters,
+      isSToken: market.isSToken ?? false,
     };
   };
 

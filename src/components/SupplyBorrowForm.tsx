@@ -162,6 +162,22 @@ const SupplyBorrowForm = ({
     return availableToSupplyOrBorrow * (1 - buffer);
   };
 
+  // USD max borrow from collateral (for display when token max is 0 but user has capacity)
+  const maxBorrowableUSD =
+    mode === "borrow" &&
+    userGlobalData &&
+    typeof collateralFactor === "number"
+      ? Math.max(
+          0,
+          userGlobalData.totalCollateralValue * (collateralFactor / 100) -
+            userGlobalData.totalBorrowValue
+        )
+      : 0;
+  const hasCapacityNoLiquidity =
+    mode === "borrow" &&
+    calculateMaxBorrowable() === 0 &&
+    maxBorrowableUSD > 0;
+
   const handleMaxClick = () => {
     if (mode === "deposit") {
       let maxDepositable = walletBalance;
@@ -379,12 +395,17 @@ const SupplyBorrowForm = ({
                     maximumFractionDigits: 2,
                   })}`
                   : userGlobalData
-                    ? `≈ $${(
-                      calculateMaxBorrowable() * (tokenPrice || 1)
-                    ).toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}`
+                    ? hasCapacityNoLiquidity
+                      ? `Your capacity ≈ $${maxBorrowableUSD.toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })} · no liquidity in this market`
+                      : `≈ $${(
+                          calculateMaxBorrowable() * (tokenPrice || 1)
+                        ).toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}`
                     : "Connect wallet to see USD value"}
               </div>
             </div>

@@ -43,6 +43,7 @@ export interface OnDemandMarketData {
 }
 
 export type SortField =
+  | "default"
   | "asset"
   | "totalSupplyUSD"
   | "supplyAPY"
@@ -50,6 +51,14 @@ export type SortField =
   | "borrowAPY"
   | "utilization";
 export type SortOrder = "asc" | "desc";
+
+const NUMERIC_SORT_FIELDS: SortField[] = [
+  "totalSupplyUSD",
+  "supplyAPY",
+  "totalBorrowUSD",
+  "borrowAPY",
+  "utilization",
+];
 
 interface UseOnDemandMarketDataProps {
   searchTerm?: string;
@@ -65,7 +74,7 @@ const DEFAULT_THROTTLE_MS = 60 * 1000;
 
 export const useOnDemandMarketData = ({
   searchTerm = "",
-  sortField = "totalSupplyUSD",
+  sortField = "default",
   sortOrder = "desc",
   pageSize = 10,
   autoLoad = true,
@@ -96,11 +105,12 @@ export const useOnDemandMarketData = ({
     const initialData: Record<string, OnDemandMarketData> = {};
 
     tokens.forEach((token) => {
-      // Use poolId in key to support multiple markets per symbol
-      const key = token.poolId 
-        ? `${token.symbol.toLowerCase()}-${token.poolId}`
-        : token.symbol.toLowerCase();
-      
+      // Use poolId in key to support multiple markets per symbol (e.g. 2 WAD markets)
+      const key =
+        token.poolId != null && token.poolId !== ""
+          ? `${token.symbol.toLowerCase()}-${String(token.poolId)}`
+          : token.symbol.toLowerCase();
+
       // Get the original token config to access isStoken property
       const networkConfig = getNetworkConfig(currentNetwork);
       const tokenConfigRaw = networkConfig.tokens[token.symbol];
@@ -146,25 +156,26 @@ export const useOnDemandMarketData = ({
       // Parse marketKey to handle both old format (symbol) and new format (symbol-poolId)
       const parts = marketKey.split('-');
       const symbol = parts[0];
-      const poolId = parts.length > 1 ? parts.slice(1).join('-') : undefined;
-      
-      // Find matching tokens
+      const poolIdFromKey = parts.length > 1 ? parts.slice(1).join('-') : undefined;
+
+      // Find matching tokens (compare poolId as string so "123" and 123 both match – e.g. 2 WAD markets)
       const matchingTokens = tokens.filter((t) => {
         const matchesSymbol = t.symbol.toLowerCase() === symbol.toLowerCase();
-        if (poolId) {
-          return matchesSymbol && t.poolId === poolId;
+        if (poolIdFromKey != null && poolIdFromKey !== "") {
+          return matchesSymbol && String(t.poolId) === String(poolIdFromKey);
         }
         return matchesSymbol;
       });
-      
+
       if (matchingTokens.length === 0) return;
-      
-      // Load all matching markets
+
+      // Load all matching markets (key must match initialData: symbol-poolId as string)
       for (const token of matchingTokens) {
-        const tokenMarketKey = token.poolId 
-          ? `${token.symbol.toLowerCase()}-${token.poolId}`
-          : token.symbol.toLowerCase();
-        
+        const tokenMarketKey =
+          token.poolId != null && token.poolId !== ""
+            ? `${token.symbol.toLowerCase()}-${String(token.poolId)}`
+            : token.symbol.toLowerCase();
+
         // Skip if already loading this specific market
         if (loadingMarkets.has(tokenMarketKey)) {
           continue;
@@ -241,9 +252,9 @@ export const useOnDemandMarketData = ({
             console.log(`USD calculations for ${token.symbol}:`, {
               tokenPrice,
               totalSupplyAmount,
-              totalSupplyUSD: totalSupplyAmount * tokenPrice,
+              totalSupplyUSD: totalSupplyAmount * tokenPrice * Math.pow(10, token.decimals + 6) / Math.pow(10, 12),
               totalBorrowAmount,
-              totalBorrowUSD: totalBorrowAmount * tokenPrice,
+              totalBorrowUSD: totalBorrowAmount * tokenPrice * Math.pow(10, token.decimals + 6) / Math.pow(10, 12),
             });
 
             // Get the original token config to access isStoken property
@@ -259,7 +270,7 @@ export const useOnDemandMarketData = ({
                 !Number.isNaN(marketInfo.apyCalculation.apy))
                 ? marketInfo.apyCalculation.apy
                 : typeof marketInfo.supplyRate === "number" &&
-                    !Number.isNaN(marketInfo.supplyRate)
+                  !Number.isNaN(marketInfo.supplyRate)
                   ? marketInfo.supplyRate * 100
                   : 0;
 
@@ -269,7 +280,7 @@ export const useOnDemandMarketData = ({
                 !Number.isNaN(marketInfo.borrowApyCalculation.apy))
                 ? marketInfo.borrowApyCalculation.apy
                 : typeof marketInfo.borrowRateCurrent === "number" &&
-                    !Number.isNaN(marketInfo.borrowRateCurrent)
+                  !Number.isNaN(marketInfo.borrowRateCurrent)
                   ? marketInfo.borrowRateCurrent * 100
                   : 0;
 
@@ -277,14 +288,10 @@ export const useOnDemandMarketData = ({
               asset: token.symbol,
               icon: token.logoPath,
               totalSupply: totalSupplyAmount,
-              totalSupplyUSD:
-                (totalSupplyAmount * tokenPrice * Math.pow(10, token.decimals)) /
-                Math.pow(10, 6),
+              totalSupplyUSD: Number(totalSupplyAmount * tokenPrice * Math.pow(10, token.decimals + 6) / Math.pow(10, 12)),
               supplyAPY: supplyAPYValue,
               totalBorrow: totalBorrowAmount,
-              totalBorrowUSD:
-                (totalBorrowAmount * tokenPrice * Math.pow(10, token.decimals)) /
-                Math.pow(10, 6),
+              totalBorrowUSD: totalBorrowAmount * tokenPrice * Math.pow(10, token.decimals + 6) / Math.pow(10, 12),
               borrowAPY: borrowAPYValue,
               utilization: tokenConfig?.isStoken
                 ? 100.0
@@ -307,6 +314,8 @@ export const useOnDemandMarketData = ({
               isSToken: tokenConfig?.isStoken || false,
               poolId: tokenPoolId, // Store poolId for multi-market tokens
             };
+
+            console.log(`Market data for ${token.symbol}:`, marketData);
 
             setMarketsData((prev) => ({
               ...prev,
@@ -366,11 +375,12 @@ export const useOnDemandMarketData = ({
     [autoLoad, marketsData, loadingMarkets, loadMarketData]
   );
 
-  // Convert markets data to array format
+  // Convert markets data to array format (include _sortKey for stable tie-breaking)
   const marketDataArray = useMemo(() => {
     return Object.entries(marketsData).map(([key, market]) => ({
       ...market,
       isLoading: loadingMarkets.has(key),
+      _sortKey: key,
     }));
   }, [marketsData, loadingMarkets]);
 
@@ -385,21 +395,82 @@ export const useOnDemandMarketData = ({
       market.asset.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
-    // Sort data
+    // Sort data (with stable tie-breaker so desc is true reverse of asc)
+    const isNumericField = NUMERIC_SORT_FIELDS.includes(sortField);
+    const isDefaultSort = sortField === "default";
     filtered.sort((a, b) => {
-      let aValue: number | string = a[sortField];
-      let bValue: number | string = b[sortField];
-
-      if (typeof aValue === "string") {
-        aValue = aValue.toLowerCase();
-        bValue = (bValue as string).toLowerCase();
+      // Default sort: greater of totalSupplyUSD and totalBorrowUSD (desc = largest first)
+      if (isDefaultSort) {
+        const aNum = Math.max(
+          Number(a.totalSupplyUSD) || 0,
+          Number(a.totalBorrowUSD) || 0
+        );
+        const bNum = Math.max(
+          Number(b.totalSupplyUSD) || 0,
+          Number(b.totalBorrowUSD) || 0
+        );
+        let cmp = 0;
+        if (aNum < bNum) cmp = -1;
+        else if (aNum > bNum) cmp = 1;
+        if (sortOrder === "desc") cmp = -cmp;
+        if (cmp !== 0) return cmp;
+        const aKey = (a as { _sortKey?: string })._sortKey ?? "";
+        const bKey = (b as { _sortKey?: string })._sortKey ?? "";
+        return aKey.localeCompare(bKey);
       }
 
-      if (sortOrder === "asc") {
-        return aValue < bValue ? -1 : aValue > bValue ? 1 : 0;
+      let aValue: number | string | undefined = a[sortField];
+      let bValue: number | string | undefined = b[sortField];
+
+      // Numeric fields: coerce to number so "123" sorts by value not string order; treat NaN as missing
+      if (isNumericField) {
+        const aNum = Number(aValue);
+        const bNum = Number(bValue);
+        const aMissing =
+          aValue === undefined ||
+          aValue === null ||
+          Number.isNaN(aNum);
+        const bMissing =
+          bValue === undefined ||
+          bValue === null ||
+          Number.isNaN(bNum);
+        if (aMissing && bMissing) {
+          const aKey = (a as { _sortKey?: string })._sortKey ?? "";
+          const bKey = (b as { _sortKey?: string })._sortKey ?? "";
+          return aKey.localeCompare(bKey);
+        }
+        if (aMissing) return 1;
+        if (bMissing) return -1;
+        // Compare with explicit sign to avoid float precision issues; return -1 | 0 | 1
+        let cmp = 0;
+        if (aNum < bNum) cmp = -1;
+        else if (aNum > bNum) cmp = 1;
+        if (sortOrder === "desc") cmp = -cmp;
+        if (cmp !== 0) return cmp;
       } else {
-        return aValue > bValue ? -1 : aValue < bValue ? 1 : 0;
+        // String field (asset): handle undefined/null, then compare lexicographically
+        const aMissing = aValue === undefined || aValue === null;
+        const bMissing = bValue === undefined || bValue === null;
+        if (aMissing && bMissing) {
+          return (a as { _sortKey?: string })._sortKey?.localeCompare((b as { _sortKey?: string })._sortKey ?? "") ?? 0;
+        }
+        if (aMissing) return 1;
+        if (bMissing) return -1;
+        const aStr = String(aValue).toLowerCase();
+        const bStr = String(bValue).toLowerCase();
+        let cmp = 0;
+        if (sortOrder === "asc") {
+          cmp = aStr < bStr ? -1 : aStr > bStr ? 1 : 0;
+        } else {
+          cmp = aStr > bStr ? -1 : aStr < bStr ? 1 : 0;
+        }
+        if (cmp !== 0) return cmp;
       }
+
+      // Tie-breaker: same primary value → sort by _sortKey (asc) so order is deterministic and desc is true reverse
+      const aKey = (a as { _sortKey?: string })._sortKey ?? "";
+      const bKey = (b as { _sortKey?: string })._sortKey ?? "";
+      return aKey.localeCompare(bKey);
     });
 
     const totalPages = Math.ceil(filtered.length / pageSize);

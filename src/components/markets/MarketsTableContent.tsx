@@ -1,12 +1,14 @@
 
 import { useBreakpoint } from "@/hooks/useBreakpoint";
-import { OnDemandMarketData } from "@/hooks/useOnDemandMarketData";
+import { OnDemandMarketData, SortField, SortOrder } from "@/hooks/useOnDemandMarketData";
 import MarketsDesktopTable from "./MarketsDesktopTable";
 import MarketsTabletTable from "./MarketsTabletTable";
 import MarketCardView from "./MarketCardView";
 
 interface MarketsTableContentProps {
   markets: OnDemandMarketData[];
+  sortField?: SortField;
+  sortOrder?: SortOrder;
   userDeposits?: Record<string, number>;
   onRowClick: (market: OnDemandMarketData) => void;
   onInfoClick: (e: React.MouseEvent, market: OnDemandMarketData) => void;
@@ -20,6 +22,8 @@ interface MarketsTableContentProps {
 
 const MarketsTableContent = ({ 
   markets, 
+  sortField,
+  sortOrder,
   userDeposits,
   onRowClick, 
   onInfoClick, 
@@ -50,6 +54,8 @@ const MarketsTableContent = ({
     return (
       <MarketsTabletTable
         markets={markets}
+        sortField={sortField}
+        sortOrder={sortOrder}
         onRowClick={onRowClick}
         onInfoClick={onInfoClick}
         onDepositClick={onDepositClick}
@@ -65,6 +71,8 @@ const MarketsTableContent = ({
   return (
     <MarketsDesktopTable
       markets={markets}
+      sortField={sortField}
+      sortOrder={sortOrder}
       onRowClick={onRowClick}
       onInfoClick={onInfoClick}
       onDepositClick={onDepositClick}

@@ -42,6 +42,7 @@ interface MintModalProps {
     borrowAPY: number;
     utilization: number;
     collateralFactor: number;
+    liquidationThreshold?: number;
     liquidity: number;
     liquidityUSD: number;
     maxTotalDeposits?: number;
@@ -85,7 +86,7 @@ const MintModal = ({
   // Calculate max borrow amount when modal opens
   useEffect(() => {
     console.log("useEffect triggered", { isOpen, hasAddress: !!activeAccount?.address, asset, currentNetwork });
-    
+
     const fetchMaxBorrowAmount = async () => {
       if (!isOpen || !activeAccount?.address) {
         console.log("Early return - conditions not met", { isOpen, hasAddress: !!activeAccount?.address });
@@ -101,10 +102,12 @@ const MintModal = ({
 
       try {
         const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-        // If poolId is provided, find the token that matches both symbol and poolId
-        // Otherwise, fall back to finding by symbol only (for backward compatibility)
-        const token = poolId
-          ? tokens.find((t) => t.symbol === asset && t.poolId === poolId)
+        // If poolId is provided, find the token that matches both symbol and poolId (e.g. 2 WAD markets)
+        // Compare as string so "123" and 123 match
+        const token = poolId != null && poolId !== ""
+          ? tokens.find(
+              (t) => t.symbol === asset && String(t.poolId) === String(poolId)
+            )
           : tokens.find((t) => t.symbol === asset);
 
         if (!token) {
@@ -152,19 +155,45 @@ const MintModal = ({
           storageAppId ? Number(storageAppId) : undefined
         );
 
-        console.log("maxBorrowBigInt", { maxBorrowBigInt });
+        // Available supply cap: for sToken/mint markets treat as unlimited
+        const totalDeposits = assetData.totalSupply;
+        const totalBorrowed = assetData.totalBorrow;
+        const depositsMinusBorrowed = totalDeposits - totalBorrowed;
+        const effectiveSupplyCap = assetData.isSToken
+          ? Number.MAX_SAFE_INTEGER
+          : depositsMinusBorrowed;
 
         if (maxBorrowBigInt !== null && maxBorrowBigInt !== BigInt(0)) {
           // Convert from bigint (atomic units) to number (human-readable)
           const maxBorrowBN = new BigNumber(maxBorrowBigInt.toString());
           const divisor = new BigNumber(10).pow(decimals);
           const maxBorrowNumber = maxBorrowBN.dividedBy(divisor).toNumber();
-          
-          setCalculatedMaxBorrow(Math.max(0, maxBorrowNumber));
-          console.log("Max borrow amount calculated:", maxBorrowNumber);
-        } else {
-          setCalculatedMaxBorrow(0);
-          console.log("Max borrow amount is 0");
+
+          // Optional buffer: liquidation threshold - collateral factor (e.g. 85 - 80 = 5%)
+          let adjustedMaxBorrow = maxBorrowNumber;
+          if (assetData.liquidationThreshold != null && assetData.collateralFactor != null) {
+            const buffer = assetData.liquidationThreshold - assetData.collateralFactor;
+            if (buffer > 0) {
+              adjustedMaxBorrow = maxBorrowNumber * (1 + buffer / 100);
+            }
+          }
+
+          // Cap by available supply (sToken markets use unlimited cap)
+          const finalMaxBorrow = Math.max(
+            0,
+            Math.min(adjustedMaxBorrow, effectiveSupplyCap)
+          );
+          setCalculatedMaxBorrow(finalMaxBorrow);
+          console.log("MintModal: Max borrow calculated:", {
+            maxBorrowNumber,
+            adjustedMaxBorrow,
+            effectiveSupplyCap: assetData.isSToken ? "(sToken: unlimited)" : effectiveSupplyCap,
+            finalMaxBorrow,
+          });
+        } else if (!assetData.isSToken) {
+          const finalMaxBorrow = Math.max(0, depositsMinusBorrowed);
+          setCalculatedMaxBorrow(finalMaxBorrow);
+          console.log("Max borrow amount (fallback):", finalMaxBorrow);
         }
       } catch (error) {
         console.error("Error calculating max borrow amount:", error);
@@ -178,7 +207,19 @@ const MintModal = ({
     };
 
     fetchMaxBorrowAmount();
-  }, [isOpen, activeAccount?.address, asset, poolId, currentNetwork]);
+  }, [
+    isOpen,
+    activeAccount?.address,
+    asset,
+    poolId,
+    currentNetwork,
+    network,
+    assetData.totalSupply,
+    assetData.totalBorrow,
+    assetData.isSToken,
+    assetData.collateralFactor,
+    assetData.liquidationThreshold,
+  ]);
 
   // Reset states when modal opens/closes
   useEffect(() => {
@@ -329,8 +370,7 @@ const MintModal = ({
           const networkName =
             networkId === "voi-mainnet" ? "VOI Mainnet" : "Algorand Mainnet";
           throw new Error(
-            `Your wallet (${
-              activeWallet.metadata?.name || walletId
+            `Your wallet (${activeWallet.metadata?.name || walletId
             }) does not support ${networkName}. Please switch to a compatible wallet or network.`
           );
         }
@@ -373,7 +413,7 @@ const MintModal = ({
           const maxRetries = 10;
           const apiBaseUrl = import.meta.env.VITE_DORKFI_API_URL || "https://dorkfi-api.nautilus.sh";
           const networkParam = networkToUse ? `?network=${networkToUse}` : "";
-          
+
           while (!metadataUpdated && retryCount < maxRetries) {
             try {
               const response = await fetch(
@@ -534,11 +574,11 @@ const MintModal = ({
                 calculatedMaxBorrow !== null
                   ? calculatedMaxBorrow
                   : (() => {
-                      if (!userGlobalData) return 0;
-                      // Calculate max borrowable: max(0, collateral * cf - borrows)
-                      const collateralFactorDecimal = assetData.collateralFactor / 100;
-                      return Math.max(0, (userGlobalData.totalCollateralValue * collateralFactorDecimal) - userGlobalData.totalBorrowValue);
-                    })()
+                    if (!userGlobalData) return 0;
+                    // Calculate max borrowable: max(0, collateral * cf - borrows)
+                    const collateralFactorDecimal = assetData.collateralFactor / 100;
+                    return Math.max(0, (userGlobalData.totalCollateralValue * collateralFactorDecimal) - userGlobalData.totalBorrowValue);
+                  })()
               }
               supplyAPY={assetData.supplyAPY}
               totalSupply={assetData.totalSupply}

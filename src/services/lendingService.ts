@@ -985,6 +985,72 @@ export const fetchUserGlobalData = async (
 };
 
 /**
+ * Fetch user global data for a single pool (for borrowing power in that pool).
+ * Use this when computing max borrow for a specific pool so borrowing power is based on collateral in that pool only.
+ */
+export const fetchUserGlobalDataForPool = async (
+  userAddress: string,
+  networkId: NetworkId,
+  poolId: string | number
+): Promise<{
+  totalCollateralValue: number;
+  totalBorrowValue: number;
+  lastUpdateTime: number;
+} | null> => {
+  try {
+    const networkConfig = getNetworkConfig(networkId);
+
+    if (!isAlgorandCompatibleNetwork(networkId)) {
+      return null;
+    }
+
+    const clients = algorandService.initializeClients(
+      networkConfig.walletNetworkId as AlgorandNetwork
+    );
+
+    const poolIdNum = Number(poolId);
+    const ci = new CONTRACT(
+      poolIdNum,
+      clients.algod,
+      undefined,
+      { ...LendingPoolAppSpec.contract, events: [] },
+      {
+        addr: algosdk.encodeAddress(algosdk.getApplicationAddress(poolIdNum).publicKey),
+        sk: new Uint8Array(),
+      }
+    );
+
+    ci.setFee(2000);
+    const globalUserR = await ci.get_global_user(userAddress);
+    if (!globalUserR.success) {
+      console.warn(`Failed to get global user data for pool ${poolId}`);
+      return null;
+    }
+
+    const globalUser = GlobalUserData(globalUserR.returnValue);
+    const totalCollateralValueUSD = new BigNumber(
+      globalUser.totalCollateralValue.toString()
+    )
+      .div(1e12)
+      .toNumber();
+    const totalBorrowValueUSD = new BigNumber(
+      globalUser.totalBorrowValue.toString()
+    )
+      .div(1e12)
+      .toNumber();
+
+    return {
+      totalCollateralValue: totalCollateralValueUSD,
+      totalBorrowValue: totalBorrowValueUSD,
+      lastUpdateTime: Number(globalUser.lastUpdateTime),
+    };
+  } catch (error) {
+    console.error("Error fetching user global data for pool:", error);
+    return null;
+  }
+};
+
+/**
  * Fetch user borrow balance for a specific market
  * This gets the user's scaled borrows from the lending pool contract
  * Returns both the current borrow balance and accrued interest

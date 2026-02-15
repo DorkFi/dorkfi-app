@@ -18,6 +18,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import SupplyBorrowCongrats from "./SupplyBorrowCongrats";
+import { calculateDepositAPY } from "@/utils/apyCalculations";
 
 interface WithdrawModalProps {
   isOpen: boolean;
@@ -32,6 +33,8 @@ interface WithdrawModalProps {
     collateralFactor: number;
     tokenPrice: number;
     totalDeposits?: number;
+    totalBorrows?: number;
+    apyParameters?: { borrowRateBps: number; slopeBps: number; reserveFactorBps: number };
     marketCapacity?: number;
     liquidationMargin?: number;
     healthFactor?: number;
@@ -420,7 +423,7 @@ const WithdrawModal = ({
                     )}
                   </div>
 
-                  {/* Estimated APY */}
+                  {/* Estimated APY (adjusted after withdraw when amount entered) */}
                   <div className="border-b border-gray-200 dark:border-slate-700 pb-2 md:pb-3">
                     <div className="flex justify-between items-center">
                       <button
@@ -436,13 +439,49 @@ const WithdrawModal = ({
                           <ChevronDown className="h-3 w-3 text-slate-400 dark:text-slate-500" />
                         )}
                       </button>
-                      <span className="text-sm font-medium text-teal-600 dark:text-teal-400">
-                        {marketStats.supplyAPY.toFixed(2)}%
-                      </span>
+                      {(() => {
+                        const withdrawAmount = typeof amount === "number" && amount > 0 ? amount : 0;
+                        const params = marketStats.apyParameters;
+                        const totalSupply = marketStats.totalDeposits ?? 0;
+                        const totalBorrow = marketStats.totalBorrows ?? 0;
+                        if (withdrawAmount > 0 && params && totalSupply > 0) {
+                          const newTotalSupply = Math.max(0, totalSupply - withdrawAmount);
+                          const result = calculateDepositAPY(
+                            { borrowRate: params.borrowRateBps, slope: params.slopeBps, reserveFactor: params.reserveFactorBps },
+                            { totalScaledDeposits: newTotalSupply, totalScaledBorrows: totalBorrow, lastUpdateTime: Date.now() }
+                          );
+                          const currentAPY = marketStats.supplyAPY;
+                          const changePercent = currentAPY > 0 ? ((result.apy - currentAPY) / currentAPY) * 100 : 0;
+                          return (
+                            <div className="text-right">
+                              <div className="text-sm font-medium text-teal-600 dark:text-teal-400">
+                                {Math.max(0, result.apy).toFixed(2)}%
+                              </div>
+                              {Math.abs(changePercent) > 0.1 && (
+                                <div className={`text-xs flex items-center justify-end gap-1 ${
+                                  changePercent > 0 ? "text-green-600 dark:text-green-400" : "text-orange-600 dark:text-orange-400"
+                                }`}>
+                                  <span>{changePercent > 0 ? "↑" : "↓"}</span>
+                                  <span>{changePercent > 0 ? "+" : ""}{changePercent.toFixed(1)}%</span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        }
+                        return (
+                          <span className="text-sm font-medium text-teal-600 dark:text-teal-400">
+                            {marketStats.supplyAPY.toFixed(2)}%
+                          </span>
+                        );
+                      })()}
                     </div>
                     {expandedDetail === "depositAPY" && (
                       <div className="mt-2 pt-2 border-t border-gray-200 dark:border-slate-700">
-                        <p className="text-xs text-slate-600 dark:text-slate-400">Annual percentage yield for supplying {tokenSymbol}.</p>
+                        <p className="text-xs text-slate-600 dark:text-slate-400">
+                          {typeof amount === "number" && amount > 0
+                            ? "Deposit APY after your withdrawal (based on adjusted utilization)."
+                            : `Annual percentage yield for supplying ${tokenSymbol}.`}
+                        </p>
                       </div>
                     )}
                   </div>

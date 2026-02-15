@@ -88,7 +88,7 @@ function normalizeMarketData(md) {
 const MarketsTable = () => {
   const { formatPercent } = useNumberI18n();
   const [searchTerm, setSearchTerm] = useState("");
-  const [sortField, setSortField] = useState<SortField>("totalSupplyUSD");
+  const [sortField, setSortField] = useState<SortField>("default");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [depositModal, setDepositModal] = useState({
     isOpen: false,
@@ -512,13 +512,14 @@ const MarketsTable = () => {
         );
         setUserGlobalData(globalData);
 
-        // Fetch user's current borrow balance for this specific asset
+        // Fetch user's current borrow balance for this specific asset (use poolId for 2 WAD markets etc.)
         const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-        // If poolId is provided, find the token that matches both symbol and poolId
-        // Otherwise, fall back to finding by symbol only (for backward compatibility)
-        const token = poolId
-          ? tokens.find((t) => t.symbol === asset && t.poolId === poolId)
-          : tokens.find((t) => t.symbol === asset);
+        const token =
+          poolId != null && poolId !== ""
+            ? tokens.find(
+              (t) => t.symbol === asset && String(t.poolId) === String(poolId)
+            )
+            : tokens.find((t) => t.symbol === asset);
 
         if (token && token.poolId && token.underlyingContractId) {
           const borrowData = await fetchUserBorrowBalance(
@@ -759,7 +760,14 @@ const MarketsTable = () => {
           setUserGlobalData(globalData);
 
           const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-          const token = tokens.find((t) => t.symbol === mintModal.asset);
+          // Use poolId when there are multiple markets for the same asset (e.g. 2 WAD markets)
+          const token = mintModal.poolId != null
+            ? tokens.find(
+              (t) =>
+                t.symbol === mintModal.asset &&
+                String(t.poolId) === String(mintModal.poolId)
+            )
+            : tokens.find((t) => t.symbol === mintModal.asset);
 
           if (token && token.poolId && token.underlyingContractId) {
             const borrowData = await fetchUserBorrowBalance(
@@ -781,6 +789,7 @@ const MarketsTable = () => {
     activeAccount?.address,
     mintModal.isOpen,
     mintModal.asset,
+    mintModal.poolId,
     currentNetwork,
   ]);
 
@@ -950,9 +959,9 @@ const MarketsTable = () => {
   const formattedTotalThisBatch =
     totalClaimableThisBatch > 0
       ? ARC200Service.formatBalance(
-          totalClaimableThisBatch.toString(),
-          rewardDecimals
-        )
+        totalClaimableThisBatch.toString(),
+        rewardDecimals
+      )
       : "0";
   const hasMoreRewardsToClaim =
     Object.keys(claimableRewards).length > MAX_CLAIMS_PER_TX;
@@ -1950,20 +1959,25 @@ const MarketsTable = () => {
   };
 
   const getAssetData = (asset: string, poolId?: string) => {
-    console.log({ asset, poolId, markets });
-    // Find matching markets - prefer poolId match if provided
-    let market;
-    if (poolId) {
-      // If poolId is provided, match by both asset and poolId
-      market = markets.find((m) => m.asset === asset && m.poolId === poolId);
+    const poolIdStr = poolId != null && poolId !== "" ? String(poolId) : null;
+    let market: (typeof markets)[0] | undefined;
+
+    if (poolIdStr) {
+      // Exact match by asset + poolId (required for 2 WAD markets etc. – never use another market’s data)
+      market = markets.find(
+        (m) =>
+          m.asset === asset &&
+          (String(m.poolId) === poolIdStr ||
+            String((m as { marketInfo?: { poolId?: string } }).marketInfo?.poolId) === poolIdStr)
+      );
+      // When poolId was provided, do not fall back to a different market – wrong collateral factor etc.
+      if (!market) return null;
     }
 
-    // If no poolId match or poolId not provided, find by asset
-    // For tokens with multiple markets, prefer the one with higher totalSupply (more active market)
     if (!market) {
+      // No poolId provided – find by asset only
       const matchingMarkets = markets.filter((m) => m.asset === asset);
       if (matchingMarkets.length > 1) {
-        // Multiple markets found - prefer the one with higher totalSupply
         market = matchingMarkets.reduce((prev, current) => {
           return (current.totalSupply || 0) > (prev.totalSupply || 0)
             ? current
@@ -1992,6 +2006,19 @@ const MarketsTable = () => {
           ? market.borrowApyCalculation.apy
           : 0;
 
+    const marketInfo = (market as { marketInfo?: { borrowRate?: number; slope?: number; reserveFactor?: number } }).marketInfo;
+    const apyParameters =
+      marketInfo &&
+      typeof marketInfo.borrowRate === "number" &&
+      typeof marketInfo.slope === "number" &&
+      typeof marketInfo.reserveFactor === "number"
+        ? {
+            borrowRateBps: Math.round(marketInfo.borrowRate * 10000),
+            slopeBps: Math.round(marketInfo.slope * 10000),
+            reserveFactorBps: Math.round(marketInfo.reserveFactor * 10000),
+          }
+        : undefined;
+
     return {
       icon: market.icon,
       totalSupply: market.totalSupply,
@@ -2002,10 +2029,13 @@ const MarketsTable = () => {
       borrowAPY,
       utilization: market.utilization,
       collateralFactor: market.collateralFactor,
+      liquidationThreshold: market.liquidationThreshold,
       liquidity: market.totalSupply - market.totalBorrow,
       liquidityUSD: market.totalSupplyUSD - market.totalBorrowUSD,
       reserveFactor: market.reserveFactor,
       apyCalculation: market.apyCalculation,
+      borrowApyCalculation: (market as { borrowApyCalculation?: { apy: number } }).borrowApyCalculation,
+      apyParameters,
       maxTotalDeposits: market.supplyCap,
       isSToken: market.isSToken,
     };
@@ -2192,6 +2222,8 @@ const MarketsTable = () => {
           ) : (
             <MarketsTableContent
               markets={markets}
+              sortField={sortField}
+              sortOrder={sortOrder}
               onRowClick={handleRowClick}
               onInfoClick={handleInfoClick}
               onDepositClick={handleDepositClick}
@@ -2271,22 +2303,28 @@ const MarketsTable = () => {
         {/* Withdraw Modal */}
         {withdrawModal.isOpen &&
           withdrawModal.asset &&
-          getAssetData(withdrawModal.asset) && (
-            <WithdrawModal
-              isOpen={withdrawModal.isOpen}
-              onClose={handleCloseWithdrawModal}
-              tokenSymbol={withdrawModal.asset}
-              tokenIcon={getAssetData(withdrawModal.asset).icon}
-              currentlyDeposited={1000}
-              marketStats={{
-                supplyAPY: getAssetData(withdrawModal.asset).supplyAPY,
-                utilization: getAssetData(withdrawModal.asset).utilization,
-                collateralFactor: getAssetData(withdrawModal.asset)
-                  .collateralFactor,
-                tokenPrice: 1.0,
-              }}
-            />
-          )}
+          (() => {
+            const assetData = getAssetData(withdrawModal.asset);
+            return assetData ? (
+              <WithdrawModal
+                isOpen={withdrawModal.isOpen}
+                onClose={handleCloseWithdrawModal}
+                tokenSymbol={withdrawModal.asset}
+                tokenIcon={assetData.icon}
+                currentlyDeposited={1000}
+                marketStats={{
+                  supplyAPY: assetData.supplyAPY,
+                  borrowAPY: assetData.borrowAPY,
+                  utilization: assetData.utilization,
+                  collateralFactor: assetData.collateralFactor,
+                  tokenPrice: assetData.totalSupply > 0 ? assetData.totalSupplyUSD / assetData.totalSupply : 1.0,
+                  totalDeposits: assetData.totalSupply,
+                  totalBorrows: assetData.totalBorrow,
+                  apyParameters: assetData.apyParameters,
+                }}
+              />
+            ) : null;
+          })()}
 
         {/* Borrow Modal */}
         {borrowModal.isOpen &&

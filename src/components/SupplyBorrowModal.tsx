@@ -21,6 +21,7 @@ import {
   deposit,
   borrow,
   fetchUserGlobalData,
+  fetchUserGlobalDataForPool,
   fetchMarketInfoFromContract,
 } from "@/services/lendingService";
 import {
@@ -34,6 +35,7 @@ import algorandService from "@/services/algorandService";
 import algosdk, { waitForConfirmation } from "algosdk";
 import BigNumber from "bignumber.js";
 import { useToast } from "@/hooks/use-toast";
+import { useTokenPrice } from "@/hooks/useTokenPrice";
 import { calculateMaxBorrowAmount } from "@/services/adminService";
 import dorkfiAPIService from "@/services/dorkfiAPIService";
 import { updateTransactionMetadata } from "@/utils/transactionUtils";
@@ -61,6 +63,10 @@ interface SupplyBorrowModalProps {
     liquidityUSD: number;
     maxTotalDeposits?: number;
     isSToken?: boolean;
+    reserveFactor?: number;
+    apyCalculation?: { apy: number; utilizationRate?: number };
+    borrowApyCalculation?: { apy: number };
+    apyParameters?: { borrowRateBps: number; slopeBps: number; reserveFactorBps: number };
   };
   walletBalance?: number;
   walletBalanceUSD?: number;
@@ -112,6 +118,7 @@ const SupplyBorrowModal = ({
 
   // Use provided network or fallback to current network
   const networkToUse = network || currentNetwork;
+  const { price: tokenPrice } = useTokenPrice(asset, networkToUse);
 
   // Calculate max borrow amount when modal opens in borrow mode
   useEffect(() => {
@@ -145,8 +152,7 @@ const SupplyBorrowModal = ({
 
         if (!token) {
           throw new Error(
-            `Token ${asset} not found in network config${
-              poolId ? ` with poolId ${poolId}` : ""
+            `Token ${asset} not found in network config${poolId ? ` with poolId ${poolId}` : ""
             }`
           );
         }
@@ -174,8 +180,8 @@ const SupplyBorrowModal = ({
         // Compare poolIds as strings to ensure exact match
         const tokenConfig = Array.isArray(tokenConfigRaw)
           ? tokenConfigRaw.find(
-              (tc) => String(tc.poolId) === String(token.poolId)
-            ) || tokenConfigRaw[0]
+            (tc) => String(tc.poolId) === String(token.poolId)
+          ) || tokenConfigRaw[0]
           : tokenConfigRaw;
 
         if (!tokenConfig) {
@@ -263,6 +269,25 @@ const SupplyBorrowModal = ({
             depositsMinusBorrowed,
             finalMaxBorrow,
           });
+        } else if (userGlobalData && userGlobalData.totalCollateralValue > 0) {
+          // Borrowing power must be based on collateral in this pool only (not aggregate across pools)
+          const poolData =
+            poolId != null && poolId !== ""
+              ? await fetchUserGlobalDataForPool(
+                activeAccount.address,
+                networkToUse as NetworkId,
+                Number(poolId)
+              )
+              : null;
+          console.log("SupplyBorrowModal: Pool data", { poolData, poolId });
+          const collateralForBorrow =
+            poolData != null ? poolData.totalCollateralValue : userGlobalData.totalCollateralValue;
+          const maxBorrowUSD = collateralForBorrow * (assetData.collateralFactor / 100);
+          const calculatedMaxBorrow =
+            tokenPrice != null && tokenPrice > 0
+              ? (maxBorrowUSD / tokenPrice) * Math.pow(10, 6) / Math.pow(10, decimals)
+              : 0;
+          setCalculatedMaxBorrow(calculatedMaxBorrow);
         } else {
           // Even if maxBorrowBigInt is 0, we should still check deposits - borrowed
           const finalMaxBorrow = Math.max(0, depositsMinusBorrowed);
@@ -287,7 +312,7 @@ const SupplyBorrowModal = ({
     };
 
     fetchMaxBorrowAmount();
-  }, [isOpen, mode, activeAccount?.address, asset, poolId, networkToUse]);
+  }, [isOpen, mode, activeAccount?.address, asset, poolId, networkToUse, tokenPrice]);
 
   // Reset states when modal opens/closes
   useEffect(() => {
@@ -398,8 +423,7 @@ const SupplyBorrowModal = ({
           availableTokens: tokens.filter((t) => t.symbol === asset),
         });
         throw new Error(
-          `Token ${asset} not found in network config${
-            poolId ? ` with poolId ${poolId}` : ""
+          `Token ${asset} not found in network config${poolId ? ` with poolId ${poolId}` : ""
           }`
         );
       }
@@ -439,8 +463,8 @@ const SupplyBorrowModal = ({
       // Handle case where tokenConfig might be an array (multiple markets)
       const originalTokenConfig = Array.isArray(tokenConfigRaw)
         ? tokenConfigRaw.find(
-            (tc) => String(tc.poolId) === String(token.poolId)
-          ) || tokenConfigRaw[0]
+          (tc) => String(tc.poolId) === String(token.poolId)
+        ) || tokenConfigRaw[0]
         : tokenConfigRaw;
 
       if (!originalTokenConfig) {
@@ -570,8 +594,7 @@ const SupplyBorrowModal = ({
           const networkName =
             networkId === "voi-mainnet" ? "VOI Mainnet" : "Algorand Mainnet";
           throw new Error(
-            `Your wallet (${
-              activeWallet.metadata?.name || walletId
+            `Your wallet (${activeWallet.metadata?.name || walletId
             }) does not support ${networkName}. Please switch to a compatible wallet or network.`
           );
         }
@@ -617,7 +640,7 @@ const SupplyBorrowModal = ({
       const maxRetries = 10;
       const apiBaseUrl = import.meta.env.VITE_DORKFI_API_URL || "https://dorkfi-api.nautilus.sh";
       const networkParam = finalNetwork ? `?network=${finalNetwork}` : "";
-      
+
       while (!metadataUpdated && retryCount < maxRetries) {
         try {
           const response = await fetch(
@@ -708,9 +731,8 @@ const SupplyBorrowModal = ({
           errorMessage =
             "Insufficient collateral for borrow. Please check your collateral balance, add collateral, or repay debt and try again.";
         } else if (message.includes("tried to spend")) {
-          errorMessage = `Insufficient ${
-            networkToUse === "algorand-mainnet" ? "Algorand" : "Voi"
-          } Network balance for this transaction. Please check your wallet balance and try again.`;
+          errorMessage = `Insufficient ${networkToUse === "algorand-mainnet" ? "Algorand" : "Voi"
+            } Network balance for this transaction. Please check your wallet balance and try again.`;
         } else if (message.includes("insufficient")) {
           errorMessage =
             mode === "deposit"
@@ -883,6 +905,7 @@ const SupplyBorrowModal = ({
                 assetData={assetData}
                 userGlobalData={userGlobalData}
                 depositAmount={mode === "deposit" ? parseFloat(amount) || 0 : 0}
+                borrowAmount={mode === "borrow" ? parseFloat(amount) || 0 : 0}
                 userBorrowBalance={userBorrowBalance}
                 userDepositBalance={userDepositBalance}
                 isSToken={assetData.isSToken || false}
@@ -907,11 +930,10 @@ const SupplyBorrowModal = ({
                   isLoading ||
                   (mode === "borrow" && !userGlobalData)
                 }
-                className={`flex-1 font-semibold h-11 ${
-                  mode === "deposit"
-                    ? "bg-teal-600 hover:bg-teal-700 text-white"
-                    : "bg-whale-gold hover:bg-whale-gold/90 text-black"
-                } disabled:opacity-50 disabled:cursor-not-allowed`}
+                className={`flex-1 font-semibold h-11 ${mode === "deposit"
+                  ? "bg-teal-600 hover:bg-teal-700 text-white"
+                  : "bg-whale-gold hover:bg-whale-gold/90 text-black"
+                  } disabled:opacity-50 disabled:cursor-not-allowed`}
               >
                 {isLoading ? (
                   <div className="flex items-center gap-2 justify-center">

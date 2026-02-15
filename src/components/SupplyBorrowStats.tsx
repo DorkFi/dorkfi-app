@@ -1,8 +1,7 @@
-
 import { Card, CardContent } from "@/components/ui/card";
 import { InfoIcon, ChevronDown, ChevronUp } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { calculateDepositAPY } from "@/utils/apyCalculations";
+import { calculateDepositAPY, calculateBorrowAPY } from "@/utils/apyCalculations";
 import { useState } from "react";
 
 interface AssetData {
@@ -17,13 +16,9 @@ interface AssetData {
   totalBorrowUSD?: number;
   reserveFactor?: number;
   maxTotalDeposits?: number;
-  apyCalculation?: {
-    utilizationRate: number;
-    borrowRate: number;
-    supplyRate: number;
-    apy: number;
-    apyFormatted: string;
-  };
+  apyCalculation?: { apy: number; [key: string]: unknown };
+  borrowApyCalculation?: { apy: number };
+  apyParameters?: { borrowRateBps: number; slopeBps: number; reserveFactorBps: number };
 }
 
 interface SupplyBorrowStatsProps {
@@ -36,95 +31,68 @@ interface SupplyBorrowStatsProps {
     lastUpdateTime: number;
   } | null;
   depositAmount?: number;
+  borrowAmount?: number;
   userBorrowBalance?: number;
   userDepositBalance?: number;
   isSToken?: boolean;
 }
 
-const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmount = 0, userBorrowBalance = 0, userDepositBalance = 0, isSToken = false }: SupplyBorrowStatsProps) => {
-  // Calculate adjusted utilization and APY based on deposit amount
-  const calculateAdjustedMetrics = () => {
-    const safeSupplyAPY = Number.isFinite(assetData.supplyAPY) ? assetData.supplyAPY : 0;
-    if (mode === "deposit" && depositAmount > 0 && assetData.apyCalculation) {
-      // Utilization = totalBorrow / (totalSupply + depositAmount)
-      const currentUtilization = assetData.utilization / 100; // Convert to decimal
-      const currentTotalSupply = assetData.totalSupply || 1; // Avoid division by zero
-      const currentTotalBorrow = currentTotalSupply * currentUtilization;
-      
-      const newTotalSupply = currentTotalSupply + depositAmount;
-      const newUtilization = (currentTotalBorrow / newTotalSupply) * 100;
-      
-      // Debug: Log the current values to understand the data format
-      console.log('APY Debug:', {
-        currentSupplyAPY: assetData.supplyAPY,
-        apyCalculation: assetData.apyCalculation,
-        reserveFactor: assetData.reserveFactor,
-        currentUtilization: assetData.utilization,
-        newUtilization,
-        depositAmount,
-        currentTotalSupply,
-        currentTotalBorrow
-      });
-      
-      // Conservative approach: Use a simple linear relationship between utilization and APY
-      // This avoids complex calculations that might have unit issues
-      const currentUtilizationRate = assetData.utilization / 100;
-      const newUtilizationRate = newUtilization / 100;
-      
-      // Calculate utilization change ratio
-      const utilizationChangeRatio = currentUtilizationRate > 0 ? newUtilizationRate / currentUtilizationRate : 1;
-      
-      // Estimate APY change based on utilization change
-      // Typical relationship: APY changes by about 10-20% of utilization change
-      const apySensitivity = 0.15; // Conservative sensitivity factor
-      const apyChangeRatio = 1 + ((utilizationChangeRatio - 1) * apySensitivity);
-      
-      // Calculate new APY (use safeSupplyAPY to avoid NaN)
-      const newAPY = Math.max(safeSupplyAPY * apyChangeRatio, 0);
-      
-      console.log('APY Calculation Debug:', {
-        currentUtilizationRate,
-        newUtilizationRate,
-        utilizationChangeRatio,
-        apySensitivity,
-        apyChangeRatio,
-        newAPY,
-        originalAPY: assetData.supplyAPY,
-        apyChange: newAPY - assetData.supplyAPY
-      });
-      
-      // Calculate percentage change for APY (relative change)
-      const apyChangePercent = safeSupplyAPY > 0 
-        ? ((newAPY - safeSupplyAPY) / safeSupplyAPY) * 100
-        : 0;
+const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmount = 0, borrowAmount = 0, userBorrowBalance = 0, userDepositBalance = 0, isSToken = false }: SupplyBorrowStatsProps) => {
+  const safeSupplyAPY = Number.isFinite(assetData.supplyAPY) ? assetData.supplyAPY : 0;
+  const safeBorrowAPY = Number.isFinite(assetData.borrowAPY) ? assetData.borrowAPY : 0;
 
+  // Calculate adjusted utilization and APY using protocol APY formulas when apyParameters are available
+  const calculateAdjustedMetrics = () => {
+    const params = assetData.apyParameters;
+    const totalSupply = assetData.totalSupply ?? 0;
+    const totalBorrow = assetData.totalBorrow ?? 0;
+
+    if (mode === "deposit" && depositAmount > 0 && params) {
+      const newTotalSupply = totalSupply + depositAmount;
+      const adjustedState = {
+        totalScaledDeposits: newTotalSupply,
+        totalScaledBorrows: totalBorrow,
+        lastUpdateTime: Date.now(),
+      };
+      const result = calculateDepositAPY(
+        { borrowRate: params.borrowRateBps, slope: params.slopeBps, reserveFactor: params.reserveFactorBps },
+        adjustedState
+      );
+      const newUtilization = result.utilizationRate * 100;
+      const apyChangePercent = safeSupplyAPY > 0 ? ((result.apy - safeSupplyAPY) / safeSupplyAPY) * 100 : 0;
       return {
-        utilization: {
-          current: assetData.utilization,
-          adjusted: Math.min(newUtilization, 100), // Cap at 100%
-          change: newUtilization - assetData.utilization
-        },
-        apy: {
-          current: safeSupplyAPY,
-          adjusted: Math.max(newAPY, 0), // Ensure non-negative
-          change: newAPY - safeSupplyAPY, // Absolute change
-          changePercent: apyChangePercent // Relative change percentage
-        }
+        utilization: { current: assetData.utilization, adjusted: Math.min(newUtilization, 100), change: newUtilization - assetData.utilization },
+        apy: { current: safeSupplyAPY, adjusted: Math.max(result.apy, 0), change: result.apy - safeSupplyAPY, changePercent: apyChangePercent },
       };
     }
-    
+
+    if (mode === "borrow" && borrowAmount > 0 && params) {
+      const newTotalBorrow = totalBorrow + borrowAmount;
+      const adjustedState = {
+        totalScaledDeposits: totalSupply,
+        totalScaledBorrows: newTotalBorrow,
+        lastUpdateTime: Date.now(),
+      };
+      const result = calculateBorrowAPY(
+        { borrowRate: params.borrowRateBps, slope: params.slopeBps, reserveFactor: params.reserveFactorBps },
+        adjustedState,
+        isSToken
+      );
+      const apyChangePercent = safeBorrowAPY > 0 ? ((result.apy - safeBorrowAPY) / safeBorrowAPY) * 100 : 0;
+      return {
+        utilization: { current: assetData.utilization, adjusted: assetData.utilization, change: 0 },
+        apy: { current: safeBorrowAPY, adjusted: Math.max(result.apy, 0), change: result.apy - safeBorrowAPY, changePercent: apyChangePercent },
+      };
+    }
+
     return {
-      utilization: {
-        current: assetData.utilization,
-        adjusted: assetData.utilization,
-        change: 0
-      },
+      utilization: { current: assetData.utilization, adjusted: assetData.utilization, change: 0 },
       apy: {
-        current: safeSupplyAPY,
-        adjusted: safeSupplyAPY,
+        current: mode === "deposit" ? safeSupplyAPY : safeBorrowAPY,
+        adjusted: mode === "deposit" ? safeSupplyAPY : safeBorrowAPY,
         change: 0,
-        changePercent: 0
-      }
+        changePercent: 0,
+      },
     };
   };
 
@@ -150,8 +118,8 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
                 </TooltipTrigger>
                 <TooltipContent>
                   <p>
-                    {mode === "deposit" && depositAmount > 0 
-                      ? "APY after your deposit (based on adjusted utilization)"
+                    {(mode === "deposit" && depositAmount > 0) || (mode === "borrow" && borrowAmount > 0)
+                      ? `APY after your ${mode === "deposit" ? "deposit" : "borrow"} (based on adjusted utilization)`
                       : `Annual percentage yield for ${mode === "deposit" ? "depositing" : "borrowing"} ${asset}`
                     }
                   </p>
@@ -159,7 +127,7 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
               </Tooltip>
             </div>
             <div className="text-right">
-              {mode === "deposit" && depositAmount > 0 ? (
+              {(mode === "deposit" && depositAmount > 0) || (mode === "borrow" && borrowAmount > 0) ? (
                 <div className="space-y-1">
                   <div className={`text-sm font-medium ${mode === "deposit" ? "text-teal-600 dark:text-teal-400" : "text-red-600 dark:text-red-400"}`}>
                     {(Number.isFinite(adjustedMetrics.apy.adjusted) ? adjustedMetrics.apy.adjusted : 0).toFixed(2)}%
@@ -397,7 +365,10 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
                       <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p>Maximum amount you can borrow based on your total collateral value</p>
+                      <p>Maximum amount you can borrow based on your total collateral value (from the protocol).</p>
+                      {userGlobalData.totalCollateralValue === 0 && userGlobalData.totalBorrowValue === 0 && (
+                        <p className="mt-1 text-amber-600 dark:text-amber-400 text-xs">If you have supplied collateral but see $0, refresh the page or sync your position so the protocol can update your account.</p>
+                      )}
                     </TooltipContent>
                   </Tooltip>
                 </div>

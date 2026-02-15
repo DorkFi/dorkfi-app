@@ -11,7 +11,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Info, Loader2, ChevronDown, ChevronRight } from "lucide-react";
-import { OnDemandMarketData } from "@/hooks/useOnDemandMarketData";
+import { OnDemandMarketData, SortField, SortOrder } from "@/hooks/useOnDemandMarketData";
 import MarketsTableActions from "./MarketsTableActions";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import APYDisplay from "@/components/APYDisplay";
@@ -27,6 +27,8 @@ import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 
 interface MarketsDesktopTableProps {
   markets: OnDemandMarketData[];
+  sortField?: SortField;
+  sortOrder?: SortOrder;
   onRowClick: (market: OnDemandMarketData) => void;
   onInfoClick: (e: React.MouseEvent, market: OnDemandMarketData) => void;
   onDepositClick: (asset: string, poolId?: string) => void;
@@ -61,6 +63,8 @@ const ErrorCell = ({ error }: { error: string }) => (
 
 const MarketsDesktopTable = ({
   markets,
+  sortField,
+  sortOrder = "desc",
   onRowClick,
   onInfoClick,
   onDepositClick,
@@ -276,18 +280,39 @@ const MarketsDesktopTable = ({
       });
     });
     
-    // Sort groups alphabetically
+    // Sort groups: by sortField/sortOrder when set, otherwise alphabetically by symbol
     const sortedGroups: Record<string, OnDemandMarketData[]> = {};
-    const sortedKeys = Object.keys(groups).sort((a, b) => {
-      return a.localeCompare(b);
+    const numericSortFields: SortField[] = ["totalSupplyUSD", "supplyAPY", "totalBorrowUSD", "borrowAPY", "utilization"];
+    const sortedKeys = Object.keys(groups).sort((keyA, keyB) => {
+      if (!sortField || sortField === "asset") {
+        const cmp = keyA.localeCompare(keyB);
+        return sortOrder === "desc" ? -cmp : cmp;
+      }
+      if (sortField === "default") {
+        const groupA = groups[keyA];
+        const groupB = groups[keyB];
+        const defaultVal = (m: OnDemandMarketData) =>
+          Math.max(Number(m.totalSupplyUSD) || 0, Number(m.totalBorrowUSD) || 0);
+        const maxA = Math.max(...groupA.map(defaultVal));
+        const maxB = Math.max(...groupB.map(defaultVal));
+        if (sortOrder === "desc") return maxB - maxA;
+        return maxA - maxB;
+      }
+      if (numericSortFields.includes(sortField)) {
+        const groupA = groups[keyA];
+        const groupB = groups[keyB];
+        const maxA = Math.max(...groupA.map((m) => Number((m as Record<string, unknown>)[sortField]) || 0));
+        const maxB = Math.max(...groupB.map((m) => Number((m as Record<string, unknown>)[sortField]) || 0));
+        if (sortOrder === "desc") return maxB - maxA;
+        return maxA - maxB;
+      }
+      return keyA.localeCompare(keyB);
     });
-    
     sortedKeys.forEach((key) => {
       sortedGroups[key] = groups[key];
     });
-    
     return sortedGroups;
-  }, [markets, currentNetwork]);
+  }, [markets, currentNetwork, sortField, sortOrder]);
 
   const toggleExpand = (symbol: string) => {
     setExpandedSymbols((prev) => {

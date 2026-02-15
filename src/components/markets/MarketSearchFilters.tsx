@@ -4,7 +4,7 @@ import { Search, SortAsc, SortDesc } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { SortField, SortOrder } from "@/hooks/useMarketData";
+import { SortField, SortOrder } from "@/hooks/useOnDemandMarketData";
 
 interface MarketSearchFiltersProps {
   searchTerm: string;
@@ -48,6 +48,7 @@ const MarketSearchFilters = ({
               <SelectValue placeholder="Sort by..." />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="default">Default</SelectItem>
               <SelectItem value="asset">Asset</SelectItem>
               <SelectItem value="totalSupplyUSD">Total Deposits</SelectItem>
               <SelectItem value="supplyAPY">Deposit APY</SelectItem>

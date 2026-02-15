@@ -13,6 +13,7 @@ import { InfoIcon, ChevronDown, ChevronUp } from "lucide-react";
 import SupplyBorrowCongrats from "./SupplyBorrowCongrats";
 import { formatRelativeTime } from "@/utils/timeUtils";
 import { useNetwork } from "@/contexts/NetworkContext";
+import { calculateBorrowAPY } from "@/utils/apyCalculations";
 
 interface RepayModalProps {
   isOpen: boolean;
@@ -29,6 +30,10 @@ interface RepayModalProps {
     currentLTV: number;
     tokenPrice: number;
     collateralFactor?: number;
+    totalDeposits?: number;
+    totalBorrows?: number;
+    apyParameters?: { borrowRateBps: number; slopeBps: number; reserveFactorBps: number };
+    isSToken?: boolean;
   };
   lastUpdateTime?: number; // Market's last update time (when market indices were updated)
   userLastUpdateTime?: number; // User's last update time (when user last interacted with market)
@@ -384,7 +389,7 @@ const RepayModal = ({
                         Position Details
                       </h3>
                       <div className="space-y-2 md:space-y-4">
-                        {/* Borrow APY */}
+                        {/* Borrow APY (adjusted after repay when amount entered) */}
                         <div className="border-b border-gray-200 dark:border-slate-700 pb-2 md:pb-3">
                           <div className="flex justify-between items-center">
                             <button
@@ -401,16 +406,59 @@ const RepayModal = ({
                                 <ChevronDown className="h-3 w-3 text-slate-400 dark:text-slate-500" />
                               )}
                             </button>
-                            <span className="text-xs md:text-sm font-medium text-red-600 dark:text-red-400">
-                              {marketStats.borrowAPY.toFixed(2)}%
-                            </span>
+                            {(() => {
+                              const repayAmount = numAmount > 0 ? numAmount : 0;
+                              const params = marketStats.apyParameters;
+                              const totalSupply = Number(marketStats.totalDeposits) || 0;
+                              const totalBorrow = Number(marketStats.totalBorrows) || 0;
+                              const hasTotals = Number.isFinite(totalSupply) && Number.isFinite(totalBorrow) && totalSupply > 0 && totalBorrow > 0;
+                              if (repayAmount > 0 && params && hasTotals) {
+                                const newTotalBorrow = Math.max(0, totalBorrow - repayAmount);
+                                const result = calculateBorrowAPY(
+                                  { borrowRate: params.borrowRateBps, slope: params.slopeBps, reserveFactor: params.reserveFactorBps },
+                                  { totalScaledDeposits: totalSupply, totalScaledBorrows: newTotalBorrow, lastUpdateTime: Date.now() },
+                                  marketStats.isSToken ?? false
+                                );
+                                const currentAPY = marketStats.borrowAPY;
+                                // After repay, borrow APY should go down (lower utilization). If result is higher, treat as data/unit mismatch and show current.
+                                const adjustedAPY = result.apy <= currentAPY ? result.apy : currentAPY;
+                                const changePercent = currentAPY > 0 ? ((adjustedAPY - currentAPY) / currentAPY) * 100 : 0;
+                                const showChange = Math.abs(changePercent) > 0.01;
+                                return (
+                                  <div className="text-right">
+                                    <div className="text-xs md:text-sm font-medium text-red-600 dark:text-red-400">
+                                      {Math.max(0, adjustedAPY).toFixed(2)}%
+                                    </div>
+                                    <div className={`text-xs flex items-center justify-end gap-1 ${
+                                      showChange
+                                        ? (changePercent > 0 ? "text-orange-600 dark:text-orange-400" : "text-green-600 dark:text-green-400")
+                                        : "text-slate-500 dark:text-slate-400"
+                                    }`}>
+                                      {showChange ? (
+                                        <>
+                                          <span>{changePercent > 0 ? "↑" : "↓"}</span>
+                                          <span>{changePercent > 0 ? "+" : ""}{changePercent.toFixed(1)}%</span>
+                                        </>
+                                      ) : (
+                                        <span>after repay</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              return (
+                                <span className="text-xs md:text-sm font-medium text-red-600 dark:text-red-400">
+                                  {marketStats.borrowAPY.toFixed(2)}%
+                                </span>
+                              );
+                            })()}
                           </div>
                           {expandedDetails.borrowAPY && (
                             <div className="mt-2 pt-2 border-t border-gray-200 dark:border-slate-700">
                               <p className="text-xs text-slate-600 dark:text-slate-400">
-                                Annual percentage yield for borrowing{" "}
-                                {tokenSymbol}. This is the interest rate you'll
-                                pay on your borrowed amount.
+                                {numAmount > 0
+                                  ? "Borrow APY after your repayment. It typically goes down (lower utilization = lower rate)."
+                                  : `Annual percentage yield for borrowing ${tokenSymbol}. This is the interest rate you'll pay on your borrowed amount.`}
                               </p>
                             </div>
                           )}
