@@ -2,6 +2,8 @@ import { Button } from "@/components/ui/button";
 import { Plus, Minus, RefreshCw, Info } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import DorkFiCard from "@/components/ui/DorkFiCard";
+import { useNetwork } from "@/contexts/NetworkContext";
+import { getTokenConfig } from "@/config";
 
 interface PortfolioTableMobileCardProps {
   asset: string;
@@ -46,6 +48,13 @@ const PortfolioTableMobileCard = ({
   isRefreshing,
   type = "deposit",
 }: PortfolioTableMobileCardProps) => {
+  const { currentNetwork } = useNetwork();
+  const tokenConfigRaw = getTokenConfig(currentNetwork, asset);
+  const tokenConfig = Array.isArray(tokenConfigRaw)
+    ? poolId ? tokenConfigRaw.find((c: { poolId?: string }) => String(c.poolId) === String(poolId)) ?? tokenConfigRaw[0] : tokenConfigRaw[0]
+    : tokenConfigRaw;
+  const displayDecimals = Math.min((tokenConfig as { decimals?: number } | undefined)?.decimals ?? 6, 8);
+
   const isDeposit = type === "deposit";
   const valueColor = isDeposit ? "text-green-400" : "text-red-400";
   const apyColor = isDeposit ? "text-green-400" : "text-red-400";
@@ -133,7 +142,7 @@ const PortfolioTableMobileCard = ({
             <div className="text-sm font-medium text-slate-700 dark:text-slate-200">
               {balance.toLocaleString("en-US", {
                 minimumFractionDigits: 2,
-                maximumFractionDigits: 6,
+                maximumFractionDigits: displayDecimals,
               })}{" "}
               {asset}
             </div>
@@ -161,7 +170,7 @@ const PortfolioTableMobileCard = ({
             }`}>
               {isDeposit ? "+" : ""}{accruedInterest.toLocaleString("en-US", {
                 minimumFractionDigits: 2,
-                maximumFractionDigits: 6,
+                maximumFractionDigits: displayDecimals,
               })}{" "}
               {asset}
             </div>

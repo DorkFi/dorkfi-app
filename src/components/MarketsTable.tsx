@@ -2040,8 +2040,17 @@ const MarketsTable = () => {
           }
         : undefined;
 
+    const tokenConfigRaw = getTokenConfig(currentNetwork, asset);
+    const tokenConfig = Array.isArray(tokenConfigRaw)
+      ? poolIdStr
+        ? tokenConfigRaw.find((c: { poolId?: string }) => String(c.poolId) === poolIdStr) ?? tokenConfigRaw[0]
+        : tokenConfigRaw[0]
+      : tokenConfigRaw;
+    const decimals = (tokenConfig as { decimals?: number } | undefined)?.decimals ?? 8;
+
     return {
       icon: market.icon,
+      decimals,
       totalSupply: market.totalSupply,
       totalSupplyUSD: market.totalSupplyUSD,
       supplyAPY,
@@ -2332,6 +2341,7 @@ const MarketsTable = () => {
                 onClose={handleCloseWithdrawModal}
                 tokenSymbol={withdrawModal.asset}
                 tokenIcon={assetData.icon}
+                tokenDecimals={assetData.decimals ?? 8}
                 currentlyDeposited={1000}
                 marketStats={{
                   supplyAPY: assetData.supplyAPY,

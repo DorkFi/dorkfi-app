@@ -6700,6 +6700,35 @@ const Portfolio = () => {
                               }
                               const isCollateral = deposit.value > 0; // Simplified - in reality, check if it's enabled as collateral
 
+                              // Token decimals for Supplied / Accrued Interest (e.g. 8 for goBTC)
+                              const depositNetworkForToken =
+                                (deposit as any).network || currentNetwork;
+                              const tokenConfigRawSupplied =
+                                getTokenConfig(
+                                  depositNetworkForToken,
+                                  deposit.asset
+                                );
+                              const tokenConfigSupplied = Array.isArray(
+                                tokenConfigRawSupplied
+                              )
+                                ? deposit.poolId
+                                  ? (
+                                      tokenConfigRawSupplied as (TokenConfig & {
+                                        poolId?: string;
+                                      })[]
+                                    ).find(
+                                      (c) =>
+                                        String(c.poolId) ===
+                                        String(deposit.poolId)
+                                    ) ?? tokenConfigRawSupplied[0]
+                                  : tokenConfigRawSupplied[0]
+                                : tokenConfigRawSupplied;
+                              const suppliedDisplayDecimals = Math.min(
+                                (tokenConfigSupplied as TokenConfig)
+                                  ?.decimals ?? 6,
+                                8
+                              );
+
                               // Get network name from deposit or infer
                               let networkName = "Unknown";
                               const depositNetwork = (deposit as any).network;
@@ -6788,7 +6817,11 @@ const Portfolio = () => {
                                     {depositMarketLabel || "-"}
                                   </TableCell>
                                   <TableCell>
-                                    {formatNumber(deposit.balance, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}
+                                    {formatNumber(deposit.balance, {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits:
+                                        suppliedDisplayDecimals,
+                                    })}
                                   </TableCell>
                                   <TableCell>
                                     {formatCurrency(deposit.value, "USD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -6804,7 +6837,8 @@ const Portfolio = () => {
                                         <span className="text-sm font-medium">
                                           {formatNumber(deposit.accruedInterest, {
                                             minimumFractionDigits: 2,
-                                            maximumFractionDigits: 6,
+                                            maximumFractionDigits:
+                                              suppliedDisplayDecimals,
                                           })}{" "}
                                           {deposit.asset}
                                         </span>

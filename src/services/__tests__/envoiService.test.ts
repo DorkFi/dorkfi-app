@@ -3,14 +3,15 @@
  * Tests the integration with the enVoi Naming Service API
  */
 
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import envoiService from '../envoiService';
 
 // Mock fetch for testing
-global.fetch = jest.fn();
+global.fetch = vi.fn();
 
 describe('EnvoiService', () => {
   beforeEach(() => {
-    (fetch as jest.Mock).mockClear();
+    vi.mocked(fetch).mockClear();
   });
 
   describe('resolveName', () => {
@@ -22,7 +23,7 @@ describe('EnvoiService', () => {
         owner: 'BRB3JP4LIW5Q755FJCGVAOA4W3THJ7BR3K6F26EVCGMETLEAZOQRHHJNLQ'
       };
 
-      (fetch as jest.Mock).mockResolvedValueOnce({
+      vi.mocked(fetch).mockResolvedValueOnce({
         ok: true,
         json: async () => mockResponse,
       });
@@ -36,7 +37,7 @@ describe('EnvoiService', () => {
     });
 
     it('should return null when no name is found (404)', async () => {
-      (fetch as jest.Mock).mockResolvedValueOnce({
+      vi.mocked(fetch).mockResolvedValueOnce({
         ok: false,
         status: 404,
       });
@@ -47,7 +48,7 @@ describe('EnvoiService', () => {
     });
 
     it('should handle API errors gracefully', async () => {
-      (fetch as jest.Mock).mockRejectedValueOnce(new Error('Network error'));
+      vi.mocked(fetch).mockRejectedValueOnce(new Error('Network error'));
 
       const result = await envoiService.resolveName('BRB3JP4LIW5Q755FJCGVAOA4W3THJ7BR3K6F26EVCGMETLEAZOQRHHJNLQ');
 
@@ -63,7 +64,7 @@ describe('EnvoiService', () => {
         tokenId: '123456789'
       };
 
-      (fetch as jest.Mock).mockResolvedValueOnce({
+      vi.mocked(fetch).mockResolvedValueOnce({
         ok: true,
         json: async () => mockResponse,
       });
@@ -88,7 +89,7 @@ describe('EnvoiService', () => {
         total: 1
       };
 
-      (fetch as jest.Mock).mockResolvedValueOnce({
+      vi.mocked(fetch).mockResolvedValueOnce({
         ok: true,
         json: async () => mockResponse,
       });
@@ -139,7 +140,7 @@ describe('EnvoiService', () => {
         owner: 'BRB3JP4LIW5Q755FJCGVAOA4W3THJ7BR3K6F26EVCGMETLEAZOQRHHJNLQ'
       };
 
-      (fetch as jest.Mock).mockResolvedValueOnce({
+      vi.mocked(fetch).mockResolvedValueOnce({
         ok: true,
         json: async () => mockResponse,
       });
@@ -150,7 +151,7 @@ describe('EnvoiService', () => {
     });
 
     it('should return the address if no name is found', async () => {
-      (fetch as jest.Mock).mockResolvedValueOnce({
+      vi.mocked(fetch).mockResolvedValueOnce({
         ok: false,
         status: 404,
       });

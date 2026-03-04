@@ -5,7 +5,7 @@ import { ArrowDown, Info, RefreshCw } from "lucide-react";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import DorkFiButton from "@/components/ui/DorkFiButton";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { getNetworkConfig } from "@/config";
+import { getNetworkConfig, getTokenConfig } from "@/config";
 
 interface Deposit {
   asset: string;
@@ -65,6 +65,13 @@ const DepositsList = ({ deposits, onDepositClick, onWithdrawClick, onRefresh, is
       <div className="space-y-4">
         {deposits.map((deposit) => {
           const marketLabel = getMarketLabel(deposit.poolId);
+          const tokenConfigRaw = getTokenConfig(currentNetwork, deposit.asset);
+          const tokenConfig = Array.isArray(tokenConfigRaw)
+            ? deposit.poolId
+              ? tokenConfigRaw.find((c: { poolId?: string }) => String(c.poolId) === String(deposit.poolId)) ?? tokenConfigRaw[0]
+              : tokenConfigRaw[0]
+            : tokenConfigRaw;
+          const displayDecimals = Math.min((tokenConfig as { decimals?: number } | undefined)?.decimals ?? 6, 8);
           // Use both asset and poolId for unique key to handle multiple markets for same token
           const uniqueKey = deposit.poolId ? `${deposit.asset}-${deposit.poolId}` : deposit.asset;
           return (
@@ -109,7 +116,11 @@ const DepositsList = ({ deposits, onDepositClick, onWithdrawClick, onRefresh, is
                 </Tooltip>
               </div>
               <div className="text-sm font-medium text-slate-700 dark:text-slate-200 flex items-center gap-1 text-center justify-center">
-                {deposit.balance.toLocaleString()} tokens
+                {deposit.balance.toLocaleString("en-US", {
+                  minimumFractionDigits: 0,
+                  maximumFractionDigits: displayDecimals,
+                })}{" "}
+                tokens
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Info className="w-3 h-3 cursor-help flex-shrink-0" />
@@ -121,7 +132,7 @@ const DepositsList = ({ deposits, onDepositClick, onWithdrawClick, onRefresh, is
               </div>
               {deposit.nTokenBalance !== undefined && deposit.nTokenBalance > 0 && (
                 <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1 break-all text-center justify-center">
-                  {deposit.nTokenBalance.toFixed(6)} n{deposit.asset}
+                  {deposit.nTokenBalance.toFixed(displayDecimals)} n{deposit.asset}
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Info className="w-3 h-3 cursor-help flex-shrink-0" />
@@ -136,8 +147,9 @@ const DepositsList = ({ deposits, onDepositClick, onWithdrawClick, onRefresh, is
                 <div className="text-xs text-green-500 dark:text-green-400 flex items-center gap-1 text-center justify-center font-medium">
                   +{deposit.accruedInterest.toLocaleString("en-US", {
                     minimumFractionDigits: 2,
-                    maximumFractionDigits: 6,
-                  })} {deposit.asset} earned
+                    maximumFractionDigits: displayDecimals,
+                  })}{" "}
+                  {deposit.asset} earned
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Info className="w-3 h-3 cursor-help flex-shrink-0" />

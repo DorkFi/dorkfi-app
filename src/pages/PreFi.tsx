@@ -3343,6 +3343,7 @@ export default function PreFiDashboard() {
         <WithdrawModal
           isOpen={isWithdrawModalOpen}
           onClose={closeWithdrawModal}
+          tokenDecimals={selectedMarket.decimals ?? 8}
           tokenSymbol={
             selectedMarket.tokenStandard === "network"
               ? getNetworkSymbol(currentNetwork)

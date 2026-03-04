@@ -354,31 +354,34 @@ const PortfolioModals = ({
       depositAny?.userDepositIndex?.toString();
 
     // Calculate tokenPrice properly accounting for token decimals
-    // The price oracle contract stores prices in a 12-decimal scale
-    // This converts from contract format back to token's native decimal format
+    // Use the deposit's network so we get the correct token config (e.g. 8 decimals for goBTC on Algorand)
+    // and match the Supplied Assets table USD value.
+    const depositNetwork = depositAny?.network || currentNetwork;
     let tokenPrice = deposit?.tokenPrice || 1;
     if (market?.price) {
       try {
-        // Get token config to find decimals
-        const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+        // Get token config from the deposit's network (not currentNetwork)
+        const tokens = getAllTokensWithDisplayInfo(depositNetwork);
         const token = poolId
           ? tokens.find((t) => t.symbol === asset && t.poolId === poolId)
           : tokens.find((t) => t.symbol === asset);
-        
+
         const tokenDecimals = token?.decimals ?? 6; // Default to 6 if not found
-        
-        // Calculate adjustment: 12 (oracle decimals) - token decimals
+
+        // Oracle stores price in 12-decimal scale; convert to human price using token decimals
         const targetAdjustment = 12 - tokenDecimals;
         const divisor = Math.pow(10, targetAdjustment);
-        
+
         const price = parseFloat(market.price);
         if (price && price > 0) {
           tokenPrice = price / divisor;
         }
       } catch (error) {
         console.error("Error calculating tokenPrice:", error);
-        // Fallback to simple division by 10^6 if calculation fails
-        tokenPrice = parseFloat(market.price) / Math.pow(10, 6);
+        // Fallback: use deposit.tokenPrice if available, else 10^6 divisor
+        tokenPrice =
+          deposit?.tokenPrice ||
+          parseFloat(market.price) / Math.pow(10, 6);
       }
     }
 
@@ -1581,6 +1584,15 @@ const PortfolioModals = ({
               )
             : deposits.find((d) => d.asset === withdrawModal.asset);
 
+          const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+          const withdrawToken = withdrawModal.poolId
+            ? tokens.find(
+                (t) =>
+                  t.symbol === withdrawModal.asset &&
+                  t.poolId === withdrawModal.poolId
+              )
+            : tokens.find((t) => t.symbol === withdrawModal.asset);
+
           return (
             <WithdrawModal
               isOpen={withdrawModal.isOpen}
@@ -1593,6 +1605,7 @@ const PortfolioModals = ({
                 withdrawModal.poolId
               )}
               maxWithdrawUnderlying={maxWithdrawData?.maxWithdrawUnderlying ?? undefined}
+              tokenDecimals={withdrawToken?.decimals ?? 8}
               onSubmit={handleWithdrawSubmit}
               onRefreshBalance={() => {
                 // Refresh market data

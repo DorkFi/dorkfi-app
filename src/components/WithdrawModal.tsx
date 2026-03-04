@@ -47,6 +47,8 @@ interface WithdrawModalProps {
   };
   /** Health-factor-safe max withdraw (from getMaxWithdrawable). When set, Max button and validation use this instead of full deposit. */
   maxWithdrawUnderlying?: number;
+  /** Token decimals for amount display (e.g. 8 for goBTC). Default 8 so small balances are not truncated. */
+  tokenDecimals?: number;
   onSubmit?: (amount: string, options?: { isMaxWithdraw?: boolean }) => void;
   isLoading?: boolean;
   showTooltip?: boolean;
@@ -62,12 +64,14 @@ const WithdrawModal = ({
   currentlyDeposited,
   marketStats,
   maxWithdrawUnderlying,
+  tokenDecimals = 8,
   onSubmit,
   isLoading = false,
   showTooltip = false,
   tooltipText = "",
   onRefreshBalance,
 }: WithdrawModalProps) => {
+  const displayDecimals = Math.min(Math.max(0, tokenDecimals), 8);
   const [amount, setAmount] = useState<number | "">("");
   const [fiatValue, setFiatValue] = useState(0);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -169,7 +173,7 @@ const WithdrawModal = ({
   const handleMaxClick = () => {
     // Use health-factor-safe max when available (getMaxWithdrawable), else full deposit
     maxWithdrawRef.current = true;
-    const formattedAmount = parseFloat(effectiveMaxWithdraw.toFixed(3));
+    const formattedAmount = parseFloat(effectiveMaxWithdraw.toFixed(displayDecimals));
     setAmount(formattedAmount);
   };
 
@@ -212,14 +216,15 @@ const WithdrawModal = ({
     setFiatValue(0);
   };
 
-  // Use same precision (3 decimals) for comparison to avoid floating point failures
+  // Use same precision as display decimals for comparison to avoid floating point failures
+  const precision = Math.pow(10, displayDecimals);
   const amountRounded =
     typeof amount === "number" && Number.isFinite(amount)
-      ? Math.floor(amount * 1e3) / 1e3
+      ? Math.floor(amount * precision) / precision
       : NaN;
   const maxRounded =
     Number.isFinite(effectiveMaxWithdraw)
-      ? Math.floor(effectiveMaxWithdraw * 1e3) / 1e3
+      ? Math.floor(effectiveMaxWithdraw * precision) / precision
       : 0;
   const isValidAmount =
     amount !== "" &&
@@ -292,7 +297,7 @@ const WithdrawModal = ({
                     autoFocus
                     value={amount}
                     onChange={(v) => setAmount(v ?? "")}
-                    formatOptions={{ maximumFractionDigits: 3 }}
+                    formatOptions={{ maximumFractionDigits: displayDecimals }}
                     className="bg-white/80 dark:bg-slate-800 border-gray-300 dark:border-slate-600 text-slate-800 dark:text-white pr-16 text-lg h-12"
                   />
                   <Button
@@ -318,7 +323,7 @@ const WithdrawModal = ({
                     <p className="text-sm text-amber-600 dark:text-amber-400">
                       You can withdraw up to{" "}
                       {effectiveMaxWithdraw.toLocaleString(undefined, {
-                        maximumFractionDigits: 3,
+                        maximumFractionDigits: displayDecimals,
                       })}{" "}
                       {tokenSymbol} (limited by collateral health).
                     </p>
@@ -357,10 +362,17 @@ const WithdrawModal = ({
                     </div>
                     <div className="text-right">
                       <div className="text-sm font-semibold text-red-800 dark:text-red-200">
-                        {currentDepositValue.toLocaleString()} {tokenSymbol}
+                        {currentDepositValue.toLocaleString(undefined, {
+                          maximumFractionDigits: displayDecimals,
+                        })}{" "}
+                        {tokenSymbol}
                       </div>
                       <div className="text-xs text-red-600 dark:text-red-400">
-                        ≈ ${(currentDepositValue * marketStats.tokenPrice).toLocaleString()}
+                        ≈ $
+                        {(currentDepositValue * marketStats.tokenPrice).toLocaleString(
+                          undefined,
+                          { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+                        )}
                       </div>
                     </div>
                   </div>

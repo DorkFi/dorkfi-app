@@ -2,6 +2,8 @@ import { Button } from "@/components/ui/button";
 import { RefreshCw, Info, ArrowDown } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import DorkFiCard from "@/components/ui/DorkFiCard";
+import { useNetwork } from "@/contexts/NetworkContext";
+import { getTokenConfig } from "@/config";
 
 interface AccruedInterestMobileCardProps {
   asset: string;
@@ -36,6 +38,13 @@ const AccruedInterestMobileCard = ({
   onRefreshClick,
   isRefreshing,
 }: AccruedInterestMobileCardProps) => {
+  const { currentNetwork } = useNetwork();
+  const tokenConfigRaw = getTokenConfig(currentNetwork, asset);
+  const tokenConfig = Array.isArray(tokenConfigRaw)
+    ? poolId ? tokenConfigRaw.find((c: { poolId?: string }) => String(c.poolId) === String(poolId)) ?? tokenConfigRaw[0] : tokenConfigRaw[0]
+    : tokenConfigRaw;
+  const displayDecimals = Math.min((tokenConfig as { decimals?: number } | undefined)?.decimals ?? 6, 8);
+
   const isNetPositive = netInterest > 0;
   const hasDeposits = (earnedInterest || 0) > 0;
   const hasBorrows = (owedInterest || 0) > 0;
@@ -102,7 +111,7 @@ const AccruedInterestMobileCard = ({
           }`}>
             {isNetPositive ? "+" : ""}{netInterest.toLocaleString("en-US", {
               minimumFractionDigits: 2,
-              maximumFractionDigits: 6,
+              maximumFractionDigits: displayDecimals,
             })}{" "}
             {asset}
           </div>
@@ -119,7 +128,7 @@ const AccruedInterestMobileCard = ({
                 <div className="text-sm font-medium text-green-700 dark:text-green-300">
                   +{earnedInterest!.toLocaleString("en-US", {
                     minimumFractionDigits: 2,
-                    maximumFractionDigits: 6,
+                    maximumFractionDigits: displayDecimals,
                   })}{" "}
                   {asset}
                 </div>
@@ -139,7 +148,7 @@ const AccruedInterestMobileCard = ({
                 <div className="text-sm font-medium text-amber-700 dark:text-amber-300">
                   {owedInterest!.toLocaleString("en-US", {
                     minimumFractionDigits: 2,
-                    maximumFractionDigits: 6,
+                    maximumFractionDigits: displayDecimals,
                   })}{" "}
                   {asset}
                 </div>

@@ -105,6 +105,17 @@ How to add a new governance proposal category to the frontend:
 
 **Perfect for:** Developers adding or changing governance proposal categories
 
+### 📐 [Asset Decimals and Display](ASSET_DECIMALS_AND_DISPLAY.md)
+**Reference for balance/amount decimals and withdraw modal USD consistency**
+
+How the frontend handles token decimals and deposited value display:
+- Showing up to 8 decimals for assets (e.g. goBTC) on portfolio and withdraw
+- Using the deposit’s network (not current network) for token price in the withdraw modal so USD matches the Supplied Assets table
+- Where token decimals are applied (WithdrawModal, DepositsList, Supplied Assets table, etc.)
+- Oracle price scale and adding new amount displays
+
+**Perfect for:** Developers touching balance/amount formatting, withdraw flow, or multi-network portfolio display
+
 ## Quick Start Guide
 
 ### For New Users
@@ -121,7 +132,8 @@ How to add a new governance proposal category to the frontend:
 4. **Claim Setup**: Follow the [Claim Setup Guide](CLAIM_SETUP.md) to configure reward claims
 5. **Transaction Updates**: Review [Transaction Metadata Integration](TRANSACTION_METADATA.md) for real-time state updates
 6. **Governance Categories**: See [Adding a Proposal Category](ADDING_PROPOSAL_CATEGORY.md) to add new categories
-7. **Codebase**: Explore the React/TypeScript frontend implementation
+7. **Asset Decimals & Withdraw Value**: See [Asset Decimals and Display](ASSET_DECIMALS_AND_DISPLAY.md) for balance/amount formatting and withdraw modal USD consistency
+8. **Codebase**: Explore the React/TypeScript frontend implementation
 
 ## Key Features
 
@@ -194,13 +206,22 @@ This frontend is built with modern web technologies:
 - **Algorand SDK** - Blockchain integration
 - **React Query** - Data fetching and caching
 
+## Testing
+
+Unit tests use [Vitest](https://vitest.dev/) (Jest-compatible API). Run them locally:
+
+- `npm run test` — run all tests once
+- `npm run test:watch` — run tests in watch mode
+
+The **Test** GitHub Action (`.github/workflows/test.yml`) runs on push/PR to `main` and `next`: it runs `npm run test` and `npm run lint`. New tests live alongside source (e.g. `src/utils/__tests__/assetDecimals.test.ts`). See `vitest.config.ts` for exclusions (e.g. config-dependent service tests).
+
 ## Contributing
 
 If you're interested in contributing to the PreFi frontend:
 1. Review the version management documentation
 2. Set up the development environment
 3. Follow the established coding patterns
-4. Test your changes thoroughly
+4. Run `npm run test` and fix any failures before opening a PR
 
 ---
 
