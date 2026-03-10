@@ -1262,7 +1262,6 @@ export const withdrawReserves = async (
 
       const buildN = [];
 
-      let result: any;
 
       // {
       //   const txnO = (await builder.token.createBalanceBox(userAddress))
@@ -1332,7 +1331,7 @@ export const withdrawReserves = async (
       if (networkConfig.networkId === "algorand-mainnet") {
         ci.setBeaconId(3209233839); // TODO move this to ulujs
       }
-      result = await ci.custom();
+      const result = await ci.custom();
 
       console.log("withdrawReserves result", { result });
 

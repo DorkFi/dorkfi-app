@@ -1,7 +1,7 @@
 {
   "name": "vite_react_shadcn_ts",
   "private": true,
-  "version": "0.1.553",
+  "version": "0.1.554",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -106,7 +106,7 @@
     "vitest": "^2.1.0"
   },
   "overrides": {
-    "chalk": "5.3.0",
+    "chalk": "4.1.2",
     "strip-ansi": "7.1.0",
     "color-convert": "2.0.1",
     "color-name": "1.1.4",

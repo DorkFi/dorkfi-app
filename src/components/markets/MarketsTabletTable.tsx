@@ -169,17 +169,7 @@ const MarketsTabletTable = ({
     checkMigrationBalances();
   }, [markets, activeAccount?.address, currentNetwork]);
 
-  if (markets.length === 0) {
-    return (
-      <div className="text-center py-8">
-        <p className="text-ink-blue">
-          No markets found matching your search criteria.
-        </p>
-      </div>
-    );
-  }
-
-  // Helper to get poolId for sorting
+  // Helper to get poolId for sorting (must be before useMemo to keep hooks order)
   const getPoolIdForSorting = (market: OnDemandMarketData, index?: number): string | null => {
     // Priority 1: From marketInfo (most reliable when loaded)
     let poolId = market.marketInfo?.poolId;
@@ -282,6 +272,16 @@ const MarketsTabletTable = ({
     });
     return sortedGroups;
   }, [markets, currentNetwork, sortField, sortOrder]);
+
+  if (markets.length === 0) {
+    return (
+      <div className="text-center py-8">
+        <p className="text-ink-blue">
+          No markets found matching your search criteria.
+        </p>
+      </div>
+    );
+  }
 
   const toggleExpand = (symbol: string) => {
     setExpandedSymbols((prev) => {

@@ -162,7 +162,7 @@ const WalletNetworkButton = ({
     setIsWalletModalOpen(false);
   };
 
-  const handleAccountSelect = async (account: any) => {
+  const handleAccountSelect = async (account: { address: string; name?: string }) => {
     try {
       if (activeWallet) {
         await activeWallet.setActiveAccount(account.address);

@@ -419,8 +419,8 @@ export const useOnDemandMarketData = ({
         return aKey.localeCompare(bKey);
       }
 
-      let aValue: number | string | undefined = a[sortField];
-      let bValue: number | string | undefined = b[sortField];
+      const aValue: number | string | undefined = a[sortField];
+      const bValue: number | string | undefined = b[sortField];
 
       // Numeric fields: coerce to number so "123" sorts by value not string order; treat NaN as missing
       if (isNumericField) {

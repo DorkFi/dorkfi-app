@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { act, useState, useEffect, useCallback, useRef } from "react";
 import {
   ATokenClient,
@@ -5107,7 +5108,7 @@ export default function AdminDashboard() {
       const contractId = market.underlyingContractId;
 
       // Try to get data using both token symbol and contract ID
-      let getUserData =
+      const getUserData =
         userGetUserData[marketId] || userGetUserData[contractId];
 
       const currentPrice = userMarketPrices[marketId] || 0;
@@ -5274,7 +5275,7 @@ export default function AdminDashboard() {
       const contractId = market.underlyingContractId;
 
       // Try to get data using both token symbol and contract ID
-      let getUserData =
+      const getUserData =
         userGetUserData[marketId] || userGetUserData[contractId];
       const currentPrice = userMarketPrices[marketId] || 0;
 
@@ -13657,7 +13658,7 @@ export default function AdminDashboard() {
                       }}
                       onBlur={(e) => {
                         // On blur, if time is not set, default to 00:00
-                        let dateValue = e.target.value;
+                        const dateValue = e.target.value;
                         if (dateValue && (!dateValue.includes('T') || !dateValue.split('T')[1])) {
                           const datePart = dateValue.split('T')[0];
                           setProposalStartDate(datePart + 'T00:00');
@@ -16771,19 +16772,15 @@ export default function AdminDashboard() {
                   // Check if this is a Price Oracle role assignment
                   const isPriceOracleRole = selectedRole.id === "price-oracle";
 
-                  let contractId: number;
-                  let targetAddress: string;
-                  let contractSpec: any;
-
                   // All roles (including PriceOracle) are assigned on the LendingPool contract
                   // The PriceOracle role on the LendingPool contract grants permission to update prices
                   // Use selected lending pool or fallback to first pool
                   const lendingPoolId =
                     selectedLendingPool ||
                     networkConfig.contracts.lendingPools[0];
-                  contractId = Number(lendingPoolId);
-                  targetAddress = assignAddress;
-                  contractSpec = {
+                  const contractId = Number(lendingPoolId);
+                  const targetAddress = assignAddress;
+                  const contractSpec = {
                     ...LendingPoolAppSpec.contract,
                     events: [],
                   };

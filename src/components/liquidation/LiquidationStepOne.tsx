@@ -147,7 +147,7 @@ export default function LiquidationStepOne({ account, onComplete, onCancel }: Li
         return !!selectedCollateral;
       case 2:
         return !!selectedDebt;
-      case 3:
+      case 3: {
         if (!repayAmountUSD || !calculations) return false;
         const amount = parseFloat(repayAmountUSD);
         if (amount <= 0) return false;
@@ -170,6 +170,7 @@ export default function LiquidationStepOne({ account, onComplete, onCancel }: Li
         const finalMaxAmount = Math.min(maxLiquidatableAmount, maxRepayForSelectedDebt);
         
         return amount <= finalMaxAmount;
+      }
       default:
         return false;
     }

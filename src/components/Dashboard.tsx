@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import NFTMintModal from "./NFTMintModal";
@@ -6,10 +6,11 @@ import DashboardHero from "./DashboardHero";
 import PortfolioStatsGrid from "./PortfolioStatsGrid";
 import MarketOverviewCard from "./MarketOverviewCard";
 import UserHealthChart from "./UserHealthChart";
-import { useUserAssets } from "@/hooks/useUserAssets";
+import { useUserAssets, type UserAsset } from "@/hooks/useUserAssets";
 import {
   fetchUserGlobalData,
   fetchAllMarkets,
+  type MarketInfo,
 } from "@/services/lendingService";
 import { CONTRACT } from "ulujs";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
@@ -31,7 +32,7 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
     totalBorrowValue: number;
     lastUpdateTime: number;
   } | null>(null);
-  const [marketData, setMarketData] = useState<any[]>([]);
+  const [marketData, setMarketData] = useState<MarketInfo[]>([]);
   const [activeUsersCount, setActiveUsersCount] = useState<number>(0);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
@@ -40,7 +41,7 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
   const userAssets = useUserAssets(activeAccount?.address || "");
 
   // Calculate net APY from user assets
-  const calculateNetAPY = (assets: any[]) => {
+  const calculateNetAPY = (assets: UserAsset[]) => {
     if (!assets || assets.length === 0) return 0;
 
     let totalDepositValue = 0;
@@ -124,7 +125,7 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
   const mintedSupply = 1274;
 
   // Function to fetch unique active users from blockchain events
-  const fetchActiveUsersCount = async () => {
+  const fetchActiveUsersCount = useCallback(async () => {
     try {
       const networkConfig = getNetworkConfig(currentNetwork);
 
@@ -134,7 +135,7 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
       }
 
       const clients = algorandService.initializeClients(
-        networkConfig.walletNetworkId as any
+        networkConfig.walletNetworkId as string
       );
 
       // Get the first lending pool contract
@@ -186,7 +187,14 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
       const lastRound = status["last-round"];
 
       // Decode UserHealth events exactly like LiquidationMarkets
-      const decodeHealthFactor = (event: any[]) => ({
+      interface UserHealthEventRecord {
+        timestamp: number;
+        round: number;
+        user_id: string;
+        total_collateral_value: number;
+        total_borrow_value: number;
+      }
+      const decodeHealthFactor = (event: unknown[]): UserHealthEventRecord => ({
         timestamp: Number(event[2]),
         round: Number(event[1]),
         user_id: String(event[3]),
@@ -194,23 +202,24 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
         total_borrow_value: Number(event[6]),
       });
 
+      type EventGroup = { name: string; events?: unknown[] };
       // Fetch events from the last 2M rounds (similar to LiquidationMarkets)
-      const events: any = await ci.getEvents({
+      const events = (await ci.getEvents({
         minRound: Math.max(0, lastRound - 2e6),
-      });
+      })) as EventGroup[];
 
       console.log("🔍 Debug - All events fetched:", events);
       console.log(
         "🔍 Debug - Event names:",
-        events.map((e: any) => e.name)
+        events.map((e) => e.name)
       );
       console.log("🔍 Debug - Last round:", lastRound);
       console.log("🔍 Debug - Min round:", Math.max(0, lastRound - 2e6));
 
       const allUserHealthEvents =
         events
-          .find((event: any) => event.name === "UserHealth")
-          ?.events?.map(decodeHealthFactor) ?? [];
+          .find((event) => event.name === "UserHealth")
+          ?.events?.map((e) => decodeHealthFactor(e as unknown[])) ?? [];
 
       console.log(
         "🔍 Debug - UserHealth events found:",
@@ -218,7 +227,7 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
       );
       console.log(
         "🔍 Debug - Raw UserHealth events:",
-        events.find((e: any) => e.name === "UserHealth")
+        events.find((e) => e.name === "UserHealth")
       );
 
       // Reduce to latest health factor by userId (same logic as LiquidationMarkets)
@@ -228,7 +237,7 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
           latest.set(current.user_id, current);
         }
         return latest;
-      }, new Map<string, any>());
+      }, new Map<string, UserHealthEventRecord>());
 
       const uniqueUsersCount = userHealthEvents.size;
       console.log(`🔍 Debug - Found ${uniqueUsersCount} unique active users`);
@@ -242,22 +251,22 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
 
         // Try to get all events and look for any user-related events
         const allEvents = events.flatMap(
-          (eventGroup: any) => eventGroup.events || []
+          (eventGroup) => eventGroup.events || []
         );
         console.log("🔍 Debug - Total events found:", allEvents.length);
 
         // Look for any events that might contain user IDs
         const userEvents = allEvents.filter(
-          (event: any) =>
-            event &&
+          (event: unknown): event is unknown[] =>
+            Array.isArray(event) &&
             event.length > 0 &&
             typeof event[0] === "string" &&
-            event[0].length > 20
+            (event[0] as string).length > 20
         );
         console.log("🔍 Debug - Potential user events:", userEvents.length);
 
         if (userEvents.length > 0) {
-          const uniqueUsers = new Set(userEvents.map((event: any) => event[0]));
+          const uniqueUsers = new Set(userEvents.map((event) => event[0] as string));
           console.log(
             `🔍 Debug - Alternative method found ${uniqueUsers.size} unique users`
           );
@@ -267,15 +276,15 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
         // Try fetching from a smaller range (last 100k rounds)
         console.log("🔍 Debug - Trying smaller range (last 100k rounds)...");
         try {
-          const recentEvents: any = await ci.getEvents({
+          const recentEvents = (await ci.getEvents({
             minRound: Math.max(0, lastRound - 100000),
-          });
+          })) as EventGroup[];
 
           console.log("🔍 Debug - Recent events:", recentEvents);
           const recentUserHealthEvents =
             recentEvents
-              .find((event: any) => event.name === "UserHealth")
-              ?.events?.map(decodeHealthFactor) ?? [];
+              .find((event) => event.name === "UserHealth")
+              ?.events?.map((e) => decodeHealthFactor(e as unknown[])) ?? [];
 
           if (recentUserHealthEvents.length > 0) {
             const recentUserHealthMap = recentUserHealthEvents.reduce(
@@ -286,7 +295,7 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
                 }
                 return latest;
               },
-              new Map<string, any>()
+              new Map<string, UserHealthEventRecord>()
             );
 
             console.log(
@@ -304,7 +313,7 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
       console.error("Error fetching active users count:", error);
       return 0;
     }
-  };
+  }, [currentNetwork]);
 
   // Fetch user global data and market data when wallet connects
   useEffect(() => {
@@ -366,7 +375,7 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
     };
 
     fetchData();
-  }, [activeAccount?.address, currentNetwork]);
+  }, [activeAccount?.address, currentNetwork, fetchActiveUsersCount]);
 
   // Mock mint handler
   const handleMint = () => {

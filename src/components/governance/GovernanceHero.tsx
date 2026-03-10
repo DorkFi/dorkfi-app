@@ -3,7 +3,7 @@ import DorkFiCard from "@/components/ui/DorkFiCard";
 import React from "react";
 
 interface GovernanceHeroProps {
-  stats: any;
+  stats: Record<string, unknown>;
 }
 
 export const GovernanceHero = ({ stats }: GovernanceHeroProps) => {

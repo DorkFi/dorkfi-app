@@ -19,7 +19,7 @@ interface MultiNetworkTLVProps {
 interface StatProps {
   label: string;
   value: string | React.ReactNode;
-  icon: any;
+  icon: React.ComponentType<{ className?: string }>;
   className?: string;
 }
 
@@ -48,7 +48,7 @@ function Stat({
 }
 
 interface NetworkBreakdownProps {
-  networkData: Record<NetworkId, any>;
+  networkData: Record<NetworkId, unknown>;
   isLoading: boolean;
   onRefresh: () => void;
 }

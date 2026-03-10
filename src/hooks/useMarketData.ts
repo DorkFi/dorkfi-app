@@ -196,7 +196,7 @@ export const useMarketData = ({
 
   const { filteredData, totalPages, paginatedData } = useMemo(() => {
     // Filter data based on search term
-    let filtered = marketData.filter(market =>
+    const filtered = marketData.filter(market =>
       market.asset.toLowerCase().includes(searchTerm.toLowerCase())
     );
 

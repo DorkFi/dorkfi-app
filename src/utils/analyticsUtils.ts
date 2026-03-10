@@ -133,11 +133,11 @@ export const getRiskLevel = (healthFactor: number): string => {
 /**
  * Convert array data to chart format
  */
-export const transformToChartData = <T extends Record<string, any>>(
+export const transformToChartData = <T extends Record<string, unknown>>(
   data: T[], 
   xKey: keyof T, 
   yKey: keyof T
-): Array<{ x: any; y: any }> => {
+): Array<{ x: unknown; y: unknown }> => {
   return data.map(item => ({
     x: item[xKey],
     y: item[yKey],
@@ -188,7 +188,7 @@ export const generateChartColors = (count: number): string[] => {
  * Format tooltip values for charts
  */
 export const formatTooltipValue = (
-  value: any, 
+  value: unknown, 
   name: string, 
   type: 'currency' | 'number' | 'percentage' = 'number'
 ): [string, string] => {
@@ -211,7 +211,7 @@ export const formatTooltipValue = (
 /**
  * Debounce function for search inputs
  */
-export const debounce = <T extends (...args: any[]) => void>(
+export const debounce = <T extends (...args: unknown[]) => void>(
   func: T,
   wait: number
 ): ((...args: Parameters<T>) => void) => {
@@ -288,7 +288,7 @@ export const aggregateByWeek = <T extends DataPoint>(
 ): T[] => {
   if (data.length === 0) return [];
   
-  const weeklyData: { [key: string]: any } = {};
+  const weeklyData: { [key: string]: Record<string, unknown> } = {};
   
   data.forEach(item => {
     const date = new Date(item.date);
@@ -324,7 +324,7 @@ export const aggregateByMonth = <T extends DataPoint>(
 ): T[] => {
   if (data.length === 0) return [];
   
-  const monthlyData: { [key: string]: any } = {};
+  const monthlyData: { [key: string]: Record<string, unknown> } = {};
   
   data.forEach(item => {
     const date = new Date(item.date);
@@ -357,7 +357,7 @@ export const aggregateByYear = <T extends DataPoint>(
 ): T[] => {
   if (data.length === 0) return [];
   
-  const yearlyData: { [key: string]: any } = {};
+  const yearlyData: { [key: string]: Record<string, unknown> } = {};
   
   data.forEach(item => {
     const date = new Date(item.date);
@@ -389,7 +389,7 @@ export const aggregateWithAverage = <T extends DataPoint>(
   range: TimeRange,
   sumKeys: string[] = [],
   avgKeys: string[] = []
-): any[] => {
+): unknown[] => {
   if (range === 'daily') return data;
   
   const aggregateFn = range === 'weekly' ? aggregateByWeek : 
@@ -401,7 +401,7 @@ export const aggregateWithAverage = <T extends DataPoint>(
   
   // Convert avgKeys to averages
   if (avgKeys.length > 0) {
-    aggregated.forEach((item: any) => {
+    aggregated.forEach((item: Record<string, unknown>) => {
       avgKeys.forEach(key => {
         if (item.count > 0) {
           item[key] = item[key] / item.count;

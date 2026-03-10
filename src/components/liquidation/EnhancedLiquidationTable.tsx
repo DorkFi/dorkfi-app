@@ -97,7 +97,7 @@ export default function EnhancedLiquidationTable({ accounts, onAccountClick }: E
                         value={healthPercentage} 
                         className="h-1"
                         style={{
-                          // @ts-ignore
+                          // @ts-expect-error CSS custom property for Progress color
                           '--progress-background': account.healthFactor <= 1.0 ? '#ef4444' : 
                                                    account.healthFactor <= 1.1 ? '#f59e0b' : 
                                                    account.healthFactor <= 1.5 ? '#eab308' : '#22c55e'

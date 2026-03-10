@@ -42,7 +42,7 @@ const BorrowsChart = () => {
             // Group by date and sum amounts (matching demo page approach)
             const dailyBorrows: { [key: string]: number } = {};
             
-            borrows.forEach((borrow: any) => {
+            borrows.forEach((borrow: Record<string, unknown>) => {
               const date = new Date(borrow.timestamp).toISOString().split('T')[0];
               // Convert from micro-units to USD (divide by 1e12, matching demo page)
               const value = parseFloat(borrow.borrowValueUSD || '0') / 1e12;

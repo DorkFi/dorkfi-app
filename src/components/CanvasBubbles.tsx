@@ -263,7 +263,7 @@ export const CanvasBubbles = () => {
         const minDistance = Math.max(distance, bubble.baseRadius * 2);
         const strength = (repulsionRadius - minDistance) / repulsionRadius;
         
-        let responsiveness = bubble.layer === 'background' ? 0.2 : 
+        const responsiveness = bubble.layer === 'background' ? 0.2 : 
                            bubble.layer === 'accent' ? 0.8 : 0.5;
         
         const force = strength * responsiveness * 1.5;

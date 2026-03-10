@@ -1,5 +1,7 @@
 import algosdk from "algosdk";
 import { CONTRACT } from "ulujs";
+
+type ContractInstance = InstanceType<typeof CONTRACT>;
 import { APP_SPEC as VNSPublicResolverSpec } from "@/clients/VNSPublicResolverClient";
 import { namehash, stringToUint8Array } from "@/utils/namehash";
 
@@ -12,8 +14,8 @@ export class ResolverService {
   private indexerClient: algosdk.Indexer;
   private registryId: number;
   private mode: "default" | "builder";
-  private contractInstance: any;
-  private builder: any;
+  private contractInstance: ContractInstance;
+  private builder: ContractInstance;
 
   constructor(
     network: "mainnet" | "testnet",
@@ -96,7 +98,7 @@ export class ResolverService {
     return null;
   }
 
-  async setText(node: string, key: string, value: string): Promise<any> {
+  async setText(node: string, key: string, value: string): Promise<unknown> {
     const nodeBytes = await namehash(node);
     const keyBytes = stringToUint8Array(key, 22);
     const valueBytes = stringToUint8Array(value, 256);

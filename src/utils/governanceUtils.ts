@@ -68,7 +68,7 @@ export const convertServiceProposalToUI = (
     executionTime: executionTime,
     details: {
       type: category as ProposalCategory,
-    } as any, // Details would need to be parsed from proposalActionHash if available
+    } as Record<string, unknown>, // Details would need to be parsed from proposalActionHash if available
     ...(networkId !== undefined && { networkId, networkIds: [networkId] }),
   };
 };
