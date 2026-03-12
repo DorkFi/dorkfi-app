@@ -1138,30 +1138,25 @@ export const fetchUserBorrowBalance = async (
             ? 0n
             : (BigInt(scaledBorrows) * BigInt(currentBorrowIndex)) / SCALE;
 
-        // Calculate original borrow amount using user's stored borrow index (without accrued interest):
-        // original_amount = (scaled_borrows * user_borrow_index) / SCALE
-        const originalBorrowsRaw =
-          BigInt(scaledBorrows) === 0n
-            ? 0n
-            : (BigInt(scaledBorrows) * BigInt(userBorrowIndex)) / SCALE;
-
         // Convert to human-readable format by accounting for token decimals
         const actualBorrowAmount =
           Number(actualBorrowsRaw) / Math.pow(10, token.decimals);
-        const originalBorrowAmount =
-          Number(originalBorrowsRaw) / Math.pow(10, token.decimals);
 
-        // Calculate accrued interest as the difference
-        const accruedInterest = actualBorrowAmount - originalBorrowAmount;
+        // Single-division interest: compute index delta before dividing to
+        // avoid double-truncation from two independent BigInt divisions.
+        const interestRaw =
+          BigInt(scaledBorrows) === 0n
+            ? 0n
+            : (BigInt(scaledBorrows) * (BigInt(currentBorrowIndex) - BigInt(userBorrowIndex))) / SCALE;
+        const accruedInterest = Number(interestRaw) / Math.pow(10, token.decimals);
 
         console.log(`User borrow balance for ${token.symbol}:`, {
           scaledBorrows: scaledBorrows.toString(),
           userBorrowIndex: userBorrowIndex.toString(),
           currentBorrowIndex: currentBorrowIndex.toString(),
           actualBorrowsRaw: actualBorrowsRaw.toString(),
-          originalBorrowsRaw: originalBorrowsRaw.toString(),
+          interestRaw: interestRaw.toString(),
           actualBorrowAmount,
-          originalBorrowAmount,
           accruedInterest,
           tokenDecimals: token.decimals,
           formula: `(${scaledBorrows} * ${currentBorrowIndex}) / ${SCALE.toString()} = ${actualBorrowsRaw.toString()}`,

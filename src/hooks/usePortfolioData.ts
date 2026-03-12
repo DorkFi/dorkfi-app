@@ -526,9 +526,20 @@ export const usePortfolioData = () => {
   const totalCollateral =
     userGlobalData?.totalCollateralValue ||
     deposits.reduce((sum, deposit) => sum + deposit.value, 0);
-  const totalBorrowed =
-    userGlobalData?.totalBorrowValue ||
-    borrows.reduce((sum, borrow) => sum + borrow.value, 0);
+  // Derive totalBorrowed from per-position sums so it stays consistent
+  // with the per-position accrued interest displayed alongside it.
+  // Note: healthFactor / netLTV below also use this position-derived value.
+  const totalBorrowed = borrows.reduce((sum, borrow) => sum + borrow.value, 0);
+
+  // Reconciliation: warn when position-sum drifts from global contract value
+  const globalBorrowed = userGlobalData?.totalBorrowValue || 0;
+  if (globalBorrowed > 0 && Math.abs(totalBorrowed - globalBorrowed) / globalBorrowed > 0.01) {
+    console.warn('[Portfolio] Borrow value mismatch between position sum and global data', {
+      positionSum: totalBorrowed,
+      globalValue: globalBorrowed,
+      drift: totalBorrowed - globalBorrowed,
+    });
+  }
 
   // Calculate weighted liquidation threshold based on borrowed assets only
   const calculateWeightedLiquidationThreshold = () => {
