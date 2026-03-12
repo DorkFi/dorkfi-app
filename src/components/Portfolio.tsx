@@ -641,18 +641,25 @@ const Portfolio = () => {
           if (userDepositIndex && scaledDeposits > 0n && depositIndex > 0n) {
             const userDepositIndexBigInt = BigInt(userDepositIndex);
             if (userDepositIndexBigInt > 0n) {
-              const currentDepositValueRaw =
-                (scaledDeposits * depositIndex) / SCALE;
-              const originalDepositRaw =
-                (scaledDeposits * userDepositIndexBigInt) / SCALE;
-              const currentDepositValue =
-                Number(currentDepositValueRaw) / Math.pow(10, token.decimals);
-              const originalDeposit =
-                Number(originalDepositRaw) / Math.pow(10, token.decimals);
-              accruedInterest = Math.max(
-                0,
-                currentDepositValue - originalDeposit
-              );
+              if (userDepositIndexBigInt > depositIndex) {
+                console.warn(
+                  "Invalid deposit index relationship: userDepositIndex > currentDepositIndex",
+                  {
+                    userDepositIndex: userDepositIndex,
+                    currentDepositIndex: depositIndex.toString(),
+                    tokenSymbol: token.symbol,
+                    marketId,
+                  }
+                );
+                accruedInterest = 0;
+              } else {
+                const interestRaw =
+                  (scaledDeposits * (depositIndex - userDepositIndexBigInt)) / SCALE;
+                accruedInterest = Math.max(
+                  0,
+                  Number(interestRaw) / Math.pow(10, token.decimals)
+                );
+              }
             }
           }
 
@@ -821,17 +828,11 @@ const Portfolio = () => {
                 // If indices are invalid, assume no interest accrued
                 accruedInterest = 0;
               } else {
-                const currentBorrowValueRaw =
-                  (scaledBorrows * borrowIndex) / SCALE;
-                const originalBorrowRaw =
-                  (scaledBorrows * userBorrowIndexBigInt) / SCALE;
-                const currentBorrowValue =
-                  Number(currentBorrowValueRaw) / Math.pow(10, token.decimals);
-                const originalBorrow =
-                  Number(originalBorrowRaw) / Math.pow(10, token.decimals);
+                const interestRaw =
+                  (scaledBorrows * (borrowIndex - userBorrowIndexBigInt)) / SCALE;
                 accruedInterest = Math.max(
                   0,
-                  currentBorrowValue - originalBorrow
+                  Number(interestRaw) / Math.pow(10, token.decimals)
                 );
               }
             }
