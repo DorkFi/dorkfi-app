@@ -35,6 +35,13 @@ import {
 import algorandService from "@/services/algorandService";
 import algosdk, { waitForConfirmation } from "algosdk";
 import BigNumber from "bignumber.js";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from "@/components/ui/select";
+import { ChevronDown } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useTokenPrice } from "@/hooks/useTokenPrice";
 import { calculateMaxBorrowAmount } from "@/services/adminService";
@@ -80,6 +87,15 @@ interface SupplyBorrowModalProps {
   userDepositBalance?: number;
   onTransactionSuccess?: () => void;
   onRefreshWalletBalance?: () => void;
+  /** When provided (e.g. from health card), show asset dropdown like Withdraw modal */
+  availableAssets?: {
+    asset: string;
+    icon: string;
+    value?: number;
+    poolId?: string;
+    network?: string;
+  }[];
+  onSelectAsset?: (asset: string, poolId?: string, network?: string) => void;
 }
 
 const SupplyBorrowModal = ({
@@ -96,6 +112,8 @@ const SupplyBorrowModal = ({
   userBorrowBalance = 0,
   userDepositBalance = 0,
   onTransactionSuccess,
+  availableAssets,
+  onSelectAsset,
 }: SupplyBorrowModalProps) => {
   const [amount, setAmount] = useState("");
   const [fiatValue, setFiatValue] = useState(0);
@@ -804,7 +822,7 @@ const SupplyBorrowModal = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-white rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl card-hover hover:shadow-lg hover:border-ocean-teal/40 transition-all max-w-[95vw] md:max-w-md h-[90vh] md:h-auto max-h-[90vh] md:max-h-[85vh] overflow-hidden flex flex-col p-0">
+      <DialogContent className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-white rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-[95vw] md:max-w-md h-[90vh] md:h-auto max-h-[90vh] md:max-h-[85vh] overflow-hidden flex flex-col p-0">
         {showSuccess ? (
           <div className="p-6 overflow-y-auto">
             <SupplyBorrowCongrats
@@ -825,11 +843,81 @@ const SupplyBorrowModal = ({
                 <DialogTitle className="sr-only">
                   {mode === "deposit" ? "Deposit" : "Borrow"} {asset}
                 </DialogTitle>
-                <SupplyBorrowHeader
-                  mode={mode}
-                  asset={asset}
-                  assetIcon={assetData.icon}
-                />
+                {mode === "deposit" &&
+                availableAssets &&
+                availableAssets.length > 0 &&
+                onSelectAsset ? (
+                  <div className="space-y-2">
+                    <h2 className="text-2xl font-bold text-center text-slate-800 dark:text-white capitalize">
+                      deposit
+                    </h2>
+                    <div className="flex items-center justify-center gap-3 pb-2 mt-3 h-14">
+                      <Select
+                        value={`${asset}-${poolId ?? ""}-${network ?? ""}`}
+                        onValueChange={(value) => {
+                          const selected = availableAssets.find(
+                            (a) =>
+                              `${a.asset}-${a.poolId ?? ""}-${a.network ?? ""}` ===
+                              value
+                          );
+                          if (selected) {
+                            onSelectAsset(
+                              selected.asset,
+                              selected.poolId,
+                              selected.network
+                            );
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="w-auto min-w-0 h-auto bg-transparent border-none p-0 hover:bg-transparent focus:ring-0 focus:ring-offset-0 justify-center [&>svg:last-child]:!hidden">
+                          <div className="flex items-center gap-2 shrink-0">
+                            <img
+                              src={assetData.icon}
+                              alt={asset}
+                              className="w-12 h-12 rounded-full shadow"
+                            />
+                            <span className="flex items-center gap-1 text-xl font-semibold text-slate-800 dark:text-white">
+                              {asset}
+                              <ChevronDown className="h-4 w-4 text-slate-800 dark:text-white" />
+                            </span>
+                          </div>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableAssets.map((a) => (
+                            <SelectItem
+                              key={`${a.asset}-${a.poolId ?? ""}-${a.network ?? ""}`}
+                              value={`${a.asset}-${a.poolId ?? ""}-${a.network ?? ""}`}
+                            >
+                              <span className="flex items-center gap-2">
+                                <img
+                                  src={a.icon}
+                                  alt={a.asset}
+                                  className="h-5 w-5 rounded-full"
+                                />
+                                <span>{a.asset}</span>
+                                {a.value != null && (
+                                  <span className="text-xs text-muted-foreground">
+                                    —{" "}
+                                    {a.value.toLocaleString(undefined, {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    })}
+                                  </span>
+                                )}
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                ) : (
+                  <SupplyBorrowHeader
+                    mode={mode}
+                    asset={asset}
+                    assetIcon={assetData.icon}
+                  />
+                )}
               </DialogHeader>
             </div>
 

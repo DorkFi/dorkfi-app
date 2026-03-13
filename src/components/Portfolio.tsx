@@ -3522,7 +3522,27 @@ const Portfolio = () => {
   };
 
   const handleAddCollateral = () => {
-    setDepositModal({ isOpen: true, asset: "VOI" });
+    if (deposits.length > 0) {
+      const largest = deposits.reduce((prev, cur) =>
+        (cur.value > prev.value ? cur : prev) as typeof prev
+      );
+      setDepositModal({
+        isOpen: true,
+        asset: largest.asset,
+        poolId: largest.poolId,
+        network: (largest as ItemWithNetwork).network,
+      });
+    } else if (marketData.length > 0) {
+      const m = marketData[0] as { symbol?: string; poolId?: string };
+      setDepositModal({
+        isOpen: true,
+        asset: m.symbol ?? "VOI",
+        poolId: m.poolId,
+        network: currentNetwork,
+      });
+    } else {
+      setDepositModal({ isOpen: true, asset: "VOI", network: currentNetwork });
+    }
   };
 
   const handleBuyVoi = () => {
@@ -9544,6 +9564,12 @@ const Portfolio = () => {
         }
         onSelectWithdrawAsset={(asset, poolId, network) =>
           setWithdrawModal((prev) => ({ ...prev, asset, poolId, network }))
+        }
+        onSelectDepositAsset={(asset, poolId, network) =>
+          setDepositModal((prev) => ({ ...prev, asset, poolId, network }))
+        }
+        onSelectRepayAsset={(asset, poolId, network) =>
+          setRepayModal((prev) => ({ ...prev, asset, poolId, network }))
         }
         onRefreshWalletBalance={refreshWalletBalance}
         onRefreshMarket={() => displayAddress && fetchUser(displayAddress)}

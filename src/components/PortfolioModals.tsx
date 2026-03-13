@@ -102,6 +102,8 @@ interface PortfolioModalsProps {
   onCloseBorrowModal: () => void;
   onCloseRepayModal: () => void;
   onSelectWithdrawAsset?: (asset: string, poolId?: string, network?: string) => void;
+  onSelectDepositAsset?: (asset: string, poolId?: string, network?: string) => void;
+  onSelectRepayAsset?: (asset: string, poolId?: string, network?: string) => void;
   onRefreshWalletBalance?: (asset: string, networkId?: string) => void;
   onRefreshMarket?: () => void;
   prefetchWithdrawIndicesRef?: React.MutableRefObject<
@@ -125,6 +127,8 @@ const PortfolioModals = ({
   onCloseBorrowModal,
   onCloseRepayModal,
   onSelectWithdrawAsset,
+  onSelectDepositAsset,
+  onSelectRepayAsset,
   onRefreshWalletBalance,
   onRefreshMarket,
   prefetchWithdrawIndicesRef,
@@ -1155,6 +1159,7 @@ const PortfolioModals = ({
   }, [
     repayModal.isOpen,
     repayModal.asset,
+    repayModal.network,
     activeAccount?.address,
     onRefreshWalletBalance,
   ]);
@@ -1422,6 +1427,18 @@ const PortfolioModals = ({
             poolId={depositModal.poolId}
             network={depositModal.network}
             mode="deposit"
+            availableAssets={
+              deposits.length > 0
+                ? deposits.map((d) => ({
+                    asset: d.asset,
+                    icon: d.icon,
+                    value: d.value,
+                    poolId: d.poolId,
+                    network: (d as { network?: string }).network,
+                  }))
+                : undefined
+            }
+            onSelectAsset={onSelectDepositAsset}
             assetData={getAssetData(
               depositModal.asset,
               depositModal.poolId,
@@ -1742,18 +1759,39 @@ const PortfolioModals = ({
               onClose={onCloseRepayModal}
               tokenSymbol={repayModal.asset}
               tokenIcon={getTokenImagePath(repayModal.asset)}
+              poolId={repayModal.poolId}
+              network={
+                repayModal.network || (borrow as any)?.network || currentNetwork
+              }
               currentBorrow={borrow?.balance || 0}
               accruedInterest={borrow?.interest || 0}
-              walletBalance={walletBalances[repayModal.asset]?.balance || 0}
+              walletBalance={
+                repayModal.network
+                  ? walletBalances[
+                      `${repayModal.network}-${repayModal.asset}`
+                    ]?.balance ||
+                    walletBalances[repayModal.asset]?.balance ||
+                    0
+                  : walletBalances[repayModal.asset]?.balance || 0
+              }
               marketStats={getMarketStatsForBorrow(
                 repayModal.asset,
                 repayModal.poolId
               )}
               lastUpdateTime={marketLastUpdateTime}
               userLastUpdateTime={userLastUpdateTime}
-              network={
-                repayModal.network || (borrow as any)?.network || currentNetwork
+              availableAssets={
+                borrows.length > 0
+                  ? borrows.map((b) => ({
+                      asset: b.asset,
+                      icon: b.icon,
+                      value: b.value,
+                      poolId: b.poolId,
+                      network: (b as { network?: string }).network,
+                    }))
+                  : undefined
               }
+              onSelectAsset={onSelectRepayAsset}
               onSubmit={handleRepaySubmit}
             />
           );
