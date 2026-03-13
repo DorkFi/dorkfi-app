@@ -50,7 +50,7 @@ const PositionStatsGrid = ({
             </Tooltip>
           </div>
           <div className={`text-2xl font-bold text-green-600 dark:text-green-400`}>
-            ${totalCollateral.toLocaleString()}
+            ${totalCollateral.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
         </div>
         
@@ -68,7 +68,7 @@ const PositionStatsGrid = ({
             </Tooltip>
           </div>
           <div className={`text-2xl font-bold text-red-600 dark:text-red-400`}>
-            ${totalBorrowed.toLocaleString()}
+            ${totalBorrowed.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
         </div>
       </div>
@@ -116,7 +116,7 @@ const PositionStatsGrid = ({
       <div className="p-4 rounded-lg bg-gradient-to-r from-slate-50 to-gray-50 dark:from-slate-800 dark:to-slate-700 border border-slate-200/50 dark:border-slate-600/30">
         <div className="text-sm text-muted-foreground mb-1">Net Portfolio Value</div>
         <div className={`text-2xl font-bold ${(totalCollateral - totalBorrowed) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-          ${(totalCollateral - totalBorrowed).toLocaleString()}
+          ${(totalCollateral - totalBorrowed).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
         </div>
         <div className="text-xs text-muted-foreground mt-1">
           {((totalCollateral - totalBorrowed) / totalCollateral * 100).toFixed(1)}% of collateral value

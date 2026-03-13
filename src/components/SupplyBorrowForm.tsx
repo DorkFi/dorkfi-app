@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { LocaleNumberInput } from "@/components/ui/LocaleNumberInput";
 import { useTokenPrice } from "@/hooks/useTokenPrice";
+import { formatRelativeTime } from "@/utils/timeUtils";
 import { getTokenConfig, NetworkId } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
 
@@ -30,6 +31,7 @@ interface SupplyBorrowFormProps {
   isLoadingMaxBorrow?: boolean;
   maxBorrowError?: string | null;
   network?: string; // Optional network parameter for cross-network operations
+  walletBalanceLastUpdated?: number;
 }
 
 const SupplyBorrowForm = ({
@@ -52,6 +54,7 @@ const SupplyBorrowForm = ({
   isLoadingMaxBorrow = false,
   maxBorrowError = null,
   network,
+  walletBalanceLastUpdated,
 }: SupplyBorrowFormProps) => {
   const [amount, setAmount] = useState<number | "">("");
   const [fiatValue, setFiatValue] = useState(0);
@@ -389,24 +392,31 @@ const SupplyBorrowForm = ({
                   : "text-whale-gold/80"
                   }`}
               >
-                {mode === "deposit"
-                  ? `≈ $${walletBalanceUSD.toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}`
-                  : userGlobalData
-                    ? hasCapacityNoLiquidity
-                      ? `Your capacity ≈ $${maxBorrowableUSD.toLocaleString(undefined, {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })} · no liquidity in this market`
-                      : `≈ $${(
-                          calculateMaxBorrowable() * (tokenPrice || 1)
-                        ).toLocaleString(undefined, {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}`
-                    : "Connect wallet to see USD value"}
+                {mode === "deposit" ? (
+                  <>
+                    {`≈ $${walletBalanceUSD.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}`}
+                    {walletBalanceLastUpdated && (
+                      <span className="ml-2 text-[11px] opacity-80">
+                        · Updated {formatRelativeTime(walletBalanceLastUpdated)}
+                      </span>
+                    )}
+                  </>
+                ) : userGlobalData
+                  ? hasCapacityNoLiquidity
+                    ? `Your capacity ≈ $${maxBorrowableUSD.toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })} · no liquidity in this market`
+                    : `≈ $${(
+                        calculateMaxBorrowable() * (tokenPrice || 1)
+                      ).toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}`
+                  : "Connect wallet to see USD value"}
               </div>
             </div>
           </div>

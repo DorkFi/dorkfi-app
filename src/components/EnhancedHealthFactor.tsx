@@ -1,9 +1,9 @@
 import { Card, CardContent } from "@/components/ui/card";
-import React from 'react';
-import UnderwaterScene from './liquidation/UnderwaterScene';
-import PositionStatsGrid from './liquidation/PositionStatsGrid';
-import HealthFactorActions from './liquidation/HealthFactorActions';
-import { Button } from "@/components/ui/button";
+import React from "react";
+import UnderwaterScene from "./liquidation/UnderwaterScene";
+import PositionStatsGrid from "./liquidation/PositionStatsGrid";
+import HealthFactorActions from "./liquidation/HealthFactorActions";
+import DorkFiButton from "@/components/ui/DorkFiButton";
 import { RefreshCw } from "lucide-react";
 
 interface EnhancedHealthFactorProps {
@@ -12,6 +12,8 @@ interface EnhancedHealthFactorProps {
   totalBorrowed: number;
   liquidationMargin: number;
   netLTV: number;
+  weightedCollateralFactor?: number;
+  weightedLiquidationThreshold?: number;
   dorkNftImage?: string;
   underwaterBg: string;
   onAddCollateral?: () => void;
@@ -19,6 +21,8 @@ interface EnhancedHealthFactorProps {
   onEditProfile?: () => void;
   onRefreshMarkets?: () => void;
   isRefreshingMarkets?: boolean;
+  onRepayDebt?: () => void;
+  onWithdraw?: () => void;
 }
 
 const EnhancedHealthFactor = ({
@@ -27,13 +31,17 @@ const EnhancedHealthFactor = ({
   totalBorrowed,
   liquidationMargin,
   netLTV,
+  weightedCollateralFactor = 0.8,
+  weightedLiquidationThreshold = 0.85,
   dorkNftImage,
   underwaterBg,
   onAddCollateral,
   onBuyVoi,
   onEditProfile,
   onRefreshMarkets,
-  isRefreshingMarkets
+  isRefreshingMarkets,
+  onRepayDebt,
+  onWithdraw,
 }: EnhancedHealthFactorProps) => {
   return (
     <div className="w-full max-w-7xl mx-auto animate-fade-in">
@@ -41,14 +49,33 @@ const EnhancedHealthFactor = ({
         <CardContent className="p-6 md:p-8">
           {/* Enhanced Responsive Layout */}
           <div className="grid grid-cols-1 xl:grid-cols-[420px,1fr] gap-8 lg:gap-10">
-            {/* Left Side - Enhanced Health Gauge */}
-            <div className="xl:border-r-2 xl:border-ocean-teal/20 xl:pr-8 order-2 xl:order-1">
+            {/* Left Side - Enhanced Health Gauge + Status message */}
+            <div className="xl:border-r-2 xl:border-ocean-teal/20 xl:pr-8 order-2 xl:order-1 space-y-4">
               <UnderwaterScene 
                 healthFactor={healthFactor}
                 dorkNftImage={dorkNftImage}
                 underwaterBg={underwaterBg}
                 onEdit={onEditProfile}
               />
+              {/* Status message - directly below health factor value */}
+              <div
+                className={`rounded-xl border-2 p-4 transition-all duration-300 ${
+                  healthFactor === null
+                    ? "bg-slate-500/10 border-slate-500/30"
+                    : healthFactor <= 1.0
+                    ? "bg-red-500/15 border-red-500/40"
+                    : healthFactor <= 1.2
+                    ? "bg-amber-500/15 border-amber-500/40"
+                    : "bg-emerald-500/10 border-emerald-500/30"
+                }`}
+              >
+                <p className="text-sm font-medium text-foreground">
+                  {healthFactor === null && "No collateral yet. Supply assets to earn yield and borrow."}
+                  {healthFactor !== null && healthFactor <= 1.0 && "Action needed: supply more collateral or repay debt to avoid liquidation."}
+                  {healthFactor !== null && healthFactor > 1.0 && healthFactor <= 1.2 && "Consider supplying more or repaying debt to improve your health factor."}
+                  {healthFactor !== null && healthFactor > 1.2 && "Position looks healthy. Supply or repay below to adjust."}
+                </p>
+              </div>
             </div>
 
             {/* Right Side - Stats Panel & CTAs */}
@@ -64,12 +91,12 @@ const EnhancedHealthFactor = ({
                   </p>
                 </div>
                 {onRefreshMarkets && (
-                  <Button
+                  <DorkFiButton
                     onClick={onRefreshMarkets}
                     disabled={isRefreshingMarkets}
-                    variant="outline"
+                    variant="secondary"
                     size="sm"
-                    className="h-9 px-3 text-xs sm:text-sm border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="min-w-0"
                     title="Refresh all market data"
                   >
                     <RefreshCw
@@ -78,7 +105,7 @@ const EnhancedHealthFactor = ({
                       }`}
                     />
                     Refresh
-                  </Button>
+                  </DorkFiButton>
                 )}
                 {/*
 <div className={`px-3 py-1 rounded-full text-xs font-semibold ${
@@ -110,6 +137,9 @@ const EnhancedHealthFactor = ({
                 healthFactor={healthFactor}
                 onAddCollateral={onAddCollateral}
                 onBuyVoi={onBuyVoi}
+                onRepayDebt={onRepayDebt}
+                onWithdraw={onWithdraw}
+                totalBorrowed={totalBorrowed}
               />
             </div>
           </div>

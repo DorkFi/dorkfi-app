@@ -8,7 +8,6 @@ import Portfolio from "@/components/Portfolio";
 import SwapWidget from "@/components/SwapWidget";
 import SwapHeroSection from "@/components/SwapHeroSection";
 import CandlestickChart from "@/components/CandlestickChart";
-import CanvasBubbles from "@/components/CanvasBubbles";
 import PreFi from "@/pages/PreFi";
 import { useIsMobile } from "@/hooks/use-mobile";
 import LiquidationMonitor from "@/components/liquidation/LiquidationMonitor";
@@ -111,11 +110,6 @@ const Index = ({ activeTab, onTabChange }: IndexProps) => {
 
       {/* Dark Mode Ocean Background */}
       <div className="absolute inset-0 z-0 hidden dark:block dorkfi-dark-bg-with-overlay" />
-
-      {/* Advanced Canvas Bubble System - Dark Mode Only */}
-      <div className="hidden dark:block">
-        <CanvasBubbles />
-      </div>
 
       <Header activeTab={activeTab} onTabChange={onTabChange} />
 

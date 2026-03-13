@@ -186,7 +186,7 @@ const DepositsList = ({ deposits, onDepositClick, onWithdrawClick, onRefresh, is
             {/* USD value above Deposit/Withdraw buttons (column 3) */}
             <div className="flex flex-col items-end gap-2 min-w-[120px] sm:min-w-[150px] pr-2 sm:pr-3">
               <DorkFiButton variant="secondary" onClick={() => onDepositClick(deposit.asset, deposit.poolId)} className="w-full max-w-[120px] sm:max-w-[148px] text-xs sm:text-sm">Deposit</DorkFiButton>
-              <DorkFiButton variant="danger-outline" onClick={() => onWithdrawClick(deposit.asset, deposit.poolId, deposit.network)} className="w-full max-w-[120px] sm:max-w-[148px] text-xs sm:text-sm">Withdraw</DorkFiButton>
+              <DorkFiButton variant="withdraw" onClick={() => onWithdrawClick(deposit.asset, deposit.poolId, deposit.network)} className="w-full max-w-[120px] sm:max-w-[148px] text-xs sm:text-sm">Withdraw</DorkFiButton>
             </div>
           </div>
           );
