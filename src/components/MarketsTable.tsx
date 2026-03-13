@@ -388,6 +388,27 @@ const MarketsTable = () => {
       },
       symbol: "VOI",
       decimals: 6,
+    },
+    {
+      id: 11,
+      name: "Phase 2 Incentive",
+      description: "DorkFi Phase 2 Incentive (Biweekly)",
+      reward: 948718,
+      icon: "/lovable-uploads/VOI.png",
+      airdropAccount:
+        "XDVFQTDT4CLSWIXEC5JFSCLDZXVCGKXWXLGI3XODEYDSGH5GJJWOU4D4UI",
+      tokenStandard: "network",
+      networks: {
+        "algorand-mainnet": {
+          contractId: "3210709899",
+          assetId: "2320775407",
+        },
+        "voi-mainnet": {
+          contractId: "41877720",
+        },
+      },
+      symbol: "VOI",
+      decimals: 6,
     }
   ];
 
