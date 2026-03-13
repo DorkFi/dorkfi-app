@@ -257,7 +257,7 @@ export default function AccountOverview({
         if (parsed && typeof parsed.ts === 'number') setLastSyncAt(parsed.ts);
         if (parsed && typeof parsed.health === 'number') setLastSyncedHealth(parsed.health);
       }
-    } catch (_) {}
+    } catch (_) { /* ignore */ }
   }, [account.walletAddress]);
 
   // After data loads, optionally finalize a pending sync and persist latest health
@@ -271,7 +271,7 @@ export default function AccountOverview({
           `df:lastSync:${account.walletAddress}`,
           JSON.stringify({ ts: now, health: realHealthFactor })
         );
-      } catch (_) {}
+      } catch (_) { /* ignore */ }
       setFinalizeSyncOnData(false);
     }
   }, [finalizeSyncOnData, isLoading, realHealthFactor, account.walletAddress]);

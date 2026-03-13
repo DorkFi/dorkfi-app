@@ -71,11 +71,12 @@ const UserHealthChart: React.FC<UserHealthChartProps> = ({ className }) => {
       const status = await clients.algod.status().do();
       const lastRound = status["last-round"];
       
-      const events: any = await ci.getEvents({
+      type EventGroup = { name: string; events?: unknown[] };
+      const events = (await ci.getEvents({
         minRound: Math.max(0, lastRound - 2e6), // Last 2M rounds
-      });
+      })) as EventGroup[];
 
-      const decodeHealthFactor = (event: any[]) => ({
+      const decodeHealthFactor = (event: unknown[]) => ({
         timestamp: Number(event[2]),
         round: Number(event[1]),
         user_id: String(event[3]),
@@ -85,8 +86,8 @@ const UserHealthChart: React.FC<UserHealthChartProps> = ({ className }) => {
       });
 
       const allUserHealthEvents = events
-        .find((event: any) => event.name === "UserHealth")
-        ?.events?.map(decodeHealthFactor) ?? [];
+        .find((event) => event.name === "UserHealth")
+        ?.events?.map((e) => decodeHealthFactor(e as unknown[])) ?? [];
 
       // Sort by timestamp for chronological order
       const sortedEvents = allUserHealthEvents.sort((a, b) => a.timestamp - b.timestamp);

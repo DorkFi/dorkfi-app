@@ -176,7 +176,7 @@ export default function LiquidationQueueTable({ accounts, onAccountClick, onLiqu
                             value={healthPercentage} 
                             className="h-1 md:h-2"
                             style={{
-                              // @ts-ignore
+                              // @ts-expect-error CSS custom property for Progress color
                               '--progress-background': account.healthFactor <= 1.0 ? '#ef4444' : 
                                                    account.healthFactor <= 1.1 ? '#f59e0b' : 
                                                    account.healthFactor <= 1.5 ? '#eab308' : '#22c55e'

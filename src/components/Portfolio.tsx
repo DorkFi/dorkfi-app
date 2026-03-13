@@ -101,6 +101,17 @@ import {
 } from "@/components/ui/tooltip";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 
+/* eslint-disable no-case-declarations -- many sort switch blocks use const in cases */
+/* eslint-disable react-hooks/exhaustive-deps -- many callbacks intentionally use stable deps subset */
+/** Used for portfolio items (deposits, borrows, etc.) that may have network/originalSymbol/interest fields at runtime */
+interface ItemWithNetwork {
+  network?: string;
+  originalSymbol?: string;
+  accruedInterest?: number;
+  interest?: number;
+  accruedInterestValue?: number;
+}
+
 const Portfolio = () => {
   const { address: routeAddress } = useParams<{ address: string }>();
   const navigate = useNavigate();
@@ -178,8 +189,8 @@ const Portfolio = () => {
     totalBorrowValue: number;
     lastUpdateTime: number;
   } | null>(null);
-  const [marketData, setMarketData] = useState<any[]>([]);
-  const [userPositions, setUserPositions] = useState<any[]>([]);
+  const [marketData, setMarketData] = useState<unknown[]>([]);
+  const [userPositions, setUserPositions] = useState<unknown[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [isLoadingPositions, setIsLoadingPositions] = useState(false);
   const [isRefreshingMarkets, setIsRefreshingMarkets] = useState(false);
@@ -194,7 +205,7 @@ const Portfolio = () => {
   const [isLoadingWalletBalance, setIsLoadingWalletBalance] = useState(false);
   const [userBorrowBalance, setUserBorrowBalance] = useState<number>(0);
   const [isLoadingBorrowData, setIsLoadingBorrowData] = useState(false);
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<Record<string, unknown> | null>(null);
   const [userProfileAvatar, setUserProfileAvatar] = useState<string | null>(
     null
   );
@@ -257,19 +268,19 @@ const Portfolio = () => {
   }>({ column: "riskRatio", direction: "asc" }); // Default sort by risk ratio (most risky first)
 
   // Liquidatable positions state
-  const [liquidatablePositions, setLiquidatablePositions] = useState<any[]>([]);
+  const [liquidatablePositions, setLiquidatablePositions] = useState<unknown[]>([]);
   const [isLoadingLiquidatablePositions, setIsLoadingLiquidatablePositions] =
     useState(false);
   const [liquidationModalOpen, setLiquidationModalOpen] = useState(false);
   const [selectedLiquidationPosition, setSelectedLiquidationPosition] =
-    useState<any | null>(null);
+    useState<unknown | null>(null);
   /** USD amount to liquidate (0 to position.liquidationAmount); enables partial liquidation */
   const [partialLiquidationAmountUsd, setPartialLiquidationAmountUsd] =
     useState<number>(0);
   const [isLiquidating, setIsLiquidating] = useState(false);
   const [repayModalOpen, setRepayModalOpen] = useState(false);
   const [selectedRepayPosition, setSelectedRepayPosition] =
-    useState<any | null>(null);
+    useState<unknown | null>(null);
   const [isRepaying, setIsRepaying] = useState(false);
   const [repayWalletBalance, setRepayWalletBalance] = useState<number | null>(null);
   const [isLoadingRepayBalance, setIsLoadingRepayBalance] = useState(false);
@@ -344,7 +355,7 @@ const Portfolio = () => {
   const fetchUserPositions = async (
     userAddress: string,
     networkId: string,
-    markets: any[] = []
+    markets: unknown[] = []
   ) => {
     try {
       console.log("fetchUserPositions called with:", {
@@ -352,7 +363,7 @@ const Portfolio = () => {
         networkId,
         marketsCount: markets.length,
       });
-      const tokens = getAllTokensWithDisplayInfo(networkId as any);
+      const tokens = getAllTokensWithDisplayInfo(networkId as NetworkId);
       const positions = [];
 
       for (const token of tokens) {
@@ -381,13 +392,13 @@ const Portfolio = () => {
               userAddress,
               token.poolId,
               token.underlyingContractId,
-              networkId as any
+              networkId as NetworkId
             ),
             fetchUserBorrowBalance(
               userAddress,
               token.poolId,
               token.underlyingContractId,
-              networkId as any
+              networkId as NetworkId
             ),
           ]);
 
@@ -400,7 +411,7 @@ const Portfolio = () => {
             // Get the original token config to access nTokenId
             // For multi-market tokens (array), find the one matching the token's poolId
             const originalTokenConfigRaw = getTokenConfig(
-              networkId as any,
+              networkId as NetworkId,
               token.symbol
             );
 
@@ -493,11 +504,11 @@ const Portfolio = () => {
 
   // Transform user.computed.deposits and user.computed.borrows into table format
   const transformedDepositsAndBorrows = useMemo(() => {
-    const transformedDeposits: any[] = [];
-    const transformedBorrows: any[] = [];
+    const transformedDeposits: unknown[] = [];
+    const transformedBorrows: unknown[] = [];
 
     if (user?.computed?.deposits && Array.isArray(user.computed.deposits)) {
-      user.computed.deposits.forEach((item: any) => {
+      user.computed.deposits.forEach((item: Record<string, unknown>) => {
         try {
           const networkId = item.network;
           const marketId =
@@ -510,7 +521,7 @@ const Portfolio = () => {
           }
 
           // Get tokens for this network
-          const tokens = getAllTokensWithDisplayInfo(networkId as any);
+          const tokens = getAllTokensWithDisplayInfo(networkId as NetworkId);
 
           // Find token matching marketId and poolId
           const token = tokens.find(
@@ -673,7 +684,7 @@ const Portfolio = () => {
     }
 
     if (user?.computed?.borrows && Array.isArray(user.computed.borrows)) {
-      user.computed.borrows.forEach((item: any) => {
+      user.computed.borrows.forEach((item: Record<string, unknown>) => {
         try {
           const networkId = item.network;
           const marketId =
@@ -686,7 +697,7 @@ const Portfolio = () => {
           }
 
           // Get tokens for this network
-          const tokens = getAllTokensWithDisplayInfo(networkId as any);
+          const tokens = getAllTokensWithDisplayInfo(networkId as NetworkId);
 
           // Find token matching marketId and poolId
           const token = tokens.find(
@@ -868,13 +879,13 @@ const Portfolio = () => {
   // Combine deposits and borrows with accrued interest, grouped by market
   const accruedInterestItems = useMemo(() => {
     // Group by market key: asset + network + poolId
-    const marketMap = new Map<string, any>();
+    const marketMap = new Map<string, unknown>();
 
     // Process deposits with accrued interest
     deposits.forEach((deposit) => {
       const accruedInterest = deposit.accruedInterest || 0;
       if (accruedInterest > 0) {
-        const marketKey = `${deposit.asset}-${(deposit as any).network || "unknown"
+        const marketKey = `${deposit.asset}-${(deposit as ItemWithNetwork).network || "unknown"
           }-${deposit.poolId || "unknown"}`;
         const existing = marketMap.get(marketKey);
 
@@ -887,7 +898,7 @@ const Portfolio = () => {
           marketMap.set(marketKey, {
             asset: deposit.asset,
             icon: deposit.icon,
-            network: (deposit as any).network,
+            network: (deposit as ItemWithNetwork).network,
             poolId: deposit.poolId,
             tokenPrice: deposit.tokenPrice || 1,
             earnedInterest: accruedInterest,
@@ -904,9 +915,9 @@ const Portfolio = () => {
     // Process borrows with accrued interest
     borrows.forEach((borrow) => {
       const accruedInterest =
-        borrow.accruedInterest || (borrow as any).interest || 0;
+        borrow.accruedInterest || (borrow as ItemWithNetwork).interest || 0;
       if (accruedInterest > 0) {
-        const marketKey = `${borrow.asset}-${(borrow as any).network || "unknown"
+        const marketKey = `${borrow.asset}-${(borrow as ItemWithNetwork).network || "unknown"
           }-${borrow.poolId || "unknown"}`;
         const existing = marketMap.get(marketKey);
 
@@ -919,7 +930,7 @@ const Portfolio = () => {
           marketMap.set(marketKey, {
             asset: borrow.asset,
             icon: borrow.icon,
-            network: (borrow as any).network,
+            network: (borrow as ItemWithNetwork).network,
             poolId: borrow.poolId,
             tokenPrice: borrow.tokenPrice || 1,
             earnedInterest: 0,
@@ -1111,7 +1122,7 @@ const Portfolio = () => {
           deposit.poolId
         ) {
           const poolGlobalData = user.globalUserData.find(
-            (item: any) => String(item.appId) === String(deposit.poolId)
+            (item: Record<string, unknown>) => String(item.appId) === String(deposit.poolId)
           );
 
           if (poolGlobalData) {
@@ -1356,7 +1367,7 @@ const Portfolio = () => {
             },
           });
           clearTimeout(timeoutId);
-        } catch (fetchError: any) {
+        } catch (fetchError: unknown) {
           clearTimeout(timeoutId);
 
           // Handle different types of fetch errors
@@ -1403,7 +1414,7 @@ const Portfolio = () => {
           );
         }
 
-        const filtered = allOpportunities.filter((opp: any) => {
+        const filtered = allOpportunities.filter((opp: Record<string, unknown>) => {
           const userMatches =
             opp.user?.toLowerCase() === displayAddress.toLowerCase();
           const effectiveHF = opp.effectiveHF;
@@ -1440,7 +1451,7 @@ const Portfolio = () => {
           positions: filtered,
         });
         setLiquidatablePositions(filtered);
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error(
           "[Portfolio] Error fetching liquidatable positions:",
           error
@@ -1504,7 +1515,7 @@ const Portfolio = () => {
         // Get token config for decimals
         const originalSymbol =
           "originalSymbol" in token
-            ? (token as any).originalSymbol
+            ? (token as ItemWithNetwork).originalSymbol
             : debtSymbol;
         const originalTokenConfigRaw = getTokenConfig(networkId, originalSymbol);
 
@@ -1563,7 +1574,6 @@ const Portfolio = () => {
     };
 
     loadRepayWalletBalance();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repayModalOpen, selectedRepayPosition, activeAccount?.address]);
 
   const lowestAtRiskHealthFactor =
@@ -1599,13 +1609,13 @@ const Portfolio = () => {
 
     const networkLiquidationMargins = Object.entries(
       user.computed.networkValues
-    ).map(([network, values]: [string, any]) => {
+    ).map(([network, values]: [string, unknown]) => {
       const networkCollateral = values.collateral || 0;
       const networkBorrow = values.borrow || 0;
 
       // Find minimum liquidation threshold for markets with deposits in this network
       const networkDeposits = deposits.filter((deposit) => {
-        const depositNetwork = (deposit as any).network;
+        const depositNetwork = (deposit as ItemWithNetwork).network;
         if (!depositNetwork) return false;
         const normalized = depositNetwork.toLowerCase();
         const normalizedNetwork = network.toLowerCase();
@@ -1685,7 +1695,7 @@ const Portfolio = () => {
   }, [borrows]);
 
   // Calculate risk factor for each borrow position
-  const calculatePositionRiskFactor = (borrow: any) => {
+  const calculatePositionRiskFactor = (borrow: Record<string, unknown>) => {
     if (!borrow.value || borrow.value <= 0 || totalCollateral === 0) return 0;
 
     // Risk factor = (borrow value / total collateral) * (1 / health factor)
@@ -1761,7 +1771,7 @@ const Portfolio = () => {
         asset,
         networkToUse,
       });
-      const tokens = getAllTokensWithDisplayInfo(networkToUse as any);
+      const tokens = getAllTokensWithDisplayInfo(networkToUse as NetworkId);
       const token = tokens.find((t) => t.symbol === asset);
 
       console.log("token", token);
@@ -1776,9 +1786,9 @@ const Portfolio = () => {
       // Get the original token config to access tokenStandard
       // Use originalSymbol to look up the config, as asset might be a display symbol
       const originalSymbol =
-        "originalSymbol" in token ? (token as any).originalSymbol : asset;
+        "originalSymbol" in token ? (token as ItemWithNetwork).originalSymbol : asset;
       const originalTokenConfigRaw = getTokenConfig(
-        networkToUse as any,
+        networkToUse as NetworkId,
         originalSymbol
       );
       console.log("originalTokenConfigRaw", { originalTokenConfigRaw, token });
@@ -1800,7 +1810,7 @@ const Portfolio = () => {
 
       // Initialize ARC200Service with clients for the specific network
       const algorandNetwork = getAlgorandNetworkFromNetworkId(
-        networkToUse as any
+        networkToUse as NetworkId
       );
       let clients;
       if (algorandNetwork) {
@@ -2008,6 +2018,7 @@ const Portfolio = () => {
         console.error("Error refreshing wallet balance:", error);
       }
     },
+     
     [activeAccount?.address, currentNetwork]
   );
 
@@ -2191,6 +2202,7 @@ const Portfolio = () => {
         throw error;
       }
     },
+     
     [
       signTransactions,
       activeAccount?.address,
@@ -2317,7 +2329,7 @@ const Portfolio = () => {
       // Refresh markets for all enabled networks
       for (const networkId of enabledNetworks) {
         try {
-          const tokens = getAllTokensWithDisplayInfo(networkId as any);
+          const tokens = getAllTokensWithDisplayInfo(networkId as NetworkId);
 
           // Refresh each market
           for (const token of tokens) {
@@ -2405,6 +2417,7 @@ const Portfolio = () => {
     } finally {
       setIsRefreshingMarkets(false);
     }
+     
   }, [
     isRefreshingMarkets,
     displayAddress,
@@ -2716,7 +2729,7 @@ const Portfolio = () => {
 
       for (const deposit of deposits) {
         try {
-          const networkToUse = ((deposit as any).network ||
+          const networkToUse = ((deposit as ItemWithNetwork).network ||
             currentNetwork) as NetworkId;
           const tokens = getAllTokensWithDisplayInfo(networkToUse);
 
@@ -2790,7 +2803,7 @@ const Portfolio = () => {
 
       for (const borrow of borrows) {
         try {
-          const networkToUse = ((borrow as any).network ||
+          const networkToUse = ((borrow as ItemWithNetwork).network ||
             currentNetwork) as NetworkId;
           const tokens = getAllTokensWithDisplayInfo(networkToUse);
 
@@ -2874,7 +2887,7 @@ const Portfolio = () => {
 
       for (const item of accruedInterestItems) {
         try {
-          const networkToUse = ((item as any).network ||
+          const networkToUse = ((item as ItemWithNetwork).network ||
             currentNetwork) as NetworkId;
           const tokens = getAllTokensWithDisplayInfo(networkToUse);
 
@@ -2955,7 +2968,7 @@ const Portfolio = () => {
 
       for (const asset of atRiskAssets) {
         try {
-          const networkToUse = ((asset as any).network ||
+          const networkToUse = ((asset as ItemWithNetwork).network ||
             currentNetwork) as NetworkId;
           const tokens = getAllTokensWithDisplayInfo(networkToUse);
 
@@ -3055,7 +3068,7 @@ const Portfolio = () => {
         );
         const globalCollateralValue =
           user.globalUserData
-            .map((item: any) => BigInt(item.totalCollateralValue))
+            .map((item: Record<string, unknown>) => BigInt(item.totalCollateralValue as string | number))
             .reduce((acc: bigint, curr: bigint) => acc + curr, BigInt(0)) /
           BigInt(1e12);
         console.log(
@@ -3064,7 +3077,7 @@ const Portfolio = () => {
         );
         const globalBorrowValue =
           user.globalUserData
-            .map((item: any) => BigInt(item.totalBorrowValue))
+            .map((item: Record<string, unknown>) => BigInt(item.totalBorrowValue as string | number))
             .reduce((acc: bigint, curr: bigint) => acc + curr, BigInt(0)) /
           BigInt(1e12);
         console.log("[Portfolio] Global borrow value:", globalBorrowValue);
@@ -3086,7 +3099,7 @@ const Portfolio = () => {
         > = {};
 
         if (user.globalUserData && Array.isArray(user.globalUserData)) {
-          user.globalUserData.forEach((item: any) => {
+          user.globalUserData.forEach((item: Record<string, unknown>) => {
             const network = item.network || "unknown";
             const collateralValue = Number(
               BigInt(item.totalCollateralValue) / BigInt(1e12)
@@ -3111,7 +3124,7 @@ const Portfolio = () => {
           const deposits = [];
           const borrows = [];
           if (user.userData && Array.isArray(user.userData)) {
-            user.userData.forEach((item: any) => {
+            user.userData.forEach((item: Record<string, unknown>) => {
               if (BigInt(item.scaledDeposits) > BigInt(0)) deposits.push(item);
               if (BigInt(item.scaledBorrows) > BigInt(0)) borrows.push(item);
             });
@@ -3155,12 +3168,12 @@ const Portfolio = () => {
 
       try {
         const enabledNetworks = getEnabledNetworks();
-        const allMarketData: any[] = [];
+        const allMarketData: unknown[] = [];
 
         // Fetch market data for each enabled network
         for (const networkId of enabledNetworks) {
           try {
-            const markets = await fetchAllMarkets(networkId as any);
+            const markets = await fetchAllMarkets(networkId as NetworkId);
             allMarketData.push(...markets);
           } catch (error) {
             console.error(
@@ -3408,7 +3421,7 @@ const Portfolio = () => {
 
     try {
       // Use the asset's network if provided, otherwise fall back to currentNetwork
-      const networkToUse = (networkId || currentNetwork) as any;
+      const networkToUse = (networkId || currentNetwork) as NetworkId;
 
       // Fetch user global data before opening modal (only if wallet is connected)
       if (activeAccount?.address) {
@@ -3479,7 +3492,7 @@ const Portfolio = () => {
 
     try {
       // Use the asset's network if provided, otherwise fall back to currentNetwork
-      const networkToUse = (networkId || currentNetwork) as any;
+      const networkToUse = (networkId || currentNetwork) as NetworkId;
 
       // Fetch user global data from contract before opening modal (for accurate health factor)
       if (activeAccount?.address) {
@@ -3552,7 +3565,7 @@ const Portfolio = () => {
       let debtMarket = marketData.find((m) => {
         const matchesSymbol = m.symbol === debtSymbol;
         const matchesNetwork =
-          (m as any).network === networkId ||
+          (m as ItemWithNetwork).network === networkId ||
           (networkId && m.network === networkId);
         const matchesPool =
           selectedLiquidationPosition.debtMarketId &&
@@ -3566,7 +3579,7 @@ const Portfolio = () => {
         debtMarket = marketData.find((m) => {
           const matchesSymbol = m.symbol === debtSymbol;
           const matchesNetwork =
-            (m as any).network === networkId ||
+            (m as ItemWithNetwork).network === networkId ||
             (networkId && m.network === networkId);
           return matchesSymbol && matchesNetwork;
         });
@@ -3586,7 +3599,7 @@ const Portfolio = () => {
             symbol: m.symbol,
             poolId: m.poolId,
             appId: m.appId,
-            network: (m as any).network,
+            network: (m as ItemWithNetwork).network,
           })),
         });
         throw new Error(
@@ -3598,7 +3611,7 @@ const Portfolio = () => {
         symbol: debtMarket.symbol,
         poolId: debtMarket.poolId,
         appId: debtMarket.appId,
-        network: (debtMarket as any).network,
+        network: (debtMarket as ItemWithNetwork).network,
       });
 
       // Get token configs - need to find tokens matching the specific markets
@@ -3785,7 +3798,7 @@ const Portfolio = () => {
       const collateralMarket = marketData.find((m) => {
         const matchesSymbol = m.symbol === collateralSymbol;
         const matchesNetwork =
-          (m as any).network === networkId ||
+          (m as ItemWithNetwork).network === networkId ||
           (networkId && m.network === networkId);
         const matchesPool =
           selectedLiquidationPosition.collateralMarketId &&
@@ -3801,7 +3814,7 @@ const Portfolio = () => {
         const collateralMarketFallback = marketData.find((m) => {
           const matchesSymbol = m.symbol === collateralSymbol;
           const matchesNetwork =
-            (m as any).network === networkId ||
+            (m as ItemWithNetwork).network === networkId ||
             (networkId && m.network === networkId);
           return matchesSymbol && matchesNetwork;
         });
@@ -3884,8 +3897,8 @@ const Portfolio = () => {
         userAddress,
         activeAccount.address,
         networkId,
-        undefined as any,
-        undefined as any
+        undefined,
+        undefined
       );
 
       if (!result.success) {
@@ -4446,7 +4459,7 @@ const Portfolio = () => {
                   if (selectedNetworkFilter === "all") {
                     // Show allocation by network
                     return Object.entries(user.computed.networkValues)
-                      .map(([network, values]: [string, any]) => {
+                      .map(([network, values]: [string, unknown]) => {
                         const networkDisplayName = network
                           .split("-")
                           .map(
@@ -4629,13 +4642,13 @@ const Portfolio = () => {
                         // Calculate liquidation margins for all networks and find the lowest
                         const networkLiquidationMargins = Object.entries(
                           user?.computed?.networkValues || {}
-                        ).map(([network, values]: [string, any]) => {
+                        ).map(([network, values]: [string, unknown]) => {
                           const networkCollateral = values.collateral || 0;
                           const networkBorrow = values.borrow || 0;
 
                           // Find minimum liquidation threshold for markets with deposits in this network
                           const networkDeposits = deposits.filter((deposit) => {
-                            const depositNetwork = (deposit as any).network;
+                            const depositNetwork = (deposit as ItemWithNetwork).network;
                             if (!depositNetwork) return false;
                             const normalized = depositNetwork.toLowerCase();
                             const normalizedNetwork = network.toLowerCase();
@@ -4892,7 +4905,7 @@ const Portfolio = () => {
               {(() => {
                 const filteredNetworks = Object.entries(
                   user.computed.networkValues
-                ).filter(([network, values]: [string, any]) => {
+                ).filter(([network, values]: [string, unknown]) => {
                   // Filter by network type
                   if (selectedNetworkFilter !== "all") {
                     const normalizedNetwork = network.toLowerCase();
@@ -4919,13 +4932,13 @@ const Portfolio = () => {
 
                 // Calculate liquidation margins for all networks and find the lowest
                 const networkLiquidationMargins = filteredNetworks.map(
-                  ([network, values]: [string, any]) => {
+                  ([network, values]: [string, unknown]) => {
                     const networkCollateral = values.collateral || 0;
                     const networkBorrow = values.borrow || 0;
 
                     // Find minimum liquidation threshold for markets with deposits in this network
                     const networkDeposits = deposits.filter((deposit) => {
-                      const depositNetwork = (deposit as any).network;
+                      const depositNetwork = (deposit as ItemWithNetwork).network;
                       if (!depositNetwork) return false;
                       const normalized = depositNetwork.toLowerCase();
                       const normalizedNetwork = network.toLowerCase();
@@ -4994,7 +5007,7 @@ const Portfolio = () => {
                 return (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {filteredNetworks.map(
-                      ([network, values]: [string, any]) => {
+                      ([network, values]: [string, unknown]) => {
                         const networkDisplayName = network
                           .split("-")
                           .map(
@@ -5019,7 +5032,7 @@ const Portfolio = () => {
                         // Calculate liquidation margin for this network
                         // Find minimum liquidation threshold for markets with deposits in this network
                         const networkDeposits = deposits.filter((deposit) => {
-                          const depositNetwork = (deposit as any).network;
+                          const depositNetwork = (deposit as ItemWithNetwork).network;
                           if (!depositNetwork) return false;
                           const normalized = depositNetwork.toLowerCase();
                           const normalizedNetwork = network.toLowerCase();
@@ -5227,7 +5240,7 @@ const Portfolio = () => {
                       const debtMarket = marketData.find((m) => {
                         const matchesSymbol = m.symbol === debtSymbol;
                         const matchesNetwork =
-                          (m as any).network === networkId ||
+                          (m as ItemWithNetwork).network === networkId ||
                           (networkId && m.network === networkId);
                         const matchesPool =
                           debtMarketId &&
@@ -5239,7 +5252,7 @@ const Portfolio = () => {
                       const collateralMarket = marketData.find((m) => {
                         const matchesSymbol = m.symbol === collateralSymbol;
                         const matchesNetwork =
-                          (m as any).network === networkId ||
+                          (m as ItemWithNetwork).network === networkId ||
                           (networkId && m.network === networkId);
                         const matchesPool =
                           collateralMarketId &&
@@ -5270,7 +5283,7 @@ const Portfolio = () => {
                           symbol: m.symbol,
                           poolId: m.poolId,
                           appId: m.appId,
-                          network: (m as any).network,
+                          network: (m as ItemWithNetwork).network,
                           liquidationBonus: m.liquidationBonus,
                           marketInfo: m.marketInfo
                             ? {
@@ -5673,7 +5686,7 @@ const Portfolio = () => {
                             }
                             if (suppliedAssetsNetworkFilter === "all")
                               return true;
-                            const depositNetwork = (deposit as any).network;
+                            const depositNetwork = (deposit as ItemWithNetwork).network;
                             if (depositNetwork) {
                               const normalizedNetwork =
                                 depositNetwork.toLowerCase();
@@ -5693,7 +5706,7 @@ const Portfolio = () => {
                               return true;
                             }
                             const depositNetworkForMarket =
-                              (deposit as any).network || currentNetwork;
+                              (deposit as ItemWithNetwork).network || currentNetwork;
                             const depositMarketLabel = getMarketLabel(
                               depositNetworkForMarket,
                               deposit.poolId
@@ -5794,17 +5807,17 @@ const Portfolio = () => {
                                   balance={deposit.balance}
                                   apy={deposit.apy}
                                   accruedInterest={
-                                    (deposit as any).accruedInterest
+                                    (deposit as ItemWithNetwork).accruedInterest
                                   }
                                   accruedInterestValue={
-                                    (deposit as any).accruedInterestValue
+                                    (deposit as ItemWithNetwork).accruedInterestValue
                                   }
                                   borrowingPower={
                                     deposit.value * marketCollateralFactor
                                   }
                                   collateralFactor={marketCollateralFactor}
                                   liquidationFactor={marketLiquidationThreshold}
-                                  network={(deposit as any).network}
+                                  network={(deposit as ItemWithNetwork).network}
                                   poolId={deposit.poolId}
                                   onDepositClick={
                                     !isViewOnly && !market?.isPaused
@@ -5812,7 +5825,7 @@ const Portfolio = () => {
                                         handleDepositClick(
                                           deposit.asset,
                                           deposit.poolId,
-                                          (deposit as any).network
+                                          (deposit as ItemWithNetwork).network
                                         )
                                       : undefined
                                   }
@@ -5822,7 +5835,7 @@ const Portfolio = () => {
                                         handleWithdrawClick(
                                           deposit.asset,
                                           deposit.poolId,
-                                          (deposit as any).network
+                                          (deposit as ItemWithNetwork).network
                                         )
                                       : undefined
                                   }
@@ -6268,7 +6281,7 @@ const Portfolio = () => {
                                 }
 
                                 // Get network from deposit (if available) or infer from networkValues
-                                const depositNetwork = (deposit as any).network;
+                                const depositNetwork = (deposit as ItemWithNetwork).network;
                                 if (depositNetwork) {
                                   const normalizedNetwork =
                                     depositNetwork.toLowerCase();
@@ -6288,7 +6301,7 @@ const Portfolio = () => {
                                 // Fallback: try to match by network values
                                 const matchingNetwork = Object.entries(
                                   user.computed.networkValues
-                                ).find(([network, values]: [string, any]) => {
+                                ).find(([network, values]: [string, unknown]) => {
                                   const normalizedNetwork =
                                     network.toLowerCase();
                                   if (
@@ -6314,7 +6327,7 @@ const Portfolio = () => {
                                   return true;
                                 }
                                 const depositNetworkForMarket =
-                                  (deposit as any).network || currentNetwork;
+                                  (deposit as ItemWithNetwork).network || currentNetwork;
                                 const depositMarketLabel = getMarketLabel(
                                   depositNetworkForMarket,
                                   deposit.poolId
@@ -6328,16 +6341,17 @@ const Portfolio = () => {
                                 let comparison = 0;
 
                                 switch (suppliedAssetsSort.column) {
-                                  case "network":
+                                  case "network": {
                                     const networkA = (
-                                      (a as any).network || "Unknown"
+                                      (a as ItemWithNetwork).network || "Unknown"
                                     ).toLowerCase();
                                     const networkB = (
-                                      (b as any).network || "Unknown"
+                                      (b as ItemWithNetwork).network || "Unknown"
                                     ).toLowerCase();
                                     comparison =
                                       networkA.localeCompare(networkB);
                                     break;
+                                  }
                                   case "asset":
                                     comparison = a.asset.localeCompare(b.asset);
                                     break;
@@ -6350,14 +6364,15 @@ const Portfolio = () => {
                                   case "apy":
                                     comparison = a.apy - b.apy;
                                     break;
-                                  case "accruedInterest":
+                                  case "accruedInterest": {
                                     const accruedInterestA =
-                                      (a as any).accruedInterest || 0;
+                                      (a as ItemWithNetwork).accruedInterest || 0;
                                     const accruedInterestB =
-                                      (b as any).accruedInterest || 0;
+                                      (b as ItemWithNetwork).accruedInterest || 0;
                                     comparison =
                                       accruedInterestA - accruedInterestB;
                                     break;
+                                  }
                                   case "collateralFactor": {
                                     // Find markets for each deposit to get their collateral factors
                                     const marketACF = marketData.find(
@@ -6551,7 +6566,7 @@ const Portfolio = () => {
                             return displayDeposits.map((deposit, index) => {
                               // Get market label using the deposit's network, not currentNetwork
                               const depositNetworkForMarket =
-                                (deposit as any).network || currentNetwork;
+                                (deposit as ItemWithNetwork).network || currentNetwork;
                               const depositMarketLabel = getMarketLabel(
                                 depositNetworkForMarket,
                                 deposit.poolId
@@ -6632,7 +6647,7 @@ const Portfolio = () => {
 
                               // Token decimals for Supplied / Accrued Interest (e.g. 8 for goBTC)
                               const depositNetworkForToken =
-                                (deposit as any).network || currentNetwork;
+                                (deposit as ItemWithNetwork).network || currentNetwork;
                               const tokenConfigRawSupplied =
                                 getTokenConfig(
                                   depositNetworkForToken,
@@ -6661,7 +6676,7 @@ const Portfolio = () => {
 
                               // Get network name from deposit or infer
                               let networkName = "Unknown";
-                              const depositNetwork = (deposit as any).network;
+                              const depositNetwork = (deposit as ItemWithNetwork).network;
                               if (depositNetwork) {
                                 // Format network name: "algorand-mainnet" -> "Algorand", "voi-mainnet" -> "VOI"
                                 const normalized = depositNetwork.toLowerCase();
@@ -6686,7 +6701,7 @@ const Portfolio = () => {
                                 // Fallback: try to infer from networkValues
                                 const matchingNetwork = Object.entries(
                                   user.computed.networkValues
-                                ).find(([network, values]: [string, any]) => {
+                                ).find(([network, values]: [string, unknown]) => {
                                   // Simple heuristic: if deposit value is close to network collateral, it might belong there
                                   return (
                                     Math.abs(
@@ -6724,7 +6739,7 @@ const Portfolio = () => {
                                     handleDepositClick(
                                       deposit.asset,
                                       deposit.poolId,
-                                      (deposit as any).network
+                                      (deposit as ItemWithNetwork).network
                                     )
                                   }
                                 >
@@ -6830,7 +6845,7 @@ const Portfolio = () => {
                                                 handleDepositClick(
                                                   deposit.asset,
                                                   deposit.poolId,
-                                                  (deposit as any).network
+                                                  (deposit as ItemWithNetwork).network
                                                 );
                                               }}
                                               title="Supply more of this asset to earn yield and use as collateral"
@@ -6849,7 +6864,7 @@ const Portfolio = () => {
                                               handleWithdrawClick(
                                                 deposit.asset,
                                                 deposit.poolId,
-                                                (deposit as any).network
+                                                (deposit as ItemWithNetwork).network
                                               );
                                             }}
                                             title="Withdraw this asset back to your wallet"
@@ -6902,7 +6917,7 @@ const Portfolio = () => {
                             return true;
                           }
 
-                          const depositNetwork = (deposit as any).network;
+                          const depositNetwork = (deposit as ItemWithNetwork).network;
                           if (depositNetwork) {
                             const normalizedNetwork =
                               depositNetwork.toLowerCase();
@@ -6915,7 +6930,7 @@ const Portfolio = () => {
 
                           const matchingNetwork = Object.entries(
                             user?.computed?.networkValues || {}
-                          ).find(([network, values]: [string, any]) => {
+                          ).find(([network, values]: [string, unknown]) => {
                             const normalizedNetwork = network.toLowerCase();
                             if (suppliedAssetsNetworkFilter === "algorand") {
                               return normalizedNetwork.includes("algorand");
@@ -6933,10 +6948,10 @@ const Portfolio = () => {
                           switch (suppliedAssetsSort.column) {
                             case "network":
                               const networkA = (
-                                (a as any).network || "Unknown"
+                                (a as ItemWithNetwork).network || "Unknown"
                               ).toLowerCase();
                               const networkB = (
-                                (b as any).network || "Unknown"
+                                (b as ItemWithNetwork).network || "Unknown"
                               ).toLowerCase();
                               comparison = networkA.localeCompare(networkB);
                               break;
@@ -6954,9 +6969,9 @@ const Portfolio = () => {
                               break;
                             case "accruedInterest":
                               const accruedInterestA =
-                                (a as any).accruedInterest || 0;
+                                (a as ItemWithNetwork).accruedInterest || 0;
                               const accruedInterestB =
-                                (b as any).accruedInterest || 0;
+                                (b as ItemWithNetwork).accruedInterest || 0;
                               comparison = accruedInterestA - accruedInterestB;
                               break;
                             case "borrowingPower":
@@ -7401,10 +7416,10 @@ const Portfolio = () => {
                                       break;
                                     case "network":
                                       const networkA = (
-                                        (a as any).network || "Unknown"
+                                        (a as ItemWithNetwork).network || "Unknown"
                                       ).toLowerCase();
                                       const networkB = (
-                                        (b as any).network || "Unknown"
+                                        (b as ItemWithNetwork).network || "Unknown"
                                       ).toLowerCase();
                                       comparison =
                                         networkA.localeCompare(networkB);
@@ -7445,7 +7460,7 @@ const Portfolio = () => {
                                     return true;
                                   }
                                   const assetNetwork =
-                                    (asset as any).network || currentNetwork;
+                                    (asset as ItemWithNetwork).network || currentNetwork;
                                   const marketLabel = getMarketLabel(
                                     assetNetwork,
                                     asset.poolId
@@ -7459,7 +7474,7 @@ const Portfolio = () => {
                                 (asset, index) => {
                                   // Get market label using the asset's network, not currentNetwork
                                   const assetNetwork =
-                                    (asset as any).network || currentNetwork;
+                                    (asset as ItemWithNetwork).network || currentNetwork;
                                   const marketLabel = getMarketLabel(
                                     assetNetwork,
                                     asset.poolId
@@ -7499,7 +7514,7 @@ const Portfolio = () => {
                                       </TableCell>
                                       <TableCell className="text-center">
                                         {(() => {
-                                          const depositNetwork = (asset as any)
+                                          const depositNetwork = (asset as ItemWithNetwork)
                                             .network;
                                           if (depositNetwork) {
                                             // Format network name: "algorand-mainnet" -> "Algorand", "voi-mainnet" -> "VOI"
@@ -7777,7 +7792,7 @@ const Portfolio = () => {
                             }
                             if (borrowedAssetsNetworkFilter === "all")
                               return true;
-                            const borrowNetwork = (borrow as any).network;
+                            const borrowNetwork = (borrow as ItemWithNetwork).network;
                             if (borrowNetwork) {
                               const normalizedNetwork =
                                 borrowNetwork.toLowerCase();
@@ -7881,15 +7896,15 @@ const Portfolio = () => {
                                   balance={borrow.balance}
                                   apy={borrow.apy}
                                   accruedInterest={
-                                    (borrow as any).accruedInterest ||
-                                    (borrow as any).interest
+                                    (borrow as ItemWithNetwork).accruedInterest ||
+                                    (borrow as ItemWithNetwork).interest
                                   }
                                   accruedInterestValue={
-                                    (borrow as any).accruedInterestValue
+                                    (borrow as ItemWithNetwork).accruedInterestValue
                                   }
                                   ltvUsage={ltvUsage}
                                   liquidationPrice={liquidationPrice}
-                                  network={(borrow as any).network}
+                                  network={(borrow as ItemWithNetwork).network}
                                   poolId={borrow.poolId}
                                   onDepositClick={
                                     !isViewOnly && !market?.isPaused
@@ -7897,7 +7912,7 @@ const Portfolio = () => {
                                         handleBorrowClick(
                                           borrow.asset,
                                           borrow.poolId,
-                                          (borrow as any).network
+                                          (borrow as ItemWithNetwork).network
                                         )
                                       : undefined
                                   }
@@ -7907,7 +7922,7 @@ const Portfolio = () => {
                                         handleRepayClick(
                                           borrow.asset,
                                           borrow.poolId,
-                                          (borrow as any).network
+                                          (borrow as ItemWithNetwork).network
                                         )
                                       : undefined
                                   }
@@ -8181,7 +8196,7 @@ const Portfolio = () => {
                                   return true;
                                 }
 
-                                const borrowNetwork = (borrow as any).network;
+                                const borrowNetwork = (borrow as ItemWithNetwork).network;
                                 if (borrowNetwork) {
                                   const normalizedNetwork =
                                     borrowNetwork.toLowerCase();
@@ -8200,7 +8215,7 @@ const Portfolio = () => {
 
                                 const matchingNetwork = Object.entries(
                                   user?.computed?.networkValues || {}
-                                ).find(([network, values]: [string, any]) => {
+                                ).find(([network, values]: [string, unknown]) => {
                                   const normalizedNetwork =
                                     network.toLowerCase();
                                   if (
@@ -8225,7 +8240,7 @@ const Portfolio = () => {
                                   return true;
                                 }
                                 const borrowNetwork =
-                                  (borrow as any).network || currentNetwork;
+                                  (borrow as ItemWithNetwork).network || currentNetwork;
                                 const borrowMarketLabel = getMarketLabel(
                                   borrowNetwork,
                                   borrow.poolId
@@ -8241,10 +8256,10 @@ const Portfolio = () => {
                                 switch (borrowedAssetsSort.column) {
                                   case "network":
                                     const networkA = (
-                                      (a as any).network || "Unknown"
+                                      (a as ItemWithNetwork).network || "Unknown"
                                     ).toLowerCase();
                                     const networkB = (
-                                      (b as any).network || "Unknown"
+                                      (b as ItemWithNetwork).network || "Unknown"
                                     ).toLowerCase();
                                     comparison =
                                       networkA.localeCompare(networkB);
@@ -8263,9 +8278,9 @@ const Portfolio = () => {
                                     break;
                                   case "accruedInterest":
                                     const accruedInterestA =
-                                      (a as any).accruedInterest || 0;
+                                      (a as ItemWithNetwork).accruedInterest || 0;
                                     const accruedInterestB =
-                                      (b as any).accruedInterest || 0;
+                                      (b as ItemWithNetwork).accruedInterest || 0;
                                     comparison =
                                       accruedInterestA - accruedInterestB;
                                     break;
@@ -8296,7 +8311,7 @@ const Portfolio = () => {
 
                               // Calculate market label using the borrow's network, not currentNetwork
                               const borrowNetwork =
-                                (borrow as any).network || currentNetwork;
+                                (borrow as ItemWithNetwork).network || currentNetwork;
                               const borrowMarketLabel = getMarketLabel(
                                 borrowNetwork,
                                 borrow.poolId
@@ -8362,7 +8377,7 @@ const Portfolio = () => {
                                 // Fallback: try to infer from networkValues
                                 const matchingNetwork = Object.entries(
                                   user.computed.networkValues
-                                ).find(([network, values]: [string, any]) => {
+                                ).find(([network, values]: [string, unknown]) => {
                                   return (
                                     Math.abs(values.borrow - borrow.value) <
                                     values.borrow * 0.1
@@ -8498,7 +8513,7 @@ const Portfolio = () => {
                                                 handleBorrowClick(
                                                   borrow.asset,
                                                   borrow.poolId,
-                                                  (borrow as any).network
+                                                  (borrow as ItemWithNetwork).network
                                                 );
                                               }}
                                               title="Borrow more of this asset against your collateral"
@@ -8517,7 +8532,7 @@ const Portfolio = () => {
                                               handleRepayClick(
                                                 borrow.asset,
                                                 borrow.poolId,
-                                                (borrow as any).network
+                                                (borrow as ItemWithNetwork).network
                                               );
                                             }}
                                             title="Repay this debt to improve health factor"
@@ -8570,7 +8585,7 @@ const Portfolio = () => {
                             return true;
                           }
 
-                          const borrowNetwork = (borrow as any).network;
+                          const borrowNetwork = (borrow as ItemWithNetwork).network;
                           if (borrowNetwork) {
                             const normalizedNetwork =
                               borrowNetwork.toLowerCase();
@@ -8583,7 +8598,7 @@ const Portfolio = () => {
 
                           const matchingNetwork = Object.entries(
                             user?.computed?.networkValues || {}
-                          ).find(([network, values]: [string, any]) => {
+                          ).find(([network, values]: [string, unknown]) => {
                             const normalizedNetwork = network.toLowerCase();
                             if (selectedNetworkFilter === "algorand") {
                               return normalizedNetwork.includes("algorand");
@@ -8601,10 +8616,10 @@ const Portfolio = () => {
                           switch (borrowedAssetsSort.column) {
                             case "network":
                               const networkA = (
-                                (a as any).network || "Unknown"
+                                (a as ItemWithNetwork).network || "Unknown"
                               ).toLowerCase();
                               const networkB = (
-                                (b as any).network || "Unknown"
+                                (b as ItemWithNetwork).network || "Unknown"
                               ).toLowerCase();
                               comparison = networkA.localeCompare(networkB);
                               break;
@@ -8622,9 +8637,9 @@ const Portfolio = () => {
                               break;
                             case "accruedInterest":
                               const accruedInterestA =
-                                (a as any).accruedInterest || 0;
+                                (a as ItemWithNetwork).accruedInterest || 0;
                               const accruedInterestB =
-                                (b as any).accruedInterest || 0;
+                                (b as ItemWithNetwork).accruedInterest || 0;
                               comparison = accruedInterestA - accruedInterestB;
                               break;
                             default:
@@ -8738,7 +8753,7 @@ const Portfolio = () => {
                               if (!assetMatch) return false;
                             }
                             if (selectedNetworkFilter === "all") return true;
-                            const itemNetwork = (item as any).network;
+                            const itemNetwork = (item as ItemWithNetwork).network;
                             if (itemNetwork) {
                               const normalizedNetwork =
                                 itemNetwork.toLowerCase();
@@ -8795,7 +8810,7 @@ const Portfolio = () => {
                               return (
                                 <AccruedInterestMobileCard
                                   key={`${item.asset}-${item.poolId || "default"
-                                    }-${(item as any).network || "unknown"}`}
+                                    }-${(item as ItemWithNetwork).network || "unknown"}`}
                                   asset={item.asset}
                                   icon={item.icon}
                                   netInterest={item.netInterest || 0}
@@ -8805,7 +8820,7 @@ const Portfolio = () => {
                                   earnedInterestValue={item.earnedInterestValue}
                                   owedInterestValue={item.owedInterestValue}
                                   tokenPrice={item.tokenPrice}
-                                  network={(item as any).network}
+                                  network={(item as ItemWithNetwork).network}
                                   poolId={item.poolId}
                                   onRepayClick={
                                     hasBorrows
@@ -8813,7 +8828,7 @@ const Portfolio = () => {
                                         handleRepayClick(
                                           item.asset,
                                           item.poolId,
-                                          (item as any).network
+                                          (item as ItemWithNetwork).network
                                         )
                                       : undefined
                                   }
@@ -9003,7 +9018,7 @@ const Portfolio = () => {
                                   return true;
                                 }
 
-                                const itemNetwork = (item as any).network;
+                                const itemNetwork = (item as ItemWithNetwork).network;
                                 if (itemNetwork) {
                                   const normalizedNetwork =
                                     itemNetwork.toLowerCase();
@@ -9018,7 +9033,7 @@ const Portfolio = () => {
 
                                 const matchingNetwork = Object.entries(
                                   user?.computed?.networkValues || {}
-                                ).find(([network, values]: [string, any]) => {
+                                ).find(([network, values]: [string, unknown]) => {
                                   const normalizedNetwork =
                                     network.toLowerCase();
                                   if (selectedNetworkFilter === "algorand") {
@@ -9039,10 +9054,10 @@ const Portfolio = () => {
                                 switch (accruedInterestSort.column) {
                                   case "network":
                                     const networkA = (
-                                      (a as any).network || "Unknown"
+                                      (a as ItemWithNetwork).network || "Unknown"
                                     ).toLowerCase();
                                     const networkB = (
-                                      (b as any).network || "Unknown"
+                                      (b as ItemWithNetwork).network || "Unknown"
                                     ).toLowerCase();
                                     comparison =
                                       networkA.localeCompare(networkB);
@@ -9076,7 +9091,7 @@ const Portfolio = () => {
                             return displayItems.map((item, index) => {
                               // Get network name from item or infer
                               let networkName = "Unknown";
-                              const itemNetwork = (item as any).network;
+                              const itemNetwork = (item as ItemWithNetwork).network;
                               if (itemNetwork) {
                                 const normalized = itemNetwork.toLowerCase();
                                 if (normalized.includes("algorand")) {
@@ -9096,7 +9111,7 @@ const Portfolio = () => {
                               } else if (selectedNetworkFilter === "all") {
                                 const matchingNetwork = Object.entries(
                                   user.computed.networkValues
-                                ).find(([network, values]: [string, any]) => {
+                                ).find(([network, values]: [string, unknown]) => {
                                   // Try to match by checking if the net interest value is close to any network's values
                                   const netValue = Math.abs(
                                     item.netInterestValue || 0
@@ -9143,7 +9158,7 @@ const Portfolio = () => {
                                       handleRepayClick(
                                         item.asset,
                                         item.poolId,
-                                        (item as any).network
+                                        (item as ItemWithNetwork).network
                                       );
                                     }
                                   }}
@@ -9223,7 +9238,7 @@ const Portfolio = () => {
                                             handleRepayClick(
                                               item.asset,
                                               item.poolId,
-                                              (item as any).network
+                                              (item as ItemWithNetwork).network
                                             );
                                           }}
                                           title="Repay"
@@ -9271,7 +9286,7 @@ const Portfolio = () => {
                             return true;
                           }
 
-                          const itemNetwork = (item as any).network;
+                          const itemNetwork = (item as ItemWithNetwork).network;
                           if (itemNetwork) {
                             const normalizedNetwork = itemNetwork.toLowerCase();
                             if (selectedNetworkFilter === "algorand") {
@@ -9283,7 +9298,7 @@ const Portfolio = () => {
 
                           const matchingNetwork = Object.entries(
                             user?.computed?.networkValues || {}
-                          ).find(([network, values]: [string, any]) => {
+                          ).find(([network, values]: [string, unknown]) => {
                             const normalizedNetwork = network.toLowerCase();
                             if (selectedNetworkFilter === "algorand") {
                               return normalizedNetwork.includes("algorand");
@@ -9301,10 +9316,10 @@ const Portfolio = () => {
                           switch (accruedInterestSort.column) {
                             case "network":
                               const networkA = (
-                                (a as any).network || "Unknown"
+                                (a as ItemWithNetwork).network || "Unknown"
                               ).toLowerCase();
                               const networkB = (
-                                (b as any).network || "Unknown"
+                                (b as ItemWithNetwork).network || "Unknown"
                               ).toLowerCase();
                               comparison = networkA.localeCompare(networkB);
                               break;
@@ -9600,7 +9615,7 @@ const Portfolio = () => {
 
             // Get the correct algod client for the network
             const algorandNetwork = getAlgorandNetworkFromNetworkId(
-              currentNetwork as any
+              currentNetwork as NetworkId
             );
             if (!algorandNetwork) {
               throw new Error(`Invalid network: ${currentNetwork}`);
@@ -9716,7 +9731,7 @@ const Portfolio = () => {
               let debtMarket = marketData.find((m) => {
                 const matchesSymbol = m.symbol === debtSymbol;
                 const matchesNetwork =
-                  (m as any).network === networkId ||
+                  (m as ItemWithNetwork).network === networkId ||
                   (networkId && m.network === networkId);
                 const matchesPool =
                   selectedLiquidationPosition.debtMarketId &&
@@ -9732,7 +9747,7 @@ const Portfolio = () => {
                 debtMarket = marketData.find((m) => {
                   const matchesSymbol = m.symbol === debtSymbol;
                   const matchesNetwork =
-                    (m as any).network === networkId ||
+                    (m as ItemWithNetwork).network === networkId ||
                     (networkId && m.network === networkId);
                   return matchesSymbol && matchesNetwork;
                 });
@@ -9750,7 +9765,7 @@ const Portfolio = () => {
                   symbol: debtMarket.symbol,
                   poolId: debtMarket.poolId,
                   appId: debtMarket.appId,
-                  network: (debtMarket as any).network,
+                  network: (debtMarket as ItemWithNetwork).network,
                   price: debtMarket.price,
                   marketInfoPrice: debtMarket.marketInfo?.price,
                 });
@@ -9796,7 +9811,7 @@ const Portfolio = () => {
                   availableMarkets: marketData.map((m) => ({
                     symbol: m.symbol,
                     poolId: m.poolId,
-                    network: (m as any).network,
+                    network: (m as ItemWithNetwork).network,
                   })),
                 });
               }
@@ -10112,7 +10127,7 @@ const Portfolio = () => {
                   // Get token config for tokenStandard (try originalSymbol then debtSymbol)
                   const originalSymbol =
                     "originalSymbol" in token
-                      ? (token as any).originalSymbol
+                      ? (token as ItemWithNetwork).originalSymbol
                       : debtSymbol;
                   let originalTokenConfigRaw = getTokenConfig(
                     networkId,
@@ -10166,7 +10181,7 @@ const Portfolio = () => {
 
                   if (!result.success) {
                     throw new Error(
-                      (result as any).error || "Repay failed"
+                      (result as { error?: string }).error || "Repay failed"
                     );
                   }
 
@@ -10178,7 +10193,7 @@ const Portfolio = () => {
 
                   // Sign and send transactions
                   const stxns = await signTransactions(
-                    (result as any).txns.map((txn: string) =>
+                    (result as { txns: string[] }).txns.map((txn: string) =>
                       Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
                     )
                   );

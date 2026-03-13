@@ -46,6 +46,7 @@ import {
   isCurrentNetworkAlgorand,
   getNetworkConfig,
   getEnabledNetworks,
+  type NetworkId,
 } from "@/config";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
 import BigNumber from "bignumber.js";
@@ -62,7 +63,7 @@ import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 
 const MAX_CLAIMS_PER_TX = 3;
 
-function normalizeMarketData(md) {
+function normalizeMarketData(md: Record<string, unknown>) {
   return {
     icon: md.icon || "",
     name: md.asset ?? md.name ?? "Unknown",
@@ -154,7 +155,7 @@ const MarketsTable = () => {
   // Helper function to get clients for reads using the active network
   const getSyncedClientsForReads = async () => {
     const algorandNetwork = getAlgorandNetworkFromNetworkId(
-      currentNetwork as any
+      currentNetwork as NetworkId
     );
     if (!algorandNetwork) {
       throw new Error(
@@ -168,7 +169,7 @@ const MarketsTable = () => {
   // Helper function to get clients for transactions using the active network
   const getSyncedClientsForTransactions = async () => {
     const algorandNetwork = getAlgorandNetworkFromNetworkId(
-      currentNetwork as any
+      currentNetwork as NetworkId
     );
     if (!algorandNetwork) {
       throw new Error(
@@ -595,7 +596,7 @@ const MarketsTable = () => {
 
       // Use originalSymbol to look up the config, as asset might be a display symbol
       const originalSymbol =
-        "originalSymbol" in token ? (token as any).originalSymbol : asset;
+        "originalSymbol" in token ? (token as { originalSymbol?: string }).originalSymbol : asset;
       const tokenConfig = getTokenConfig(currentNetwork, originalSymbol);
 
       if (!tokenConfig) {
@@ -645,7 +646,7 @@ const MarketsTable = () => {
       );
 
       if (!migrateResult.success) {
-        throw new Error((migrateResult as any).error || "Migration failed");
+        throw new Error((migrateResult as { error?: string }).error || "Migration failed");
       }
 
       // Sign and send migration transaction
@@ -832,11 +833,11 @@ const MarketsTable = () => {
     }
   };
 
-  const handleRowClick = (market: any) => {
+  const handleRowClick = (market: Record<string, unknown>) => {
     //setDetailModal({ isOpen: true, asset: market.asset, marketData: market });
   };
 
-  const handleInfoClick = (e: React.MouseEvent, market: any) => {
+  const handleInfoClick = (e: React.MouseEvent, market: Record<string, unknown>) => {
     e.stopPropagation();
     setDetailModal({ isOpen: true, asset: market.asset, marketData: market });
   };
@@ -1042,9 +1043,8 @@ const MarketsTable = () => {
       const allTxns: Uint8Array[] = [];
 
       // Process each claimable reward (limit to 4 at once)
-      let ci: any;
-      let customR: any;
-      let buildN: any[] = [];
+      let ci: InstanceType<typeof CONTRACT> | undefined;
+      const buildN: Record<string, unknown>[] = [];
       let paymentAmount = 28500;
       for (const [rewardId, rewardData] of Object.entries(claimableRewards).slice(0, MAX_CLAIMS_PER_TX)) {
         if (rewardData.amount <= 0) continue;
@@ -1183,13 +1183,14 @@ const MarketsTable = () => {
 
       console.log({ buildN });
 
+      if (!ci) throw new Error("No claimable rewards to process");
       ci.setFee(2000);
       ci.setEnableGroupResourceSharing(true);
       ci.setExtraTxns(buildN);
       if (currentNetwork === "algorand-mainnet") {
         ci.setBeaconId(3209233839);
       }
-      customR = await ci.custom();
+      const customR = await ci.custom();
 
       console.log({ customR });
 
@@ -1352,7 +1353,7 @@ const MarketsTable = () => {
       const networkConfig = getCurrentNetworkConfig();
 
       // Build claim transactions first
-      let claimBuildN: any[] = [];
+      const claimBuildN: Record<string, unknown>[] = [];
       let counter = 0;
 
       // Build claim transactions for each reward (limit to 4 at once)
@@ -1509,7 +1510,7 @@ const MarketsTable = () => {
       };
 
       // Try different payment combinations (same logic as deposit function)
-      let customTx: any;
+      let customTx: { success: boolean; txns?: string[] } = { success: false };
       for (const p of [
         [0, 0],
         [1, 0],
@@ -1552,7 +1553,7 @@ const MarketsTable = () => {
               Number(voiToken.underlyingContractId),
               bigAmount
             )
-          ).obj as any;
+          ).obj as Record<string, unknown>;
           depositBuildN.push({
             ...txnO,
             note: new TextEncoder().encode("lending deposit"),
@@ -1620,15 +1621,16 @@ const MarketsTable = () => {
       const decodedStxns = signedTxns.map((txn: Uint8Array) => {
         return algosdk.decodeSignedTransaction(txn);
       });
-      const poolTxnID = decodedStxns
+      type DecodedAppTxn = { txn: { type: string; applicationCall?: { appIndex: number }; txID(): string } };
+      const poolTxn = decodedStxns
         .reverse()
         .find(
-          (txn: any) =>
-            txn.txn.type === "appl" &&
-            Number(txn.txn.applicationCall.appIndex) ===
-            parseInt(voiToken.poolId || "")
-        )
-        ?.txn.txID();
+          (txn): txn is DecodedAppTxn =>
+            (txn as DecodedAppTxn).txn?.type === "appl" &&
+            typeof (txn as DecodedAppTxn).txn?.applicationCall?.appIndex === "number" &&
+            Number((txn as DecodedAppTxn).txn.applicationCall!.appIndex) === parseInt(voiToken.poolId || "")
+        );
+      const poolTxnID = poolTxn?.txn?.txID?.();
       if (poolTxnID) {
         await new Promise((resolve) => setTimeout(resolve, 5000));
         // Retry until metadata update succeeds
@@ -1794,7 +1796,7 @@ const MarketsTable = () => {
       // Get the original token config to access tokenStandard
       // Use originalSymbol to look up the config, as asset might be a display symbol
       const originalSymbol =
-        "originalSymbol" in token ? (token as any).originalSymbol : asset;
+        "originalSymbol" in token ? (token as { originalSymbol?: string }).originalSymbol : asset;
       const tokenConfigRaw = getTokenConfig(currentNetwork, originalSymbol);
       if (!tokenConfigRaw) {
         console.error(

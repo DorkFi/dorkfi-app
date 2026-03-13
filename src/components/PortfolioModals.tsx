@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- TODO: type modal state and API responses */
 import { useEffect, useRef, useState, useCallback } from "react";
 import DepositModal from "./DepositModal";
 import WithdrawModal from "./WithdrawModal";

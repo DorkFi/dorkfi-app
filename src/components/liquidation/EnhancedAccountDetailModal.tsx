@@ -69,7 +69,7 @@ const getConfigNetworkIdFromWalletNetworkId = (
 const getTokenConfig = async (networkId: NetworkId, tokenSymbol: string) => {
   const tokens = getAllTokensWithDisplayInfo(networkId);
 
-  let token = tokens.find(
+  const token = tokens.find(
     (t) => t.symbol === tokenSymbol || t.originalSymbol === tokenSymbol
   );
   if (!token) {

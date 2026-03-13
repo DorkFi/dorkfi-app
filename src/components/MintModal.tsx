@@ -256,7 +256,7 @@ const MintModal = ({
 
     try {
       // Use the asset's network if provided, otherwise fall back to currentNetwork
-      const networkToUse = (network || currentNetwork) as any;
+      const networkToUse = (network || currentNetwork) as string;
       const tokens = getAllTokensWithDisplayInfo(networkToUse);
       // If poolId is provided, find the token that matches both symbol and poolId
       // Otherwise, fall back to finding by symbol only (for backward compatibility)
@@ -404,7 +404,9 @@ const MintModal = ({
         const decodedStxns = stxns.map((txn: Uint8Array) => {
           return algosdk.decodeSignedTransaction(txn);
         });
-        const poolTxnID = decodedStxns.reverse().find((txn: any) => txn.txn.type === "appl" && Number(txn.txn.applicationCall.appIndex) === parseInt(token.poolId))?.txn.txID();
+        type DecodedAppTxn = { txn: { type: string; applicationCall?: { appIndex: number }; txID(): string } };
+        const poolTxn = decodedStxns.reverse().find((txn): txn is DecodedAppTxn => (txn as DecodedAppTxn).txn?.type === "appl" && typeof (txn as DecodedAppTxn).txn?.applicationCall?.appIndex === "number" && Number((txn as DecodedAppTxn).txn.applicationCall!.appIndex) === parseInt(token.poolId));
+        const poolTxnID = poolTxn?.txn?.txID?.();
         if (poolTxnID) {
           await new Promise((resolve) => setTimeout(resolve, 5000));
           // Retry until metadata update succeeds
@@ -459,9 +461,9 @@ const MintModal = ({
           "error" in result ? result.error : "Transaction failed";
         throw new Error(errorMsg || "Minting failed");
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Minting error:", err);
-      setError(err.message || "An error occurred during minting");
+      setError(err instanceof Error ? err.message : "An error occurred during minting");
     } finally {
       setIsLoading(false);
     }

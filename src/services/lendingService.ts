@@ -4,7 +4,7 @@
  * This service handles interactions with the lending protocol,
  * including fetching market information, user positions, and protocol statistics.
  */
-
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import {
   getCurrentNetworkConfig,
   getNetworkConfig,
@@ -156,23 +156,23 @@ export interface ProtocolStats {
 
 export interface Market {
   paused: boolean;
-  maxTotalDeposits: BigInt;
-  maxTotalBorrows: BigInt;
-  liquidationBonus: BigInt;
-  collateralFactor: BigInt;
-  liquidationThreshold: BigInt;
-  reserveFactor: BigInt;
-  borrowRate: BigInt;
-  slope: BigInt;
-  totalScaledDeposits: BigInt;
-  totalScaledBorrows: BigInt;
-  depositIndex: BigInt;
-  borrowIndex: BigInt;
-  lastUpdateTime: BigInt;
-  reserves: BigInt;
-  price: BigInt;
-  ntokenId: BigInt;
-  closeFactor: BigInt;
+  maxTotalDeposits: bigint;
+  maxTotalBorrows: bigint;
+  liquidationBonus: bigint;
+  collateralFactor: bigint;
+  liquidationThreshold: bigint;
+  reserveFactor: bigint;
+  borrowRate: bigint;
+  slope: bigint;
+  totalScaledDeposits: bigint;
+  totalScaledBorrows: bigint;
+  depositIndex: bigint;
+  borrowIndex: bigint;
+  lastUpdateTime: bigint;
+  reserves: bigint;
+  price: bigint;
+  ntokenId: bigint;
+  closeFactor: bigint;
 }
 
 /**
@@ -225,12 +225,12 @@ export const decodeMarket = (market: RawMarket): Market => {
 };
 
 interface User {
-  scaledDeposits: BigInt;
-  scaledBorrows: BigInt;
-  depositIndex: BigInt;
-  borrowIndex: BigInt;
-  lastUpdateTime: BigInt;
-  lastPrice: BigInt;
+  scaledDeposits: bigint;
+  scaledBorrows: bigint;
+  depositIndex: bigint;
+  borrowIndex: bigint;
+  lastUpdateTime: bigint;
+  lastPrice: bigint;
 }
 
 export const decodeUser = (user: any[]) => {
@@ -2866,8 +2866,6 @@ export const withdraw = async (
 
       console.log("builder", { builder });
 
-      let customTx: any;
-
       const buildN = [];
 
       // Withdraw from lending pool
@@ -2931,7 +2929,7 @@ export const withdraw = async (
         ci.setBeaconId(3209233839); // TODO move this to ulujs
       }
 
-      customTx = await ci.custom();
+      const customTx = await ci.custom();
 
       console.log("withdraw:customTx", { customTx });
 
