@@ -1429,13 +1429,25 @@ const PortfolioModals = ({
             mode="deposit"
             availableAssets={
               deposits.length > 0
-                ? deposits.map((d) => ({
-                    asset: d.asset,
-                    icon: d.icon,
-                    value: d.value,
-                    poolId: d.poolId,
-                    network: (d as { network?: string }).network,
-                  }))
+                ? deposits.map((d) => {
+                    const network = (d as { network?: string }).network;
+                    const walletKey = network
+                      ? `${network}-${d.asset}`
+                      : d.asset;
+                    const walletBalanceForAsset =
+                      walletBalances[walletKey]?.balance ??
+                      walletBalances[d.asset]?.balance ??
+                      0;
+
+                    return {
+                      asset: d.asset,
+                      icon: d.icon,
+                      // Show wallet balance available to deposit (token units)
+                      value: walletBalanceForAsset,
+                      poolId: d.poolId,
+                      network,
+                    };
+                  })
                 : undefined
             }
             onSelectAsset={onSelectDepositAsset}
@@ -1461,6 +1473,14 @@ const PortfolioModals = ({
                   walletBalances[depositModal.asset]?.balanceUSD ||
                   0
                 : walletBalances[depositModal.asset]?.balanceUSD || 0
+            }
+            walletBalanceLastUpdated={
+              depositModal.network
+                ? walletBalances[
+                    `${depositModal.network}-${depositModal.asset}`
+                  ]?.lastUpdated ||
+                  walletBalances[depositModal.asset]?.lastUpdated
+                : walletBalances[depositModal.asset]?.lastUpdated
             }
             onTransactionSuccess={async () => {
               // Refresh wallet balance immediately after successful transaction

@@ -96,6 +96,7 @@ interface SupplyBorrowModalProps {
     network?: string;
   }[];
   onSelectAsset?: (asset: string, poolId?: string, network?: string) => void;
+  walletBalanceLastUpdated?: number;
 }
 
 const SupplyBorrowModal = ({
@@ -114,6 +115,7 @@ const SupplyBorrowModal = ({
   onTransactionSuccess,
   availableAssets,
   onSelectAsset,
+  walletBalanceLastUpdated,
 }: SupplyBorrowModalProps) => {
   const [amount, setAmount] = useState("");
   const [fiatValue, setFiatValue] = useState(0);
@@ -986,6 +988,7 @@ const SupplyBorrowModal = ({
                 isLoadingMaxBorrow={isLoadingMaxBorrow}
                 maxBorrowError={maxBorrowError}
                 network={networkToUse}
+                walletBalanceLastUpdated={walletBalanceLastUpdated}
               />
 
               <SupplyBorrowStats

@@ -200,7 +200,7 @@ const Portfolio = () => {
   );
   const [dataError, setDataError] = useState<string | null>(null);
   const [walletBalances, setWalletBalances] = useState<
-    Record<string, { balance: number; balanceUSD: number }>
+    Record<string, { balance: number; balanceUSD: number; lastUpdated?: number }>
   >({});
   const [isLoadingWalletBalance, setIsLoadingWalletBalance] = useState(false);
   const [userBorrowBalance, setUserBorrowBalance] = useState<number>(0);
@@ -1739,14 +1739,14 @@ const Portfolio = () => {
     doFetch?: boolean
   ) => {
     if (!displayAddress) {
-      return { balance: 0, balanceUSD: 0 };
+      return { balance: 0, balanceUSD: 0, lastUpdated: Date.now() };
     }
 
     // Use provided network or fallback to current network
     const networkToUse = networkId || currentNetwork;
 
     if (!networkToUse) {
-      return { balance: 0, balanceUSD: 0 };
+      return { balance: 0, balanceUSD: 0, lastUpdated: Date.now() };
     }
 
     // Check if we already have this balance cached (with network-specific key)
@@ -1780,7 +1780,7 @@ const Portfolio = () => {
         console.error(
           `Token ${asset} not found in network config for network: ${networkToUse}`
         );
-        return { balance: 0, balanceUSD: 0 };
+        return { balance: 0, balanceUSD: 0, lastUpdated: Date.now() };
       }
 
       // Get the original token config to access tokenStandard
@@ -1796,7 +1796,7 @@ const Portfolio = () => {
         console.error(
           `Original token config not found for ${asset} (originalSymbol: ${originalSymbol})`
         );
-        return { balance: 0, balanceUSD: 0 };
+        return { balance: 0, balanceUSD: 0, lastUpdated: Date.now() };
       }
 
       // Handle array of token configs (multiple markets)
@@ -1976,6 +1976,7 @@ const Portfolio = () => {
       const balanceData = {
         balance,
         balanceUSD,
+        lastUpdated: Date.now(),
       };
 
       setWalletBalances((prev) => ({
@@ -1995,7 +1996,7 @@ const Portfolio = () => {
       return balanceData;
     } catch (error) {
       console.error("Error fetching wallet balance:", error);
-      return { balance: 0, balanceUSD: 0 };
+      return { balance: 0, balanceUSD: 0, lastUpdated: Date.now() };
     }
   };
 
@@ -3388,6 +3389,35 @@ const Portfolio = () => {
         balance: balanceResult,
       });
 
+      // In the background, prefetch wallet balances for other deposit assets
+      if (deposits.length > 0) {
+        const otherDeposits = deposits.filter(
+          (d) => d.asset !== asset || d.poolId !== poolId
+        );
+        if (otherDeposits.length > 0) {
+          Promise.all(
+            otherDeposits.map((d) =>
+              fetchWalletBalance(
+                d.asset,
+                (d as ItemWithNetwork).network || networkId,
+                true
+              ).catch((error) =>
+                console.error(
+                  "[Portfolio] Error prefetching wallet balance for deposit asset",
+                  d.asset,
+                  error
+                )
+              )
+            )
+          ).catch((error) =>
+            console.error(
+              "[Portfolio] Error in prefetch wallet balances Promise.all",
+              error
+            )
+          );
+        }
+      }
+
       // Open modal after balance is fetched
       setDepositModal({ isOpen: true, asset, poolId, network: networkId });
     } catch (error) {
@@ -3522,26 +3552,21 @@ const Portfolio = () => {
   };
 
   const handleAddCollateral = () => {
+    // Reuse handleDepositClick so we always fetch wallet balances
     if (deposits.length > 0) {
       const largest = deposits.reduce((prev, cur) =>
         (cur.value > prev.value ? cur : prev) as typeof prev
       );
-      setDepositModal({
-        isOpen: true,
-        asset: largest.asset,
-        poolId: largest.poolId,
-        network: (largest as ItemWithNetwork).network,
-      });
+      handleDepositClick(
+        largest.asset,
+        largest.poolId,
+        (largest as ItemWithNetwork).network
+      );
     } else if (marketData.length > 0) {
       const m = marketData[0] as { symbol?: string; poolId?: string };
-      setDepositModal({
-        isOpen: true,
-        asset: m.symbol ?? "VOI",
-        poolId: m.poolId,
-        network: currentNetwork,
-      });
+      handleDepositClick(m.symbol ?? "VOI", m.poolId, currentNetwork);
     } else {
-      setDepositModal({ isOpen: true, asset: "VOI", network: currentNetwork });
+      handleDepositClick("VOI", undefined, currentNetwork);
     }
   };
 
