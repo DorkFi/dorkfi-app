@@ -9,12 +9,16 @@ interface HealthFactorActionsProps {
   healthFactor: number | null;
   onAddCollateral?: () => void;
   onBuyVoi?: () => void;
+  onRepayDebt?: () => void;
+  totalBorrowed?: number;
 }
 
 const HealthFactorActions = ({
   healthFactor,
   onAddCollateral,
   onBuyVoi,
+  onRepayDebt,
+  totalBorrowed = 0,
 }: HealthFactorActionsProps) => {
   const getRiskLevel = (hf: number | null) => {
     if (hf === null)
@@ -109,45 +113,46 @@ const HealthFactorActions = ({
         </div>
       </div>
 
-      {/* Action Buttons with Enhanced Styling */}
-      <div className="space-y-3 pt-2">
-        {/*
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              onClick={onAddCollateral}
-              className={`w-full font-semibold py-3 transition-all duration-300 ${
-                isHighRisk
-                  ? "bg-red-500 hover:bg-red-600 text-white shadow-lg hover:shadow-xl"
-                  : "bg-ocean-teal hover:bg-ocean-teal/90 text-white"
-              }`}
-            >
-              {isHighRisk ? "🚨 Add Collateral (Urgent)" : "Add Collateral"}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent className="max-w-xs">
-            <p>
-              Deposit more assets to increase your collateral, improve your
-              health factor, and gain more borrowing capacity. Recommended when
-              health factor is low.
-            </p>
-          </TooltipContent>
-        </Tooltip>*/}
-
-        {/*<Tooltip>
-          <TooltipTrigger asChild>
-            <Button 
-              onClick={onBuyVoi}
-              variant="outline"
-              className="w-full border-whale-gold text-whale-gold hover:bg-whale-gold hover:text-black font-semibold py-3 transition-all duration-300"
-            >
-              Buy VOI
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent className="max-w-xs">
-            <p>Purchase VOI tokens to use as collateral or to repay VOI-denominated debt. Helps strengthen your position in the VOI ecosystem.</p>
-          </TooltipContent>
-        </Tooltip>*/}
+      {/* Primary action buttons - Supply and Repay */}
+      <div className="flex flex-col sm:flex-row gap-2 pt-2">
+        {onAddCollateral && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                onClick={onAddCollateral}
+                className={`flex-1 font-semibold py-3 transition-all duration-300 ${
+                  isHighRisk
+                    ? "bg-red-500 hover:bg-red-600 text-white shadow-lg hover:shadow-xl"
+                    : "bg-ocean-teal hover:bg-ocean-teal/90 text-white"
+                }`}
+              >
+                {isHighRisk ? "Supply (Urgent)" : "Supply"}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-xs">
+              <p>
+                Add assets to earn yield, use as collateral, and improve your
+                health factor. Recommended when health factor is low.
+              </p>
+            </TooltipContent>
+          </Tooltip>
+        )}
+        {totalBorrowed > 0 && onRepayDebt && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant={isHighRisk ? "destructive" : "outline"}
+                onClick={onRepayDebt}
+                className="flex-1 font-semibold py-3 transition-all duration-300 border-slate-300 dark:border-slate-600"
+              >
+                Repay
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-xs">
+              <p>Pay down debt to improve your health factor and reduce liquidation risk.</p>
+            </TooltipContent>
+          </Tooltip>
+        )}
       </div>
 
       {/* Additional Risk Information */}

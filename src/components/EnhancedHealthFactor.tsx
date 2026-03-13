@@ -4,7 +4,9 @@ import UnderwaterScene from './liquidation/UnderwaterScene';
 import PositionStatsGrid from './liquidation/PositionStatsGrid';
 import HealthFactorActions from './liquidation/HealthFactorActions';
 import { Button } from "@/components/ui/button";
-import { RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronUp, RefreshCw, SlidersHorizontal } from "lucide-react";
+import PositionSafetyLevers from "./liquidation/PositionSafetyLevers";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 interface EnhancedHealthFactorProps {
   healthFactor: number | null;
@@ -12,6 +14,8 @@ interface EnhancedHealthFactorProps {
   totalBorrowed: number;
   liquidationMargin: number;
   netLTV: number;
+  weightedCollateralFactor?: number;
+  weightedLiquidationThreshold?: number;
   dorkNftImage?: string;
   underwaterBg: string;
   onAddCollateral?: () => void;
@@ -19,6 +23,7 @@ interface EnhancedHealthFactorProps {
   onEditProfile?: () => void;
   onRefreshMarkets?: () => void;
   isRefreshingMarkets?: boolean;
+  onRepayDebt?: () => void;
 }
 
 const EnhancedHealthFactor = ({
@@ -27,14 +32,18 @@ const EnhancedHealthFactor = ({
   totalBorrowed,
   liquidationMargin,
   netLTV,
+  weightedCollateralFactor = 0.8,
+  weightedLiquidationThreshold = 0.85,
   dorkNftImage,
   underwaterBg,
   onAddCollateral,
   onBuyVoi,
   onEditProfile,
   onRefreshMarkets,
-  isRefreshingMarkets
+  isRefreshingMarkets,
+  onRepayDebt,
 }: EnhancedHealthFactorProps) => {
+  const [safetyOpen, setSafetyOpen] = React.useState(false);
   return (
     <div className="w-full max-w-7xl mx-auto animate-fade-in">
       <Card className="bg-gradient-to-br from-blue-50 via-cyan-50 to-sky-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 border-2 border-gray-200/50 dark:border-ocean-teal/30 overflow-hidden shadow-xl hover:shadow-2xl transition-all duration-500 hover:border-ocean-teal/50">
@@ -110,7 +119,45 @@ const EnhancedHealthFactor = ({
                 healthFactor={healthFactor}
                 onAddCollateral={onAddCollateral}
                 onBuyVoi={onBuyVoi}
+                onRepayDebt={onRepayDebt}
+                totalBorrowed={totalBorrowed}
               />
+
+              <Collapsible open={safetyOpen} onOpenChange={setSafetyOpen}>
+                <Card className="bg-white/60 dark:bg-slate-950/25 border border-gray-200/60 dark:border-ocean-teal/20 shadow-sm">
+                  <CollapsibleTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      className="w-full flex items-center justify-between px-4 py-3 hover:bg-ocean-teal/5"
+                    >
+                      <div className="flex items-center gap-2">
+                        <SlidersHorizontal className="w-4 h-4 text-whale-gold" />
+                        <span className="text-sm font-semibold text-slate-800 dark:text-white">
+                          Safety Levers
+                        </span>
+                      </div>
+                      {safetyOpen ? (
+                        <ChevronUp className="w-4 h-4 text-muted-foreground" />
+                      ) : (
+                        <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                      )}
+                    </Button>
+                  </CollapsibleTrigger>
+
+                  <CollapsibleContent>
+                    <div className="px-4 pb-4">
+                      <PositionSafetyLevers
+                        totalCollateral={totalCollateral}
+                        totalBorrowed={totalBorrowed}
+                        weightedCollateralFactor={weightedCollateralFactor}
+                        weightedLiquidationThreshold={weightedLiquidationThreshold}
+                        onAddCollateral={onAddCollateral}
+                        onRepayDebt={onRepayDebt}
+                      />
+                    </div>
+                  </CollapsibleContent>
+                </Card>
+              </Collapsible>
             </div>
           </div>
         </CardContent>

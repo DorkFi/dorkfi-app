@@ -4355,10 +4355,28 @@ const Portfolio = () => {
                 totalBorrowed={totalBorrowed}
                 liquidationMargin={liquidationMargin}
                 netLTV={netLTV}
+                weightedCollateralFactor={weightedCollateralFactor}
+                weightedLiquidationThreshold={weightedLiquidationThreshold}
                 dorkNftImage={displayAvatar || undefined}
                 underwaterBg="/lovable-uploads/44ebe994-a30e-4eb1-a4a1-776aa2978776.png"
                 onAddCollateral={!isViewOnly ? handleAddCollateral : undefined}
                 onBuyVoi={!isViewOnly ? handleBuyVoi : undefined}
+                onRepayDebt={
+                  !isViewOnly
+                    ? () => {
+                        if (borrows.length > 0) {
+                          const largestBorrow = borrows.reduce((prev, current) =>
+                            current.value > prev.value ? current : prev
+                          );
+                          handleRepayClick(
+                            largestBorrow.asset,
+                            largestBorrow.poolId,
+                            (largestBorrow as any).network
+                          );
+                        }
+                      }
+                    : undefined
+                }
                 onEditProfile={
                   !isViewOnly && !isPeraOrDefly
                     ? () => setNftModalOpen(true)
@@ -4373,9 +4391,19 @@ const Portfolio = () => {
                 onAddCollateral={!isViewOnly ? handleAddCollateral : undefined}
                 onRepayDebt={
                   !isViewOnly
-                    ? () => {
-                      // Find the largest borrow position and open repay modal
-                      if (borrows.length > 0) {
+                    ? (asset?: string, poolId?: string, network?: string) => {
+                      if (asset != null) {
+                        const borrow = borrows.find(
+                          (b) =>
+                            b.asset === asset &&
+                            (poolId != null ? b.poolId === poolId : true)
+                        );
+                        handleRepayClick(
+                          asset,
+                          poolId ?? borrow?.poolId,
+                          network ?? (borrow as any)?.network
+                        );
+                      } else if (borrows.length > 0) {
                         const largestBorrow = borrows.reduce(
                           (prev, current) =>
                             current.value > prev.value ? current : prev
@@ -4435,13 +4463,17 @@ const Portfolio = () => {
                 }
                 onBorrow={
                   !isViewOnly
-                    ? (asset) => {
+                    ? (asset?: string, poolId?: string, network?: string) => {
                       if (asset) {
-                        const borrow = borrows.find((b) => b.asset === asset);
+                        const borrow = borrows.find(
+                          (b) =>
+                            b.asset === asset &&
+                            (poolId != null ? b.poolId === poolId : true)
+                        );
                         handleBorrowClick(
                           asset,
-                          borrow?.poolId,
-                          (borrow as any)?.network
+                          poolId ?? borrow?.poolId,
+                          network ?? (borrow as any)?.network
                         );
                       }
                     }
@@ -4464,6 +4496,8 @@ const Portfolio = () => {
                 borrows={borrows.map((b) => ({
                   asset: b.asset,
                   value: b.value,
+                  poolId: b.poolId,
+                  network: (b as any).network,
                 }))}
                 healthFactor={displayHealthFactor}
               />
@@ -6884,7 +6918,7 @@ const Portfolio = () => {
                                     </span>
                                   </TableCell>
                                   <TableCell>
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-2 flex-wrap">
                                       {!isViewOnly && (
                                         <>
                                           {!market?.isPaused && (
@@ -6899,10 +6933,12 @@ const Portfolio = () => {
                                                   (deposit as any).network
                                                 );
                                               }}
-                                              title="Deposit"
-                                              className="w-8 h-8 p-0 flex items-center justify-center"
+                                              title="Supply more of this asset to earn yield and use as collateral"
+                                              aria-label="Supply"
+                                              className="h-8 px-2 gap-1"
                                             >
-                                              +
+                                              <span className="text-base leading-none">+</span>
+                                              <span className="hidden lg:inline text-xs">Supply</span>
                                             </Button>
                                           )}
                                           <Button
@@ -6916,10 +6952,12 @@ const Portfolio = () => {
                                                 (deposit as any).network
                                               );
                                             }}
-                                            title="Withdraw"
-                                            className="w-8 h-8 p-0 flex items-center justify-center"
+                                            title="Withdraw this asset back to your wallet"
+                                            aria-label="Withdraw"
+                                            className="h-8 px-2 gap-1"
                                           >
-                                            −
+                                            <span className="text-base leading-none">−</span>
+                                            <span className="hidden lg:inline text-xs">Withdraw</span>
                                           </Button>
                                         </>
                                       )}
@@ -6946,7 +6984,8 @@ const Portfolio = () => {
                                             ? "Refresh market data (view-only)"
                                             : "Refresh market data"
                                         }
-                                        className="w-8 h-8 p-0 flex items-center justify-center"
+                                        aria-label="Refresh"
+                                        className="w-8 h-8 p-0 flex items-center justify-center flex-shrink-0"
                                       >
                                         <RefreshCw
                                           className={`w-3 h-3 ${refreshingMarket ===
@@ -6962,10 +7001,10 @@ const Portfolio = () => {
                                     </div>
                                   </TableCell>
                                 </TableRow>
-                              );
-                            });
-                          })()}
-                          {deposits.length === 0 && (
+                            );
+                          });
+                        })()}
+                        {deposits.length === 0 && (
                             <TableRow>
                               <TableCell
                                 colSpan={10}
@@ -8626,7 +8665,7 @@ const Portfolio = () => {
                                     </span>
                                   </TableCell>
                                   <TableCell>
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-2 flex-wrap">
                                       {!isViewOnly && (
                                         <>
                                           {!market?.isPaused && (
@@ -8641,10 +8680,12 @@ const Portfolio = () => {
                                                   (borrow as any).network
                                                 );
                                               }}
-                                              title="Borrow"
-                                              className="w-8 h-8 p-0 flex items-center justify-center"
+                                              title="Borrow more of this asset against your collateral"
+                                              aria-label="Borrow"
+                                              className="h-8 px-2 gap-1"
                                             >
-                                              +
+                                              <span className="text-base leading-none">+</span>
+                                              <span className="hidden lg:inline text-xs">Borrow</span>
                                             </Button>
                                           )}
                                           <Button
@@ -8658,10 +8699,12 @@ const Portfolio = () => {
                                                 (borrow as any).network
                                               );
                                             }}
-                                            title="Repay"
-                                            className="w-8 h-8 p-0 flex items-center justify-center"
+                                            title="Repay this debt to improve health factor"
+                                            aria-label="Repay"
+                                            className="h-8 px-2 gap-1"
                                           >
-                                            −
+                                            <span className="text-base leading-none">−</span>
+                                            <span className="hidden lg:inline text-xs">Repay</span>
                                           </Button>
                                         </>
                                       )}
@@ -8684,7 +8727,8 @@ const Portfolio = () => {
                                           }`
                                         }
                                         title="Refresh market data"
-                                        className="w-8 h-8 p-0 flex items-center justify-center"
+                                        aria-label="Refresh"
+                                        className="w-8 h-8 p-0 flex items-center justify-center flex-shrink-0"
                                       >
                                         <RefreshCw
                                           className={`w-3 h-3 ${refreshingMarket ===
