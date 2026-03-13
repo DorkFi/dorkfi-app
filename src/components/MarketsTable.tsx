@@ -16,7 +16,9 @@ import {
   useOnDemandMarketData,
   SortField,
   SortOrder,
+  type MarketFilter,
 } from "@/hooks/useOnDemandMarketData";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import MarketSearchFilters from "@/components/markets/MarketSearchFilters";
 import MarketPagination from "@/components/markets/MarketPagination";
 import SupplyBorrowModal from "@/components/SupplyBorrowModal";
@@ -90,6 +92,7 @@ const MarketsTable = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [sortField, setSortField] = useState<SortField>("default");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
+  const [marketFilter, setMarketFilter] = useState<MarketFilter>("all");
   const [depositModal, setDepositModal] = useState({
     isOpen: false,
     asset: null,
@@ -410,6 +413,7 @@ const MarketsTable = () => {
     sortOrder,
     pageSize: 10,
     autoLoad: true,
+    marketFilter,
   });
 
   const handleSearchTermChange = (value: string) => {
@@ -2214,6 +2218,27 @@ const MarketsTable = () => {
                 )}
               </div>
             </div>
+            {/* Market filter: All / A / B */}
+            <Tabs
+              value={marketFilter}
+              onValueChange={(v) => {
+                setMarketFilter(v as MarketFilter);
+                setCurrentPage(1);
+              }}
+              className="w-full mt-4"
+            >
+              <TabsList className="grid w-full max-w-md grid-cols-3">
+                <TabsTrigger value="all" className="text-sm">
+                  All Markets
+                </TabsTrigger>
+                <TabsTrigger value="A" className="text-sm">
+                  A Markets
+                </TabsTrigger>
+                <TabsTrigger value="B" className="text-sm">
+                  B Markets
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
           </div>
           {/* Informational guidance - matches Liquidations Queue styles */}
           <section

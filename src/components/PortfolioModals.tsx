@@ -100,6 +100,7 @@ interface PortfolioModalsProps {
   onCloseWithdrawModal: () => void;
   onCloseBorrowModal: () => void;
   onCloseRepayModal: () => void;
+  onSelectWithdrawAsset?: (asset: string, poolId?: string, network?: string) => void;
   onRefreshWalletBalance?: (asset: string, networkId?: string) => void;
   onRefreshMarket?: () => void;
   prefetchWithdrawIndicesRef?: React.MutableRefObject<
@@ -122,6 +123,7 @@ const PortfolioModals = ({
   onCloseWithdrawModal,
   onCloseBorrowModal,
   onCloseRepayModal,
+  onSelectWithdrawAsset,
   onRefreshWalletBalance,
   onRefreshMarket,
   prefetchWithdrawIndicesRef,
@@ -1599,6 +1601,15 @@ const PortfolioModals = ({
               onClose={onCloseWithdrawModal}
               tokenSymbol={withdrawModal.asset}
               tokenIcon={getTokenImagePath(withdrawModal.asset)}
+              availableAssets={deposits.map((d) => ({
+                asset: d.asset,
+                icon: d.icon,
+                value: d.value,
+                poolId: d.poolId,
+                // @ts-expect-error optional network on deposit
+                network: d.network,
+              }))}
+              onSelectAsset={onSelectWithdrawAsset}
               currentlyDeposited={deposit?.balance || 0}
               marketStats={getMarketStatsForDeposit(
                 withdrawModal.asset,

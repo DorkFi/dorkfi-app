@@ -10,7 +10,6 @@ import LiquidationHeroSection from "@/components/liquidation/LiquidationHeroSect
 import LiquidationQueueTable from "@/components/liquidation/LiquidationQueueTable";
 import LiquidationPagination from "@/components/liquidation/LiquidationPagination";
 import HorizontalSummaryCards from "@/components/liquidation/HorizontalSummaryCards";
-import CanvasBubbles from "@/components/CanvasBubbles";
 import DorkFiButton from "@/components/ui/DorkFiButton";
 import { getCurrentNetworkConfig } from "@/config";
 import algorandService, { AlgorandNetwork } from "@/services/algorandService";
@@ -277,11 +276,6 @@ export default function LiquidationMarkets({
 
       {/* Dark Mode Ocean Background */}
       <div className="absolute inset-0 z-0 hidden dark:block dorkfi-dark-bg-with-overlay" />
-
-      {/* Advanced Canvas Bubble System - Dark Mode Only */}
-      <div className="hidden dark:block">
-        <CanvasBubbles />
-      </div>
 
       <Header activeTab={activeTab} onTabChange={onTabChange} />
 

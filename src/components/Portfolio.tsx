@@ -43,7 +43,6 @@ import EnhancedHealthFactor from "./EnhancedHealthFactor";
 import DepositsList from "./DepositsList";
 import BorrowsList from "./BorrowsList";
 import PortfolioModals from "./PortfolioModals";
-import QuickActionsPanel from "./QuickActionsPanel";
 import PortfolioTableMobileCard from "./portfolio/PortfolioTableMobileCard";
 import AccruedInterestMobileCard from "./portfolio/AccruedInterestMobileCard";
 import NFTSelectionModal from "./liquidation/NFTSelectionModal";
@@ -63,8 +62,12 @@ import {
   ArrowDown,
   Search,
   Filter,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -87,7 +90,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Button } from "@/components/ui/button";
+import DorkFiButton from "@/components/ui/DorkFiButton";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import {
@@ -247,6 +250,7 @@ const Portfolio = () => {
     column: string | null;
     direction: "asc" | "desc";
   }>({ column: "value", direction: "desc" });
+  const [networkPortfolioOpen, setNetworkPortfolioOpen] = useState(false);
   const [atRiskAssetsSort, setAtRiskAssetsSort] = useState<{
     column: string | null;
     direction: "asc" | "desc";
@@ -3386,19 +3390,12 @@ const Portfolio = () => {
     ((asset: string, poolId?: string) => Promise<void>) | null
   >(null);
 
-  const handleWithdrawClick = async (
+  const handleWithdrawClick = (
     asset: string,
     poolId?: string,
     networkId?: string
   ) => {
-    // Prefetch indices before opening modal
-    if (prefetchWithdrawIndicesRef.current) {
-      try {
-        await prefetchWithdrawIndicesRef.current(asset, poolId);
-      } catch (error) {
-        console.error("Error prefetching withdraw indices:", error);
-      }
-    }
+    // Open modal immediately; indices and max withdraw load in background when modal opens
     setWithdrawModal({ isOpen: true, asset, poolId, network: networkId });
   };
 
@@ -4279,10 +4276,6 @@ const Portfolio = () => {
               Track Your Health Factor, Monitor Your Positions, and Manage Your
               Portfolio.
             </span>
-            <br className="hidden md:block" />
-            <span className="block md:inline md:whitespace-nowrap sm:hidden">
-              Add collateral or repay if your health factor gets too low.
-            </span>
           </Body>
 
           {/* Data Source Indicator */}
@@ -4377,6 +4370,20 @@ const Portfolio = () => {
                       }
                     : undefined
                 }
+                onWithdraw={
+                  !isViewOnly && deposits.length > 0
+                    ? () => {
+                        const largestDeposit = deposits.reduce((prev, current) =>
+                          current.value > prev.value ? current : prev
+                        );
+                        handleWithdrawClick(
+                          largestDeposit.asset,
+                          largestDeposit.poolId,
+                          (largestDeposit as any).network
+                        );
+                      }
+                    : undefined
+                }
                 onEditProfile={
                   !isViewOnly && !isPeraOrDefly
                     ? () => setNftModalOpen(true)
@@ -4384,122 +4391,6 @@ const Portfolio = () => {
                 }
                 onRefreshMarkets={handleRefreshMarkets}
                 isRefreshingMarkets={isRefreshingMarkets}
-              />
-
-              {/* Quick Actions Panel */}
-              <QuickActionsPanel
-                onAddCollateral={!isViewOnly ? handleAddCollateral : undefined}
-                onRepayDebt={
-                  !isViewOnly
-                    ? (asset?: string, poolId?: string, network?: string) => {
-                      if (asset != null) {
-                        const borrow = borrows.find(
-                          (b) =>
-                            b.asset === asset &&
-                            (poolId != null ? b.poolId === poolId : true)
-                        );
-                        handleRepayClick(
-                          asset,
-                          poolId ?? borrow?.poolId,
-                          network ?? (borrow as any)?.network
-                        );
-                      } else if (borrows.length > 0) {
-                        const largestBorrow = borrows.reduce(
-                          (prev, current) =>
-                            current.value > prev.value ? current : prev
-                        );
-                        handleRepayClick(
-                          largestBorrow.asset,
-                          largestBorrow.poolId,
-                          (largestBorrow as any).network
-                        );
-                      }
-                    }
-                    : undefined
-                }
-                onDeposit={
-                  !isViewOnly
-                    ? (asset, poolId) => {
-                      if (asset) {
-                        const deposit = deposits.find(
-                          (d) =>
-                            d.asset === asset &&
-                            (poolId ? d.poolId === poolId : true)
-                        );
-                        const m = marketData.find(
-                          (mkt) =>
-                            mkt.symbol === asset &&
-                            (deposit?.poolId
-                              ? mkt.poolId === deposit.poolId
-                              : true)
-                        );
-                        if (m?.isPaused) return;
-                        handleDepositClick(
-                          asset,
-                          deposit?.poolId,
-                          (deposit as any)?.network
-                        );
-                      } else {
-                        handleAddCollateral();
-                      }
-                    }
-                    : undefined
-                }
-                onWithdraw={
-                  !isViewOnly
-                    ? (asset) => {
-                      if (asset) {
-                        const deposit = deposits.find(
-                          (d) => d.asset === asset
-                        );
-                        handleWithdrawClick(
-                          asset,
-                          deposit?.poolId,
-                          (deposit as any)?.network
-                        );
-                      }
-                    }
-                    : undefined
-                }
-                onBorrow={
-                  !isViewOnly
-                    ? (asset?: string, poolId?: string, network?: string) => {
-                      if (asset) {
-                        const borrow = borrows.find(
-                          (b) =>
-                            b.asset === asset &&
-                            (poolId != null ? b.poolId === poolId : true)
-                        );
-                        handleBorrowClick(
-                          asset,
-                          poolId ?? borrow?.poolId,
-                          network ?? (borrow as any)?.network
-                        );
-                      }
-                    }
-                    : undefined
-                }
-                totalBorrowed={totalBorrowed}
-                deposits={deposits.map((d) => {
-                  const m = marketData.find(
-                    (mkt) =>
-                      mkt.symbol === d.asset &&
-                      (d.poolId ? mkt.poolId === d.poolId : true)
-                  );
-                  return {
-                    asset: d.asset,
-                    value: d.value,
-                    poolId: d.poolId,
-                    isPaused: m?.isPaused ?? false,
-                  };
-                })}
-                borrows={borrows.map((b) => ({
-                  asset: b.asset,
-                  value: b.value,
-                  poolId: b.poolId,
-                  network: (b as any).network,
-                }))}
-                healthFactor={displayHealthFactor}
               />
             </>
           );
@@ -4509,14 +4400,27 @@ const Portfolio = () => {
       {user?.computed?.networkValues &&
         Object.keys(user.computed.networkValues).length > 0 && (
           <DorkFiCard className="p-6 md:p-8">
-            <div className="mb-6">
-              <H1 className="text-2xl md:text-3xl mb-2">Network Portfolio</H1>
-              <Body className="text-sm text-muted-foreground">
-                View your portfolio breakdown by network. These values sum up to
-                your global portfolio.
-              </Body>
-            </div>
-
+            <Collapsible open={networkPortfolioOpen} onOpenChange={setNetworkPortfolioOpen}>
+              <CollapsibleTrigger asChild>
+                <Button
+                  variant="ghost"
+                  className="w-full flex items-center justify-between p-0 h-auto hover:bg-transparent mb-6"
+                >
+                  <div className="text-left">
+                    <H1 className="text-2xl md:text-3xl mb-2">Network Portfolio</H1>
+                    <Body className="text-sm text-muted-foreground">
+                      View your portfolio breakdown by network. These values sum up to
+                      your global portfolio.
+                    </Body>
+                  </div>
+                  {networkPortfolioOpen ? (
+                    <ChevronUp className="w-5 h-5 shrink-0 text-muted-foreground" />
+                  ) : (
+                    <ChevronDown className="w-5 h-5 shrink-0 text-muted-foreground" />
+                  )}
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
             {/* Network Filter Tabs */}
             <Tabs
               value={selectedNetworkFilter}
@@ -5258,6 +5162,8 @@ const Portfolio = () => {
                 );
               })()}
             </Tabs>
+              </CollapsibleContent>
+            </Collapsible>
           </DorkFiCard>
         )}
 
@@ -5448,7 +5354,10 @@ const Portfolio = () => {
                       };
 
                       return (
-                        <TableRow key={index}>
+                        <TableRow
+                          key={index}
+                          className="transition-all relative card-hover rounded-lg border border-gray-200/30 dark:border-ocean-teal/10 bg-white/50 dark:bg-slate-800/50 hover:border-red-400 hover:shadow-[0_0_16px_4px_rgba(239,68,68,0.15)] hover:z-20"
+                        >
                           <TableCell>
                             <div className="flex items-center gap-2">
                               <img
@@ -5522,7 +5431,7 @@ const Portfolio = () => {
 
                               return (
                                 <div className="flex gap-2">
-                                  <Button
+                                  <DorkFiButton
                                     onClick={() => {
                                       // Open repay modal with position details
                                       setSelectedRepayPosition({
@@ -5537,13 +5446,13 @@ const Portfolio = () => {
                                     }}
                                     variant="secondary"
                                     size="sm"
-                                    className="text-xs"
+                                    className="min-w-0 text-xs"
                                     disabled={!activeAccount?.address}
                                     title="Repay debt on behalf of this user"
                                   >
                                     Repay
-                                  </Button>
-                                  <Button
+                                  </DorkFiButton>
+                                  <DorkFiButton
                                     onClick={() => {
                                       // Open liquidation modal with position details
                                       const pos = {
@@ -5558,9 +5467,9 @@ const Portfolio = () => {
                                       setPartialLiquidationAmountUsd(liquidationAmount ?? 0);
                                       setLiquidationModalOpen(true);
                                     }}
-                                    variant="destructive"
+                                    variant="danger"
                                     size="sm"
-                                    className="text-xs"
+                                    className="min-w-0 text-xs"
                                     disabled={isOwnPosition}
                                     title={
                                       isOwnPosition
@@ -5569,17 +5478,17 @@ const Portfolio = () => {
                                     }
                                   >
                                     Liquidate
-                                  </Button>
-                                  <Button
-                                    variant="outline"
+                                  </DorkFiButton>
+                                  <DorkFiButton
+                                    variant="secondary"
                                     size="sm"
-                                    className="text-xs"
+                                    className="min-w-0 text-xs"
                                     disabled={!activeAccount?.address}
                                     title="Claim rewards or collateral"
                                     onClick={() => handleClaim(position)}
                                   >
                                     Claim
-                                  </Button>
+                                  </DorkFiButton>
                                 </div>
                               );
                             })()}
@@ -5605,12 +5514,12 @@ const Portfolio = () => {
                   <div ref={suppliedAssetsTableRef} className="mb-4">
                     <div className="flex items-center justify-between mb-4">
                       <H1 className="text-xl md:text-2xl">Supplied Assets</H1>
-                      <Button
+                      <DorkFiButton
                         onClick={handleRefreshSuppliedAssets}
                         disabled={refreshingSection === "Supplied Assets"}
-                        variant="outline"
+                        variant="secondary"
                         size="sm"
-                        className="h-8 px-3 text-xs border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="min-w-0"
                         title={
                           isViewOnly
                             ? "Refresh market data (view-only mode)"
@@ -5624,7 +5533,7 @@ const Portfolio = () => {
                             }`}
                         />
                         Refresh
-                      </Button>
+                      </DorkFiButton>
                     </div>
                     {/* Search, Network and Market Filter Tabs - Single row on large screens */}
                     <div className="mb-4 flex flex-col md:flex-row gap-4 items-start md:items-center">
@@ -5642,14 +5551,14 @@ const Portfolio = () => {
                           />
                         </div>
                         {/* Filter Icon Button - Only visible on mobile */}
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          className="md:hidden h-10 w-10"
+                        <DorkFiButton
+                          variant="secondary"
+                          size="sm"
+                          className="md:hidden min-w-0 h-10 w-10 p-0"
                           onClick={() => setSuppliedAssetsFilterModalOpen(true)}
                         >
                           <Filter className="h-4 w-4" />
-                        </Button>
+                        </DorkFiButton>
                       </div>
                       {/* Network and Market Filter Tabs - Hidden on mobile */}
                       <div className="hidden md:flex gap-4 flex-1">
@@ -5917,48 +5826,35 @@ const Portfolio = () => {
                                         )
                                       : undefined
                                   }
-                                  onRefreshClick={() =>
-                                    handleRefreshSingleMarket(
-                                      deposit.asset,
-                                      deposit.poolId,
-                                      (deposit as any).network
-                                    )
-                                  }
-                                  isRefreshing={
-                                    refreshingMarket ===
-                                    `${deposit.asset}-${deposit.poolId || "default"
-                                    }-${(deposit as any).network || currentNetwork
-                                    }`
-                                  }
                                   type="deposit"
                                 />
                               );
                             })}
                             {hasMore && (
-                              <Button
-                                variant="outline"
+                              <DorkFiButton
+                                variant="secondary"
                                 onClick={() =>
                                   setShowAllSuppliedAssets(
                                     !showAllSuppliedAssets
                                   )
                                 }
-                                className="w-full"
+                                className="w-full min-w-0"
                               >
                                 {showAllSuppliedAssets
                                   ? "Show Less"
                                   : "Show More"}
-                              </Button>
+                              </DorkFiButton>
                             )}
                           </>
                         );
                       })()}
                     </div>
                   ) : (
-                    <div className="overflow-x-auto">
-                      <Table>
+                    <div className="w-full min-w-0 overflow-hidden">
+                      <Table className="table-fixed w-full [&_th]:px-2 [&_td]:px-2 [&_th]:py-2 [&_td]:py-2">
                         <TableHeader>
                           <TableRow>
-                            <TableHead>
+                            <TableHead className="w-[11%] min-w-0">
                               <button
                                 onClick={() => {
                                   if (suppliedAssetsSort.column === "asset") {
@@ -5990,7 +5886,7 @@ const Portfolio = () => {
                                 )}
                               </button>
                             </TableHead>
-                            <TableHead>
+                            <TableHead className="hidden lg:table-cell w-[8%] min-w-0">
                               <button
                                 onClick={() => {
                                   if (suppliedAssetsSort.column === "network") {
@@ -6010,7 +5906,7 @@ const Portfolio = () => {
                                 }}
                                 className="flex items-center justify-center gap-1 hover:text-foreground transition-colors w-full"
                               >
-                                Network
+                                Net
                                 {suppliedAssetsSort.column === "network" ? (
                                   suppliedAssetsSort.direction === "asc" ? (
                                     <ArrowUp className="w-3 h-3" />
@@ -6022,10 +5918,10 @@ const Portfolio = () => {
                                 )}
                               </button>
                             </TableHead>
-                            <TableHead className="text-center">
+                            <TableHead className="text-center hidden xl:table-cell w-[7%] min-w-0">
                               Market
                             </TableHead>
-                            <TableHead>
+                            <TableHead className="w-[10%] min-w-0">
                               <button
                                 onClick={() => {
                                   if (
@@ -6059,7 +5955,7 @@ const Portfolio = () => {
                                 )}
                               </button>
                             </TableHead>
-                            <TableHead>
+                            <TableHead className="w-[10%] min-w-0">
                               <button
                                 onClick={() => {
                                   if (suppliedAssetsSort.column === "value") {
@@ -6091,7 +5987,7 @@ const Portfolio = () => {
                                 )}
                               </button>
                             </TableHead>
-                            <TableHead>
+                            <TableHead className="w-[7%] min-w-0">
                               <button
                                 onClick={() => {
                                   if (suppliedAssetsSort.column === "apy") {
@@ -6123,7 +6019,7 @@ const Portfolio = () => {
                                 )}
                               </button>
                             </TableHead>
-                            <TableHead>
+                            <TableHead className="hidden xl:table-cell w-[12%] min-w-0">
                               <div className="flex items-center gap-1">
                                 <button
                                   onClick={() => {
@@ -6179,7 +6075,7 @@ const Portfolio = () => {
                                 </UITooltip>
                               </div>
                             </TableHead>
-                            <TableHead>
+                            <TableHead className="hidden xl:table-cell w-[10%] min-w-0">
                               <div className="flex items-center gap-1">
                                 <button
                                   onClick={() => {
@@ -6233,7 +6129,7 @@ const Portfolio = () => {
                                 </UITooltip>
                               </div>
                             </TableHead>
-                            <TableHead>
+                            <TableHead className="hidden xl:table-cell w-[8%] min-w-0">
                               <div className="flex items-center gap-1">
                                 <button
                                   onClick={() => {
@@ -6290,7 +6186,7 @@ const Portfolio = () => {
                                 </UITooltip>
                               </div>
                             </TableHead>
-                            <TableHead>
+                            <TableHead className="hidden xl:table-cell w-[8%] min-w-0">
                               <div className="flex items-center gap-1">
                                 <button
                                   onClick={() => {
@@ -6347,7 +6243,7 @@ const Portfolio = () => {
                                 </UITooltip>
                               </div>
                             </TableHead>
-                            <TableHead>Actions</TableHead>
+                            <TableHead className="w-[14%] min-w-0">Actions</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -6823,7 +6719,7 @@ const Portfolio = () => {
                               return (
                                 <TableRow
                                   key={index}
-                                  className="cursor-pointer hover:bg-muted/50 transition-colors"
+                                  className="transition-all relative card-hover rounded-lg border border-gray-200/30 dark:border-ocean-teal/10 bg-white/50 dark:bg-slate-800/50 hover:border-teal-400 hover:shadow-[0_0_16px_4px_rgba(13,255,190,0.15)] hover:z-20 cursor-pointer"
                                   onClick={() =>
                                     handleDepositClick(
                                       deposit.asset,
@@ -6832,43 +6728,47 @@ const Portfolio = () => {
                                     )
                                   }
                                 >
-                                  <TableCell>
-                                    <div className="flex items-center gap-2">
+                                  <TableCell className="min-w-0">
+                                    <div className="flex flex-col items-center gap-1 min-w-0">
                                       <img
                                         src={deposit.icon}
                                         alt={deposit.asset}
-                                        className="w-6 h-6 rounded-full"
+                                        className="w-8 h-8 rounded-full shrink-0"
                                       />
-                                      <span className="font-medium">
+                                      <span className="font-medium truncate text-center">
                                         {deposit.asset}
                                       </span>
                                     </div>
                                   </TableCell>
-                                  <TableCell className="font-medium text-center">
+                                  <TableCell className="font-medium text-center hidden lg:table-cell">
                                     {networkName}
                                   </TableCell>
-                                  <TableCell className="text-center">
+                                  <TableCell className="text-center hidden xl:table-cell">
                                     {depositMarketLabel || "-"}
                                   </TableCell>
-                                  <TableCell>
+                                  <TableCell className="whitespace-nowrap">
                                     {formatNumber(deposit.balance, {
                                       minimumFractionDigits: 2,
-                                      maximumFractionDigits:
-                                        suppliedDisplayDecimals,
+                                      maximumFractionDigits: 2,
                                     })}
                                   </TableCell>
-                                  <TableCell>
-                                    {formatCurrency(deposit.value, "USD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  <TableCell className="whitespace-nowrap">
+                                    {formatCurrency(deposit.value, "USD", {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    })}
                                   </TableCell>
-                                  <TableCell>
+                                  <TableCell className="whitespace-nowrap">
                                     <span className="text-green-600 dark:text-green-400">
-                                      {formatPercent(deposit.apy / 100, { maximumFractionDigits: 2 })}
+                                      {formatPercent(deposit.apy / 100, {
+                                        maximumFractionDigits: 2,
+                                      })}
                                     </span>
                                   </TableCell>
-                                  <TableCell>
+                                  <TableCell className="hidden xl:table-cell">
                                     {deposit.accruedInterest > 0 ? (
-                                      <div className="flex flex-col">
-                                        <span className="text-sm font-medium">
+                                      <div className="flex flex-col min-w-0">
+                                        <span className="text-sm font-medium truncate">
                                           {formatNumber(deposit.accruedInterest, {
                                             minimumFractionDigits: 2,
                                             maximumFractionDigits:
@@ -6892,7 +6792,7 @@ const Portfolio = () => {
                                       </span>
                                     )}
                                   </TableCell>
-                                  <TableCell>
+                                  <TableCell className="hidden xl:table-cell whitespace-nowrap">
                                     {isCollateral ? (
                                       <span className="font-semibold">
                                         {formatCurrency(
@@ -6907,12 +6807,12 @@ const Portfolio = () => {
                                       </span>
                                     )}
                                   </TableCell>
-                                  <TableCell>
+                                  <TableCell className="hidden xl:table-cell">
                                     <span className="text-muted-foreground">
                                       {formatPercent(marketCollateralFactor, { maximumFractionDigits: 2 })}
                                     </span>
                                   </TableCell>
-                                  <TableCell>
+                                  <TableCell className="hidden xl:table-cell">
                                     <span className="text-muted-foreground">
                                       {formatPercent(marketLiquidationThreshold, { maximumFractionDigits: 2 })}
                                     </span>
@@ -6922,9 +6822,9 @@ const Portfolio = () => {
                                       {!isViewOnly && (
                                         <>
                                           {!market?.isPaused && (
-                                            <Button
+                                            <DorkFiButton
                                               size="sm"
-                                              variant="outline"
+                                              variant="secondary"
                                               onClick={(e) => {
                                                 e.stopPropagation();
                                                 handleDepositClick(
@@ -6935,15 +6835,15 @@ const Portfolio = () => {
                                               }}
                                               title="Supply more of this asset to earn yield and use as collateral"
                                               aria-label="Supply"
-                                              className="h-8 px-2 gap-1"
+                                              className="min-w-[92px] h-8 px-2 gap-1"
                                             >
                                               <span className="text-base leading-none">+</span>
                                               <span className="hidden lg:inline text-xs">Supply</span>
-                                            </Button>
+                                            </DorkFiButton>
                                           )}
-                                          <Button
+                                          <DorkFiButton
                                             size="sm"
-                                            variant="outline"
+                                            variant="withdraw"
                                             onClick={(e) => {
                                               e.stopPropagation();
                                               handleWithdrawClick(
@@ -6954,50 +6854,13 @@ const Portfolio = () => {
                                             }}
                                             title="Withdraw this asset back to your wallet"
                                             aria-label="Withdraw"
-                                            className="h-8 px-2 gap-1"
+                                            className="min-w-[92px] h-8 px-2 gap-1"
                                           >
                                             <span className="text-base leading-none">−</span>
                                             <span className="hidden lg:inline text-xs">Withdraw</span>
-                                          </Button>
+                                          </DorkFiButton>
                                         </>
                                       )}
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleRefreshSingleMarket(
-                                            deposit.asset,
-                                            deposit.poolId,
-                                            (deposit as any).network
-                                          );
-                                        }}
-                                        disabled={
-                                          refreshingMarket ===
-                                          `${deposit.asset}-${deposit.poolId || "default"
-                                          }-${(deposit as any).network ||
-                                          currentNetwork
-                                          }`
-                                        }
-                                        title={
-                                          isViewOnly
-                                            ? "Refresh market data (view-only)"
-                                            : "Refresh market data"
-                                        }
-                                        aria-label="Refresh"
-                                        className="w-8 h-8 p-0 flex items-center justify-center flex-shrink-0"
-                                      >
-                                        <RefreshCw
-                                          className={`w-3 h-3 ${refreshingMarket ===
-                                            `${deposit.asset}-${deposit.poolId || "default"
-                                            }-${(deposit as any).network ||
-                                            currentNetwork
-                                            }`
-                                            ? "animate-spin"
-                                            : ""
-                                            }`}
-                                        />
-                                      </Button>
                                     </div>
                                   </TableCell>
                                 </TableRow>
@@ -7007,7 +6870,7 @@ const Portfolio = () => {
                         {deposits.length === 0 && (
                             <TableRow>
                               <TableCell
-                                colSpan={10}
+                                colSpan={11}
                                 className="text-center text-muted-foreground py-8"
                               >
                                 No supplied assets
@@ -7134,8 +6997,8 @@ const Portfolio = () => {
 
                       return hasMore ? (
                         <div className="mt-4 text-center">
-                          <Button
-                            variant="outline"
+                          <DorkFiButton
+                            variant="secondary"
                             onClick={() => {
                               const wasExpanded = showAllSuppliedAssets;
                               setShowAllSuppliedAssets(!showAllSuppliedAssets);
@@ -7154,10 +7017,10 @@ const Portfolio = () => {
                                 }, 0);
                               }
                             }}
-                            className="w-full"
+                            className="w-full min-w-0"
                           >
                             {showAllSuppliedAssets ? "Show Less" : "Show More"}
-                          </Button>
+                          </DorkFiButton>
                         </div>
                       ) : null;
                     })()}
@@ -7182,12 +7045,12 @@ const Portfolio = () => {
                               At Risk Assets
                             </H1>
                           </div>
-                          <Button
+                          <DorkFiButton
                             onClick={handleRefreshAtRiskAssets}
                             disabled={refreshingSection === "At Risk Assets"}
-                            variant="outline"
+                            variant="secondary"
                             size="sm"
-                            className="h-8 px-3 text-xs border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="min-w-0"
                             title={
                               isViewOnly
                                 ? "Refresh market data (view-only mode)"
@@ -7201,7 +7064,7 @@ const Portfolio = () => {
                                 }`}
                             />
                             Refresh
-                          </Button>
+                          </DorkFiButton>
                         </div>
                         <Body className="text-sm text-muted-foreground">
                           These assets have a health factor (collateral value ×
@@ -7231,15 +7094,15 @@ const Portfolio = () => {
                       </div>
                       {/* Filter Button for Mobile - At Risk Assets */}
                       <div className="md:hidden mb-4 flex justify-end">
-                        <Button
-                          variant="outline"
+                        <DorkFiButton
+                          variant="secondary"
                           size="sm"
                           onClick={() => setAtRiskAssetsFilterModalOpen(true)}
-                          className="flex items-center gap-2"
+                          className="flex items-center gap-2 min-w-0"
                         >
                           <Filter className="h-4 w-4" />
                           Filter
-                        </Button>
+                        </DorkFiButton>
                       </div>
                       {/* Filter Modal for Mobile - At Risk Assets */}
                       <Dialog
@@ -7606,7 +7469,7 @@ const Portfolio = () => {
                                     <TableRow
                                       key={`${asset.asset}-${asset.poolId || index
                                         }`}
-                                      className="hover:bg-orange-500/10"
+                                      className="transition-all relative card-hover rounded-lg border border-gray-200/30 dark:border-ocean-teal/10 bg-white/50 dark:bg-slate-800/50 hover:border-orange-400 hover:shadow-[0_0_16px_4px_rgba(249,115,22,0.15)] hover:bg-orange-500/5 hover:z-20 cursor-pointer"
                                     >
                                       <TableCell>
                                         <div className="flex items-center gap-2">
@@ -7720,8 +7583,8 @@ const Portfolio = () => {
                                                   : true)
                                             );
                                             return !atRiskMarket?.isPaused && (
-                                              <Button
-                                                variant="outline"
+                                              <DorkFiButton
+                                                variant="secondary"
                                                 size="sm"
                                                 onClick={() =>
                                                   handleDepositClick(
@@ -7729,44 +7592,12 @@ const Portfolio = () => {
                                                     asset.poolId
                                                   )
                                                 }
-                                                className="w-8 h-8 p-0 flex items-center justify-center"
+                                                className="min-w-0 w-8 h-8 p-0"
                                               >
                                                 +
-                                              </Button>
+                                              </DorkFiButton>
                                             );
                                           })()}
-                                          <Button
-                                            size="sm"
-                                            variant="outline"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              handleRefreshSingleMarket(
-                                                asset.asset,
-                                                asset.poolId,
-                                                (asset as any).network
-                                              );
-                                            }}
-                                            disabled={
-                                              refreshingMarket ===
-                                              `${asset.asset}-${asset.poolId || "default"
-                                              }-${(asset as any).network ||
-                                              currentNetwork
-                                              }`
-                                            }
-                                            title="Refresh market data"
-                                            className="w-8 h-8 p-0 flex items-center justify-center"
-                                          >
-                                            <RefreshCw
-                                              className={`w-3 h-3 ${refreshingMarket ===
-                                                `${asset.asset}-${asset.poolId || "default"
-                                                }-${(asset as any).network ||
-                                                currentNetwork
-                                                }`
-                                                ? "animate-spin"
-                                                : ""
-                                                }`}
-                                            />
-                                          </Button>
                                         </div>
                                       </TableCell>
                                     </TableRow>
@@ -7787,12 +7618,12 @@ const Portfolio = () => {
                   <div ref={borrowedAssetsTableRef} className="mb-4">
                     <div className="flex items-center justify-between mb-4">
                       <H1 className="text-xl md:text-2xl">Borrowed Assets</H1>
-                      <Button
+                      <DorkFiButton
                         onClick={handleRefreshBorrowedAssets}
                         disabled={refreshingSection === "Borrowed Assets"}
-                        variant="outline"
+                        variant="secondary"
                         size="sm"
-                        className="h-8 px-3 text-xs border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="min-w-0"
                         title={
                           isViewOnly
                             ? "Refresh market data (view-only mode)"
@@ -7806,7 +7637,7 @@ const Portfolio = () => {
                             }`}
                         />
                         Refresh
-                      </Button>
+                      </DorkFiButton>
                     </div>
                     {/* Search, Network and Market Filter Tabs - Single row on large screens */}
                     <div className="mb-4 flex flex-col md:flex-row gap-4 items-start md:items-center">
@@ -7824,14 +7655,14 @@ const Portfolio = () => {
                           />
                         </div>
                         {/* Filter Icon Button - Only visible on mobile */}
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          className="md:hidden h-10 w-10"
+                        <DorkFiButton
+                          variant="secondary"
+                          size="sm"
+                          className="md:hidden min-w-0 h-10 w-10 p-0"
                           onClick={() => setBorrowedAssetsFilterModalOpen(true)}
                         >
                           <Filter className="h-4 w-4" />
-                        </Button>
+                        </DorkFiButton>
                       </div>
                       {/* Network and Market Filter Tabs - Hidden on mobile */}
                       <div className="hidden md:flex gap-4 flex-1">
@@ -8080,37 +7911,24 @@ const Portfolio = () => {
                                         )
                                       : undefined
                                   }
-                                  onRefreshClick={() =>
-                                    handleRefreshSingleMarket(
-                                      borrow.asset,
-                                      borrow.poolId,
-                                      (borrow as any).network
-                                    )
-                                  }
-                                  isRefreshing={
-                                    refreshingMarket ===
-                                    `${borrow.asset}-${borrow.poolId || "default"
-                                    }-${(borrow as any).network || currentNetwork
-                                    }`
-                                  }
                                   type="borrow"
                                 />
                               );
                             })}
                             {hasMore && (
-                              <Button
-                                variant="outline"
+                              <DorkFiButton
+                                variant="secondary"
                                 onClick={() =>
                                   setShowAllBorrowedAssets(
                                     !showAllBorrowedAssets
                                   )
                                 }
-                                className="w-full"
+                                className="w-full min-w-0"
                               >
                                 {showAllBorrowedAssets
                                   ? "Show Less"
                                   : "Show More"}
-                              </Button>
+                              </DorkFiButton>
                             )}
                           </>
                         );
@@ -8580,7 +8398,10 @@ const Portfolio = () => {
                               };
 
                               return (
-                                <TableRow key={index}>
+                                <TableRow
+                                  key={index}
+                                  className="transition-all relative card-hover rounded-lg border border-gray-200/30 dark:border-ocean-teal/10 bg-white/50 dark:bg-slate-800/50 hover:border-teal-400 hover:shadow-[0_0_16px_4px_rgba(13,255,190,0.15)] hover:z-20"
+                                >
                                   <TableCell>
                                     <div className="flex items-center gap-2">
                                       <img
@@ -8669,9 +8490,9 @@ const Portfolio = () => {
                                       {!isViewOnly && (
                                         <>
                                           {!market?.isPaused && (
-                                            <Button
+                                            <DorkFiButton
                                               size="sm"
-                                              variant="outline"
+                                              variant="borrow-outline"
                                               onClick={(e) => {
                                                 e.stopPropagation();
                                                 handleBorrowClick(
@@ -8682,15 +8503,15 @@ const Portfolio = () => {
                                               }}
                                               title="Borrow more of this asset against your collateral"
                                               aria-label="Borrow"
-                                              className="h-8 px-2 gap-1"
+                                              className="min-w-[92px] h-8 px-2 gap-1"
                                             >
                                               <span className="text-base leading-none">+</span>
                                               <span className="hidden lg:inline text-xs">Borrow</span>
-                                            </Button>
+                                            </DorkFiButton>
                                           )}
-                                          <Button
+                                          <DorkFiButton
                                             size="sm"
-                                            variant="outline"
+                                            variant="danger-outline"
                                             onClick={(e) => {
                                               e.stopPropagation();
                                               handleRepayClick(
@@ -8701,46 +8522,13 @@ const Portfolio = () => {
                                             }}
                                             title="Repay this debt to improve health factor"
                                             aria-label="Repay"
-                                            className="h-8 px-2 gap-1"
+                                            className="min-w-[92px] h-8 px-2 gap-1"
                                           >
                                             <span className="text-base leading-none">−</span>
                                             <span className="hidden lg:inline text-xs">Repay</span>
-                                          </Button>
+                                          </DorkFiButton>
                                         </>
                                       )}
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleRefreshSingleMarket(
-                                            borrow.asset,
-                                            borrow.poolId,
-                                            (borrow as any).network
-                                          );
-                                        }}
-                                        disabled={
-                                          refreshingMarket ===
-                                          `${borrow.asset}-${borrow.poolId || "default"
-                                          }-${(borrow as any).network ||
-                                          currentNetwork
-                                          }`
-                                        }
-                                        title="Refresh market data"
-                                        aria-label="Refresh"
-                                        className="w-8 h-8 p-0 flex items-center justify-center flex-shrink-0"
-                                      >
-                                        <RefreshCw
-                                          className={`w-3 h-3 ${refreshingMarket ===
-                                            `${borrow.asset}-${borrow.poolId || "default"
-                                            }-${(borrow as any).network ||
-                                            currentNetwork
-                                            }`
-                                            ? "animate-spin"
-                                            : ""
-                                            }`}
-                                        />
-                                      </Button>
                                     </div>
                                   </TableCell>
                                 </TableRow>
@@ -8853,8 +8641,8 @@ const Portfolio = () => {
 
                       return hasMore ? (
                         <div className="mt-4 text-center">
-                          <Button
-                            variant="outline"
+                          <DorkFiButton
+                            variant="secondary"
                             onClick={() => {
                               const wasExpanded = showAllBorrowedAssets;
                               setShowAllBorrowedAssets(!showAllBorrowedAssets);
@@ -8873,10 +8661,10 @@ const Portfolio = () => {
                                 }, 0);
                               }
                             }}
-                            className="w-full"
+                            className="w-full min-w-0"
                           >
                             {showAllBorrowedAssets ? "Show Less" : "Show More"}
-                          </Button>
+                          </DorkFiButton>
                         </div>
                       ) : null;
                     })()}
@@ -8899,12 +8687,12 @@ const Portfolio = () => {
                           </span>
                         )}
                       </H1>
-                      <Button
+                      <DorkFiButton
                         onClick={handleRefreshAccruedInterest}
                         disabled={refreshingSection === "Accrued Interest"}
-                        variant="outline"
+                        variant="secondary"
                         size="sm"
-                        className="h-8 px-3 text-xs border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="min-w-0"
                         title={
                           isViewOnly
                             ? "Refresh market data (view-only mode)"
@@ -8918,7 +8706,7 @@ const Portfolio = () => {
                             }`}
                         />
                         Refresh
-                      </Button>
+                      </DorkFiButton>
                     </div>
                   </div>
                   <div className="mb-4">
@@ -9029,36 +8817,23 @@ const Portfolio = () => {
                                         )
                                       : undefined
                                   }
-                                  onRefreshClick={() =>
-                                    handleRefreshSingleMarket(
-                                      item.asset,
-                                      item.poolId,
-                                      (item as any).network
-                                    )
-                                  }
-                                  isRefreshing={
-                                    refreshingMarket ===
-                                    `${item.asset}-${item.poolId || "default"
-                                    }-${(item as any).network || currentNetwork
-                                    }`
-                                  }
                                 />
                               );
                             })}
                             {hasMore && (
-                              <Button
-                                variant="outline"
+                              <DorkFiButton
+                                variant="secondary"
                                 onClick={() =>
                                   setShowAllAccruedInterest(
                                     !showAllAccruedInterest
                                   )
                                 }
-                                className="w-full"
+                                className="w-full min-w-0"
                               >
                                 {showAllAccruedInterest
                                   ? "Show Less"
                                   : "Show More"}
-                              </Button>
+                              </DorkFiButton>
                             )}
                           </>
                         );
@@ -9361,7 +9136,7 @@ const Portfolio = () => {
                               return (
                                 <TableRow
                                   key={index}
-                                  className="cursor-pointer hover:bg-muted/50 transition-colors"
+                                  className="transition-all relative card-hover rounded-lg border border-gray-200/30 dark:border-ocean-teal/10 bg-white/50 dark:bg-slate-800/50 hover:border-teal-400 hover:shadow-[0_0_16px_4px_rgba(13,255,190,0.15)] hover:z-20 cursor-pointer"
                                   onClick={() => {
                                     // Only show repay action
                                     if (hasBorrows) {
@@ -9440,9 +9215,9 @@ const Portfolio = () => {
                                   <TableCell>
                                     <div className="flex items-center gap-2">
                                       {hasBorrows && (
-                                        <Button
+                                        <DorkFiButton
                                           size="sm"
-                                          variant="outline"
+                                          variant="danger-outline"
                                           onClick={(e) => {
                                             e.stopPropagation();
                                             handleRepayClick(
@@ -9452,43 +9227,11 @@ const Portfolio = () => {
                                             );
                                           }}
                                           title="Repay"
-                                          className="w-8 h-8 p-0 flex items-center justify-center"
+                                          className="min-w-0 w-8 h-8 p-0"
                                         >
                                           −
-                                        </Button>
+                                        </DorkFiButton>
                                       )}
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleRefreshSingleMarket(
-                                            item.asset,
-                                            item.poolId,
-                                            (item as any).network
-                                          );
-                                        }}
-                                        disabled={
-                                          refreshingMarket ===
-                                          `${item.asset}-${item.poolId || "default"
-                                          }-${(item as any).network ||
-                                          currentNetwork
-                                          }`
-                                        }
-                                        title="Refresh market data"
-                                        className="w-8 h-8 p-0 flex items-center justify-center"
-                                      >
-                                        <RefreshCw
-                                          className={`w-3 h-3 ${refreshingMarket ===
-                                            `${item.asset}-${item.poolId || "default"
-                                            }-${(item as any).network ||
-                                            currentNetwork
-                                            }`
-                                            ? "animate-spin"
-                                            : ""
-                                            }`}
-                                        />
-                                      </Button>
                                     </div>
                                   </TableCell>
                                 </TableRow>
@@ -9589,8 +9332,8 @@ const Portfolio = () => {
 
                       return hasMore ? (
                         <div className="mt-4 text-center">
-                          <Button
-                            variant="outline"
+                          <DorkFiButton
+                            variant="secondary"
                             onClick={() => {
                               const wasExpanded = showAllAccruedInterest;
                               setShowAllAccruedInterest(
@@ -9610,10 +9353,10 @@ const Portfolio = () => {
                                 }, 0);
                               }
                             }}
-                            className="w-full"
+                            className="w-full min-w-0"
                           >
                             {showAllAccruedInterest ? "Show Less" : "Show More"}
-                          </Button>
+                          </DorkFiButton>
                         </div>
                       ) : null;
                     })()}
@@ -9783,6 +9526,9 @@ const Portfolio = () => {
             poolId: undefined,
             network: undefined,
           })
+        }
+        onSelectWithdrawAsset={(asset, poolId, network) =>
+          setWithdrawModal((prev) => ({ ...prev, asset, poolId, network }))
         }
         onRefreshWalletBalance={refreshWalletBalance}
         onRefreshMarket={() => displayAddress && fetchUser(displayAddress)}
@@ -10215,16 +9961,17 @@ const Portfolio = () => {
                         placeholder="0"
                         className="flex-1 min-w-[120px] h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                       />
-                      <Button
+                      <DorkFiButton
                         type="button"
-                        variant="outline"
+                        variant="secondary"
                         size="sm"
                         onClick={() =>
                           setPartialLiquidationAmountUsd(maxLiquidationUsd)
                         }
+                        className="min-w-0"
                       >
                         Max
-                      </Button>
+                      </DorkFiButton>
                     </div>
                     <div className="flex items-center gap-4">
                       <Slider
@@ -10260,25 +10007,27 @@ const Portfolio = () => {
                     </p>
                   </div>
                   <div className="flex justify-end gap-2 pt-4">
-                    <Button
-                      variant="outline"
+                    <DorkFiButton
+                      variant="secondary"
                       onClick={() => setLiquidationModalOpen(false)}
+                      className="min-w-0"
                     >
                       Cancel
-                    </Button>
-                    <Button
-                      variant="destructive"
+                    </DorkFiButton>
+                    <DorkFiButton
+                      variant="danger"
                       onClick={handleLiquidation}
                       disabled={
                         isLiquidating ||
                         debtTokenPrice === 0 ||
                         liquidationValueUsd <= 0
                       }
+                      className="min-w-0"
                     >
                       {isLiquidating
                         ? "Processing..."
                         : "Proceed to Liquidation"}
-                    </Button>
+                    </DorkFiButton>
                   </div>
                 </div>
               );
@@ -10560,15 +10309,16 @@ const Portfolio = () => {
                   </div>
 
                   <div className="flex justify-end gap-2 pt-4">
-                    <Button
-                      variant="outline"
+                    <DorkFiButton
+                      variant="secondary"
                       onClick={() => setRepayModalOpen(false)}
                       disabled={isRepaying}
+                      className="min-w-0"
                     >
                       Cancel
-                    </Button>
-                    <Button
-                      variant="default"
+                    </DorkFiButton>
+                    <DorkFiButton
+                      variant="primary"
                       onClick={handleRepayOnBehalf}
                       disabled={
                         isRepaying ||
@@ -10576,9 +10326,10 @@ const Portfolio = () => {
                         !activeAccount?.address ||
                         tokenPrice === 0
                       }
+                      className="min-w-0"
                     >
                       {isRepaying ? "Processing..." : "Repay"}
-                    </Button>
+                    </DorkFiButton>
                   </div>
                 </div>
               );

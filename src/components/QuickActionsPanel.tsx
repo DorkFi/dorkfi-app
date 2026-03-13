@@ -180,7 +180,7 @@ const QuickActionsPanel = ({
                     <Tooltip key={deposit.poolId ? `${deposit.asset}-${deposit.poolId}` : deposit.asset}>
                       <TooltipTrigger asChild>
                         <DorkFiButton
-                          variant="outline"
+                          variant="withdraw"
                           onClick={() => onWithdraw(deposit.asset)}
                           className="w-full text-sm"
                         >

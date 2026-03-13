@@ -7,7 +7,15 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import DorkFiButton from "@/components/ui/DorkFiButton";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { LocaleNumberInput } from "@/components/ui/LocaleNumberInput";
 import { Card, CardContent } from "@/components/ui/card";
 import { InfoIcon, ChevronDown, ChevronUp } from "lucide-react";
@@ -25,6 +33,16 @@ interface WithdrawModalProps {
   onClose: () => void;
   tokenSymbol: string;
   tokenIcon: string;
+  /** Optional list of withdrawable assets for in-modal asset switching */
+  availableAssets?: {
+    asset: string;
+    icon: string;
+    value: number;
+    poolId?: string;
+    network?: string;
+  }[];
+  /** Called when the user selects a different asset from the dropdown */
+  onSelectAsset?: (asset: string, poolId?: string, network?: string) => void;
   currentlyDeposited: number;
   marketStats: {
     supplyAPY: number;
@@ -61,6 +79,8 @@ const WithdrawModal = ({
   onClose,
   tokenSymbol,
   tokenIcon,
+  availableAssets,
+  onSelectAsset,
   currentlyDeposited,
   marketStats,
   maxWithdrawUnderlying,
@@ -235,7 +255,7 @@ const WithdrawModal = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-white rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl card-hover hover:shadow-lg hover:border-ocean-teal/40 transition-all max-w-[95vw] md:max-w-md h-[90vh] md:h-auto max-h-[90vh] md:max-h-[85vh] overflow-hidden flex flex-col p-0">
+      <DialogContent className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-white rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-[95vw] md:max-w-md h-[80vh] md:h-[70vh] max-h-[80vh] md:max-h-[70vh] overflow-hidden flex flex-col p-0">
         {showSuccess ? (
           <div className="p-6 overflow-y-auto">
             <SupplyBorrowCongrats
@@ -251,38 +271,105 @@ const WithdrawModal = ({
           </div>
         ) : (
           <div className="flex flex-col h-full">
-            <div className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 px-6 pt-4 pb-2 shrink-0">
+            <div className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 px-6 pt-4 pb-2 shrink-0 min-h-[7.5rem]">
               <DialogHeader className="pb-0">
                 <DialogTitle className="text-2xl font-bold text-center text-slate-800 dark:text-white">
                   Withdraw
                 </DialogTitle>
-                <div className="flex items-center justify-center gap-3 pb-2 mt-3">
-                  <img
-                    src={tokenIcon}
-                    alt={tokenSymbol}
-                    className="w-12 h-12 rounded-full shadow"
-                  />
-                  {showTooltip ? (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="text-xl font-semibold text-slate-800 dark:text-white cursor-help underline decoration-dotted">
+                <div className="flex items-center justify-center gap-3 pb-2 mt-3 h-14">
+                  {availableAssets && availableAssets.length > 0 && onSelectAsset ? (
+                    <Select
+                      value={
+                        availableAssets.find(
+                          (a) => a.asset === tokenSymbol
+                        )
+                          ? tokenSymbol
+                          : undefined
+                      }
+                      onValueChange={(value) => {
+                        const selected = availableAssets.find(
+                          (a) => a.asset === value
+                        );
+                        if (selected) {
+                          onSelectAsset(
+                            selected.asset,
+                            selected.poolId,
+                            selected.network
+                          );
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="w-auto min-w-0 h-auto bg-transparent border-none p-0 hover:bg-transparent focus:ring-0 focus:ring-offset-0 justify-center [&>svg:last-child]:!hidden">
+                        <div className="flex items-center gap-2 shrink-0">
+                          <img
+                            src={
+                              availableAssets.find(
+                                (a) => a.asset === tokenSymbol
+                              )?.icon || tokenIcon
+                            }
+                            alt={tokenSymbol}
+                            className="w-12 h-12 rounded-full shadow"
+                          />
+                          <span className="flex items-center gap-1 text-xl font-semibold text-slate-800 dark:text-white">
+                            {tokenSymbol}
+                            <ChevronDown className="h-4 w-4 text-slate-800 dark:text-white" />
+                          </span>
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableAssets.map((asset) => (
+                          <SelectItem key={`${asset.asset}-${asset.poolId ?? ""}-${asset.network ?? ""}`} value={asset.asset}>
+                            <span className="flex items-center gap-2">
+                              <img
+                                src={asset.icon}
+                                alt={asset.asset}
+                                className="h-5 w-5 rounded-full"
+                              />
+                              <span>{asset.asset}</span>
+                              {asset.value != null && (
+                                <span className="text-xs text-muted-foreground">
+                                  —{" "}
+                                  {asset.value.toLocaleString(undefined, {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  })}
+                                </span>
+                              )}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <>
+                      <img
+                        src={tokenIcon}
+                        alt={tokenSymbol}
+                        className="w-12 h-12 rounded-full shadow"
+                      />
+                      {showTooltip ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="text-xl font-semibold text-slate-800 dark:text-white cursor-help underline decoration-dotted">
+                              {tokenSymbol}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>{tooltipText}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : (
+                        <span className="text-xl font-semibold text-slate-800 dark:text-white">
                           {tokenSymbol}
                         </span>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>{tooltipText}</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  ) : (
-                    <span className="text-xl font-semibold text-slate-800 dark:text-white">
-                      {tokenSymbol}
-                    </span>
+                      )}
+                    </>
                   )}
                 </div>
               </DialogHeader>
             </div>
 
-            <div className="flex-1 overflow-y-auto overscroll-contain px-6 pt-2 pb-4 md:pb-3 space-y-3 touch-pan-y min-h-0">
+            <div className="flex-1 overflow-y-auto overscroll-contain px-6 pt-2 pb-4 md:pb-3 space-y-3 touch-pan-y min-h-0 [scrollbar-gutter:stable]">
               <div className="space-y-3">
                 <Label
                   htmlFor="amount"
@@ -632,10 +719,11 @@ const WithdrawModal = ({
               >
                 Cancel
               </Button>
-              <Button
+              <DorkFiButton
+                variant="withdraw"
                 onClick={handleSubmit}
                 disabled={!isValidAmount || isLoading || internalLoading}
-                className="flex-1 font-semibold h-11 bg-red-600 hover:bg-red-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-1 min-w-0 h-11 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isLoading || internalLoading ? (
                   <div className="flex items-center gap-2 justify-center">
@@ -645,7 +733,7 @@ const WithdrawModal = ({
                 ) : (
                   <span>Withdraw {tokenSymbol}</span>
                 )}
-              </Button>
+              </DorkFiButton>
             </div>
           </div>
         )}

@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button";
+import DorkFiButton from "@/components/ui/DorkFiButton";
 import { Plus, Minus, RefreshCw, Info } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import DorkFiCard from "@/components/ui/DorkFiCard";
@@ -65,15 +65,15 @@ const PortfolioTableMobileCard = ({
   return (
     <DorkFiCard className={`p-4 ${bgColor} border`}>
       <div className="space-y-3">
-        {/* Header: Asset Icon + Name + Actions */}
+        {/* Header: Asset Icon above Ticker + Actions */}
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col items-center gap-1">
             <img
               src={icon}
               alt={asset}
-              className="w-10 h-10 rounded-full flex-shrink-0"
+              className="w-12 h-12 rounded-full flex-shrink-0"
             />
-            <div>
+            <div className="text-center">
               <div className="font-semibold text-base text-slate-800 dark:text-white">
                 {asset}
               </div>
@@ -86,17 +86,17 @@ const PortfolioTableMobileCard = ({
             </div>
           </div>
           {onRefreshClick && (
-            <Button
-              variant="ghost"
+            <DorkFiButton
+              variant="secondary"
               size="sm"
               onClick={onRefreshClick}
               disabled={isRefreshing}
-              className="h-8 w-8 p-0"
+              className="min-w-0 h-8 w-8 p-0"
             >
               <RefreshCw
                 className={`w-4 h-4 ${isRefreshing ? "animate-spin" : ""}`}
               />
-            </Button>
+            </DorkFiButton>
           )}
         </div>
 
@@ -142,7 +142,7 @@ const PortfolioTableMobileCard = ({
             <div className="text-sm font-medium text-slate-700 dark:text-slate-200">
               {balance.toLocaleString("en-US", {
                 minimumFractionDigits: 2,
-                maximumFractionDigits: displayDecimals,
+                maximumFractionDigits: 2,
               })}{" "}
               {asset}
             </div>
@@ -317,26 +317,26 @@ const PortfolioTableMobileCard = ({
         {/* Action Buttons */}
         <div className="flex gap-2 pt-2">
           {onDepositClick && (
-            <Button
-              variant="secondary"
+            <DorkFiButton
+              variant={isDeposit ? "secondary" : "borrow-outline"}
               size="sm"
               onClick={onDepositClick}
-              className="flex-1"
+              className="flex-1 min-w-0"
             >
               <Plus className="w-4 h-4 mr-1" />
               {isDeposit ? "Deposit" : "Borrow"}
-            </Button>
+            </DorkFiButton>
           )}
           {onWithdrawClick && (
-            <Button
-              variant={isDeposit ? "outline" : "destructive"}
+            <DorkFiButton
+              variant={isDeposit ? "withdraw" : "danger-outline"}
               size="sm"
               onClick={onWithdrawClick}
-              className="flex-1"
+              className="flex-1 min-w-0"
             >
               <Minus className="w-4 h-4 mr-1" />
               {isDeposit ? "Withdraw" : "Repay"}
-            </Button>
+            </DorkFiButton>
           )}
         </div>
       </div>

@@ -60,6 +60,8 @@ const NUMERIC_SORT_FIELDS: SortField[] = [
   "utilization",
 ];
 
+export type MarketFilter = "all" | "A" | "B";
+
 interface UseOnDemandMarketDataProps {
   searchTerm?: string;
   sortField?: SortField;
@@ -67,6 +69,7 @@ interface UseOnDemandMarketDataProps {
   pageSize?: number;
   autoLoad?: boolean; // Whether to automatically load markets when they come into view
   throttleMs?: number; // Throttle duration in milliseconds (default: 1 minute)
+  marketFilter?: MarketFilter; // "all" | "A" (first lending pool) | "B" (second lending pool)
 }
 
 // Throttle duration: 1 minute
@@ -79,6 +82,7 @@ export const useOnDemandMarketData = ({
   pageSize = 10,
   autoLoad = true,
   throttleMs = DEFAULT_THROTTLE_MS,
+  marketFilter = "all",
 }: UseOnDemandMarketDataProps = {}) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [marketsData, setMarketsData] = useState<
@@ -384,12 +388,32 @@ export const useOnDemandMarketData = ({
     }));
   }, [marketsData, loadingMarkets]);
 
+  // Lending pool IDs for A/B filter (first = A, second = B)
+  const lendingPools = useMemo(() => {
+    try {
+      return getLendingPools(currentNetwork as NetworkId) ?? [];
+    } catch {
+      return [];
+    }
+  }, [currentNetwork]);
+
   // Filter and sort data
   const { filteredData, totalPages, paginatedData } = useMemo(() => {
     // Filter out paused markets
     let filtered = marketDataArray.filter(
       (market) => !market.marketInfo?.isPaused
     );
+    // Filter by market (All / A / B)
+    if (marketFilter !== "all" && lendingPools.length >= 2) {
+      const poolIdA = lendingPools[0];
+      const poolIdB = lendingPools[1];
+      filtered = filtered.filter((market) => {
+        const pid = market.poolId != null ? String(market.poolId) : "";
+        if (marketFilter === "A") return pid === String(poolIdA);
+        if (marketFilter === "B") return pid === String(poolIdB);
+        return true;
+      });
+    }
     // Filter data based on search term
     filtered = filtered.filter((market) =>
       market.asset.toLowerCase().includes(searchTerm.toLowerCase())
@@ -490,6 +514,8 @@ export const useOnDemandMarketData = ({
     currentPage,
     pageSize,
     marketDataArray,
+    marketFilter,
+    lendingPools,
   ]);
 
   const handleSearchChange = (newSearchTerm: string) => {

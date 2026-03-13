@@ -127,6 +127,8 @@
   /* Smooth scrolling */
   html {
     scroll-behavior: smooth;
+    /* Reserve scrollbar space so modals don't jump when body overflow is locked */
+    scrollbar-gutter: stable;
   }
 
   /* Focus styles */
