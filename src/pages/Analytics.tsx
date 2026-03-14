@@ -1,7 +1,6 @@
 import React from 'react';
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
-import CanvasBubbles from "@/components/CanvasBubbles";
 import AnalyticsHero from "@/components/analytics/AnalyticsHero";
 import KPIGrid from "@/components/analytics/KPIGrid";
 import AnalyticsSection from "@/components/analytics/AnalyticsSection";
@@ -33,11 +32,6 @@ const Analytics = ({
       
       {/* Dark Mode Ocean Background */}
       <div className="absolute inset-0 z-0 hidden dark:block dorkfi-dark-bg-with-overlay" />
-
-      {/* Advanced Canvas Bubble System - Dark Mode Only */}
-      <div className="hidden dark:block">
-        <CanvasBubbles />
-      </div>
 
       <Header activeTab={activeTab} onTabChange={onTabChange} />
       

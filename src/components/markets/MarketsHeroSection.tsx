@@ -65,11 +65,7 @@ const MarketsHeroSection = () => {
         </H1>
         <Body className="text-sm sm:text-base md:text-lg lg:text-xl max-w-2xl md:max-w-none mx-auto">
           <span className="block md:inline md:whitespace-nowrap">
-            Deposit tokens to earn interest. Need cash? Borrow without selling your crypto.
-          </span>
-          <br className="hidden md:block" />
-          <span className="hidden sm:inline md:whitespace-nowrap">
-            No banks. No middlemen. Just you and your wallet.
+            Deposit tokens to earn interest. Need cash? Borrow without selling.
           </span>
         </Body>
       </div>

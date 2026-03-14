@@ -85,7 +85,6 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
-import CanvasBubbles from "@/components/CanvasBubbles";
 import VersionDisplay from "@/components/VersionDisplay";
 import {
   getNetworkConfig,
@@ -6154,11 +6153,6 @@ export default function AdminDashboard() {
 
       {/* Dark Mode Ocean Background */}
       <div className="absolute inset-0 z-0 hidden dark:block dorkfi-dark-bg-with-overlay" />
-
-      {/* Advanced Canvas Bubble System - Dark Mode Only */}
-      <div className="hidden dark:block">
-        <CanvasBubbles />
-      </div>
 
       {/* Admin Header */}
       <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-white/80 dark:header-nav-bg backdrop-blur-md supports-[backdrop-filter]:bg-white/70 dark:supports-[backdrop-filter]:header-nav-bg shadow-sm dark:shadow-none">

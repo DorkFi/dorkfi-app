@@ -69,12 +69,19 @@ export const getTokenImagePath = (symbol: string): string => {
     xUSD: "/lovable-uploads/xUSD.webp",
   };
 
+  // Normalize symbol for case-insensitive lookup
+  const upperSymbol = symbol.toUpperCase();
+
   // First check for exact match (including prefixed tokens like aUSDC)
   if (tokenImageMap[symbol]) {
     return tokenImageMap[symbol];
   }
+  if (tokenImageMap[upperSymbol]) {
+    return tokenImageMap[upperSymbol];
+  }
 
   // If no exact match, remove 'a' prefix if present (aVOI → VOI, but aUSDC should already be handled above)
   const cleanSymbol = symbol.startsWith("a") ? symbol.slice(1) : symbol;
-  return tokenImageMap[cleanSymbol] || "/placeholder.svg";
+  const cleanUpper = cleanSymbol.toUpperCase();
+  return tokenImageMap[cleanSymbol] || tokenImageMap[cleanUpper] || "/placeholder.svg";
 };

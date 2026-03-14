@@ -9,6 +9,12 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { LocaleNumberInput } from "@/components/ui/LocaleNumberInput";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from "@/components/ui/select";
 import { InfoIcon, ChevronDown, ChevronUp } from "lucide-react";
 import SupplyBorrowCongrats from "./SupplyBorrowCongrats";
 import { formatRelativeTime } from "@/utils/timeUtils";
@@ -20,6 +26,8 @@ interface RepayModalProps {
   onClose: () => void;
   tokenSymbol: string;
   tokenIcon: string;
+  poolId?: string; // For dropdown selection when multiple borrows exist
+  network?: string; // Network ID for transaction viewing / dropdown selection
   currentBorrow: number;
   accruedInterest: number;
   walletBalance: number;
@@ -37,8 +45,16 @@ interface RepayModalProps {
   };
   lastUpdateTime?: number; // Market's last update time (when market indices were updated)
   userLastUpdateTime?: number; // User's last update time (when user last interacted with market)
-  network?: string; // Network ID for transaction viewing
   onSubmit: (amount: string, isRepayAll?: boolean) => Promise<string>; // Returns transaction ID, isRepayAll indicates if repayAll should be used
+  /** When provided, show asset dropdown like Supply/Withdraw modals */
+  availableAssets?: {
+    asset: string;
+    icon: string;
+    value?: number;
+    poolId?: string;
+    network?: string;
+  }[];
+  onSelectAsset?: (asset: string, poolId?: string, network?: string) => void;
 }
 
 const RepayModal = ({
@@ -46,14 +62,17 @@ const RepayModal = ({
   onClose,
   tokenSymbol,
   tokenIcon,
+  poolId,
+  network,
   currentBorrow,
   accruedInterest,
   walletBalance,
   marketStats,
   lastUpdateTime,
   userLastUpdateTime,
-  network,
   onSubmit,
+  availableAssets,
+  onSelectAsset,
 }: RepayModalProps) => {
   const [amount, setAmount] = useState<number | "">("");
   const [fiatValue, setFiatValue] = useState(0);
@@ -210,7 +229,7 @@ const RepayModal = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="bg-card dark:bg-slate-900 rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl card-hover hover:shadow-lg hover:border-ocean-teal/40 transition-all max-w-[95vw] md:max-w-lg lg:max-w-4xl h-[90vh] md:h-auto md:max-h-[85vh] overflow-hidden flex flex-col px-0 py-0">
+      <DialogContent className="bg-card dark:bg-slate-900 rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-[95vw] md:max-w-lg lg:max-w-4xl h-[90vh] md:h-auto md:max-h-[85vh] overflow-hidden flex flex-col px-0 py-0">
         {showSuccess ? (
           <div className="p-6 overflow-y-auto">
             <SupplyBorrowCongrats
@@ -228,17 +247,70 @@ const RepayModal = ({
           <div className="flex flex-col h-full">
             <div className="sticky top-0 z-20 bg-card dark:bg-slate-900 pt-6 px-6 md:px-8 lg:px-10 pb-4 border-b border-gray-200/50 dark:border-slate-700/50">
               <DialogHeader className="pb-0">
-                <div className="flex items-center justify-center gap-4">
-                  <img
-                    src={tokenIcon}
-                    alt={tokenSymbol}
-                    className="w-14 h-14 rounded-full ring-2 ring-whale-gold/20 dark:ring-whale-gold/30"
-                  />
-                  <div className="flex flex-col items-start">
-                    <DialogTitle className="text-2xl font-bold text-slate-800 dark:text-white leading-tight">
-                      Repay {tokenSymbol}
-                    </DialogTitle>
-                    <span className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+                {availableAssets &&
+                availableAssets.length > 0 &&
+                onSelectAsset ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="flex items-center justify-center gap-3 pb-2 mt-1 h-14">
+                      <Select
+                        value={`${tokenSymbol}-${poolId ?? ""}-${network ?? ""}`}
+                        onValueChange={(value) => {
+                          const selected = availableAssets.find(
+                            (a) =>
+                              `${a.asset}-${a.poolId ?? ""}-${a.network ?? ""}` ===
+                              value
+                          );
+                          if (selected) {
+                            onSelectAsset(
+                              selected.asset,
+                              selected.poolId,
+                              selected.network
+                            );
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="w-auto min-w-0 h-auto bg-transparent border-none p-0 hover:bg-transparent focus:ring-0 focus:ring-offset-0 justify-center [&>svg:last-child]:!hidden">
+                          <div className="flex items-center gap-2 shrink-0">
+                            <img
+                              src={tokenIcon}
+                              alt={tokenSymbol}
+                              className="w-14 h-14 rounded-full ring-2 ring-whale-gold/20 dark:ring-whale-gold/30"
+                            />
+                            <span className="flex items-center gap-1 text-2xl font-bold text-slate-800 dark:text-white">
+                              {tokenSymbol}
+                              <ChevronDown className="h-4 w-4 text-slate-800 dark:text-white" />
+                            </span>
+                          </div>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableAssets.map((a) => (
+                            <SelectItem
+                              key={`${a.asset}-${a.poolId ?? ""}-${a.network ?? ""}`}
+                              value={`${a.asset}-${a.poolId ?? ""}-${a.network ?? ""}`}
+                            >
+                              <span className="flex items-center gap-2">
+                                <img
+                                  src={a.icon}
+                                  alt={a.asset}
+                                  className="h-5 w-5 rounded-full"
+                                />
+                                <span>{a.asset}</span>
+                                {a.value != null && (
+                                  <span className="text-xs text-muted-foreground">
+                                    —{" "}
+                                    {a.value.toLocaleString(undefined, {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    })}
+                                  </span>
+                                )}
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <span className="text-sm text-slate-500 dark:text-slate-400">
                       $
                       {marketStats.tokenPrice.toLocaleString(undefined, {
                         minimumFractionDigits: 2,
@@ -246,7 +318,27 @@ const RepayModal = ({
                       })}
                     </span>
                   </div>
-                </div>
+                ) : (
+                  <div className="flex items-center justify-center gap-4">
+                    <img
+                      src={tokenIcon}
+                      alt={tokenSymbol}
+                      className="w-14 h-14 rounded-full ring-2 ring-whale-gold/20 dark:ring-whale-gold/30"
+                    />
+                    <div className="flex flex-col items-start">
+                      <DialogTitle className="text-2xl font-bold text-slate-800 dark:text-white leading-tight">
+                        Repay {tokenSymbol}
+                      </DialogTitle>
+                      <span className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+                        $
+                        {marketStats.tokenPrice.toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 4,
+                        })}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </DialogHeader>
             </div>
 
