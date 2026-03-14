@@ -200,7 +200,7 @@ const Portfolio = () => {
   );
   const [dataError, setDataError] = useState<string | null>(null);
   const [walletBalances, setWalletBalances] = useState<
-    Record<string, { balance: number; balanceUSD: number; lastUpdated?: number }>
+    Record<string, { balance: number; balanceUSD: number; lastUpdated: number }>
   >({});
   const [isLoadingWalletBalance, setIsLoadingWalletBalance] = useState(false);
   const [userBorrowBalance, setUserBorrowBalance] = useState<number>(0);
@@ -4423,7 +4423,7 @@ const Portfolio = () => {
                           handleRepayClick(
                             largestBorrow.asset,
                             largestBorrow.poolId,
-                            (largestBorrow as any).network
+                            (largestBorrow as ItemWithNetwork).network
                           );
                         }
                       }
@@ -4438,7 +4438,7 @@ const Portfolio = () => {
                         handleWithdrawClick(
                           largestDeposit.asset,
                           largestDeposit.poolId,
-                          (largestDeposit as any).network
+                          (largestDeposit as ItemWithNetwork).network
                         );
                       }
                     : undefined
