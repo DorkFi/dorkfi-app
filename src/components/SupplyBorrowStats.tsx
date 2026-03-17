@@ -2,6 +2,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { InfoIcon, ChevronDown, ChevronUp } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { calculateDepositAPY, calculateBorrowAPY } from "@/utils/apyCalculations";
+import { isAtDepositCap } from "@/constants/lendingCaps";
+import { useTokenPrice } from "@/hooks/useTokenPrice";
 import { useState } from "react";
 
 interface AssetData {
@@ -16,6 +18,7 @@ interface AssetData {
   totalBorrowUSD?: number;
   reserveFactor?: number;
   maxTotalDeposits?: number;
+  maxTotalBorrows?: number;
   apyCalculation?: { apy: number; [key: string]: unknown };
   borrowApyCalculation?: { apy: number };
   apyParameters?: { borrowRateBps: number; slopeBps: number; reserveFactorBps: number };
@@ -38,6 +41,7 @@ interface SupplyBorrowStatsProps {
 }
 
 const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmount = 0, borrowAmount = 0, userBorrowBalance = 0, userDepositBalance = 0, isSToken = false }: SupplyBorrowStatsProps) => {
+  const { price: tokenPrice } = useTokenPrice(asset);
   const safeSupplyAPY = Number.isFinite(assetData.supplyAPY) ? assetData.supplyAPY : 0;
   const safeBorrowAPY = Number.isFinite(assetData.borrowAPY) ? assetData.borrowAPY : 0;
 
@@ -271,7 +275,7 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
                 {assetData.maxTotalDeposits.toLocaleString()} {asset}
               </div>
               <div className="text-xs text-slate-500 dark:text-slate-400">
-                {assetData.totalSupply && assetData.maxTotalDeposits > assetData.totalSupply 
+                {assetData.totalSupply != null && assetData.maxTotalDeposits > 0 && !isAtDepositCap(assetData.totalSupply, assetData.maxTotalDeposits)
                   ? `${((assetData.maxTotalDeposits - assetData.totalSupply) / assetData.maxTotalDeposits * 100).toFixed(1)}% available`
                   : "At capacity"
                 }
@@ -374,10 +378,16 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
                 </div>
                 <span className="text-sm font-medium text-teal-600 dark:text-teal-400">
                   ${(() => {
-                    // Calculate max borrowable amount based on collateral
-                    // Formula: max(0, collateral * cf - borrows)
-                    const collateralFactorDecimal = assetData.collateralFactor / 100; // Convert percentage to decimal
-                    const maxBorrowable = Math.max(0, (userGlobalData.totalCollateralValue * collateralFactorDecimal) - userGlobalData.totalBorrowValue);
+                    // Max borrowable from collateral; cap by remaining borrow cap when applicable.
+                    // assetData.totalBorrow and maxTotalBorrows are in same token units; tokenPrice is USD per token.
+                    const collateralFactorDecimal = assetData.collateralFactor / 100;
+                    let maxBorrowable = Math.max(0, (userGlobalData.totalCollateralValue * collateralFactorDecimal) - userGlobalData.totalBorrowValue);
+                    const borrowCap = Number(assetData.maxTotalBorrows ?? 0);
+                    if (borrowCap > 0 && tokenPrice > 0) {
+                      const totalBorrow = Number(assetData.totalBorrow ?? 0);
+                      const remainingBorrowCapUSD = Math.max(0, borrowCap - totalBorrow) * tokenPrice;
+                      maxBorrowable = Math.min(maxBorrowable, remainingBorrowCapUSD);
+                    }
                     return maxBorrowable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                   })()}
                 </span>

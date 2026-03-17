@@ -11,6 +11,7 @@ import STokenTabletRow from "./STokenTabletRow";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { getTokenConfig, getAllTokensWithDisplayInfo, getNetworkConfig } from "@/config";
+import { isAtDepositCap, isAtBorrowCap } from "@/constants/lendingCaps";
 import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
@@ -743,6 +744,12 @@ const MarketsTabletTable = ({
                         : tokenConfigRaw;
                       const hasMigration = !!tokenConfig?.migration;
                       const migrationBalance = migrationBalances[mainMarket.asset];
+                      const totalSupply = Number(mainMarket.totalSupply ?? 0);
+                      const supplyCap = Number(mainMarket.supplyCap ?? 0);
+                      const depositCapReached = isAtDepositCap(totalSupply, supplyCap);
+                      const totalBorrow = Number(mainMarket.totalBorrow ?? 0);
+                      const borrowCap = Number(mainMarket.borrowCap ?? 0);
+                      const borrowCapReached = isAtBorrowCap(totalBorrow, borrowCap);
 
                       return (
                         <MarketsTableActions
@@ -761,6 +768,8 @@ const MarketsTabletTable = ({
                           migrationBalance={migrationBalance || undefined}
                           isLoadingBalance={isLoadingBalance}
                           isSToken={mainMarket.isSToken}
+                          depositDisabled={depositCapReached}
+                          borrowDisabled={borrowCapReached}
                         />
                       );
                     })()}

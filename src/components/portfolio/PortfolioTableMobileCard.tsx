@@ -25,6 +25,10 @@ interface PortfolioTableMobileCardProps {
   onRefreshClick?: () => void;
   isRefreshing?: boolean;
   type?: "deposit" | "borrow";
+  /** When true, deposit button is disabled (e.g. market at or over deposit cap). */
+  depositDisabled?: boolean;
+  /** When true, borrow button is disabled (e.g. market at or over borrow cap). */
+  borrowDisabled?: boolean;
 }
 
 const PortfolioTableMobileCard = ({
@@ -47,6 +51,8 @@ const PortfolioTableMobileCard = ({
   onRefreshClick,
   isRefreshing,
   type = "deposit",
+  depositDisabled = false,
+  borrowDisabled = false,
 }: PortfolioTableMobileCardProps) => {
   const { currentNetwork } = useNetwork();
   const tokenConfigRaw = getTokenConfig(currentNetwork, asset);
@@ -322,6 +328,14 @@ const PortfolioTableMobileCard = ({
               size="sm"
               onClick={onDepositClick}
               className="flex-1 min-w-0"
+              disabled={isDeposit ? depositDisabled : borrowDisabled}
+              title={
+                isDeposit && depositDisabled
+                  ? "Market at deposit cap"
+                  : !isDeposit && borrowDisabled
+                    ? "Market at borrow cap"
+                    : undefined
+              }
             >
               <Plus className="w-4 h-4 mr-1" />
               {isDeposit ? "Deposit" : "Borrow"}

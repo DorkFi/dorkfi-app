@@ -23,6 +23,7 @@ export interface OnDemandMarketData {
   walletBalance: number;
   supplyCap: number;
   supplyCapUSD: number;
+  borrowCap: number;
   maxLTV: number;
   liquidationThreshold: number;
   liquidationPenalty: number;
@@ -137,6 +138,7 @@ export const useOnDemandMarketData = ({
         walletBalance: 0,
         supplyCap: 0,
         supplyCapUSD: 0,
+        borrowCap: 0,
         maxLTV: 0,
         liquidationThreshold: 0,
         liquidationPenalty: 0,
@@ -252,6 +254,7 @@ export const useOnDemandMarketData = ({
             const totalSupplyAmount = parseFloat(marketInfo.totalDeposits) || 0;
             const totalBorrowAmount = parseFloat(marketInfo.totalBorrows) || 0;
             const supplyCapAmount = parseFloat(marketInfo.maxTotalDeposits) || 0;
+            const borrowCapAmount = parseFloat(marketInfo.maxTotalBorrows) || 0;
 
             console.log(`USD calculations for ${token.symbol}:`, {
               tokenPrice,
@@ -304,6 +307,7 @@ export const useOnDemandMarketData = ({
               walletBalance: 0, // This would need wallet integration
               supplyCap: supplyCapAmount,
               supplyCapUSD: supplyCapAmount * tokenPrice,
+              borrowCap: borrowCapAmount,
               maxLTV: marketInfo.collateralFactor * 100,
               liquidationThreshold: marketInfo.liquidationThreshold * 100,
               liquidationPenalty: marketInfo.liquidationBonus * 100,

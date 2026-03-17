@@ -1,6 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { RefreshCw, Info, ArrowDown } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { RefreshCw } from "lucide-react";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { getTokenConfig } from "@/config";
@@ -17,7 +16,6 @@ interface AccruedInterestMobileCardProps {
   tokenPrice?: number;
   network?: string;
   poolId?: string;
-  onRepayClick?: () => void;
   onRefreshClick?: () => void;
   isRefreshing?: boolean;
 }
@@ -34,7 +32,6 @@ const AccruedInterestMobileCard = ({
   tokenPrice = 1,
   network,
   poolId,
-  onRepayClick,
   onRefreshClick,
   isRefreshing,
 }: AccruedInterestMobileCardProps) => {
@@ -162,21 +159,6 @@ const AccruedInterestMobileCard = ({
             )}
           </div>
         )}
-
-        {/* Action Buttons */}
-        <div className="flex gap-2 pt-2">
-          {hasBorrows && onRepayClick && (
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={onRepayClick}
-              className="flex-1"
-            >
-              <ArrowDown className="w-4 h-4 mr-1" />
-              Repay
-            </Button>
-          )}
-        </div>
       </div>
     </DorkFiCard>
   );

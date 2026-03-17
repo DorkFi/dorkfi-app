@@ -21,6 +21,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { getTokenConfig, getAllTokensWithDisplayInfo, getNetworkConfig } from "@/config";
+import { isAtDepositCap, isAtBorrowCap } from "@/constants/lendingCaps";
 import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
@@ -599,15 +600,12 @@ const MarketsDesktopTable = ({
             // Use poolId from market object (most reliable - set when market data is loaded)
             // Fallback to token poolId, then marketInfo poolId
             const finalPoolId = market.poolId || token?.poolId || poolId || market.marketInfo?.poolId;
-            
-            console.log("=== MARKETS TABLE ACTIONS DEBUG ===", {
-              asset: market.asset,
-              marketPoolId: market.poolId,
-              marketInfoPoolId: market.marketInfo?.poolId,
-              tokenPoolId: token?.poolId,
-              finalPoolId,
-              hasMarketInfo: !!market.marketInfo,
-            });
+            const totalSupply = Number(market.totalSupply ?? 0);
+            const supplyCap = Number(market.supplyCap ?? 0);
+            const depositCapReached = isAtDepositCap(totalSupply, supplyCap);
+            const totalBorrow = Number(market.totalBorrow ?? 0);
+            const borrowCap = Number(market.borrowCap ?? 0);
+            const borrowCapReached = isAtBorrowCap(totalBorrow, borrowCap);
 
             return (
               <MarketsTableActions
@@ -626,6 +624,8 @@ const MarketsDesktopTable = ({
                 migrationBalance={migrationBalance || undefined}
                 isLoadingBalance={isLoadingBalance}
                 isSToken={market.isSToken}
+                depositDisabled={depositCapReached}
+                borrowDisabled={borrowCapReached}
               />
             );
           })()}
@@ -1017,7 +1017,13 @@ const MarketsDesktopTable = ({
 
                       // Use poolId from market object (most reliable - set when market data is loaded)
                       const finalPoolId = mainMarket.poolId || token?.poolId || poolId || mainMarket.marketInfo?.poolId;
-                      
+                      const totalSupply = Number(mainMarket.totalSupply ?? 0);
+                      const supplyCap = Number(mainMarket.supplyCap ?? 0);
+                      const depositCapReached = isAtDepositCap(totalSupply, supplyCap);
+                      const totalBorrow = Number(mainMarket.totalBorrow ?? 0);
+                      const borrowCap = Number(mainMarket.borrowCap ?? 0);
+                      const borrowCapReached = isAtBorrowCap(totalBorrow, borrowCap);
+
                       return (
                         <MarketsTableActions
                           asset={mainMarket.asset}
@@ -1035,6 +1041,8 @@ const MarketsDesktopTable = ({
                           migrationBalance={migrationBalance || undefined}
                           isLoadingBalance={isLoadingBalance}
                           isSToken={mainMarket.isSToken}
+                          depositDisabled={depositCapReached}
+                          borrowDisabled={borrowCapReached}
                         />
                       );
                     })()}
