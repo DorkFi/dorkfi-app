@@ -3367,28 +3367,45 @@ const Portfolio = () => {
       return;
     }
 
-    console.log("[Portfolio] handleDepositClick called with:", {
-      asset,
-      poolId,
-      networkId,
-      currentNetwork,
-    });
+    if (marketData.length === 0) {
+      toast({
+        title: "Market data loading",
+        description: "Market data is loading. Please try again shortly.",
+        variant: "default",
+      });
+      return;
+    }
+
+    // Don't open modal if market is at or over deposit cap
+    const market = marketData.find(
+      (m: any) =>
+        m.symbol === asset &&
+        (poolId != null && poolId !== ""
+          ? String(m.poolId) === String(poolId)
+          : true) &&
+        (networkId != null && networkId !== ""
+          ? m.networkId === networkId
+          : true)
+    ) as any;
+    if (market) {
+      const totalSupply = Number(market.totalDeposits ?? 0);
+      const maxTotalDeposits = Number(market.maxTotalDeposits ?? 0);
+      if (maxTotalDeposits > 0 && totalSupply >= maxTotalDeposits) {
+        toast({
+          title: "Deposit cap reached",
+          description:
+            "This market has reached its deposit cap. Deposits are not available.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
 
     setIsLoadingWalletBalance(true);
 
     try {
       // Fetch wallet balance before opening modal using the deposit's network
-      console.log("[Portfolio] Fetching wallet balance for:", {
-        asset,
-        networkId,
-        currentNetwork,
-      });
       const balanceResult = await fetchWalletBalance(asset, networkId, true);
-      console.log("[Portfolio] Wallet balance fetched:", {
-        asset,
-        networkId,
-        balance: balanceResult,
-      });
 
       // In the background, prefetch wallet balances for other deposit assets
       if (deposits.length > 0) {
@@ -5843,6 +5860,10 @@ const Portfolio = () => {
                                 marketLiquidationThreshold =
                                   marketLiquidationThreshold / 100;
                               }
+                              const isAtDepositCap =
+                                Number(market?.maxTotalDeposits ?? 0) > 0 &&
+                                Number(market?.totalDeposits ?? 0) >=
+                                  Number(market?.maxTotalDeposits ?? 0);
                               return (
                                 <PortfolioTableMobileCard
                                   key={`${deposit.asset}-${deposit.poolId || "default"
@@ -5865,6 +5886,7 @@ const Portfolio = () => {
                                   liquidationFactor={marketLiquidationThreshold}
                                   network={(deposit as ItemWithNetwork).network}
                                   poolId={deposit.poolId}
+                                  depositDisabled={isAtDepositCap}
                                   onDepositClick={
                                     !isViewOnly && !market?.isPaused
                                       ? () =>
@@ -6690,6 +6712,10 @@ const Portfolio = () => {
                                   marketLiquidationThreshold / 10000;
                               }
                               const isCollateral = deposit.value > 0; // Simplified - in reality, check if it's enabled as collateral
+                              const isAtDepositCap =
+                                Number(market?.maxTotalDeposits ?? 0) > 0 &&
+                                Number(market?.totalDeposits ?? 0) >=
+                                  Number(market?.maxTotalDeposits ?? 0);
 
                               // Token decimals for Supplied / Accrued Interest (e.g. 8 for goBTC)
                               const depositNetworkForToken =
@@ -6781,13 +6807,14 @@ const Portfolio = () => {
                                 <TableRow
                                   key={index}
                                   className="transition-all relative card-hover rounded-lg border border-gray-200/30 dark:border-ocean-teal/10 bg-white/50 dark:bg-slate-800/50 hover:border-teal-400 hover:shadow-[0_0_16px_4px_rgba(13,255,190,0.15)] hover:z-20 cursor-pointer"
-                                  onClick={() =>
+                                  onClick={() => {
+                                    if (isAtDepositCap) return;
                                     handleDepositClick(
                                       deposit.asset,
                                       deposit.poolId,
                                       (deposit as ItemWithNetwork).network
-                                    )
-                                  }
+                                    );
+                                  }}
                                 >
                                   <TableCell className="min-w-0">
                                     <div className="flex flex-col items-center gap-1 min-w-0">
@@ -6894,7 +6921,12 @@ const Portfolio = () => {
                                                   (deposit as ItemWithNetwork).network
                                                 );
                                               }}
-                                              title="Supply more of this asset to earn yield and use as collateral"
+                                              disabled={isAtDepositCap}
+                                              title={
+                                                isAtDepositCap
+                                                  ? "Market at deposit cap"
+                                                  : "Supply more of this asset to earn yield and use as collateral"
+                                              }
                                               aria-label="Supply"
                                               className="min-w-[92px] h-8 px-2 gap-1"
                                             >
@@ -7642,7 +7674,12 @@ const Portfolio = () => {
                                                 (asset.poolId
                                                   ? m.poolId === asset.poolId
                                                   : true)
-                                            );
+                                            ) as any;
+                                            const isAtDepositCap =
+                                              atRiskMarket &&
+                                              Number(atRiskMarket?.maxTotalDeposits ?? 0) > 0 &&
+                                              Number(atRiskMarket?.totalDeposits ?? 0) >=
+                                                Number(atRiskMarket?.maxTotalDeposits ?? 0);
                                             return !atRiskMarket?.isPaused && (
                                               <DorkFiButton
                                                 variant="secondary"
@@ -7652,6 +7689,12 @@ const Portfolio = () => {
                                                     asset.asset,
                                                     asset.poolId
                                                   )
+                                                }
+                                                disabled={isAtDepositCap}
+                                                title={
+                                                  isAtDepositCap
+                                                    ? "Market at deposit cap"
+                                                    : undefined
                                                 }
                                                 className="min-w-0 w-8 h-8 p-0"
                                               >

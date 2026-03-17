@@ -599,15 +599,10 @@ const MarketsDesktopTable = ({
             // Use poolId from market object (most reliable - set when market data is loaded)
             // Fallback to token poolId, then marketInfo poolId
             const finalPoolId = market.poolId || token?.poolId || poolId || market.marketInfo?.poolId;
-            
-            console.log("=== MARKETS TABLE ACTIONS DEBUG ===", {
-              asset: market.asset,
-              marketPoolId: market.poolId,
-              marketInfoPoolId: market.marketInfo?.poolId,
-              tokenPoolId: token?.poolId,
-              finalPoolId,
-              hasMarketInfo: !!market.marketInfo,
-            });
+            const totalSupply = Number(market.totalSupply ?? 0);
+            const supplyCap = Number(market.supplyCap ?? 0);
+            const isAtDepositCap =
+              supplyCap > 0 && totalSupply >= supplyCap;
 
             return (
               <MarketsTableActions
@@ -626,6 +621,7 @@ const MarketsDesktopTable = ({
                 migrationBalance={migrationBalance || undefined}
                 isLoadingBalance={isLoadingBalance}
                 isSToken={market.isSToken}
+                depositDisabled={isAtDepositCap}
               />
             );
           })()}
@@ -1017,7 +1013,11 @@ const MarketsDesktopTable = ({
 
                       // Use poolId from market object (most reliable - set when market data is loaded)
                       const finalPoolId = mainMarket.poolId || token?.poolId || poolId || mainMarket.marketInfo?.poolId;
-                      
+                      const totalSupply = Number(mainMarket.totalSupply ?? 0);
+                      const supplyCap = Number(mainMarket.supplyCap ?? 0);
+                      const isAtDepositCap =
+                        supplyCap > 0 && totalSupply >= supplyCap;
+
                       return (
                         <MarketsTableActions
                           asset={mainMarket.asset}
@@ -1035,6 +1035,7 @@ const MarketsDesktopTable = ({
                           migrationBalance={migrationBalance || undefined}
                           isLoadingBalance={isLoadingBalance}
                           isSToken={mainMarket.isSToken}
+                          depositDisabled={isAtDepositCap}
                         />
                       );
                     })()}

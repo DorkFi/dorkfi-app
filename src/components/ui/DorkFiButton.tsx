@@ -40,23 +40,30 @@ const variantClasses: Record<Variant, string> = {
 
 // All buttons standardized: min-h-[44px] min-w-[92px] px-4 py-2 text-sm font-semibold rounded-lg btn-hover-lift shadow-sm/hover:shadow-md transition-all, flex/center content, gap-1
 const DorkFiButton = React.forwardRef<HTMLButtonElement, DorkFiButtonProps>(
-  ({ variant = "primary", size = 'md', className, children, ...props }, ref) => (
-    <button
-      ref={ref}
-      className={cn(
-        "rounded-lg font-semibold min-h-[44px] min-w-[92px] btn-hover-lift shadow-sm hover:shadow-md transition-all flex items-center justify-center gap-1",
-        size === 'sm' ? 'px-3 py-1.5 text-xs' : size === 'lg' ? 'px-5 py-3 text-base' : 'px-4 py-2 text-sm',
-        variantClasses[variant],
-        className
-      )}
-      type={props.type || "button"}
-      tabIndex={props.onClick ? 0 : -1}
-      style={{ pointerEvents: props.onClick ? "auto" : "none" }}
-      {...props}
-    >
-      {children}
-    </button>
-  )
+  ({ variant = "primary", size = 'md', className, children, disabled, ...props }, ref) => {
+    const isDisabled = Boolean(disabled);
+    return (
+      <button
+        ref={ref}
+        disabled={disabled}
+        className={cn(
+          "rounded-lg font-semibold min-h-[44px] min-w-[92px] shadow-sm transition-all flex items-center justify-center gap-1",
+          size === 'sm' ? 'px-3 py-1.5 text-xs' : size === 'lg' ? 'px-5 py-3 text-base' : 'px-4 py-2 text-sm',
+          !isDisabled && "btn-hover-lift hover:shadow-md",
+          !isDisabled && variantClasses[variant],
+          isDisabled &&
+            "!opacity-60 !cursor-not-allowed !bg-slate-200 !border !border-slate-300 !text-slate-500 hover:!bg-slate-200 hover:!border-slate-300 hover:!text-slate-500 hover:!shadow-sm hover:!translate-y-0 dark:!bg-slate-700 dark:!border-slate-600 dark:!text-slate-400 dark:hover:!bg-slate-700 dark:hover:!border-slate-600",
+          className
+        )}
+        type={props.type || "button"}
+        tabIndex={isDisabled ? -1 : (props.onClick ? 0 : -1)}
+        style={{ pointerEvents: props.onClick && !isDisabled ? "auto" : "none" }}
+        {...props}
+      >
+        {children}
+      </button>
+    );
+  }
 );
 
 DorkFiButton.displayName = "DorkFiButton";

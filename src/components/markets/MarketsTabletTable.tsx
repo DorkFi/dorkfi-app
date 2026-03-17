@@ -743,6 +743,10 @@ const MarketsTabletTable = ({
                         : tokenConfigRaw;
                       const hasMigration = !!tokenConfig?.migration;
                       const migrationBalance = migrationBalances[mainMarket.asset];
+                      const totalSupply = Number(mainMarket.totalSupply ?? 0);
+                      const supplyCap = Number(mainMarket.supplyCap ?? 0);
+                      const isAtDepositCap =
+                        supplyCap > 0 && totalSupply >= supplyCap;
 
                       return (
                         <MarketsTableActions
@@ -761,6 +765,7 @@ const MarketsTabletTable = ({
                           migrationBalance={migrationBalance || undefined}
                           isLoadingBalance={isLoadingBalance}
                           isSToken={mainMarket.isSToken}
+                          depositDisabled={isAtDepositCap}
                         />
                       );
                     })()}
