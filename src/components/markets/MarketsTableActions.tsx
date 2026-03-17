@@ -14,19 +14,26 @@ interface MarketsTableActionsProps {
   isSToken?: boolean;
   /** When true, deposit is disabled (e.g. market at or over deposit cap). */
   depositDisabled?: boolean;
+  /** When true, borrow is disabled (e.g. market at or over borrow cap). */
+  borrowDisabled?: boolean;
 }
 
-const MarketsTableActions = ({ 
+/**
+ * Deposit / Borrow (or Mint for sToken) actions.
+ * For sToken the second button is "Mint"; it is not disabled by borrowDisabled by design (mint is independent of borrow cap).
+ */
+const MarketsTableActions = ({
   asset,
   poolId,
-  onDepositClick, 
-  onBorrowClick, 
+  onDepositClick,
+  onBorrowClick,
   onMintClick,
   onMigrateClick,
   migrationBalance,
   isLoadingBalance = false,
   isSToken = false,
   depositDisabled = false,
+  borrowDisabled = false,
 }: MarketsTableActionsProps) => {
   return (
     <div className="flex flex-col space-y-2">
@@ -50,10 +57,12 @@ const MarketsTableActions = ({
             e.stopPropagation();
             if (isSToken && onMintClick) {
               onMintClick(asset, poolId);
-            } else {
+            } else if (!borrowDisabled) {
               onBorrowClick(asset, poolId);
             }
           }}
+          disabled={!isSToken && borrowDisabled}
+          title={!isSToken && borrowDisabled ? "Market at borrow cap" : undefined}
           className={isSToken ? "min-w-[140px] flex-1" : ""}
         >
           {isSToken ? "Mint" : "Borrow"}

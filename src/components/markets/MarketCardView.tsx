@@ -12,6 +12,7 @@ import { useWallet } from "@txnlab/use-wallet-react";
 import STokenCard from "./STokenCard";
 import { ArrowRightLeft } from "lucide-react";
 import { getTokenConfig, getAllTokensWithDisplayInfo } from "@/config";
+import { isAtDepositCap, isAtBorrowCap } from "@/constants/lendingCaps";
 import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
@@ -249,20 +250,26 @@ const MarketCardView = ({
                 <DorkFiButton
                   variant="secondary"
                   onClick={e => { e.stopPropagation(); onDepositClick(market.asset, market.marketInfo?.poolId || market.poolId); }}
-                  disabled={
-                    (Number(market.supplyCap ?? 0) > 0 &&
-                     Number(market.totalSupply ?? 0) >= Number(market.supplyCap ?? 0))
-                  }
+                  disabled={isAtDepositCap(Number(market.totalSupply ?? 0), Number(market.supplyCap ?? 0))}
                   title={
-                    (Number(market.supplyCap ?? 0) > 0 &&
-                     Number(market.totalSupply ?? 0) >= Number(market.supplyCap ?? 0))
+                    isAtDepositCap(Number(market.totalSupply ?? 0), Number(market.supplyCap ?? 0))
                       ? "Market at deposit cap"
                       : undefined
                   }
                 >Deposit</DorkFiButton>
                 <DorkFiButton
                   variant="borrow-outline"
-                  onClick={e => { e.stopPropagation(); onBorrowClick(market.asset, market.marketInfo?.poolId || market.poolId); }}
+                  onClick={e => {
+                    e.stopPropagation();
+                    if (isAtBorrowCap(Number(market.totalBorrow ?? 0), Number(market.borrowCap ?? 0))) return;
+                    onBorrowClick(market.asset, market.marketInfo?.poolId || market.poolId);
+                  }}
+                  disabled={isAtBorrowCap(Number(market.totalBorrow ?? 0), Number(market.borrowCap ?? 0))}
+                  title={
+                    isAtBorrowCap(Number(market.totalBorrow ?? 0), Number(market.borrowCap ?? 0))
+                      ? "Market at borrow cap"
+                      : undefined
+                  }
                 >Borrow</DorkFiButton>
               </div>
               {(() => {

@@ -37,6 +37,7 @@ import {
   isMarketPaused,
 } from "@/services/lendingService";
 import { useToast } from "@/hooks/use-toast";
+import { isAtDepositCap, isAtBorrowCap } from "@/constants/lendingCaps";
 import algosdk, { waitForConfirmation } from "algosdk";
 import { abi, CONTRACT } from "ulujs";
 import {
@@ -450,12 +451,12 @@ const MarketsTable = () => {
   };
 
   const handleDepositClick = async (asset: string, poolId?: string) => {
-    // Don't open modal if market is at or over deposit cap
+    // Don't open modal if market is at or over deposit cap (95% threshold)
     const assetData = getAssetData(asset, poolId);
     if (assetData) {
       const totalSupply = Number(assetData.totalSupply ?? 0);
       const maxTotalDeposits = Number(assetData.maxTotalDeposits ?? 0);
-      if (maxTotalDeposits > 0 && totalSupply >= maxTotalDeposits) {
+      if (isAtDepositCap(totalSupply, maxTotalDeposits)) {
         toast({
           title: "Deposit cap reached",
           description: "This market has reached its deposit cap. Deposits are not available.",
@@ -512,6 +513,22 @@ const MarketsTable = () => {
   };
 
   const handleBorrowClick = async (asset: string, poolId?: string) => {
+    // Don't open modal if market is at or over borrow cap (95% threshold)
+    const assetData = getAssetData(asset, poolId);
+    if (assetData) {
+      const totalBorrow = Number(assetData.totalBorrow ?? 0);
+      const maxTotalBorrows = Number(assetData.maxTotalBorrows ?? 0);
+      if (isAtBorrowCap(totalBorrow, maxTotalBorrows)) {
+        toast({
+          title: "Borrow cap reached",
+          description:
+            "This market has reached its borrow cap. Borrowing is not available.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     setIsLoadingGlobalData(true);
 
     try {
@@ -2106,6 +2123,7 @@ const MarketsTable = () => {
       borrowApyCalculation: (market as { borrowApyCalculation?: { apy: number } }).borrowApyCalculation,
       apyParameters,
       maxTotalDeposits: market.supplyCap,
+      maxTotalBorrows: market.borrowCap,
       isSToken: market.isSToken,
     };
   };
