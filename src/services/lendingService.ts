@@ -244,12 +244,30 @@ export const decodeUser = (user: any[]) => {
   } as User;
 };
 
+/** SCALE used by contract for index math (1e18). */
+const DEPOSIT_SCALE = new BigNumber(1e18);
+
+/**
+ * Market total supply including accrued interest, for deposit cap validation.
+ * Formula: (totalScaledDeposits * depositIndex) / SCALE / 10^decimals.
+ * Use this so cap checks match contract semantics (principal + interest).
+ */
+function totalDepositsIncludingInterest(
+  totalScaledDeposits: string,
+  depositIndex: string,
+  decimals: number
+): string {
+  return new BigNumber(totalScaledDeposits)
+    .times(depositIndex)
+    .div(DEPOSIT_SCALE)
+    .div(new BigNumber(10).pow(decimals))
+    .toFixed(4);
+}
+
 export const enhanceAVMMarketInfo = (
   market: any,
   token?: TokenConfig
 ): MarketInfo => {
-  console.log("enhanceAVMMarketInfo", { market, token });
-
   const poolId = market.poolId || market.appId;
   const utilizationRate =
     market.totalScaledDeposits.toString() == "0"
@@ -277,7 +295,13 @@ export const enhanceAVMMarketInfo = (
       .toFixed(4);
   };
 
-  const totalDeposits = formatDeposit(market.totalScaledDeposits.toString());
+  const decimals = token?.decimals ?? 6;
+  // Include accrued interest so deposit cap validation matches contract (see issue #246)
+  const totalDeposits = totalDepositsIncludingInterest(
+    market.totalScaledDeposits.toString(),
+    market.depositIndex.toString(),
+    decimals
+  );
 
   const totalBorrows = formatDeposit(market.totalScaledBorrows.toString());
 
@@ -325,7 +349,7 @@ export const enhanceAVMMarketInfo = (
     tokenContractId: market.ntokenId.toString(),
     name: token?.name || "",
     symbol: token?.symbol || "",
-    decimals: token?.decimals ?? 6,
+    decimals,
     collateralFactor: parseFloat(market.collateralFactor.toString()) / 10000,
     liquidationThreshold:
       parseFloat(market.liquidationThreshold.toString()) / 10000,
@@ -333,10 +357,10 @@ export const enhanceAVMMarketInfo = (
     borrowRate: parseFloat(market.borrowRate.toString()) / 10000,
     slope: parseFloat(market.slope.toString()) / 10000,
     maxTotalDeposits: BigNumber(market.maxTotalDeposits.toString())
-      .div(10 ** (token?.decimals ?? 6))
+      .div(10 ** decimals)
       .toFixed(0),
     maxTotalBorrows: BigNumber(market.maxTotalBorrows.toString())
-      .div(10 ** (token?.decimals ?? 6))
+      .div(10 ** decimals)
       .toFixed(0),
     liquidationBonus: parseFloat(market.liquidationBonus.toString()) / 10000,
     closeFactor: parseFloat(market.closeFactor.toString()) / 10000,
@@ -613,13 +637,18 @@ export const fetchMarketInfo = async (
         return new BigNumber(price).div(new BigNumber(10).pow(18)).toFixed(12);
       };
 
+      const tokenDecimals = token?.decimals ?? 6;
       const formatDeposit = (deposit: string) => {
         return new BigNumber(deposit)
-          .div(new BigNumber(10).pow(token?.decimals || 0))
+          .div(new BigNumber(10).pow(tokenDecimals))
           .toFixed(4);
       };
-
-      const totalDeposits = formatDeposit(market.totalScaledDeposits);
+      // Include accrued interest so deposit cap validation matches contract (see issue #246)
+      const totalDeposits = totalDepositsIncludingInterest(
+        market.totalScaledDeposits.toString(),
+        market.depositIndex.toString(),
+        tokenDecimals
+      );
 
       const totalBorrows = formatDeposit(market.totalScaledBorrows);
 

@@ -12,6 +12,8 @@ interface MarketsTableActionsProps {
   migrationBalance?: string; // Formatted balance to display
   isLoadingBalance?: boolean;
   isSToken?: boolean;
+  /** When true, deposit is disabled (e.g. market at or over deposit cap). */
+  depositDisabled?: boolean;
 }
 
 const MarketsTableActions = ({ 
@@ -23,7 +25,8 @@ const MarketsTableActions = ({
   onMigrateClick,
   migrationBalance,
   isLoadingBalance = false,
-  isSToken = false 
+  isSToken = false,
+  depositDisabled = false,
 }: MarketsTableActionsProps) => {
   return (
     <div className="flex flex-col space-y-2">
@@ -35,7 +38,8 @@ const MarketsTableActions = ({
               e.stopPropagation();
               onDepositClick(asset, poolId);
             }}
-            disabled={isLoadingBalance}
+            disabled={isLoadingBalance || depositDisabled}
+            title={depositDisabled ? "Market at deposit cap" : undefined}
           >
             {isLoadingBalance ? "Loading..." : "Deposit"}
           </DorkFiButton>

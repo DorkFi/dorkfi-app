@@ -450,8 +450,20 @@ const MarketsTable = () => {
   };
 
   const handleDepositClick = async (asset: string, poolId?: string) => {
-    console.log("=== HANDLE DEPOSIT CLICK DEBUG ===");
-    console.log("Received params:", { asset, poolId });
+    // Don't open modal if market is at or over deposit cap
+    const assetData = getAssetData(asset, poolId);
+    if (assetData) {
+      const totalSupply = Number(assetData.totalSupply ?? 0);
+      const maxTotalDeposits = Number(assetData.maxTotalDeposits ?? 0);
+      if (maxTotalDeposits > 0 && totalSupply >= maxTotalDeposits) {
+        toast({
+          title: "Deposit cap reached",
+          description: "This market has reached its deposit cap. Deposits are not available.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
 
     setIsLoadingBalance(true);
 
@@ -2595,19 +2607,18 @@ const MarketsTable = () => {
                           }
                         }
 
-                        // Debug logging
-                        console.log("=== Direct Deposit APY Debug ===", {
-                          voiTokenSymbol: voiToken.symbol,
-                          poolId: voiToken.poolId,
-                          voiAssetData,
-                          apyCalculation: voiAssetData?.apyCalculation,
-                          supplyAPY: voiAssetData?.supplyAPY,
-                          allMarkets: markets.map((m) => ({
-                            asset: m.asset,
-                            poolId: m.poolId,
-                            supplyAPY: m.supplyAPY,
-                          })),
-                        });
+                        // Hide "Deposit & Earn" if deposit amount + total supply (incl. interest) would exceed cap
+                        const totalSupply = Number(voiAssetData?.totalSupply ?? 0);
+                        const maxTotalDeposits = Number(voiAssetData?.maxTotalDeposits ?? 0);
+                        const depositAmountHuman =
+                          totalClaimableThisBatch / Math.pow(10, rewardDecimals);
+                        const wouldExceedDepositCap =
+                          maxTotalDeposits > 0 &&
+                          depositAmountHuman + totalSupply > maxTotalDeposits;
+
+                        if (wouldExceedDepositCap) {
+                          return null;
+                        }
 
                         // Use effective APY from apyCalculation if available, otherwise fallback to supplyAPY
                         const apy =

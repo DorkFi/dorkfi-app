@@ -249,6 +249,16 @@ const MarketCardView = ({
                 <DorkFiButton
                   variant="secondary"
                   onClick={e => { e.stopPropagation(); onDepositClick(market.asset, market.marketInfo?.poolId || market.poolId); }}
+                  disabled={
+                    (Number(market.supplyCap ?? 0) > 0 &&
+                     Number(market.totalSupply ?? 0) >= Number(market.supplyCap ?? 0))
+                  }
+                  title={
+                    (Number(market.supplyCap ?? 0) > 0 &&
+                     Number(market.totalSupply ?? 0) >= Number(market.supplyCap ?? 0))
+                      ? "Market at deposit cap"
+                      : undefined
+                  }
                 >Deposit</DorkFiButton>
                 <DorkFiButton
                   variant="borrow-outline"
