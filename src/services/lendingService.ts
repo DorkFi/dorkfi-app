@@ -264,6 +264,23 @@ function totalDepositsIncludingInterest(
     .toFixed(4);
 }
 
+/**
+ * Market total borrows including accrued interest, for borrow cap validation.
+ * Formula: (totalScaledBorrows * borrowIndex) / SCALE / 10^decimals.
+ * Use this so cap checks match contract semantics (principal + interest). See issue #248.
+ */
+function totalBorrowsIncludingInterest(
+  totalScaledBorrows: string,
+  borrowIndex: string,
+  decimals: number
+): string {
+  return new BigNumber(totalScaledBorrows)
+    .times(borrowIndex)
+    .div(DEPOSIT_SCALE)
+    .div(new BigNumber(10).pow(decimals))
+    .toFixed(4);
+}
+
 export const enhanceAVMMarketInfo = (
   market: any,
   token?: TokenConfig
@@ -303,7 +320,12 @@ export const enhanceAVMMarketInfo = (
     decimals
   );
 
-  const totalBorrows = formatDeposit(market.totalScaledBorrows.toString());
+  // Include accrued interest so borrow cap validation matches contract (see issue #248)
+  const totalBorrows = totalBorrowsIncludingInterest(
+    market.totalScaledBorrows.toString(),
+    market.borrowIndex.toString(),
+    decimals
+  );
 
   // For b market (poolId 47139781), use 2% (200 basis points) as base borrow rate
   // Otherwise use the borrow rate from the contract
@@ -650,7 +672,12 @@ export const fetchMarketInfo = async (
         tokenDecimals
       );
 
-      const totalBorrows = formatDeposit(market.totalScaledBorrows);
+      // Include accrued interest so borrow cap validation matches contract (see issue #248)
+      const totalBorrows = totalBorrowsIncludingInterest(
+        market.totalScaledBorrows.toString(),
+        market.borrowIndex.toString(),
+        tokenDecimals
+      );
 
       // For b market (poolId 47139781), use 2% (200 basis points) as base borrow rate
       // Otherwise use the borrow rate from the contract

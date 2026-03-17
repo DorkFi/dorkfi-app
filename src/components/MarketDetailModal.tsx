@@ -15,6 +15,8 @@ import { useNetwork } from "@/contexts/NetworkContext";
 import { fetchUserGlobalData, fetchUserBorrowBalance } from "@/services/lendingService";
 import { getAllTokensWithDisplayInfo } from "@/config";
 import { APYCalculationResult } from "@/utils/apyCalculations";
+import { useToast } from "@/hooks/use-toast";
+import { isAtBorrowCap as isAtBorrowCapUtil } from "@/constants/lendingCaps";
 
 interface MarketDetailModalProps {
   isOpen: boolean;
@@ -32,6 +34,7 @@ interface MarketDetailModalProps {
     collateralFactor: number;
     supplyCap: number;
     supplyCapUSD: number;
+    borrowCap?: number;
     maxLTV: number;
     liquidationThreshold: number;
     liquidationPenalty: number;
@@ -70,7 +73,12 @@ const MarketDetailModal = ({ isOpen, onClose, asset, marketData }: MarketDetailM
   } | null>(null);
   const [userBorrowBalance, setUserBorrowBalance] = useState<number>(0);
   const [isLoadingGlobalData, setIsLoadingGlobalData] = useState(false);
-  
+  const { toast } = useToast();
+
+  const borrowCap = Number(marketData.borrowCap ?? 0);
+  const totalBorrow = Number(marketData.totalBorrow ?? 0);
+  const isAtBorrowCap = isAtBorrowCapUtil(totalBorrow, borrowCap);
+
   const { activeAccount } = useWallet();
   const { currentNetwork } = useNetwork();
 
@@ -79,6 +87,15 @@ const MarketDetailModal = ({ isOpen, onClose, asset, marketData }: MarketDetailM
   };
 
   const handleBorrowClick = async () => {
+    if (isAtBorrowCap) {
+      toast({
+        title: "Borrow cap reached",
+        description:
+          "This market has reached its borrow cap. Borrowing is not available.",
+        variant: "destructive",
+      });
+      return;
+    }
     setIsLoadingGlobalData(true);
     
     try {
@@ -144,6 +161,7 @@ const MarketDetailModal = ({ isOpen, onClose, asset, marketData }: MarketDetailM
     collateralFactor: marketData.collateralFactor,
     liquidity: marketData.totalSupply - marketData.totalBorrow,
     liquidityUSD: marketData.totalSupplyUSD - marketData.totalBorrowUSD,
+    maxTotalBorrows: marketData.borrowCap ?? 0,
   });
 
   const supplyUtilization = (marketData.totalSupplyUSD / marketData.supplyCapUSD) * 100;
@@ -531,7 +549,9 @@ const MarketDetailModal = ({ isOpen, onClose, asset, marketData }: MarketDetailM
               <Button
                 onClick={handleBorrowClick}
                 variant="outline"
-                className="border-ocean-teal text-ocean-teal hover:bg-ocean-teal/10 dark:border-ocean-teal dark:text-ocean-teal h-10 text-base font-semibold"
+                disabled={isAtBorrowCap}
+                title={isAtBorrowCap ? "Market at borrow cap" : undefined}
+                className="border-ocean-teal text-ocean-teal hover:bg-ocean-teal/10 dark:border-ocean-teal dark:text-ocean-teal h-10 text-base font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 Borrow {asset}
               </Button>

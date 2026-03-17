@@ -21,6 +21,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { getTokenConfig, getAllTokensWithDisplayInfo, getNetworkConfig } from "@/config";
+import { isAtDepositCap, isAtBorrowCap } from "@/constants/lendingCaps";
 import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
@@ -601,8 +602,10 @@ const MarketsDesktopTable = ({
             const finalPoolId = market.poolId || token?.poolId || poolId || market.marketInfo?.poolId;
             const totalSupply = Number(market.totalSupply ?? 0);
             const supplyCap = Number(market.supplyCap ?? 0);
-            const isAtDepositCap =
-              supplyCap > 0 && totalSupply >= supplyCap;
+            const depositCapReached = isAtDepositCap(totalSupply, supplyCap);
+            const totalBorrow = Number(market.totalBorrow ?? 0);
+            const borrowCap = Number(market.borrowCap ?? 0);
+            const borrowCapReached = isAtBorrowCap(totalBorrow, borrowCap);
 
             return (
               <MarketsTableActions
@@ -621,7 +624,8 @@ const MarketsDesktopTable = ({
                 migrationBalance={migrationBalance || undefined}
                 isLoadingBalance={isLoadingBalance}
                 isSToken={market.isSToken}
-                depositDisabled={isAtDepositCap}
+                depositDisabled={depositCapReached}
+                borrowDisabled={borrowCapReached}
               />
             );
           })()}
@@ -1015,8 +1019,10 @@ const MarketsDesktopTable = ({
                       const finalPoolId = mainMarket.poolId || token?.poolId || poolId || mainMarket.marketInfo?.poolId;
                       const totalSupply = Number(mainMarket.totalSupply ?? 0);
                       const supplyCap = Number(mainMarket.supplyCap ?? 0);
-                      const isAtDepositCap =
-                        supplyCap > 0 && totalSupply >= supplyCap;
+                      const depositCapReached = isAtDepositCap(totalSupply, supplyCap);
+                      const totalBorrow = Number(mainMarket.totalBorrow ?? 0);
+                      const borrowCap = Number(mainMarket.borrowCap ?? 0);
+                      const borrowCapReached = isAtBorrowCap(totalBorrow, borrowCap);
 
                       return (
                         <MarketsTableActions
@@ -1035,7 +1041,8 @@ const MarketsDesktopTable = ({
                           migrationBalance={migrationBalance || undefined}
                           isLoadingBalance={isLoadingBalance}
                           isSToken={mainMarket.isSToken}
-                          depositDisabled={isAtDepositCap}
+                          depositDisabled={depositCapReached}
+                          borrowDisabled={borrowCapReached}
                         />
                       );
                     })()}

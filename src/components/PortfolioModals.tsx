@@ -793,6 +793,7 @@ const PortfolioModals = ({
       liquidity: totalSupply - totalBorrow,
       liquidityUSD: (totalSupply - totalBorrow) * tokenPrice,
       maxTotalDeposits: parseFloat(market.maxTotalDeposits) || 0,
+      maxTotalBorrows: parseFloat((market as { maxTotalBorrows?: string }).maxTotalBorrows ?? "0") || 0,
       reserveFactor: market.reserveFactor != null ? (market.reserveFactor <= 1 ? market.reserveFactor * 10000 : market.reserveFactor) : undefined,
       apyCalculation: market.apyCalculation,
       borrowApyCalculation: market.borrowApyCalculation,

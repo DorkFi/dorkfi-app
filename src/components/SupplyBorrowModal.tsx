@@ -70,6 +70,7 @@ interface SupplyBorrowModalProps {
     liquidity: number;
     liquidityUSD: number;
     maxTotalDeposits?: number;
+    maxTotalBorrows?: number;
     isSToken?: boolean;
     reserveFactor?: number;
     apyCalculation?: { apy: number; utilizationRate?: number };
@@ -241,6 +242,14 @@ const SupplyBorrowModal = ({
         const totalDeposits = assetData.totalSupply;
         const totalBorrowed = assetData.totalBorrow;
 
+        // Cap by market borrow cap (amount remaining)
+        const capByBorrowCap = (value: number) => {
+          const borrowCap = assetData.maxTotalBorrows ?? 0;
+          if (borrowCap <= 0) return value;
+          const remaining = Math.max(0, borrowCap - (assetData.totalBorrow ?? 0));
+          return Math.min(value, remaining);
+        };
+
         // Calculate total deposits - total borrowed
         const depositsMinusBorrowed = totalDeposits - totalBorrowed;
 
@@ -277,10 +286,12 @@ const SupplyBorrowModal = ({
             }
           }
 
-          // Take minimum of (total deposits - total borrowed) and current borrowable value
-          const finalMaxBorrow = Math.max(
-            0,
-            Math.min(adjustedMaxBorrow, depositsMinusBorrowed)
+          // Take minimum of (total deposits - total borrowed) and current borrowable value, then cap by borrow cap
+          const finalMaxBorrow = capByBorrowCap(
+            Math.max(
+              0,
+              Math.min(adjustedMaxBorrow, depositsMinusBorrowed)
+            )
           );
 
           setCalculatedMaxBorrow(finalMaxBorrow);
@@ -304,14 +315,15 @@ const SupplyBorrowModal = ({
           const collateralForBorrow =
             poolData != null ? poolData.totalCollateralValue : userGlobalData.totalCollateralValue;
           const maxBorrowUSD = collateralForBorrow * (assetData.collateralFactor / 100);
-          const calculatedMaxBorrow =
+          const calculatedMaxBorrow = capByBorrowCap(
             tokenPrice != null && tokenPrice > 0
               ? (maxBorrowUSD / tokenPrice) * Math.pow(10, 6) / Math.pow(10, decimals)
-              : 0;
+              : 0
+          );
           setCalculatedMaxBorrow(calculatedMaxBorrow);
         } else {
-          // Even if maxBorrowBigInt is 0, we should still check deposits - borrowed
-          const finalMaxBorrow = Math.max(0, depositsMinusBorrowed);
+          // Even if maxBorrowBigInt is 0, we should still check deposits - borrowed, then cap by borrow cap
+          const finalMaxBorrow = capByBorrowCap(Math.max(0, depositsMinusBorrowed));
           setCalculatedMaxBorrow(finalMaxBorrow);
           console.log(
             "SupplyBorrowModal: Max borrow amount (deposits - borrowed):",
@@ -333,7 +345,7 @@ const SupplyBorrowModal = ({
     };
 
     fetchMaxBorrowAmount();
-  }, [isOpen, mode, activeAccount?.address, asset, poolId, networkToUse, tokenPrice]);
+  }, [isOpen, mode, activeAccount?.address, asset, poolId, networkToUse, tokenPrice, assetData.totalBorrow, assetData.maxTotalBorrows]);
 
   // Reset states when modal opens/closes
   useEffect(() => {
@@ -971,8 +983,14 @@ const SupplyBorrowModal = ({
                 walletBalance={propWalletBalance}
                 walletBalanceUSD={propWalletBalanceUSD}
                 availableToSupplyOrBorrow={
-                  mode === "borrow" && calculatedMaxBorrow !== null
-                    ? calculatedMaxBorrow
+                  mode === "borrow"
+                    ? (() => {
+                        const raw = calculatedMaxBorrow !== null ? calculatedMaxBorrow : assetData.liquidity;
+                        const borrowCap = assetData.maxTotalBorrows ?? 0;
+                        if (borrowCap <= 0) return raw;
+                        const remaining = Math.max(0, borrowCap - (assetData.totalBorrow ?? 0));
+                        return Math.min(raw, remaining);
+                      })()
                     : assetData.liquidity
                 }
                 supplyAPY={assetData.supplyAPY}
