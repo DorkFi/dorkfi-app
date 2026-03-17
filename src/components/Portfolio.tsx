@@ -268,10 +268,6 @@ const Portfolio = () => {
     direction: "asc" | "desc";
   }>({ column: "riskRatio", direction: "asc" }); // Default sort by risk ratio (most risky first)
 
-  // Liquidatable positions state
-  const [liquidatablePositions, setLiquidatablePositions] = useState<unknown[]>([]);
-  const [isLoadingLiquidatablePositions, setIsLoadingLiquidatablePositions] =
-    useState(false);
   const [liquidationModalOpen, setLiquidationModalOpen] = useState(false);
   const [selectedLiquidationPosition, setSelectedLiquidationPosition] =
     useState<unknown | null>(null);
@@ -1317,167 +1313,6 @@ const Portfolio = () => {
   // Calculate health factor for display
   // Use the lowest health factor from at-risk assets if available, otherwise use global health factor
   const healthFactor = calculateHealthFactor(totalCollateral, totalBorrowed);
-
-  // Fetch liquidatable positions from Orca API when health factor < 1
-  useEffect(() => {
-    const fetchLiquidatablePositions = async () => {
-      // Skip if feature is disabled
-      if (!isFeatureEnabled("enableLiquidatablePositions")) {
-        console.log(
-          "[Portfolio] Liquidatable positions feature disabled, skipping fetch"
-        );
-        setLiquidatablePositions([]);
-        return;
-      }
-
-      // Only fetch when we have an address
-      if (!displayAddress) {
-        console.log(
-          "[Portfolio] No displayAddress, skipping liquidatable positions fetch"
-        );
-        setLiquidatablePositions([]);
-        return;
-      }
-
-      console.log("[Portfolio] Health factor check:", {
-        healthFactor,
-        shouldFetch: healthFactor === null || healthFactor < 1,
-      });
-
-      // Only fetch if health factor is below 1 (or null, which might indicate risk)
-      if (healthFactor !== null && healthFactor >= 1) {
-        console.log("[Portfolio] Health factor >= 1, skipping fetch");
-        setLiquidatablePositions([]);
-        return;
-      }
-
-      setIsLoadingLiquidatablePositions(true);
-      try {
-        const url = `https://orca-api.nautilus.sh/api/opportunities?limit=100`;
-        console.log("[Portfolio] Fetching liquidatable positions from:", url);
-
-        // Add timeout to prevent hanging requests
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-
-        let response: Response;
-        try {
-          response = await fetch(url, {
-            signal: controller.signal,
-            headers: {
-              'Accept': 'application/json',
-            },
-          });
-          clearTimeout(timeoutId);
-        } catch (fetchError: unknown) {
-          clearTimeout(timeoutId);
-
-          // Handle different types of fetch errors
-          if (fetchError.name === 'AbortError') {
-            throw new Error('Request timeout: The liquidatable positions API did not respond in time');
-          } else if (fetchError.message?.includes('Failed to fetch') || fetchError instanceof TypeError) {
-            // Network error, CORS issue, or API unreachable
-            console.warn('[Portfolio] Network error fetching liquidatable positions:', fetchError);
-            throw new Error('Network error: Unable to reach the liquidatable positions API. This may be due to network connectivity or CORS restrictions.');
-          } else {
-            throw fetchError;
-          }
-        }
-
-        if (!response.ok) {
-          const errorText = await response.text().catch(() => response.statusText);
-          throw new Error(
-            `Failed to fetch liquidatable positions: ${response.status} ${response.statusText}${errorText ? ` - ${errorText}` : ''}`
-          );
-        }
-
-        const data = await response.json();
-
-        console.log("[Portfolio] Orca API response:", {
-          count: data.count,
-          total: data.total,
-          opportunitiesCount: data.opportunities?.length || 0,
-        });
-
-        // The API already filters by user, but let's double-check and filter by user address
-        // Show all positions that match the user address and have effectiveHF < 10000
-        const allOpportunities = data.opportunities || [];
-        console.log("[Portfolio] All opportunities from API:", {
-          count: allOpportunities.length,
-          sample: allOpportunities[0],
-          displayAddress,
-        });
-
-        // For debugging: show first few opportunities
-        if (allOpportunities.length > 0) {
-          console.log(
-            "[Portfolio] First 3 opportunities:",
-            allOpportunities.slice(0, 3)
-          );
-        }
-
-        const filtered = allOpportunities.filter((opp: Record<string, unknown>) => {
-          const userMatches =
-            opp.user?.toLowerCase() === displayAddress.toLowerCase();
-          const effectiveHF = opp.effectiveHF;
-          const hasLowEffectiveHF =
-            effectiveHF !== null &&
-            effectiveHF !== undefined &&
-            effectiveHF < 10000;
-
-          if (!userMatches) {
-            console.log(
-              "[Portfolio] Opportunity filtered out - user mismatch:",
-              {
-                oppUser: opp.user,
-                displayAddress,
-              }
-            );
-          }
-          if (userMatches && !hasLowEffectiveHF) {
-            console.log(
-              "[Portfolio] Opportunity filtered out - effectiveHF too high:",
-              {
-                effectiveHF,
-                threshold: 10000,
-              }
-            );
-          }
-
-          return userMatches && hasLowEffectiveHF;
-        });
-
-        console.log("[Portfolio] Filtered liquidatable positions:", {
-          total: allOpportunities.length,
-          filtered: filtered.length,
-          positions: filtered,
-        });
-        setLiquidatablePositions(filtered);
-      } catch (error: unknown) {
-        console.error(
-          "[Portfolio] Error fetching liquidatable positions:",
-          error
-        );
-
-        // Only log error details, don't show to user unless it's a critical issue
-        // Silently fail and set empty array - the section won't show if there are no positions
-        setLiquidatablePositions([]);
-
-        // Log more details for debugging
-        if (error?.message) {
-          console.warn('[Portfolio] Liquidatable positions fetch error details:', {
-            message: error.message,
-            name: error.name,
-            stack: error.stack,
-          });
-        }
-      } finally {
-        setIsLoadingLiquidatablePositions(false);
-      }
-    };
-
-    fetchLiquidatablePositions();
-  }, [displayAddress, healthFactor]);
 
   // Fetch wallet balance when repay modal opens
   useEffect(() => {
@@ -5279,341 +5114,6 @@ const Portfolio = () => {
           </DorkFiCard>
         )}
 
-      {/* Liquidatable Positions Section - Only show when health factor < 1 and feature is enabled */}
-      {isFeatureEnabled("enableLiquidatablePositions") &&
-        ((healthFactor !== null && healthFactor < 1) ||
-          liquidatablePositions.length > 0) && (
-          <DorkFiCard className="p-6 md:p-8 border-red-500/50 bg-red-50/50 dark:bg-red-950/20">
-            <div className="mb-4">
-              <div className="flex items-center gap-2 mb-2">
-                <AlertTriangle className="w-5 h-5 text-red-500" />
-                <H1 className="text-xl md:text-2xl text-red-600 dark:text-red-400">
-                  Liquidatable Positions
-                </H1>
-              </div>
-              <p className="text-sm text-muted-foreground mb-4">
-                Your health factor is below 1.0. These positions are at risk of
-                liquidation.
-              </p>
-            </div>
-
-            {isLoadingLiquidatablePositions ? (
-              <div className="flex items-center justify-center py-8">
-                <Skeleton className="h-8 w-8 rounded-full mr-2" />
-                <span className="text-muted-foreground">
-                  Loading liquidatable positions...
-                </span>
-              </div>
-            ) : liquidatablePositions.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <p>No liquidatable positions found.</p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Debt Asset</TableHead>
-                      <TableHead>Collateral Asset</TableHead>
-                      <TableHead>Network</TableHead>
-                      <TableHead>Market</TableHead>
-                      <TableHead>Debt Value (USD)</TableHead>
-                      <TableHead>Collateral Value (USD)</TableHead>
-                      <TableHead>Debt/Collateral Ratio</TableHead>
-                      <TableHead>Liquidation Amount (USD)</TableHead>
-                      <TableHead>Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {liquidatablePositions.map((position, index) => {
-                      // Find market for the debt asset to get close factor
-                      const debtMarketId = position.debtMarketId?.toString();
-                      const debtSymbol = position.debtTokenInfo?.data?.symbol;
-                      const collateralMarketId =
-                        position.collateralMarketId?.toString();
-                      const collateralSymbol =
-                        position.collateralTokenInfo?.data?.symbol;
-                      const networkId = position.network as NetworkId;
-
-                      // Find market matching debt asset and network
-                      const debtMarket = marketData.find((m) => {
-                        const matchesSymbol = m.symbol === debtSymbol;
-                        const matchesNetwork =
-                          (m as ItemWithNetwork).network === networkId ||
-                          (networkId && m.network === networkId);
-                        const matchesPool =
-                          debtMarketId &&
-                          (m.poolId === debtMarketId || m.appId === debtMarketId);
-                        return matchesSymbol && (matchesNetwork || matchesPool);
-                      });
-
-                      // Find market matching collateral asset and network
-                      const collateralMarket = marketData.find((m) => {
-                        const matchesSymbol = m.symbol === collateralSymbol;
-                        const matchesNetwork =
-                          (m as ItemWithNetwork).network === networkId ||
-                          (networkId && m.network === networkId);
-                        const matchesPool =
-                          collateralMarketId &&
-                          (m.poolId === collateralMarketId ||
-                            m.appId === collateralMarketId);
-                        return matchesSymbol && (matchesNetwork || matchesPool);
-                      });
-
-                      console.log(
-                        "[Portfolio] Collateral market:",
-                        collateralMarket
-                      );
-
-                      // Debug: Log market lookup
-                      console.log("[Portfolio] Collateral market lookup:", {
-                        collateralSymbol,
-                        collateralMarketId,
-                        networkId,
-                        marketDataLength: marketData.length,
-                        foundMarket: !!collateralMarket,
-                        marketKeys: collateralMarket
-                          ? Object.keys(collateralMarket)
-                          : null,
-                        liquidationBonus: collateralMarket?.liquidationBonus,
-                        marketInfoLiquidationBonus:
-                          collateralMarket?.marketInfo?.liquidationBonus,
-                        allMarkets: marketData.map((m) => ({
-                          symbol: m.symbol,
-                          poolId: m.poolId,
-                          appId: m.appId,
-                          network: (m as ItemWithNetwork).network,
-                          liquidationBonus: m.liquidationBonus,
-                          marketInfo: m.marketInfo
-                            ? {
-                              liquidationBonus: m.marketInfo.liquidationBonus,
-                            }
-                            : null,
-                        })),
-                      });
-
-                      // Get close factor from debt market (stored as decimal, e.g., 0.5 for 50%)
-                      // If not found, default to 50% (0.5)
-                      const closeFactor =
-                        debtMarket?.closeFactor ??
-                        debtMarket?.marketInfo?.closeFactor ??
-                        0.5;
-
-                      // Get liquidation bonus from collateral market (stored as decimal, e.g., 0.05 for 5%)
-                      // TODO: Once liquidationBonus is available in marketData, use it from there instead of hardcoded 20%
-                      // Check multiple possible locations for liquidation bonus
-                      let liquidationBonus = 0.2; // Default to 20% (0.20) until marketData includes liquidationBonus
-                      if (collateralMarket) {
-                        // Try direct property first
-                        if (
-                          collateralMarket.liquidationBonus !== undefined &&
-                          collateralMarket.liquidationBonus !== null
-                        ) {
-                          liquidationBonus =
-                            typeof collateralMarket.liquidationBonus === "number"
-                              ? collateralMarket.liquidationBonus
-                              : parseFloat(
-                                collateralMarket.liquidationBonus.toString()
-                              ) / 10000; // Convert from basis points if needed
-                        }
-                        // Try marketInfo property
-                        else if (
-                          collateralMarket.marketInfo?.liquidationBonus !==
-                          undefined &&
-                          collateralMarket.marketInfo?.liquidationBonus !== null
-                        ) {
-                          liquidationBonus =
-                            typeof collateralMarket.marketInfo
-                              .liquidationBonus === "number"
-                              ? collateralMarket.marketInfo.liquidationBonus
-                              : parseFloat(
-                                collateralMarket.marketInfo.liquidationBonus.toString()
-                              ) / 10000;
-                        }
-                      }
-
-                      console.log("[Portfolio] Liquidation bonus result:", {
-                        foundMarket: !!collateralMarket,
-                        liquidationBonus,
-                        rawValue: collateralMarket?.liquidationBonus,
-                        marketInfoValue:
-                          collateralMarket?.marketInfo?.liquidationBonus,
-                      });
-
-                      // Calculate liquidation amount: min(collateral value, borrow amount * close factor)
-                      const borrowValueUsd = position.borrowValueUsd || 0;
-                      const collateralValueUsd = position.collateralValueUsd || 0;
-                      const liquidationAmountFromCloseFactor =
-                        borrowValueUsd * closeFactor;
-                      let liquidationAmount = Math.min(
-                        collateralValueUsd,
-                        liquidationAmountFromCloseFactor
-                      );
-
-                      // Reduce liquidation amount by liquidation bonus percentage
-                      // liquidationBonus is a percentage (e.g., 0.05 = 5%), so we subtract that percentage
-                      liquidationAmount =
-                        liquidationAmount * (1 - liquidationBonus);
-
-                      // Format network name for display
-                      const getNetworkDisplayName = (
-                        network: string | undefined
-                      ) => {
-                        if (!network) return "N/A";
-                        if (network === "voi-mainnet") return "Voi";
-                        if (network === "algorand-mainnet") return "Algorand";
-                        return network;
-                      };
-
-                      return (
-                        <TableRow
-                          key={index}
-                          className="transition-all relative card-hover rounded-lg border border-gray-200/30 dark:border-ocean-teal/10 bg-white/50 dark:bg-slate-800/50 hover:border-red-400 hover:shadow-[0_0_16px_4px_rgba(239,68,68,0.15)] hover:z-20"
-                        >
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <img
-                                src={getTokenImagePath(
-                                  position.debtTokenInfo?.data?.symbol || ""
-                                )}
-                                alt={position.debtTokenInfo?.data?.symbol || ""}
-                                className="w-5 h-5 rounded-full"
-                                onError={(e) => {
-                                  (e.target as HTMLImageElement).src =
-                                    "/placeholder.svg";
-                                }}
-                              />
-                              <span className="font-medium">
-                                {position.debtTokenInfo?.data?.symbol || "N/A"}
-                              </span>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <img
-                                src={getTokenImagePath(
-                                  position.collateralTokenInfo?.data?.symbol || ""
-                                )}
-                                alt={
-                                  position.collateralTokenInfo?.data?.symbol || ""
-                                }
-                                className="w-5 h-5 rounded-full"
-                                onError={(e) => {
-                                  (e.target as HTMLImageElement).src =
-                                    "/placeholder.svg";
-                                }}
-                              />
-                              <span className="font-medium">
-                                {position.collateralTokenInfo?.data?.symbol ||
-                                  "N/A"}
-                              </span>
-                            </div>
-                          </TableCell>
-                          <TableCell className="font-medium">
-                            {getNetworkDisplayName(position.network)}
-                          </TableCell>
-                          <TableCell>
-                            {getMarketLabel(
-                              networkId,
-                              position.appId?.toString()
-                            ) || "N/A"}
-                          </TableCell>
-                          <TableCell>{formatCurrency(borrowValueUsd, "USD", { maximumFractionDigits: 2 })}</TableCell>
-                          <TableCell>
-                            {position.collateralValueUsd != null ? formatCurrency(position.collateralValueUsd, "USD", { maximumFractionDigits: 2 }) : formatCurrency(0, "USD", { maximumFractionDigits: 2 })}
-                          </TableCell>
-                          <TableCell>
-                            {position.debtCollateralRatio != null
-                              ? formatPercent(position.debtCollateralRatio, { maximumFractionDigits: 2 })
-                              : "N/A"}
-                          </TableCell>
-                          <TableCell>
-                            <span className="font-medium">
-                              {formatCurrency(liquidationAmount, "USD", { maximumFractionDigits: 2 })}
-                            </span>
-                          </TableCell>
-                          <TableCell>
-                            {(() => {
-                              // Check if the connected account matches the position user
-                              const userAddress = position.user?.toLowerCase();
-                              const connectedAddress =
-                                activeAccount?.address?.toLowerCase();
-                              const isOwnPosition =
-                                userAddress === connectedAddress;
-
-                              return (
-                                <div className="flex gap-2">
-                                  <DorkFiButton
-                                    onClick={() => {
-                                      // Open repay modal with position details
-                                      setSelectedRepayPosition({
-                                        ...position,
-                                        borrowValueUsd,
-                                        debtMarket,
-                                        debtSymbol,
-                                        debtMarketId,
-                                        networkId,
-                                      });
-                                      setRepayModalOpen(true);
-                                    }}
-                                    variant="secondary"
-                                    size="sm"
-                                    className="min-w-0 text-xs"
-                                    disabled={!activeAccount?.address}
-                                    title="Repay debt on behalf of this user"
-                                  >
-                                    Repay
-                                  </DorkFiButton>
-                                  <DorkFiButton
-                                    onClick={() => {
-                                      // Open liquidation modal with position details
-                                      const pos = {
-                                        ...position,
-                                        liquidationAmount,
-                                        borrowValueUsd,
-                                        collateralValueUsd,
-                                        closeFactor,
-                                        liquidationBonus,
-                                      };
-                                      setSelectedLiquidationPosition(pos);
-                                      setPartialLiquidationAmountUsd(liquidationAmount ?? 0);
-                                      setLiquidationModalOpen(true);
-                                    }}
-                                    variant="danger"
-                                    size="sm"
-                                    className="min-w-0 text-xs"
-                                    disabled={isOwnPosition}
-                                    title={
-                                      isOwnPosition
-                                        ? "Cannot liquidate your own position"
-                                        : "Liquidate this position"
-                                    }
-                                  >
-                                    Liquidate
-                                  </DorkFiButton>
-                                  <DorkFiButton
-                                    variant="secondary"
-                                    size="sm"
-                                    className="min-w-0 text-xs"
-                                    disabled={!activeAccount?.address}
-                                    title="Claim rewards or collateral"
-                                    onClick={() => handleClaim(position)}
-                                  >
-                                    Claim
-                                  </DorkFiButton>
-                                </div>
-                              );
-                            })()}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </DorkFiCard>
-        )}
 
       {/* Per-Network Asset Tables */}
       {user?.computed?.networkValues &&
@@ -7721,21 +7221,25 @@ const Portfolio = () => {
                                               <DorkFiButton
                                                 variant="secondary"
                                                 size="sm"
-                                                onClick={() =>
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
                                                   handleDepositClick(
                                                     asset.asset,
-                                                    asset.poolId
-                                                  )
-                                                }
+                                                    asset.poolId,
+                                                    (asset as ItemWithNetwork).network
+                                                  );
+                                                }}
                                                 disabled={depositCapReached}
                                                 title={
                                                   depositCapReached
                                                     ? "Market at deposit cap"
-                                                    : undefined
+                                                    : "Supply more of this asset to earn yield and use as collateral"
                                                 }
-                                                className="min-w-0 w-8 h-8 p-0"
+                                                aria-label="Supply"
+                                                className="min-w-[92px] h-8 px-2 gap-1"
                                               >
-                                                +
+                                                <span className="text-base leading-none">+</span>
+                                                <span className="hidden lg:inline text-xs">Supply</span>
                                               </DorkFiButton>
                                             );
                                           })()}
@@ -8967,16 +8471,6 @@ const Portfolio = () => {
                                   tokenPrice={item.tokenPrice}
                                   network={(item as ItemWithNetwork).network}
                                   poolId={item.poolId}
-                                  onRepayClick={
-                                    hasBorrows
-                                      ? () =>
-                                        handleRepayClick(
-                                          item.asset,
-                                          item.poolId,
-                                          (item as ItemWithNetwork).network
-                                        )
-                                      : undefined
-                                  }
                                 />
                               );
                             })}
@@ -9139,7 +8633,6 @@ const Portfolio = () => {
                                 )}
                               </button>
                             </TableHead>
-                            <TableHead>Actions</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -9296,17 +8789,7 @@ const Portfolio = () => {
                               return (
                                 <TableRow
                                   key={index}
-                                  className="transition-all relative card-hover rounded-lg border border-gray-200/30 dark:border-ocean-teal/10 bg-white/50 dark:bg-slate-800/50 hover:border-teal-400 hover:shadow-[0_0_16px_4px_rgba(13,255,190,0.15)] hover:z-20 cursor-pointer"
-                                  onClick={() => {
-                                    // Only show repay action
-                                    if (hasBorrows) {
-                                      handleRepayClick(
-                                        item.asset,
-                                        item.poolId,
-                                        (item as ItemWithNetwork).network
-                                      );
-                                    }
-                                  }}
+                                  className="transition-all relative card-hover rounded-lg border border-gray-200/30 dark:border-ocean-teal/10 bg-white/50 dark:bg-slate-800/50 hover:border-teal-400 hover:shadow-[0_0_16px_4px_rgba(13,255,190,0.15)] hover:z-20"
                                 >
                                   <TableCell>
                                     <div className="flex items-center gap-2">
@@ -9372,28 +8855,6 @@ const Portfolio = () => {
                                       })}
                                     </span>
                                   </TableCell>
-                                  <TableCell>
-                                    <div className="flex items-center gap-2">
-                                      {hasBorrows && (
-                                        <DorkFiButton
-                                          size="sm"
-                                          variant="danger-outline"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleRepayClick(
-                                              item.asset,
-                                              item.poolId,
-                                              (item as ItemWithNetwork).network
-                                            );
-                                          }}
-                                          title="Repay"
-                                          className="min-w-0 w-8 h-8 p-0"
-                                        >
-                                          −
-                                        </DorkFiButton>
-                                      )}
-                                    </div>
-                                  </TableCell>
                                 </TableRow>
                               );
                             });
@@ -9401,7 +8862,7 @@ const Portfolio = () => {
                           {accruedInterestItems.length === 0 && (
                             <TableRow>
                               <TableCell
-                                colSpan={5}
+                                colSpan={4}
                                 className="text-center text-muted-foreground py-8"
                               >
                                 No accrued interest
