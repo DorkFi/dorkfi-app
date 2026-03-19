@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { Proposal, VotingStats } from "@/types/governanceTypes";
 import { getEvents, decodeProposalCreatedEvent, getProposal, getVoter, Voter, castVote, castBatchVote, getVote } from "@/services/governanceService";
 import { convertServiceProposalToUI } from "@/utils/governanceUtils";
+import { isProposalBlacklisted } from "@/constants/governanceConstants";
 import { useWallet } from "@txnlab/use-wallet-react";
 import algorandService, { AlgorandNetwork } from "@/services/algorandService";
 import { getCurrentNetworkConfig, getNetworkConfig, getAlgorandNetworkFromNetworkId, getNetworksWithGovernance, type NetworkId } from "@/config";
@@ -266,6 +267,7 @@ export const useGovernanceData = (networkId: NetworkId | null) => {
             }
 
             for (const proposalId of proposalCreatedEvents) {
+              if (isProposalBlacklisted(proposalId)) continue;
               try {
                 const serviceProposal = await getProposal(proposalId, netId);
                 const uiProposal = convertServiceProposalToUI(serviceProposal, proposalId, netId);
