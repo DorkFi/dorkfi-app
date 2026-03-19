@@ -4410,23 +4410,40 @@ const Portfolio = () => {
                       .filter((item) => item.value > 0)
                       .sort((a, b) => b.value - a.value);
                   } else {
-                    // Show allocation by asset for selected network
+                    // Show allocation by asset (and A/B pool) for selected network
                     const filteredDeposits = deposits.filter((deposit) => {
-                      // This is a simplified filter - in a real scenario, you'd match by network
-                      return true; // For now, show all deposits
+                      const depositNetwork = (deposit as ItemWithNetwork).network;
+                      if (!depositNetwork) return true;
+                      const normalized = depositNetwork.toLowerCase();
+                      if (selectedNetworkFilter === "algorand") {
+                        return normalized.includes("algorand");
+                      }
+                      if (selectedNetworkFilter === "voi") {
+                        return normalized.includes("voi");
+                      }
+                      return true;
                     });
 
                     const assetMap = new Map<string, number>();
                     filteredDeposits.forEach((deposit) => {
-                      const current = assetMap.get(deposit.asset) || 0;
-                      assetMap.set(deposit.asset, current + deposit.value);
+                      const depositNetworkForLabel =
+                        (deposit as ItemWithNetwork).network || currentNetwork;
+                      const label = getMarketLabel(
+                        depositNetworkForLabel,
+                        deposit.poolId
+                      );
+                      const displayName = label
+                        ? `${deposit.asset} · ${label}`
+                        : deposit.asset;
+                      const current = assetMap.get(displayName) || 0;
+                      assetMap.set(displayName, current + deposit.value);
                     });
 
                     return Array.from(assetMap.entries())
-                      .map(([asset, value]) => ({
-                        name: asset,
+                      .map(([name, value]) => ({
+                        name,
                         value,
-                        asset,
+                        asset: name,
                       }))
                       .filter((item) => item.value > 0)
                       .sort((a, b) => b.value - a.value);
@@ -6354,11 +6371,25 @@ const Portfolio = () => {
                                 >
                                   <TableCell className="min-w-0">
                                     <div className="flex flex-col items-center gap-1 min-w-0">
-                                      <img
-                                        src={deposit.icon}
-                                        alt={deposit.asset}
-                                        className="w-8 h-8 rounded-full shrink-0"
-                                      />
+                                      <div className="relative shrink-0">
+                                        <img
+                                          src={deposit.icon}
+                                          alt={deposit.asset}
+                                          className="w-8 h-8 rounded-full shrink-0"
+                                        />
+                                        {depositMarketLabel && (
+                                          <div
+                                            className={`absolute -top-1 -right-1 w-4 h-4 rounded-full ${depositMarketLabel === "A"
+                                              ? "bg-blue-500 dark:bg-blue-600"
+                                              : "bg-purple-500 dark:bg-purple-600"
+                                              } border-2 border-white dark:border-slate-800 flex items-center justify-center z-10`}
+                                          >
+                                            <span className="text-[9px] font-bold text-white leading-none">
+                                              {depositMarketLabel}
+                                            </span>
+                                          </div>
+                                        )}
+                                      </div>
                                       <span className="font-medium truncate text-center">
                                         {deposit.asset}
                                       </span>
@@ -8060,14 +8091,28 @@ const Portfolio = () => {
                                   key={index}
                                   className="transition-all relative card-hover rounded-lg border border-gray-200/30 dark:border-ocean-teal/10 bg-white/50 dark:bg-slate-800/50 hover:border-teal-400 hover:shadow-[0_0_16px_4px_rgba(13,255,190,0.15)] hover:z-20"
                                 >
-                                  <TableCell>
-                                    <div className="flex items-center gap-2">
-                                      <img
-                                        src={borrow.icon}
-                                        alt={borrow.asset}
-                                        className="w-6 h-6 rounded-full"
-                                      />
-                                      <span className="font-medium">
+                                  <TableCell className="min-w-0">
+                                    <div className="flex flex-col items-center gap-1 min-w-0">
+                                      <div className="relative shrink-0">
+                                        <img
+                                          src={borrow.icon}
+                                          alt={borrow.asset}
+                                          className="w-8 h-8 rounded-full shrink-0"
+                                        />
+                                        {borrowMarketLabel && (
+                                          <div
+                                            className={`absolute -top-1 -right-1 w-4 h-4 rounded-full ${borrowMarketLabel === "A"
+                                              ? "bg-blue-500 dark:bg-blue-600"
+                                              : "bg-purple-500 dark:bg-purple-600"
+                                              } border-2 border-white dark:border-slate-800 flex items-center justify-center z-10`}
+                                          >
+                                            <span className="text-[9px] font-bold text-white leading-none">
+                                              {borrowMarketLabel}
+                                            </span>
+                                          </div>
+                                        )}
+                                      </div>
+                                      <span className="font-medium truncate text-center">
                                         {borrow.asset}
                                       </span>
                                     </div>

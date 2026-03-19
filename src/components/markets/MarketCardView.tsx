@@ -11,7 +11,7 @@ import { useNetwork } from "@/contexts/NetworkContext";
 import { useWallet } from "@txnlab/use-wallet-react";
 import STokenCard from "./STokenCard";
 import { ArrowRightLeft } from "lucide-react";
-import { getTokenConfig, getAllTokensWithDisplayInfo } from "@/config";
+import { getTokenConfig, getAllTokensWithDisplayInfo, getMarketLabel } from "@/config";
 import { isAtDepositCap, isAtBorrowCap } from "@/constants/lendingCaps";
 import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
@@ -120,35 +120,19 @@ const MarketCardView = ({
     checkMigrationBalances();
   }, [markets, activeAccount?.address, currentNetwork]);
 
-  // Deduplicate markets by asset symbol and poolId
-  // For mobile, we show only one market per asset (preferring sToken if available)
+  // One card per asset+pool so A and B markets both appear on mobile
   const deduplicatedMarkets = useMemo(() => {
     const marketMap = new Map<string, OnDemandMarketData>();
-    
     markets.forEach((market) => {
-      const key = market.asset;
-      const existingMarket = marketMap.get(key);
-      
-      // If no existing market, add this one
-      if (!existingMarket) {
+      const poolId = market.marketInfo?.poolId || market.poolId || "default";
+      const key = `${market.asset}-${poolId}`;
+      const existing = marketMap.get(key);
+      if (!existing) {
         marketMap.set(key, market);
-      } else {
-        // Prefer sToken markets, otherwise keep the first one
-        // Also check by poolId to avoid true duplicates
-        const existingPoolId = existingMarket.marketInfo?.poolId || existingMarket.poolId;
-        const currentPoolId = market.marketInfo?.poolId || market.poolId;
-        
-        // If poolIds are different, prefer sToken
-        if (existingPoolId !== currentPoolId) {
-          if (market.isSToken && !existingMarket.isSToken) {
-            marketMap.set(key, market);
-          }
-          // If both are sTokens or both are not, keep the first one
-        }
-        // If poolIds match, it's a duplicate, keep existing
+      } else if (market.isSToken && !existing.isSToken) {
+        marketMap.set(key, market);
       }
     });
-    
     return Array.from(marketMap.values());
   }, [markets]);
 
@@ -162,6 +146,10 @@ const MarketCardView = ({
   return (
     <div className="space-y-4">
       {deduplicatedMarkets.map((market) => {
+        const poolIdForLabel =
+          market.marketInfo?.poolId || market.poolId || undefined;
+        const marketLabel = getMarketLabel(currentNetwork, poolIdForLabel);
+
         // Render special card for s-tokens
         if (market.isSToken) {
           // Use poolId in key to ensure uniqueness even if multiple markets exist
@@ -170,6 +158,7 @@ const MarketCardView = ({
             <STokenCard
               key={marketKey}
               market={market}
+              marketLabel={marketLabel}
               onRowClick={onRowClick}
               onInfoClick={onInfoClick}
               onDepositClick={onDepositClick}
@@ -191,7 +180,22 @@ const MarketCardView = ({
             {/* Header with logo, asset info, and info button */}
             <div className="flex flex-col items-center text-center md:flex-col-reverse md:items-start md:text-left md:justify-normal">
               <div className="flex items-center gap-3 flex-1">
-                <img src={market.icon} alt={market.asset} className="w-10 h-10 md:w-8 md:h-8 rounded-full object-contain flex-shrink-0" />
+                <div className="relative flex-shrink-0">
+                  <img src={market.icon} alt={market.asset} className="w-10 h-10 md:w-8 md:h-8 rounded-full object-contain flex-shrink-0" />
+                  {marketLabel && (
+                    <div
+                      className={`absolute -top-1 -right-1 w-5 h-5 rounded-full ${
+                        marketLabel === "A"
+                          ? "bg-blue-500 dark:bg-blue-600"
+                          : "bg-purple-500 dark:bg-purple-600"
+                      } border-2 border-white dark:border-slate-800 flex items-center justify-center z-10`}
+                    >
+                      <span className="text-xs font-bold text-white">
+                        {marketLabel}
+                      </span>
+                    </div>
+                  )}
+                </div>
                 <div className="flex flex-col items-center justify-center gap-1 text-center flex-1">
                   <div className="font-semibold text-lg leading-tight">{market.asset}</div>
                   <Badge variant="outline" className="text-xs px-2 py-0.5 h-4 flex items-center justify-center whitespace-nowrap">

@@ -9,6 +9,8 @@ import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 
 interface STokenCardProps {
   market: OnDemandMarketData;
+  /** A/B pool badge from parent (mobile card view). */
+  marketLabel?: string | null;
   onRowClick: (market: OnDemandMarketData) => void;
   onInfoClick: (e: React.MouseEvent, market: OnDemandMarketData) => void;
   onDepositClick: (asset: string) => void;
@@ -17,7 +19,8 @@ interface STokenCardProps {
 }
 
 const STokenCard = ({ 
-  market, 
+  market,
+  marketLabel,
   onRowClick, 
   onInfoClick, 
   onDepositClick, 
@@ -34,7 +37,20 @@ const STokenCard = ({
       {/* Header with logo, asset info, and info button */}
       <div className="flex flex-col items-center text-center md:flex-col-reverse md:items-start md:text-left md:justify-normal">
         <div className="flex items-center gap-3 flex-1">
-          <img src={market.icon} alt={market.asset} className="w-10 h-10 md:w-8 md:h-8 rounded-full object-contain flex-shrink-0" />
+          <div className="relative flex-shrink-0">
+            <img src={market.icon} alt={market.asset} className="w-10 h-10 md:w-8 md:h-8 rounded-full object-contain flex-shrink-0" />
+            {marketLabel && (
+              <div
+                className={`absolute -top-1 -right-1 w-5 h-5 rounded-full ${
+                  marketLabel === "A"
+                    ? "bg-blue-500 dark:bg-blue-600"
+                    : "bg-purple-500 dark:bg-purple-600"
+                } border-2 border-white dark:border-slate-800 flex items-center justify-center z-10`}
+              >
+                <span className="text-xs font-bold text-white">{marketLabel}</span>
+              </div>
+            )}
+          </div>
           <div className="flex flex-col items-center justify-center gap-1 text-center flex-1">
             <div className="font-semibold text-lg leading-tight">{market.asset}</div>
             <Badge variant="outline" className="text-xs px-2 py-0.5 h-4 flex items-center justify-center whitespace-nowrap">
