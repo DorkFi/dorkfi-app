@@ -79,7 +79,7 @@ export const PremiumMarketModal = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl w-full min-w-0 min-h-0 max-h-[min(90dvh,90vh)] flex flex-col overflow-hidden px-0 py-0 bg-card dark:bg-slate-900 rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl card-hover hover:shadow-lg hover:border-ocean-teal/40 transition-all">
+      <DialogContent className="max-w-2xl w-full min-w-0 min-h-0 max-h-[min(90dvh,90vh)] flex flex-col overflow-hidden px-0 py-0 dorkfi-dark-bg-modal rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl card-hover hover:shadow-lg hover:border-ocean-teal/40 transition-all">
         <DialogTitle className="sr-only">{marketData.symbol} Market Details</DialogTitle>
         <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain rounded-xl">
           <div className="flex flex-col gap-3 sm:gap-4 px-3 pb-4 pt-10 pr-11 sm:px-4 sm:pt-4 sm:pr-10 min-w-0 w-full max-w-full box-border">
