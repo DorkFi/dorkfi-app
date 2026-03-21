@@ -133,6 +133,7 @@ export default function AccountOverview({
     .filter((asset) => asset.depositBalance > 0)
     .map((asset) => ({
       symbol: asset.symbol,
+      poolId: asset.poolId,
       amount: asset.depositBalance,
       valueUSD: asset.depositValueUSD,
       collateralFactor: asset.collateralFactor,
@@ -143,6 +144,7 @@ export default function AccountOverview({
     .filter((asset) => asset.borrowBalance > 0)
     .map((asset) => ({
       symbol: asset.symbol,
+      poolId: asset.poolId,
       amount: asset.borrowBalance,
       valueUSD: asset.borrowValueUSD,
       collateralFactor: asset.collateralFactor,
@@ -573,6 +575,7 @@ export default function AccountOverview({
                 title="Collateral Assets"
                 assets={collateralAssets}
                 colorScheme="collateral"
+                networkId={currentNetwork}
                 totalBorrowed={totalBorrowValue}
                 accountHealthFactor={realHealthFactor}
                 weightedCollateralValue={weightedCollateralValue}
@@ -583,6 +586,7 @@ export default function AccountOverview({
                 title="Borrowed Assets"
                 assets={borrowedAssets}
                 colorScheme="borrowed"
+                networkId={currentNetwork}
                 totalBorrowed={totalBorrowValue}
                 accountHealthFactor={realHealthFactor}
                 weightedCollateralValue={weightedCollateralValue}

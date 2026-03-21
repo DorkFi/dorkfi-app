@@ -64,29 +64,77 @@ import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 
 const MAX_CLAIMS_PER_TX = 3;
 
+/** Map on-demand market row → PremiumMarketModal `MarketData` (USD fields in whole dollars like the markets table). */
 function normalizeMarketData(md: Record<string, unknown>) {
+  const totalSupplyUSD = Number(md.totalSupplyUSD ?? 0);
+  const totalBorrowUSD = Number(md.totalBorrowUSD ?? 0);
+  const supplyUsdWhole = Math.max(0, Math.round(totalSupplyUSD / 1_000_000));
+  const borrowUsdWhole = Math.max(0, Math.round(totalBorrowUSD / 1_000_000));
+  const availableUsdWhole = Math.max(0, supplyUsdWhole - borrowUsdWhole);
+
+  const mi = md.marketInfo as Record<string, unknown> | undefined;
+  /** USD per 1 whole token — same basis as `useOnDemandMarketData` TVL (micro-USD / human supply). */
+  const supplyTokensHuman = Number(md.totalSupply ?? 0);
+  let price = 1;
+  if (
+    supplyTokensHuman > 0 &&
+    Number.isFinite(totalSupplyUSD) &&
+    totalSupplyUSD > 0
+  ) {
+    price = totalSupplyUSD / 1_000_000 / supplyTokensHuman;
+  } else if (mi?.price != null) {
+    const tokenPrice = parseFloat(String(mi.price)) || 0;
+    const decimals = Number(mi.decimals ?? 6);
+    if (tokenPrice > 0 && Number.isFinite(decimals)) {
+      price =
+        (tokenPrice * Math.pow(10, decimals + 6)) / Math.pow(10, 12);
+    }
+  }
+
+  const utilization = Number(md.utilization ?? 0);
+
   return {
-    icon: md.icon || "",
-    name: md.asset ?? md.name ?? "Unknown",
-    symbol: md.asset ?? md.symbol ?? "???",
-    price: md.price ?? 1,
-    priceChange24h: md.priceChange24h ?? 0,
-    priceHistory: md.priceHistory ?? [],
-    totalSupply: md.totalSupply ?? 0,
-    totalBorrow: md.totalBorrow ?? 0,
-    availableLiquidity: md.availableLiquidity ?? 0,
-    utilization: md.utilization ?? 0,
-    supplyAPY: md.supplyAPY ?? 0,
-    borrowAPY: md.borrowAPY ?? 0,
-    maxLTV: md.maxLTV ?? 0,
-    liquidationThreshold: md.liquidationThreshold ?? 0,
-    liquidationBonus: md.liquidationBonus ?? 0,
-    reserveFactor: md.reserveFactor ?? 0,
-    supplyCap: md.supplyCap ?? 0,
-    borrowCap: md.borrowCap ?? 0,
-    oracleStatus: md.oracleStatus ?? "live",
-    auditProvider: md.auditProvider ?? "N/A",
+    icon: String(md.icon ?? ""),
+    name: String(md.asset ?? md.name ?? "Unknown"),
+    symbol: String(md.asset ?? md.symbol ?? "???"),
+    price,
+    priceChange24h: Number(md.priceChange24h ?? 0),
+    priceHistory:
+      (md.priceHistory as { time: number; price: number }[]) ?? [],
+    totalSupply: supplyUsdWhole,
+    totalBorrow: borrowUsdWhole,
+    availableLiquidity: availableUsdWhole,
+    utilization,
+    supplyAPY: Number(md.supplyAPY ?? 0),
+    borrowAPY: Number(md.borrowAPY ?? 0),
+    maxLTV: Number(md.maxLTV ?? md.collateralFactor ?? 0),
+    liquidationThreshold: Number(md.liquidationThreshold ?? 0),
+    liquidationBonus: Number(
+      md.liquidationPenalty ?? md.liquidationBonus ?? 0
+    ),
+    reserveFactor: Number(md.reserveFactor ?? 0),
+    supplyCap: Number(md.supplyCap ?? 0),
+    borrowCap: Number(md.borrowCap ?? 0),
+    oracleStatus:
+      md.oracleStatus === "stale"
+        ? ("stale" as const)
+        : ("live" as const),
+    auditProvider: String(md.auditProvider ?? "N/A"),
   };
+}
+
+function poolIdFromMarketRow(market: Record<string, unknown>): string | undefined {
+  const direct = market.poolId;
+  if (direct != null && String(direct) !== "") return String(direct);
+  const mi = market.marketInfo as { poolId?: string } | undefined;
+  if (mi?.poolId != null && String(mi.poolId) !== "") return String(mi.poolId);
+  return undefined;
+}
+
+function networkIdToChainId(
+  networkId: string
+): "voi" | "algorand" {
+  return networkId.toLowerCase().includes("algorand") ? "algorand" : "voi";
 }
 
 const MarketsTable = () => {
@@ -95,9 +143,14 @@ const MarketsTable = () => {
   const [sortField, setSortField] = useState<SortField>("default");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [marketFilter, setMarketFilter] = useState<MarketFilter>("all");
-  const [depositModal, setDepositModal] = useState({
+  const [depositModal, setDepositModal] = useState<{
+    isOpen: boolean;
+    asset: string | null;
+    poolId?: string;
+  }>({
     isOpen: false,
     asset: null,
+    poolId: undefined,
   });
   const [withdrawModal, setWithdrawModal] = useState({
     isOpen: false,
@@ -112,9 +165,15 @@ const MarketsTable = () => {
     asset: string | null;
     poolId?: string;
   }>({ isOpen: false, asset: null });
-  const [detailModal, setDetailModal] = useState({
+  const [detailModal, setDetailModal] = useState<{
+    isOpen: boolean;
+    asset: string | null;
+    poolId?: string;
+    marketData: Record<string, unknown> | null;
+  }>({
     isOpen: false,
     asset: null,
+    poolId: undefined,
     marketData: null,
   });
   const [walletBalances, setWalletBalances] = useState<
@@ -883,17 +942,34 @@ const MarketsTable = () => {
     }
   };
 
+  const openMarketDetailModal = (market: Record<string, unknown>) => {
+    const asset = typeof market.asset === "string" ? market.asset : null;
+    if (!asset) return;
+    const poolId = poolIdFromMarketRow(market);
+    setDetailModal({
+      isOpen: true,
+      asset,
+      poolId,
+      marketData: market,
+    });
+  };
+
   const handleRowClick = (market: Record<string, unknown>) => {
-    //setDetailModal({ isOpen: true, asset: market.asset, marketData: market });
+    openMarketDetailModal(market);
   };
 
   const handleInfoClick = (e: React.MouseEvent, market: Record<string, unknown>) => {
     e.stopPropagation();
-    setDetailModal({ isOpen: true, asset: market.asset, marketData: market });
+    openMarketDetailModal(market);
   };
 
   const handleCloseDetailModal = () => {
-    setDetailModal({ isOpen: false, asset: null, marketData: null });
+    setDetailModal({
+      isOpen: false,
+      asset: null,
+      poolId: undefined,
+      marketData: null,
+    });
   };
 
   // Load all markets when component mounts
@@ -2358,11 +2434,10 @@ const MarketsTable = () => {
             isOpen={detailModal.isOpen}
             onClose={handleCloseDetailModal}
             asset={detailModal.asset}
-            marketData={
-              detailModal.marketData
-                ? normalizeMarketData(detailModal.marketData)
-                : undefined
-            }
+            chainId={networkIdToChainId(currentNetwork)}
+            networkId={currentNetwork}
+            rawMarket={detailModal.marketData}
+            marketData={normalizeMarketData(detailModal.marketData)}
             userPosition={{
               supplied: 100,
               borrowed: 0,
@@ -2371,24 +2446,28 @@ const MarketsTable = () => {
               healthFactor: 2.5,
               earnings: 5.25,
             }}
-            onDeposit={() => handleDepositClick(detailModal.asset!)}
+            onDeposit={() =>
+              handleDepositClick(detailModal.asset!, detailModal.poolId)
+            }
             onWithdraw={() => handleWithdrawClick(detailModal.asset!)}
-            onBorrow={() => handleBorrowClick(detailModal.asset!)}
-            onRepay={() => { }}
+            onBorrow={() =>
+              handleBorrowClick(detailModal.asset!, detailModal.poolId)
+            }
+            onRepay={() => {}}
           />
         )}
 
         {/* Deposit Modal */}
         {depositModal.isOpen &&
           depositModal.asset &&
-          getAssetData(depositModal.asset) && (
+          getAssetData(depositModal.asset, depositModal.poolId) && (
             <SupplyBorrowModal
               isOpen={depositModal.isOpen}
               onClose={handleCloseDepositModal}
               asset={depositModal.asset}
               poolId={depositModal.poolId}
               mode="deposit"
-              assetData={getAssetData(depositModal.asset)}
+              assetData={getAssetData(depositModal.asset, depositModal.poolId)!}
               walletBalance={walletBalances[depositModal.asset]?.balance || 0}
               walletBalanceUSD={
                 walletBalances[depositModal.asset]?.balanceUSD || 0

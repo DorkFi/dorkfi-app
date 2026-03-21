@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React from 'react';
+import DorkFiButton from '@/components/ui/DorkFiButton';
 import { MarketData, UserPosition } from './types';
 
 export const PrimaryActionButtons = ({
@@ -7,7 +8,7 @@ export const PrimaryActionButtons = ({
   onBorrow,
   onRepay,
   asset,
-  userPosition,
+  userPosition: _userPosition,
   marketData,
 }: {
   onDeposit?: () => void;
@@ -18,41 +19,60 @@ export const PrimaryActionButtons = ({
   userPosition?: UserPosition;
   marketData: MarketData;
 }) => {
-  const [selected, setSelected] = useState<'deposit' | 'borrow' | 'withdraw'>('deposit');
+  void _userPosition;
+  void asset;
+
   return (
-    <div className="flex flex-col gap-2 bg-[#131d35] px-0 py-0 rounded-2xl mt-2 shadow border-none">
-      <div className="flex flex-row gap-3 mb-2">
-        {/* Deposit Button (filled teal) */}
-        <button
-          className={`flex-1 font-bold rounded-lg py-3 px-2 flex items-center justify-center text-base transition focus:outline-none focus:ring-2 focus:ring-teal-300 shadow-none
-            ${selected === 'deposit' ? 'bg-[#16d8a8] text-white' : 'bg-[#153b34] text-white/80'}
-            hover:bg-[#11c6a1]`}
-          onClick={() => { setSelected('deposit'); onDeposit?.(); }}
+    <div className="flex flex-col gap-3 min-w-0 w-full">
+      <div className="flex flex-col gap-2 min-w-0 w-full sm:flex-row sm:flex-wrap sm:gap-2">
+        <DorkFiButton
+          type="button"
+          variant="primary"
+          className="w-full min-w-0 sm:flex-1 sm:min-w-0"
+          onClick={() => onDeposit?.()}
         >
           Deposit
-        </button>
-        {/* Borrow Button (yellow outline) */}
-        <button
-          className={`flex-1 font-bold rounded-lg py-3 px-2 flex items-center justify-center text-base transition focus:outline-none focus:ring-2 focus:ring-yellow-300 shadow-none border-2
-            ${selected === 'borrow' ? 'border-yellow-400 text-yellow-400 bg-[#222b12]/50' : 'border-yellow-400 text-yellow-400 bg-transparent'}
-            hover:bg-yellow-900/10`}
-          onClick={() => { setSelected('borrow'); onBorrow?.(); }}
+        </DorkFiButton>
+        <DorkFiButton
+          type="button"
+          variant="borrow-outline"
+          className="w-full min-w-0 sm:flex-1 sm:min-w-0"
+          onClick={() => onBorrow?.()}
         >
           Borrow
-        </button>
-        {/* Withdraw Button (outline dark) */}
-        <button
-          className={`flex-1 font-bold rounded-lg py-3 px-2 flex items-center justify-center text-base transition focus:outline-none focus:ring-2 focus:ring-blue-300 shadow-none border-2
-            ${selected === 'withdraw' ? 'border-blue-400 text-white bg-[#12203a]/70' : 'border-blue-600 text-white bg-transparent'}
-            hover:bg-blue-900/20`}
-          onClick={() => { setSelected('withdraw'); onWithdraw?.(); }}
+        </DorkFiButton>
+        <DorkFiButton
+          type="button"
+          variant="withdraw"
+          className="w-full min-w-0 sm:flex-1 sm:min-w-0"
+          onClick={() => onWithdraw?.()}
         >
           Withdraw
-        </button>
+        </DorkFiButton>
       </div>
-      <div className="flex flex-row justify-between text-xs text-blue-200/90 mt-1">
-        <span>Supply APY: <span className="text-green-400 font-semibold">{marketData.supplyAPY.toFixed(2)}%</span></span>
-        <span>Borrow APY: <span className="text-yellow-400 font-semibold">{marketData.borrowAPY.toFixed(2)}%</span></span>
+      {onRepay && (
+        <DorkFiButton
+          type="button"
+          variant="secondary"
+          className="w-full"
+          onClick={() => onRepay()}
+        >
+          Repay
+        </DorkFiButton>
+      )}
+      <div className="flex flex-row flex-wrap justify-between gap-2 text-xs text-muted-foreground pt-1">
+        <span>
+          Supply APY:{' '}
+          <span className="text-green-600 dark:text-green-400 font-semibold">
+            {marketData.supplyAPY.toFixed(2)}%
+          </span>
+        </span>
+        <span>
+          Borrow APY:{' '}
+          <span className="text-amber-600 dark:text-amber-400 font-semibold">
+            {marketData.borrowAPY.toFixed(2)}%
+          </span>
+        </span>
       </div>
     </div>
   );
