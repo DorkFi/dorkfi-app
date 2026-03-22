@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { formatUsdAmount } from '@/lib/utils';
 import { MarketData, UserPosition } from './types';
 
 export const HealthFactorSimulator = ({
@@ -70,8 +71,8 @@ export const HealthFactorSimulator = ({
           className="w-full mt-1 accent-ocean-teal"
         />
         <div className="flex justify-between text-xs text-muted-foreground mt-1">
-          <span>${borrowDelta}</span>
-          <span>Max: ${userPosition.borrowable}</span>
+          <span>{formatUsdAmount(borrowDelta)}</span>
+          <span>Max: {formatUsdAmount(userPosition.borrowable)}</span>
         </div>
       </div>
     </div>

@@ -20,7 +20,9 @@ export const GovernanceVotingInfoCard = () => {
         {/* Text on the right - 2/3 width */}
         <div className="w-full sm:w-2/3 text-center sm:text-left">
           <Body className="text-base md:text-lg leading-relaxed">
-            <span className="text-xl md:text-2xl font-bold text-white underline">Welcome to the DorkFi Governance Portal.</span>
+            <span className="text-xl md:text-2xl font-bold text-white bg-black inline-block px-2 py-1 rounded-sm">
+              Welcome to the DorkFi Governance Portal.
+            </span>
             <br />
             This is where UNIT holders shape the future of the protocol—voting on upgrades, risk parameters, market listings, and treasury decisions. Governance at DorkFi is transparent, on-chain, and driven by the community that supplies, borrows, and builds here.
             <br /><br />

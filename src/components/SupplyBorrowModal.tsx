@@ -836,9 +836,9 @@ const SupplyBorrowModal = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-white rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-[95vw] md:max-w-md h-[90vh] md:h-auto max-h-[90vh] md:max-h-[85vh] overflow-hidden flex flex-col p-0">
+      <DialogContent className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-white rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-[95vw] md:max-w-md max-h-[min(90vh,90dvh)] overflow-y-auto overflow-x-hidden flex flex-col p-0 overscroll-contain">
         {showSuccess ? (
-          <div className="p-6 overflow-y-auto">
+          <div className="p-6">
             <SupplyBorrowCongrats
               transactionType={mode}
               asset={asset}
@@ -851,7 +851,7 @@ const SupplyBorrowModal = ({
             />
           </div>
         ) : (
-          <div className="flex flex-col h-full">
+          <div className="flex flex-col min-h-0">
             <div className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 px-6 pt-4 pb-2 shrink-0">
               <DialogHeader className="pb-0">
                 <DialogTitle className="sr-only">
@@ -935,7 +935,7 @@ const SupplyBorrowModal = ({
               </DialogHeader>
             </div>
 
-            <div className="flex-1 overflow-y-auto overscroll-contain px-6 pt-2 pb-4 md:pb-3 space-y-3 touch-pan-y min-h-0">
+            <div className="px-6 pt-2 pb-4 md:pb-3 space-y-3">
               {error && (
                 <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 mb-4">
                   <div className="flex items-start justify-between">

@@ -21,8 +21,23 @@ import { ProposalCategory } from "@/types/governanceTypes";
 import { getCategoryId } from "@/constants/governanceConstants";
 import { APP_SPEC as UNITGovernanceAppSpec, PowerSnapshot, PowerSource, PowerMultiplierSnapshot } from "@/clients/UNITGovernanceClient";
 
-/** Default number of rounds to look back when fetching governance events (ProposalCreated, etc.). */
-export const GOVERNANCE_EVENTS_MIN_ROUNDS_LOOKBACK = 2e6;
+/**
+ * Default rounds to look back for governance indexer/event scans.
+ * Smaller = faster loads; increase via VITE_GOVERNANCE_EVENTS_ROUNDS_LOOKBACK if older proposals are missing.
+ */
+function governanceEventsRoundsLookback(): number {
+  const raw = import.meta.env.VITE_GOVERNANCE_EVENTS_ROUNDS_LOOKBACK;
+  if (raw != null && String(raw).trim() !== "") {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n >= 10_000) {
+      return Math.min(Math.floor(n), 5_000_000);
+    }
+  }
+  return 1_000_000;
+}
+
+/** Resolved lookback (env override or default). Exported for debugging/metrics. */
+export const GOVERNANCE_EVENTS_MIN_ROUNDS_LOOKBACK = governanceEventsRoundsLookback();
 
 /** Per-network minimum round for governance events (genesis/first governance round). */
 const GOVERNANCE_EVENTS_MIN_ROUND_BY_NETWORK: Partial<Record<NetworkId, number>> = {

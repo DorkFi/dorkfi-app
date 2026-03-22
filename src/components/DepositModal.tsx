@@ -108,7 +108,7 @@ const DepositModal = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="w-full max-w-[98vw] sm:max-w-md rounded-t-2xl sm:rounded-xl p-4 sm:p-8 max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-full max-w-[98vw] sm:max-w-md rounded-t-2xl sm:rounded-xl p-4 sm:p-8 max-h-[min(90vh,90dvh)] overflow-y-auto overflow-x-hidden overscroll-contain flex flex-col">
         {showSuccess ? (
           <div className="p-6">
             <SupplyBorrowCongrats
