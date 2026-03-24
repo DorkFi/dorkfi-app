@@ -3418,6 +3418,25 @@ export const deposit = async (
               });
             }
           } else if (tokenStandard == "asa") {
+            // ------------------------------------------------------------
+            // TODO move this to setup market workflow
+            // ------------------------------------------------------------
+            {
+              const txnO = (
+                await builder.token.createBalanceBox(
+                  algosdk.encodeAddress(
+                    algosdk.getApplicationAddress(Number(poolId)).publicKey
+                  )
+                )
+              ).obj;
+              console.log("createBalanceBox", { txnO });
+              buildN.push({
+                ...txnO,
+                payment: 28500,
+                note: new TextEncoder().encode("nt200 createBalanceBox"),
+              });
+            }
+            // ------------------------------------------------------------
             const aamt = adjustedDepositAmount;
             const xaid = Number(token.underlyingAssetId);
             const payment = p1 > 0 ? 28501 : 0;
@@ -3497,17 +3516,17 @@ export const deposit = async (
         // REM ensures that the pool can hold a balance prior to first
         //     first deposit
         // ------------------------------------------------------------
-        // {
-        //   const receiver = algosdk.encodeAddress(
-        //     algosdk.getApplicationAddress(Number(poolId)).publicKey
-        //   );
-        //   const txnO = (await builder.token.arc200_transfer(receiver, 0)).obj;
-        //   buildN.push({
-        //     ...txnO,
-        //     payment: 28504,
-        //     note: new TextEncoder().encode(`arc200 transfer`),
-        //   });
-        // }
+        {
+          const receiver = algosdk.encodeAddress(
+            algosdk.getApplicationAddress(Number(poolId)).publicKey
+          );
+          const txnO = (await builder.token.arc200_transfer(receiver, 0)).obj;
+          buildN.push({
+            ...txnO,
+            payment: 28504,
+            note: new TextEncoder().encode(`arc200 transfer`),
+          });
+        }
         // ------------------------------------------------------------
 
         // deposit to lending pool

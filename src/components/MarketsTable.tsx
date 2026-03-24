@@ -166,6 +166,7 @@ const MarketsTable = () => {
   const [sortField, setSortField] = useState<SortField>("default");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [marketFilter, setMarketFilter] = useState<MarketFilter>("all");
+  const [newMarketsOnly, setNewMarketsOnly] = useState(false);
   const [depositModal, setDepositModal] = useState<{
     isOpen: boolean;
     asset: string | null;
@@ -515,6 +516,7 @@ const MarketsTable = () => {
     loadAllMarkets,
     isLoading,
     marketsData,
+    newMarketsCount,
   } = useOnDemandMarketData({
     searchTerm,
     sortField,
@@ -522,7 +524,16 @@ const MarketsTable = () => {
     pageSize: 10,
     autoLoad: true,
     marketFilter,
+    newMarketsOnly,
   });
+
+  useEffect(() => {
+    setNewMarketsOnly(false);
+  }, [currentNetwork]);
+
+  useEffect(() => {
+    if (newMarketsCount === 0) setNewMarketsOnly(false);
+  }, [newMarketsCount]);
 
   const handleSearchTermChange = (value: string) => {
     setSearchTerm(value);
@@ -2478,6 +2489,12 @@ const MarketsTable = () => {
           sortField={sortField}
           sortOrder={sortOrder}
           onSortChange={handleSortFieldChange}
+          newMarketsCount={newMarketsCount}
+          newMarketsOnly={newMarketsOnly}
+          onNewMarketsOnlyChange={(v) => {
+            setNewMarketsOnly(v);
+            setCurrentPage(1);
+          }}
         />
 
         {/* Markets Table */}

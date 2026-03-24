@@ -42,6 +42,8 @@ export interface OnDemandMarketData {
   isSToken?: boolean;
   // Pool ID to identify specific market when multiple markets exist for same symbol
   poolId?: string;
+  /** From token config `dataAddedAt` (recent listings). */
+  isNew?: boolean;
 }
 
 export type SortField =
@@ -72,6 +74,8 @@ interface UseOnDemandMarketDataProps {
   autoLoad?: boolean; // Whether to automatically load markets when they come into view
   throttleMs?: number; // Throttle duration in milliseconds (default: 1 minute)
   marketFilter?: MarketFilter; // "all" | "A" (first lending pool) | "B" (second lending pool)
+  /** When true, only markets flagged as new (recent `dataAddedAt` in config) are shown. */
+  newMarketsOnly?: boolean;
 }
 
 // Throttle duration: 1 minute
@@ -85,6 +89,7 @@ export const useOnDemandMarketData = ({
   autoLoad = true,
   throttleMs = DEFAULT_THROTTLE_MS,
   marketFilter = "all",
+  newMarketsOnly = false,
 }: UseOnDemandMarketDataProps = {}) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [marketsData, setMarketsData] = useState<
@@ -149,6 +154,7 @@ export const useOnDemandMarketData = ({
         isLoaded: false,
         isSToken: tokenConfig?.isStoken || false,
         poolId: token.poolId, // Store poolId for multi-market tokens
+        isNew: token.isNew,
       };
     });
 
@@ -338,6 +344,7 @@ export const useOnDemandMarketData = ({
               borrowApyCalculation: marketInfo.borrowApyCalculation, // Include borrow APY calculation results
               isSToken: tokenConfig?.isStoken || false,
               poolId: tokenPoolId, // Store poolId for multi-market tokens
+              isNew: token.isNew,
             };
 
             console.log(`Market data for ${token.symbol}:`, marketData);
@@ -418,12 +425,24 @@ export const useOnDemandMarketData = ({
     }
   }, [currentNetwork]);
 
+  const newMarketsCount = useMemo(() => {
+    return marketDataArray.filter((market) => {
+      if (!market.isNew) return false;
+      if (market.marketInfo?.isPaused) return false;
+      return true;
+    }).length;
+  }, [marketDataArray]);
+
   // Filter and sort data
   const { filteredData, totalPages, paginatedData } = useMemo(() => {
     // Filter out paused markets
     let filtered = marketDataArray.filter(
       (market) => !market.marketInfo?.isPaused
     );
+    // New markets only (config-driven)
+    if (newMarketsOnly) {
+      filtered = filtered.filter((market) => market.isNew);
+    }
     // Filter by market (All / A / B)
     if (marketFilter !== "all" && lendingPools.length >= 2) {
       const poolIdA = lendingPools[0];
@@ -537,6 +556,7 @@ export const useOnDemandMarketData = ({
     marketDataArray,
     marketFilter,
     lendingPools,
+    newMarketsOnly,
   ]);
 
   const handleSearchChange = (newSearchTerm: string) => {
@@ -581,5 +601,6 @@ export const useOnDemandMarketData = ({
     loadAllMarkets,
     isLoading: loadingMarkets.size > 0,
     marketsData,
+    newMarketsCount,
   };
 };
