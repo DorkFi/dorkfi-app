@@ -1,6 +1,9 @@
 import { Proposal as UIProposal, ProposalStatus, ProposalCategory } from "@/types/governanceTypes";
 import { Proposal as ServiceProposal } from "@/services/governanceService";
-import { getCategoryFromId } from "@/constants/governanceConstants";
+import {
+  getCategoryFromId,
+  GOVERNANCE_PASS_THRESHOLD_YES_FRACTION,
+} from "@/constants/governanceConstants";
 
 /**
  * Converts a service Proposal (from governance contract) to UI Proposal format
@@ -29,12 +32,15 @@ export const convertServiceProposalToUI = (
   const startTime = new Date(Number(serviceProposal.votingStartTimestamp) * 1000);
   const endTime = new Date(Number(serviceProposal.votingEndTimestamp) * 1000);
 
-  // If contract still shows active but voting has ended, derive passed/rejected from vote counts
-  // Passed: yes power >= 50% of total power; otherwise rejected
+  // If contract still shows active but voting has ended, derive passed/rejected from vote power
+  // Passed: yes power >= GOVERNANCE_PASS_THRESHOLD_YES_FRACTION of total power cast; otherwise rejected
   if (status === "active" && endTime.getTime() < Date.now()) {
     const totalPower = Number(serviceProposal.proposalTotalPower);
     const yesPower = Number(serviceProposal.proposalYesPower);
-    status = totalPower > 0 && yesPower >= totalPower * 0.69 ? "passed" : "rejected";
+    status =
+      totalPower > 0 && yesPower >= totalPower * GOVERNANCE_PASS_THRESHOLD_YES_FRACTION
+        ? "passed"
+        : "rejected";
   }
 
   // Get category

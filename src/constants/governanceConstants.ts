@@ -56,6 +56,16 @@ export const getCategoryFromId = (categoryId: number): ProposalCategory | undefi
 };
 
 /**
+ * Minimum fraction of total voting power in the tally that must be "yes" for a proposal to pass
+ * when we derive passed/rejected from on-chain power after voting ends (contract may still show active).
+ * Aligns with protocol rules — see dorkfi-app#215.
+ */
+export const GOVERNANCE_PASS_THRESHOLD_YES_FRACTION = 0.69;
+
+/** Human-readable threshold for governance UI copy. */
+export const GOVERNANCE_PASS_THRESHOLD_DISPLAY = "69%";
+
+/**
  * Proposal IDs to hide from the governance UI (e.g. test or invalid proposals).
  * Use full 64-char hex; comparison is normalized (lowercase, padded to 64).
  */
