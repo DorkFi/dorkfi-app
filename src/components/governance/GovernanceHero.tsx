@@ -1,6 +1,7 @@
 import { H1, Body } from "@/components/ui/Typography";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import React from "react";
+import { GOVERNANCE_PASS_THRESHOLD_DISPLAY } from "@/constants/governanceConstants";
 
 interface GovernanceHeroProps {
   stats: Record<string, unknown>;
@@ -68,6 +69,10 @@ export const GovernanceHero = ({ stats }: GovernanceHeroProps) => {
         </H1>
         <Body className="text-sm sm:text-base md:text-lg lg:text-xl max-w-2xl mx-auto">
           Vote on protocol changes using your UNIT.
+        </Body>
+        <Body className="text-xs sm:text-sm text-muted-foreground max-w-2xl mx-auto mt-3">
+          Proposals pass when yes votes reach at least {GOVERNANCE_PASS_THRESHOLD_DISPLAY} of the
+          voting power cast (in addition to any quorum requirements).
         </Body>
       </div>
     </DorkFiCard>

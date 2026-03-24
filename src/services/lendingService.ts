@@ -3421,21 +3421,21 @@ export const deposit = async (
             // ------------------------------------------------------------
             // TODO move this to setup market workflow
             // ------------------------------------------------------------
-            {
-              const txnO = (
-                await builder.token.createBalanceBox(
-                  algosdk.encodeAddress(
-                    algosdk.getApplicationAddress(Number(poolId)).publicKey
-                  )
-                )
-              ).obj;
-              console.log("createBalanceBox", { txnO });
-              buildN.push({
-                ...txnO,
-                payment: 28500,
-                note: new TextEncoder().encode("nt200 createBalanceBox"),
-              });
-            }
+            // {
+            //   const txnO = (
+            //     await builder.token.createBalanceBox(
+            //       algosdk.encodeAddress(
+            //         algosdk.getApplicationAddress(Number(poolId)).publicKey
+            //       )
+            //     )
+            //   ).obj;
+            //   console.log("createBalanceBox", { txnO });
+            //   buildN.push({
+            //     ...txnO,
+            //     payment: 28500,
+            //     note: new TextEncoder().encode("nt200 createBalanceBox"),
+            //   });
+            // }
             // ------------------------------------------------------------
             const aamt = adjustedDepositAmount;
             const xaid = Number(token.underlyingAssetId);

@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { getMarketLabel } from "@/config";
+import { getMarketLabel, getNetworkDisplayName } from "@/config";
 
 function formatUsdFromMicro(micro: number): string {
   if (!Number.isFinite(micro)) return "—";
@@ -60,7 +60,7 @@ export const MarketDetailStatsSection: React.FC<MarketDetailStatsSectionProps> =
   const error = typeof rawMarket.error === "string" ? rawMarket.error : null;
 
   const rows: { label: string; value: string; hint?: string }[] = [
-    { label: "Network", value: networkId.replace(/-/g, " ") },
+    { label: "Network", value: getNetworkDisplayName(networkId) },
     { label: "Lending pool (app)", value: poolId },
     ...(marketLabel
       ? [{ label: "Market", value: `Pool ${marketLabel}` }]

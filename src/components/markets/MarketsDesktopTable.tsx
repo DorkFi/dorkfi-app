@@ -505,6 +505,11 @@ const MarketsDesktopTable = ({
                 apyCalculation={market.apyCalculation}
                 fallbackAPY={market.borrowAPY}
                 showTooltip={true}
+                networkId={currentNetwork}
+                asset={market.asset}
+                poolId={market.marketInfo?.poolId ?? market.poolId}
+                market={market}
+                marketIndex={marketIndex}
               />
             </Badge>
           )}
@@ -942,6 +947,10 @@ const MarketsDesktopTable = ({
                           apyCalculation={mainMarket.apyCalculation}
                           fallbackAPY={mainMarket.borrowAPY}
                           showTooltip={true}
+                          networkId={currentNetwork}
+                          asset={mainMarket.asset}
+                          poolId={mainMarket.marketInfo?.poolId ?? mainMarket.poolId}
+                          market={mainMarket}
                         />
                       </Badge>
                     )}

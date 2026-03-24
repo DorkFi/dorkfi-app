@@ -6,6 +6,7 @@ import DorkFiButton from "@/components/ui/DorkFiButton";
 import APYDisplay from "@/components/APYDisplay";
 import BorrowAPYDisplay from "@/components/BorrowAPYDisplay";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
+import { useNetwork } from "@/contexts/NetworkContext";
 
 interface STokenCardProps {
   market: OnDemandMarketData;
@@ -28,6 +29,7 @@ const STokenCard = ({
   onMintClick
 }: STokenCardProps) => {
   const { formatCurrency, formatPercent } = useNumberI18n();
+  const { currentNetwork } = useNetwork();
   return (
     <DorkFiCard
       key={market.asset}
@@ -68,8 +70,13 @@ const STokenCard = ({
           <Badge className="bg-gradient-to-r from-red-100 to-pink-100 text-red-800 dark:from-red-900 dark:to-pink-900 dark:text-red-200 border border-red-300 dark:border-red-600">
             <BorrowAPYDisplay 
               apyCalculation={market.apyCalculation}
+              borrowApyCalculation={market.borrowApyCalculation}
               fallbackAPY={market.borrowAPY}
               showTooltip={true}
+              networkId={currentNetwork}
+              asset={market.asset}
+              poolId={market.marketInfo?.poolId ?? market.poolId}
+              market={market}
             />
           </Badge>
           <div className="text-xs text-purple-700 dark:text-purple-300 mt-1">
