@@ -9,6 +9,8 @@ import { getAllTokensWithDisplayInfo } from '@/config';
 
 export interface UserAsset {
   symbol: string;
+  /** Lending pool app id when position is pool-specific (for A/B market labels). */
+  poolId?: string;
   contractId: string;
   depositBalance: number;
   borrowBalance: number;
@@ -98,6 +100,7 @@ export const useUserAssets = (userAddress: string) => {
           if (depositBalance > 0 || borrowBalance > 0) {
             assets.push({
               symbol: token.symbol,
+              poolId: token.poolId,
               contractId: token.underlyingContractId,
               depositBalance,
               borrowBalance,

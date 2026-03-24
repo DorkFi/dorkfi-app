@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { RefreshCw } from "lucide-react";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { getTokenConfig } from "@/config";
+import { getTokenConfig, getMarketLabel } from "@/config";
 
 interface AccruedInterestMobileCardProps {
   asset: string;
@@ -42,6 +42,8 @@ const AccruedInterestMobileCard = ({
     : tokenConfigRaw;
   const displayDecimals = Math.min((tokenConfig as { decimals?: number } | undefined)?.decimals ?? 6, 8);
 
+  const marketLabel = getMarketLabel(network || currentNetwork, poolId);
+
   const isNetPositive = netInterest > 0;
   const hasDeposits = (earnedInterest || 0) > 0;
   const hasBorrows = (owedInterest || 0) > 0;
@@ -56,11 +58,26 @@ const AccruedInterestMobileCard = ({
         {/* Header: Asset Icon + Name + Actions */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img
-              src={icon}
-              alt={asset}
-              className="w-10 h-10 rounded-full flex-shrink-0"
-            />
+            <div className="relative flex-shrink-0">
+              <img
+                src={icon}
+                alt={asset}
+                className="w-12 h-12 rounded-full flex-shrink-0"
+              />
+              {marketLabel && (
+                <div
+                  className={`absolute -top-0.5 -right-0.5 w-5 h-5 rounded-full ${
+                    marketLabel === "A"
+                      ? "bg-blue-500 dark:bg-blue-600"
+                      : "bg-purple-500 dark:bg-purple-600"
+                  } border-2 border-white dark:border-slate-800 flex items-center justify-center z-10`}
+                >
+                  <span className="text-[10px] font-bold text-white leading-none">
+                    {marketLabel}
+                  </span>
+                </div>
+              )}
+            </div>
             <div>
               <div className="font-semibold text-base text-slate-800 dark:text-white">
                 {asset}

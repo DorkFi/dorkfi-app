@@ -7,6 +7,7 @@ import {
   getLendingPools,
 } from "@/config";
 import { fetchMarketInfo, type MarketInfo } from "@/services/lendingService";
+import { normalizeWadUsdPerToken } from "@/lib/utils";
 import { APYCalculationResult } from "@/utils/apyCalculations";
 
 export interface OnDemandMarketData {
@@ -250,18 +251,32 @@ export const useOnDemandMarketData = ({
               `Setting market data for ${token.symbol} with pool ID: ${tokenPoolId}`
             );
             // Calculate USD values using the market price
-            const tokenPrice = parseFloat(marketInfo.price) || 0;
+            let tokenPrice = parseFloat(marketInfo.price) || 0;
+            const isWad = token.symbol.toUpperCase() === "WAD";
+            if (isWad) {
+              tokenPrice = normalizeWadUsdPerToken(tokenPrice);
+            }
             const totalSupplyAmount = parseFloat(marketInfo.totalDeposits) || 0;
             const totalBorrowAmount = parseFloat(marketInfo.totalBorrows) || 0;
             const supplyCapAmount = parseFloat(marketInfo.maxTotalDeposits) || 0;
             const borrowCapAmount = parseFloat(marketInfo.maxTotalBorrows) || 0;
 
+            // WAD: oracle can be micro-USD per token; store TVL as micro-USD (÷1e6 in UI).
+            // All other assets: legacy decimal-scaled formula (do not change — used across the app).
+            const decScale =
+              Math.pow(10, token.decimals + 6) / Math.pow(10, 12);
+            const totalSupplyUSD = isWad
+              ? Number(totalSupplyAmount * tokenPrice * 1e6)
+              : Number(totalSupplyAmount * tokenPrice * decScale);
+            const totalBorrowUSD = isWad
+              ? Number(totalBorrowAmount * tokenPrice * 1e6)
+              : Number(totalBorrowAmount * tokenPrice * decScale);
             console.log(`USD calculations for ${token.symbol}:`, {
               tokenPrice,
               totalSupplyAmount,
-              totalSupplyUSD: totalSupplyAmount * tokenPrice * Math.pow(10, token.decimals + 6) / Math.pow(10, 12),
+              totalSupplyUSD,
               totalBorrowAmount,
-              totalBorrowUSD: totalBorrowAmount * tokenPrice * Math.pow(10, token.decimals + 6) / Math.pow(10, 12),
+              totalBorrowUSD,
             });
 
             // Get the original token config to access isStoken property
@@ -295,10 +310,10 @@ export const useOnDemandMarketData = ({
               asset: token.symbol,
               icon: token.logoPath,
               totalSupply: totalSupplyAmount,
-              totalSupplyUSD: Number(totalSupplyAmount * tokenPrice * Math.pow(10, token.decimals + 6) / Math.pow(10, 12)),
+              totalSupplyUSD,
               supplyAPY: supplyAPYValue,
               totalBorrow: totalBorrowAmount,
-              totalBorrowUSD: totalBorrowAmount * tokenPrice * Math.pow(10, token.decimals + 6) / Math.pow(10, 12),
+              totalBorrowUSD,
               borrowAPY: borrowAPYValue,
               utilization: tokenConfig?.isStoken
                 ? 100.0
@@ -306,7 +321,9 @@ export const useOnDemandMarketData = ({
               collateralFactor: marketInfo.collateralFactor * 100,
               walletBalance: 0, // This would need wallet integration
               supplyCap: supplyCapAmount,
-              supplyCapUSD: supplyCapAmount * tokenPrice,
+              supplyCapUSD: isWad
+                ? supplyCapAmount * tokenPrice * 1e6
+                : supplyCapAmount * tokenPrice,
               borrowCap: borrowCapAmount,
               maxLTV: marketInfo.collateralFactor * 100,
               liquidationThreshold: marketInfo.liquidationThreshold * 100,

@@ -182,6 +182,19 @@
     background-position: center;
     background-repeat: no-repeat;
   }
+
+  /* Modal-safe site background (no pseudo-element overlay layering). */
+  .dorkfi-dark-bg-modal {
+    background-image: linear-gradient(
+        to bottom,
+        hsl(var(--deep-sea-navy) / 0.7),
+        hsl(var(--deep-sea-navy) / 0.7)
+      ),
+      url('/lovable-uploads/dorkfi_bg_03.png');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+  }
   
   .light-mode-beach-bg {
     background-image: url('/lovable-uploads/beach_banner.png');
