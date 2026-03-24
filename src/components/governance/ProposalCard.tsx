@@ -4,12 +4,13 @@ import { PROPOSAL_CATEGORY_DISPLAY_NAMES } from "@/constants/governanceConstants
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Clock, TrendingUp, TrendingDown, CheckCircle2, XCircle, HourglassIcon, Link2 } from "lucide-react";
+import { Clock, TrendingUp, TrendingDown, CheckCircle2, XCircle, HourglassIcon, Link2, Info } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import { H3, Body, Caption } from "@/components/ui/Typography";
 import { VoteConfirmationModal } from "./VoteConfirmationModal";
 import { VoteSuccessModal } from "./VoteSuccessModal";
+import { ProposalDetailsModal } from "./ProposalDetailsModal";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import { getNetworkConfig } from "@/config";
 import { getNetworkLogoPath } from "@/utils/tokenImageUtils";
@@ -63,6 +64,7 @@ export const ProposalCard = ({
 }: ProposalCardProps) => {
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
   const [pendingVoteSupport, setPendingVoteSupport] = useState<boolean | null>(null);
   const [isVoting, setIsVoting] = useState(false);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
@@ -201,6 +203,15 @@ export const ProposalCard = ({
               </button>
             </div>
           </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 p-0 shrink-0"
+            onClick={() => setShowDetails(true)}
+            title="View proposal details"
+          >
+            <Info className="h-4 w-4" />
+          </Button>
         </div>
 
         {/* Voting Stats */}
@@ -334,6 +345,13 @@ export const ProposalCard = ({
           userVote={userVote}
         />
       )}
+
+      {/* Proposal Details Modal */}
+      <ProposalDetailsModal
+        open={showDetails}
+        onOpenChange={setShowDetails}
+        proposal={proposal}
+      />
     </>
   );
 };

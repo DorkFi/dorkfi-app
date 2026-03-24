@@ -156,7 +156,7 @@ import {
 } from "@/constants/roles";
 import { ProposalCategory, Proposal as UIProposal, ProposalStatus } from "@/types/governanceTypes";
 import { createProposalWithCategory, getEvents, decodeProposalCreatedEvent, getProposal, Proposal as ServiceProposal, snapPower, getPowerSource, snapMultiplier, closeVotingEarly } from "@/services/governanceService";
-import { getCategoryFromId, PROPOSAL_CATEGORY_DISPLAY_NAMES } from "@/constants/governanceConstants";
+import { getCategoryFromId, PROPOSAL_CATEGORY_DISPLAY_NAMES, isProposalBlacklisted } from "@/constants/governanceConstants";
 import { ProposalCard } from "@/components/governance/ProposalCard";
 import { VoterInfoLookup } from "@/components/governance/VoterInfoLookup";
 import { PowerMultiplierLookup } from "@/components/governance/PowerMultiplierLookup";
@@ -3022,9 +3022,10 @@ export default function AdminDashboard() {
         }
       }
 
-      // Fetch proposal details for each ProposalCreated event
+      // Fetch proposal details for each ProposalCreated event (skip blacklisted)
       const fetchedProposals: UIProposal[] = [];
       for (const proposalId of proposalCreatedEvents) {
+        if (isProposalBlacklisted(proposalId)) continue;
         try {
           const serviceProposal = await getProposal(proposalId, selectedNetworkForGovernance);
           const uiProposal = convertServiceProposalToUI(serviceProposal, proposalId);

@@ -54,3 +54,30 @@ export const getCategoryId = (category: ProposalCategory): number => {
 export const getCategoryFromId = (categoryId: number): ProposalCategory | undefined => {
   return CATEGORY_ID_TO_CATEGORY[categoryId];
 };
+
+/**
+ * Proposal IDs to hide from the governance UI (e.g. test or invalid proposals).
+ * Use full 64-char hex; comparison is normalized (lowercase, padded to 64).
+ */
+export const GOVERNANCE_PROPOSAL_BLACKLIST: string[] = [
+  "4a6c554441c0412819991dbd14fe8597074ab188ad8efe0fe66aca63b6c5476f", // Reward WAD/USDC LP Holders proposal with errors
+  "358c2ec4acd829f644965a3be92e0d8702f538a5d653dd009b3deb61b2cb64d0", // Reward WAD/USDC LP Holders proposal with errors
+];
+
+/**
+ * Normalize proposal ID for blacklist comparison (lowercase, 64-char hex).
+ */
+const normalizeProposalId = (id: string): string => {
+  const hex = (id.startsWith("0x") ? id.slice(2) : id).toLowerCase();
+  return hex.padStart(64, "0").slice(-64);
+};
+
+/**
+ * Returns true if the proposal should be hidden from the governance list.
+ */
+export const isProposalBlacklisted = (proposalId: string): boolean => {
+  const normalized = normalizeProposalId(proposalId);
+  return GOVERNANCE_PROPOSAL_BLACKLIST.some(
+    (b) => normalizeProposalId(b) === normalized
+  );
+};
