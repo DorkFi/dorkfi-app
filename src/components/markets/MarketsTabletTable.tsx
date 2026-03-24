@@ -431,6 +431,11 @@ const MarketsTabletTable = ({
                 borrowApyCalculation={market.borrowApyCalculation}
                 fallbackAPY={market.borrowAPY}
                 showTooltip={true}
+                networkId={currentNetwork}
+                asset={market.asset}
+                poolId={market.marketInfo?.poolId ?? market.poolId}
+                market={market}
+                marketIndex={marketIndex}
               />
             </Badge>
           )}
@@ -712,6 +717,10 @@ const MarketsTabletTable = ({
                           borrowApyCalculation={mainMarket.borrowApyCalculation}
                           fallbackAPY={mainMarket.borrowAPY}
                           showTooltip={true}
+                          networkId={currentNetwork}
+                          asset={mainMarket.asset}
+                          poolId={mainMarket.marketInfo?.poolId ?? mainMarket.poolId}
+                          market={mainMarket}
                         />
                       </Badge>
                     )}

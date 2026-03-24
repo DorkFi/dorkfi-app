@@ -2080,6 +2080,56 @@ export const getMarketLabel = (
 };
 
 /**
+ * Pool id when the row object has not yet populated `marketInfo` / `poolId` (same rules as markets table `getPoolIdForSorting`).
+ */
+export const getPoolIdFromTokenConfig = (
+  networkId: NetworkId,
+  asset: string,
+  marketIndex?: number
+): string | null => {
+  try {
+    const networkConfig = getNetworkConfig(networkId);
+    const tokenConfigRaw = networkConfig.tokens[asset];
+    if (Array.isArray(tokenConfigRaw)) {
+      if (marketIndex !== undefined && tokenConfigRaw[marketIndex]?.poolId != null) {
+        return String(tokenConfigRaw[marketIndex].poolId);
+      }
+      if (tokenConfigRaw.length > 0 && tokenConfigRaw[0]?.poolId != null) {
+        return String(tokenConfigRaw[0].poolId);
+      }
+    } else if (tokenConfigRaw?.poolId != null) {
+      return String(tokenConfigRaw.poolId);
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+};
+
+/**
+ * Borrow APY tooltip lists utilization; for A-market WAD that line is hidden to reduce confusion (dorkfi-app#266).
+ * Pass `market` / `marketIndex` so pool id resolves from token config when the row has no carousel (single market, no pool on row yet).
+ */
+export const shouldHideBorrowTooltipUtilizationForWad = (
+  networkId: NetworkId | string | null | undefined,
+  asset: string | null | undefined,
+  poolId: string | null | undefined,
+  market?: { marketInfo?: { poolId?: string }; poolId?: string },
+  marketIndex?: number
+): boolean => {
+  if (!asset || asset !== "WAD") return false;
+  if (!networkId) return false;
+  const nid = networkId as NetworkId;
+  const resolved =
+    poolId ??
+    market?.marketInfo?.poolId ??
+    market?.poolId ??
+    getPoolIdFromTokenConfig(nid, asset, marketIndex) ??
+    null;
+  return getMarketLabel(networkId, resolved) === "A";
+};
+
+/**
  * Helper functions for accessing configuration
  */
 export const getNetworkConfig = (networkId: NetworkId): NetworkConfig => {

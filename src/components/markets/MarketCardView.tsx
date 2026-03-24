@@ -229,6 +229,10 @@ const MarketCardView = ({
                     borrowApyCalculation={market.borrowApyCalculation}
                     fallbackAPY={market.borrowAPY}
                     showTooltip={true}
+                    networkId={currentNetwork}
+                    asset={market.asset}
+                    poolId={market.marketInfo?.poolId ?? market.poolId}
+                    market={market}
                   />
                 </Badge>
                 <div className="text-xs text-muted-foreground mt-1">

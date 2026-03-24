@@ -124,8 +124,14 @@ const STokenTabletRow = ({
           <Badge className="bg-gradient-to-r from-red-100 to-pink-100 text-red-800 dark:from-red-900 dark:to-pink-900 dark:text-red-200 border border-red-300 dark:border-red-600">
             <BorrowAPYDisplay 
               apyCalculation={market.apyCalculation}
+              borrowApyCalculation={market.borrowApyCalculation}
               fallbackAPY={market.borrowAPY}
               showTooltip={true}
+              networkId={currentNetwork}
+              asset={market.asset}
+              poolId={market.marketInfo?.poolId ?? market.poolId}
+              market={market}
+              marketIndex={marketIndex}
             />
           </Badge>
         )}

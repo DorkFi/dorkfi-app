@@ -8,6 +8,7 @@ import React from 'react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Info } from 'lucide-react';
 import { APYCalculationResult, formatAPY, getAPYColorClass } from '@/utils/apyCalculations';
+import { shouldHideBorrowTooltipUtilizationForWad } from '@/config';
 
 interface BorrowAPYDisplayProps {
   apyCalculation?: APYCalculationResult;
@@ -15,6 +16,13 @@ interface BorrowAPYDisplayProps {
   fallbackAPY?: number;
   showTooltip?: boolean;
   className?: string;
+  /** When set with asset + poolId, enables A-market WAD tooltip suppression (see shouldHideBorrowTooltipUtilizationForWad). */
+  networkId?: string;
+  asset?: string;
+  poolId?: string | null;
+  /** Lets us resolve pool from token config when `poolId` is missing (e.g. single-market row before fetch). */
+  market?: { marketInfo?: { poolId?: string }; poolId?: string };
+  marketIndex?: number;
 }
 
 export const BorrowAPYDisplay: React.FC<BorrowAPYDisplayProps> = ({
@@ -22,7 +30,12 @@ export const BorrowAPYDisplay: React.FC<BorrowAPYDisplayProps> = ({
   borrowApyCalculation,
   fallbackAPY = 0,
   showTooltip = true,
-  className = ''
+  className = '',
+  networkId,
+  asset,
+  poolId,
+  market,
+  marketIndex,
 }) => {
   // Use the fallbackAPY which should contain the proper borrow APY calculation
   // The apyCalculation.borrowRate is just the raw rate, not the APY
@@ -32,6 +45,16 @@ export const BorrowAPYDisplay: React.FC<BorrowAPYDisplayProps> = ({
 
   // Use borrowApyCalculation for tooltip if available, otherwise fall back to apyCalculation
   const tooltipCalculation = borrowApyCalculation || apyCalculation;
+
+  const hideUtilizationInTooltip =
+    networkId != null &&
+    shouldHideBorrowTooltipUtilizationForWad(
+      networkId,
+      asset,
+      poolId ?? undefined,
+      market,
+      marketIndex
+    );
 
   if (!showTooltip || !tooltipCalculation) {
     return (
@@ -46,13 +69,15 @@ export const BorrowAPYDisplay: React.FC<BorrowAPYDisplayProps> = ({
       <div className="font-semibold text-white mb-2">Borrow APY Calculation Breakdown</div>
       
       <div className="space-y-1">
-        <div className="flex justify-between">
-          <span className="text-gray-300">Utilization Rate:</span>
-          <span className="text-white font-mono">
-            {(tooltipCalculation.utilizationRate * 100).toFixed(1)}%
-          </span>
-        </div>
-        
+        {!hideUtilizationInTooltip && (
+          <div className="flex justify-between">
+            <span className="text-gray-300">Utilization Rate:</span>
+            <span className="text-white font-mono">
+              {(tooltipCalculation.utilizationRate * 100).toFixed(1)}%
+            </span>
+          </div>
+        )}
+
         <div className="flex justify-between">
           <span className="text-gray-300">Borrow Rate:</span>
           <span className="text-white font-mono">

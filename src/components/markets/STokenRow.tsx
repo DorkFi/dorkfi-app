@@ -168,6 +168,11 @@ const STokenRow = ({
               borrowApyCalculation={market.borrowApyCalculation}
               fallbackAPY={market.borrowAPY}
               showTooltip={true}
+              networkId={currentNetwork}
+              asset={market.asset}
+              poolId={market.marketInfo?.poolId ?? market.poolId}
+              market={market}
+              marketIndex={marketIndex}
             />
           </Badge>
         )}
