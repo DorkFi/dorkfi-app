@@ -1,9 +1,9 @@
-
-import { useState } from "react";
-import { Search, SortAsc, SortDesc } from "lucide-react";
+import { Search, SortAsc, SortDesc, Sparkles } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { SortField, SortOrder } from "@/hooks/useOnDemandMarketData";
 
 interface MarketSearchFiltersProps {
@@ -12,6 +12,10 @@ interface MarketSearchFiltersProps {
   sortField: SortField;
   sortOrder: SortOrder;
   onSortChange: (field: SortField, order: SortOrder) => void;
+  /** When > 0, shows "New markets only" toggle. */
+  newMarketsCount?: number;
+  newMarketsOnly?: boolean;
+  onNewMarketsOnlyChange?: (value: boolean) => void;
 }
 
 const MarketSearchFilters = ({
@@ -19,7 +23,10 @@ const MarketSearchFilters = ({
   onSearchChange,
   sortField,
   sortOrder,
-  onSortChange
+  onSortChange,
+  newMarketsCount = 0,
+  newMarketsOnly = false,
+  onNewMarketsOnlyChange,
 }: MarketSearchFiltersProps) => {
   const handleSortFieldChange = (field: SortField) => {
     onSortChange(field, sortOrder);
@@ -68,6 +75,29 @@ const MarketSearchFilters = ({
           </Button>
         </div>
       </div>
+
+      {newMarketsCount > 0 && onNewMarketsOnlyChange && (
+        <div className="flex flex-wrap items-center gap-3 mt-5">
+          <div className="flex items-center gap-2">
+            <Switch
+              id="markets-new-only"
+              checked={newMarketsOnly}
+              onCheckedChange={onNewMarketsOnlyChange}
+              aria-label="Show new markets only"
+            />
+            <Label
+              htmlFor="markets-new-only"
+              className="text-sm font-medium text-slate-700 dark:text-slate-200 cursor-pointer flex items-center gap-1.5"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-ocean-teal shrink-0" aria-hidden />
+              New markets only
+              <span className="text-xs font-normal text-muted-foreground">
+                ({newMarketsCount})
+              </span>
+            </Label>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

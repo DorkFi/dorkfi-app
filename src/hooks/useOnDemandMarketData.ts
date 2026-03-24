@@ -7,6 +7,7 @@ import {
   getLendingPools,
 } from "@/config";
 import { fetchMarketInfo, type MarketInfo } from "@/services/lendingService";
+import { normalizeWadUsdPerToken } from "@/lib/utils";
 import { APYCalculationResult } from "@/utils/apyCalculations";
 
 export interface OnDemandMarketData {
@@ -41,6 +42,8 @@ export interface OnDemandMarketData {
   isSToken?: boolean;
   // Pool ID to identify specific market when multiple markets exist for same symbol
   poolId?: string;
+  /** From token config `dataAddedAt` (recent listings). */
+  isNew?: boolean;
 }
 
 export type SortField =
@@ -71,6 +74,8 @@ interface UseOnDemandMarketDataProps {
   autoLoad?: boolean; // Whether to automatically load markets when they come into view
   throttleMs?: number; // Throttle duration in milliseconds (default: 1 minute)
   marketFilter?: MarketFilter; // "all" | "A" (first lending pool) | "B" (second lending pool)
+  /** When true, only markets flagged as new (recent `dataAddedAt` in config) are shown. */
+  newMarketsOnly?: boolean;
 }
 
 // Throttle duration: 1 minute
@@ -84,6 +89,7 @@ export const useOnDemandMarketData = ({
   autoLoad = true,
   throttleMs = DEFAULT_THROTTLE_MS,
   marketFilter = "all",
+  newMarketsOnly = false,
 }: UseOnDemandMarketDataProps = {}) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [marketsData, setMarketsData] = useState<
@@ -148,6 +154,7 @@ export const useOnDemandMarketData = ({
         isLoaded: false,
         isSToken: tokenConfig?.isStoken || false,
         poolId: token.poolId, // Store poolId for multi-market tokens
+        isNew: token.isNew,
       };
     });
 
@@ -250,18 +257,32 @@ export const useOnDemandMarketData = ({
               `Setting market data for ${token.symbol} with pool ID: ${tokenPoolId}`
             );
             // Calculate USD values using the market price
-            const tokenPrice = parseFloat(marketInfo.price) || 0;
+            let tokenPrice = parseFloat(marketInfo.price) || 0;
+            const isWad = token.symbol.toUpperCase() === "WAD";
+            if (isWad) {
+              tokenPrice = normalizeWadUsdPerToken(tokenPrice);
+            }
             const totalSupplyAmount = parseFloat(marketInfo.totalDeposits) || 0;
             const totalBorrowAmount = parseFloat(marketInfo.totalBorrows) || 0;
             const supplyCapAmount = parseFloat(marketInfo.maxTotalDeposits) || 0;
             const borrowCapAmount = parseFloat(marketInfo.maxTotalBorrows) || 0;
 
+            // WAD: oracle can be micro-USD per token; store TVL as micro-USD (÷1e6 in UI).
+            // All other assets: legacy decimal-scaled formula (do not change — used across the app).
+            const decScale =
+              Math.pow(10, token.decimals + 6) / Math.pow(10, 12);
+            const totalSupplyUSD = isWad
+              ? Number(totalSupplyAmount * tokenPrice * 1e6)
+              : Number(totalSupplyAmount * tokenPrice * decScale);
+            const totalBorrowUSD = isWad
+              ? Number(totalBorrowAmount * tokenPrice * 1e6)
+              : Number(totalBorrowAmount * tokenPrice * decScale);
             console.log(`USD calculations for ${token.symbol}:`, {
               tokenPrice,
               totalSupplyAmount,
-              totalSupplyUSD: totalSupplyAmount * tokenPrice * Math.pow(10, token.decimals + 6) / Math.pow(10, 12),
+              totalSupplyUSD,
               totalBorrowAmount,
-              totalBorrowUSD: totalBorrowAmount * tokenPrice * Math.pow(10, token.decimals + 6) / Math.pow(10, 12),
+              totalBorrowUSD,
             });
 
             // Get the original token config to access isStoken property
@@ -295,10 +316,10 @@ export const useOnDemandMarketData = ({
               asset: token.symbol,
               icon: token.logoPath,
               totalSupply: totalSupplyAmount,
-              totalSupplyUSD: Number(totalSupplyAmount * tokenPrice * Math.pow(10, token.decimals + 6) / Math.pow(10, 12)),
+              totalSupplyUSD,
               supplyAPY: supplyAPYValue,
               totalBorrow: totalBorrowAmount,
-              totalBorrowUSD: totalBorrowAmount * tokenPrice * Math.pow(10, token.decimals + 6) / Math.pow(10, 12),
+              totalBorrowUSD,
               borrowAPY: borrowAPYValue,
               utilization: tokenConfig?.isStoken
                 ? 100.0
@@ -306,7 +327,9 @@ export const useOnDemandMarketData = ({
               collateralFactor: marketInfo.collateralFactor * 100,
               walletBalance: 0, // This would need wallet integration
               supplyCap: supplyCapAmount,
-              supplyCapUSD: supplyCapAmount * tokenPrice,
+              supplyCapUSD: isWad
+                ? supplyCapAmount * tokenPrice * 1e6
+                : supplyCapAmount * tokenPrice,
               borrowCap: borrowCapAmount,
               maxLTV: marketInfo.collateralFactor * 100,
               liquidationThreshold: marketInfo.liquidationThreshold * 100,
@@ -321,6 +344,7 @@ export const useOnDemandMarketData = ({
               borrowApyCalculation: marketInfo.borrowApyCalculation, // Include borrow APY calculation results
               isSToken: tokenConfig?.isStoken || false,
               poolId: tokenPoolId, // Store poolId for multi-market tokens
+              isNew: token.isNew,
             };
 
             console.log(`Market data for ${token.symbol}:`, marketData);
@@ -401,12 +425,24 @@ export const useOnDemandMarketData = ({
     }
   }, [currentNetwork]);
 
+  const newMarketsCount = useMemo(() => {
+    return marketDataArray.filter((market) => {
+      if (!market.isNew) return false;
+      if (market.marketInfo?.isPaused) return false;
+      return true;
+    }).length;
+  }, [marketDataArray]);
+
   // Filter and sort data
   const { filteredData, totalPages, paginatedData } = useMemo(() => {
     // Filter out paused markets
     let filtered = marketDataArray.filter(
       (market) => !market.marketInfo?.isPaused
     );
+    // New markets only (config-driven)
+    if (newMarketsOnly) {
+      filtered = filtered.filter((market) => market.isNew);
+    }
     // Filter by market (All / A / B)
     if (marketFilter !== "all" && lendingPools.length >= 2) {
       const poolIdA = lendingPools[0];
@@ -520,6 +556,7 @@ export const useOnDemandMarketData = ({
     marketDataArray,
     marketFilter,
     lendingPools,
+    newMarketsOnly,
   ]);
 
   const handleSearchChange = (newSearchTerm: string) => {
@@ -564,5 +601,6 @@ export const useOnDemandMarketData = ({
     loadAllMarkets,
     isLoading: loadingMarkets.size > 0,
     marketsData,
+    newMarketsCount,
   };
 };

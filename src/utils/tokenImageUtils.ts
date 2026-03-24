@@ -67,6 +67,8 @@ export const getTokenImagePath = (symbol: string): string => {
     FOLKS: "/lovable-uploads/FOLKS.png",
     USDt: "/lovable-uploads/USDt.webp",
     xUSD: "/lovable-uploads/xUSD.webp",
+    tALGO: "/lovable-uploads/tALGO.webp",
+    xALGO: "/lovable-uploads/xALGO.webp",
   };
 
   // Normalize symbol for case-insensitive lookup

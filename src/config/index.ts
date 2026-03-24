@@ -74,6 +74,18 @@ export interface TokenConfig {
     contractId: string;
     nTokenId: string;
   };
+  /** ISO 8601 timestamp when this token row was added to config (optional metadata). */
+  dataAddedAt?: string;
+}
+
+/** Markets with `dataAddedAt` within this window are treated as "new" on the Markets page. */
+export const NEW_MARKET_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
+
+export function isNewMarketByDataAddedAt(dataAddedAt?: string): boolean {
+  if (!dataAddedAt) return false;
+  const t = Date.parse(dataAddedAt);
+  if (Number.isNaN(t)) return false;
+  return Date.now() - t < NEW_MARKET_WINDOW_MS;
 }
 
 export interface PreFiParameters {
@@ -1283,6 +1295,30 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
       isSmartContract: true,
     },
   },
+  tALGO: {
+    assetId: "2537013734",
+    poolId: "3333688282",
+    contractId: "3490783147",
+    nTokenId: "3490789358",
+    decimals: 6,
+    name: "TALGO",
+    symbol: "tALGO",
+    logoPath: "/lovable-uploads/tALGO.webp",
+    tokenStandard: "asa",
+    dataAddedAt: "2026-03-23T00:00:00.000Z",
+  },
+  xALGO: {
+    assetId: "1134696561",
+    poolId: "3333688282",
+    contractId: "3490854290",
+    nTokenId: "3490863151",
+    decimals: 6,
+    name: "Governance xALGO",
+    symbol: "xALGO",
+    logoPath: "/lovable-uploads/xALGO.webp",
+    tokenStandard: "asa",
+    dataAddedAt: "2026-03-23T00:00:00.000Z",
+  },
   USDC: {
     assetId: "31566704",
     poolId: "3333688282",
@@ -2253,9 +2289,7 @@ export const getTokenDisplayInfo = (
  * For tokens with multiple markets, each market is returned as a separate entry
  */
 export const getAllTokensWithDisplayInfo = (networkId: NetworkId) => {
-  const networkConfig = getNetworkConfig(networkId);
   const tokens = config.networks[networkId].tokens;
-  console.log("tokens", { tokens });
   const result: Array<{
     symbol: string;
     name: string;
@@ -2268,6 +2302,7 @@ export const getAllTokensWithDisplayInfo = (networkId: NetworkId) => {
     poolId?: string;
     decimals: number;
     logoPath: string;
+    isNew: boolean;
   }> = [];
 
   for (const [symbol, tokenConfig] of Object.entries(tokens)) {
@@ -2281,6 +2316,7 @@ export const getAllTokensWithDisplayInfo = (networkId: NetworkId) => {
             ...displayInfo,
             decimals: config.decimals,
             logoPath: config.logoPath,
+            isNew: isNewMarketByDataAddedAt(config.dataAddedAt),
           });
         }
       });
@@ -2293,6 +2329,7 @@ export const getAllTokensWithDisplayInfo = (networkId: NetworkId) => {
           ...displayInfo,
           decimals: tokenConfig.decimals,
           logoPath: tokenConfig.logoPath,
+          isNew: isNewMarketByDataAddedAt(tokenConfig.dataAddedAt),
         });
       }
     }

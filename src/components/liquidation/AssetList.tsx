@@ -2,8 +2,9 @@
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { AlertTriangle, Shield } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { getMarketLabel, type NetworkId } from '@/config';
 
 interface Asset {
   symbol: string;
@@ -11,12 +12,15 @@ interface Asset {
   valueUSD: number;
   collateralFactor?: number;
   liquidationThreshold?: number;
+  poolId?: string;
 }
 
 interface AssetListProps {
   title: string;
   assets: Asset[];
   colorScheme: 'collateral' | 'borrowed';
+  /** Current chain/network id for resolving A/B pool labels */
+  networkId?: NetworkId | string | null;
   totalBorrowed?: number; // For calculating LTV per asset
   accountHealthFactor?: number; // Overall account health factor
   weightedCollateralValue?: number; // Weighted collateral value for proper calculations
@@ -26,6 +30,7 @@ export default function AssetList({
   title, 
   assets, 
   colorScheme, 
+  networkId,
   totalBorrowed = 0, 
   accountHealthFactor = 3.0,
   weightedCollateralValue = 0 
@@ -63,6 +68,7 @@ export default function AssetList({
         <div className="space-y-2">
           {assets.map((asset, index) => {
             const liquidatable = isAssetLiquidatable(asset);
+            const marketLabel = getMarketLabel(networkId, asset.poolId);
             return (
               <Tooltip key={index}>
                 <TooltipTrigger asChild>
@@ -76,8 +82,21 @@ export default function AssetList({
                         <span className={`text-xs font-bold ${colors.text}`}>
                           {asset.symbol.substring(0, 2)}
                         </span>
+                        {marketLabel && (
+                          <div
+                            className={`absolute -bottom-0.5 -left-0.5 w-4 h-4 rounded-full ${
+                              marketLabel === "A"
+                                ? "bg-blue-500 dark:bg-blue-600"
+                                : "bg-purple-500 dark:bg-purple-600"
+                            } border border-white dark:border-slate-800 flex items-center justify-center z-[1]`}
+                          >
+                            <span className="text-[9px] font-bold text-white leading-none">
+                              {marketLabel}
+                            </span>
+                          </div>
+                        )}
                         {liquidatable && (
-                          <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full flex items-center justify-center">
+                          <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full flex items-center justify-center z-[1]">
                             <AlertTriangle className="w-2 h-2 text-white" />
                           </div>
                         )}

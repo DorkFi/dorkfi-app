@@ -210,6 +210,63 @@ function mergeProposalsById(raw: Proposal[]): Proposal[] {
   return merged;
 }
 
+/** Avoid hammering algod/indexer when many proposals exist on one network. */
+const PROPOSAL_FETCH_CONCURRENCY = 12;
+
+const VOTE_FETCH_CONCURRENCY = 16;
+
+function proposalIdsFromEvents(events: unknown): string[] {
+  const eventsArray = Array.isArray(events) ? events : [events];
+  const ids: string[] = [];
+  for (const group of eventsArray) {
+    if (
+      group &&
+      typeof group === "object" &&
+      (group as { name?: string }).name === "ProposalCreated" &&
+      Array.isArray((group as { events?: unknown[] }).events)
+    ) {
+      for (const ev of (group as { events: unknown[] }).events) {
+        if (Array.isArray(ev) && ev.length >= 4) {
+          try {
+            const decoded = decodeProposalCreatedEvent(
+              ev as [string, unknown, unknown, string]
+            );
+            ids.push(decoded.proposal_id);
+          } catch (err) {
+            console.error("Failed to decode ProposalCreated event:", err);
+          }
+        }
+      }
+    }
+  }
+  return [...new Set(ids)];
+}
+
+async function fetchProposalsForNetwork(netId: NetworkId): Promise<Proposal[]> {
+  const events = await getEvents(netId);
+  const proposalIds = proposalIdsFromEvents(events);
+  const out: Proposal[] = [];
+  for (let i = 0; i < proposalIds.length; i += PROPOSAL_FETCH_CONCURRENCY) {
+    const chunk = proposalIds.slice(i, i + PROPOSAL_FETCH_CONCURRENCY);
+    const chunkResults = await Promise.all(
+      chunk.map(async (proposalId) => {
+        try {
+          const serviceProposal = await getProposal(proposalId, netId);
+          return convertServiceProposalToUI(serviceProposal, proposalId, netId);
+        } catch (err: unknown) {
+          console.error(
+            `Failed to fetch proposal ${proposalId} on ${netId}:`,
+            err
+          );
+          return null;
+        }
+      })
+    );
+    out.push(...chunkResults.filter((p): p is Proposal => p != null));
+  }
+  return out;
+}
+
 export const useGovernanceData = (networkId: NetworkId | null) => {
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const [proposals, setProposals] = useState<Proposal[]>([]);
@@ -243,43 +300,17 @@ export const useGovernanceData = (networkId: NetworkId | null) => {
 
       try {
         const governanceNetworks = getNetworksWithGovernance();
-        const fetchedProposals: Proposal[] = [];
-
-        for (const netId of governanceNetworks) {
-          try {
-            const events = await getEvents(netId);
-            const eventsArray = Array.isArray(events) ? events : [events];
-
-            const proposalCreatedEvents: string[] = [];
-            for (const group of eventsArray) {
-              if (group?.name === "ProposalCreated" && Array.isArray(group?.events)) {
-                for (const ev of group.events) {
-                  if (Array.isArray(ev) && ev.length >= 4) {
-                    try {
-                      const decoded = decodeProposalCreatedEvent(ev as [string, unknown, unknown, string]);
-                      proposalCreatedEvents.push(decoded.proposal_id);
-                    } catch (err) {
-                      console.error("Failed to decode ProposalCreated event:", err);
-                    }
-                  }
-                }
-              }
+        const perNetwork = await Promise.all(
+          governanceNetworks.map(async (netId) => {
+            try {
+              return await fetchProposalsForNetwork(netId);
+            } catch (err: unknown) {
+              console.error(`Failed to fetch governance events for ${netId}:`, err);
+              return [] as Proposal[];
             }
-
-            for (const proposalId of proposalCreatedEvents) {
-              if (isProposalBlacklisted(proposalId)) continue;
-              try {
-                const serviceProposal = await getProposal(proposalId, netId);
-                const uiProposal = convertServiceProposalToUI(serviceProposal, proposalId, netId);
-                fetchedProposals.push(uiProposal);
-              } catch (err: any) {
-                console.error(`Failed to fetch proposal ${proposalId} on ${netId}:`, err);
-              }
-            }
-          } catch (err: any) {
-            console.error(`Failed to fetch governance events for ${netId}:`, err);
-          }
-        }
+          })
+        );
+        const fetchedProposals = perNetwork.flat();
 
         if (fetchedProposals.length > 0) {
           setProposals(fetchedProposals);
@@ -329,20 +360,30 @@ export const useGovernanceData = (networkId: NetworkId | null) => {
 
       try {
         const votesMap = new Map<string, boolean>();
-        await Promise.all(
-          proposals.map(async (proposal) => {
-            const netId = (proposal.networkId ?? networkId) as NetworkId | undefined;
-            if (!netId) return;
-            try {
-              const voteValue = await getVote(proposal.id, activeAccount.address, netId);
-              const key = getVoteKey(proposal);
-              if (voteValue === "1") votesMap.set(key, true);
-              else if (voteValue === "0") votesMap.set(key, false);
-            } catch (err: any) {
-              console.debug(`No vote found for proposal ${proposal.id}:`, err?.message);
-            }
-          })
-        );
+        for (let i = 0; i < proposals.length; i += VOTE_FETCH_CONCURRENCY) {
+          const chunk = proposals.slice(i, i + VOTE_FETCH_CONCURRENCY);
+          await Promise.all(
+            chunk.map(async (proposal) => {
+              const netId = (proposal.networkId ?? networkId) as NetworkId | undefined;
+              if (!netId) return;
+              try {
+                const voteValue = await getVote(
+                  proposal.id,
+                  activeAccount.address,
+                  netId
+                );
+                const key = getVoteKey(proposal);
+                if (voteValue === "1") votesMap.set(key, true);
+                else if (voteValue === "0") votesMap.set(key, false);
+              } catch (err: unknown) {
+                console.debug(
+                  `No vote found for proposal ${proposal.id}:`,
+                  err instanceof Error ? err.message : err
+                );
+              }
+            })
+          );
+        }
         setUserVotes(votesMap);
       } catch (err: any) {
         console.error("Failed to fetch user votes:", err);
