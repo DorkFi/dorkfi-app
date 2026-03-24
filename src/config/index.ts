@@ -2086,6 +2086,25 @@ export const getNetworkConfig = (networkId: NetworkId): NetworkConfig => {
   return config.networks[networkId];
 };
 
+/** Short product labels for UI where `NetworkConfig.name` is too verbose (e.g. modal network row). */
+const NETWORK_DISPLAY_NAME_OVERRIDES: Partial<Record<NetworkId, string>> = {
+  "voi-mainnet": "Voi Network",
+  "algorand-mainnet": "Algorand",
+};
+
+/**
+ * User-facing network title for UI. Uses branded short names for Voi / Algorand mainnet,
+ * otherwise `NetworkConfig.name`, then a readable slug if unknown.
+ */
+export const getNetworkDisplayName = (networkId: string): string => {
+  const id = networkId as NetworkId;
+  const branded = NETWORK_DISPLAY_NAME_OVERRIDES[id];
+  if (branded) return branded;
+  const entry = config.networks[id];
+  if (entry?.name) return entry.name;
+  return networkId.replace(/-/g, " ");
+};
+
 export const getCurrentNetworkConfig = (): NetworkConfig => {
   return config.networks[config.defaultNetwork];
 };
