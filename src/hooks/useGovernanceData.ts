@@ -244,7 +244,9 @@ function proposalIdsFromEvents(events: unknown): string[] {
 
 async function fetchProposalsForNetwork(netId: NetworkId): Promise<Proposal[]> {
   const events = await getEvents(netId);
-  const proposalIds = proposalIdsFromEvents(events);
+  const proposalIds = proposalIdsFromEvents(events).filter(
+    (id) => !isProposalBlacklisted(id)
+  );
   const out: Proposal[] = [];
   for (let i = 0; i < proposalIds.length; i += PROPOSAL_FETCH_CONCURRENCY) {
     const chunk = proposalIds.slice(i, i + PROPOSAL_FETCH_CONCURRENCY);
