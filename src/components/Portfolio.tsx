@@ -5164,71 +5164,31 @@ const Portfolio = () => {
                         Refresh
                       </DorkFiButton>
                     </div>
-                    {/* Search, Network and Market Filter Tabs - Single row on large screens */}
-                    <div className="mb-4 flex flex-col md:flex-row gap-4 items-start md:items-center">
-                      {/* Search Bar */}
-                      <div className="relative w-full md:max-w-md flex items-center gap-2">
-                        <div className="relative flex-1">
-                          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-                          <Input
-                            placeholder="Search assets..."
-                            value={suppliedAssetsSearchTerm}
-                            onChange={(e) =>
-                              setSuppliedAssetsSearchTerm(e.target.value)
-                            }
-                            className="pl-10"
-                          />
-                        </div>
-                        {/* Filter Icon Button - Only visible on mobile */}
-                        <DorkFiButton
-                          variant="secondary"
-                          size="sm"
-                          className="md:hidden min-w-0 h-10 w-10 p-0"
-                          onClick={() => setSuppliedAssetsFilterModalOpen(true)}
-                        >
-                          <Filter className="h-4 w-4" />
-                        </DorkFiButton>
+                    <div className="mb-4 flex flex-row flex-wrap items-center gap-3">
+                      <div className="relative flex-1 min-w-0 max-w-md">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4 pointer-events-none" />
+                        <Input
+                          placeholder="Search assets..."
+                          value={suppliedAssetsSearchTerm}
+                          onChange={(e) =>
+                            setSuppliedAssetsSearchTerm(e.target.value)
+                          }
+                          className="pl-10"
+                        />
                       </div>
-                      {/* Network and Market Filter Tabs - Hidden on mobile */}
-                      <div className="hidden md:flex gap-4 flex-1">
-                        <Tabs
-                          value={suppliedAssetsNetworkFilter}
-                          onValueChange={setSuppliedAssetsNetworkFilter}
-                          className="flex-1"
-                        >
-                          <TabsList className="grid w-full grid-cols-3">
-                            <TabsTrigger value="all" className="text-sm">
-                              All Networks
-                            </TabsTrigger>
-                            <TabsTrigger value="algorand" className="text-sm">
-                              Algorand
-                            </TabsTrigger>
-                            <TabsTrigger value="voi" className="text-sm">
-                              VOI
-                            </TabsTrigger>
-                          </TabsList>
-                        </Tabs>
-                        <Tabs
-                          value={suppliedAssetsMarketFilter}
-                          onValueChange={setSuppliedAssetsMarketFilter}
-                          className="flex-1"
-                        >
-                          <TabsList className="grid w-full grid-cols-3">
-                            <TabsTrigger value="both" className="text-sm">
-                              Both Markets
-                            </TabsTrigger>
-                            <TabsTrigger value="A" className="text-sm">
-                              A Market
-                            </TabsTrigger>
-                            <TabsTrigger value="B" className="text-sm">
-                              B Market
-                            </TabsTrigger>
-                          </TabsList>
-                        </Tabs>
-                      </div>
+                      <DorkFiButton
+                        variant="secondary"
+                        size="sm"
+                        type="button"
+                        className="shrink-0"
+                        onClick={() => setSuppliedAssetsFilterModalOpen(true)}
+                      >
+                        <Filter className="h-4 w-4" />
+                        Filter assets
+                      </DorkFiButton>
                     </div>
                   </div>
-                  {/* Filter Modal for Mobile */}
+                  {/* Network / market filters (all viewports) */}
                   <Dialog
                     open={suppliedAssetsFilterModalOpen}
                     onOpenChange={setSuppliedAssetsFilterModalOpen}
@@ -7315,71 +7275,31 @@ const Portfolio = () => {
                         Refresh
                       </DorkFiButton>
                     </div>
-                    {/* Search, Network and Market Filter Tabs - Single row on large screens */}
-                    <div className="mb-4 flex flex-col md:flex-row gap-4 items-start md:items-center">
-                      {/* Search Bar */}
-                      <div className="relative w-full md:max-w-md flex items-center gap-2">
-                        <div className="relative flex-1">
-                          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-                          <Input
-                            placeholder="Search assets..."
-                            value={borrowedAssetsSearchTerm}
-                            onChange={(e) =>
-                              setBorrowedAssetsSearchTerm(e.target.value)
-                            }
-                            className="pl-10"
-                          />
-                        </div>
-                        {/* Filter Icon Button - Only visible on mobile */}
-                        <DorkFiButton
-                          variant="secondary"
-                          size="sm"
-                          className="md:hidden min-w-0 h-10 w-10 p-0"
-                          onClick={() => setBorrowedAssetsFilterModalOpen(true)}
-                        >
-                          <Filter className="h-4 w-4" />
-                        </DorkFiButton>
+                    <div className="mb-4 flex flex-row flex-wrap items-center gap-3">
+                      <div className="relative flex-1 min-w-0 max-w-md">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4 pointer-events-none" />
+                        <Input
+                          placeholder="Search assets..."
+                          value={borrowedAssetsSearchTerm}
+                          onChange={(e) =>
+                            setBorrowedAssetsSearchTerm(e.target.value)
+                          }
+                          className="pl-10"
+                        />
                       </div>
-                      {/* Network and Market Filter Tabs - Hidden on mobile */}
-                      <div className="hidden md:flex gap-4 flex-1">
-                        <Tabs
-                          value={borrowedAssetsNetworkFilter}
-                          onValueChange={setBorrowedAssetsNetworkFilter}
-                          className="flex-1"
-                        >
-                          <TabsList className="grid w-full grid-cols-3">
-                            <TabsTrigger value="all" className="text-sm">
-                              All Networks
-                            </TabsTrigger>
-                            <TabsTrigger value="algorand" className="text-sm">
-                              Algorand
-                            </TabsTrigger>
-                            <TabsTrigger value="voi" className="text-sm">
-                              VOI
-                            </TabsTrigger>
-                          </TabsList>
-                        </Tabs>
-                        <Tabs
-                          value={borrowedAssetsMarketFilter}
-                          onValueChange={setBorrowedAssetsMarketFilter}
-                          className="flex-1"
-                        >
-                          <TabsList className="grid w-full grid-cols-3">
-                            <TabsTrigger value="both" className="text-sm">
-                              Both Markets
-                            </TabsTrigger>
-                            <TabsTrigger value="A" className="text-sm">
-                              A Market
-                            </TabsTrigger>
-                            <TabsTrigger value="B" className="text-sm">
-                              B Market
-                            </TabsTrigger>
-                          </TabsList>
-                        </Tabs>
-                      </div>
+                      <DorkFiButton
+                        variant="secondary"
+                        size="sm"
+                        type="button"
+                        className="shrink-0"
+                        onClick={() => setBorrowedAssetsFilterModalOpen(true)}
+                      >
+                        <Filter className="h-4 w-4" />
+                        Filter assets
+                      </DorkFiButton>
                     </div>
                   </div>
-                  {/* Filter Modal for Mobile */}
+                  {/* Network / market filters (all viewports) */}
                   <Dialog
                     open={borrowedAssetsFilterModalOpen}
                     onOpenChange={setBorrowedAssetsFilterModalOpen}
@@ -8830,20 +8750,38 @@ const Portfolio = () => {
                               const hasDeposits =
                                 (item.earnedInterest || 0) > 0;
                               const hasBorrows = (item.owedInterest || 0) > 0;
+                              const accruedMarketLabel = getMarketLabel(
+                                itemNetwork || currentNetwork,
+                                item.poolId
+                              );
 
                               return (
                                 <TableRow
                                   key={index}
                                   className="transition-all relative card-hover rounded-lg border border-gray-200/30 dark:border-ocean-teal/10 bg-white/50 dark:bg-slate-800/50 hover:border-teal-400 hover:shadow-[0_0_16px_4px_rgba(13,255,190,0.15)] hover:z-20"
                                 >
-                                  <TableCell>
-                                    <div className="flex items-center gap-2">
-                                      <img
-                                        src={item.icon}
-                                        alt={item.asset}
-                                        className="w-6 h-6 rounded-full"
-                                      />
-                                      <span className="font-medium">
+                                  <TableCell className="min-w-0">
+                                    <div className="flex flex-col items-center gap-1 min-w-0">
+                                      <div className="relative shrink-0">
+                                        <img
+                                          src={item.icon}
+                                          alt={item.asset}
+                                          className="w-8 h-8 rounded-full shrink-0"
+                                        />
+                                        {accruedMarketLabel && (
+                                          <div
+                                            className={`absolute -top-1 -right-1 w-4 h-4 rounded-full ${accruedMarketLabel === "A"
+                                              ? "bg-blue-500 dark:bg-blue-600"
+                                              : "bg-purple-500 dark:bg-purple-600"
+                                              } border-2 border-white dark:border-slate-800 flex items-center justify-center z-10`}
+                                          >
+                                            <span className="text-[9px] font-bold text-white leading-none">
+                                              {accruedMarketLabel}
+                                            </span>
+                                          </div>
+                                        )}
+                                      </div>
+                                      <span className="font-medium truncate text-center">
                                         {item.asset}
                                       </span>
                                     </div>

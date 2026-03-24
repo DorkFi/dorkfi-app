@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { formatUsdAmount } from '@/lib/utils';
 import { UserPosition } from './types';
 
 const StatCard = ({
@@ -10,9 +11,13 @@ const StatCard = ({
   value: string;
   color: string;
 }) => (
-  <div className="min-w-0 rounded-xl px-1 py-3 sm:py-4 shadow-sm border border-border bg-muted/40 dark:bg-muted/25 flex flex-col items-center">
-    <div className="uppercase text-xs tracking-wide mb-1 text-muted-foreground">{label}</div>
-    <div className={`font-bold text-base sm:text-xl md:text-2xl text-center break-all px-0.5 ${color}`}>{value}</div>
+  <div className="min-w-0 rounded-xl px-1.5 sm:px-2 py-3 sm:py-4 shadow-sm border border-border bg-muted/40 dark:bg-muted/25 flex flex-col items-center">
+    <div className="uppercase text-xs tracking-wide mb-1 text-muted-foreground text-center">{label}</div>
+    <div
+      className={`font-bold text-center tabular-nums whitespace-nowrap max-w-full overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden text-base sm:text-lg md:text-xl px-0.5 ${color}`}
+    >
+      {value}
+    </div>
   </div>
 );
 
@@ -59,10 +64,10 @@ export const UserPositionBar = ({ userPosition }: { userPosition?: UserPosition 
       </button>
       {open && (
         <div className="rounded-b-xl border border-t-0 border-border bg-muted/20 dark:bg-muted/15 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 px-2 py-3 items-stretch w-full min-w-0">
-          <StatCard label="Supplied" value={`$${userPosition.supplied}`} color="text-green-600 dark:text-green-400" />
-          <StatCard label="Borrowed" value={`$${userPosition.borrowed}`} color="text-orange-600 dark:text-orange-400" />
-          <StatCard label="Withdrawable" value={`$${userPosition.withdrawable}`} color="text-cyan-600 dark:text-cyan-400" />
-          <StatCard label="Borrowable" value={`$${userPosition.borrowable}`} color="text-blue-600 dark:text-blue-400" />
+          <StatCard label="Supplied" value={formatUsdAmount(userPosition.supplied)} color="text-green-600 dark:text-green-400" />
+          <StatCard label="Borrowed" value={formatUsdAmount(userPosition.borrowed)} color="text-orange-600 dark:text-orange-400" />
+          <StatCard label="Withdrawable" value={formatUsdAmount(userPosition.withdrawable)} color="text-cyan-600 dark:text-cyan-400" />
+          <StatCard label="Borrowable" value={formatUsdAmount(userPosition.borrowable)} color="text-blue-600 dark:text-blue-400" />
           <StatCard
             label="Health factor"
             value={userPosition.healthFactor.toFixed(2)}

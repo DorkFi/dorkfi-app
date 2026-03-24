@@ -62,7 +62,7 @@ const AccruedInterestMobileCard = ({
               <img
                 src={icon}
                 alt={asset}
-                className="w-10 h-10 rounded-full flex-shrink-0"
+                className="w-12 h-12 rounded-full flex-shrink-0"
               />
               {marketLabel && (
                 <div
