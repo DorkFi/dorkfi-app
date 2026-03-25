@@ -101,6 +101,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
+import {
+  useRewardsAprBonusMap,
+  getRewardsBonusSupplyAprPercent,
+} from "@/hooks/useRewardsAprBonusMap";
 
 /* eslint-disable no-case-declarations -- many sort switch blocks use const in cases */
 /* eslint-disable react-hooks/exhaustive-deps -- many callbacks intentionally use stable deps subset */
@@ -119,6 +123,12 @@ const Portfolio = () => {
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
   const { formatNumber, formatCurrency, formatPercent } = useNumberI18n();
+
+  const rewardsAprNetworks = useMemo(
+    () => getEnabledNetworks() as NetworkId[],
+    []
+  );
+  const rewardsAprByBaseUrl = useRewardsAprBonusMap(rewardsAprNetworks);
 
   // Use address from route params if available, otherwise fall back to activeAccount address
   const displayAddress = routeAddress || activeAccount?.address;
@@ -442,6 +452,7 @@ const Portfolio = () => {
 
             positions.push({
               asset: token.symbol,
+              originalSymbol: token.originalSymbol ?? token.symbol,
               icon: token.logoPath,
               balance: depositBalance,
               nTokenBalance: nTokenBalance,
@@ -666,6 +677,7 @@ const Portfolio = () => {
 
           transformedDeposits.push({
             asset: token.symbol,
+            originalSymbol: token.originalSymbol ?? token.symbol,
             icon: token.logoPath,
             balance: actualBalance,
             value: actualBalance * tokenPrice,
@@ -5377,6 +5389,19 @@ const Portfolio = () => {
                                 Number(market?.totalDeposits ?? 0),
                                 Number(market?.maxTotalDeposits ?? 0),
                               );
+                              const depositNetForRewards =
+                                (deposit as ItemWithNetwork).network ||
+                                currentNetwork;
+                              const rewardBonusAprMobile =
+                                getRewardsBonusSupplyAprPercent(
+                                  depositNetForRewards as NetworkId,
+                                  (deposit as ItemWithNetwork).originalSymbol ??
+                                    deposit.asset,
+                                  deposit.poolId
+                                    ? String(deposit.poolId)
+                                    : undefined,
+                                  rewardsAprByBaseUrl
+                                );
                               return (
                                 <PortfolioTableMobileCard
                                   key={`${deposit.asset}-${deposit.poolId || "default"
@@ -5386,6 +5411,11 @@ const Portfolio = () => {
                                   value={deposit.value}
                                   balance={deposit.balance}
                                   apy={deposit.apy}
+                                  rewardBonusAprPercent={
+                                    rewardBonusAprMobile > 0
+                                      ? rewardBonusAprMobile
+                                      : undefined
+                                  }
                                   accruedInterest={
                                     (deposit as ItemWithNetwork).accruedInterest
                                   }
@@ -6259,6 +6289,16 @@ const Portfolio = () => {
                                 8
                               );
 
+                              const rewardBonusApr = getRewardsBonusSupplyAprPercent(
+                                depositNetworkForToken as NetworkId,
+                                (deposit as ItemWithNetwork).originalSymbol ??
+                                  deposit.asset,
+                                deposit.poolId != null
+                                  ? String(deposit.poolId)
+                                  : undefined,
+                                rewardsAprByBaseUrl
+                              );
+
                               // Get network name from deposit or infer
                               let networkName = "Unknown";
                               const depositNetwork = (deposit as ItemWithNetwork).network;
@@ -6374,11 +6414,18 @@ const Portfolio = () => {
                                     })}
                                   </TableCell>
                                   <TableCell className="whitespace-nowrap">
-                                    <span className="text-green-600 dark:text-green-400">
-                                      {formatPercent(deposit.apy / 100, {
-                                        maximumFractionDigits: 2,
-                                      })}
-                                    </span>
+                                    <div className="flex flex-col gap-0.5 items-start">
+                                      <span className="text-green-600 dark:text-green-400">
+                                        {formatPercent(deposit.apy / 100, {
+                                          maximumFractionDigits: 2,
+                                        })}
+                                      </span>
+                                      {rewardBonusApr > 0 ? (
+                                        <span className="text-xs font-semibold text-amber-700 dark:text-amber-400 tabular-nums">
+                                          +{rewardBonusApr.toFixed(2)}%
+                                        </span>
+                                      ) : null}
+                                    </div>
                                   </TableCell>
                                   <TableCell className="hidden xl:table-cell">
                                     {deposit.accruedInterest > 0 ? (

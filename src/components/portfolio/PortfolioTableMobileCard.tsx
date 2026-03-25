@@ -11,6 +11,8 @@ interface PortfolioTableMobileCardProps {
   value: number;
   balance?: number;
   apy?: number;
+  /** Bonus rewards APR (% points); shown as +X.XX% when &gt; 0. */
+  rewardBonusAprPercent?: number;
   accruedInterest?: number;
   accruedInterestValue?: number;
   borrowingPower?: number;
@@ -37,6 +39,7 @@ const PortfolioTableMobileCard = ({
   value,
   balance,
   apy,
+  rewardBonusAprPercent,
   accruedInterest,
   accruedInterestValue,
   borrowingPower,
@@ -157,6 +160,13 @@ const PortfolioTableMobileCard = ({
               <div className={`text-lg font-semibold ${apyColor}`}>
                 {apy.toFixed(2)}%
               </div>
+              {isDeposit &&
+                rewardBonusAprPercent != null &&
+                rewardBonusAprPercent > 0 && (
+                  <div className="text-xs font-semibold text-amber-700 dark:text-amber-400 mt-0.5 tabular-nums">
+                    +{rewardBonusAprPercent.toFixed(2)}%
+                  </div>
+                )}
             </div>
           )}
         </div>

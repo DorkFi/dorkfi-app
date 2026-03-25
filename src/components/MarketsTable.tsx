@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ExternalLink, RefreshCw, ChevronDown } from "lucide-react";
@@ -64,6 +64,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
+import { useRewardsAprBonusMap } from "@/hooks/useRewardsAprBonusMap";
 
 const MAX_CLAIMS_PER_TX = 3;
 
@@ -116,6 +117,13 @@ function normalizeMarketData(md: Record<string, unknown>) {
 
   const utilization = Number(md.utilization ?? 0);
 
+  const baseSupplyApy = Number(md.supplyAPY ?? 0);
+  const rewardsBonus =
+    typeof md.rewardsBonusSupplyAprPercent === "number" &&
+    !Number.isNaN(md.rewardsBonusSupplyAprPercent)
+      ? md.rewardsBonusSupplyAprPercent
+      : 0;
+
   return {
     icon: String(md.icon ?? ""),
     name: String(md.asset ?? md.name ?? "Unknown"),
@@ -128,7 +136,7 @@ function normalizeMarketData(md: Record<string, unknown>) {
     totalBorrow: borrowUsdWhole,
     availableLiquidity: availableUsdWhole,
     utilization,
-    supplyAPY: Number(md.supplyAPY ?? 0),
+    supplyAPY: baseSupplyApy + rewardsBonus,
     borrowAPY: Number(md.borrowAPY ?? 0),
     maxLTV: Number(md.maxLTV ?? md.collateralFactor ?? 0),
     liquidationThreshold: Number(md.liquidationThreshold ?? 0),
@@ -167,6 +175,7 @@ const MarketsTable = () => {
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [marketFilter, setMarketFilter] = useState<MarketFilter>("all");
   const [newMarketsOnly, setNewMarketsOnly] = useState(false);
+  const [rewardMarketsOnly, setRewardMarketsOnly] = useState(false);
   const [depositModal, setDepositModal] = useState<{
     isOpen: boolean;
     asset: string | null;
@@ -524,7 +533,7 @@ const MarketsTable = () => {
   ];
 
   const {
-    data: markets,
+    data: marketsPage,
     totalItems,
     totalPages,
     currentPage,
@@ -536,8 +545,8 @@ const MarketsTable = () => {
     loadVisibleMarkets,
     loadAllMarkets,
     isLoading,
-    marketsData,
     newMarketsCount,
+    rewardMarketsCount,
   } = useOnDemandMarketData({
     searchTerm,
     sortField,
@@ -546,15 +555,33 @@ const MarketsTable = () => {
     autoLoad: true,
     marketFilter,
     newMarketsOnly,
+    rewardMarketsOnly,
   });
+
+  const rewardsAprByBaseUrl = useRewardsAprBonusMap([currentNetwork]);
+
+  const markets = useMemo(() => {
+    return marketsPage.map((m) => ({
+      ...m,
+      rewardsBonusSupplyAprPercent:
+        m.hasRewards && m.rewardsPublicBaseUrlResolved
+          ? rewardsAprByBaseUrl[m.rewardsPublicBaseUrlResolved] ?? null
+          : undefined,
+    }));
+  }, [marketsPage, rewardsAprByBaseUrl]);
 
   useEffect(() => {
     setNewMarketsOnly(false);
+    setRewardMarketsOnly(false);
   }, [currentNetwork]);
 
   useEffect(() => {
     if (newMarketsCount === 0) setNewMarketsOnly(false);
   }, [newMarketsCount]);
+
+  useEffect(() => {
+    if (rewardMarketsCount === 0) setRewardMarketsOnly(false);
+  }, [rewardMarketsCount]);
 
   const handleSearchTermChange = (value: string) => {
     setSearchTerm(value);
@@ -2201,14 +2228,20 @@ const MarketsTable = () => {
 
     if (!market) return null;
 
-    // Safely resolve APY values - avoid NaN in deposit modal
-    const supplyAPY =
+    // Safely resolve APY values - avoid NaN in deposit modal (include rewards bonus when present)
+    const rewardsBonus =
+      typeof market.rewardsBonusSupplyAprPercent === "number" &&
+      !Number.isNaN(market.rewardsBonusSupplyAprPercent)
+        ? market.rewardsBonusSupplyAprPercent
+        : 0;
+    const baseSupplyApy =
       typeof market.supplyAPY === "number" && !Number.isNaN(market.supplyAPY)
         ? market.supplyAPY
         : (typeof market.apyCalculation?.apy === "number" &&
           !Number.isNaN(market.apyCalculation?.apy))
           ? market.apyCalculation.apy
           : 0;
+    const supplyAPY = baseSupplyApy + rewardsBonus;
     const borrowAPY =
       typeof market.borrowAPY === "number" && !Number.isNaN(market.borrowAPY)
         ? market.borrowAPY
@@ -2230,7 +2263,10 @@ const MarketsTable = () => {
           }
         : undefined;
 
-    const tokenConfigRaw = getTokenConfig(currentNetwork, asset);
+    const tokenConfigRaw = getTokenConfig(
+      currentNetwork,
+      (market as { configSymbol?: string }).configSymbol ?? asset
+    );
     const tokenConfig = Array.isArray(tokenConfigRaw)
       ? poolIdStr
         ? tokenConfigRaw.find((c: { poolId?: string }) => String(c.poolId) === poolIdStr) ?? tokenConfigRaw[0]
@@ -2514,6 +2550,12 @@ const MarketsTable = () => {
           newMarketsOnly={newMarketsOnly}
           onNewMarketsOnlyChange={(v) => {
             setNewMarketsOnly(v);
+            setCurrentPage(1);
+          }}
+          rewardMarketsCount={rewardMarketsCount}
+          rewardMarketsOnly={rewardMarketsOnly}
+          onRewardMarketsOnlyChange={(v) => {
+            setRewardMarketsOnly(v);
             setCurrentPage(1);
           }}
         />
