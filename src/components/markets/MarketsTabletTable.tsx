@@ -12,6 +12,10 @@ import { useNetwork } from "@/contexts/NetworkContext";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { getTokenConfig, getAllTokensWithDisplayInfo, getNetworkConfig } from "@/config";
 import { isAtDepositCap, isAtBorrowCap } from "@/constants/lendingCaps";
+import {
+  DEPOSIT_APY_BADGE_DEFAULT,
+  DEPOSIT_APY_BADGE_REWARDS,
+} from "@/constants/marketUi";
 import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
@@ -409,10 +413,18 @@ const MarketsTabletTable = ({
             ) : market.error ? (
               <div className="text-xs text-red-500">Error</div>
             ) : (
-              <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+              <Badge
+                className={
+                  market.hasRewards
+                    ? DEPOSIT_APY_BADGE_REWARDS
+                    : DEPOSIT_APY_BADGE_DEFAULT
+                }
+              >
                 <APYDisplay 
                   apyCalculation={market.apyCalculation}
                   fallbackAPY={market.supplyAPY}
+                  bonusRewardsAprPercent={market.rewardsBonusSupplyAprPercent}
+                  hasRewardsProgram={!!market.hasRewards}
                   showTooltip={true}
                 />
               </Badge>
@@ -695,10 +707,18 @@ const MarketsTabletTable = ({
                       ) : mainMarket.error ? (
                         <div className="text-xs text-red-500">Error</div>
                       ) : (
-                        <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                        <Badge
+                          className={
+                            mainMarket.hasRewards
+                              ? DEPOSIT_APY_BADGE_REWARDS
+                              : DEPOSIT_APY_BADGE_DEFAULT
+                          }
+                        >
                           <APYDisplay 
                             apyCalculation={mainMarket.apyCalculation}
                             fallbackAPY={mainMarket.supplyAPY}
+                            bonusRewardsAprPercent={mainMarket.rewardsBonusSupplyAprPercent}
+                            hasRewardsProgram={!!mainMarket.hasRewards}
                             showTooltip={true}
                           />
                         </Badge>
