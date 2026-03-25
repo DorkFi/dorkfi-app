@@ -122,6 +122,9 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
       // This allows switching to any network without disconnecting the wallet
       return [
         WalletId.KIBISIS,
+        // AlgoVoi: ARC-27 browser extension wallet (Algorand + Voi)
+        // Replace 'algovoi' with WalletId.ALGOVOI once TxnLab/use-wallet#434 lands
+        'algovoi' as any,
         {
           id: WalletId.LUTE,
           options: { siteName: "DorkFi" },
@@ -178,7 +181,7 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
     const walletNameLower = (walletName || "").toLowerCase();
 
     // Universal wallets support all AVM networks
-    if (walletIdLower === "lute" || walletIdLower === "kibisis") {
+    if (walletIdLower === "lute" || walletIdLower === "kibisis" || walletIdLower === "algovoi") {
       return true;
     }
 

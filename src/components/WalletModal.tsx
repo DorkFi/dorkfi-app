@@ -57,6 +57,13 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
           isInstalled: true,
         },
         {
+          id: "algovoi",
+          name: "AlgoVoi",
+          icon: wallets.find((w) => w.id === "algovoi")?.metadata.icon || "",
+          description: "Connect with AlgoVoi wallet (Algorand/VOI)",
+          isInstalled: true,
+        },
+        {
           id: "lute",
           name: "Lute",
           icon: wallets.find((w) => w.id === "lute")?.metadata.icon || "🔗",
@@ -174,6 +181,15 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
         if (provider.id === "biatec" && availableWalletIds.includes("biatec")) {
           return true;
         }
+        // Show AlgoVoi if registered in WalletManager OR if the extension is detected directly
+        // (window.algorand detection bridges the gap before TxnLab/use-wallet#434 lands)
+        if (
+          provider.id === "algovoi" &&
+          (availableWalletIds.includes("algovoi") ||
+            (typeof window !== "undefined" && (window as any).algorand?.isAlgoVoi === true))
+        ) {
+          return true;
+        }
         // Show other wallets if they're available or not installed
         return (
           availableWalletIds.includes(provider.id) || !provider.isInstalled
@@ -250,6 +266,24 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
 
       // For AVM networks, find the wallet from the wallets array
       if (isAVM) {
+        // Handle AlgoVoi: use window.algorand directly until TxnLab/use-wallet#434 lands
+        if (providerId === "algovoi") {
+          const algoVoiProvider = (window as any).algorand;
+          if (!algoVoiProvider?.isAlgoVoi) {
+            throw new Error("AlgoVoi extension not detected. Please install it and reload.");
+          }
+          const registeredWallet = wallets.find((w) => w.id === "algovoi");
+          if (registeredWallet) {
+            await registeredWallet.connect();
+          } else {
+            // Fallback: trigger ARC-27 enable directly
+            const accounts = await algoVoiProvider.enable({ genesisHash: undefined });
+            if (!accounts?.accounts?.length) throw new Error("No accounts returned");
+          }
+          if (abortController.signal.aborted) return;
+          if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
+          toast({ title: "AlgoVoi Connected", description: "Successfully connected to AlgoVoi" });
+        } else
         // Handle Vera Wallet specifically (uses WalletConnect)
         if (providerId === "vera") {
           const walletConnectWallet = wallets.find(
