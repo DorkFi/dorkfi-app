@@ -14,8 +14,8 @@ import { ArrowRightLeft } from "lucide-react";
 import { getTokenConfig, getAllTokensWithDisplayInfo, getMarketLabel } from "@/config";
 import { isAtDepositCap, isAtBorrowCap } from "@/constants/lendingCaps";
 import {
-  DEPOSIT_APY_BADGE_DEFAULT,
-  DEPOSIT_APY_BADGE_REWARDS,
+  depositApyBadgeClassName,
+  isIntrinsicDepositApyBadge,
 } from "@/constants/marketUi";
 import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
@@ -215,17 +215,21 @@ const MarketCardView = ({
               <div className="flex flex-col items-center md:items-start">
                 <div className="text-sm text-muted-foreground mb-1">Deposit APY</div>
                 <Badge
-                  className={
-                    market.hasRewards
-                      ? DEPOSIT_APY_BADGE_REWARDS
-                      : DEPOSIT_APY_BADGE_DEFAULT
-                  }
+                  className={depositApyBadgeClassName(
+                    market.hasRewards,
+                    market.intrinsicSupplyApyPercent
+                  )}
                 >
                   <APYDisplay 
                     apyCalculation={market.apyCalculation}
                     fallbackAPY={market.supplyAPY}
+                    intrinsicApyPercent={market.intrinsicSupplyApyPercent}
                     bonusRewardsAprPercent={market.rewardsBonusSupplyAprPercent}
                     hasRewardsProgram={!!market.hasRewards}
+                    hasIntrinsicApy={isIntrinsicDepositApyBadge(
+                      market.hasRewards,
+                      market.intrinsicSupplyApyPercent
+                    )}
                     showTooltip={true}
                   />
                 </Badge>

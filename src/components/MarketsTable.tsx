@@ -123,6 +123,11 @@ function normalizeMarketData(md: Record<string, unknown>) {
     !Number.isNaN(md.rewardsBonusSupplyAprPercent)
       ? md.rewardsBonusSupplyAprPercent
       : 0;
+  const intrinsicBonus =
+    typeof md.intrinsicSupplyApyPercent === "number" &&
+    !Number.isNaN(md.intrinsicSupplyApyPercent)
+      ? md.intrinsicSupplyApyPercent
+      : 0;
 
   return {
     icon: String(md.icon ?? ""),
@@ -136,7 +141,7 @@ function normalizeMarketData(md: Record<string, unknown>) {
     totalBorrow: borrowUsdWhole,
     availableLiquidity: availableUsdWhole,
     utilization,
-    supplyAPY: baseSupplyApy + rewardsBonus,
+    supplyAPY: baseSupplyApy + rewardsBonus + intrinsicBonus,
     borrowAPY: Number(md.borrowAPY ?? 0),
     maxLTV: Number(md.maxLTV ?? md.collateralFactor ?? 0),
     liquidationThreshold: Number(md.liquidationThreshold ?? 0),
@@ -2234,6 +2239,11 @@ const MarketsTable = () => {
       !Number.isNaN(market.rewardsBonusSupplyAprPercent)
         ? market.rewardsBonusSupplyAprPercent
         : 0;
+    const intrinsicBonus =
+      typeof market.intrinsicSupplyApyPercent === "number" &&
+      !Number.isNaN(market.intrinsicSupplyApyPercent)
+        ? market.intrinsicSupplyApyPercent
+        : 0;
     const baseSupplyApy =
       typeof market.supplyAPY === "number" && !Number.isNaN(market.supplyAPY)
         ? market.supplyAPY
@@ -2241,7 +2251,7 @@ const MarketsTable = () => {
           !Number.isNaN(market.apyCalculation?.apy))
           ? market.apyCalculation.apy
           : 0;
-    const supplyAPY = baseSupplyApy + rewardsBonus;
+    const supplyAPY = baseSupplyApy + rewardsBonus + intrinsicBonus;
     const borrowAPY =
       typeof market.borrowAPY === "number" && !Number.isNaN(market.borrowAPY)
         ? market.borrowAPY

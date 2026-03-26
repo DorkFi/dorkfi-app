@@ -6,6 +6,7 @@ import {
   getNetworkConfig,
   getLendingPools,
   getRewardsProgramPublicBaseUrl,
+  getIntrinsicSupplyApyPercent,
   type TokenConfig,
 } from "@/config";
 import { fetchMarketInfo, type MarketInfo } from "@/services/lendingService";
@@ -57,6 +58,11 @@ export interface OnDemandMarketData {
    * Percentage points to add to on-chain supply APY for display.
    */
   rewardsBonusSupplyAprPercent?: number | null;
+  /**
+   * Intrinsic supply APY from token config (`intrinsicApyPercent`); percentage points added to
+   * on-chain supply APY for display (e.g. governance staking).
+   */
+  intrinsicSupplyApyPercent?: number | null;
 }
 
 export type SortField =
@@ -181,6 +187,14 @@ export const useOnDemandMarketData = ({
         tokenConfig as TokenConfig | undefined
       );
 
+      const intrinsicApr = getIntrinsicSupplyApyPercent(
+        currentNetwork,
+        configSymbol,
+        token.poolId != null && token.poolId !== ""
+          ? String(token.poolId)
+          : undefined
+      );
+
       initialData[key] = {
         asset: token.symbol,
         configSymbol,
@@ -208,6 +222,8 @@ export const useOnDemandMarketData = ({
         poolId: token.poolId, // Store poolId for multi-market tokens
         isNew: token.isNew,
         ...rewardsMeta,
+        intrinsicSupplyApyPercent:
+          intrinsicApr > 0 ? intrinsicApr : undefined,
       };
     });
 
@@ -351,6 +367,14 @@ export const useOnDemandMarketData = ({
               tokenConfig as TokenConfig | undefined
             );
 
+            const intrinsicApr = getIntrinsicSupplyApyPercent(
+              currentNetwork,
+              configSymbol,
+              tokenPoolId != null && tokenPoolId !== ""
+                ? String(tokenPoolId)
+                : undefined
+            );
+
             // Safely resolve supplyAPY - avoid NaN when supplyRate is undefined
             const supplyAPYValue =
               (typeof marketInfo.apyCalculation?.apy === "number" &&
@@ -406,6 +430,8 @@ export const useOnDemandMarketData = ({
               poolId: tokenPoolId, // Store poolId for multi-market tokens
               isNew: token.isNew,
               ...rewardsMeta,
+              intrinsicSupplyApyPercent:
+                intrinsicApr > 0 ? intrinsicApr : undefined,
             };
 
             console.log(`Market data for ${token.symbol}:`, marketData);

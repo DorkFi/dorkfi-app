@@ -30,6 +30,7 @@ import algorandService from "@/services/algorandService";
 import {
   getAllTokens,
   getTokenConfig,
+  getIntrinsicSupplyApyPercent,
   isFeatureEnabled,
   getEnabledNetworks,
   getAlgorandNetworkFromNetworkId,
@@ -5402,6 +5403,15 @@ const Portfolio = () => {
                                     : undefined,
                                   rewardsAprByBaseUrl
                                 );
+                              const intrinsicAprMobile =
+                                getIntrinsicSupplyApyPercent(
+                                  depositNetForRewards as NetworkId,
+                                  (deposit as ItemWithNetwork).originalSymbol ??
+                                    deposit.asset,
+                                  deposit.poolId
+                                    ? String(deposit.poolId)
+                                    : undefined
+                                );
                               return (
                                 <PortfolioTableMobileCard
                                   key={`${deposit.asset}-${deposit.poolId || "default"
@@ -5411,6 +5421,11 @@ const Portfolio = () => {
                                   value={deposit.value}
                                   balance={deposit.balance}
                                   apy={deposit.apy}
+                                  intrinsicApyPercent={
+                                    intrinsicAprMobile > 0
+                                      ? intrinsicAprMobile
+                                      : undefined
+                                  }
                                   rewardBonusAprPercent={
                                     rewardBonusAprMobile > 0
                                       ? rewardBonusAprMobile
@@ -6298,6 +6313,14 @@ const Portfolio = () => {
                                   : undefined,
                                 rewardsAprByBaseUrl
                               );
+                              const intrinsicApr = getIntrinsicSupplyApyPercent(
+                                depositNetworkForToken as NetworkId,
+                                (deposit as ItemWithNetwork).originalSymbol ??
+                                  deposit.asset,
+                                deposit.poolId != null
+                                  ? String(deposit.poolId)
+                                  : undefined
+                              );
 
                               // Get network name from deposit or infer
                               let networkName = "Unknown";
@@ -6420,6 +6443,11 @@ const Portfolio = () => {
                                           maximumFractionDigits: 2,
                                         })}
                                       </span>
+                                      {intrinsicApr > 0 ? (
+                                        <span className="text-xs font-semibold text-sky-700 dark:text-sky-400 tabular-nums">
+                                          +{intrinsicApr.toFixed(2)}% intrinsic
+                                        </span>
+                                      ) : null}
                                       {rewardBonusApr > 0 ? (
                                         <span className="text-xs font-semibold text-amber-700 dark:text-amber-400 tabular-nums">
                                           +{rewardBonusApr.toFixed(2)}%

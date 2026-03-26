@@ -73,7 +73,7 @@ export const BorrowAPYDisplay: React.FC<BorrowAPYDisplayProps> = ({
           <div className="flex justify-between">
             <span className="text-gray-300">Utilization Rate:</span>
             <span className="text-white font-mono">
-              {(tooltipCalculation.utilizationRate * 100).toFixed(1)}%
+              {(tooltipCalculation.utilizationRate * 100).toFixed(2)}%
             </span>
           </div>
         )}
