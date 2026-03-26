@@ -12,6 +12,10 @@ import { useNetwork } from "@/contexts/NetworkContext";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { getTokenConfig, getAllTokensWithDisplayInfo, getNetworkConfig } from "@/config";
 import { isAtDepositCap, isAtBorrowCap } from "@/constants/lendingCaps";
+import {
+  depositApyBadgeClassName,
+  isIntrinsicDepositApyBadge,
+} from "@/constants/marketUi";
 import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
@@ -409,10 +413,22 @@ const MarketsTabletTable = ({
             ) : market.error ? (
               <div className="text-xs text-red-500">Error</div>
             ) : (
-              <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+              <Badge
+                className={depositApyBadgeClassName(
+                  market.hasRewards,
+                  market.intrinsicSupplyApyPercent
+                )}
+              >
                 <APYDisplay 
                   apyCalculation={market.apyCalculation}
                   fallbackAPY={market.supplyAPY}
+                  intrinsicApyPercent={market.intrinsicSupplyApyPercent}
+                  bonusRewardsAprPercent={market.rewardsBonusSupplyAprPercent}
+                  hasRewardsProgram={!!market.hasRewards}
+                  hasIntrinsicApy={isIntrinsicDepositApyBadge(
+                    market.hasRewards,
+                    market.intrinsicSupplyApyPercent
+                  )}
                   showTooltip={true}
                 />
               </Badge>
@@ -695,10 +711,22 @@ const MarketsTabletTable = ({
                       ) : mainMarket.error ? (
                         <div className="text-xs text-red-500">Error</div>
                       ) : (
-                        <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                        <Badge
+                          className={depositApyBadgeClassName(
+                            mainMarket.hasRewards,
+                            mainMarket.intrinsicSupplyApyPercent
+                          )}
+                        >
                           <APYDisplay 
                             apyCalculation={mainMarket.apyCalculation}
                             fallbackAPY={mainMarket.supplyAPY}
+                            intrinsicApyPercent={mainMarket.intrinsicSupplyApyPercent}
+                            bonusRewardsAprPercent={mainMarket.rewardsBonusSupplyAprPercent}
+                            hasRewardsProgram={!!mainMarket.hasRewards}
+                            hasIntrinsicApy={isIntrinsicDepositApyBadge(
+                              mainMarket.hasRewards,
+                              mainMarket.intrinsicSupplyApyPercent
+                            )}
                             showTooltip={true}
                           />
                         </Badge>

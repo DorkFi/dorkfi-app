@@ -74,8 +74,25 @@ export interface TokenConfig {
     contractId: string;
     nTokenId: string;
   };
+  /** When true, this token row participates in a DorkFi bonus rewards program (CTAs, badges, links). */
+  hasRewards?: boolean;
+  /**
+   * Optional deployment instance id for this row (`https://{id}.{provider host}`). Used when
+   * `rewardsPublicBaseUrl` is unset; overrides the global registry for the same `(networkId, poolId, contractId)`.
+   */
+  rewardsInstanceId?: string;
+  /**
+   * Optional full HTTPS origin for the rewards app (highest-priority override). When set, ignores
+   * registry and `VITE_REWARDS_PROVIDER_HOST` for the origin host.
+   */
+  rewardsPublicBaseUrl?: string;
   /** ISO 8601 timestamp when this token row was added to config (optional metadata). */
   dataAddedAt?: string;
+  /**
+   * Optional intrinsic supply APY in percentage points (e.g. 4.55 for 4.55%) from the asset
+   * itself (e.g. governance staking), added to on-chain supply APY for display.
+   */
+  intrinsicApyPercent?: number;
 }
 
 /** Markets with `dataAddedAt` within this window are treated as "new" on the Markets page. */
@@ -1274,7 +1291,7 @@ const algorandProdContracts: ContractConfig = {
 };
 
 const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
-  ALGO: {
+  ALGO: [{
     assetId: "0",
     poolId: "3333688282",
     contractId: "3207744109",
@@ -1294,7 +1311,30 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
       displaySymbol: "Algo",
       isSmartContract: true,
     },
+    hasRewards: true,
   },
+  {
+    assetId: "0",
+    poolId: "3345940978",
+    contractId: "3207744109",
+    nTokenId: "3333724131",
+    migration: {
+      poolId: "3207735602",
+      contractId: "3207744109",
+      nTokenId: "3209220112",
+    },
+    decimals: 6,
+    name: "Algorand",
+    symbol: "ALGO",
+    logoPath: "/lovable-uploads/Algo.webp",
+    tokenStandard: "network",
+    marketOverride: {
+      displayName: "Algo",
+      displaySymbol: "Algo",
+      isSmartContract: true,
+    },
+    dataAddedAt: "2026-03-26T00:00:00.000Z",
+  }],
   tALGO: {
     assetId: "2537013734",
     poolId: "3333688282",
@@ -1306,6 +1346,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     logoPath: "/lovable-uploads/tALGO.webp",
     tokenStandard: "asa",
     dataAddedAt: "2026-03-23T00:00:00.000Z",
+    intrinsicApyPercent: 4.51,
   },
   xALGO: {
     assetId: "1134696561",
@@ -1318,8 +1359,9 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     logoPath: "/lovable-uploads/xALGO.webp",
     tokenStandard: "asa",
     dataAddedAt: "2026-03-23T00:00:00.000Z",
+    intrinsicApyPercent: 4.49,
   },
-  USDC: {
+  USDC: [{
     assetId: "31566704",
     poolId: "3333688282",
     contractId: "3210682240",
@@ -1334,7 +1376,18 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     symbol: "USDC",
     logoPath: "/lovable-uploads/USDC.webp",
     tokenStandard: "asa",
-  },
+  }, {
+    assetId: "31566704",
+    poolId: "3345940978",
+    contractId: "3210682240",
+    nTokenId: "3494389084",
+    decimals: 6,
+    name: "USD Coin",
+    symbol: "USDC",
+    logoPath: "/lovable-uploads/USDC.webp",
+    tokenStandard: "asa",
+    dataAddedAt: "2026-03-26T00:00:00.000Z",
+  }],
   UNIT: {
     assetId: "3121954282",
     poolId: "3333688282",
@@ -2035,9 +2088,120 @@ export const marketLabelMap: Record<string, string> = {
   // VOI Mainnet
   "voi-mainnet-41760711": "A",
   "voi-mainnet-44866061": "B",
-  // Algorand Mainnet
-  "algorand-mainnet-47139778": "A",
-  "algorand-mainnet-47139781": "B",
+  // Algorand Mainnet (prod pools in this file)
+  "algorand-mainnet-3333688282": "A",
+  "algorand-mainnet-3345940978": "B",
+};
+
+/**
+ * Normalizes a rewards app origin: trim and remove trailing slashes. Callers should join paths with a
+ * single `/` when appending routes.
+ */
+export const normalizeRewardsPublicBaseUrl = (origin: string): string =>
+  origin.trim().replace(/\/+$/, "");
+
+/**
+ * Default hostname for rewards UI URLs (`https://{instanceId}.{host}`). Override with
+ * `VITE_REWARDS_PROVIDER_HOST` (host only, no scheme).
+ */
+export const DEFAULT_REWARDS_PROVIDER_HOST = "rewards.nautilus.sh";
+
+function normalizeRewardsProviderHostInput(raw: string): string {
+  const s = raw.trim();
+  if (!s) return "";
+  try {
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) {
+      return new URL(s).hostname.replace(/\/+$/, "");
+    }
+  } catch {
+    // fall through
+  }
+  return s.replace(/^\/+/, "").replace(/\/+$/, "").split("/")[0] ?? "";
+}
+
+/**
+ * Hostname for Nautilus-style rewards deployments (`{instanceId}.{host}`). Set `VITE_REWARDS_PROVIDER_HOST`
+ * to point at another provider or staging host; defaults to `rewards.nautilus.sh`.
+ */
+export function getRewardsPublicProviderHost(): string {
+  const raw =
+    typeof import.meta.env.VITE_REWARDS_PROVIDER_HOST === "string"
+      ? import.meta.env.VITE_REWARDS_PROVIDER_HOST
+      : "";
+  const normalized = normalizeRewardsProviderHostInput(raw);
+  return normalized !== "" ? normalized : DEFAULT_REWARDS_PROVIDER_HOST;
+}
+
+/**
+ * Turns a registry value into a full HTTPS origin: either a full URL or an instance id
+ * `https://{instanceId}.{getRewardsPublicProviderHost()}`.
+ */
+export function resolveRewardsRegistryEntryToOrigin(
+  registryValue: string,
+  providerHostOverride?: string
+): string {
+  const v = registryValue.trim();
+  if (!v) {
+    return "";
+  }
+  if (/^https?:\/\//i.test(v)) {
+    return normalizeRewardsPublicBaseUrl(v);
+  }
+  const host = providerHostOverride ?? getRewardsPublicProviderHost();
+  const instance = v.replace(/^\.+/, "").replace(/\/+$/, "");
+  return normalizeRewardsPublicBaseUrl(`https://${instance}.${host}`);
+}
+
+/**
+ * Map from `networkId:poolId:contractId` (rewards `explorer-config` / `dorkfi` cohort) to deployment
+ * instance id or full HTTPS origin.
+ */
+export const REWARDS_PROGRAM_PUBLIC_BASE_URL_REGISTRY: Record<string, string> = {
+  // ALGO @ A market — matches rewards API `dorkfi` cohort (algorand-mainnet / pool / contract)
+  "algorand-mainnet:3333688282:3207744109": "fa00f0044fc97455",
+};
+
+/** Fields used when resolving rewards URLs from a token row (see {@link getRewardsProgramPublicBaseUrl}). */
+export type TokenRewardsUrlFields = Pick<
+  TokenConfig,
+  "rewardsPublicBaseUrl" | "rewardsInstanceId"
+>;
+
+/**
+ * `(networkId, poolId, contractId)` → public rewards app origin, or `null`.
+ *
+ * Priority: `token.rewardsPublicBaseUrl` → `token.rewardsInstanceId` → registry + provider host.
+ */
+export const getRewardsProgramPublicBaseUrl = (
+  networkId: NetworkId | string | null | undefined,
+  poolId: string | number | null | undefined,
+  contractId: string | number | null | undefined,
+  token?: TokenRewardsUrlFields | null
+): string | null => {
+  const rawUrl = token?.rewardsPublicBaseUrl;
+  if (rawUrl != null && String(rawUrl).trim() !== "") {
+    return normalizeRewardsPublicBaseUrl(rawUrl);
+  }
+  const rawInstance = token?.rewardsInstanceId;
+  if (rawInstance != null && String(rawInstance).trim() !== "") {
+    const origin = resolveRewardsRegistryEntryToOrigin(String(rawInstance).trim());
+    return origin !== "" ? origin : null;
+  }
+  if (
+    networkId == null ||
+    networkId === "" ||
+    poolId == null ||
+    contractId == null
+  ) {
+    return null;
+  }
+  const key = `${String(networkId).toLowerCase()}:${String(poolId)}:${String(contractId)}`;
+  const fromRegistry = REWARDS_PROGRAM_PUBLIC_BASE_URL_REGISTRY[key];
+  if (fromRegistry) {
+    const origin = resolveRewardsRegistryEntryToOrigin(fromRegistry);
+    return origin !== "" ? origin : null;
+  }
+  return null;
 };
 
 /**
@@ -2283,6 +2447,24 @@ export const getTokenConfig = (
   symbol: string
 ): TokenConfig | TokenConfig[] | undefined => {
   return config.networks[networkId].tokens[symbol];
+};
+
+/** Intrinsic supply APY (% points) from config when set; 0 if unset or not applicable. */
+export const getIntrinsicSupplyApyPercent = (
+  networkId: NetworkId | string | undefined,
+  symbol: string,
+  poolId: string | undefined
+): number => {
+  if (!networkId) return 0;
+  const raw = getTokenConfig(networkId as NetworkId, symbol);
+  if (!raw) return 0;
+  const row = Array.isArray(raw)
+    ? poolId != null && poolId !== ""
+      ? raw.find((c) => String(c.poolId) === String(poolId)) ?? raw[0]
+      : raw[0]
+    : raw;
+  const v = row.intrinsicApyPercent;
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
 };
 
 export const getAllTokens = (networkId: NetworkId): TokenConfig[] => {

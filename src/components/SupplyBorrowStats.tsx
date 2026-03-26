@@ -148,7 +148,7 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
                         <span>{adjustedMetrics.apy.changePercent > 0 ? "↑" : "↓"}</span>
                         <span>
                           {adjustedMetrics.apy.changePercent > 0 ? "+" : ""}
-                          {adjustedMetrics.apy.changePercent.toFixed(1)}%
+                          {adjustedMetrics.apy.changePercent.toFixed(2)}%
                         </span>
                       </>
                     ) : (
@@ -276,7 +276,7 @@ const SupplyBorrowStats = ({ mode, asset, assetData, userGlobalData, depositAmou
               </div>
               <div className="text-xs text-slate-500 dark:text-slate-400">
                 {assetData.totalSupply != null && assetData.maxTotalDeposits > 0 && !isAtDepositCap(assetData.totalSupply, assetData.maxTotalDeposits)
-                  ? `${((assetData.maxTotalDeposits - assetData.totalSupply) / assetData.maxTotalDeposits * 100).toFixed(1)}% available`
+                  ? `${((assetData.maxTotalDeposits - assetData.totalSupply) / assetData.maxTotalDeposits * 100).toFixed(2)}% available`
                   : "At capacity"
                 }
               </div>

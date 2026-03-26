@@ -5,6 +5,9 @@ import {
   NetworkId,
   getNetworkConfig,
   getLendingPools,
+  getRewardsProgramPublicBaseUrl,
+  getIntrinsicSupplyApyPercent,
+  type TokenConfig,
 } from "@/config";
 import { fetchMarketInfo, type MarketInfo } from "@/services/lendingService";
 import { normalizeWadUsdPerToken } from "@/lib/utils";
@@ -12,6 +15,8 @@ import { APYCalculationResult } from "@/utils/apyCalculations";
 
 export interface OnDemandMarketData {
   asset: string;
+  /** Canonical key in `network.tokens` (e.g. `ALGO` when {@link asset} is display `Algo`). */
+  configSymbol?: string;
   icon: string;
   totalSupply: number;
   totalSupplyUSD: number;
@@ -44,6 +49,20 @@ export interface OnDemandMarketData {
   poolId?: string;
   /** From token config `dataAddedAt` (recent listings). */
   isNew?: boolean;
+  /** Token row participates in bonus rewards (from config). */
+  hasRewards?: boolean;
+  /** Resolved public origin for the rewards app (`getRewardsProgramPublicBaseUrl`). */
+  rewardsPublicBaseUrlResolved?: string | null;
+  /**
+   * Bonus supply APR from rewards API (`targetAprAdjustedToSupplyPercent`), merged in MarketsTable.
+   * Percentage points to add to on-chain supply APY for display.
+   */
+  rewardsBonusSupplyAprPercent?: number | null;
+  /**
+   * Intrinsic supply APY from token config (`intrinsicApyPercent`); percentage points added to
+   * on-chain supply APY for display (e.g. governance staking).
+   */
+  intrinsicSupplyApyPercent?: number | null;
 }
 
 export type SortField =
@@ -66,6 +85,33 @@ const NUMERIC_SORT_FIELDS: SortField[] = [
 
 export type MarketFilter = "all" | "A" | "B";
 
+function getRewardsMetaForTokenRow(
+  networkId: NetworkId,
+  tokenConfig: TokenConfig | undefined
+): {
+  hasRewards?: boolean;
+  rewardsPublicBaseUrlResolved: string | null;
+} {
+  if (!tokenConfig) {
+    return { rewardsPublicBaseUrlResolved: null };
+  }
+  const hasRewards = tokenConfig.hasRewards === true;
+  const poolId = tokenConfig.poolId;
+  const contractId = tokenConfig.contractId;
+  if (!hasRewards || poolId == null || contractId == null) {
+    return { hasRewards, rewardsPublicBaseUrlResolved: null };
+  }
+  return {
+    hasRewards,
+    rewardsPublicBaseUrlResolved: getRewardsProgramPublicBaseUrl(
+      networkId,
+      poolId,
+      contractId,
+      tokenConfig
+    ),
+  };
+}
+
 interface UseOnDemandMarketDataProps {
   searchTerm?: string;
   sortField?: SortField;
@@ -76,6 +122,10 @@ interface UseOnDemandMarketDataProps {
   marketFilter?: MarketFilter; // "all" | "A" (first lending pool) | "B" (second lending pool)
   /** When true, only markets flagged as new (recent `dataAddedAt` in config) are shown. */
   newMarketsOnly?: boolean;
+  /** When true, only markets with `hasRewards` in config are shown. */
+  rewardMarketsOnly?: boolean;
+  /** When true, only assets that have a market in more than one lending pool are shown. */
+  multiPoolOnly?: boolean;
 }
 
 // Throttle duration: 1 minute
@@ -90,6 +140,8 @@ export const useOnDemandMarketData = ({
   throttleMs = DEFAULT_THROTTLE_MS,
   marketFilter = "all",
   newMarketsOnly = false,
+  rewardMarketsOnly = false,
+  multiPoolOnly = false,
 }: UseOnDemandMarketDataProps = {}) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [marketsData, setMarketsData] = useState<
@@ -116,6 +168,9 @@ export const useOnDemandMarketData = ({
     const initialData: Record<string, OnDemandMarketData> = {};
 
     tokens.forEach((token) => {
+      // Config keys use canonical symbols (e.g. "ALGO"); display `token.symbol` may be overridden ("Algo").
+      const configSymbol = token.originalSymbol ?? token.symbol;
+
       // Use poolId in key to support multiple markets per symbol (e.g. 2 WAD markets)
       const key =
         token.poolId != null && token.poolId !== ""
@@ -124,14 +179,28 @@ export const useOnDemandMarketData = ({
 
       // Get the original token config to access isStoken property
       const networkConfig = getNetworkConfig(currentNetwork);
-      const tokenConfigRaw = networkConfig.tokens[token.symbol];
+      const tokenConfigRaw = networkConfig.tokens[configSymbol];
       // Compare poolIds as strings to ensure exact match
       const tokenConfig = Array.isArray(tokenConfigRaw)
         ? tokenConfigRaw.find((tc) => String(tc.poolId) === String(token.poolId)) || tokenConfigRaw[0]
         : tokenConfigRaw;
 
+      const rewardsMeta = getRewardsMetaForTokenRow(
+        currentNetwork,
+        tokenConfig as TokenConfig | undefined
+      );
+
+      const intrinsicApr = getIntrinsicSupplyApyPercent(
+        currentNetwork,
+        configSymbol,
+        token.poolId != null && token.poolId !== ""
+          ? String(token.poolId)
+          : undefined
+      );
+
       initialData[key] = {
         asset: token.symbol,
+        configSymbol,
         icon: token.logoPath,
         totalSupply: 0,
         totalSupplyUSD: 0,
@@ -155,6 +224,9 @@ export const useOnDemandMarketData = ({
         isSToken: tokenConfig?.isStoken || false,
         poolId: token.poolId, // Store poolId for multi-market tokens
         isNew: token.isNew,
+        ...rewardsMeta,
+        intrinsicSupplyApyPercent:
+          intrinsicApr > 0 ? intrinsicApr : undefined,
       };
     });
 
@@ -287,10 +359,24 @@ export const useOnDemandMarketData = ({
 
             // Get the original token config to access isStoken property
             const networkConfig = getNetworkConfig(currentNetwork);
-            const tokenConfigRaw = networkConfig.tokens[token.symbol];
+            const configSymbol = token.originalSymbol ?? token.symbol;
+            const tokenConfigRaw = networkConfig.tokens[configSymbol];
             const tokenConfig = Array.isArray(tokenConfigRaw)
               ? tokenConfigRaw.find((tc) => tc.poolId === tokenPoolId) || tokenConfigRaw[0]
               : tokenConfigRaw;
+
+            const rewardsMeta = getRewardsMetaForTokenRow(
+              currentNetwork,
+              tokenConfig as TokenConfig | undefined
+            );
+
+            const intrinsicApr = getIntrinsicSupplyApyPercent(
+              currentNetwork,
+              configSymbol,
+              tokenPoolId != null && tokenPoolId !== ""
+                ? String(tokenPoolId)
+                : undefined
+            );
 
             // Safely resolve supplyAPY - avoid NaN when supplyRate is undefined
             const supplyAPYValue =
@@ -314,6 +400,7 @@ export const useOnDemandMarketData = ({
 
             const marketData: OnDemandMarketData = {
               asset: token.symbol,
+              configSymbol,
               icon: token.logoPath,
               totalSupply: totalSupplyAmount,
               totalSupplyUSD,
@@ -345,6 +432,9 @@ export const useOnDemandMarketData = ({
               isSToken: tokenConfig?.isStoken || false,
               poolId: tokenPoolId, // Store poolId for multi-market tokens
               isNew: token.isNew,
+              ...rewardsMeta,
+              intrinsicSupplyApyPercent:
+                intrinsicApr > 0 ? intrinsicApr : undefined,
             };
 
             console.log(`Market data for ${token.symbol}:`, marketData);
@@ -433,6 +523,42 @@ export const useOnDemandMarketData = ({
     }).length;
   }, [marketDataArray]);
 
+  const rewardMarketsCount = useMemo(() => {
+    return marketDataArray.filter((market) => {
+      if (!market.hasRewards) return false;
+      if (market.marketInfo?.isPaused) return false;
+      return true;
+    }).length;
+  }, [marketDataArray]);
+
+  /** Display asset keys (configSymbol or asset) that appear in more than one pool. */
+  const multiPoolAssetKeys = useMemo(() => {
+    const poolIdsByKey = new Map<string, Set<string>>();
+    marketDataArray.forEach((m) => {
+      const key = (m.configSymbol ?? m.asset).toLowerCase();
+      const pid =
+        m.poolId != null && m.poolId !== ""
+          ? String(m.poolId)
+          : "_default";
+      if (!poolIdsByKey.has(key)) poolIdsByKey.set(key, new Set());
+      poolIdsByKey.get(key)!.add(pid);
+    });
+    const multi = new Set<string>();
+    poolIdsByKey.forEach((pids, key) => {
+      if (pids.size > 1) multi.add(key);
+    });
+    return multi;
+  }, [marketDataArray]);
+
+  const multiPoolMarketsCount = useMemo(() => {
+    return marketDataArray.filter((market) => {
+      const key = (market.configSymbol ?? market.asset).toLowerCase();
+      if (!multiPoolAssetKeys.has(key)) return false;
+      if (market.marketInfo?.isPaused) return false;
+      return true;
+    }).length;
+  }, [marketDataArray, multiPoolAssetKeys]);
+
   // Filter and sort data
   const { filteredData, totalPages, paginatedData } = useMemo(() => {
     // Filter out paused markets
@@ -442,6 +568,18 @@ export const useOnDemandMarketData = ({
     // New markets only (config-driven)
     if (newMarketsOnly) {
       filtered = filtered.filter((market) => market.isNew);
+    }
+    // Reward markets only (config `hasRewards`)
+    if (rewardMarketsOnly) {
+      filtered = filtered.filter((market) => market.hasRewards === true);
+    }
+    // Multi-pool only (same asset listed in more than one lending pool)
+    if (multiPoolOnly) {
+      filtered = filtered.filter((market) =>
+        multiPoolAssetKeys.has(
+          (market.configSymbol ?? market.asset).toLowerCase()
+        )
+      );
     }
     // Filter by market (All / A / B)
     if (marketFilter !== "all" && lendingPools.length >= 2) {
@@ -557,6 +695,9 @@ export const useOnDemandMarketData = ({
     marketFilter,
     lendingPools,
     newMarketsOnly,
+    rewardMarketsOnly,
+    multiPoolOnly,
+    multiPoolAssetKeys,
   ]);
 
   const handleSearchChange = (newSearchTerm: string) => {
@@ -602,5 +743,7 @@ export const useOnDemandMarketData = ({
     isLoading: loadingMarkets.size > 0,
     marketsData,
     newMarketsCount,
+    rewardMarketsCount,
+    multiPoolMarketsCount,
   };
 };

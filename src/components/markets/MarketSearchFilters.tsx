@@ -1,4 +1,4 @@
-import { Search, SortAsc, SortDesc, Sparkles } from "lucide-react";
+import { Search, SortAsc, SortDesc, Sparkles, Gift, Layers } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -16,6 +16,14 @@ interface MarketSearchFiltersProps {
   newMarketsCount?: number;
   newMarketsOnly?: boolean;
   onNewMarketsOnlyChange?: (value: boolean) => void;
+  /** When > 0, shows "Reward markets only" toggle. */
+  rewardMarketsCount?: number;
+  rewardMarketsOnly?: boolean;
+  onRewardMarketsOnlyChange?: (value: boolean) => void;
+  /** When > 0, shows "Multi-pool" toggle. */
+  multiPoolMarketsCount?: number;
+  multiPoolOnly?: boolean;
+  onMultiPoolOnlyChange?: (value: boolean) => void;
 }
 
 const MarketSearchFilters = ({
@@ -27,6 +35,12 @@ const MarketSearchFilters = ({
   newMarketsCount = 0,
   newMarketsOnly = false,
   onNewMarketsOnlyChange,
+  rewardMarketsCount = 0,
+  rewardMarketsOnly = false,
+  onRewardMarketsOnlyChange,
+  multiPoolMarketsCount = 0,
+  multiPoolOnly = false,
+  onMultiPoolOnlyChange,
 }: MarketSearchFiltersProps) => {
   const handleSortFieldChange = (field: SortField) => {
     onSortChange(field, sortOrder);
@@ -76,26 +90,70 @@ const MarketSearchFilters = ({
         </div>
       </div>
 
-      {newMarketsCount > 0 && onNewMarketsOnlyChange && (
-        <div className="flex flex-wrap items-center gap-3 mt-5">
-          <div className="flex items-center gap-2">
-            <Switch
-              id="markets-new-only"
-              checked={newMarketsOnly}
-              onCheckedChange={onNewMarketsOnlyChange}
-              aria-label="Show new markets only"
-            />
-            <Label
-              htmlFor="markets-new-only"
-              className="text-sm font-medium text-slate-700 dark:text-slate-200 cursor-pointer flex items-center gap-1.5"
-            >
-              <Sparkles className="h-3.5 w-3.5 text-ocean-teal shrink-0" aria-hidden />
-              New markets only
-              <span className="text-xs font-normal text-muted-foreground">
-                ({newMarketsCount})
-              </span>
-            </Label>
-          </div>
+      {((newMarketsCount > 0 && onNewMarketsOnlyChange) ||
+        (rewardMarketsCount > 0 && onRewardMarketsOnlyChange) ||
+        (multiPoolMarketsCount > 0 && onMultiPoolOnlyChange)) && (
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mt-5">
+          {newMarketsCount > 0 && onNewMarketsOnlyChange && (
+            <div className="flex items-center gap-2">
+              <Switch
+                id="markets-new-only"
+                checked={newMarketsOnly}
+                onCheckedChange={onNewMarketsOnlyChange}
+                aria-label="Show new markets only"
+              />
+              <Label
+                htmlFor="markets-new-only"
+                className="text-sm font-medium text-slate-700 dark:text-slate-200 cursor-pointer flex items-center gap-1.5"
+              >
+                <Sparkles className="h-3.5 w-3.5 text-ocean-teal shrink-0" aria-hidden />
+                New markets only
+                <span className="text-xs font-normal text-muted-foreground">
+                  ({newMarketsCount})
+                </span>
+              </Label>
+            </div>
+          )}
+          {rewardMarketsCount > 0 && onRewardMarketsOnlyChange && (
+            <div className="flex items-center gap-2">
+              <Switch
+                id="markets-rewards-only"
+                checked={rewardMarketsOnly}
+                onCheckedChange={onRewardMarketsOnlyChange}
+                aria-label="Show reward markets only"
+              />
+              <Label
+                htmlFor="markets-rewards-only"
+                className="text-sm font-medium text-slate-700 dark:text-slate-200 cursor-pointer flex items-center gap-1.5"
+              >
+                <Gift className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0" aria-hidden />
+                Reward markets only
+                <span className="text-xs font-normal text-muted-foreground">
+                  ({rewardMarketsCount})
+                </span>
+              </Label>
+            </div>
+          )}
+          {multiPoolMarketsCount > 0 && onMultiPoolOnlyChange && (
+            <div className="flex items-center gap-2">
+              <Switch
+                id="markets-multi-pool-only"
+                checked={multiPoolOnly}
+                onCheckedChange={onMultiPoolOnlyChange}
+                aria-label="Show multi-pool markets only"
+              />
+              <Label
+                htmlFor="markets-multi-pool-only"
+                className="text-sm font-medium text-slate-700 dark:text-slate-200 cursor-pointer flex items-center gap-1.5"
+              >
+                <Layers className="h-3.5 w-3.5 text-ocean-teal shrink-0" aria-hidden />
+                Multi-pool
+                <span className="text-xs font-normal text-muted-foreground">
+                  ({multiPoolMarketsCount})
+                </span>
+              </Label>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -561,7 +561,7 @@ const WithdrawModal = ({
                                   changePercent > 0 ? "text-green-600 dark:text-green-400" : "text-orange-600 dark:text-orange-400"
                                 }`}>
                                   <span>{changePercent > 0 ? "↑" : "↓"}</span>
-                                  <span>{changePercent > 0 ? "+" : ""}{changePercent.toFixed(1)}%</span>
+                                  <span>{changePercent > 0 ? "+" : ""}{changePercent.toFixed(2)}%</span>
                                 </div>
                               )}
                             </div>
@@ -682,7 +682,7 @@ const WithdrawModal = ({
                                 <div className="flex justify-between">
                                   <span>Index Growth:</span>
                                   <span className="text-slate-700 dark:text-slate-300">
-                                    {((Number(marketStats.currentDepositIndex) / Number(marketStats.userDepositIndex) - 1) * 100).toFixed(4)}%
+                                    {((Number(marketStats.currentDepositIndex) / Number(marketStats.userDepositIndex) - 1) * 100).toFixed(2)}%
                                   </span>
                                 </div>
                               )}

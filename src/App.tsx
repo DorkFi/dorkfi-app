@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -21,6 +22,15 @@ import PortfolioPage from "./pages/PortfolioPage";
 
 //const LAUNCH_TIMESTAMP = Date.UTC(2025, 10, 21, 2, 0, 0); // Nov 20, 2025 6:00 PM PST (Nov 21, 2025 2:00 AM UTC)
 const LAUNCH_TIMESTAMP = Date.now();
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 interface ConditionalHomePageProps {
   activeTab: string;
@@ -48,6 +58,7 @@ function App() {
   };
 
   return (
+    <QueryClientProvider client={queryClient}>
     <ThemeProvider
       attribute="class"
       defaultTheme="dark"
@@ -119,6 +130,7 @@ function App() {
         </LocaleSettingsProvider>
       </NetworkProvider>
     </ThemeProvider>
+    </QueryClientProvider>
   );
 }
 

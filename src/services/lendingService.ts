@@ -121,6 +121,12 @@ export interface MarketInfo {
   // Current market indices (for accurate position calculations)
   depositIndex: string;
   borrowIndex: string;
+  /** Raw on-chain oracle price (stringified integer, e.g. WAD scale). */
+  priceRaw?: string;
+  /** Reserves in underlying token units (human-readable). */
+  reservesAmount?: string;
+  /** Market `lastUpdateTime` from chain as ISO 8601. */
+  chainLastUpdateIso?: string;
   // APY calculation results
   apyCalculation?: APYCalculationResult;
   borrowApyCalculation?: APYCalculationResult;
@@ -750,6 +756,16 @@ export const fetchMarketInfo = async (
         // Current market indices (for accurate position calculations)
         depositIndex: market.depositIndex,
         borrowIndex: market.borrowIndex,
+        priceRaw: String(market.price),
+        reservesAmount: new BigNumber(market.reserves.toString())
+          .dividedBy(new BigNumber(10).pow(tokenDecimals))
+          .toFixed(2),
+        chainLastUpdateIso: (() => {
+          const t = Number(market.lastUpdateTime);
+          if (!Number.isFinite(t) || t <= 0) return "";
+          const ms = t < 1e12 ? t * 1000 : t;
+          return new Date(ms).toISOString();
+        })(),
         apyCalculation,
         borrowApyCalculation,
       };
