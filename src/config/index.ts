@@ -1333,6 +1333,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
       displaySymbol: "Algo",
       isSmartContract: true,
     },
+    dataAddedAt: "2026-03-26T00:00:00.000Z",
   }],
   tALGO: {
     assetId: "2537013734",
@@ -1360,7 +1361,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     dataAddedAt: "2026-03-23T00:00:00.000Z",
     intrinsicApyPercent: 4.49,
   },
-  USDC: {
+  USDC: [{
     assetId: "31566704",
     poolId: "3333688282",
     contractId: "3210682240",
@@ -1375,7 +1376,18 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     symbol: "USDC",
     logoPath: "/lovable-uploads/USDC.webp",
     tokenStandard: "asa",
-  },
+  }, {
+    assetId: "31566704",
+    poolId: "3345940978",
+    contractId: "3210682240",
+    nTokenId: "3494389084",
+    decimals: 6,
+    name: "USD Coin",
+    symbol: "USDC",
+    logoPath: "/lovable-uploads/USDC.webp",
+    tokenStandard: "asa",
+    dataAddedAt: "2026-03-26T00:00:00.000Z",
+  }],
   UNIT: {
     assetId: "3121954282",
     poolId: "3333688282",

@@ -181,6 +181,7 @@ const MarketsTable = () => {
   const [marketFilter, setMarketFilter] = useState<MarketFilter>("all");
   const [newMarketsOnly, setNewMarketsOnly] = useState(false);
   const [rewardMarketsOnly, setRewardMarketsOnly] = useState(false);
+  const [multiPoolOnly, setMultiPoolOnly] = useState(false);
   const [depositModal, setDepositModal] = useState<{
     isOpen: boolean;
     asset: string | null;
@@ -552,6 +553,7 @@ const MarketsTable = () => {
     isLoading,
     newMarketsCount,
     rewardMarketsCount,
+    multiPoolMarketsCount,
   } = useOnDemandMarketData({
     searchTerm,
     sortField,
@@ -561,6 +563,7 @@ const MarketsTable = () => {
     marketFilter,
     newMarketsOnly,
     rewardMarketsOnly,
+    multiPoolOnly,
   });
 
   const rewardsAprByBaseUrl = useRewardsAprBonusMap([currentNetwork]);
@@ -578,6 +581,7 @@ const MarketsTable = () => {
   useEffect(() => {
     setNewMarketsOnly(false);
     setRewardMarketsOnly(false);
+    setMultiPoolOnly(false);
   }, [currentNetwork]);
 
   useEffect(() => {
@@ -587,6 +591,10 @@ const MarketsTable = () => {
   useEffect(() => {
     if (rewardMarketsCount === 0) setRewardMarketsOnly(false);
   }, [rewardMarketsCount]);
+
+  useEffect(() => {
+    if (multiPoolMarketsCount === 0) setMultiPoolOnly(false);
+  }, [multiPoolMarketsCount]);
 
   const handleSearchTermChange = (value: string) => {
     setSearchTerm(value);
@@ -2566,6 +2574,12 @@ const MarketsTable = () => {
           rewardMarketsOnly={rewardMarketsOnly}
           onRewardMarketsOnlyChange={(v) => {
             setRewardMarketsOnly(v);
+            setCurrentPage(1);
+          }}
+          multiPoolMarketsCount={multiPoolMarketsCount}
+          multiPoolOnly={multiPoolOnly}
+          onMultiPoolOnlyChange={(v) => {
+            setMultiPoolOnly(v);
             setCurrentPage(1);
           }}
         />

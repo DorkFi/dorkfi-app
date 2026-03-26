@@ -1,4 +1,4 @@
-import { Search, SortAsc, SortDesc, Sparkles, Gift } from "lucide-react";
+import { Search, SortAsc, SortDesc, Sparkles, Gift, Layers } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -20,6 +20,10 @@ interface MarketSearchFiltersProps {
   rewardMarketsCount?: number;
   rewardMarketsOnly?: boolean;
   onRewardMarketsOnlyChange?: (value: boolean) => void;
+  /** When > 0, shows "Multi-pool" toggle. */
+  multiPoolMarketsCount?: number;
+  multiPoolOnly?: boolean;
+  onMultiPoolOnlyChange?: (value: boolean) => void;
 }
 
 const MarketSearchFilters = ({
@@ -34,6 +38,9 @@ const MarketSearchFilters = ({
   rewardMarketsCount = 0,
   rewardMarketsOnly = false,
   onRewardMarketsOnlyChange,
+  multiPoolMarketsCount = 0,
+  multiPoolOnly = false,
+  onMultiPoolOnlyChange,
 }: MarketSearchFiltersProps) => {
   const handleSortFieldChange = (field: SortField) => {
     onSortChange(field, sortOrder);
@@ -84,7 +91,8 @@ const MarketSearchFilters = ({
       </div>
 
       {((newMarketsCount > 0 && onNewMarketsOnlyChange) ||
-        (rewardMarketsCount > 0 && onRewardMarketsOnlyChange)) && (
+        (rewardMarketsCount > 0 && onRewardMarketsOnlyChange) ||
+        (multiPoolMarketsCount > 0 && onMultiPoolOnlyChange)) && (
         <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mt-5">
           {newMarketsCount > 0 && onNewMarketsOnlyChange && (
             <div className="flex items-center gap-2">
@@ -122,6 +130,26 @@ const MarketSearchFilters = ({
                 Reward markets only
                 <span className="text-xs font-normal text-muted-foreground">
                   ({rewardMarketsCount})
+                </span>
+              </Label>
+            </div>
+          )}
+          {multiPoolMarketsCount > 0 && onMultiPoolOnlyChange && (
+            <div className="flex items-center gap-2">
+              <Switch
+                id="markets-multi-pool-only"
+                checked={multiPoolOnly}
+                onCheckedChange={onMultiPoolOnlyChange}
+                aria-label="Show multi-pool markets only"
+              />
+              <Label
+                htmlFor="markets-multi-pool-only"
+                className="text-sm font-medium text-slate-700 dark:text-slate-200 cursor-pointer flex items-center gap-1.5"
+              >
+                <Layers className="h-3.5 w-3.5 text-ocean-teal shrink-0" aria-hidden />
+                Multi-pool
+                <span className="text-xs font-normal text-muted-foreground">
+                  ({multiPoolMarketsCount})
                 </span>
               </Label>
             </div>

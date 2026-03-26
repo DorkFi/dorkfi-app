@@ -101,6 +101,7 @@ import {
   GovernanceConfig,
   isCurrentNetworkAVM,
   getAlgorandNetworkFromNetworkId,
+  type TokenStandard,
 } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
@@ -167,26 +168,137 @@ const getMarketsFromConfig = (networkId: NetworkId) => {
   const networkConfig = getNetworkConfig(networkId);
   const tokens = getAllTokensWithDisplayInfo(networkId);
 
-  return tokens.map((token) => ({
-    // Include poolId in id to make it unique for tokens with multiple markets
-    id: token.poolId
-      ? `${token.symbol.toLowerCase()}-${token.poolId}`
-      : token.symbol.toLowerCase(),
-    name: token.name, // This will be "Voi" or "Algo" if override is configured
-    symbol: token.symbol, // This will be "Voi" or "Algo" if override is configured
-    originalName: token.originalName, // The original token name
-    originalSymbol: token.originalSymbol, // The original token symbol
-    underlyingAssetId: token.underlyingAssetId, // The actual asset ID to use
-    underlyingContractId: token.underlyingContractId, // The actual contract ID to use
-    originalContractId: token.originalContractId, // The original contract ID
-    isSmartContract: token.isSmartContract, // Whether this is a smart contract-based asset
-    decimals: token.decimals, // CRITICAL: Token decimals for proper calculations
-    poolId: token.poolId, // Pool ID for this token
-    status: "active" as const,
-    totalDeposits: Math.floor(Math.random() * 1000000) + 50000, // Mock data
-    users: Math.floor(Math.random() * 500) + 50, // Mock data
-  }));
+  return tokens.map((token) => {
+    const tokenConfigRaw = networkConfig.tokens[token.originalSymbol];
+    const tokenConfig = Array.isArray(tokenConfigRaw)
+      ? tokenConfigRaw.find(
+          (c) => String(c.poolId) === String(token.poolId)
+        ) || tokenConfigRaw[0]
+      : tokenConfigRaw;
+
+    return {
+      // Include poolId in id to make it unique for tokens with multiple markets
+      id: token.poolId
+        ? `${token.symbol.toLowerCase()}-${token.poolId}`
+        : token.symbol.toLowerCase(),
+      name: token.name, // This will be "Voi" or "Algo" if override is configured
+      symbol: token.symbol, // This will be "Voi" or "Algo" if override is configured
+      originalName: token.originalName, // The original token name
+      originalSymbol: token.originalSymbol, // The original token symbol
+      underlyingAssetId: token.underlyingAssetId, // The actual asset ID to use
+      underlyingContractId: token.underlyingContractId, // The actual contract ID to use
+      originalContractId: token.originalContractId, // The original contract ID
+      isSmartContract: token.isSmartContract, // Whether this is a smart contract-based asset
+      decimals: token.decimals, // CRITICAL: Token decimals for proper calculations
+      poolId: token.poolId, // Pool ID for this token
+      tokenStandard: (tokenConfig?.tokenStandard ?? "asa") as TokenStandard,
+      status: "active" as const,
+      totalDeposits: Math.floor(Math.random() * 1000000) + 50000, // Mock data
+      users: Math.floor(Math.random() * 500) + 50, // Mock data
+    };
+  });
 };
+
+/** Short chain label for admin CSV export (matches common spreadsheet samples). */
+function networkIdToExportChainLabel(networkId: NetworkId): string {
+  if (networkId.startsWith("algorand")) return "algorand";
+  if (networkId.startsWith("voi")) return "voi";
+  return networkId.replace(/-mainnet$/i, "").replace(/-testnet$/i, "");
+}
+
+function escapeTsvCell(value: string | number | boolean): string {
+  const s = String(value);
+  if (/[\t\n\r]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+const MARKET_EXPORT_HEADERS = [
+  "Chain",
+  "Pool ID",
+  "Contract ID",
+  "Market ID",
+  "Symbol",
+  "Name",
+  "Token Standard",
+  "Decimals",
+  "nToken ID",
+  "Paused",
+  "Price",
+  "Collateral Factor (%)",
+  "Liquidation Threshold (%)",
+  "Liquidation Bonus (%)",
+  "Reserve Factor (%)",
+  "Close Factor (%)",
+  "Base Borrow Rate (%)",
+  "Slope (%)",
+  "Current Borrow Rate (%)",
+  "Supply Rate (%)",
+  "Utilization (%)",
+  "Total Deposits",
+  "Total Borrows",
+  "Max Total Deposits",
+  "Max Total Borrows",
+  "Reserves",
+  "Deposit Index",
+  "Borrow Index",
+  "Last Update Time",
+] as const;
+
+function buildMarketExportTsvRow(
+  m: MarketInfo,
+  opts: {
+    chainLabel: string;
+    contractId: string;
+    tokenStandard: string;
+  }
+): string {
+  const supplyPct =
+    m.apyCalculation?.apy ?? (Number.isFinite(m.supplyRate) ? m.supplyRate * 100 : 0);
+  const borrowPct =
+    m.borrowApyCalculation?.apy ??
+    (Number.isFinite(m.borrowRateCurrent) ? m.borrowRateCurrent * 100 : 0);
+
+  const fmtPct = (x: number, fd: number) => {
+    if (!Number.isFinite(x)) return "";
+    return String(Number(x.toFixed(fd)));
+  };
+
+  const cells: (string | number | boolean)[] = [
+    opts.chainLabel,
+    m.poolId,
+    opts.contractId,
+    m.marketId,
+    m.symbol,
+    m.name,
+    opts.tokenStandard,
+    m.decimals ?? "",
+    m.ntokenId,
+    m.isPaused ? "Yes" : "No",
+    m.priceRaw ?? m.price,
+    fmtPct(m.collateralFactor * 100, 4),
+    fmtPct(m.liquidationThreshold * 100, 4),
+    fmtPct(m.liquidationBonus * 100, 4),
+    fmtPct(m.reserveFactor * 100, 4),
+    fmtPct(m.closeFactor * 100, 4),
+    fmtPct(m.borrowRate * 100, 4),
+    fmtPct(m.slope * 100, 4),
+    borrowPct.toFixed(4),
+    supplyPct.toFixed(4),
+    (m.utilizationRate * 100).toFixed(4),
+    m.totalDeposits,
+    m.totalBorrows,
+    m.maxTotalDeposits,
+    m.maxTotalBorrows,
+    m.reservesAmount ?? "",
+    m.depositIndex,
+    m.borrowIndex,
+    m.chainLastUpdateIso ?? "",
+  ];
+
+  return cells.map(escapeTsvCell).join("\t");
+}
 
 export default function AdminDashboard() {
   const { activeAccount, signTransactions, transactionSigner } = useWallet();
@@ -3195,6 +3307,38 @@ export default function AdminDashboard() {
       setIsLoadingMarketView(false);
     }
   };
+
+  const handleExportMarketViewCsv = useCallback(() => {
+    if (!marketViewData) return;
+    const configRow = markets.find((m) => m.id === selectedMarket?.id);
+    const contractId =
+      configRow?.underlyingContractId || String(marketViewData.marketId ?? "");
+    const tokenStandard = configRow?.tokenStandard ?? "asa";
+    const chainLabel = networkIdToExportChainLabel(currentNetwork);
+
+    const headerLine = MARKET_EXPORT_HEADERS.join("\t");
+    const rowLine = buildMarketExportTsvRow(marketViewData as MarketInfo, {
+      chainLabel,
+      contractId: String(contractId),
+      tokenStandard,
+    });
+
+    const blob = new Blob([`${headerLine}\n${rowLine}\n`], {
+      type: "text/csv;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const safeSymbol = String(marketViewData.symbol || "market").replace(
+      /[^\w.-]+/g,
+      "_"
+    );
+    a.href = url;
+    a.download = `market-${safeSymbol}-${marketViewData.marketId}-${Date.now()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [marketViewData, selectedMarket, markets, currentNetwork]);
 
   const handleEditMarket = (market: any) => {
     setSelectedMarket(market);
@@ -15802,38 +15946,49 @@ export default function AdminDashboard() {
                 </DialogDescription>
               </div>
               {marketViewData && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={async () => {
-                    if (!selectedMarket) return;
-                    setIsLoadingMarketView(true);
-                    try {
-                      // Use market.id if available (includes poolId), otherwise fall back to asset symbol
-                      const marketKey = selectedMarket.id || selectedMarket.asset?.toLowerCase();
-                      await loadMarketDataWithBypass(marketKey);
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleExportMarketViewCsv}
+                    disabled={isLoadingMarketView}
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    Export CSV
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      if (!selectedMarket) return;
+                      setIsLoadingMarketView(true);
+                      try {
+                        // Use market.id if available (includes poolId), otherwise fall back to asset symbol
+                        const marketKey = selectedMarket.id || selectedMarket.asset?.toLowerCase();
+                        await loadMarketDataWithBypass(marketKey);
 
-                      // Wait for data to be updated
-                      setTimeout(() => {
-                        const updatedMarketData = marketsData[marketKey];
-                        if (updatedMarketData?.marketInfo) {
-                          setMarketViewData(updatedMarketData.marketInfo);
-                        }
-                      }, 100);
-                    } catch (error) {
-                      console.error("Error refreshing market data:", error);
-                    } finally {
-                      setIsLoadingMarketView(false);
-                    }
-                  }}
-                  disabled={isLoadingMarketView}
-                >
-                  <RefreshCcw
-                    className={`h-4 w-4 mr-2 ${isLoadingMarketView ? "animate-spin" : ""
-                      }`}
-                  />
-                  Refresh
-                </Button>
+                        // Wait for data to be updated
+                        setTimeout(() => {
+                          const updatedMarketData = marketsData[marketKey];
+                          if (updatedMarketData?.marketInfo) {
+                            setMarketViewData(updatedMarketData.marketInfo);
+                          }
+                        }, 100);
+                      } catch (error) {
+                        console.error("Error refreshing market data:", error);
+                      } finally {
+                        setIsLoadingMarketView(false);
+                      }
+                    }}
+                    disabled={isLoadingMarketView}
+                  >
+                    <RefreshCcw
+                      className={`h-4 w-4 mr-2 ${isLoadingMarketView ? "animate-spin" : ""
+                        }`}
+                    />
+                    Refresh
+                  </Button>
+                </div>
               )}
             </div>
           </DialogHeader>

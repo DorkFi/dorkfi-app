@@ -124,6 +124,8 @@ interface UseOnDemandMarketDataProps {
   newMarketsOnly?: boolean;
   /** When true, only markets with `hasRewards` in config are shown. */
   rewardMarketsOnly?: boolean;
+  /** When true, only assets that have a market in more than one lending pool are shown. */
+  multiPoolOnly?: boolean;
 }
 
 // Throttle duration: 1 minute
@@ -139,6 +141,7 @@ export const useOnDemandMarketData = ({
   marketFilter = "all",
   newMarketsOnly = false,
   rewardMarketsOnly = false,
+  multiPoolOnly = false,
 }: UseOnDemandMarketDataProps = {}) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [marketsData, setMarketsData] = useState<
@@ -528,6 +531,34 @@ export const useOnDemandMarketData = ({
     }).length;
   }, [marketDataArray]);
 
+  /** Display asset keys (configSymbol or asset) that appear in more than one pool. */
+  const multiPoolAssetKeys = useMemo(() => {
+    const poolIdsByKey = new Map<string, Set<string>>();
+    marketDataArray.forEach((m) => {
+      const key = (m.configSymbol ?? m.asset).toLowerCase();
+      const pid =
+        m.poolId != null && m.poolId !== ""
+          ? String(m.poolId)
+          : "_default";
+      if (!poolIdsByKey.has(key)) poolIdsByKey.set(key, new Set());
+      poolIdsByKey.get(key)!.add(pid);
+    });
+    const multi = new Set<string>();
+    poolIdsByKey.forEach((pids, key) => {
+      if (pids.size > 1) multi.add(key);
+    });
+    return multi;
+  }, [marketDataArray]);
+
+  const multiPoolMarketsCount = useMemo(() => {
+    return marketDataArray.filter((market) => {
+      const key = (market.configSymbol ?? market.asset).toLowerCase();
+      if (!multiPoolAssetKeys.has(key)) return false;
+      if (market.marketInfo?.isPaused) return false;
+      return true;
+    }).length;
+  }, [marketDataArray, multiPoolAssetKeys]);
+
   // Filter and sort data
   const { filteredData, totalPages, paginatedData } = useMemo(() => {
     // Filter out paused markets
@@ -541,6 +572,14 @@ export const useOnDemandMarketData = ({
     // Reward markets only (config `hasRewards`)
     if (rewardMarketsOnly) {
       filtered = filtered.filter((market) => market.hasRewards === true);
+    }
+    // Multi-pool only (same asset listed in more than one lending pool)
+    if (multiPoolOnly) {
+      filtered = filtered.filter((market) =>
+        multiPoolAssetKeys.has(
+          (market.configSymbol ?? market.asset).toLowerCase()
+        )
+      );
     }
     // Filter by market (All / A / B)
     if (marketFilter !== "all" && lendingPools.length >= 2) {
@@ -657,6 +696,8 @@ export const useOnDemandMarketData = ({
     lendingPools,
     newMarketsOnly,
     rewardMarketsOnly,
+    multiPoolOnly,
+    multiPoolAssetKeys,
   ]);
 
   const handleSearchChange = (newSearchTerm: string) => {
@@ -703,5 +744,6 @@ export const useOnDemandMarketData = ({
     marketsData,
     newMarketsCount,
     rewardMarketsCount,
+    multiPoolMarketsCount,
   };
 };
