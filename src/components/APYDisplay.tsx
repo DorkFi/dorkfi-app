@@ -17,10 +17,14 @@ import { APYCalculationResult, formatAPY, getAPYColorClass } from "@/utils/apyCa
 interface APYDisplayProps {
   apyCalculation?: APYCalculationResult;
   fallbackAPY?: number;
+  /** Intrinsic supply APY from token config (% points); added to displayed APY. */
+  intrinsicApyPercent?: number | null;
   /** Extra supply APR from bonus rewards program (% points); added to displayed APY. */
   bonusRewardsAprPercent?: number | null;
   /** Use black/gold-friendly text (pair with rewards deposit badge). */
   hasRewardsProgram?: boolean;
+  /** Use dark text for silver intrinsic deposit badge (pair with `DEPOSIT_APY_BADGE_INTRINSIC`). */
+  hasIntrinsicApy?: boolean;
   showTooltip?: boolean;
   className?: string;
 }
@@ -28,25 +32,38 @@ interface APYDisplayProps {
 export const APYDisplay: React.FC<APYDisplayProps> = ({
   apyCalculation,
   fallbackAPY = 0,
+  intrinsicApyPercent,
   bonusRewardsAprPercent,
   hasRewardsProgram = false,
+  hasIntrinsicApy = false,
   showTooltip = true,
   className = "",
 }) => {
   const baseApy = apyCalculation?.apy ?? fallbackAPY;
+  const intrinsic =
+    typeof intrinsicApyPercent === "number" &&
+    Number.isFinite(intrinsicApyPercent)
+      ? intrinsicApyPercent
+      : 0;
   const bonus =
     typeof bonusRewardsAprPercent === "number" &&
     Number.isFinite(bonusRewardsAprPercent)
       ? bonusRewardsAprPercent
       : 0;
-  const apy = baseApy + bonus;
+  const apy = baseApy + intrinsic + bonus;
   const formattedAPY = formatAPY(apy);
-  const colorClass = hasRewardsProgram ? "text-black" : getAPYColorClass(apy);
+  const colorClass = hasRewardsProgram
+    ? "text-black"
+    : hasIntrinsicApy
+      ? "text-black"
+      : getAPYColorClass(apy);
   const infoIconClass = hasRewardsProgram
     ? "h-3 w-3 text-black/55"
-    : "h-3 w-3 text-gray-400 hover:text-gray-600";
+    : hasIntrinsicApy
+      ? "h-3 w-3 text-black/55"
+      : "h-3 w-3 text-gray-400 hover:text-gray-600";
 
-  if (!showTooltip || (!apyCalculation && bonus <= 0)) {
+  if (!showTooltip || (!apyCalculation && bonus <= 0 && intrinsic <= 0)) {
     return (
       <span className={`font-medium ${colorClass} ${className}`}>
         {formattedAPY}
@@ -64,7 +81,7 @@ export const APYDisplay: React.FC<APYDisplayProps> = ({
             <div className="flex justify-between">
               <span className="text-gray-300">Utilization Rate:</span>
               <span className="text-white font-mono">
-                {(apyCalculation.utilizationRate * 100).toFixed(1)}%
+                {(apyCalculation.utilizationRate * 100).toFixed(2)}%
               </span>
             </div>
 
@@ -78,7 +95,7 @@ export const APYDisplay: React.FC<APYDisplayProps> = ({
             <div className="flex justify-between">
               <span className="text-gray-300">Supply Rate:</span>
               <span className="text-white font-mono">
-                {(apyCalculation.supplyRate * 100).toFixed(4)}%
+                {(apyCalculation.supplyRate * 100).toFixed(2)}%
               </span>
             </div>
           </>
@@ -88,6 +105,13 @@ export const APYDisplay: React.FC<APYDisplayProps> = ({
             <span className="text-white font-mono">{formatAPY(baseApy)}</span>
           </div>
         )}
+
+        {intrinsic > 0 ? (
+          <div className="flex justify-between">
+            <span className="text-gray-300">Intrinsic APY:</span>
+            <span className="text-sky-300 font-mono">+{formatAPY(intrinsic)}</span>
+          </div>
+        ) : null}
 
         {bonus > 0 ? (
           <div className="flex justify-between">

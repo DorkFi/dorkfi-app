@@ -529,7 +529,7 @@ const RepayModal = ({
                                       {showChange ? (
                                         <>
                                           <span>{changePercent > 0 ? "↑" : "↓"}</span>
-                                          <span>{changePercent > 0 ? "+" : ""}{changePercent.toFixed(1)}%</span>
+                                          <span>{changePercent > 0 ? "+" : ""}{changePercent.toFixed(2)}%</span>
                                         </>
                                       ) : (
                                         <span>after repay</span>

@@ -88,6 +88,11 @@ export interface TokenConfig {
   rewardsPublicBaseUrl?: string;
   /** ISO 8601 timestamp when this token row was added to config (optional metadata). */
   dataAddedAt?: string;
+  /**
+   * Optional intrinsic supply APY in percentage points (e.g. 4.55 for 4.55%) from the asset
+   * itself (e.g. governance staking), added to on-chain supply APY for display.
+   */
+  intrinsicApyPercent?: number;
 }
 
 /** Markets with `dataAddedAt` within this window are treated as "new" on the Markets page. */
@@ -1286,7 +1291,7 @@ const algorandProdContracts: ContractConfig = {
 };
 
 const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
-  ALGO: {
+  ALGO: [{
     assetId: "0",
     poolId: "3333688282",
     contractId: "3207744109",
@@ -1308,6 +1313,27 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     },
     hasRewards: true,
   },
+  {
+    assetId: "0",
+    poolId: "3345940978",
+    contractId: "3207744109",
+    nTokenId: "3333724131",
+    migration: {
+      poolId: "3207735602",
+      contractId: "3207744109",
+      nTokenId: "3209220112",
+    },
+    decimals: 6,
+    name: "Algorand",
+    symbol: "ALGO",
+    logoPath: "/lovable-uploads/Algo.webp",
+    tokenStandard: "network",
+    marketOverride: {
+      displayName: "Algo",
+      displaySymbol: "Algo",
+      isSmartContract: true,
+    },
+  }],
   tALGO: {
     assetId: "2537013734",
     poolId: "3333688282",
@@ -1319,6 +1345,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     logoPath: "/lovable-uploads/tALGO.webp",
     tokenStandard: "asa",
     dataAddedAt: "2026-03-23T00:00:00.000Z",
+    intrinsicApyPercent: 4.51,
   },
   xALGO: {
     assetId: "1134696561",
@@ -1331,6 +1358,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     logoPath: "/lovable-uploads/xALGO.webp",
     tokenStandard: "asa",
     dataAddedAt: "2026-03-23T00:00:00.000Z",
+    intrinsicApyPercent: 4.49,
   },
   USDC: {
     assetId: "31566704",
@@ -2407,6 +2435,24 @@ export const getTokenConfig = (
   symbol: string
 ): TokenConfig | TokenConfig[] | undefined => {
   return config.networks[networkId].tokens[symbol];
+};
+
+/** Intrinsic supply APY (% points) from config when set; 0 if unset or not applicable. */
+export const getIntrinsicSupplyApyPercent = (
+  networkId: NetworkId | string | undefined,
+  symbol: string,
+  poolId: string | undefined
+): number => {
+  if (!networkId) return 0;
+  const raw = getTokenConfig(networkId as NetworkId, symbol);
+  if (!raw) return 0;
+  const row = Array.isArray(raw)
+    ? poolId != null && poolId !== ""
+      ? raw.find((c) => String(c.poolId) === String(poolId)) ?? raw[0]
+      : raw[0]
+    : raw;
+  const v = row.intrinsicApyPercent;
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
 };
 
 export const getAllTokens = (networkId: NetworkId): TokenConfig[] => {

@@ -11,6 +11,8 @@ interface PortfolioTableMobileCardProps {
   value: number;
   balance?: number;
   apy?: number;
+  /** Intrinsic APY from token config (% points); shown as +X.XX% intrinsic when &gt; 0. */
+  intrinsicApyPercent?: number;
   /** Bonus rewards APR (% points); shown as +X.XX% when &gt; 0. */
   rewardBonusAprPercent?: number;
   accruedInterest?: number;
@@ -39,6 +41,7 @@ const PortfolioTableMobileCard = ({
   value,
   balance,
   apy,
+  intrinsicApyPercent,
   rewardBonusAprPercent,
   accruedInterest,
   accruedInterestValue,
@@ -160,6 +163,13 @@ const PortfolioTableMobileCard = ({
               <div className={`text-lg font-semibold ${apyColor}`}>
                 {apy.toFixed(2)}%
               </div>
+              {isDeposit &&
+                intrinsicApyPercent != null &&
+                intrinsicApyPercent > 0 && (
+                  <div className="text-xs font-semibold text-sky-700 dark:text-sky-400 mt-0.5 tabular-nums">
+                    +{intrinsicApyPercent.toFixed(2)}% intrinsic
+                  </div>
+                )}
               {isDeposit &&
                 rewardBonusAprPercent != null &&
                 rewardBonusAprPercent > 0 && (
