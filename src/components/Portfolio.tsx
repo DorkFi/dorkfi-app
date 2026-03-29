@@ -69,6 +69,7 @@ import {
 } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -93,6 +94,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import DorkFiButton from "@/components/ui/DorkFiButton";
+import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import {
@@ -157,6 +159,8 @@ const Portfolio = () => {
   const { toast } = useToast();
   const breakpoint = useBreakpoint();
   const isMobile = breakpoint === "mobile";
+  /** Matches Tailwind `lg` (1024px+) — wide layouts for Portfolio controls */
+  const isLargePortfolioScreen = breakpoint === "desktop";
 
   const [depositModal, setDepositModal] = useState<{
     isOpen: boolean;
@@ -257,6 +261,9 @@ const Portfolio = () => {
   const suppliedAssetsTableRef = useRef<HTMLDivElement>(null);
   const [borrowedAssetsSearchTerm, setBorrowedAssetsSearchTerm] =
     useState<string>("");
+  const [portfolioPositionsTab, setPortfolioPositionsTab] = useState<
+    "supplied" | "borrowed"
+  >("supplied");
   const [showAllBorrowedAssets, setShowAllBorrowedAssets] =
     useState<boolean>(false);
   const borrowedAssetsTableRef = useRef<HTMLDivElement>(null);
@@ -886,6 +893,9 @@ const Portfolio = () => {
     hasComputedData && transformedDepositsAndBorrows.borrows.length > 0
       ? transformedDepositsAndBorrows.borrows
       : userPositions.filter((pos) => pos.type === "borrow");
+
+  const hasBothPositionTypes =
+    deposits.length > 0 && borrows.length > 0;
 
   // Combine deposits and borrows with accrued interest, grouped by market
   const accruedInterestItems = useMemo(() => {
@@ -3207,6 +3217,14 @@ const Portfolio = () => {
     setShowAllBorrowedAssets(false);
   }, [borrowedAssetsSearchTerm, borrowedAssetsNetworkFilter]);
 
+  // Section filter modals are mobile-only; close when viewport shows inline filters
+  useEffect(() => {
+    if (breakpoint !== "mobile") {
+      setSuppliedAssetsFilterModalOpen(false);
+      setBorrowedAssetsFilterModalOpen(false);
+    }
+  }, [breakpoint]);
+
   const handleDepositClick = async (
     asset: string,
     poolId?: string,
@@ -5149,10 +5167,48 @@ const Portfolio = () => {
       {user?.computed?.networkValues &&
         Object.keys(user.computed.networkValues).length > 0 && (
           <TooltipProvider>
-            <div className="space-y-6">
+            <div className="flex flex-col gap-6">
+              {hasBothPositionTypes && isLargePortfolioScreen && (
+                <div className="order-0 hidden rounded-lg border border-border bg-muted/40 p-4 md:p-5 lg:block">
+                  <ToggleGroup
+                    type="single"
+                    value={portfolioPositionsTab}
+                    onValueChange={(v) => {
+                      if (v === "supplied" || v === "borrowed") {
+                        setPortfolioPositionsTab(v);
+                      }
+                    }}
+                    variant="outline"
+                    className="inline-flex w-full max-w-md gap-0 rounded-lg border border-input bg-background p-1 shadow-sm"
+                    aria-label="Switch between supplied and borrowed positions"
+                  >
+                    <ToggleGroupItem
+                      value="supplied"
+                      className="flex-1 rounded-md px-4 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground sm:min-w-[8rem]"
+                    >
+                      Supplied
+                    </ToggleGroupItem>
+                    <ToggleGroupItem
+                      value="borrowed"
+                      className="flex-1 rounded-md px-4 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground sm:min-w-[8rem]"
+                    >
+                      Borrowed
+                    </ToggleGroupItem>
+                  </ToggleGroup>
+                </div>
+              )}
               {/* Supplied Assets Table */}
               {deposits.length > 0 && (
-                <DorkFiCard className="p-6 md:p-8">
+                <DorkFiCard
+                  className={cn(
+                    "p-6 md:p-8",
+                    hasBothPositionTypes && "order-1",
+                    hasBothPositionTypes &&
+                      isLargePortfolioScreen &&
+                      portfolioPositionsTab === "borrowed" &&
+                      "lg:hidden"
+                  )}
+                >
                   <div ref={suppliedAssetsTableRef} className="mb-4">
                     <div className="flex items-center justify-between mb-4">
                       <H1 className="text-xl md:text-2xl">Supplied Assets</H1>
@@ -5193,15 +5249,61 @@ const Portfolio = () => {
                         variant="secondary"
                         size="sm"
                         type="button"
-                        className="shrink-0"
+                        className="shrink-0 md:hidden"
                         onClick={() => setSuppliedAssetsFilterModalOpen(true)}
                       >
                         <Filter className="h-4 w-4" />
                         Filter assets
                       </DorkFiButton>
                     </div>
+                    <div className="hidden md:flex md:flex-row md:items-end md:gap-4 lg:gap-6 mb-4">
+                      <div className="min-w-0 flex-1">
+                        <label className="text-sm font-medium mb-2 block">
+                          Network
+                        </label>
+                        <Tabs
+                          value={suppliedAssetsNetworkFilter}
+                          onValueChange={setSuppliedAssetsNetworkFilter}
+                          className="w-full"
+                        >
+                          <TabsList className="grid w-full grid-cols-3 h-9">
+                            <TabsTrigger value="all" className="text-xs px-1.5 lg:text-sm lg:px-2">
+                              All Networks
+                            </TabsTrigger>
+                            <TabsTrigger value="algorand" className="text-xs px-1.5 lg:text-sm lg:px-2">
+                              Algorand
+                            </TabsTrigger>
+                            <TabsTrigger value="voi" className="text-xs px-1.5 lg:text-sm lg:px-2">
+                              VOI
+                            </TabsTrigger>
+                          </TabsList>
+                        </Tabs>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <label className="text-sm font-medium mb-2 block">
+                          Market
+                        </label>
+                        <Tabs
+                          value={suppliedAssetsMarketFilter}
+                          onValueChange={setSuppliedAssetsMarketFilter}
+                          className="w-full"
+                        >
+                          <TabsList className="grid w-full grid-cols-3 h-9">
+                            <TabsTrigger value="both" className="text-xs px-1.5 lg:text-sm lg:px-2">
+                              Both Markets
+                            </TabsTrigger>
+                            <TabsTrigger value="A" className="text-xs px-1.5 lg:text-sm lg:px-2">
+                              A Market
+                            </TabsTrigger>
+                            <TabsTrigger value="B" className="text-xs px-1.5 lg:text-sm lg:px-2">
+                              B Market
+                            </TabsTrigger>
+                          </TabsList>
+                        </Tabs>
+                      </div>
+                    </div>
                   </div>
-                  {/* Network / market filters (all viewports) */}
+                  {/* Network / market filters (mobile modal) */}
                   <Dialog
                     open={suppliedAssetsFilterModalOpen}
                     onOpenChange={setSuppliedAssetsFilterModalOpen}
@@ -6731,7 +6833,12 @@ const Portfolio = () => {
                   );
 
                   return (
-                    <DorkFiCard className="p-6 md:p-8 border-orange-500/50 bg-orange-500/5">
+                    <DorkFiCard
+                      className={cn(
+                        "p-6 md:p-8 border-orange-500/50 bg-orange-500/5",
+                        hasBothPositionTypes && "order-2 lg:order-3"
+                      )}
+                    >
                       <div className="mb-4">
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
@@ -7325,7 +7432,16 @@ const Portfolio = () => {
 
               {/* Borrowed Assets Table */}
               {borrows.length > 0 && (
-                <DorkFiCard className="p-6 md:p-8">
+                <DorkFiCard
+                  className={cn(
+                    "p-6 md:p-8",
+                    hasBothPositionTypes && "order-3 lg:order-2",
+                    hasBothPositionTypes &&
+                      isLargePortfolioScreen &&
+                      portfolioPositionsTab === "supplied" &&
+                      "lg:hidden"
+                  )}
+                >
                   <div ref={borrowedAssetsTableRef} className="mb-4">
                     <div className="flex items-center justify-between mb-4">
                       <H1 className="text-xl md:text-2xl">Borrowed Assets</H1>
@@ -7366,15 +7482,61 @@ const Portfolio = () => {
                         variant="secondary"
                         size="sm"
                         type="button"
-                        className="shrink-0"
+                        className="shrink-0 md:hidden"
                         onClick={() => setBorrowedAssetsFilterModalOpen(true)}
                       >
                         <Filter className="h-4 w-4" />
                         Filter assets
                       </DorkFiButton>
                     </div>
+                    <div className="hidden md:flex md:flex-row md:items-end md:gap-4 lg:gap-6 mb-4">
+                      <div className="min-w-0 flex-1">
+                        <label className="text-sm font-medium mb-2 block">
+                          Network
+                        </label>
+                        <Tabs
+                          value={borrowedAssetsNetworkFilter}
+                          onValueChange={setBorrowedAssetsNetworkFilter}
+                          className="w-full"
+                        >
+                          <TabsList className="grid w-full grid-cols-3 h-9">
+                            <TabsTrigger value="all" className="text-xs px-1.5 lg:text-sm lg:px-2">
+                              All Networks
+                            </TabsTrigger>
+                            <TabsTrigger value="algorand" className="text-xs px-1.5 lg:text-sm lg:px-2">
+                              Algorand
+                            </TabsTrigger>
+                            <TabsTrigger value="voi" className="text-xs px-1.5 lg:text-sm lg:px-2">
+                              VOI
+                            </TabsTrigger>
+                          </TabsList>
+                        </Tabs>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <label className="text-sm font-medium mb-2 block">
+                          Market
+                        </label>
+                        <Tabs
+                          value={borrowedAssetsMarketFilter}
+                          onValueChange={setBorrowedAssetsMarketFilter}
+                          className="w-full"
+                        >
+                          <TabsList className="grid w-full grid-cols-3 h-9">
+                            <TabsTrigger value="both" className="text-xs px-1.5 lg:text-sm lg:px-2">
+                              Both Markets
+                            </TabsTrigger>
+                            <TabsTrigger value="A" className="text-xs px-1.5 lg:text-sm lg:px-2">
+                              A Market
+                            </TabsTrigger>
+                            <TabsTrigger value="B" className="text-xs px-1.5 lg:text-sm lg:px-2">
+                              B Market
+                            </TabsTrigger>
+                          </TabsList>
+                        </Tabs>
+                      </div>
+                    </div>
                   </div>
-                  {/* Network / market filters (all viewports) */}
+                  {/* Network / market filters (mobile modal) */}
                   <Dialog
                     open={borrowedAssetsFilterModalOpen}
                     onOpenChange={setBorrowedAssetsFilterModalOpen}
@@ -8377,7 +8539,12 @@ const Portfolio = () => {
 
               {/* Accrued Interest Table */}
               {accruedInterestItems.length > 0 && (
-                <DorkFiCard className="p-6 md:p-8">
+                <DorkFiCard
+                  className={cn(
+                    "p-6 md:p-8",
+                    hasBothPositionTypes && "order-4"
+                  )}
+                >
                   <div ref={accruedInterestTableRef} className="mb-4">
                     <div className="flex items-center justify-between mb-2">
                       <H1 className="text-xl md:text-2xl">
