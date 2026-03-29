@@ -63,7 +63,7 @@ export const APYDisplay: React.FC<APYDisplayProps> = ({
       ? "h-3 w-3 text-black/55"
       : "h-3 w-3 text-gray-400 hover:text-gray-600";
 
-  if (!showTooltip || (!apyCalculation && bonus <= 0 && intrinsic <= 0)) {
+  if (!showTooltip) {
     return (
       <span className={`font-medium ${colorClass} ${className}`}>
         {formattedAPY}
@@ -128,11 +128,9 @@ export const APYDisplay: React.FC<APYDisplayProps> = ({
         </div>
       </div>
 
-      {apyCalculation ? (
-        <div className="text-xs text-gray-400 mt-2">
-          APY = (1 + daily_supply_rate)^365 - 1
-        </div>
-      ) : null}
+      <div className="text-xs text-gray-400 mt-2">
+        APY = (1 + daily_supply_rate)^365 - 1
+      </div>
     </div>
   );
 
