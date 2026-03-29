@@ -1,0 +1,115 @@
+name: Close issues on next
+
+# Closes issues when their number appears with a closing keyword in any new commit
+# pushed to `next`, or in the body/title of a merged PR referenced by
+# "Merge pull request #N" in that range. This matches GitHub's default behavior for
+# the default branch, and also covers work that merged to `beta` first and only
+# reaches `next` via a later merge.
+
+on:
+  push:
+    branches:
+      - next
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: close-issues-on-next
+  cancel-in-progress: false
+
+jobs:
+  close-issues:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Close issues from commits and merged PRs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const before = context.payload.before;
+            const after = context.payload.after;
+            if (!before || before === "0000000000000000000000000000000000000000") {
+              console.log("Skipping: initial push or missing before SHA");
+              return;
+            }
+
+            const { execSync } = require("child_process");
+            let log;
+            try {
+              log = execSync(`git log --format=%B ${before}..${after}`, {
+                encoding: "utf8",
+                maxBuffer: 32 * 1024 * 1024,
+              });
+            } catch (e) {
+              console.log(`git log failed: ${e.message}`);
+              return;
+            }
+
+            const issueNums = new Set();
+            const keyword =
+              /(?:fix|fixes|close|closes|closed|resolve|resolves|addresses)\s+#(\d+)/gi;
+            for (const m of log.matchAll(keyword)) {
+              issueNums.add(parseInt(m[1], 10));
+            }
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const mergePr = /Merge pull request #(\d+)/g;
+            const prNums = new Set();
+            let mergeM;
+            while ((mergeM = mergePr.exec(log)) !== null) {
+              prNums.add(parseInt(mergeM[1], 10));
+            }
+
+            for (const pull_number of prNums) {
+              try {
+                const { data: pr } = await github.rest.pulls.get({
+                  owner,
+                  repo,
+                  pull_number,
+                });
+                const text = `${pr.title}\n${pr.body || ""}`;
+                const kw2 =
+                  /(?:fix|fixes|close|closes|closed|resolve|resolves|addresses)\s+#(\d+)/gi;
+                for (const m of text.matchAll(kw2)) {
+                  issueNums.add(parseInt(m[1], 10));
+                }
+                for (const line of text.split("\n")) {
+                  if (!/\baddresses\b/i.test(line)) continue;
+                  const um = line.match(/issues\/(\d+)/i);
+                  if (um) issueNums.add(parseInt(um[1], 10));
+                }
+              } catch (e) {
+                console.log(`Could not fetch PR #${pull_number}: ${e.message}`);
+              }
+            }
+
+            for (const issue_number of issueNums) {
+              try {
+                const { data: issue } = await github.rest.issues.get({
+                  owner,
+                  repo,
+                  issue_number,
+                });
+                if (issue.state === "open") {
+                  await github.rest.issues.update({
+                    owner,
+                    repo,
+                    issue_number,
+                    state: "closed",
+                    state_reason: "completed",
+                  });
+                  console.log(`Closed #${issue_number}`);
+                }
+              } catch (e) {
+                console.log(`Could not close #${issue_number}: ${e.message}`);
+              }
+            }
