@@ -117,6 +117,21 @@ function normalizeMarketData(md: Record<string, unknown>) {
 
   const utilization = Number(md.utilization ?? 0);
 
+  const parseRateFraction = (v: unknown): number | undefined => {
+    if (typeof v === "number" && Number.isFinite(v)) {
+      return v > 1 ? v / 10000 : v;
+    }
+    if (typeof v === "string" && v.trim() !== "") {
+      const n = Number.parseFloat(v.replace(/,/g, ""));
+      if (Number.isFinite(n)) return n > 1 ? n / 10000 : n;
+    }
+    return undefined;
+  };
+  const borrowRateFrac =
+    parseRateFraction(mi?.borrowRate) ?? parseRateFraction(md.borrowRate);
+  const slopeFrac =
+    parseRateFraction(mi?.slope) ?? parseRateFraction(md.slope);
+
   const baseSupplyApy = Number(md.supplyAPY ?? 0);
   const rewardsBonus =
     typeof md.rewardsBonusSupplyAprPercent === "number" &&
@@ -143,6 +158,8 @@ function normalizeMarketData(md: Record<string, unknown>) {
     utilization,
     supplyAPY: baseSupplyApy + rewardsBonus + intrinsicBonus,
     borrowAPY: Number(md.borrowAPY ?? 0),
+    ...(borrowRateFrac !== undefined ? { borrowRate: borrowRateFrac } : {}),
+    ...(slopeFrac !== undefined ? { slope: slopeFrac } : {}),
     maxLTV: Number(md.maxLTV ?? md.collateralFactor ?? 0),
     liquidationThreshold: Number(md.liquidationThreshold ?? 0),
     liquidationBonus: Number(
@@ -165,6 +182,31 @@ function poolIdFromMarketRow(market: Record<string, unknown>): string | undefine
   const mi = market.marketInfo as { poolId?: string } | undefined;
   if (mi?.poolId != null && String(mi.poolId) !== "") return String(mi.poolId);
   return undefined;
+}
+
+/** Matches `useOnDemandMarketData` cache keys (`symbol` or `symbol-poolId`). */
+function marketKeyForOnDemandLoad(asset: string, poolId?: string): string {
+  return poolId != null && poolId !== ""
+    ? `${asset.toLowerCase()}-${String(poolId)}`
+    : asset.toLowerCase();
+}
+
+/** Find the current row on the markets page (same asset + pool); used to merge fresh chain data into the detail modal. */
+function findMarketRowOnPage(
+  pageMarkets: Record<string, unknown>[],
+  asset: string,
+  poolId?: string
+): Record<string, unknown> | null {
+  if (poolId != null && poolId !== "") {
+    const found = pageMarkets.find(
+      (m) =>
+        String(m.asset) === asset &&
+        String((m.poolId as string | undefined) ?? "") === String(poolId)
+    );
+    return found ?? null;
+  }
+  const found = pageMarkets.find((m) => String(m.asset) === asset);
+  return found ?? null;
 }
 
 function networkIdToChainId(
@@ -1050,6 +1092,8 @@ const MarketsTable = () => {
       poolId,
       marketData: market,
     });
+    // Fresh on-chain read for modal (fetchMarketInfo(..., "contract") via useOnDemandMarketData).
+    void loadMarketDataWithBypass(marketKeyForOnDemandLoad(asset, poolId));
   };
 
   const handleRowClick = (market: Record<string, unknown>) => {
@@ -1069,6 +1113,33 @@ const MarketsTable = () => {
       marketData: null,
     });
   };
+
+  // When the detail modal is open, replace the snapshot row with the refreshed row from
+  // `loadMarketDataWithBypass` (chain-sourced marketInfo) once it lands in `markets`.
+  // Compare `lastFetched` so we do not churn on unrelated `markets` remaps (e.g. rewards APR).
+  useEffect(() => {
+    if (!detailModal.isOpen || !detailModal.asset) return;
+    const fresh = findMarketRowOnPage(
+      markets as Record<string, unknown>[],
+      detailModal.asset,
+      detailModal.poolId
+    );
+    if (!fresh) return;
+    setDetailModal((prev) => {
+      if (!prev.isOpen || !prev.marketData) return prev;
+      if (fresh === prev.marketData) return prev;
+      const prevLast = (prev.marketData as { lastFetched?: number }).lastFetched;
+      const freshLast = (fresh as { lastFetched?: number }).lastFetched;
+      if (
+        prevLast !== undefined &&
+        freshLast !== undefined &&
+        freshLast <= prevLast
+      ) {
+        return prev;
+      }
+      return { ...prev, marketData: fresh };
+    });
+  }, [markets, detailModal.isOpen, detailModal.asset, detailModal.poolId]);
 
   // Load all markets when component mounts
   useEffect(() => {
