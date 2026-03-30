@@ -46,6 +46,12 @@ const UtilizationBar = ({ percent }: { percent: number }) => (
   </div>
 );
 
+function formatCurveRateFraction(v: number | undefined): string {
+  if (v === undefined || !Number.isFinite(v)) return "—";
+  const pct = v > 1 ? v : v * 100;
+  return `${pct.toFixed(2)}%`;
+}
+
 export const MarketOverview = ({ marketData }: { marketData: MarketData }) => {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 px-0 mb-0 min-w-0 w-full">
@@ -67,6 +73,18 @@ export const MarketOverview = ({ marketData }: { marketData: MarketData }) => {
         color="text-orange-600 dark:text-orange-400"
         subtitle={`${marketData.borrowAPY.toFixed(2)}% APY`}
       />
+      <div className="min-w-0 w-full sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <OverviewItem
+          title="Borrow rate (base)"
+          value={formatCurveRateFraction(marketData.borrowRate)}
+          subtitle="Curve intercept at 0% utilization"
+        />
+        <OverviewItem
+          title="Slope"
+          value={formatCurveRateFraction(marketData.slope)}
+          subtitle="Per 100% utilization"
+        />
+      </div>
       <div className="min-w-0 w-full sm:col-span-2">
         <span className="block text-xs text-muted-foreground mb-1">Utilization rate</span>
         <UtilizationBar percent={marketData.utilization ?? 0} />
