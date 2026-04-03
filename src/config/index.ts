@@ -78,12 +78,13 @@ export interface TokenConfig {
   hasRewards?: boolean;
   /**
    * Optional deployment instance id for this row (`https://{id}.{provider host}`). Used when
-   * `rewardsPublicBaseUrl` is unset; overrides the global registry for the same `(networkId, poolId, contractId)`.
+   * {@link rewardsPublicBaseUrl} is unset; wins over the global registry for the same
+   * `(networkId, poolId, contractId)`.
    */
   rewardsInstanceId?: string;
   /**
    * Optional full HTTPS origin for the rewards app (highest-priority override). When set, ignores
-   * registry and `VITE_REWARDS_PROVIDER_HOST` for the origin host.
+   * {@link rewardsInstanceId}, registry, and `VITE_REWARDS_PROVIDER_HOST` for the origin host.
    */
   rewardsPublicBaseUrl?: string;
   /** ISO 8601 timestamp when this token row was added to config (optional metadata). */
@@ -854,6 +855,7 @@ const prodTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
       symbol: "WAD",
       logoPath: "/lovable-uploads/WAD_fixed.png",
       tokenStandard: "arc200",
+      hasRewards: true,
     },
   ],
 };
@@ -2159,6 +2161,8 @@ export function resolveRewardsRegistryEntryToOrigin(
 export const REWARDS_PROGRAM_PUBLIC_BASE_URL_REGISTRY: Record<string, string> = {
   // ALGO @ A market — matches rewards API `dorkfi` cohort (algorand-mainnet / pool / contract)
   "algorand-mainnet:3333688282:3207744109": "fa00f0044fc97455",
+  // Algorand mainnet — B market WAD (`hasRewards` row for WAD @ pool 47139781)
+  "algorand-mainnet:47139781:47138068": "fa00f0044fc97455",
 };
 
 /** Fields used when resolving rewards URLs from a token row (see {@link getRewardsProgramPublicBaseUrl}). */
@@ -2168,9 +2172,12 @@ export type TokenRewardsUrlFields = Pick<
 >;
 
 /**
- * `(networkId, poolId, contractId)` → public rewards app origin, or `null`.
+ * Single resolver: `(networkId, poolId, contractId)` → public rewards app origin, or `null` if none.
  *
- * Priority: `token.rewardsPublicBaseUrl` → `token.rewardsInstanceId` → registry + provider host.
+ * **Priority (highest first):**
+ * 1. `token.rewardsPublicBaseUrl` — full origin; ignores registry and provider host.
+ * 2. `token.rewardsInstanceId` — `{instance}.{VITE_REWARDS_PROVIDER_HOST or default}`; ignores registry.
+ * 3. {@link REWARDS_PROGRAM_PUBLIC_BASE_URL_REGISTRY} for `(networkId, poolId, contractId)` + provider host.
  */
 export const getRewardsProgramPublicBaseUrl = (
   networkId: NetworkId | string | null | undefined,

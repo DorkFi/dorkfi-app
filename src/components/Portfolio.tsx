@@ -125,6 +125,7 @@ const Portfolio = () => {
   const navigate = useNavigate();
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
+  const rewardsAprByBaseUrl = useRewardsAprBonusMap(getEnabledNetworks());
   const { formatNumber, formatCurrency, formatPercent } = useNumberI18n();
 
   const rewardsAprNetworks = useMemo(
@@ -1539,9 +1540,16 @@ const Portfolio = () => {
         asset: deposit.asset,
         icon: deposit.icon,
         value: deposit.value,
-        apy: deposit.apy,
+        apy:
+          deposit.apy +
+          getRewardsBonusSupplyAprPercent(
+            (deposit as ItemWithNetwork).network ?? currentNetwork,
+            deposit.asset,
+            deposit.poolId,
+            rewardsAprByBaseUrl
+          ),
       }));
-  }, [deposits]);
+  }, [deposits, rewardsAprByBaseUrl, currentNetwork]);
 
   const modalBorrows = useMemo(() => {
     return borrows
@@ -5439,6 +5447,15 @@ const Portfolio = () => {
                         return (
                           <>
                             {displayDeposits.map((deposit) => {
+                              const rewardsBonusApr = getRewardsBonusSupplyAprPercent(
+                                (deposit as ItemWithNetwork).network ??
+                                  currentNetwork,
+                                deposit.asset,
+                                deposit.poolId,
+                                rewardsAprByBaseUrl
+                              );
+                              const depositApyWithRewards =
+                                deposit.apy + rewardsBonusApr;
                               const market = marketData.find(
                                 (m) =>
                                   m.symbol === deposit.asset &&
