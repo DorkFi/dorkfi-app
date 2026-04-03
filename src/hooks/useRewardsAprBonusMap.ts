@@ -11,7 +11,8 @@ import { fetchRewardAprStats } from "@/services/rewardAprStatsService";
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Fetches and caches `targetAprAdjustedToSupplyPercent` per rewards deployment origin (24h).
+ * Fetches and caches `targetAprAdjustedToSupplyPercent` per rewards deployment origin
+ * (24h). React Query dedupes with Markets table when the same origins are used.
  */
 export function useRewardsAprBonusMap(networkIds: NetworkId[]) {
   const baseUrls = useMemo(() => {

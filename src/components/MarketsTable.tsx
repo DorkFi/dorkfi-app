@@ -2561,7 +2561,9 @@ const MarketsTable = () => {
     detailModal.marketData,
     activeAccount?.address,
     currentNetwork,
-    markets,
+    // Not `markets`: that list is rebuilt on every row/rewards update and caused a full
+    // Promise.all per tick while the modal stayed open. `detailModal.marketData` is enough;
+    // the sync effect updates it when the selected row’s `lastFetched` advances.
   ]);
 
   return (
