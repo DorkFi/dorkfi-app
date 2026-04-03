@@ -125,7 +125,6 @@ const Portfolio = () => {
   const navigate = useNavigate();
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
-  const rewardsAprByBaseUrl = useRewardsAprBonusMap(getEnabledNetworks());
   const { formatNumber, formatCurrency, formatPercent } = useNumberI18n();
 
   const rewardsAprNetworks = useMemo(
