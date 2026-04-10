@@ -453,11 +453,14 @@ export const fetchMarketInfoFromContract = async (
         }
       );
       ci.setFee(5000);
-      const marketR = await ci.get_market(Number(marketId));
-      console.log("marketR", { marketR });
+      let marketR = await ci.sync_market(Number(marketId));
       if (!marketR.success) {
-        console.error(`Contract call failed for market ${marketId}:`, marketR);
-        throw new Error(`Failed to get market info for market ${marketId}`);
+        marketR = await ci.get_market(Number(marketId));
+        console.log("marketR", { marketR });
+        if (!marketR.success) {
+          console.error(`Contract call failed for market ${marketId}:`, marketR);
+          throw new Error(`Failed to get market info for market ${marketId}`);
+        }
       }
 
       if (!marketR.returnValue || !Array.isArray(marketR.returnValue)) {
