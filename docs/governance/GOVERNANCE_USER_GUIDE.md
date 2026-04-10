@@ -14,7 +14,7 @@ The Governance page allows UNIT token holders to participate in the decentralize
 6. [Batch Voting](#batch-voting)
 7. [Proposal Statuses](#proposal-statuses)
 8. [Proposal Categories](#proposal-categories)
-9. [Adding a New Category (developers)](ADDING_PROPOSAL_CATEGORY.md)
+9. [Adding a New Category (developers)](../workflows/ADD_PROPOSAL_CATEGORY_TO_GOVERNANCE.md)
 10. [Mobile Usage](#mobile-usage)
 11. [Troubleshooting](#troubleshooting)
 
