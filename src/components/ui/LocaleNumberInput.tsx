@@ -51,14 +51,16 @@ export const LocaleNumberInput = React.forwardRef<
       [formatNumber, formatOptions]
     );
 
-    // Sync display from parent whenever value changes (e.g. MAX/quick-amount buttons).
-    // Parent value only changes on blur (onChange) or button clicks, never while user is typing,
-    // so this won't overwrite in-progress input.
+    // Sync display from parent when value / formatter changes (e.g. MAX, locale switch).
+    // While focused, skip sync: parent `value` often stays stale until blur (LocaleNumberInput
+    // only calls onChange on blur), and `formatForDisplay` identity can change on re-renders —
+    // without this guard, display resets every render and the field appears "unable to accept input".
     React.useEffect(() => {
+      if (isFocused) return;
       const formatted = formatForDisplay(value === "" ? "" : value);
       setDisplayValue(formatted);
       setLastValidValue(value);
-    }, [value, formatForDisplay]);
+    }, [value, formatForDisplay, isFocused]);
 
     const handleFocus: React.FocusEventHandler<HTMLInputElement> = (e) => {
       setIsFocused(true);

@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Dialog,
   DialogContent,
@@ -364,10 +364,13 @@ const SupplyBorrowModal = ({
     }
   }, [isOpen, mode]);
 
-  const handleAmountChange = (newAmount: string, newFiatValue: number) => {
-    setAmount(newAmount);
-    setFiatValue(newFiatValue);
-  };
+  const handleAmountChange = useCallback(
+    (newAmount: string, newFiatValue: number) => {
+      setAmount(newAmount);
+      setFiatValue(newFiatValue);
+    },
+    []
+  );
 
   const handleSubmit = async () => {
     if (!activeAccount?.address) {
