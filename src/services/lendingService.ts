@@ -19,6 +19,7 @@ import {
   getLendingPools,
   getPreFiParameters,
   TokenConfig,
+  getEnabledNetworks,
 } from "@/config";
 import algorandService, { AlgorandNetwork } from "./algorandService";
 import { ARC200Service } from "./arc200Service";
@@ -36,6 +37,10 @@ import {
   calculateBorrowAPY,
   APYCalculationResult,
 } from "@/utils/apyCalculations";
+import {
+  calculateUserHealthFactor,
+  DEFAULT_LIQUIDATION_THRESHOLD_DECIMAL,
+} from "@/utils/userHealth";
 import dorkfiAPIService from "./dorkfiAPIService";
 
 export interface MarketData {
@@ -789,6 +794,153 @@ export const fetchMarketInfo = async (
   }
 };
 
+export type UserPositionMarketKey = {
+  networkId: NetworkId;
+  poolId: string;
+  marketId: string;
+};
+
+/**
+ * Collect unique pool/market pairs from API-shaped user position rows (e.g. `user.computed.deposits` / `borrows`).
+ */
+export function collectPositionMarketKeys(
+  items: Record<string, unknown>[] | undefined | null
+): UserPositionMarketKey[] {
+  if (!items?.length) return [];
+  const seen = new Set<string>();
+  const out: UserPositionMarketKey[] = [];
+  for (const item of items) {
+    const networkId = item.network as NetworkId | undefined;
+    const poolId = String(item.appId ?? item.poolId ?? "");
+    const marketId = String(
+      item.marketId ?? item.underlyingContractId ?? ""
+    );
+    if (!networkId || !poolId || !marketId) continue;
+    const key = `${networkId}|${poolId}|${marketId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ networkId, poolId, marketId });
+  }
+  return out;
+}
+
+/**
+ * POST `/market-data/{network}/{appId}/{marketId}` so the API refreshes its chain snapshot.
+ * Use before `fetchAllMarkets` when you want the GET path to reflect the latest on-chain state.
+ */
+export async function postRefreshMarketDataSnapshot(
+  networkId: NetworkId,
+  poolId: string,
+  marketId: string
+): Promise<boolean> {
+  try {
+    const res = await dorkfiAPIService.fetchFreshMarketData(
+      networkId,
+      Number(poolId),
+      Number(marketId)
+    );
+    return !!res?.success;
+  } catch (error) {
+    console.error("[postRefreshMarketDataSnapshot]", {
+      networkId,
+      poolId,
+      marketId,
+      error,
+    });
+    return false;
+  }
+}
+
+/**
+ * Fresh market snapshot via POST `/market-data/{network}/{appId}/{marketId}`
+ * (backend re-reads chain). Pairs with GET-backed `fetchMarketInfo` / `fetchAllMarkets`.
+ */
+export async function fetchFreshMarketInfo(
+  poolId: string,
+  marketId: string,
+  networkId: NetworkId
+): Promise<MarketInfo | null> {
+  if (!isAlgorandCompatibleNetwork(networkId)) {
+    return null;
+  }
+  try {
+    const response = await dorkfiAPIService.fetchFreshMarketData(
+      networkId,
+      Number(poolId),
+      Number(marketId)
+    );
+    if (!response?.success || !response?.data) {
+      console.warn("[fetchFreshMarketInfo] POST failed or empty", {
+        poolId,
+        marketId,
+        networkId,
+        response,
+      });
+      return null;
+    }
+    const apiMarket = response.data as unknown as MarketData;
+
+    const token =
+      getAllTokensWithDisplayInfo(networkId).find(
+        (t) =>
+          String(t.underlyingContractId) === String(marketId) &&
+          String(t.poolId) === String(poolId)
+      ) ||
+      getAllTokensWithDisplayInfo(networkId).find(
+        (t) => String(t.underlyingContractId) === String(marketId)
+      );
+    if (!token) {
+      console.warn("[fetchFreshMarketInfo] no token config", {
+        poolId,
+        marketId,
+        networkId,
+      });
+      return null;
+    }
+
+    const networkConfig = getNetworkConfig(networkId);
+    const tokenConfigRaw = networkConfig.tokens[token.symbol];
+    let tokenConfig: TokenConfig | undefined;
+    if (Array.isArray(tokenConfigRaw)) {
+      tokenConfig =
+        tokenConfigRaw.find((c) => String(c.poolId) === String(poolId)) ??
+        tokenConfigRaw[0];
+    } else {
+      tokenConfig = tokenConfigRaw;
+    }
+
+    const decimals = token.decimals ?? 6;
+    const merged = {
+      ...apiMarket,
+      network: networkId,
+      poolId: String(poolId),
+      appId: String(poolId),
+      marketId: String(marketId),
+    };
+
+    const info = enhanceAVMMarketInfo(merged, tokenConfig);
+    const priceStr = String(apiMarket.price ?? "0");
+    const reserves = String(apiMarket.reserves ?? "0");
+    const lastUp = Number(apiMarket.lastUpdateTime ?? 0);
+
+    return {
+      ...info,
+      priceRaw: priceStr,
+      reservesAmount: new BigNumber(reserves)
+        .dividedBy(new BigNumber(10).pow(decimals))
+        .toFixed(2),
+      chainLastUpdateIso: (() => {
+        if (!Number.isFinite(lastUp) || lastUp <= 0) return "";
+        const ms = lastUp < 1e12 ? lastUp * 1000 : lastUp;
+        return new Date(ms).toISOString();
+      })(),
+    };
+  } catch (error) {
+    console.error("[fetchFreshMarketInfo]", error);
+    return null;
+  }
+}
+
 /**
  * Fetch all markets information
  */
@@ -919,12 +1071,12 @@ export const fetchAllMarkets = async (
 
 /**
  * Fetch user global data (total collateral and borrow values)
- * @param marketData Optional market data array to calculate healthFactorIndex with individual market collateral factors
+ * @param _marketData Reserved for future per-position LT; health uses default liquidation threshold (Portfolio refines LT from user deposits).
  */
 export const fetchUserGlobalData = async (
   userAddress: string,
   networkId: NetworkId,
-  marketData?: MarketInfo[]
+  _marketData?: MarketInfo[]
 ): Promise<{
   totalCollateralValue: number;
   totalBorrowValue: number;
@@ -992,50 +1144,38 @@ export const fetchUserGlobalData = async (
         }
       }
 
-      // Calculate healthFactorIndex if marketData is provided
+      // Same ratio as on-chain _calculate_user_health(collateral, borrow, liquidation_threshold);
+      // here we only have pooled totals, so we use a default LT when user deposit breakdown is unavailable.
       let healthFactorIndex: number | undefined;
-      const STANDARD_COLLATERAL_FACTOR = 0.8; // 80% baseline
 
       if (totalBorrowValueUSD === 0 && totalCollateralValueUSD > 0) {
-        // No borrows = excellent health (capped at 3.0 for display)
         healthFactorIndex = 3.0;
         console.log(
           `[HealthFactorIndex] No borrows - excellent health (capped at 3.0): ${healthFactorIndex}`
         );
       } else if (totalCollateralValueUSD === 0 && totalBorrowValueUSD > 0) {
-        // No collateral but has borrows = 0 health
         healthFactorIndex = 0;
         console.log(
           `[HealthFactorIndex] No collateral but has borrows: ${healthFactorIndex}`
         );
       } else if (totalBorrowValueUSD > 0 && totalCollateralValueUSD > 0) {
-        // Calculate healthFactorIndex normalized to 80% collateral factor baseline
-        //
-        // The contract's totalCollateralValue is already weighted: sum(depositValue_i * collateralFactor_i)
-        // To normalize to 80% baseline, we want: sum(depositValue_i * 0.8)
-        //
-        // Since we don't have individual positions, we'll use the contract's value directly.
-        // If the average collateral factor is close to 80% (which is common), this is already close to normalized.
-        //
-        // healthFactorIndex = totalCollateralValue / totalBorrowValue
-        // This gives the actual health factor with current market collateral factors.
-        // For most cases where average CF ≈ 80%, this is effectively normalized to 80% baseline.
-
-        healthFactorIndex = totalCollateralValueUSD / totalBorrowValueUSD;
-
-        // Cap at 3.0 for display purposes (consistent with Portfolio page)
-        healthFactorIndex = Math.min(healthFactorIndex, 3.0);
+        const hfRaw = calculateUserHealthFactor(
+          totalCollateralValueUSD,
+          totalBorrowValueUSD,
+          DEFAULT_LIQUIDATION_THRESHOLD_DECIMAL,
+          "fetchUserGlobalData"
+        );
+        if (hfRaw != null) {
+          healthFactorIndex = Math.min(hfRaw, 3.0);
+        }
 
         console.log(`[HealthFactorIndex] Calculation:`, {
           totalCollateralValueUSD,
           totalBorrowValueUSD,
+          liquidationThreshold: DEFAULT_LIQUIDATION_THRESHOLD_DECIMAL,
           healthFactorIndex,
-          formula: `(${totalCollateralValueUSD.toFixed(
-            2
-          )} / ${totalBorrowValueUSD.toFixed(2)}) = ${healthFactorIndex.toFixed(
-            4
-          )}`,
-          note: "Using contract's weighted collateral value. If average CF ≈ 80%, this is effectively normalized to 80% baseline. Capped at 3.0 for display.",
+          formula: `(${totalCollateralValueUSD.toFixed(2)} × ${DEFAULT_LIQUIDATION_THRESHOLD_DECIMAL}) / ${totalBorrowValueUSD.toFixed(2)}`,
+          note: "Matches contract (collateral × liquidation_threshold) / borrow; default LT without per-user markets. Portfolio refines LT from deposits. Capped at 3.0 for display.",
         });
       }
 
@@ -1118,6 +1258,146 @@ export const fetchUserGlobalDataForPool = async (
     };
   } catch (error) {
     console.error("Error fetching user global data for pool:", error);
+    return null;
+  }
+};
+
+/**
+ * Per-pool and per-market user snapshot read directly from lending pool contracts
+ * (no indexer/API). Use when `VITE_USER_DATA_SOURCE` is `chain` or as an API fallback.
+ */
+export type ChainUserDataRow = {
+  network: string;
+  marketId: string;
+  underlyingContractId: string;
+  appId: string;
+  poolId: string;
+  scaledDeposits: string;
+  scaledBorrows: string;
+  depositIndex: string;
+  borrowIndex: string;
+};
+
+export type ChainGlobalUserRow = {
+  network: string;
+  totalCollateralValue: string;
+  totalBorrowValue: string;
+  poolId: string;
+};
+
+/**
+ * Fetch global user rows and per-market user rows from chain for all enabled networks.
+ * Mirrors the shape expected by Portfolio when building `user.computed` from API data.
+ */
+export const fetchUserDataFromChain = async (
+  userAddress: string
+): Promise<{
+  globalUserData: ChainGlobalUserRow[];
+  userData: ChainUserDataRow[];
+} | null> => {
+  const globalUserData: ChainGlobalUserRow[] = [];
+  const userData: ChainUserDataRow[] = [];
+
+  try {
+    const networks = getEnabledNetworks();
+
+    for (const networkId of networks) {
+      if (!isAlgorandCompatibleNetwork(networkId)) {
+        continue;
+      }
+
+      const networkConfig = getNetworkConfig(networkId);
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      for (const poolId of networkConfig.contracts.lendingPools) {
+        const ci = new CONTRACT(
+          Number(poolId),
+          clients.algod,
+          undefined,
+          { ...LendingPoolAppSpec.contract, events: [] },
+          {
+            addr: algosdk.encodeAddress(
+              algosdk.getApplicationAddress(Number(poolId)).publicKey
+            ),
+            sk: new Uint8Array(),
+          }
+        );
+        ci.setFee(2000);
+
+        const globalUserR = await ci.get_global_user(userAddress);
+        if (globalUserR.success) {
+          const globalUser = GlobalUserData(globalUserR.returnValue);
+          globalUserData.push({
+            network: networkId,
+            poolId: String(poolId),
+            totalCollateralValue: globalUser.totalCollateralValue.toString(),
+            totalBorrowValue: globalUser.totalBorrowValue.toString(),
+          });
+        } else {
+          console.warn(
+            `[fetchUserDataFromChain] get_global_user failed for pool ${poolId} on ${networkId}`
+          );
+        }
+      }
+
+      const tokens = getAllTokensWithDisplayInfo(networkId);
+      for (const token of tokens) {
+        if (!token.underlyingContractId || !token.poolId) {
+          continue;
+        }
+
+        const ci = new CONTRACT(
+          Number(token.poolId),
+          clients.algod,
+          undefined,
+          { ...LendingPoolAppSpec.contract, events: [] },
+          {
+            addr: algosdk.encodeAddress(
+              algosdk.getApplicationAddress(Number(token.poolId)).publicKey
+            ),
+            sk: new Uint8Array(),
+          }
+        );
+        ci.setFee(2000);
+
+        const userDataR = await ci.get_user(
+          userAddress,
+          Number(token.underlyingContractId)
+        );
+        if (!userDataR.success) {
+          continue;
+        }
+
+        const ud = UserData(userDataR.returnValue);
+        const sd = ud.scaledDeposits ?? 0n;
+        const sb = ud.scaledBorrows ?? 0n;
+        if (sd === 0n && sb === 0n) {
+          continue;
+        }
+
+        userData.push({
+          network: networkId,
+          marketId: String(token.underlyingContractId),
+          underlyingContractId: String(token.underlyingContractId),
+          appId: String(token.poolId),
+          poolId: String(token.poolId),
+          scaledDeposits: sd.toString(),
+          scaledBorrows: sb.toString(),
+          depositIndex: (ud.depositIndex ?? 0n).toString(),
+          borrowIndex: (ud.borrowIndex ?? 0n).toString(),
+        });
+      }
+    }
+
+    if (globalUserData.length === 0 && userData.length === 0) {
+      return { globalUserData: [], userData: [] };
+    }
+
+    return { globalUserData, userData };
+  } catch (error) {
+    console.error("[fetchUserDataFromChain] Error:", error);
     return null;
   }
 };
@@ -1311,8 +1591,13 @@ export const fetchUserDepositBalance = async (
           return 0; // Return 0 instead of null for no deposits
         }
 
-        // Get current market data to access deposit index
-        const marketInfo = await fetchMarketInfo(poolId, marketId, networkId);
+        // Get current market data to access deposit index (contract = fresh indices for chain-backed reads)
+        const marketInfo = await fetchMarketInfo(
+          poolId,
+          marketId,
+          networkId,
+          "contract"
+        );
         if (!marketInfo) {
           console.warn(`Failed to get market info for market ${marketId}`);
           return null;

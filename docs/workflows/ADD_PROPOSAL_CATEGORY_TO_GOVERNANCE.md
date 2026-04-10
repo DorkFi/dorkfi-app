@@ -84,7 +84,7 @@ If you add a category that is not yet in `categoryColors`, the badge may fall ba
 
 ## 5. Optional: Update user-facing docs
 
-- **`docs/GOVERNANCE_USER_GUIDE.md`** – In the [Proposal Categories](#proposal-categories) section, add a short subsection for the new category (what it’s for, example proposals).
+- **`docs/governance/GOVERNANCE_USER_GUIDE.md`** – In the [Proposal Categories](#proposal-categories) section, add a short subsection for the new category (what it’s for, example proposals).
 - **Contract / backend** – Ensure the governance contract and any backend or indexer use the same category ID for the new type.
 
 ---
@@ -97,7 +97,7 @@ If you add a category that is not yet in `categoryColors`, the badge may fall ba
 - [ ] `PROPOSAL_CATEGORY_DISPLAY_NAMES` in `src/constants/governanceConstants.ts`
 - [ ] `categoryColors` in `src/components/governance/ProposalCard.tsx`
 - [ ] Governance contract supports the new category ID (if applicable)
-- [ ] Optional: `docs/GOVERNANCE_USER_GUIDE.md` updated
+- [ ] Optional: `docs/governance/GOVERNANCE_USER_GUIDE.md` updated
 
 ---
 

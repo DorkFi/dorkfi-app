@@ -21,9 +21,16 @@ import {
   fetchUserDepositBalance,
   enhanceAVMMarketInfo,
   fetchMarketInfo,
+  collectPositionMarketKeys,
+  postRefreshMarketDataSnapshot,
   repayOnBehalf,
   liquidateCrossMarket,
+  fetchUserDataFromChain,
 } from "@/services/lendingService";
+import {
+  usePortfolioVisibleChainLive,
+  portfolioPositionChainKey,
+} from "@/hooks/usePortfolioVisibleChainLive";
 import dorkfiAPIService from "@/services/dorkfiAPIService";
 import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
@@ -41,6 +48,10 @@ import {
 } from "@/config";
 import { getAllTokensWithDisplayInfo } from "@/config";
 import { getTokenImagePath } from "@/utils/tokenImageUtils";
+import {
+  calculateUserHealthFactor,
+  normalizeLiquidationThresholdToDecimal,
+} from "@/utils/userHealth";
 import EnhancedHealthFactor from "./EnhancedHealthFactor";
 import DepositsList from "./DepositsList";
 import BorrowsList from "./BorrowsList";
@@ -119,6 +130,12 @@ interface ItemWithNetwork {
   interest?: number;
   accruedInterestValue?: number;
 }
+
+/** Standalone "Accrued Interest" summary card + table (below Supplied/Borrowed). */
+const SHOW_ACCRUED_INTEREST_SECTION = false;
+
+/** Liquidation Price column in Borrowed Assets (desktop + mobile card). */
+const SHOW_LIQUIDATION_PRICE_IN_BORROWED = false;
 
 const Portfolio = () => {
   const { address: routeAddress } = useParams<{ address: string }>();
@@ -326,6 +343,13 @@ const Portfolio = () => {
 
     return price / divisor;
   };
+
+  const { attachChainPollRow, mergeDeposit, mergeBorrow } =
+    usePortfolioVisibleChainLive({
+      address: displayAddress,
+      marketData,
+      formatPriceFromContract,
+    });
 
   // Function to fetch ntoken balance for a specific token
   const fetchNTokenBalance = async (
@@ -1020,6 +1044,36 @@ const Portfolio = () => {
       : userGlobalData?.totalBorrowValue ||
       borrows.reduce((sum, borrow) => sum + borrow.value, 0);
 
+  /** Per pool collateral USD for LTV in Borrowed Assets (contract global user; deposit sum fallback). */
+  const collateralUsdByPoolId = useMemo(() => {
+    const map: Record<string, number> = {};
+    if (user?.globalUserData && Array.isArray(user.globalUserData)) {
+      for (const item of user.globalUserData) {
+        const rec = item as Record<string, unknown>;
+        const appId = String(rec.appId ?? rec.poolId ?? "");
+        if (!appId) continue;
+        try {
+          const v = Number(
+            BigInt(String(rec.totalCollateralValue ?? 0)) / BigInt(1e12)
+          );
+          if (!Number.isNaN(v)) map[appId] = v;
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    const depositSumByPool: Record<string, number> = {};
+    for (const d of deposits) {
+      if (d.poolId == null || d.poolId === "") continue;
+      const pid = String(d.poolId);
+      depositSumByPool[pid] = (depositSumByPool[pid] ?? 0) + d.value;
+    }
+    for (const [pid, sum] of Object.entries(depositSumByPool)) {
+      if (map[pid] === undefined) map[pid] = sum;
+    }
+    return map;
+  }, [user?.globalUserData, deposits]);
+
   // Calculate weighted liquidation threshold based on borrowed assets only
   // This is more accurate because liquidation risk only applies to markets with active debt
   const calculateWeightedLiquidationThreshold = () => {
@@ -1100,6 +1154,37 @@ const Portfolio = () => {
   };
 
   const weightedCollateralFactor = calculateWeightedCollateralFactor();
+
+  /** Min liquidation threshold among markets where the user has deposits — matches conservative aggregate health (same LT shape as `_calculate_user_health`). */
+  const minLiquidationThresholdForHealth = useMemo(() => {
+    const md = marketData as Array<{
+      symbol?: string;
+      poolId?: string;
+      liquidationThreshold?: unknown;
+      marketInfo?: { liquidationThreshold?: unknown };
+    }>;
+    if (!deposits.length || !md.length) {
+      return normalizeLiquidationThresholdToDecimal(undefined);
+    }
+    const thresholds: number[] = [];
+    for (const deposit of deposits) {
+      if (!deposit.value || deposit.value <= 0) continue;
+      const market = md.find(
+        (m) =>
+          m.symbol === deposit.asset &&
+          (deposit.poolId ? m.poolId === deposit.poolId : true)
+      );
+      const raw =
+        market?.liquidationThreshold ??
+        market?.marketInfo?.liquidationThreshold;
+      if (raw !== undefined && raw !== null) {
+        thresholds.push(normalizeLiquidationThresholdToDecimal(raw));
+      }
+    }
+    return thresholds.length > 0
+      ? Math.min(...thresholds)
+      : normalizeLiquidationThresholdToDecimal(undefined);
+  }, [deposits, marketData]);
 
   // Calculate at-risk assets: assets where (deposit value * liquidation factor) / total borrow value < 1
   const atRiskAssets = useMemo(() => {
@@ -1190,44 +1275,107 @@ const Portfolio = () => {
       .sort((a, b) => a.riskRatio - b.riskRatio); // Sort by risk ratio (most risky first)
   }, [deposits, marketData, totalBorrowed, user?.globalUserData]);
 
-  // Calculate health factor using actual market collateral factors from contract
-  // The contract's totalCollateralValue is already weighted: sum(depositValue_i * collateralFactor_i)
-  // So we use it directly: health factor = totalCollateralValue / totalBorrowed
-  // If no collateral, return null (no calculation possible)
-  // If no borrows, return high value (excellent health - no liquidation risk)
+  // Portfolio health matches lending pool _calculate_user_health(collateral, borrow, liquidation_threshold).
+  // Prefer each pool's get_global_user-style totals from `user.globalUserData`; portfolio HF = worst (min) HF
+  // across pools with borrows. Fallback to aggregate collateral/borrow when per-pool data is missing.
 
-  // Helper function to calculate health factor for given collateral and borrow values
   const calculateHealthFactor = (
     collateral: number,
     borrowed: number
-  ): number | null => {
-    // If both are 0 or invalid, return null (data not loaded or no position)
-    if ((!collateral || collateral <= 0) && (!borrowed || borrowed <= 0)) {
-      return null;
+  ): number | null =>
+    calculateUserHealthFactor(
+      collateral,
+      borrowed,
+      minLiquidationThresholdForHealth,
+      "portfolio"
+    );
+
+  const healthFactor = useMemo(() => {
+    const md = marketData as Array<{
+      symbol?: string;
+      poolId?: string;
+      liquidationThreshold?: unknown;
+      marketInfo?: { liquidationThreshold?: unknown };
+    }>;
+
+    const minLtForPool = (poolId: string): number => {
+      const thresholds: number[] = [];
+      for (const deposit of deposits) {
+        if (String(deposit.poolId ?? "") !== poolId) continue;
+        if (!deposit.value || deposit.value <= 0) continue;
+        const market = md.find(
+          (m) =>
+            m.symbol === deposit.asset &&
+            (deposit.poolId ? m.poolId === deposit.poolId : true)
+        );
+        const raw =
+          market?.liquidationThreshold ??
+          market?.marketInfo?.liquidationThreshold;
+        if (raw !== undefined && raw !== null) {
+          thresholds.push(normalizeLiquidationThresholdToDecimal(raw));
+        }
+      }
+      return thresholds.length > 0
+        ? Math.min(...thresholds)
+        : normalizeLiquidationThresholdToDecimal(undefined);
+    };
+
+    let worst: number | null = null;
+
+    const gud = user?.globalUserData;
+    if (Array.isArray(gud) && gud.length > 0) {
+      for (const item of gud) {
+        const rec = item as Record<string, unknown>;
+        const poolId = String(rec.appId ?? rec.poolId ?? "");
+        if (!poolId) continue;
+
+        let collateral = 0;
+        let borrow = 0;
+        try {
+          collateral = Number(
+            BigInt(String(rec.totalCollateralValue ?? 0)) / BigInt(1e12)
+          );
+          borrow = Number(
+            BigInt(String(rec.totalBorrowValue ?? 0)) / BigInt(1e12)
+          );
+        } catch {
+          continue;
+        }
+
+        const lt = minLtForPool(poolId);
+
+        if (borrow <= 0) {
+          continue;
+        }
+
+        const hf = calculateUserHealthFactor(
+          collateral,
+          borrow,
+          lt,
+          `pool:${poolId}`
+        );
+        if (hf != null && isFinite(hf)) {
+          if (worst === null || hf < worst) worst = hf;
+        }
+      }
     }
 
-    if (collateral > 0 && borrowed > 0) {
-      // Use collateral value directly - it's already weighted with actual market collateral factors
-      // from the contract: totalCollateralValue = sum(depositValue_i * collateralFactor_i)
-      const calculated = collateral / borrowed;
-      // Ensure health factor is never exactly 0 (should be at least a very small positive number)
-      // If calculation results in 0 or negative, there's likely a data issue
-      if (calculated <= 0 || !isFinite(calculated)) {
-        console.warn("Invalid health factor calculation:", {
-          collateral,
-          borrowed,
-          calculated,
-          note: "Using contract's weighted collateral value (includes actual market collateral factors)",
-        });
-        // Return null to indicate data issue rather than showing 0
-        return null;
-      }
-      return calculated;
-    } else if (collateral > 0) {
-      return 10.0; // Excellent health when no borrows
-    }
-    return null; // No calculation possible when no collateral
-  };
+    const aggregateFallback = calculateUserHealthFactor(
+      totalCollateral,
+      totalBorrowed,
+      minLiquidationThresholdForHealth,
+      "portfolio-aggregate-fallback"
+    );
+
+    return worst !== null ? worst : aggregateFallback;
+  }, [
+    user?.globalUserData,
+    deposits,
+    marketData,
+    totalCollateral,
+    totalBorrowed,
+    minLiquidationThresholdForHealth,
+  ]);
 
   // Helper function to saturate health factor values at 3.00 for display
   const saturateHealthFactor = (healthFactor: number | null): number | null => {
@@ -1235,107 +1383,210 @@ const Portfolio = () => {
     return Math.min(healthFactor, 3.0);
   };
 
-  // Helper function to calculate network health factor using min(liquidation threshold) for markets with deposits
-  // Matches contract formula: (collateral_value * liquidation_threshold) / borrow_value
-  const calculateNetworkHealthFactor = (
-    networkName: string,
-    networkCollateral: number,
-    networkBorrow: number
+  /**
+   * Supplied table: health per row — this pool's `globalUserData` collateral/borrow with **this row's**
+   * market liquidation threshold (same shape as using the collateral market LT on-chain). Rows in one pool
+   * can differ when assets have different LTs. Falls back to portfolio HF when pool/global data is missing.
+   */
+  const getSuppliedPositionHealth = (
+    deposit: ItemWithNetwork
   ): number | null => {
-    // If both are 0 or invalid, return null (data not loaded or no position)
-    if (
-      (!networkCollateral || networkCollateral <= 0) &&
-      (!networkBorrow || networkBorrow <= 0)
-    ) {
-      return null;
+    const poolId =
+      deposit.poolId != null && deposit.poolId !== ""
+        ? String(deposit.poolId)
+        : "";
+    if (!poolId) {
+      return healthFactor;
     }
 
-    // If no borrows, return high value (excellent health - no liquidation risk)
-    // Contract returns 10000 (1.0) when borrow_value == 0, but we use 10.0 for display
-    if (networkBorrow === 0 || networkBorrow <= 0) {
-      return 10.0;
+    const gud = user?.globalUserData;
+    if (!Array.isArray(gud) || gud.length === 0) {
+      return healthFactor;
     }
 
-    if (networkCollateral > 0) {
-      // Normalize network name for comparison (case-insensitive, handle variations)
-      const normalizedNetworkName = networkName.toLowerCase().trim();
-
-      // Find minimum liquidation threshold for markets with deposits in this network
-      const networkDeposits = deposits.filter((deposit) => {
-        if (!deposit.value || deposit.value <= 0) return false;
-        const depositNetwork = (deposit.network || "").toLowerCase().trim();
-        // Match if network names are the same or if one contains the other
-        return (
-          depositNetwork === normalizedNetworkName ||
-          depositNetwork.includes(normalizedNetworkName) ||
-          normalizedNetworkName.includes(depositNetwork)
-        );
-      });
-
-      if (networkDeposits.length === 0) {
-        // No deposits for this network, can't calculate with min(liquidation threshold)
-        // Fall back to standard calculation (assume 85% liquidation threshold)
-        const defaultLiquidationThreshold = 0.85;
-        return (
-          (networkCollateral * defaultLiquidationThreshold) / networkBorrow
-        );
-      }
-
-      // Get liquidation thresholds for markets with deposits
-      const liquidationThresholds: number[] = [];
-      networkDeposits.forEach((deposit) => {
-        const market = marketData.find(
-          (m) =>
-            m.symbol === deposit.asset &&
-            (m.poolId === deposit.poolId || m.appId === deposit.poolId)
-        );
-        if (
-          market &&
-          market.liquidationThreshold !== undefined &&
-          market.liquidationThreshold !== null
-        ) {
-          liquidationThresholds.push(market.liquidationThreshold);
-        }
-      });
-
-      if (liquidationThresholds.length === 0) {
-        // No liquidation thresholds found, fall back to standard calculation
-        console.warn(
-          `No liquidation thresholds found for network ${networkName}, using default 85%`
-        );
-        const defaultLiquidationThreshold = 0.85;
-        return (
-          (networkCollateral * defaultLiquidationThreshold) / networkBorrow
-        );
-      }
-
-      // Use minimum liquidation threshold (most conservative)
-      const minLiquidationThreshold = Math.min(...liquidationThresholds);
-
-      // Calculate using contract formula: (collateral * liquidation_threshold) / borrow
-      const calculated =
-        (networkCollateral * minLiquidationThreshold) / networkBorrow;
-
-      if (calculated <= 0 || !isFinite(calculated)) {
-        console.warn("Invalid network health factor calculation:", {
-          networkName,
-          networkCollateral,
-          networkBorrow,
-          minLiquidationThreshold,
-          calculated,
-        });
-        return null;
-      }
-
-      return calculated;
+    const poolRec = gud.find(
+      (item: Record<string, unknown>) =>
+        String(item.appId ?? item.poolId ?? "") === poolId
+    );
+    if (!poolRec) {
+      return healthFactor;
     }
 
-    return null; // No calculation possible when no collateral
+    let poolCollateral = 0;
+    let poolBorrow = 0;
+    try {
+      poolCollateral = Number(
+        BigInt(String(poolRec.totalCollateralValue ?? 0)) / BigInt(1e12)
+      );
+      poolBorrow = Number(
+        BigInt(String(poolRec.totalBorrowValue ?? 0)) / BigInt(1e12)
+      );
+    } catch {
+      return healthFactor;
+    }
+
+    const md = marketData as Array<{
+      symbol?: string;
+      poolId?: string;
+      liquidationThreshold?: unknown;
+      marketInfo?: { liquidationThreshold?: unknown };
+    }>;
+    const market = md.find(
+      (m) =>
+        m.symbol === deposit.asset &&
+        (deposit.poolId ? m.poolId === deposit.poolId : true)
+    );
+    const raw =
+      market?.liquidationThreshold ?? market?.marketInfo?.liquidationThreshold;
+    const lt =
+      raw !== undefined && raw !== null
+        ? normalizeLiquidationThresholdToDecimal(raw)
+        : normalizeLiquidationThresholdToDecimal(undefined);
+
+    return calculateUserHealthFactor(
+      poolCollateral,
+      poolBorrow,
+      lt,
+      `supplied-row:${poolId}:${deposit.asset}`
+    );
   };
 
-  // Calculate health factor for display
-  // Use the lowest health factor from at-risk assets if available, otherwise use global health factor
-  const healthFactor = calculateHealthFactor(totalCollateral, totalBorrowed);
+  /** One row per lending pool (`globalUserData`), for Network Portfolio — not network-aggregated. */
+  const poolPortfolioBreakdown = useMemo(() => {
+    const gud = user?.globalUserData;
+    if (!Array.isArray(gud) || gud.length === 0) return [];
+
+    const md = marketData as Array<{
+      symbol?: string;
+      poolId?: string;
+      appId?: string;
+      liquidationThreshold?: unknown;
+      marketInfo?: { liquidationThreshold?: unknown };
+    }>;
+
+    const minLtForPool = (poolId: string): number => {
+      const thresholds: number[] = [];
+      for (const deposit of deposits) {
+        if (String(deposit.poolId ?? "") !== poolId) continue;
+        if (!deposit.value || deposit.value <= 0) continue;
+        const market = md.find(
+          (m) =>
+            m.symbol === deposit.asset &&
+            (deposit.poolId ? m.poolId === deposit.poolId : true)
+        );
+        const raw =
+          market?.liquidationThreshold ??
+          market?.marketInfo?.liquidationThreshold;
+        if (raw !== undefined && raw !== null) {
+          thresholds.push(normalizeLiquidationThresholdToDecimal(raw));
+        }
+      }
+      return thresholds.length > 0
+        ? Math.min(...thresholds)
+        : normalizeLiquidationThresholdToDecimal(undefined);
+    };
+
+    const rows: Array<{
+      poolKey: string;
+      poolId: string;
+      network: string;
+      networkDisplayName: string;
+      marketLabel: string | null;
+      title: string;
+      chartLabel: string;
+      collateral: number;
+      borrow: number;
+      netValue: number;
+      healthFactor: number | null;
+      liquidationMargin: number;
+    }> = [];
+
+    for (const raw of gud) {
+      const rec = raw as Record<string, unknown>;
+      const poolId = String(rec.appId ?? rec.poolId ?? "");
+      if (!poolId) continue;
+
+      let collateral = 0;
+      let borrow = 0;
+      try {
+        collateral = Number(
+          BigInt(String(rec.totalCollateralValue ?? 0)) / BigInt(1e12)
+        );
+        borrow = Number(
+          BigInt(String(rec.totalBorrowValue ?? 0)) / BigInt(1e12)
+        );
+      } catch {
+        continue;
+      }
+
+      if (collateral <= 0 && borrow <= 0) continue;
+
+      const network = String(rec.network || "unknown");
+      const networkDisplayName = network
+        .split("-")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" ");
+
+      const marketLabel = getMarketLabel(network, poolId);
+      const title = marketLabel
+        ? `${networkDisplayName} · Market ${marketLabel}`
+        : `${networkDisplayName} · Pool ${poolId}`;
+
+      const shortNet = network.toLowerCase().includes("algorand")
+        ? "Algorand"
+        : network.toLowerCase().includes("voi")
+          ? "VOI"
+          : networkDisplayName.split(" ")[0] || networkDisplayName;
+
+      const chartLabel = marketLabel
+        ? `${shortNet} · ${marketLabel}`
+        : `${shortNet} · ${poolId.length > 8 ? `…${poolId.slice(-6)}` : poolId}`;
+
+      const lt = minLtForPool(poolId);
+      const hfRaw = calculateUserHealthFactor(
+        collateral,
+        borrow,
+        lt,
+        `pool-portfolio:${poolId}`
+      );
+      const healthFactor =
+        hfRaw === null ? null : saturateHealthFactor(hfRaw);
+
+      const networkLTV =
+        collateral > 0 ? (borrow / collateral) * 100 : borrow > 0 ? 100 : 0;
+      const networkLiquidationMargin =
+        collateral > 0 ? lt * 100 - networkLTV : 0;
+
+      rows.push({
+        poolKey: `${network}:${poolId}`,
+        poolId,
+        network,
+        networkDisplayName,
+        marketLabel,
+        title,
+        chartLabel,
+        collateral,
+        borrow,
+        netValue: collateral - borrow,
+        healthFactor,
+        liquidationMargin: networkLiquidationMargin,
+      });
+    }
+
+    return rows.sort(
+      (a, b) => b.collateral + b.borrow - (a.collateral + a.borrow)
+    );
+  }, [user?.globalUserData, deposits, marketData]);
+
+  const networkPortfolioPoolsFiltered = useMemo(() => {
+    return poolPortfolioBreakdown.filter((row) => {
+      if (selectedNetworkFilter === "all") return true;
+      const n = row.network.toLowerCase();
+      if (selectedNetworkFilter === "algorand") return n.includes("algorand");
+      if (selectedNetworkFilter === "voi") return n.includes("voi");
+      return true;
+    });
+  }, [poolPortfolioBreakdown, selectedNetworkFilter]);
 
   // Fetch wallet balance when repay modal opens
   useEffect(() => {
@@ -2906,8 +3157,100 @@ const Portfolio = () => {
   ]);
 
   const fetchUser = async (userAddress: string) => {
+    const applyPortfolioComputed = (user: Record<string, unknown>) => {
+      if (!user.globalUserData || !Array.isArray(user.globalUserData)) {
+        return;
+      }
+      console.log(
+        "[Portfolio] User data globalUserData:",
+        user.globalUserData
+      );
+      const globalCollateralValue =
+        user.globalUserData
+          .map((item: Record<string, unknown>) =>
+            BigInt(item.totalCollateralValue as string | number)
+          )
+          .reduce((acc: bigint, curr: bigint) => acc + curr, BigInt(0)) /
+        BigInt(1e12);
+      console.log(
+        "[Portfolio] Global collateral value:",
+        globalCollateralValue
+      );
+      const globalBorrowValue =
+        user.globalUserData
+          .map((item: Record<string, unknown>) =>
+            BigInt(item.totalBorrowValue as string | number)
+          )
+          .reduce((acc: bigint, curr: bigint) => acc + curr, BigInt(0)) /
+        BigInt(1e12);
+      console.log("[Portfolio] Global borrow value:", globalBorrowValue);
+      const globalNetPortfolioValue = globalCollateralValue - globalBorrowValue;
+      console.log(
+        "[Portfolio] Global net portfolio value:",
+        globalNetPortfolioValue
+      );
+
+      const networkValues: Record<
+        string,
+        {
+          collateral: number;
+          borrow: number;
+          netValue: number;
+        }
+      > = {};
+
+      user.globalUserData.forEach((item: Record<string, unknown>) => {
+        const network = String(item.network || "unknown");
+        const collateralValue = Number(
+          BigInt(String(item.totalCollateralValue ?? 0)) / BigInt(1e12)
+        );
+        const borrowValue = Number(
+          BigInt(String(item.totalBorrowValue ?? 0)) / BigInt(1e12)
+        );
+        const netValue = collateralValue - borrowValue;
+
+        if (!networkValues[network]) {
+          networkValues[network] = {
+            collateral: 0,
+            borrow: 0,
+            netValue: 0,
+          };
+        }
+
+        networkValues[network].collateral += collateralValue;
+        networkValues[network].borrow += borrowValue;
+        networkValues[network].netValue += netValue;
+      });
+
+      const deposits: Record<string, unknown>[] = [];
+      const borrows: Record<string, unknown>[] = [];
+      if (user.userData && Array.isArray(user.userData)) {
+        user.userData.forEach((item: Record<string, unknown>) => {
+          if (BigInt(String(item.scaledDeposits ?? 0)) > BigInt(0)) {
+            deposits.push(item);
+          }
+          if (BigInt(String(item.scaledBorrows ?? 0)) > BigInt(0)) {
+            borrows.push(item);
+          }
+        });
+      }
+      const computedUser = {
+        ...user,
+        computed: {
+          globalCollateralValue: Number(globalCollateralValue),
+          globalBorrowValue: Number(globalBorrowValue),
+          globalNetPortfolioValue: Number(globalNetPortfolioValue),
+          networkValues: networkValues,
+          deposits,
+          borrows,
+        },
+      };
+      console.log("[Portfolio] User:", computedUser);
+      setUser(computedUser);
+      console.log("[Portfolio] Network values:", networkValues);
+    };
+
     try {
-      // Try API endpoint first for faster loading
       console.log(
         `[Portfolio] Attempting to fetch user data from API for ${userAddress}`
       );
@@ -2916,108 +3259,49 @@ const Portfolio = () => {
       console.log("[Portfolio] API response:", apiResponse);
 
       if (apiResponse.success && apiResponse.data) {
-        const user = apiResponse.data;
+        const user = apiResponse.data as Record<string, unknown>;
         console.log("[Portfolio] User data fetched from API:", user);
 
-        // Extract avatar from user profile if available
         if (user.avatar || user.avatarImage || user.profileImage) {
           const avatarUrl =
-            user.avatar || user.avatarImage || user.profileImage;
+            (user.avatar || user.avatarImage || user.profileImage) as string;
           setUserProfileAvatar(avatarUrl);
           console.log("[Portfolio] User profile avatar found:", avatarUrl);
         } else {
           setUserProfileAvatar(null);
         }
 
-        const networks = user.networks;
-        console.log(
-          "[Portfolio] User data globalUserData:",
-          user.globalUserData
-        );
-        const globalCollateralValue =
-          user.globalUserData
-            .map((item: Record<string, unknown>) => BigInt(item.totalCollateralValue as string | number))
-            .reduce((acc: bigint, curr: bigint) => acc + curr, BigInt(0)) /
-          BigInt(1e12);
-        console.log(
-          "[Portfolio] Global collateral value:",
-          globalCollateralValue
-        );
-        const globalBorrowValue =
-          user.globalUserData
-            .map((item: Record<string, unknown>) => BigInt(item.totalBorrowValue as string | number))
-            .reduce((acc: bigint, curr: bigint) => acc + curr, BigInt(0)) /
-          BigInt(1e12);
-        console.log("[Portfolio] Global borrow value:", globalBorrowValue);
-        const globalNetPortfolioValue =
-          globalCollateralValue - globalBorrowValue;
-        console.log(
-          "[Portfolio] Global net portfolio value:",
-          globalNetPortfolioValue
-        );
+        applyPortfolioComputed(user);
+        return;
+      }
 
-        // Calculate collateral, borrow, and net value for each network
-        const networkValues: Record<
-          string,
-          {
-            collateral: number;
-            borrow: number;
-            netValue: number;
-          }
-        > = {};
+      console.error("Error fetching user data:", apiResponse);
 
-        if (user.globalUserData && Array.isArray(user.globalUserData)) {
-          user.globalUserData.forEach((item: Record<string, unknown>) => {
-            const network = item.network || "unknown";
-            const collateralValue = Number(
-              BigInt(item.totalCollateralValue) / BigInt(1e12)
-            );
-            const borrowValue = Number(
-              BigInt(item.totalBorrowValue) / BigInt(1e12)
-            );
-            const netValue = collateralValue - borrowValue;
-
-            if (!networkValues[network]) {
-              networkValues[network] = {
-                collateral: 0,
-                borrow: 0,
-                netValue: 0,
-              };
-            }
-
-            networkValues[network].collateral += collateralValue;
-            networkValues[network].borrow += borrowValue;
-            networkValues[network].netValue += netValue;
-          });
-          const deposits = [];
-          const borrows = [];
-          if (user.userData && Array.isArray(user.userData)) {
-            user.userData.forEach((item: Record<string, unknown>) => {
-              if (BigInt(item.scaledDeposits) > BigInt(0)) deposits.push(item);
-              if (BigInt(item.scaledBorrows) > BigInt(0)) borrows.push(item);
-            });
-          }
-          const computedUser = {
-            ...user,
-            computed: {
-              globalCollateralValue: Number(globalCollateralValue),
-              globalBorrowValue: Number(globalBorrowValue),
-              globalNetPortfolioValue: Number(globalNetPortfolioValue),
-              networkValues: networkValues,
-              deposits,
-              borrows,
-            },
-          };
-          console.log("[Portfolio] User:", computedUser);
-          setUser(computedUser);
-        }
-
-        console.log("[Portfolio] Network values:", networkValues);
-      } else {
-        console.error("Error fetching user data:", apiResponse);
+      console.log(
+        `[Portfolio] API failed; falling back to chain for ${userAddress}`
+      );
+      const chain = await fetchUserDataFromChain(userAddress);
+      if (chain) {
+        setUserProfileAvatar(null);
+        applyPortfolioComputed({
+          address: userAddress,
+          globalUserData: chain.globalUserData,
+          userData: chain.userData,
+          userDataSource: "chain",
+        });
       }
     } catch (error) {
       console.error("Error fetching user global data:", error);
+      const chain = await fetchUserDataFromChain(userAddress);
+      if (chain) {
+        setUserProfileAvatar(null);
+        applyPortfolioComputed({
+          address: userAddress,
+          globalUserData: chain.globalUserData,
+          userData: chain.userData,
+          userDataSource: "chain",
+        });
+      }
     }
   };
 
@@ -3036,9 +3320,45 @@ const Portfolio = () => {
 
       try {
         const enabledNetworks = getEnabledNetworks();
-        const allMarketData: unknown[] = [];
 
-        // Fetch market data for each enabled network
+        // POST /market-data/... for user-position markets first (backend refreshes chain snapshot)
+        const computed = user?.computed as
+          | Record<string, unknown>
+          | undefined;
+        const positionKeys = [
+          ...collectPositionMarketKeys(
+            Array.isArray(computed?.deposits)
+              ? (computed.deposits as Record<string, unknown>[])
+              : undefined
+          ),
+          ...collectPositionMarketKeys(
+            Array.isArray(computed?.borrows)
+              ? (computed.borrows as Record<string, unknown>[])
+              : undefined
+          ),
+        ];
+        const seenPost = new Set<string>();
+        for (const { networkId, poolId, marketId } of positionKeys) {
+          const k = `${networkId}|${poolId}|${marketId}`;
+          if (seenPost.has(k)) continue;
+          seenPost.add(k);
+          try {
+            await postRefreshMarketDataSnapshot(
+              networkId,
+              poolId,
+              marketId
+            );
+          } catch (e) {
+            console.error(
+              "[Portfolio] postRefreshMarketDataSnapshot failed",
+              { networkId, poolId, marketId },
+              e
+            );
+          }
+        }
+
+        // Single display path: GET-backed fetchAllMarkets after POSTs
+        const allMarketData: unknown[] = [];
         for (const networkId of enabledNetworks) {
           try {
             const markets = await fetchAllMarkets(networkId as NetworkId);
@@ -4389,19 +4709,18 @@ const Portfolio = () => {
               <CollapsibleTrigger asChild>
                 <Button
                   variant="ghost"
-                  className="w-full flex items-center justify-between p-0 h-auto hover:bg-transparent mb-6"
+                  className="w-full min-w-0 flex items-start justify-between gap-3 p-0 h-auto hover:bg-transparent mb-6 text-left"
                 >
-                  <div className="text-left">
-                    <H1 className="text-2xl md:text-3xl mb-2">Network Portfolio</H1>
-                    <Body className="text-sm text-muted-foreground">
-                      View your portfolio breakdown by network. These values sum up to
-                      your global portfolio.
+                  <div className="min-w-0 flex-1 text-left">
+                    <H1 className="text-2xl md:text-3xl mb-1">Network Portfolio</H1>
+                    <Body className="text-xs sm:text-sm text-muted-foreground leading-snug">
+                      Per-pool on-chain totals. Network tabs filter the chart and cards.
                     </Body>
                   </div>
                   {networkPortfolioOpen ? (
-                    <ChevronUp className="w-5 h-5 shrink-0 text-muted-foreground" />
+                    <ChevronUp className="w-5 h-5 shrink-0 mt-1 text-muted-foreground" />
                   ) : (
-                    <ChevronDown className="w-5 h-5 shrink-0 text-muted-foreground" />
+                    <ChevronDown className="w-5 h-5 shrink-0 mt-1 text-muted-foreground" />
                   )}
                 </Button>
               </CollapsibleTrigger>
@@ -4426,67 +4745,15 @@ const Portfolio = () => {
 
               {/* Visual Slice: Allocation + Risk */}
               {(() => {
-                // Calculate allocation data
-                const allocationData = (() => {
-                  if (selectedNetworkFilter === "all") {
-                    // Show allocation by network
-                    return Object.entries(user.computed.networkValues)
-                      .map(([network, values]: [string, unknown]) => {
-                        const networkDisplayName = network
-                          .split("-")
-                          .map(
-                            (word) =>
-                              word.charAt(0).toUpperCase() + word.slice(1)
-                          )
-                          .join(" ");
-                        return {
-                          name: networkDisplayName,
-                          value: values.collateral || 0,
-                          network: network.toLowerCase(),
-                        };
-                      })
-                      .filter((item) => item.value > 0)
-                      .sort((a, b) => b.value - a.value);
-                  } else {
-                    // Show allocation by asset (and A/B pool) for selected network
-                    const filteredDeposits = deposits.filter((deposit) => {
-                      const depositNetwork = (deposit as ItemWithNetwork).network;
-                      if (!depositNetwork) return true;
-                      const normalized = depositNetwork.toLowerCase();
-                      if (selectedNetworkFilter === "algorand") {
-                        return normalized.includes("algorand");
-                      }
-                      if (selectedNetworkFilter === "voi") {
-                        return normalized.includes("voi");
-                      }
-                      return true;
-                    });
-
-                    const assetMap = new Map<string, number>();
-                    filteredDeposits.forEach((deposit) => {
-                      const depositNetworkForLabel =
-                        (deposit as ItemWithNetwork).network || currentNetwork;
-                      const label = getMarketLabel(
-                        depositNetworkForLabel,
-                        deposit.poolId
-                      );
-                      const displayName = label
-                        ? `${deposit.asset} · ${label}`
-                        : deposit.asset;
-                      const current = assetMap.get(displayName) || 0;
-                      assetMap.set(displayName, current + deposit.value);
-                    });
-
-                    return Array.from(assetMap.entries())
-                      .map(([name, value]) => ({
-                        name,
-                        value,
-                        asset: name,
-                      }))
-                      .filter((item) => item.value > 0)
-                      .sort((a, b) => b.value - a.value);
-                  }
-                })();
+                // Collateral allocation: one slice per lending pool (not network-aggregate)
+                const allocationData = networkPortfolioPoolsFiltered
+                  .map((row) => ({
+                    name: row.chartLabel,
+                    value: row.collateral,
+                    poolKey: row.poolKey,
+                  }))
+                  .filter((item) => item.value > 0)
+                  .sort((a, b) => b.value - a.value);
 
                 const totalAllocation = allocationData.reduce(
                   (sum, item) => sum + item.value,
@@ -4572,7 +4839,7 @@ const Portfolio = () => {
                               >
                                 {allocationData.map((entry, index) => (
                                   <Cell
-                                    key={`cell-${index}`}
+                                    key={entry.poolKey ?? `cell-${index}`}
                                     fill={COLORS[index % COLORS.length]}
                                   />
                                 ))}
@@ -4591,7 +4858,7 @@ const Portfolio = () => {
                           <div className="mt-4 w-full space-y-2">
                             {allocationData.slice(0, 5).map((item, index) => (
                               <div
-                                key={index}
+                                key={item.poolKey ?? index}
                                 className="flex items-center justify-between text-sm"
                               >
                                 <div className="flex items-center gap-2">
@@ -4628,71 +4895,12 @@ const Portfolio = () => {
 
                       {/* Lowest Liquidation Margin Card */}
                       {(() => {
-                        // Calculate liquidation margins for all networks and find the lowest
-                        const networkLiquidationMargins = Object.entries(
-                          user?.computed?.networkValues || {}
-                        ).map(([network, values]: [string, unknown]) => {
-                          const networkCollateral = values.collateral || 0;
-                          const networkBorrow = values.borrow || 0;
-
-                          // Find minimum liquidation threshold for markets with deposits in this network
-                          const networkDeposits = deposits.filter((deposit) => {
-                            const depositNetwork = (deposit as ItemWithNetwork).network;
-                            if (!depositNetwork) return false;
-                            const normalized = depositNetwork.toLowerCase();
-                            const normalizedNetwork = network.toLowerCase();
-                            return normalized.includes(
-                              normalizedNetwork.split("-")[0]
-                            );
-                          });
-
-                          let networkLiquidationThreshold =
-                            weightedLiquidationThreshold;
-                          if (networkDeposits.length > 0) {
-                            const liquidationThresholds: number[] = [];
-                            networkDeposits.forEach((deposit) => {
-                              const market = marketData.find(
-                                (m) =>
-                                  m.symbol === deposit.asset &&
-                                  (deposit.poolId
-                                    ? m.poolId === deposit.poolId
-                                    : true)
-                              );
-                              const threshold =
-                                market?.liquidationThreshold ??
-                                market?.marketInfo?.liquidationThreshold ??
-                                0.85;
-                              const thresholdNum =
-                                typeof threshold === "string"
-                                  ? parseFloat(threshold)
-                                  : typeof threshold === "bigint"
-                                    ? Number(threshold)
-                                    : threshold;
-                              liquidationThresholds.push(thresholdNum);
-                            });
-                            if (liquidationThresholds.length > 0) {
-                              networkLiquidationThreshold = Math.min(
-                                ...liquidationThresholds
-                              );
-                            }
-                          }
-
-                          // Calculate network LTV and liquidation margin
-                          const networkLTV =
-                            networkCollateral > 0
-                              ? (networkBorrow / networkCollateral) * 100
-                              : 0;
-                          const networkLiquidationMargin =
-                            networkCollateral > 0
-                              ? networkLiquidationThreshold * 100 - networkLTV
-                              : 0;
-
-                          return networkLiquidationMargin;
-                        });
-
+                        const poolMargins = networkPortfolioPoolsFiltered.map(
+                          (row) => row.liquidationMargin
+                        );
                         const lowestLiquidationMargin =
-                          networkLiquidationMargins.length > 0
-                            ? Math.min(...networkLiquidationMargins)
+                          poolMargins.length > 0
+                            ? Math.min(...poolMargins)
                             : null;
 
                         return lowestLiquidationMargin !== null ? (
@@ -4710,7 +4918,9 @@ const Portfolio = () => {
                                       {formatPercent(lowestLiquidationMargin / 100, { maximumFractionDigits: 2 })}
                                     </div>
                                     <div className="text-xs text-muted-foreground mt-1">
-                                      Across all networks
+                                      {selectedNetworkFilter === "all"
+                                        ? "Lowest among pools shown (all networks)"
+                                        : "Lowest among pools on this network"}
                                     </div>
                                   </div>
                                 </div>
@@ -4890,276 +5100,134 @@ const Portfolio = () => {
                 );
               })()}
 
-              {/* Network Portfolio Cards */}
+              {/* Per-pool portfolio cards (global user per pool app) */}
               {(() => {
-                const filteredNetworks = Object.entries(
-                  user.computed.networkValues
-                ).filter(([network, values]: [string, unknown]) => {
-                  // Filter by network type
-                  if (selectedNetworkFilter !== "all") {
-                    const normalizedNetwork = network.toLowerCase();
-                    if (selectedNetworkFilter === "algorand") {
-                      if (!normalizedNetwork.includes("algorand")) return false;
-                    } else if (selectedNetworkFilter === "voi") {
-                      if (!normalizedNetwork.includes("voi")) return false;
-                    }
-                  }
-
-                  // Only show networks with activity
-                  const networkCollateral = values.collateral || 0;
-                  const networkBorrow = values.borrow || 0;
-                  return networkCollateral > 0 || networkBorrow > 0;
-                });
-
-                if (filteredNetworks.length === 0) {
+                if (networkPortfolioPoolsFiltered.length === 0) {
                   return (
                     <div className="text-center py-8 text-muted-foreground">
-                      <p>No networks found for the selected filter.</p>
+                      <p>No lending pools found for the selected filter.</p>
                     </div>
                   );
                 }
 
-                // Calculate liquidation margins for all networks and find the lowest
-                const networkLiquidationMargins = filteredNetworks.map(
-                  ([network, values]: [string, unknown]) => {
-                    const networkCollateral = values.collateral || 0;
-                    const networkBorrow = values.borrow || 0;
-
-                    // Find minimum liquidation threshold for markets with deposits in this network
-                    const networkDeposits = deposits.filter((deposit) => {
-                      const depositNetwork = (deposit as ItemWithNetwork).network;
-                      if (!depositNetwork) return false;
-                      const normalized = depositNetwork.toLowerCase();
-                      const normalizedNetwork = network.toLowerCase();
-                      return normalized.includes(
-                        normalizedNetwork.split("-")[0]
-                      );
-                    });
-
-                    let networkLiquidationThreshold =
-                      weightedLiquidationThreshold;
-                    if (networkDeposits.length > 0) {
-                      const liquidationThresholds: number[] = [];
-                      networkDeposits.forEach((deposit) => {
-                        const market = marketData.find(
-                          (m) =>
-                            m.symbol === deposit.asset &&
-                            (deposit.poolId
-                              ? m.poolId === deposit.poolId
-                              : true)
-                        );
-                        const threshold =
-                          market?.liquidationThreshold ??
-                          market?.marketInfo?.liquidationThreshold ??
-                          0.85;
-                        const thresholdNum =
-                          typeof threshold === "string"
-                            ? parseFloat(threshold)
-                            : typeof threshold === "bigint"
-                              ? Number(threshold)
-                              : threshold;
-                        liquidationThresholds.push(thresholdNum);
-                      });
-                      if (liquidationThresholds.length > 0) {
-                        networkLiquidationThreshold = Math.min(
-                          ...liquidationThresholds
-                        );
-                      }
-                    }
-
-                    // Calculate network LTV and liquidation margin
-                    const networkLTV =
-                      networkCollateral > 0
-                        ? (networkBorrow / networkCollateral) * 100
-                        : 0;
-                    const networkLiquidationMargin =
-                      networkCollateral > 0
-                        ? networkLiquidationThreshold * 100 - networkLTV
-                        : 0;
-
-                    return {
-                      network,
-                      liquidationMargin: networkLiquidationMargin,
-                    };
-                  }
-                );
-
-                const lowestLiquidationMargin =
-                  networkLiquidationMargins.length > 0
-                    ? Math.min(
-                      ...networkLiquidationMargins.map(
-                        (n) => n.liquidationMargin
-                      )
-                    )
-                    : null;
-
                 return (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {filteredNetworks.map(
-                      ([network, values]: [string, unknown]) => {
-                        const networkDisplayName = network
-                          .split("-")
-                          .map(
-                            (word) =>
-                              word.charAt(0).toUpperCase() + word.slice(1)
-                          )
-                          .join(" ");
+                    {networkPortfolioPoolsFiltered.map((row) => {
+                      const {
+                        poolKey,
+                        poolId,
+                        title,
+                        collateral: poolCollateral,
+                        borrow: poolBorrow,
+                        netValue: poolNetValue,
+                        healthFactor: poolHealthFactor,
+                        liquidationMargin: poolLiquidationMargin,
+                      } = row;
 
-                        const networkCollateral = values.collateral || 0;
-                        const networkBorrow = values.borrow || 0;
-                        const networkNetValue = values.netValue || 0;
-                        const networkHealthFactorRaw =
-                          calculateNetworkHealthFactor(
-                            network,
-                            networkCollateral,
-                            networkBorrow
-                          );
-                        const networkHealthFactor = saturateHealthFactor(
-                          networkHealthFactorRaw
-                        );
+                      return (
+                        <DorkFiCard
+                          key={poolKey}
+                          className="p-4 sm:p-5 border-2 hover:border-ocean-teal/50 transition-all"
+                        >
+                          <div className="space-y-4">
+                            <div>
+                              <h3 className="text-lg font-semibold mb-1">
+                                {title}
+                              </h3>
+                              <p className="text-xs text-muted-foreground font-mono break-all">
+                                Pool {poolId}
+                              </p>
+                            </div>
 
-                        // Calculate liquidation margin for this network
-                        // Find minimum liquidation threshold for markets with deposits in this network
-                        const networkDeposits = deposits.filter((deposit) => {
-                          const depositNetwork = (deposit as ItemWithNetwork).network;
-                          if (!depositNetwork) return false;
-                          const normalized = depositNetwork.toLowerCase();
-                          const normalizedNetwork = network.toLowerCase();
-                          return normalized.includes(
-                            normalizedNetwork.split("-")[0]
-                          );
-                        });
-
-                        let networkLiquidationThreshold =
-                          weightedLiquidationThreshold;
-                        if (networkDeposits.length > 0) {
-                          const liquidationThresholds: number[] = [];
-                          networkDeposits.forEach((deposit) => {
-                            const market = marketData.find(
-                              (m) =>
-                                m.symbol === deposit.asset &&
-                                (deposit.poolId
-                                  ? m.poolId === deposit.poolId
-                                  : true)
-                            );
-                            const threshold =
-                              market?.liquidationThreshold ??
-                              market?.marketInfo?.liquidationThreshold ??
-                              0.85;
-                            const thresholdNum =
-                              typeof threshold === "string"
-                                ? parseFloat(threshold)
-                                : typeof threshold === "bigint"
-                                  ? Number(threshold)
-                                  : threshold;
-                            liquidationThresholds.push(thresholdNum);
-                          });
-                          if (liquidationThresholds.length > 0) {
-                            networkLiquidationThreshold = Math.min(
-                              ...liquidationThresholds
-                            );
-                          }
-                        }
-
-                        // Calculate network LTV and liquidation margin
-                        const networkLTV =
-                          networkCollateral > 0
-                            ? (networkBorrow / networkCollateral) * 100
-                            : 0;
-                        const networkLiquidationMargin =
-                          networkCollateral > 0
-                            ? networkLiquidationThreshold * 100 - networkLTV
-                            : 0;
-
-                        return (
-                          <DorkFiCard
-                            key={network}
-                            className="p-4 sm:p-5 border-2 hover:border-ocean-teal/50 transition-all"
-                          >
-                            <div className="space-y-4">
-                              <div>
-                                <h3 className="text-lg font-semibold mb-1">
-                                  {networkDisplayName} Portfolio
-                                </h3>
+                            <div className="space-y-3">
+                              <div className="flex justify-between items-center gap-2">
+                                <span className="text-sm text-muted-foreground">
+                                  Collateral:
+                                </span>
+                                <span className="text-sm font-semibold text-right tabular-nums">
+                                  {formatCurrency(poolCollateral, "USD", {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  })}
+                                </span>
                               </div>
 
-                              <div className="space-y-3">
-                                <div className="flex justify-between items-center">
-                                  <span className="text-sm text-muted-foreground">
-                                    Collateral:
-                                  </span>
-                                  <span className="text-sm font-semibold">
-                                    {formatCurrency(networkCollateral, "USD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                  </span>
-                                </div>
+                              <div className="flex justify-between items-center gap-2">
+                                <span className="text-sm text-muted-foreground">
+                                  Borrowed:
+                                </span>
+                                <span className="text-sm font-semibold text-right tabular-nums">
+                                  {formatCurrency(poolBorrow, "USD", {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  })}
+                                </span>
+                              </div>
 
-                                <div className="flex justify-between items-center">
-                                  <span className="text-sm text-muted-foreground">
-                                    Borrowed:
-                                  </span>
-                                  <span className="text-sm font-semibold">
-                                    {formatCurrency(networkBorrow, "USD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                  </span>
-                                </div>
+                              <div className="flex justify-between items-center gap-2">
+                                <span className="text-sm text-muted-foreground">
+                                  Net Value:
+                                </span>
+                                <span
+                                  className={`text-sm font-semibold text-right tabular-nums ${poolNetValue >= 0
+                                    ? "text-green-600 dark:text-green-400"
+                                    : "text-red-600 dark:text-red-400"
+                                    }`}
+                                >
+                                  {formatCurrency(poolNetValue, "USD", {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  })}
+                                </span>
+                              </div>
 
-                                <div className="flex justify-between items-center">
+                              <div className="pt-2 border-t border-border space-y-2">
+                                <div className="flex justify-between items-center gap-2">
                                   <span className="text-sm text-muted-foreground">
-                                    Net Value:
+                                    Health Factor:
                                   </span>
                                   <span
-                                    className={`text-sm font-semibold ${networkNetValue >= 0
-                                      ? "text-green-600 dark:text-green-400"
-                                      : "text-red-600 dark:text-red-400"
+                                    className={`text-sm font-semibold tabular-nums ${poolHealthFactor === null
+                                      ? "text-muted-foreground"
+                                      : poolHealthFactor >= 1.5
+                                        ? "text-green-600 dark:text-green-400"
+                                        : poolHealthFactor >= 1.0
+                                          ? "text-yellow-600 dark:text-yellow-400"
+                                          : "text-red-600 dark:text-red-400"
                                       }`}
                                   >
-                                    {formatCurrency(networkNetValue, "USD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    {poolHealthFactor === null
+                                      ? "N/A"
+                                      : formatNumber(poolHealthFactor, {
+                                        maximumFractionDigits: 2,
+                                      })}
                                   </span>
                                 </div>
-
-                                <div className="pt-2 border-t border-border space-y-2">
-                                  <div className="flex justify-between items-center">
-                                    <span className="text-sm text-muted-foreground">
-                                      Health Factor:
-                                    </span>
-                                    <span
-                                      className={`text-sm font-semibold ${networkHealthFactor === null
-                                        ? "text-muted-foreground"
-                                        : networkHealthFactor >= 1.5
-                                          ? "text-green-600 dark:text-green-400"
-                                          : networkHealthFactor >= 1.0
-                                            ? "text-yellow-600 dark:text-yellow-400"
-                                            : "text-red-600 dark:text-red-400"
-                                        }`}
-                                    >
-                                      {networkHealthFactor === null
-                                        ? "N/A"
-                                        : formatNumber(networkHealthFactor, { maximumFractionDigits: 2 })}
-                                    </span>
-                                  </div>
-                                  <div className="flex justify-between items-center">
-                                    <span className="text-sm text-muted-foreground">
-                                      Liquidation Margin:
-                                    </span>
-                                    <span
-                                      className={`text-sm font-semibold ${networkLiquidationMargin >= 20
-                                        ? "text-green-600 dark:text-green-400"
-                                        : networkLiquidationMargin >= 10
-                                          ? "text-yellow-600 dark:text-yellow-400"
-                                          : networkLiquidationMargin >= 0
-                                            ? "text-orange-600 dark:text-orange-400"
-                                            : "text-red-600 dark:text-red-400"
-                                        }`}
-                                    >
-                                      {formatPercent(networkLiquidationMargin / 100, { maximumFractionDigits: 2 })}
-                                    </span>
-                                  </div>
+                                <div className="flex justify-between items-center gap-2">
+                                  <span className="text-sm text-muted-foreground">
+                                    Liquidation Margin:
+                                  </span>
+                                  <span
+                                    className={`text-sm font-semibold tabular-nums ${poolLiquidationMargin >= 20
+                                      ? "text-green-600 dark:text-green-400"
+                                      : poolLiquidationMargin >= 10
+                                        ? "text-yellow-600 dark:text-yellow-400"
+                                        : poolLiquidationMargin >= 0
+                                          ? "text-orange-600 dark:text-orange-400"
+                                          : "text-red-600 dark:text-red-400"
+                                      }`}
+                                  >
+                                    {formatPercent(poolLiquidationMargin / 100, {
+                                      maximumFractionDigits: 2,
+                                    })}
+                                  </span>
                                 </div>
                               </div>
                             </div>
-                          </DorkFiCard>
-                        );
-                      }
-                    )}
+                          </div>
+                        </DorkFiCard>
+                      );
+                    })}
                   </div>
                 );
               })()}
@@ -5415,16 +5483,177 @@ const Portfolio = () => {
                           })
                           .sort((a, b) => {
                             let comparison = 0;
+
                             switch (suppliedAssetsSort.column) {
+                              case "network": {
+                                const networkA = (
+                                  (a as ItemWithNetwork).network || "Unknown"
+                                ).toLowerCase();
+                                const networkB = (
+                                  (b as ItemWithNetwork).network || "Unknown"
+                                ).toLowerCase();
+                                comparison = networkA.localeCompare(networkB);
+                                break;
+                              }
+                              case "asset":
+                                comparison = a.asset.localeCompare(b.asset);
+                                break;
+                              case "supplied":
+                                comparison = a.balance - b.balance;
+                                break;
                               case "value":
                                 comparison = a.value - b.value;
                                 break;
                               case "apy":
                                 comparison = a.apy - b.apy;
                                 break;
+                              case "accruedInterest": {
+                                const accruedInterestA =
+                                  (a as ItemWithNetwork).accruedInterest || 0;
+                                const accruedInterestB =
+                                  (b as ItemWithNetwork).accruedInterest || 0;
+                                comparison = accruedInterestA - accruedInterestB;
+                                break;
+                              }
+                              case "collateralFactor": {
+                                const marketACF = marketData.find(
+                                  (m) =>
+                                    m.symbol === a.asset &&
+                                    (a.poolId ? m.poolId === a.poolId : true)
+                                );
+                                const marketBCF = marketData.find(
+                                  (m) =>
+                                    m.symbol === b.asset &&
+                                    (b.poolId ? m.poolId === b.poolId : true)
+                                );
+                                let collateralFactorA =
+                                  marketACF?.collateralFactor ??
+                                  marketACF?.marketInfo?.collateralFactor ??
+                                  0.8;
+                                let collateralFactorB =
+                                  marketBCF?.collateralFactor ??
+                                  marketBCF?.marketInfo?.collateralFactor ??
+                                  0.8;
+                                if (typeof collateralFactorA === "string") {
+                                  collateralFactorA = parseFloat(collateralFactorA);
+                                } else if (
+                                  typeof collateralFactorA === "bigint"
+                                ) {
+                                  collateralFactorA = Number(collateralFactorA);
+                                }
+                                if (typeof collateralFactorB === "string") {
+                                  collateralFactorB = parseFloat(collateralFactorB);
+                                } else if (
+                                  typeof collateralFactorB === "bigint"
+                                ) {
+                                  collateralFactorB = Number(collateralFactorB);
+                                }
+                                if (
+                                  collateralFactorA > 1 &&
+                                  collateralFactorA <= 100
+                                ) {
+                                  collateralFactorA = collateralFactorA / 100;
+                                } else if (collateralFactorA > 100) {
+                                  collateralFactorA = collateralFactorA / 10000;
+                                }
+                                if (
+                                  collateralFactorB > 1 &&
+                                  collateralFactorB <= 100
+                                ) {
+                                  collateralFactorB = collateralFactorB / 100;
+                                } else if (collateralFactorB > 100) {
+                                  collateralFactorB = collateralFactorB / 10000;
+                                }
+                                comparison =
+                                  collateralFactorB - collateralFactorA;
+                                break;
+                              }
+                              case "liquidationFactor": {
+                                const marketALF = marketData.find(
+                                  (m) =>
+                                    m.symbol === a.asset &&
+                                    (a.poolId ? m.poolId === a.poolId : true)
+                                );
+                                const marketBLF = marketData.find(
+                                  (m) =>
+                                    m.symbol === b.asset &&
+                                    (b.poolId ? m.poolId === b.poolId : true)
+                                );
+                                let liquidationThresholdA =
+                                  marketALF?.liquidationThreshold ??
+                                  marketALF?.marketInfo?.liquidationThreshold ??
+                                  0.85;
+                                let liquidationThresholdB =
+                                  marketBLF?.liquidationThreshold ??
+                                  marketBLF?.marketInfo?.liquidationThreshold ??
+                                  0.85;
+                                if (
+                                  typeof liquidationThresholdA === "string"
+                                ) {
+                                  liquidationThresholdA = parseFloat(
+                                    liquidationThresholdA
+                                  );
+                                } else if (
+                                  typeof liquidationThresholdA === "bigint"
+                                ) {
+                                  liquidationThresholdA = Number(
+                                    liquidationThresholdA
+                                  );
+                                }
+                                if (
+                                  typeof liquidationThresholdB === "string"
+                                ) {
+                                  liquidationThresholdB = parseFloat(
+                                    liquidationThresholdB
+                                  );
+                                } else if (
+                                  typeof liquidationThresholdB === "bigint"
+                                ) {
+                                  liquidationThresholdB = Number(
+                                    liquidationThresholdB
+                                  );
+                                }
+                                if (
+                                  liquidationThresholdA > 1 &&
+                                  liquidationThresholdA <= 100
+                                ) {
+                                  liquidationThresholdA =
+                                    liquidationThresholdA / 100;
+                                } else if (liquidationThresholdA > 100) {
+                                  liquidationThresholdA =
+                                    liquidationThresholdA / 10000;
+                                }
+                                if (
+                                  liquidationThresholdB > 1 &&
+                                  liquidationThresholdB <= 100
+                                ) {
+                                  liquidationThresholdB =
+                                    liquidationThresholdB / 100;
+                                } else if (liquidationThresholdB > 100) {
+                                  liquidationThresholdB =
+                                    liquidationThresholdB / 10000;
+                                }
+                                comparison =
+                                  liquidationThresholdB - liquidationThresholdA;
+                                break;
+                              }
+                              case "positionHealth": {
+                                const hfA =
+                                  getSuppliedPositionHealth(
+                                    a as ItemWithNetwork
+                                  ) ?? -1;
+                                const hfB =
+                                  getSuppliedPositionHealth(
+                                    b as ItemWithNetwork
+                                  ) ?? -1;
+                                comparison = hfA - hfB;
+                                break;
+                              }
                               default:
-                                comparison = b.value - a.value;
+                                comparison = a.apy - b.apy;
+                                break;
                             }
+
                             return suppliedAssetsSort.direction === "asc"
                               ? comparison
                               : -comparison;
@@ -5445,7 +5674,21 @@ const Portfolio = () => {
 
                         return (
                           <>
-                            {displayDeposits.map((deposit) => {
+                            {displayDeposits.map((depositRaw) => {
+                              const depositNet =
+                                (depositRaw as ItemWithNetwork).network ||
+                                currentNetwork ||
+                                "";
+                              const deposit = mergeDeposit(
+                                depositRaw as ItemWithNetwork
+                              ) as ItemWithNetwork;
+                              const depositChainPollKey =
+                                portfolioPositionChainKey(
+                                  "deposit",
+                                  String(depositNet),
+                                  String(deposit.poolId ?? ""),
+                                  deposit.asset
+                                );
                               const rewardsBonusApr = getRewardsBonusSupplyAprPercent(
                                 (deposit as ItemWithNetwork).network ??
                                   currentNetwork,
@@ -5462,48 +5705,6 @@ const Portfolio = () => {
                                     ? m.poolId === deposit.poolId
                                     : true)
                               );
-                              let marketCollateralFactor =
-                                market?.collateralFactor ?? 0.8;
-                              if (typeof marketCollateralFactor === "string") {
-                                marketCollateralFactor = parseFloat(
-                                  marketCollateralFactor
-                                );
-                              } else if (
-                                typeof marketCollateralFactor === "bigint"
-                              ) {
-                                marketCollateralFactor = Number(
-                                  marketCollateralFactor
-                                );
-                              }
-                              if (
-                                marketCollateralFactor > 1 &&
-                                marketCollateralFactor <= 100
-                              ) {
-                                marketCollateralFactor =
-                                  marketCollateralFactor / 100;
-                              }
-                              let marketLiquidationThreshold =
-                                market?.liquidationThreshold ?? 0.85;
-                              if (
-                                typeof marketLiquidationThreshold === "string"
-                              ) {
-                                marketLiquidationThreshold = parseFloat(
-                                  marketLiquidationThreshold
-                                );
-                              } else if (
-                                typeof marketLiquidationThreshold === "bigint"
-                              ) {
-                                marketLiquidationThreshold = Number(
-                                  marketLiquidationThreshold
-                                );
-                              }
-                              if (
-                                marketLiquidationThreshold > 1 &&
-                                marketLiquidationThreshold <= 100
-                              ) {
-                                marketLiquidationThreshold =
-                                  marketLiquidationThreshold / 100;
-                              }
                               const depositCapReached = isAtDepositCap(
                                 Number(market?.totalDeposits ?? 0),
                                 Number(market?.maxTotalDeposits ?? 0),
@@ -5531,9 +5732,12 @@ const Portfolio = () => {
                                     : undefined
                                 );
                               return (
-                                <PortfolioTableMobileCard
+                                <div
                                   key={`${deposit.asset}-${deposit.poolId || "default"
                                     }`}
+                                  ref={attachChainPollRow(depositChainPollKey)}
+                                >
+                                <PortfolioTableMobileCard
                                   asset={deposit.asset}
                                   icon={deposit.icon}
                                   value={deposit.value}
@@ -5555,11 +5759,9 @@ const Portfolio = () => {
                                   accruedInterestValue={
                                     (deposit as ItemWithNetwork).accruedInterestValue
                                   }
-                                  borrowingPower={
-                                    deposit.value * marketCollateralFactor
-                                  }
-                                  collateralFactor={marketCollateralFactor}
-                                  liquidationFactor={marketLiquidationThreshold}
+                                  positionHealth={getSuppliedPositionHealth(
+                                    deposit as ItemWithNetwork
+                                  )}
                                   network={(deposit as ItemWithNetwork).network}
                                   poolId={deposit.poolId}
                                   depositDisabled={depositCapReached}
@@ -5585,6 +5787,7 @@ const Portfolio = () => {
                                   }
                                   type="deposit"
                                 />
+                                </div>
                               );
                             })}
                             {hasMore && (
@@ -5607,11 +5810,11 @@ const Portfolio = () => {
                       })()}
                     </div>
                   ) : (
-                    <div className="w-full min-w-0 overflow-hidden">
-                      <Table className="table-fixed w-full [&_th]:px-2 [&_td]:px-2 [&_th]:py-2 [&_td]:py-2">
+                    <div className="overflow-x-auto">
+                      <Table>
                         <TableHeader>
                           <TableRow>
-                            <TableHead className="w-[11%] min-w-0">
+                            <TableHead>
                               <button
                                 onClick={() => {
                                   if (suppliedAssetsSort.column === "asset") {
@@ -5643,42 +5846,13 @@ const Portfolio = () => {
                                 )}
                               </button>
                             </TableHead>
-                            <TableHead className="hidden lg:table-cell w-[8%] min-w-0">
-                              <button
-                                onClick={() => {
-                                  if (suppliedAssetsSort.column === "network") {
-                                    setSuppliedAssetsSort({
-                                      column: "network",
-                                      direction:
-                                        suppliedAssetsSort.direction === "asc"
-                                          ? "desc"
-                                          : "asc",
-                                    });
-                                  } else {
-                                    setSuppliedAssetsSort({
-                                      column: "network",
-                                      direction: "asc",
-                                    });
-                                  }
-                                }}
-                                className="flex items-center justify-center gap-1 hover:text-foreground transition-colors w-full"
-                              >
-                                Net
-                                {suppliedAssetsSort.column === "network" ? (
-                                  suppliedAssetsSort.direction === "asc" ? (
-                                    <ArrowUp className="w-3 h-3" />
-                                  ) : (
-                                    <ArrowDown className="w-3 h-3" />
-                                  )
-                                ) : (
-                                  <ArrowUpDown className="w-3 h-3 opacity-50" />
-                                )}
-                              </button>
+                            <TableHead className="text-center">
+                              Network
                             </TableHead>
-                            <TableHead className="text-center hidden xl:table-cell w-[7%] min-w-0">
+                            <TableHead className="text-center">
                               Market
                             </TableHead>
-                            <TableHead className="w-[10%] min-w-0">
+                            <TableHead>
                               <button
                                 onClick={() => {
                                   if (
@@ -5712,7 +5886,7 @@ const Portfolio = () => {
                                 )}
                               </button>
                             </TableHead>
-                            <TableHead className="w-[10%] min-w-0">
+                            <TableHead>
                               <button
                                 onClick={() => {
                                   if (suppliedAssetsSort.column === "value") {
@@ -5744,7 +5918,7 @@ const Portfolio = () => {
                                 )}
                               </button>
                             </TableHead>
-                            <TableHead className="w-[7%] min-w-0">
+                            <TableHead className="text-right">
                               <button
                                 onClick={() => {
                                   if (suppliedAssetsSort.column === "apy") {
@@ -5762,7 +5936,7 @@ const Portfolio = () => {
                                     });
                                   }
                                 }}
-                                className="flex items-center gap-1 hover:text-foreground transition-colors"
+                                className="flex w-full items-center justify-end gap-1 hover:text-foreground transition-colors"
                               >
                                 APY
                                 {suppliedAssetsSort.column === "apy" ? (
@@ -5776,231 +5950,81 @@ const Portfolio = () => {
                                 )}
                               </button>
                             </TableHead>
-                            <TableHead className="hidden xl:table-cell w-[12%] min-w-0">
-                              <div className="flex items-center gap-1">
-                                <button
-                                  onClick={() => {
-                                    if (
-                                      suppliedAssetsSort.column ===
-                                      "accruedInterest"
-                                    ) {
-                                      setSuppliedAssetsSort({
-                                        column: "accruedInterest",
-                                        direction:
-                                          suppliedAssetsSort.direction === "asc"
-                                            ? "desc"
-                                            : "asc",
-                                      });
-                                    } else {
-                                      setSuppliedAssetsSort({
-                                        column: "accruedInterest",
-                                        direction: "desc",
-                                      });
-                                    }
-                                  }}
-                                  className="flex items-center gap-1 hover:text-foreground transition-colors"
-                                >
-                                  Accrued Interest
-                                  {suppliedAssetsSort.column ===
-                                    "accruedInterest" ? (
-                                    suppliedAssetsSort.direction === "asc" ? (
-                                      <ArrowUp className="w-3 h-3" />
-                                    ) : (
-                                      <ArrowDown className="w-3 h-3" />
-                                    )
+                            <TableHead className="text-right">
+                              <button
+                                onClick={() => {
+                                  if (
+                                    suppliedAssetsSort.column ===
+                                    "accruedInterest"
+                                  ) {
+                                    setSuppliedAssetsSort({
+                                      column: "accruedInterest",
+                                      direction:
+                                        suppliedAssetsSort.direction === "asc"
+                                          ? "desc"
+                                          : "asc",
+                                    });
+                                  } else {
+                                    setSuppliedAssetsSort({
+                                      column: "accruedInterest",
+                                      direction: "desc",
+                                    });
+                                  }
+                                }}
+                                className="flex w-full items-center justify-end gap-1 hover:text-foreground transition-colors"
+                              >
+                                Accrued Interest
+                                {suppliedAssetsSort.column ===
+                                  "accruedInterest" ? (
+                                  suppliedAssetsSort.direction === "asc" ? (
+                                    <ArrowUp className="w-3 h-3" />
                                   ) : (
-                                    <ArrowUpDown className="w-3 h-3 opacity-50" />
-                                  )}
-                                </button>
-                                <UITooltip>
-                                  <TooltipTrigger asChild>
-                                    <Info className="w-4 h-4 text-muted-foreground cursor-help" />
-                                  </TooltipTrigger>
-                                  <TooltipContent className="max-w-xs">
-                                    <p className="font-semibold mb-1">
-                                      Accrued Interest
-                                    </p>
-                                    <p className="text-sm">
-                                      Interest earned on your deposits since you
-                                      deposited. This is the difference between
-                                      your current deposit value and your
-                                      original deposit amount. Interest
-                                      compounds continuously and is
-                                      automatically added to your position.
-                                    </p>
-                                  </TooltipContent>
-                                </UITooltip>
-                              </div>
+                                    <ArrowDown className="w-3 h-3" />
+                                  )
+                                ) : (
+                                  <ArrowUpDown className="w-3 h-3 opacity-50" />
+                                )}
+                              </button>
                             </TableHead>
-                            <TableHead className="hidden xl:table-cell w-[10%] min-w-0">
-                              <div className="flex items-center gap-1">
-                                <button
-                                  onClick={() => {
-                                    if (
-                                      suppliedAssetsSort.column ===
-                                      "borrowingPower"
-                                    ) {
-                                      setSuppliedAssetsSort({
-                                        column: "borrowingPower",
-                                        direction:
-                                          suppliedAssetsSort.direction === "asc"
-                                            ? "desc"
-                                            : "asc",
-                                      });
-                                    } else {
-                                      setSuppliedAssetsSort({
-                                        column: "borrowingPower",
-                                        direction: "desc",
-                                      });
-                                    }
-                                  }}
-                                  className="flex items-center gap-1 hover:text-foreground transition-colors"
-                                >
-                                  Borrow Power
-                                  {suppliedAssetsSort.column ===
-                                    "borrowingPower" ? (
-                                    suppliedAssetsSort.direction === "asc" ? (
-                                      <ArrowUp className="w-3 h-3" />
-                                    ) : (
-                                      <ArrowDown className="w-3 h-3" />
-                                    )
+                            <TableHead className="text-right">
+                              <button
+                                onClick={() => {
+                                  if (
+                                    suppliedAssetsSort.column ===
+                                    "positionHealth"
+                                  ) {
+                                    setSuppliedAssetsSort({
+                                      column: "positionHealth",
+                                      direction:
+                                        suppliedAssetsSort.direction === "asc"
+                                          ? "desc"
+                                          : "asc",
+                                    });
+                                  } else {
+                                    setSuppliedAssetsSort({
+                                      column: "positionHealth",
+                                      direction: "asc",
+                                    });
+                                  }
+                                }}
+                                className="flex w-full items-center justify-end gap-1 hover:text-foreground transition-colors"
+                              >
+                                Position Health
+                                {suppliedAssetsSort.column ===
+                                "positionHealth" ? (
+                                  suppliedAssetsSort.direction === "asc" ? (
+                                    <ArrowUp className="w-3 h-3" />
                                   ) : (
-                                    <ArrowUpDown className="w-3 h-3 opacity-50" />
-                                  )}
-                                </button>
-                                <UITooltip>
-                                  <TooltipTrigger asChild>
-                                    <Info className="w-4 h-4 text-muted-foreground cursor-help" />
-                                  </TooltipTrigger>
-                                  <TooltipContent className="max-w-xs">
-                                    <p className="font-semibold mb-1">
-                                      Borrowing Power
-                                    </p>
-                                    <p className="text-sm">
-                                      Maximum amount you can borrow against this
-                                      collateral. Calculated as: Collateral
-                                      Value × Collateral Factor. This varies by
-                                      market based on asset risk and liquidity.
-                                    </p>
-                                  </TooltipContent>
-                                </UITooltip>
-                              </div>
+                                    <ArrowDown className="w-3 h-3" />
+                                  )
+                                ) : (
+                                  <ArrowUpDown className="w-3 h-3 opacity-50" />
+                                )}
+                              </button>
                             </TableHead>
-                            <TableHead className="hidden xl:table-cell w-[8%] min-w-0">
-                              <div className="flex items-center gap-1">
-                                <button
-                                  onClick={() => {
-                                    if (
-                                      suppliedAssetsSort.column ===
-                                      "collateralFactor"
-                                    ) {
-                                      setSuppliedAssetsSort({
-                                        column: "collateralFactor",
-                                        direction:
-                                          suppliedAssetsSort.direction === "asc"
-                                            ? "desc"
-                                            : "asc",
-                                      });
-                                    } else {
-                                      setSuppliedAssetsSort({
-                                        column: "collateralFactor",
-                                        direction: "desc",
-                                      });
-                                    }
-                                  }}
-                                  className="flex items-center gap-1 hover:text-foreground transition-colors"
-                                >
-                                  Collateral Factor
-                                  {suppliedAssetsSort.column ===
-                                    "collateralFactor" ? (
-                                    suppliedAssetsSort.direction === "asc" ? (
-                                      <ArrowUp className="w-3 h-3" />
-                                    ) : (
-                                      <ArrowDown className="w-3 h-3" />
-                                    )
-                                  ) : (
-                                    <ArrowUpDown className="w-3 h-3 opacity-50" />
-                                  )}
-                                </button>
-                                <UITooltip>
-                                  <TooltipTrigger asChild>
-                                    <Info className="w-4 h-4 text-muted-foreground cursor-help" />
-                                  </TooltipTrigger>
-                                  <TooltipContent className="max-w-xs">
-                                    <p className="font-semibold mb-1">
-                                      Collateral Factor
-                                    </p>
-                                    <p className="text-sm">
-                                      Maximum percentage of collateral value
-                                      that can be borrowed against. For example,
-                                      an 80% collateral factor means you can
-                                      borrow up to $80 for every $100 of
-                                      collateral. Higher factors allow more
-                                      borrowing but may indicate higher risk
-                                      assets.
-                                    </p>
-                                  </TooltipContent>
-                                </UITooltip>
-                              </div>
+                            <TableHead className="whitespace-nowrap w-[1%]">
+                              Actions
                             </TableHead>
-                            <TableHead className="hidden xl:table-cell w-[8%] min-w-0">
-                              <div className="flex items-center gap-1">
-                                <button
-                                  onClick={() => {
-                                    if (
-                                      suppliedAssetsSort.column ===
-                                      "liquidationFactor"
-                                    ) {
-                                      setSuppliedAssetsSort({
-                                        column: "liquidationFactor",
-                                        direction:
-                                          suppliedAssetsSort.direction === "asc"
-                                            ? "desc"
-                                            : "asc",
-                                      });
-                                    } else {
-                                      setSuppliedAssetsSort({
-                                        column: "liquidationFactor",
-                                        direction: "desc",
-                                      });
-                                    }
-                                  }}
-                                  className="flex items-center gap-1 hover:text-foreground transition-colors"
-                                >
-                                  Liquidation Factor
-                                  {suppliedAssetsSort.column ===
-                                    "liquidationFactor" ? (
-                                    suppliedAssetsSort.direction === "asc" ? (
-                                      <ArrowUp className="w-3 h-3" />
-                                    ) : (
-                                      <ArrowDown className="w-3 h-3" />
-                                    )
-                                  ) : (
-                                    <ArrowUpDown className="w-3 h-3 opacity-50" />
-                                  )}
-                                </button>
-                                <UITooltip>
-                                  <TooltipTrigger asChild>
-                                    <Info className="w-4 h-4 text-muted-foreground cursor-help" />
-                                  </TooltipTrigger>
-                                  <TooltipContent className="max-w-xs">
-                                    <p className="font-semibold mb-1">
-                                      Liquidation Threshold
-                                    </p>
-                                    <p className="text-sm">
-                                      The LTV (Loan-to-Value) percentage at
-                                      which your position becomes liquidatable.
-                                      If your LTV exceeds this threshold,
-                                      liquidators can repay your debt and seize
-                                      your collateral at a discount. Typically
-                                      set at 85% to provide a safety buffer
-                                      above the collateral factor.
-                                    </p>
-                                  </TooltipContent>
-                                </UITooltip>
-                              </div>
-                            </TableHead>
-                            <TableHead className="w-[14%] min-w-0">Actions</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -6262,38 +6286,20 @@ const Portfolio = () => {
                                       liquidationThresholdA;
                                     break;
                                   }
-                                  case "borrowingPower":
+                                  case "positionHealth": {
+                                    const hfA =
+                                      getSuppliedPositionHealth(
+                                        a as ItemWithNetwork
+                                      ) ?? -1;
+                                    const hfB =
+                                      getSuppliedPositionHealth(
+                                        b as ItemWithNetwork
+                                      ) ?? -1;
+                                    comparison = hfA - hfB;
+                                    break;
+                                  }
                                   default:
-                                    // Default sort by borrowing power
-                                    // Find markets for each deposit to get their collateral factors
-                                    const marketA = marketData.find(
-                                      (m) =>
-                                        m.symbol === a.asset &&
-                                        (a.poolId
-                                          ? m.poolId === a.poolId
-                                          : true)
-                                    );
-                                    const marketB = marketData.find(
-                                      (m) =>
-                                        m.symbol === b.asset &&
-                                        (b.poolId
-                                          ? m.poolId === b.poolId
-                                          : true)
-                                    );
-                                    const collateralFactorA =
-                                      marketA?.collateralFactor ||
-                                      marketA?.marketInfo?.collateralFactor ||
-                                      0.8;
-                                    const collateralFactorB =
-                                      marketB?.collateralFactor ||
-                                      marketB?.marketInfo?.collateralFactor ||
-                                      0.8;
-                                    const borrowingPowerA =
-                                      a.value * collateralFactorA;
-                                    const borrowingPowerB =
-                                      b.value * collateralFactorB;
-                                    comparison =
-                                      borrowingPowerB - borrowingPowerA;
+                                    comparison = a.apy - b.apy;
                                     break;
                                 }
 
@@ -6307,7 +6313,10 @@ const Portfolio = () => {
                               : filteredAndSorted.slice(0, 5);
                             const hasMore = filteredAndSorted.length > 5;
 
-                            return displayDeposits.map((deposit, index) => {
+                            return displayDeposits.map((depositRaw, index) => {
+                              const deposit = mergeDeposit(
+                                depositRaw as ItemWithNetwork
+                              ) as ItemWithNetwork;
                               // Get market label using the deposit's network, not currentNetwork
                               const depositNetworkForMarket =
                                 (deposit as ItemWithNetwork).network || currentNetwork;
@@ -6324,103 +6333,14 @@ const Portfolio = () => {
                                     ? m.poolId === deposit.poolId
                                     : true)
                               );
-                              // Get collateral factor from market, fallback to 0.8 (80%)
-                              // Handle both decimal (0-1) and percentage (0-100) formats, and type conversion
-                              let marketCollateralFactor =
-                                market?.collateralFactor ??
-                                market?.marketInfo?.collateralFactor ??
-                                0.8;
-                              // Convert to number if it's a string or BigInt
-                              if (typeof marketCollateralFactor === "string") {
-                                marketCollateralFactor = parseFloat(
-                                  marketCollateralFactor
-                                );
-                              } else if (
-                                typeof marketCollateralFactor === "bigint"
-                              ) {
-                                marketCollateralFactor = Number(
-                                  marketCollateralFactor
-                                );
-                              }
-                              // If value is > 1, assume it's in percentage format and convert to decimal
-                              if (
-                                marketCollateralFactor > 1 &&
-                                marketCollateralFactor <= 100
-                              ) {
-                                marketCollateralFactor =
-                                  marketCollateralFactor / 100;
-                              } else if (marketCollateralFactor > 100) {
-                                // If > 100, might be in basis points (divide by 10000)
-                                marketCollateralFactor =
-                                  marketCollateralFactor / 10000;
-                              }
 
-                              // Get liquidation threshold from market, fallback to 0.85 (85%)
-                              // Handle both decimal (0-1) and percentage (0-100) formats, and type conversion
-                              let marketLiquidationThreshold =
-                                market?.liquidationThreshold ??
-                                market?.marketInfo?.liquidationThreshold ??
-                                0.85;
-                              // Convert to number if it's a string or BigInt
-                              if (
-                                typeof marketLiquidationThreshold === "string"
-                              ) {
-                                marketLiquidationThreshold = parseFloat(
-                                  marketLiquidationThreshold
-                                );
-                              } else if (
-                                typeof marketLiquidationThreshold === "bigint"
-                              ) {
-                                marketLiquidationThreshold = Number(
-                                  marketLiquidationThreshold
-                                );
-                              }
-                              // If value is > 1, assume it's in percentage format and convert to decimal
-                              if (
-                                marketLiquidationThreshold > 1 &&
-                                marketLiquidationThreshold <= 100
-                              ) {
-                                marketLiquidationThreshold =
-                                  marketLiquidationThreshold / 100;
-                              } else if (marketLiquidationThreshold > 100) {
-                                // If > 100, might be in basis points (divide by 10000)
-                                marketLiquidationThreshold =
-                                  marketLiquidationThreshold / 10000;
-                              }
-                              const isCollateral = deposit.value > 0; // Simplified - in reality, check if it's enabled as collateral
                               const depositCapReached = isAtDepositCap(
                                 Number(market?.totalDeposits ?? 0),
                                 Number(market?.maxTotalDeposits ?? 0),
                               );
 
-                              // Token decimals for Supplied / Accrued Interest (e.g. 8 for goBTC)
                               const depositNetworkForToken =
                                 (deposit as ItemWithNetwork).network || currentNetwork;
-                              const tokenConfigRawSupplied =
-                                getTokenConfig(
-                                  depositNetworkForToken,
-                                  deposit.asset
-                                );
-                              const tokenConfigSupplied = Array.isArray(
-                                tokenConfigRawSupplied
-                              )
-                                ? deposit.poolId
-                                  ? (
-                                      tokenConfigRawSupplied as (TokenConfig & {
-                                        poolId?: string;
-                                      })[]
-                                    ).find(
-                                      (c) =>
-                                        String(c.poolId) ===
-                                        String(deposit.poolId)
-                                    ) ?? tokenConfigRawSupplied[0]
-                                  : tokenConfigRawSupplied[0]
-                                : tokenConfigRawSupplied;
-                              const suppliedDisplayDecimals = Math.min(
-                                (tokenConfigSupplied as TokenConfig)
-                                  ?.decimals ?? 6,
-                                8
-                              );
 
                               const rewardBonusApr = getRewardsBonusSupplyAprPercent(
                                 depositNetworkForToken as NetworkId,
@@ -6497,18 +6417,25 @@ const Portfolio = () => {
                                 }
                               }
 
+                              const depositDesktopChainKey =
+                                portfolioPositionChainKey(
+                                  "deposit",
+                                  String(
+                                    (deposit as ItemWithNetwork).network ||
+                                      currentNetwork ||
+                                      ""
+                                  ),
+                                  String(deposit.poolId ?? ""),
+                                  deposit.asset
+                                );
+
                               return (
                                 <TableRow
                                   key={index}
-                                  className="transition-all relative card-hover rounded-lg border border-gray-200/30 dark:border-ocean-teal/10 bg-white/50 dark:bg-slate-800/50 hover:border-teal-400 hover:shadow-[0_0_16px_4px_rgba(13,255,190,0.15)] hover:z-20 cursor-pointer"
-                                  onClick={() => {
-                                    if (depositCapReached) return;
-                                    handleDepositClick(
-                                      deposit.asset,
-                                      deposit.poolId,
-                                      (deposit as ItemWithNetwork).network
-                                    );
-                                  }}
+                                  ref={attachChainPollRow(
+                                    depositDesktopChainKey
+                                  )}
+                                  className="transition-all relative card-hover rounded-lg border border-gray-200/30 dark:border-ocean-teal/10 bg-white/50 dark:bg-slate-800/50 hover:border-teal-400 hover:shadow-[0_0_16px_4px_rgba(13,255,190,0.15)] hover:z-20"
                                 >
                                   <TableCell className="min-w-0">
                                     <div className="flex flex-col items-center gap-1 min-w-0">
@@ -6536,26 +6463,26 @@ const Portfolio = () => {
                                       </span>
                                     </div>
                                   </TableCell>
-                                  <TableCell className="font-medium text-center hidden lg:table-cell">
+                                  <TableCell className="font-medium text-center">
                                     {networkName}
                                   </TableCell>
-                                  <TableCell className="text-center hidden xl:table-cell">
+                                  <TableCell className="text-center">
                                     {depositMarketLabel || "-"}
                                   </TableCell>
-                                  <TableCell className="whitespace-nowrap">
+                                  <TableCell>
                                     {formatNumber(deposit.balance, {
                                       minimumFractionDigits: 2,
                                       maximumFractionDigits: 2,
                                     })}
                                   </TableCell>
-                                  <TableCell className="whitespace-nowrap">
+                                  <TableCell>
                                     {formatCurrency(deposit.value, "USD", {
                                       minimumFractionDigits: 2,
                                       maximumFractionDigits: 2,
                                     })}
                                   </TableCell>
-                                  <TableCell className="whitespace-nowrap">
-                                    <div className="flex flex-col gap-0.5 items-start">
+                                  <TableCell className="text-right tabular-nums">
+                                    <div className="flex flex-col gap-0.5 items-end">
                                       <span className="text-green-600 dark:text-green-400">
                                         {formatPercent(deposit.apy / 100, {
                                           maximumFractionDigits: 2,
@@ -6563,7 +6490,7 @@ const Portfolio = () => {
                                       </span>
                                       {intrinsicApr > 0 ? (
                                         <span className="text-xs font-semibold text-sky-700 dark:text-sky-400 tabular-nums">
-                                          +{intrinsicApr.toFixed(2)}% intrinsic
+                                          +{intrinsicApr.toFixed(2)}%
                                         </span>
                                       ) : null}
                                       {rewardBonusApr > 0 ? (
@@ -6573,14 +6500,13 @@ const Portfolio = () => {
                                       ) : null}
                                     </div>
                                   </TableCell>
-                                  <TableCell className="hidden xl:table-cell">
+                                  <TableCell className="text-right tabular-nums">
                                     {deposit.accruedInterest > 0 ? (
-                                      <div className="flex flex-col min-w-0">
-                                        <span className="text-sm font-medium truncate">
+                                      <div className="flex flex-col items-end">
+                                        <span className="text-sm font-medium text-amber-600 dark:text-amber-400">
                                           {formatNumber(deposit.accruedInterest, {
                                             minimumFractionDigits: 2,
-                                            maximumFractionDigits:
-                                              suppliedDisplayDecimals,
+                                            maximumFractionDigits: 6,
                                           })}{" "}
                                           {deposit.asset}
                                         </span>
@@ -6600,33 +6526,67 @@ const Portfolio = () => {
                                       </span>
                                     )}
                                   </TableCell>
-                                  <TableCell className="hidden xl:table-cell whitespace-nowrap">
-                                    {isCollateral ? (
-                                      <span className="font-semibold">
-                                        {formatCurrency(
-                                          deposit.value * marketCollateralFactor,
-                                          "USD",
-                                          { minimumFractionDigits: 2, maximumFractionDigits: 2 }
-                                        )}
-                                      </span>
-                                    ) : (
-                                      <span className="text-muted-foreground">
-                                        —
-                                      </span>
-                                    )}
+                                  <TableCell className="text-right">
+                                    {(() => {
+                                      const rowHf = getSuppliedPositionHealth(
+                                        deposit as ItemWithNetwork
+                                      );
+                                      const displayRowHf =
+                                        rowHf !== null
+                                          ? saturateHealthFactor(rowHf)
+                                          : null;
+                                      if (displayRowHf === null && rowHf === null) {
+                                        return (
+                                          <span className="text-muted-foreground">
+                                            —
+                                          </span>
+                                        );
+                                      }
+                                      const shown = displayRowHf ?? rowHf ?? 0;
+                                      const hfBarColor =
+                                        shown >= 2
+                                          ? "bg-green-500"
+                                          : shown >= 1.5
+                                            ? "bg-yellow-500"
+                                            : shown >= 1
+                                              ? "bg-orange-500"
+                                              : "bg-red-500";
+                                      const barWidthPct = Math.min(
+                                        Math.max(shown, 0),
+                                        3
+                                      ) * (100 / 3);
+                                      const hfTextClass =
+                                        shown >= 2
+                                          ? "text-green-600 dark:text-green-400"
+                                          : shown >= 1.5
+                                            ? "text-yellow-600 dark:text-yellow-400"
+                                            : shown >= 1
+                                              ? "text-orange-500"
+                                              : "text-red-500";
+                                      return (
+                                        <div className="flex items-center justify-end gap-2">
+                                          <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2 max-w-[100px]">
+                                            <div
+                                              className={`h-2 rounded-full ${hfBarColor}`}
+                                              style={{
+                                                width: `${barWidthPct}%`,
+                                              }}
+                                            />
+                                          </div>
+                                          <span
+                                            className={`text-sm font-medium tabular-nums min-w-[50px] text-right ${hfTextClass}`}
+                                          >
+                                            {formatNumber(shown, {
+                                              minimumFractionDigits: 2,
+                                              maximumFractionDigits: 2,
+                                            })}
+                                          </span>
+                                        </div>
+                                      );
+                                    })()}
                                   </TableCell>
-                                  <TableCell className="hidden xl:table-cell">
-                                    <span className="text-muted-foreground">
-                                      {formatPercent(marketCollateralFactor, { maximumFractionDigits: 2 })}
-                                    </span>
-                                  </TableCell>
-                                  <TableCell className="hidden xl:table-cell">
-                                    <span className="text-muted-foreground">
-                                      {formatPercent(marketLiquidationThreshold, { maximumFractionDigits: 2 })}
-                                    </span>
-                                  </TableCell>
-                                  <TableCell>
-                                    <div className="flex items-center gap-2 flex-wrap">
+                                  <TableCell className="whitespace-nowrap w-[1%]">
+                                    <div className="flex items-center gap-2">
                                       {!isViewOnly && (
                                         <>
                                           {!market?.isPaused && (
@@ -6635,6 +6595,7 @@ const Portfolio = () => {
                                               variant="secondary"
                                               onClick={(e) => {
                                                 e.stopPropagation();
+                                                if (depositCapReached) return;
                                                 handleDepositClick(
                                                   deposit.asset,
                                                   deposit.poolId,
@@ -6648,7 +6609,7 @@ const Portfolio = () => {
                                                   : "Supply more of this asset to earn yield and use as collateral"
                                               }
                                               aria-label="Supply"
-                                              className="min-w-[92px] h-8 px-2 gap-1"
+                                              className="min-w-[92px] h-8 shrink-0 px-2 gap-1"
                                             >
                                               <span className="text-base leading-none">+</span>
                                               <span className="hidden lg:inline text-xs">Supply</span>
@@ -6667,7 +6628,7 @@ const Portfolio = () => {
                                             }}
                                             title="Withdraw this asset back to your wallet"
                                             aria-label="Withdraw"
-                                            className="min-w-[92px] h-8 px-2 gap-1"
+                                            className="min-w-[92px] h-8 shrink-0 px-2 gap-1"
                                           >
                                             <span className="text-base leading-none">−</span>
                                             <span className="hidden lg:inline text-xs">Withdraw</span>
@@ -6683,7 +6644,7 @@ const Portfolio = () => {
                         {deposits.length === 0 && (
                             <TableRow>
                               <TableCell
-                                colSpan={11}
+                                colSpan={9}
                                 className="text-center text-muted-foreground py-8"
                               >
                                 No supplied assets
@@ -6772,32 +6733,20 @@ const Portfolio = () => {
                                 (b as ItemWithNetwork).accruedInterest || 0;
                               comparison = accruedInterestA - accruedInterestB;
                               break;
-                            case "borrowingPower":
+                            case "positionHealth": {
+                              const hfSortA =
+                                getSuppliedPositionHealth(
+                                  a as ItemWithNetwork
+                                ) ?? -1;
+                              const hfSortB =
+                                getSuppliedPositionHealth(
+                                  b as ItemWithNetwork
+                                ) ?? -1;
+                              comparison = hfSortA - hfSortB;
+                              break;
+                            }
                             default:
-                              // Find markets for each deposit to get their collateral factors
-                              const marketA = marketData.find(
-                                (m) =>
-                                  m.symbol === a.asset &&
-                                  (a.poolId ? m.poolId === a.poolId : true)
-                              );
-                              const marketB = marketData.find(
-                                (m) =>
-                                  m.symbol === b.asset &&
-                                  (b.poolId ? m.poolId === b.poolId : true)
-                              );
-                              const collateralFactorA =
-                                marketA?.collateralFactor ||
-                                marketA?.marketInfo?.collateralFactor ||
-                                0.8;
-                              const collateralFactorB =
-                                marketB?.collateralFactor ||
-                                marketB?.marketInfo?.collateralFactor ||
-                                0.8;
-                              const borrowingPowerA =
-                                a.value * collateralFactorA;
-                              const borrowingPowerB =
-                                b.value * collateralFactorB;
-                              comparison = borrowingPowerB - borrowingPowerA;
+                              comparison = a.apy - b.apy;
                               break;
                           }
 
@@ -7675,7 +7624,21 @@ const Portfolio = () => {
 
                         return (
                           <>
-                            {displayBorrows.map((borrow) => {
+                            {displayBorrows.map((borrowRaw) => {
+                              const borrow = mergeBorrow(
+                                borrowRaw as ItemWithNetwork
+                              ) as ItemWithNetwork;
+                              const borrowNet =
+                                (borrow as ItemWithNetwork).network ||
+                                currentNetwork ||
+                                "";
+                              const borrowChainPollKey =
+                                portfolioPositionChainKey(
+                                  "borrow",
+                                  String(borrowNet),
+                                  String(borrow.poolId ?? ""),
+                                  borrow.asset
+                                );
                               const market = marketData.find(
                                 (m) =>
                                   m.symbol === borrow.asset &&
@@ -7705,31 +7668,46 @@ const Portfolio = () => {
                                     ? liquidationThresholdNum / 10000
                                     : liquidationThresholdNum;
 
-                              // Calculate LTV Usage
+                              // Calculate LTV Usage (per pool collateral, not portfolio aggregate)
+                              const poolCollateralUsd =
+                                borrow.poolId != null && borrow.poolId !== ""
+                                  ? collateralUsdByPoolId[String(borrow.poolId)] ??
+                                    0
+                                  : totalCollateral;
                               const ltvUsage =
-                                totalCollateral > 0
-                                  ? (borrow.value / totalCollateral) * 100
-                                  : 0;
+                                poolCollateralUsd > 0
+                                  ? (borrow.value / poolCollateralUsd) * 100
+                                  : borrow.value > 0
+                                    ? 100
+                                    : 0;
 
-                              // Calculate Liquidation Price (simplified)
-                              const currentPrice = borrow.tokenPrice || 1;
-                              const requiredCollateralForThisBorrow =
-                                borrow.value / normalizedThreshold;
-                              const borrowRatio =
-                                totalBorrowed > 0
-                                  ? borrow.value / totalBorrowed
-                                  : 0;
                               const liquidationPrice =
-                                totalCollateral > 0
-                                  ? currentPrice *
-                                  (requiredCollateralForThisBorrow /
-                                    (totalCollateral * borrowRatio || 1))
-                                  : currentPrice / normalizedThreshold;
+                                SHOW_LIQUIDATION_PRICE_IN_BORROWED
+                                  ? (() => {
+                                      const currentPrice =
+                                        borrow.tokenPrice || 1;
+                                      const requiredCollateralForThisBorrow =
+                                        borrow.value / normalizedThreshold;
+                                      const borrowRatio =
+                                        totalBorrowed > 0
+                                          ? borrow.value / totalBorrowed
+                                          : 0;
+                                      return totalCollateral > 0
+                                        ? currentPrice *
+                                            (requiredCollateralForThisBorrow /
+                                              (totalCollateral * borrowRatio ||
+                                                1))
+                                        : currentPrice / normalizedThreshold;
+                                    })()
+                                  : undefined;
 
                               return (
-                                <PortfolioTableMobileCard
+                                <div
                                   key={`${borrow.asset}-${borrow.poolId || "default"
                                     }`}
+                                  ref={attachChainPollRow(borrowChainPollKey)}
+                                >
+                                <PortfolioTableMobileCard
                                   asset={borrow.asset}
                                   icon={borrow.icon}
                                   value={borrow.value}
@@ -7769,6 +7747,7 @@ const Portfolio = () => {
                                   }
                                   type="borrow"
                                 />
+                                </div>
                               );
                             })}
                             {hasMore && (
@@ -7899,7 +7878,7 @@ const Portfolio = () => {
                                 )}
                               </button>
                             </TableHead>
-                            <TableHead>
+                            <TableHead className="text-right">
                               <button
                                 onClick={() => {
                                   if (borrowedAssetsSort.column === "apy") {
@@ -7917,7 +7896,7 @@ const Portfolio = () => {
                                     });
                                   }
                                 }}
-                                className="flex items-center gap-1 hover:text-foreground transition-colors"
+                                className="flex w-full items-center justify-end gap-1 hover:text-foreground transition-colors"
                               >
                                 APY
                                 {borrowedAssetsSort.column === "apy" ? (
@@ -7931,7 +7910,7 @@ const Portfolio = () => {
                                 )}
                               </button>
                             </TableHead>
-                            <TableHead>
+                            <TableHead className="text-right">
                               <button
                                 onClick={() => {
                                   if (
@@ -7952,7 +7931,7 @@ const Portfolio = () => {
                                     });
                                   }
                                 }}
-                                className="flex items-center gap-1 hover:text-foreground transition-colors"
+                                className="flex w-full items-center justify-end gap-1 hover:text-foreground transition-colors"
                               >
                                 Accrued Interest
                                 {borrowedAssetsSort.column ===
@@ -7967,52 +7946,59 @@ const Portfolio = () => {
                                 )}
                               </button>
                             </TableHead>
-                            <TableHead>
-                              <div className="flex items-center gap-1">
+                            <TableHead className="text-right">
+                              <div className="flex items-center justify-end gap-1">
                                 LTV Usage
                                 <UITooltip>
                                   <TooltipTrigger asChild>
                                     <Info className="w-4 h-4 text-muted-foreground cursor-help" />
                                   </TooltipTrigger>
-                                  <TooltipContent>
-                                    <p>
-                                      Loan-to-Value ratio: Borrowed value /
-                                      Collateral value
-                                    </p>
-                                  </TooltipContent>
-                                </UITooltip>
-                              </div>
-                            </TableHead>
-                            <TableHead>
-                              <div className="flex items-center gap-1">
-                                Liquidation Price
-                                <UITooltip>
-                                  <TooltipTrigger asChild>
-                                    <Info className="w-4 h-4 text-muted-foreground cursor-help" />
-                                  </TooltipTrigger>
                                   <TooltipContent className="max-w-xs">
-                                    <p className="font-semibold mb-1">
-                                      Liquidation Price
+                                    <p className="text-sm">
+                                      Your borrow&apos;s value in USD, compared
+                                      to this lending pool&apos;s total
+                                      collateral (from on-chain data).
                                     </p>
-                                    <p className="text-sm mb-2">
-                                      The estimated price at which your
-                                      collateral would need to drop to trigger
-                                      liquidation for this borrowed position.
-                                    </p>
-                                    <p className="text-xs text-muted-foreground">
-                                      Liquidation occurs when: Collateral Value
-                                      × Liquidation Threshold &lt; Borrowed
-                                      Value
-                                    </p>
-                                    <p className="text-xs text-muted-foreground mt-1">
-                                      This is calculated based on your total
-                                      collateral and the asset's liquidation
-                                      threshold (typically 85%).
+                                    <p className="text-xs text-muted-foreground mt-2">
+                                      If this row isn&apos;t linked to a pool, we
+                                      use your portfolio-wide collateral instead.
                                     </p>
                                   </TooltipContent>
                                 </UITooltip>
                               </div>
                             </TableHead>
+                            {SHOW_LIQUIDATION_PRICE_IN_BORROWED && (
+                              <TableHead className="text-right">
+                                <div className="flex items-center justify-end gap-1">
+                                  Liquidation Price
+                                  <UITooltip>
+                                    <TooltipTrigger asChild>
+                                      <Info className="w-4 h-4 text-muted-foreground cursor-help" />
+                                    </TooltipTrigger>
+                                    <TooltipContent className="max-w-xs">
+                                      <p className="font-semibold mb-1">
+                                        Liquidation Price
+                                      </p>
+                                      <p className="text-sm mb-2">
+                                        The estimated price at which your
+                                        collateral would need to drop to trigger
+                                        liquidation for this borrowed position.
+                                      </p>
+                                      <p className="text-xs text-muted-foreground">
+                                        Liquidation occurs when: Collateral Value
+                                        × Liquidation Threshold &lt; Borrowed
+                                        Value
+                                      </p>
+                                      <p className="text-xs text-muted-foreground mt-1">
+                                        This is calculated based on your total
+                                        collateral and the asset's liquidation
+                                        threshold (typically 85%).
+                                      </p>
+                                    </TooltipContent>
+                                  </UITooltip>
+                                </div>
+                              </TableHead>
+                            )}
                             <TableHead>Actions</TableHead>
                           </TableRow>
                         </TableHeader>
@@ -8139,7 +8125,10 @@ const Portfolio = () => {
                               ? filteredAndSorted
                               : filteredAndSorted.slice(0, 5);
 
-                            return displayBorrows.map((borrow, index) => {
+                            return displayBorrows.map((borrowRaw, index) => {
+                              const borrow = mergeBorrow(
+                                borrowRaw as ItemWithNetwork
+                              ) as ItemWithNetwork;
                               const market = marketData.find(
                                 (m) =>
                                   m.symbol === borrow.asset &&
@@ -8164,38 +8153,38 @@ const Portfolio = () => {
                                 borrow.poolId
                               );
 
-                              // Calculate LTV Usage
+                              // Calculate LTV Usage (per pool collateral, not portfolio aggregate)
+                              const poolCollateralUsd =
+                                borrow.poolId != null && borrow.poolId !== ""
+                                  ? collateralUsdByPoolId[String(borrow.poolId)] ??
+                                    0
+                                  : totalCollateral;
                               const ltvUsage =
-                                totalCollateral > 0
-                                  ? (borrow.value / totalCollateral) * 100
-                                  : 0;
+                                poolCollateralUsd > 0
+                                  ? (borrow.value / poolCollateralUsd) * 100
+                                  : borrow.value > 0
+                                    ? 100
+                                    : 0;
 
-                              // Calculate Liquidation Price
-                              // Liquidation occurs when: Collateral Value × Liquidation Threshold < Borrowed Value
-                              // For a borrowed asset, we calculate: what would the average collateral price need to be?
-                              // Simplified: If total borrowed = B, and we need collateral C where C × threshold = B
-                              // Then C = B / threshold, and if current collateral is C_current at price P_current,
-                              // liquidation price ≈ P_current × (B / threshold) / C_current
-                              // For per-asset display, we use a simplified approximation
-                              const currentPrice = borrow.tokenPrice || 1;
-                              // More accurate: liquidation price is the price at which collateral would need to drop
-                              // For this specific borrow: if this borrow represents X% of total borrows,
-                              // and collateral needs to maintain threshold, then:
-                              const borrowRatio =
-                                totalBorrowed > 0
-                                  ? borrow.value / totalBorrowed
-                                  : 0;
-                              const requiredCollateralForThisBorrow =
-                                borrow.value / liquidationThreshold;
-                              // If we assume collateral is proportional, liquidation price would be:
-                              // current collateral price × (required collateral / current collateral)
-                              // Simplified version: show price that would trigger liquidation for this borrow amount
                               const liquidationPrice =
-                                totalCollateral > 0
-                                  ? currentPrice *
-                                  (requiredCollateralForThisBorrow /
-                                    (totalCollateral * borrowRatio || 1))
-                                  : currentPrice / liquidationThreshold;
+                                SHOW_LIQUIDATION_PRICE_IN_BORROWED
+                                  ? (() => {
+                                      const currentPrice =
+                                        borrow.tokenPrice || 1;
+                                      const borrowRatio =
+                                        totalBorrowed > 0
+                                          ? borrow.value / totalBorrowed
+                                          : 0;
+                                      const requiredCollateralForThisBorrow =
+                                        borrow.value / liquidationThreshold;
+                                      return totalCollateral > 0
+                                        ? currentPrice *
+                                            (requiredCollateralForThisBorrow /
+                                              (totalCollateral * borrowRatio ||
+                                                1))
+                                        : currentPrice / liquidationThreshold;
+                                    })()
+                                  : undefined;
 
                               // Get network name from borrow or infer
                               let networkName = "Unknown";
@@ -8259,9 +8248,22 @@ const Portfolio = () => {
                                 return "bg-green-500";
                               };
 
+                              const borrowDesktopChainKey =
+                                portfolioPositionChainKey(
+                                  "borrow",
+                                  String(
+                                    (borrow as ItemWithNetwork).network ||
+                                      currentNetwork ||
+                                      ""
+                                  ),
+                                  String(borrow.poolId ?? ""),
+                                  borrow.asset
+                                );
+
                               return (
                                 <TableRow
                                   key={index}
+                                  ref={attachChainPollRow(borrowDesktopChainKey)}
                                   className="transition-all relative card-hover rounded-lg border border-gray-200/30 dark:border-ocean-teal/10 bg-white/50 dark:bg-slate-800/50 hover:border-teal-400 hover:shadow-[0_0_16px_4px_rgba(13,255,190,0.15)] hover:z-20"
                                 >
                                   <TableCell className="min-w-0">
@@ -8302,14 +8304,14 @@ const Portfolio = () => {
                                   <TableCell>
                                     {formatCurrency(borrow.value, "USD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </TableCell>
-                                  <TableCell>
+                                  <TableCell className="text-right tabular-nums">
                                     <span className="text-red-600 dark:text-red-400">
                                       {formatPercent(borrow.apy / 100, { maximumFractionDigits: 2 })}
                                     </span>
                                   </TableCell>
-                                  <TableCell>
+                                  <TableCell className="text-right tabular-nums">
                                     {borrow.accruedInterest > 0 ? (
-                                      <div className="flex flex-col">
+                                      <div className="flex flex-col items-end">
                                         <span className="text-sm font-medium text-amber-600 dark:text-amber-400">
                                           {formatNumber(borrow.accruedInterest, {
                                             minimumFractionDigits: 2,
@@ -8333,8 +8335,8 @@ const Portfolio = () => {
                                       </span>
                                     )}
                                   </TableCell>
-                                  <TableCell>
-                                    <div className="flex items-center gap-2">
+                                  <TableCell className="text-right">
+                                    <div className="flex items-center justify-end gap-2">
                                       <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2 max-w-[100px]">
                                         <div
                                           className={`h-2 rounded-full ${getLTVColor(
@@ -8348,19 +8350,22 @@ const Portfolio = () => {
                                           }}
                                         />
                                       </div>
-                                      <span className="text-sm font-medium min-w-[50px]">
+                                      <span className="text-sm font-medium min-w-[50px] tabular-nums text-right">
                                         {formatPercent(ltvUsage / 100, { maximumFractionDigits: 1 })}
                                       </span>
                                     </div>
                                   </TableCell>
-                                  <TableCell>
-                                    <span className="text-sm">
-                                      {formatCurrency(liquidationPrice, "USD", {
-                                        minimumFractionDigits: 2,
-                                        maximumFractionDigits: 4,
-                                      })}
-                                    </span>
-                                  </TableCell>
+                                  {SHOW_LIQUIDATION_PRICE_IN_BORROWED &&
+                                    liquidationPrice !== undefined && (
+                                      <TableCell className="text-right tabular-nums">
+                                        <span className="text-sm">
+                                          {formatCurrency(liquidationPrice, "USD", {
+                                            minimumFractionDigits: 2,
+                                            maximumFractionDigits: 4,
+                                          })}
+                                        </span>
+                                      </TableCell>
+                                    )}
                                   <TableCell>
                                     <div className="flex items-center gap-2 flex-wrap">
                                       {!isViewOnly && (
@@ -8554,7 +8559,7 @@ const Portfolio = () => {
               )}
 
               {/* Accrued Interest Table */}
-              {accruedInterestItems.length > 0 && (
+              {SHOW_ACCRUED_INTEREST_SECTION && accruedInterestItems.length > 0 && (
                 <DorkFiCard
                   className={cn(
                     "p-6 md:p-8",

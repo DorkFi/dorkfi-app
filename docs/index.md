@@ -8,7 +8,7 @@ PreFi is DorkFi's pre-launch deposit program that allows early supporters to ear
 
 ## Documentation Overview
 
-### 📖 [User Guide](USER_GUIDE_PREFI.md)
+### 📖 [User Guide](prefi/USER_GUIDE_PREFI.md)
 **Complete user manual for PreFi platform**
 
 The comprehensive user guide covers everything you need to know about using PreFi:
@@ -22,17 +22,14 @@ The comprehensive user guide covers everything you need to know about using PreF
 
 **Perfect for:** New users, existing users looking for detailed information, troubleshooting help
 
-### 📊 [APY Estimation Strategy](APY_ESTIMATION.md)
-**Technical documentation on how APY calculations work**
+### 📦 [PreFi documentation (index)](prefi/index.md)
+**Catalog of PreFi guides in this repo**
 
-Deep dive into the APY calculation methodology:
-- Reward allocation by deposit caps
-- Normalization layers for user-friendly display
-- Risk and market adjustments
-- Fallback strategies
-- Real-time update mechanisms
+- [PreFi User Guide](prefi/USER_GUIDE_PREFI.md): participant-facing manual (dashboard, deposits, rewards, troubleshooting)
+- [APY Estimation Strategy](prefi/APY_ESTIMATION.md): allocation by deposit caps, normalization, risk adjustments, fallbacks, live updates
+- [Pool migration configuration](prefi/POOL_MIGRATION.md): token-level migration config, old pool / nToken wiring, atomic migration UX
 
-**Perfect for:** Developers, advanced users, those interested in the technical details of reward calculations
+**Perfect for:** Finding all PreFi docs in one place; developers and operators tuning rewards, APY display, and product behavior
 
 ### 💰 [Total Deposits Guide](TOTAL_DEPOSITS.md)
 **Comprehensive guide to understanding total deposits in PreFi**
@@ -54,8 +51,27 @@ Information about the automatic version management system:
 - Automatic version incrementing
 - Setup and configuration
 - Manual version control options
+- Deeper overview: [Versioning System Overview](VERSIONING_SYSTEM.md) (build flow, `prebuild`, scripts)
+- Bootstrap / template: [Version implementation prompt](VERSION_IMPLEMENTATION_PROMPT.md) (for implementing similar version tracking in another Vite app)
 
 **Perfect for:** Developers, contributors, those working with the codebase
+
+### 🔀 [Workflows](workflows/index.md)
+**Contributor procedures (fork, PR, and related tasks)**
+
+Indexed guides for repeatable processes:
+- Forking and opening pull requests with GitHub CLI (`gh`)
+- Placeholder-based steps that apply to any upstream repo and branch
+
+**Perfect for:** Contributors who push from a fork, anyone onboarding to the repo’s GitHub workflow
+
+### 🛠️ [Development documentation](development/index.md)
+**Frontend architecture and feature deep-dives**
+
+Indexed implementation references (pages, services, cross-network behavior):
+- [Gas Station](development/GAS_STATION.md): minting flow, `GasStationService`, ARC200/ASA/network tokens on Voi and Algorand
+
+**Perfect for:** Developers extending the Gas Station, multi-network minting, or similar app features
 
 ### 🔗 [ARC200 Exchange Extension](ARC200_EXCHANGE.md)
 **Technical specification for ARC200 token exchange standard**
@@ -69,16 +85,13 @@ Complete specification for the ARC200 Exchange Extension:
 
 **Perfect for:** Developers implementing token standards, smart contract developers, DeFi protocol builders
 
-### 🎁 [Claim Setup Guide](CLAIM_SETUP.md)
-**Complete guide to setting up reward claim functionality**
+### 🎁 [Claim setup (workflow)](workflows/SETUP_NEW_CLAIM.md)
+**Configure reward claim functionality in this frontend**
 
-Comprehensive guide for configuring and managing the claim system:
-- How the claim system works
-- Adding new rewards to the system
-- Network and contract configuration
-- Testing and troubleshooting
-- Security considerations
-- Example configurations
+Step-by-step workflow (same content area as a standalone claim guide):
+- How the claim system works and ARC200 allowance
+- Adding rewards in `MarketsTable` and network configuration
+- Testing, troubleshooting, and security considerations
 
 **Perfect for:** Developers setting up rewards, administrators managing airdrops, those implementing claim functionality
 
@@ -95,15 +108,26 @@ Complete guide for integrating the transaction-metadata endpoint to update appli
 
 **Perfect for:** Frontend developers, those implementing real-time transaction updates, developers optimizing user experience
 
-### 🗳️ [Adding a Governance Proposal Category](ADDING_PROPOSAL_CATEGORY.md)
-**Step-by-step guide for adding a new proposal category**
+### 🗳️ [Governance documentation (index)](governance/index.md)
+**Catalog of governance guides in this repo**
 
-How to add a new governance proposal category to the frontend:
-- Update types and constants (IDs, display names)
-- Wire proposal card badge colors
-- Checklist and current category reference
+- [Governance User Guide](governance/GOVERNANCE_USER_GUIDE.md): UNIT voting power, proposals, single and batch voting, statuses, categories, mobile, troubleshooting
+
+**Perfect for:** UNIT holders using Governance, anyone reviewing how proposals appear in the UI; use the index to find all governance docs in one place
+
+### 🏷️ [Adding a governance proposal category (workflow)](workflows/ADD_PROPOSAL_CATEGORY_TO_GOVERNANCE.md)
+**Wire a new on-chain category ID through the frontend**
+
+Types, constants, labels, Admin UI, proposal cards, and badge colors (requires contract support for the new category ID).
 
 **Perfect for:** Developers adding or changing governance proposal categories
+
+### 🛡️ [Health Factor Calculation](HEALTH_FACTOR_CALCULATION.md)
+**How health factor is computed for lending positions**
+
+Collateral vs liquidation threshold, user-level and network-level formulas, and related implementation notes.
+
+**Perfect for:** Developers working on portfolio, borrow/repay, or liquidation-related UI and logic
 
 ### 📐 [Asset Decimals and Display](ASSET_DECIMALS_AND_DISPLAY.md)
 **Reference for balance/amount decimals and withdraw modal USD consistency**
@@ -116,24 +140,35 @@ How the frontend handles token decimals and deposited value display:
 
 **Perfect for:** Developers touching balance/amount formatting, withdraw flow, or multi-network portfolio display
 
+### ✅ [Portfolio Withdraw Flow – Verification](PORTFOLIO_WITHDRAW_FLOW_VERIFICATION.md)
+**QA / verification report for the portfolio withdraw flow**
+
+Recorded checks for withdraw modal (desktop and mobile), supplied/borrowed actions, quick actions, and related regressions.
+
+**Perfect for:** QA, reviewers validating withdraw UX parity with the test plan, developers tracing modal wiring
+
 ## Quick Start Guide
 
 ### For New Users
-1. **Start Here**: Read the [User Guide](USER_GUIDE_PREFI.md) to understand how PreFi works
+1. **Start Here**: Read the [User Guide](prefi/USER_GUIDE_PREFI.md) to understand how PreFi works
 2. **Connect Wallet**: Use the wallet connection feature to get started
 3. **Make Deposits**: Choose markets and start earning VOI rewards
 4. **Monitor Progress**: Track your deposits and qualification status
 5. **Understand Totals**: Review the [Total Deposits Guide](TOTAL_DEPOSITS.md) to understand how deposit tracking works
 
 ### For Developers
-1. **Technical Details**: Review [APY Estimation Strategy](APY_ESTIMATION.md) for calculation methods
+1. **Technical Details**: Review [PreFi documentation](prefi/index.md) and [APY Estimation Strategy](prefi/APY_ESTIMATION.md) for calculation methods
 2. **Version Control**: Check [Version Management](VERSION_MANAGEMENT.md) for development setup
-3. **Token Standards**: Review [ARC200 Exchange Extension](ARC200_EXCHANGE.md) for token exchange specifications
-4. **Claim Setup**: Follow the [Claim Setup Guide](CLAIM_SETUP.md) to configure reward claims
-5. **Transaction Updates**: Review [Transaction Metadata Integration](TRANSACTION_METADATA.md) for real-time state updates
-6. **Governance Categories**: See [Adding a Proposal Category](ADDING_PROPOSAL_CATEGORY.md) to add new categories
-7. **Asset Decimals & Withdraw Value**: See [Asset Decimals and Display](ASSET_DECIMALS_AND_DISPLAY.md) for balance/amount formatting and withdraw modal USD consistency
-8. **Codebase**: Explore the React/TypeScript frontend implementation
+3. **Forks & PRs**: See [Workflows](workflows/index.md) for fork and pull-request steps with GitHub CLI
+4. **Feature deep-dives**: See [Development documentation](development/index.md) for architecture guides (e.g. Gas Station)
+5. **Token Standards**: Review [ARC200 Exchange Extension](ARC200_EXCHANGE.md) for token exchange specifications
+6. **Claim Setup**: Follow [Claim setup (workflow)](workflows/SETUP_NEW_CLAIM.md) to configure reward claims
+7. **Transaction Updates**: Review [Transaction Metadata Integration](TRANSACTION_METADATA.md) for real-time state updates
+8. **Governance**: Read the [Governance User Guide](governance/GOVERNANCE_USER_GUIDE.md) (see [Governance documentation](governance/index.md)); to add a category, use [Adding a governance proposal category](workflows/ADD_PROPOSAL_CATEGORY_TO_GOVERNANCE.md)
+9. **Health Factor**: See [Health Factor Calculation](HEALTH_FACTOR_CALCULATION.md) for position safety math
+10. **Asset Decimals & Withdraw Value**: See [Asset Decimals and Display](ASSET_DECIMALS_AND_DISPLAY.md) for balance/amount formatting and withdraw modal USD consistency
+11. **Withdraw flow QA**: See [Portfolio Withdraw Flow – Verification](PORTFOLIO_WITHDRAW_FLOW_VERIFICATION.md) for the recorded verification pass
+12. **Codebase**: Explore the React/TypeScript frontend implementation
 
 ## Key Features
 
@@ -219,9 +254,10 @@ The **Test** GitHub Action (`.github/workflows/test.yml`) runs on push/PR to `ma
 
 If you're interested in contributing to the PreFi frontend:
 1. Review the version management documentation
-2. Set up the development environment
-3. Follow the established coding patterns
-4. Run `npm run test` and fix any failures before opening a PR
+2. If you contribute via a fork, follow [Workflows: Fork and open a PR](workflows/FORK_AND_PR.md)
+3. Set up the development environment
+4. Follow the established coding patterns
+5. Run `npm run test` and fix any failures before opening a PR
 
 ---
 

@@ -11,15 +11,16 @@ interface PortfolioTableMobileCardProps {
   value: number;
   balance?: number;
   apy?: number;
-  /** Intrinsic APY from token config (% points); shown as +X.XX% intrinsic when &gt; 0. */
+  /** Extra supply APY from token config (% points); shown as +X.XX% when &gt; 0. */
   intrinsicApyPercent?: number;
   /** Bonus rewards APR (% points); shown as +X.XX% when &gt; 0. */
   rewardBonusAprPercent?: number;
   accruedInterest?: number;
   accruedInterestValue?: number;
-  borrowingPower?: number;
   collateralFactor?: number;
   liquidationFactor?: number;
+  /** Network (or portfolio) health factor for supplied positions; null if unknown. */
+  positionHealth?: number | null;
   ltvUsage?: number;
   liquidationPrice?: number;
   network?: string;
@@ -45,9 +46,9 @@ const PortfolioTableMobileCard = ({
   rewardBonusAprPercent,
   accruedInterest,
   accruedInterestValue,
-  borrowingPower,
   collateralFactor,
   liquidationFactor,
+  positionHealth,
   ltvUsage,
   liquidationPrice,
   network,
@@ -167,7 +168,7 @@ const PortfolioTableMobileCard = ({
                 intrinsicApyPercent != null &&
                 intrinsicApyPercent > 0 && (
                   <div className="text-xs font-semibold text-sky-700 dark:text-sky-400 mt-0.5 tabular-nums">
-                    +{intrinsicApyPercent.toFixed(2)}% intrinsic
+                    +{intrinsicApyPercent.toFixed(2)}%
                   </div>
                 )}
               {isDeposit &&
@@ -195,25 +196,13 @@ const PortfolioTableMobileCard = ({
           </div>
         )}
 
-        {/* Accrued Interest */}
+        {/* Accrued Interest — amber styling for both supply and borrow (matches desktop) */}
         {accruedInterest !== undefined && accruedInterest > 0 && (
-          <div className={`p-2 rounded-lg border ${
-            isDeposit 
-              ? "bg-green-500/10 border-green-500/20" 
-              : "bg-amber-500/10 border-amber-500/20"
-          }`}>
-            <div className={`text-xs font-semibold mb-1 ${
-              isDeposit 
-                ? "text-green-600 dark:text-green-400" 
-                : "text-amber-600 dark:text-amber-400"
-            }`}>
+          <div className="p-2 rounded-lg border bg-amber-500/10 border-amber-500/20">
+            <div className="text-xs font-semibold mb-1 text-amber-600 dark:text-amber-400">
               {isDeposit ? "Accrued Interest (Earned)" : "Accrued Interest (Owed)"}
             </div>
-            <div className={`text-sm font-medium ${
-              isDeposit 
-                ? "text-green-700 dark:text-green-300" 
-                : "text-amber-700 dark:text-amber-300"
-            }`}>
+            <div className="text-sm font-medium text-amber-700 dark:text-amber-300">
               {isDeposit ? "+" : ""}{accruedInterest.toLocaleString("en-US", {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: displayDecimals,
@@ -221,11 +210,7 @@ const PortfolioTableMobileCard = ({
               {asset}
             </div>
             {accruedInterestValue && (
-              <div className={`text-xs mt-1 ${
-                isDeposit 
-                  ? "text-green-600 dark:text-green-400" 
-                  : "text-amber-600 dark:text-amber-400"
-              }`}>
+              <div className="text-xs mt-1 text-amber-600 dark:text-amber-400">
                 {isDeposit ? "+" : ""}${accruedInterestValue.toLocaleString("en-US", {
                   minimumFractionDigits: 2,
                   maximumFractionDigits: 2,
@@ -239,27 +224,6 @@ const PortfolioTableMobileCard = ({
         <div className="grid grid-cols-2 gap-3 pt-2 border-t border-border">
           {isDeposit ? (
             <>
-              {borrowingPower !== undefined && (
-                <div>
-                  <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                    Borrow Power
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Info className="w-3 h-3 cursor-help" />
-                      </TooltipTrigger>
-                      <TooltipContent className="max-w-xs">
-                        <p>Maximum amount you can borrow against this collateral</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                  <div className="text-sm font-semibold">
-                    ${borrowingPower.toLocaleString("en-US", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </div>
-                </div>
-              )}
               {collateralFactor !== undefined && (
                 <div>
                   <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
@@ -296,6 +260,52 @@ const PortfolioTableMobileCard = ({
                   </div>
                 </div>
               )}
+              {positionHealth !== undefined && (
+                <div className="col-span-2">
+                  <div className="text-xs text-muted-foreground mb-1">
+                    Position Health
+                  </div>
+                  {positionHealth === null ? (
+                    <span className="text-sm text-muted-foreground">—</span>
+                  ) : (
+                    (() => {
+                      const s = Math.min(positionHealth, 3);
+                      const barColor =
+                        s >= 2
+                          ? "bg-green-500"
+                          : s >= 1.5
+                            ? "bg-yellow-500"
+                            : s >= 1
+                              ? "bg-orange-500"
+                              : "bg-red-500";
+                      const textClass =
+                        s >= 2
+                          ? "text-green-600 dark:text-green-400"
+                          : s >= 1.5
+                            ? "text-yellow-600 dark:text-yellow-400"
+                            : s >= 1
+                              ? "text-orange-500"
+                              : "text-red-500";
+                      const barPct = Math.min(Math.max(s, 0), 3) * (100 / 3);
+                      return (
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2 max-w-[60px]">
+                            <div
+                              className={`h-2 rounded-full ${barColor}`}
+                              style={{ width: `${barPct}%` }}
+                            />
+                          </div>
+                          <span
+                            className={`text-sm font-semibold tabular-nums ${textClass}`}
+                          >
+                            {s.toFixed(2)}
+                          </span>
+                        </div>
+                      );
+                    })()
+                  )}
+                </div>
+              )}
             </>
           ) : (
             <>
@@ -308,7 +318,15 @@ const PortfolioTableMobileCard = ({
                         <Info className="w-3 h-3 cursor-help" />
                       </TooltipTrigger>
                       <TooltipContent className="max-w-xs">
-                        <p>Loan-to-Value ratio: Borrowed value / Collateral value</p>
+                        <p className="text-sm">
+                          Your borrow&apos;s value in USD, compared to this
+                          lending pool&apos;s total collateral (from on-chain
+                          data).
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          If this row isn&apos;t linked to a pool, we use your
+                          portfolio-wide collateral instead.
+                        </p>
                       </TooltipContent>
                     </Tooltip>
                   </div>
