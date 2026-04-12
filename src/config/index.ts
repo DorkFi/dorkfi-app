@@ -1454,7 +1454,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     logoPath: "/lovable-uploads/TINY.webp",
     tokenStandard: "asa",
   },
-  FINITE: {
+  FINITE: [{
     assetId: "400593267",
     poolId: "3345940978",
     contractId: "3211805086",
@@ -1470,6 +1470,19 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     logoPath: "/lovable-uploads/FINITE.webp",
     tokenStandard: "asa",
   },
+  {
+    assetId: "400593267",
+    poolId: "3333688282",
+    contractId: "3211805086",
+    nTokenId: "3346001205",
+    decimals: 8,
+    name: "FINITE",
+    symbol: "FINITE",
+    logoPath: "/lovable-uploads/FINITE.webp",
+    tokenStandard: "asa",
+    dataAddedAt: "2026-04-11T00:00:00.000Z",
+  }
+],
   COMPX: {
     assetId: "1732165149",
     poolId: "3345940978",

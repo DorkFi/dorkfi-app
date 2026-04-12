@@ -55,6 +55,10 @@ import {
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
 import BigNumber from "bignumber.js";
 import { updateTransactionMetadata } from "@/utils/transactionUtils";
+import {
+  fetchPoolCollateralMarketRowsForDeposit,
+  type PoolCollateralMarketRow,
+} from "@/utils/poolCollateralMarketRows";
 import { getNetworkLogoPath } from "@/utils/tokenImageUtils";
 import {
   DropdownMenu,
@@ -268,6 +272,9 @@ const MarketsTable = () => {
   } | null>(null);
   const [userBorrowBalance, setUserBorrowBalance] = useState<number>(0);
   const [userDepositBalance, setUserDepositBalance] = useState<number>(0);
+  /** Same-pool supplied markets + LT for deposit modal (from chain; not paginated table). */
+  const [depositPoolCollateralMarkets, setDepositPoolCollateralMarkets] =
+    useState<PoolCollateralMarketRow[]>([]);
   const [isLoadingGlobalData, setIsLoadingGlobalData] = useState(false);
   /** Live position for PremiumMarketModal (on-chain + pool caps). */
   const [detailModalUserPosition, setDetailModalUserPosition] =
@@ -695,11 +702,26 @@ const MarketsTable = () => {
         setUserDepositBalance(0);
       }
 
+      let poolCollateralRows: PoolCollateralMarketRow[] = [];
+      if (activeAccount?.address && poolId != null && poolId !== "") {
+        try {
+          poolCollateralRows = await fetchPoolCollateralMarketRowsForDeposit(
+            activeAccount.address,
+            currentNetwork as NetworkId,
+            poolId
+          );
+        } catch (e) {
+          console.error("Error loading pool collateral markets for deposit:", e);
+        }
+      }
+      setDepositPoolCollateralMarkets(poolCollateralRows);
+
       // Open modal after balance is fetched
       console.log("Opening deposit modal with:", { asset, poolId });
       setDepositModal({ isOpen: true, asset, poolId });
     } catch (error) {
       console.error("Error fetching wallet balance for deposit:", error);
+      setDepositPoolCollateralMarkets([]);
       // Still open modal even if balance fetch fails
       setDepositModal({ isOpen: true, asset, poolId });
     } finally {
@@ -950,6 +972,7 @@ const MarketsTable = () => {
   const handleCloseDepositModal = () => {
     const asset = depositModal.asset;
     setDepositModal({ isOpen: false, asset: null, poolId: undefined });
+    setDepositPoolCollateralMarkets([]);
 
     // Refresh market data and wallet balance after deposit
     if (asset) {
@@ -2839,6 +2862,7 @@ const MarketsTable = () => {
               onClose={handleCloseDepositModal}
               asset={depositModal.asset}
               poolId={depositModal.poolId}
+              network={currentNetwork}
               mode="deposit"
               assetData={getAssetData(depositModal.asset, depositModal.poolId)!}
               walletBalance={walletBalances[depositModal.asset]?.balance || 0}
@@ -2846,6 +2870,7 @@ const MarketsTable = () => {
                 walletBalances[depositModal.asset]?.balanceUSD || 0
               }
               userDepositBalance={userDepositBalance}
+              poolCollateralMarkets={depositPoolCollateralMarkets}
               onTransactionSuccess={async () => {
                 // Refresh wallet balance immediately after successful transaction
                 if (depositModal.asset) {
