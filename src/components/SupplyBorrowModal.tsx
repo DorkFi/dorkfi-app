@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Dialog,
   DialogContent,
@@ -47,6 +47,12 @@ import { useTokenPrice } from "@/hooks/useTokenPrice";
 import { calculateMaxBorrowAmount } from "@/services/adminService";
 import dorkfiAPIService from "@/services/dorkfiAPIService";
 import { updateTransactionMetadata } from "@/utils/transactionUtils";
+import type { PoolCollateralMarketRow } from "@/utils/poolCollateralMarketRows";
+import {
+  buildLiquidationThresholdSummaryForDeposit,
+  estimatePoolHealthAfterDeposit,
+  shouldBlockDepositForLowEstimatedHealth,
+} from "@/utils/depositModalPoolHealthEstimate";
 
 interface SupplyBorrowModalProps {
   isOpen: boolean;
@@ -98,6 +104,8 @@ interface SupplyBorrowModalProps {
   }[];
   onSelectAsset?: (asset: string, poolId?: string, network?: string) => void;
   walletBalanceLastUpdated?: number;
+  /** Supplied collateral markets in this pool (for deposit mode LT comparison). */
+  poolCollateralMarkets?: PoolCollateralMarketRow[];
 }
 
 const SupplyBorrowModal = ({
@@ -117,6 +125,7 @@ const SupplyBorrowModal = ({
   availableAssets,
   onSelectAsset,
   walletBalanceLastUpdated,
+  poolCollateralMarkets,
 }: SupplyBorrowModalProps) => {
   const [amount, setAmount] = useState("");
   const [fiatValue, setFiatValue] = useState(0);
@@ -133,6 +142,16 @@ const SupplyBorrowModal = ({
   );
   const [isLoadingMaxBorrow, setIsLoadingMaxBorrow] = useState(false);
   const [maxBorrowError, setMaxBorrowError] = useState<string | null>(null);
+  /** Per-pool collateral/borrow (USD) for deposit health estimate; undefined = not loaded */
+  const [poolGlobalUserData, setPoolGlobalUserData] = useState<
+    | {
+        totalCollateralValue: number;
+        totalBorrowValue: number;
+        lastUpdateTime: number;
+      }
+    | null
+    | undefined
+  >(undefined);
 
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
@@ -141,6 +160,53 @@ const SupplyBorrowModal = ({
   // Use provided network or fallback to current network
   const networkToUse = network || currentNetwork;
   const { price: tokenPrice } = useTokenPrice(asset, networkToUse);
+
+  const depositBlockedByLowEstimatedHealth = useMemo(() => {
+    if (mode !== "deposit") return false;
+    const summary = buildLiquidationThresholdSummaryForDeposit(
+      assetData.liquidationThreshold,
+      poolCollateralMarkets,
+      poolId
+    );
+    const meta = estimatePoolHealthAfterDeposit(
+      poolGlobalUserData ?? null,
+      summary,
+      parseFloat(amount) || 0,
+      tokenPrice
+    );
+    if (!meta) return false;
+    return shouldBlockDepositForLowEstimatedHealth(meta.value);
+  }, [
+    mode,
+    assetData.liquidationThreshold,
+    poolCollateralMarkets,
+    poolId,
+    poolGlobalUserData,
+    amount,
+    tokenPrice,
+  ]);
+
+  useEffect(() => {
+    if (!isOpen || mode !== "deposit" || !poolId || !activeAccount?.address) {
+      setPoolGlobalUserData(undefined);
+      return;
+    }
+    let cancelled = false;
+    fetchUserGlobalDataForPool(
+      activeAccount.address,
+      networkToUse as NetworkId,
+      poolId
+    )
+      .then((data) => {
+        if (!cancelled) setPoolGlobalUserData(data ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setPoolGlobalUserData(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, mode, poolId, activeAccount?.address, networkToUse]);
 
   // Calculate max borrow amount when modal opens in borrow mode
   useEffect(() => {
@@ -1015,13 +1081,17 @@ const SupplyBorrowModal = ({
               <SupplyBorrowStats
                 mode={mode}
                 asset={asset}
+                poolId={poolId}
+                network={networkToUse}
                 assetData={assetData}
                 userGlobalData={userGlobalData}
+                poolGlobalUserData={poolGlobalUserData}
                 depositAmount={mode === "deposit" ? parseFloat(amount) || 0 : 0}
                 borrowAmount={mode === "borrow" ? parseFloat(amount) || 0 : 0}
                 userBorrowBalance={userBorrowBalance}
                 userDepositBalance={userDepositBalance}
                 isSToken={assetData.isSToken || false}
+                poolCollateralMarkets={poolCollateralMarkets}
               />
             </div>
 
@@ -1041,7 +1111,8 @@ const SupplyBorrowModal = ({
                   !amount ||
                   parseFloat(amount) <= 0 ||
                   isLoading ||
-                  (mode === "borrow" && !userGlobalData)
+                  (mode === "borrow" && !userGlobalData) ||
+                  (mode === "deposit" && depositBlockedByLowEstimatedHealth)
                 }
                 className={`flex-1 font-semibold h-11 ${mode === "deposit"
                   ? "bg-teal-600 hover:bg-teal-700 text-white"

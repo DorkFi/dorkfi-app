@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- TODO: type modal state and API responses */
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import DepositModal from "./DepositModal";
 import WithdrawModal from "./WithdrawModal";
 import BorrowModal from "./BorrowModal";
@@ -37,6 +37,10 @@ import {
   UserData,
 } from "@/clients/DorkFiLendingPoolClient";
 import { isAlgorandCompatibleNetwork } from "@/config";
+import {
+  buildPoolCollateralMarketRows,
+  liquidationThresholdToPercent,
+} from "@/utils/poolCollateralMarketRows";
 
 interface Deposit {
   asset: string;
@@ -136,6 +140,16 @@ const PortfolioModals = ({
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
   const { toast } = useToast();
+  const depositPoolCollateralMarkets = useMemo(
+    () =>
+      buildPoolCollateralMarketRows(
+        deposits,
+        marketData,
+        depositModal.network,
+        depositModal.poolId
+      ),
+    [deposits, marketData, depositModal.network, depositModal.poolId]
+  );
   const [userDepositIndexCache, setUserDepositIndexCache] = useState<
     Record<string, string>
   >({});
@@ -730,7 +744,7 @@ const PortfolioModals = ({
         borrowAPY: 0,
         utilization: 0,
         collateralFactor: 80, // Default 80%
-        liquidationThreshold: 85, // Default 85%
+        liquidationThreshold: 85, // Default 85% (same scale as collateralFactor)
         liquidity: 0,
         liquidityUSD: 0,
         tokenPrice: tokenPrice,
@@ -778,6 +792,10 @@ const PortfolioModals = ({
           }
         : undefined;
 
+    const liqPct = liquidationThresholdToPercent(
+      market.liquidationThreshold ?? market.marketInfo?.liquidationThreshold
+    );
+
     return {
       icon: getTokenImagePath(asset),
       totalSupply,
@@ -790,6 +808,7 @@ const PortfolioModals = ({
       collateralFactor: market.collateralFactor
         ? market.collateralFactor * 100
         : 0,
+      liquidationThreshold: liqPct,
       liquidity: totalSupply - totalBorrow,
       liquidityUSD: (totalSupply - totalBorrow) * tokenPrice,
       maxTotalDeposits: parseFloat(market.maxTotalDeposits) || 0,
@@ -1457,6 +1476,7 @@ const PortfolioModals = ({
               depositModal.poolId,
               depositModal.network
             )}
+            poolCollateralMarkets={depositPoolCollateralMarkets}
             walletBalance={
               depositModal.network
                 ? walletBalances[
