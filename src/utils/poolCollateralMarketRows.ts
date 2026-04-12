@@ -19,7 +19,7 @@ export type PoolCollateralMarketRow = {
 /** Normalize raw liquidation threshold from API/chain to a 0–1 decimal. */
 export function normalizeLiquidationThresholdDecimal(raw: unknown): number {
   if (raw == null) return 0.85;
-  let n: number =
+  const n: number =
     typeof raw === "bigint"
       ? Number(raw)
       : typeof raw === "string"
