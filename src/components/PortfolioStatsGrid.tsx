@@ -21,7 +21,7 @@ const PortfolioStatsGrid: React.FC<PortfolioStatsGridProps> = ({ userStats }) =>
       <CardHeader className="pb-2 md:pb-3 text-center">
         <CardTitle className="text-xs md:text-sm font-medium flex items-center justify-center gap-2 text-slate-600 dark:text-muted-foreground">
           <ArrowDown className="w-3 h-3 md:w-4 md:h-4 text-whale-gold" />
-          <span className="hidden sm:inline">Total Deposits</span>
+          <span className="hidden sm:inline">Total Supply</span>
           <span className="sm:hidden">Deposits</span>
         </CardTitle>
       </CardHeader>

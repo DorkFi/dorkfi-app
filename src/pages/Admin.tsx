@@ -242,9 +242,9 @@ const MARKET_EXPORT_HEADERS = [
   "Current Borrow Rate (%)",
   "Supply Rate (%)",
   "Utilization (%)",
-  "Total Deposits",
+  "Total Supply",
   "Total Borrows",
-  "Max Total Deposits",
+  "Max Total Supply",
   "Max Total Borrows",
   "Reserves",
   "Deposit Index",
@@ -7068,7 +7068,7 @@ export default function AdminDashboard() {
                             <div className="grid grid-cols-2 gap-4 text-sm">
                               <div>
                                 <p className="text-muted-foreground">
-                                  Total Deposits
+                                  Total Supply
                                 </p>
                                 <p className="font-semibold">
                                   {hasData && market.marketInfo
@@ -8410,7 +8410,7 @@ export default function AdminDashboard() {
                       </div>
                       <div className="flex-1">
                         <div className="text-sm font-medium text-slate-300">
-                          Total Deposits Comparison
+                          Total Supply Comparison
                         </div>
                         <div className="text-xs text-slate-400">
                           Method 1 (Sum): $
@@ -9063,7 +9063,7 @@ export default function AdminDashboard() {
                             {userGlobalMarketData.totalDeposits.toLocaleString()}
                           </div>
                           <div className="text-xs text-muted-foreground">
-                            Total Deposits
+                            Total Supply
                           </div>
                         </div>
                         <div className="text-center">
@@ -9085,7 +9085,7 @@ export default function AdminDashboard() {
                               Net Position
                             </div>
                             <div className="text-xs text-slate-400">
-                              Total Deposits - Total Borrows
+                              Total Supply - Total Borrows
                             </div>
                           </div>
                           <div className="text-right">
@@ -9268,7 +9268,7 @@ export default function AdminDashboard() {
                             {userGlobalFromGetUser.totalDeposits.toLocaleString()}
                           </div>
                           <div className="text-xs text-muted-foreground">
-                            Total Deposits
+                            Total Supply
                           </div>
                         </div>
                         <div className="text-center">
@@ -9310,7 +9310,7 @@ export default function AdminDashboard() {
                               Net Position (get_user)
                             </div>
                             <div className="text-xs text-slate-400">
-                              Total Deposits - Total Borrows
+                              Total Supply - Total Borrows
                             </div>
                           </div>
                           <div className="text-right">
@@ -10391,7 +10391,7 @@ export default function AdminDashboard() {
                               <div className="grid grid-cols-2 gap-4 text-sm">
                                 <div>
                                   <span className="text-muted-foreground">
-                                    Max Total Deposits:
+                                    Max Total Supply:
                                   </span>
                                   <span className="ml-2 font-mono">
                                     {stokenMarketInfo.marketInfo
@@ -10441,7 +10441,7 @@ export default function AdminDashboard() {
                               <div className="grid grid-cols-2 gap-4 text-sm">
                                 <div>
                                   <span className="text-muted-foreground">
-                                    Total Deposits:
+                                    Total Supply:
                                   </span>
                                   <span className="ml-2 font-mono">
                                     {stokenMarketInfo.marketInfo.totalDeposits
@@ -10706,7 +10706,7 @@ export default function AdminDashboard() {
                             Max Borrows
                           </th>
                           <th className="text-right p-2 font-semibold">
-                            Total Deposits
+                            Total Supply
                           </th>
                           <th className="text-right p-2 font-semibold">
                             Total Borrows
@@ -15274,7 +15274,7 @@ export default function AdminDashboard() {
 
                     <div>
                       <Label htmlFor="max-total-deposits">
-                        Max Total Deposits
+                        Max Total Supply
                       </Label>
                       <Input
                         id="max-total-deposits"
@@ -15574,7 +15574,7 @@ export default function AdminDashboard() {
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <Label htmlFor="max-total-deposits">
-                          Max Total Deposits
+                          Max Total Supply
                         </Label>
                         <div className="flex gap-2">
                           <Input
@@ -15762,7 +15762,7 @@ export default function AdminDashboard() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">
-                        Max Total Deposits
+                        Max Total Supply
                       </Label>
                       <p className="text-sm">
                         {Number(newMarket.maxTotalDeposits).toLocaleString()}
@@ -16186,7 +16186,7 @@ export default function AdminDashboard() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <p className="text-sm text-muted-foreground">
-                      Total Deposits
+                      Total Supply
                     </p>
                     <p className="text-lg font-semibold">
                       $
@@ -16364,7 +16364,7 @@ export default function AdminDashboard() {
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">
-                      Max Total Deposits:
+                      Max Total Supply:
                     </span>
                     <span>
                       {(() => {
@@ -16819,7 +16819,7 @@ export default function AdminDashboard() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">
-                    Max Total Deposits:
+                    Max Total Supply:
                   </span>
                   <span className="text-sm">
                     {Number(

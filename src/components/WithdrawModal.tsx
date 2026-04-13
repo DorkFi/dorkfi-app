@@ -921,14 +921,14 @@ const WithdrawModal = ({
                     </div>
                   )}
 
-                  {/* Est. health factor after this withdrawal */}
+                  {/* Pool health (est.) after this withdrawal */}
                   {poolGlobalUserData != null &&
                     estimatedPoolHealthMeta.value !== undefined && (
                       <div className="border-b border-gray-200 dark:border-slate-700 pb-2 md:pb-3">
                         <div className="flex justify-between items-start gap-2">
                           <div className="flex items-center gap-1.5 md:gap-2 min-w-0">
                             <span className="text-[10px] md:text-sm text-slate-500 dark:text-slate-400">
-                              Est. health factor
+                              Pool health (est.)
                             </span>
                             <Tooltip>
                               <TooltipTrigger>

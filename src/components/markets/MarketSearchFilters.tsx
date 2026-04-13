@@ -71,7 +71,7 @@ const MarketSearchFilters = ({
             <SelectContent>
               <SelectItem value="default">Default</SelectItem>
               <SelectItem value="asset">Asset</SelectItem>
-              <SelectItem value="totalSupplyUSD">Total Deposits</SelectItem>
+              <SelectItem value="totalSupplyUSD">Total Supply</SelectItem>
               <SelectItem value="supplyAPY">Deposit APY</SelectItem>
               <SelectItem value="totalBorrowUSD">Total Borrow</SelectItem>
               <SelectItem value="borrowAPY">Borrow APY</SelectItem>

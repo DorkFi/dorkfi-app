@@ -58,6 +58,8 @@ export function buildLiquidationThresholdSummaryForDeposit(
 export type PoolHealthEstimateMeta = {
   value: number | null;
   deltaPercent: number | null;
+  /** Pool HF before the simulated action (capped at 3.0), when applicable */
+  beforeValue?: number | null;
 };
 
 /**
@@ -160,7 +162,7 @@ export function estimatePoolHealthAfterDeposit(
     }
   }
 
-  return { value, deltaPercent };
+  return { value, deltaPercent, beforeValue: beforeCapped };
 }
 
 export function shouldBlockDepositForLowEstimatedHealth(
@@ -228,7 +230,7 @@ export function estimatePoolHealthAfterWithdraw(
     }
   }
 
-  return { value, deltaPercent };
+  return { value, deltaPercent, beforeValue: beforeCapped };
 }
 
 /**
@@ -286,7 +288,7 @@ export function estimatePoolHealthAfterBorrow(
     }
   }
 
-  return { value, deltaPercent };
+  return { value, deltaPercent, beforeValue: beforeCapped };
 }
 
 /**
@@ -344,5 +346,5 @@ export function estimatePoolHealthAfterRepay(
     }
   }
 
-  return { value, deltaPercent };
+  return { value, deltaPercent, beforeValue: beforeCapped };
 }

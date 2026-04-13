@@ -112,7 +112,6 @@ interface SupplyBorrowModalProps {
     lastUpdateTime: number;
   } | null;
   userBorrowBalance?: number;
-  userDepositBalance?: number;
   onTransactionSuccess?: () => void;
   onRefreshWalletBalance?: () => void;
   /** When provided (e.g. from health card), show asset dropdown like Withdraw modal */
@@ -141,7 +140,6 @@ const SupplyBorrowModal = ({
   walletBalanceUSD: propWalletBalanceUSD = 0,
   userGlobalData,
   userBorrowBalance = 0,
-  userDepositBalance = 0,
   onTransactionSuccess,
   availableAssets,
   onSelectAsset,
@@ -1221,7 +1219,7 @@ const SupplyBorrowModal = ({
             <div className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 px-6 pt-4 pb-2 shrink-0">
               <DialogHeader className="pb-0">
                 <DialogTitle className="sr-only">
-                  {mode === "deposit" ? "Deposit" : "Borrow"} {asset}
+                  {mode === "deposit" ? "Supply" : "Borrow"} {asset}
                 </DialogTitle>
                 {mode === "deposit" &&
                 availableAssets &&
@@ -1229,7 +1227,7 @@ const SupplyBorrowModal = ({
                 onSelectAsset ? (
                   <div className="space-y-2">
                     <h2 className="text-2xl font-bold text-center text-slate-800 dark:text-white capitalize">
-                      deposit
+                      supply
                     </h2>
                     <div className="flex items-center justify-center gap-3 pb-2 mt-3 h-14">
                       <Select
@@ -1385,7 +1383,6 @@ const SupplyBorrowModal = ({
                 depositAmount={mode === "deposit" ? parseFloat(amount) || 0 : 0}
                 borrowAmount={mode === "borrow" ? parseFloat(amount) || 0 : 0}
                 userBorrowBalance={userBorrowBalance}
-                userDepositBalance={userDepositBalance}
                 isSToken={assetData.isSToken || false}
                 poolCollateralMarkets={poolCollateralMarkets}
               />
@@ -1472,7 +1469,7 @@ const SupplyBorrowModal = ({
                         Building transaction…
                       </div>
                     ) : (
-                      `${mode === "deposit" ? "Deposit" : "Borrow"} ${asset}`
+                      `${mode === "deposit" ? "Supply" : "Borrow"} ${asset}`
                     )}
                   </Button>
                 </>
@@ -1485,4 +1482,4 @@ const SupplyBorrowModal = ({
   );
 };
 
-export default SupplyBorrowModal; // Updated with userDepositBalance prop
+export default SupplyBorrowModal;

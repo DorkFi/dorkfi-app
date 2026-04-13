@@ -688,7 +688,7 @@ const MarketsDesktopTable = ({
               </TableHead>
               <TableHead className="text-center">
                 <div className="flex items-center justify-center gap-1">
-                  Total Deposits
+                  Total Supply
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <span>

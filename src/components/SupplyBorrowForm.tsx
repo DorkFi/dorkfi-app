@@ -459,7 +459,7 @@ const SupplyBorrowForm = ({
               Processing...
             </div>
           ) : (
-            `${mode === "deposit" ? "Deposit" : "Borrow"} ${asset}`
+            `${mode === "deposit" ? "Supply" : "Borrow"} ${asset}`
           )}
         </Button>
       )}

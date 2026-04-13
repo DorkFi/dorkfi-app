@@ -758,9 +758,9 @@ const RepayModal = ({
                               <div className="flex flex-col items-start min-w-0">
                                 <span className="text-xs md:text-sm text-slate-500 dark:text-slate-400 flex flex-wrap items-center gap-1">
                                   {repayPoolHealthLoading
-                                    ? "Est. health factor"
+                                    ? "Pool health (est.)"
                                     : showPoolHealthEstimate
-                                      ? "Est. health factor"
+                                      ? "Pool health (est.)"
                                       : "Health factor"}
                                   {!repayPoolHealthLoading &&
                                     !showPoolHealthEstimate && (

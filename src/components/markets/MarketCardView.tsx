@@ -277,10 +277,10 @@ const MarketCardView = ({
                   disabled={isAtDepositCap(Number(market.totalSupply ?? 0), Number(market.supplyCap ?? 0))}
                   title={
                     isAtDepositCap(Number(market.totalSupply ?? 0), Number(market.supplyCap ?? 0))
-                      ? "Market at deposit cap"
+                      ? "Market at supply cap"
                       : undefined
                   }
-                >Deposit</DorkFiButton>
+                >Supply</DorkFiButton>
                 <DorkFiButton
                   variant="borrow-outline"
                   onClick={e => {

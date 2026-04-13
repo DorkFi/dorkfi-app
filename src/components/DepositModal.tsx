@@ -246,11 +246,11 @@ const DepositModal = ({
                       {marketStats.collateralFactor.toFixed(0)}%
                     </span>
                   </div>
-                  {/* Total Deposits */}
+                  {/* Total Supply */}
                   <div className="flex justify-between items-center">
                     <div className="flex items-center gap-2">
                       <span className="text-sm text-slate-500 dark:text-slate-400">
-                        Total Deposits
+                        Total Supply
                       </span>
                       <Tooltip>
                         <TooltipTrigger asChild>
@@ -297,7 +297,7 @@ const DepositModal = ({
                           <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
                         </TooltipTrigger>
                         <TooltipContent>
-                          <p>Estimated annual percentage yield for new deposits based on the current market rates.</p>
+                          <p>Estimated annual percentage yield for new supply based on the current market rates.</p>
                         </TooltipContent>
                       </Tooltip>
                     </div>

@@ -271,7 +271,6 @@ const MarketsTable = () => {
     lastUpdateTime: number;
   } | null>(null);
   const [userBorrowBalance, setUserBorrowBalance] = useState<number>(0);
-  const [userDepositBalance, setUserDepositBalance] = useState<number>(0);
   /** Same-pool supplied markets + LT for deposit modal (from chain; not paginated table). */
   const [depositPoolCollateralMarkets, setDepositPoolCollateralMarkets] =
     useState<PoolCollateralMarketRow[]>([]);
@@ -677,30 +676,6 @@ const MarketsTable = () => {
     try {
       // Fetch wallet balance before opening modal
       await fetchWalletBalance(asset, poolId);
-
-      // Fetch user's existing deposit balance for this asset
-      if (activeAccount?.address) {
-        const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-        // If poolId is provided, find the token that matches both symbol and poolId
-        // Otherwise, fall back to finding by symbol only (for backward compatibility)
-        const token = poolId
-          ? tokens.find((t) => t.symbol === asset && t.poolId === poolId)
-          : tokens.find((t) => t.symbol === asset);
-
-        if (token && token.poolId && token.underlyingContractId) {
-          const depositBalance = await fetchUserDepositBalance(
-            activeAccount.address,
-            token.poolId,
-            token.underlyingContractId,
-            currentNetwork
-          );
-          setUserDepositBalance(depositBalance || 0);
-        } else {
-          setUserDepositBalance(0);
-        }
-      } else {
-        setUserDepositBalance(0);
-      }
 
       let poolCollateralRows: PoolCollateralMarketRow[] = [];
       if (activeAccount?.address && poolId != null && poolId !== "") {
@@ -2799,7 +2774,7 @@ const MarketsTable = () => {
             </p>
             <div className="mt-3 space-y-1 text-xs text-slate-600 dark:text-slate-400">
               <p>
-                • Deposit Assets: Earn interest with interest bearing tokens
+                • Supply Assets: Earn interest with interest bearing tokens
                 that grow in value over time.
               </p>
               <p>
@@ -2886,7 +2861,6 @@ const MarketsTable = () => {
               walletBalanceUSD={
                 walletBalances[depositModal.asset]?.balanceUSD || 0
               }
-              userDepositBalance={userDepositBalance}
               poolCollateralMarkets={depositPoolCollateralMarkets}
               onTransactionSuccess={async () => {
                 // Refresh wallet balance immediately after successful transaction
