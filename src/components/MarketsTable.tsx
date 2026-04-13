@@ -786,11 +786,28 @@ const MarketsTable = () => {
         setUserBorrowBalance(0);
       }
 
+      let poolCollateralRows: PoolCollateralMarketRow[] = [];
+      if (activeAccount?.address && poolId != null && poolId !== "") {
+        try {
+          poolCollateralRows = await fetchPoolCollateralMarketRowsForDeposit(
+            activeAccount.address,
+            currentNetwork as NetworkId,
+            poolId
+          );
+        } catch (e) {
+          console.error(
+            "Error loading pool collateral markets for borrow:",
+            e
+          );
+        }
+      }
+      setDepositPoolCollateralMarkets(poolCollateralRows);
+
       // Open modal regardless of connection status
       setBorrowModal({ isOpen: true, asset, poolId });
     } catch (error) {
       console.error("Error fetching user data for borrow:", error);
-      // Still open modal even if data fetch fails
+      setDepositPoolCollateralMarkets([]);
       setBorrowModal({ isOpen: true, asset, poolId });
     } finally {
       setIsLoadingGlobalData(false);
@@ -2927,10 +2944,12 @@ const MarketsTable = () => {
               onClose={handleCloseBorrowModal}
               asset={borrowModal.asset}
               poolId={borrowModal.poolId}
+              network={currentNetwork}
               mode="borrow"
               assetData={getAssetData(borrowModal.asset, borrowModal.poolId)}
               userGlobalData={userGlobalData}
               userBorrowBalance={userBorrowBalance}
+              poolCollateralMarkets={depositPoolCollateralMarkets}
               onTransactionSuccess={() => {
                 // Refresh market data after successful borrow
                 if (borrowModal.asset) {

@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import {
   buildLiquidationThresholdSummaryForDeposit,
   DEPOSIT_ESTIMATED_HEALTH_CRITICAL_MAX,
+  estimatePoolHealthAfterBorrow,
   estimatePoolHealthAfterDeposit,
 } from "@/utils/depositModalPoolHealthEstimate";
 
@@ -140,7 +141,10 @@ const SupplyBorrowStats = ({
   };
 
   const liquidationThresholdSummary = useMemo(() => {
-    if (mode !== "deposit" || assetData.liquidationThreshold == null) {
+    if (
+      (mode !== "deposit" && mode !== "borrow") ||
+      assetData.liquidationThreshold == null
+    ) {
       return null;
     }
     return buildLiquidationThresholdSummaryForDeposit(
@@ -151,7 +155,10 @@ const SupplyBorrowStats = ({
   }, [mode, assetData.liquidationThreshold, poolCollateralMarkets, poolId]);
 
   const estimatedPoolHealthMeta = useMemo(() => {
-    if (mode !== "deposit" || poolGlobalUserData == null) {
+    if (
+      (mode !== "deposit" && mode !== "borrow") ||
+      poolGlobalUserData == null
+    ) {
       return {
         value: undefined as number | null | undefined,
         deltaPercent: undefined as number | null | undefined,
@@ -163,10 +170,25 @@ const SupplyBorrowStats = ({
         deltaPercent: undefined as number | null | undefined,
       };
     }
-    const meta = estimatePoolHealthAfterDeposit(
+    if (mode === "deposit") {
+      const meta = estimatePoolHealthAfterDeposit(
+        poolGlobalUserData,
+        liquidationThresholdSummary,
+        depositAmount,
+        tokenPrice
+      );
+      if (!meta) {
+        return {
+          value: undefined as number | null | undefined,
+          deltaPercent: undefined as number | null | undefined,
+        };
+      }
+      return { value: meta.value, deltaPercent: meta.deltaPercent };
+    }
+    const meta = estimatePoolHealthAfterBorrow(
       poolGlobalUserData,
       liquidationThresholdSummary,
-      depositAmount,
+      borrowAmount,
       tokenPrice
     );
     if (!meta) {
@@ -181,6 +203,7 @@ const SupplyBorrowStats = ({
     poolGlobalUserData,
     liquidationThresholdSummary,
     depositAmount,
+    borrowAmount,
     tokenPrice,
   ]);
 
@@ -299,7 +322,7 @@ const SupplyBorrowStats = ({
         )}
 
         {/* Liquidation threshold: headline values + details (same expand pattern as Collateral Factor) */}
-        {mode === "deposit" && liquidationThresholdSummary && (
+        {(mode === "deposit" || mode === "borrow") && liquidationThresholdSummary && (
           <div className="border-b border-gray-200 dark:border-slate-700 pb-2 md:pb-3">
             <div className="flex justify-between items-start gap-2">
               <button
@@ -338,7 +361,9 @@ const SupplyBorrowStats = ({
               <div className="mt-2 pt-2 border-t border-gray-200 dark:border-slate-700">
                 <div className="space-y-3 text-xs text-slate-600 dark:text-slate-400">
                   <p>
-                    The large figure is the pool minimum liquidation threshold after this deposit (the value Portfolio uses for aggregate health when this market is the binding constraint). The line below the figure, when shown, is this market&apos;s own threshold. Liquidation may occur if health falls to this loan-to-value level.
+                    {mode === "borrow"
+                      ? "The large figure is the pool minimum liquidation threshold (the value Portfolio uses for aggregate health when this market is the binding constraint). The line below the figure, when shown, is this market's own threshold."
+                      : "The large figure is the pool minimum liquidation threshold after this deposit (the value Portfolio uses for aggregate health when this market is the binding constraint). The line below the figure, when shown, is this market's own threshold. Liquidation may occur if health falls to this loan-to-value level."}
                   </p>
                   {poolCollateralMarkets &&
                     poolCollateralMarkets.length > 0 &&
@@ -418,8 +443,8 @@ const SupplyBorrowStats = ({
           </div>
         )}
 
-        {/* Estimated pool health factor (after this deposit); below liquidation threshold */}
-        {mode === "deposit" &&
+        {/* Estimated pool health factor (after deposit or borrow); below liquidation threshold */}
+        {(mode === "deposit" || mode === "borrow") &&
           poolGlobalUserData != null &&
           estimatedPoolHealthMeta.value !== undefined && (
             <div className="border-b border-gray-200 dark:border-slate-700 pb-2 md:pb-3">
@@ -434,7 +459,9 @@ const SupplyBorrowStats = ({
                     </TooltipTrigger>
                     <TooltipContent className="max-w-xs">
                       <p>
-                        Estimate for this lending pool after this deposit: (collateral × pool minimum liquidation threshold) ÷ borrows, same shape as on-chain health, capped at 3.00 like Portfolio. Collateral includes your current pool total plus the USD value of the amount above (uses oracle price when available). The colored change is percent vs your current pool position at the prior minimum threshold (before this deposit).
+                        {mode === "borrow"
+                          ? "Estimate for this lending pool after this borrow: (collateral × pool minimum liquidation threshold) ÷ total borrows (including this amount in USD), same shape as on-chain health, capped at 3.00 like Portfolio. The colored change is percent vs your current pool position before this borrow."
+                          : "Estimate for this lending pool after this deposit: (collateral × pool minimum liquidation threshold) ÷ borrows, same shape as on-chain health, capped at 3.00 like Portfolio. Collateral includes your current pool total plus the USD value of the amount above (uses oracle price when available). The colored change is percent vs your current pool position at the prior minimum threshold (before this deposit)."}
                       </p>
                     </TooltipContent>
                   </Tooltip>
@@ -610,40 +637,6 @@ const SupplyBorrowStats = ({
                 </div>
                 <span className="text-sm font-medium text-red-600 dark:text-red-400">
                   {userBorrowBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {asset}
-                </span>
-              </div>
-            )}
-
-            {userGlobalData && (
-              <div className="flex justify-between items-center">
-                <div className="flex items-center gap-1.5 md:gap-2">
-                  <span className="text-[10px] md:text-sm text-slate-500 dark:text-slate-400">Max Borrowable</span>
-                  <Tooltip>
-                    <TooltipTrigger>
-                      <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Maximum amount you can borrow based on your total collateral value (from the protocol).</p>
-                      {userGlobalData.totalCollateralValue === 0 && userGlobalData.totalBorrowValue === 0 && (
-                        <p className="mt-1 text-amber-600 dark:text-amber-400 text-xs">If you have supplied collateral but see $0, refresh the page or sync your position so the protocol can update your account.</p>
-                      )}
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-                <span className="text-sm font-medium text-teal-600 dark:text-teal-400">
-                  ${(() => {
-                    // Max borrowable from collateral; cap by remaining borrow cap when applicable.
-                    // assetData.totalBorrow and maxTotalBorrows are in same token units; tokenPrice is USD per token.
-                    const collateralFactorDecimal = assetData.collateralFactor / 100;
-                    let maxBorrowable = Math.max(0, (userGlobalData.totalCollateralValue * collateralFactorDecimal) - userGlobalData.totalBorrowValue);
-                    const borrowCap = Number(assetData.maxTotalBorrows ?? 0);
-                    if (borrowCap > 0 && tokenPrice > 0) {
-                      const totalBorrow = Number(assetData.totalBorrow ?? 0);
-                      const remainingBorrowCapUSD = Math.max(0, borrowCap - totalBorrow) * tokenPrice;
-                      maxBorrowable = Math.min(maxBorrowable, remainingBorrowCapUSD);
-                    }
-                    return maxBorrowable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                  })()}
                 </span>
               </div>
             )}

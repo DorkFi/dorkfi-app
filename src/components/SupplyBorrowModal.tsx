@@ -24,6 +24,7 @@ import {
   fetchUserGlobalData,
   fetchUserGlobalDataForPool,
   fetchMarketInfoFromContract,
+  MAX_WITHDRAW_HEALTH_FACTOR_TARGET,
 } from "@/services/lendingService";
 import {
   getTokenConfig,
@@ -50,7 +51,9 @@ import { updateTransactionMetadata } from "@/utils/transactionUtils";
 import type { PoolCollateralMarketRow } from "@/utils/poolCollateralMarketRows";
 import {
   buildLiquidationThresholdSummaryForDeposit,
+  estimatePoolHealthAfterBorrow,
   estimatePoolHealthAfterDeposit,
+  maxBorrowTokenAmountForMinEstimatedHealth,
   shouldBlockDepositForLowEstimatedHealth,
 } from "@/utils/depositModalPoolHealthEstimate";
 
@@ -186,8 +189,128 @@ const SupplyBorrowModal = ({
     tokenPrice,
   ]);
 
+  const borrowTokenDecimals = useMemo(() => {
+    if (mode !== "borrow") return 8;
+    const raw = getTokenConfig(networkToUse as NetworkId, asset);
+    const cfg = Array.isArray(raw)
+      ? raw.find(
+          (tc: { poolId?: string | number }) =>
+            String(tc.poolId) === String(poolId)
+        ) ?? raw[0]
+      : raw;
+    return cfg?.decimals ?? 8;
+  }, [mode, networkToUse, asset, poolId]);
+
+  /** Protocol + market liquidity cap in human tokens (always finite in borrow mode). */
+  const borrowLiquidityOnlyTokens = useMemo(() => {
+    if (mode !== "borrow") return null;
+    const raw =
+      calculatedMaxBorrow !== null ? calculatedMaxBorrow : assetData.liquidity;
+    const safeRaw =
+      typeof raw === "number" && Number.isFinite(raw) ? Math.max(0, raw) : 0;
+    const borrowCap = assetData.maxTotalBorrows ?? 0;
+    if (borrowCap <= 0) return safeRaw;
+    const remaining = Math.max(0, borrowCap - (assetData.totalBorrow ?? 0));
+    return Math.min(safeRaw, remaining);
+  }, [
+    mode,
+    calculatedMaxBorrow,
+    assetData.liquidity,
+    assetData.maxTotalBorrows,
+    assetData.totalBorrow,
+  ]);
+
+  const liquidationSummaryForBorrowCap = useMemo(() => {
+    if (mode !== "borrow") return null;
+    return buildLiquidationThresholdSummaryForDeposit(
+      assetData.liquidationThreshold,
+      poolCollateralMarkets,
+      poolId
+    );
+  }, [mode, assetData.liquidationThreshold, poolCollateralMarkets, poolId]);
+
+  const hfSafeMaxBorrowTokens = useMemo(() => {
+    if (
+      mode !== "borrow" ||
+      poolGlobalUserData == null ||
+      !liquidationSummaryForBorrowCap
+    ) {
+      return null;
+    }
+    const raw = maxBorrowTokenAmountForMinEstimatedHealth(
+      poolGlobalUserData,
+      liquidationSummaryForBorrowCap,
+      tokenPrice,
+      MAX_WITHDRAW_HEALTH_FACTOR_TARGET
+    );
+    if (raw == null || !Number.isFinite(raw)) return null;
+    const d = Math.min(Math.max(0, borrowTokenDecimals), 8);
+    const f = 10 ** d;
+    return Math.floor(raw * f + Number.EPSILON) / f;
+  }, [
+    mode,
+    poolGlobalUserData,
+    liquidationSummaryForBorrowCap,
+    tokenPrice,
+    borrowTokenDecimals,
+  ]);
+
+  const effectiveBorrowCap = useMemo(() => {
+    if (mode !== "borrow" || borrowLiquidityOnlyTokens == null) return null;
+    if (hfSafeMaxBorrowTokens == null) return borrowLiquidityOnlyTokens;
+    return Math.max(0, Math.min(borrowLiquidityOnlyTokens, hfSafeMaxBorrowTokens));
+  }, [mode, borrowLiquidityOnlyTokens, hfSafeMaxBorrowTokens]);
+
+  /** Est. pool HF after borrowing `amount` (for submit / button guard). */
+  const estimatedHealthFactorAfterBorrow = useMemo(() => {
+    if (
+      mode !== "borrow" ||
+      poolGlobalUserData == null ||
+      !liquidationSummaryForBorrowCap
+    ) {
+      return null;
+    }
+    const amt = parseFloat(amount) || 0;
+    if (amt <= 0) return null;
+    const meta = estimatePoolHealthAfterBorrow(
+      poolGlobalUserData,
+      liquidationSummaryForBorrowCap,
+      amt,
+      tokenPrice
+    );
+    return meta?.value ?? null;
+  }, [mode, poolGlobalUserData, liquidationSummaryForBorrowCap, amount, tokenPrice]);
+
+  const borrowSubmitBlockedBelowHfTarget = useMemo(() => {
+    if (mode !== "borrow") return false;
+    const a = parseFloat(amount) || 0;
+    if (a <= 0) return false;
+    const v = estimatedHealthFactorAfterBorrow;
+    if (v == null || !Number.isFinite(v)) return false;
+    return v < MAX_WITHDRAW_HEALTH_FACTOR_TARGET - 1e-9;
+  }, [mode, amount, estimatedHealthFactorAfterBorrow]);
+
+  const borrowExceedsEffectiveCap = useMemo(() => {
+    if (mode !== "borrow" || effectiveBorrowCap == null) return false;
+    const a = parseFloat(amount) || 0;
+    return a > effectiveBorrowCap + 1e-9;
+  }, [mode, amount, effectiveBorrowCap]);
+
+  const borrowNoCapacityAtHfTarget = useMemo(() => {
+    return (
+      mode === "borrow" &&
+      effectiveBorrowCap != null &&
+      effectiveBorrowCap <= 0
+    );
+  }, [mode, effectiveBorrowCap]);
+
   useEffect(() => {
-    if (!isOpen || mode !== "deposit" || !poolId || !activeAccount?.address) {
+    const needsPoolHealth =
+      (mode === "deposit" || mode === "borrow") &&
+      isOpen &&
+      poolId &&
+      activeAccount?.address;
+    if (!needsPoolHealth) {
       setPoolGlobalUserData(undefined);
       return;
     }
@@ -455,6 +578,29 @@ const SupplyBorrowModal = ({
       return;
     }
 
+    if (mode === "borrow") {
+      if (!userGlobalData) {
+        setError("User data is still loading. Try again in a moment.");
+        return;
+      }
+      if (borrowNoCapacityAtHfTarget) {
+        setError("No borrow capacity available at the current health factor target.");
+        return;
+      }
+      if (borrowExceedsEffectiveCap) {
+        setError(
+          `Borrow amount exceeds the maximum that keeps estimated health factor at or above ${MAX_WITHDRAW_HEALTH_FACTOR_TARGET.toFixed(2)}.`
+        );
+        return;
+      }
+      if (borrowSubmitBlockedBelowHfTarget) {
+        setError(
+          `Borrow would put estimated pool health factor below ${MAX_WITHDRAW_HEALTH_FACTOR_TARGET.toFixed(2)}.`
+        );
+        return;
+      }
+    }
+
     setIsLoading(true);
     setError(null);
 
@@ -536,11 +682,10 @@ const SupplyBorrowModal = ({
         );
       }
 
-      // For borrows, check market liquidity only
+      // For borrows, check liquidity and HF-safe cap (same target as withdraw modal)
       if (mode === "borrow") {
         const borrowAmount = parseFloat(amount);
 
-        // Check market liquidity
         if (borrowAmount > assetData.liquidity) {
           setError("Insufficient liquidity available for borrowing");
           setIsLoading(false);
@@ -1053,13 +1198,7 @@ const SupplyBorrowModal = ({
                 walletBalanceUSD={propWalletBalanceUSD}
                 availableToSupplyOrBorrow={
                   mode === "borrow"
-                    ? (() => {
-                        const raw = calculatedMaxBorrow !== null ? calculatedMaxBorrow : assetData.liquidity;
-                        const borrowCap = assetData.maxTotalBorrows ?? 0;
-                        if (borrowCap <= 0) return raw;
-                        const remaining = Math.max(0, borrowCap - (assetData.totalBorrow ?? 0));
-                        return Math.min(raw, remaining);
-                      })()
+                    ? effectiveBorrowCap ?? borrowLiquidityOnlyTokens ?? 0
                     : assetData.liquidity
                 }
                 supplyAPY={assetData.supplyAPY}
@@ -1070,7 +1209,12 @@ const SupplyBorrowModal = ({
                 onAmountChange={handleAmountChange}
                 onSubmit={handleSubmit}
                 isLoading={isLoading}
-                disabled={mode === "borrow" && !userGlobalData}
+                disabled={
+                  (mode === "borrow" && !userGlobalData) ||
+                  (mode === "borrow" && borrowExceedsEffectiveCap) ||
+                  (mode === "borrow" && borrowSubmitBlockedBelowHfTarget) ||
+                  (mode === "borrow" && borrowNoCapacityAtHfTarget)
+                }
                 hideButton={true}
                 isLoadingMaxBorrow={isLoadingMaxBorrow}
                 maxBorrowError={maxBorrowError}
@@ -1112,6 +1256,9 @@ const SupplyBorrowModal = ({
                   parseFloat(amount) <= 0 ||
                   isLoading ||
                   (mode === "borrow" && !userGlobalData) ||
+                  (mode === "borrow" && borrowNoCapacityAtHfTarget) ||
+                  (mode === "borrow" && borrowExceedsEffectiveCap) ||
+                  (mode === "borrow" && borrowSubmitBlockedBelowHfTarget) ||
                   (mode === "deposit" && depositBlockedByLowEstimatedHealth)
                 }
                 className={`flex-1 font-semibold h-11 ${mode === "deposit"

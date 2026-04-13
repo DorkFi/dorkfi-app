@@ -161,6 +161,17 @@ const PortfolioModals = ({
       ),
     [deposits, marketData, withdrawModal.network, withdrawModal.poolId]
   );
+
+  const borrowPoolCollateralMarkets = useMemo(
+    () =>
+      buildPoolCollateralMarketRows(
+        deposits,
+        marketData,
+        borrowModal.network,
+        borrowModal.poolId
+      ),
+    [deposits, marketData, borrowModal.network, borrowModal.poolId]
+  );
   const [userDepositIndexCache, setUserDepositIndexCache] = useState<
     Record<string, string>
   >({});
@@ -1761,6 +1772,7 @@ const PortfolioModals = ({
             assetData={getAssetData(borrowModal.asset, borrowModal.poolId)}
             userGlobalData={userGlobalData}
             userBorrowBalance={userBorrowBalance || 0}
+            poolCollateralMarkets={borrowPoolCollateralMarkets}
             onTransactionSuccess={() => {
               if (onRefreshMarket) {
                 setTimeout(() => {

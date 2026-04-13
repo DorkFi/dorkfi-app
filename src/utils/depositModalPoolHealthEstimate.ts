@@ -1,4 +1,7 @@
-import { calculateUserHealthFactor } from "@/utils/userHealth";
+import {
+  calculateUserHealthFactor,
+  normalizeLiquidationThresholdToDecimal,
+} from "@/utils/userHealth";
 import type { PoolCollateralMarketRow } from "@/utils/poolCollateralMarketRows";
 
 /** Est. HF at or below this (after deposit, capped 3.0) blocks deposit in the modal. */
@@ -56,6 +59,52 @@ export type PoolHealthEstimateMeta = {
   value: number | null;
   deltaPercent: number | null;
 };
+
+/**
+ * Max **additional** borrow (human token amount) such that pool HF stays at or above {@link minHealthFactor},
+ * using (collateral × min LT) / total borrows after borrow, with USD notionals from oracle price.
+ */
+export function maxBorrowTokenAmountForMinEstimatedHealth(
+  poolGlobalUserData: {
+    totalCollateralValue: number;
+    totalBorrowValue: number;
+  } | null,
+  liquidationSummary: LiquidationThresholdSummaryDeposit | null,
+  tokenPrice: number,
+  minHealthFactor: number
+): number | null {
+  if (
+    !poolGlobalUserData ||
+    !liquidationSummary ||
+    !Number.isFinite(tokenPrice) ||
+    tokenPrice <= 0 ||
+    !Number.isFinite(minHealthFactor) ||
+    minHealthFactor <= 0
+  ) {
+    return null;
+  }
+  const C = poolGlobalUserData.totalCollateralValue;
+  const B = poolGlobalUserData.totalBorrowValue;
+  const minLt = liquidationSummary.minAfter;
+  if (
+    !Number.isFinite(C) ||
+    C <= 0 ||
+    !Number.isFinite(B) ||
+    B < 0 ||
+    !Number.isFinite(minLt)
+  ) {
+    return null;
+  }
+  const ltDec = normalizeLiquidationThresholdToDecimal(minLt);
+  if (!Number.isFinite(ltDec) || ltDec <= 0) return null;
+
+  const maxTotalBorrowUsd = (C * ltDec) / minHealthFactor;
+  const maxAdditionalUsd = maxTotalBorrowUsd - B;
+  if (!Number.isFinite(maxAdditionalUsd)) return null;
+  if (maxAdditionalUsd <= 0) return 0;
+
+  return maxAdditionalUsd / tokenPrice;
+}
 
 /**
  * Pool-level HF after deposit vs before (same cap 3.0 as Portfolio).
@@ -160,6 +209,64 @@ export function estimatePoolHealthAfterWithdraw(
     borrowUsd,
     ltBefore,
     "withdraw-modal-est-hf-before"
+  );
+
+  const cap = (h: number | null) => (h == null ? null : Math.min(h, 3.0));
+  const value = cap(hfAfterRaw);
+  const beforeCapped = cap(hfBeforeRaw);
+
+  let deltaPercent: number | null = null;
+  if (
+    beforeCapped != null &&
+    value != null &&
+    beforeCapped > 0 &&
+    Number.isFinite(beforeCapped)
+  ) {
+    const pct = ((value - beforeCapped) / beforeCapped) * 100;
+    if (Number.isFinite(pct) && Math.abs(pct) > 1e-6) {
+      deltaPercent = pct;
+    }
+  }
+
+  return { value, deltaPercent };
+}
+
+/**
+ * Pool-level HF after borrowing more vs current (same cap 3.0 as Portfolio).
+ * Collateral unchanged; borrow (USD) increases by borrowAmount × token price.
+ */
+export function estimatePoolHealthAfterBorrow(
+  poolGlobalUserData: {
+    totalCollateralValue: number;
+    totalBorrowValue: number;
+  } | null,
+  liquidationSummary: LiquidationThresholdSummaryDeposit | null,
+  borrowAmount: number,
+  tokenPrice: number
+): PoolHealthEstimateMeta | null {
+  if (poolGlobalUserData == null || liquidationSummary == null) return null;
+  const minLt = liquidationSummary.minAfter;
+  const ltBefore = liquidationSummary.minSup ?? liquidationSummary.minAfter;
+  if (!Number.isFinite(minLt) || !Number.isFinite(ltBefore)) return null;
+
+  const borrowUsd =
+    Math.max(0, Number.isFinite(borrowAmount) ? borrowAmount : 0) *
+    (tokenPrice > 0 && Number.isFinite(tokenPrice) ? tokenPrice : 0);
+  const C0 = poolGlobalUserData.totalCollateralValue;
+  const B0 = poolGlobalUserData.totalBorrowValue;
+  const borrowAfter = B0 + borrowUsd;
+
+  const hfAfterRaw = calculateUserHealthFactor(
+    C0,
+    borrowAfter,
+    minLt,
+    "borrow-modal-est-hf-after"
+  );
+  const hfBeforeRaw = calculateUserHealthFactor(
+    C0,
+    B0,
+    ltBefore,
+    "borrow-modal-est-hf-before"
   );
 
   const cap = (h: number | null) => (h == null ? null : Math.min(h, 3.0));
