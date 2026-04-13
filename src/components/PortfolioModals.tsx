@@ -15,6 +15,7 @@ import {
   fetchUserWalletBalance,
   fetchMarketInfoFromContract,
   getMaxWithdrawableForMarket,
+  fetchUserGlobalDataForPool,
 } from "@/services/lendingService";
 import {
   getTokenConfig,
@@ -172,6 +173,29 @@ const PortfolioModals = ({
       ),
     [deposits, marketData, borrowModal.network, borrowModal.poolId]
   );
+
+  const repayPoolCollateralMarkets = useMemo(
+    () =>
+      buildPoolCollateralMarketRows(
+        deposits,
+        marketData,
+        repayModal.network,
+        repayModal.poolId
+      ),
+    [deposits, marketData, repayModal.network, repayModal.poolId]
+  );
+
+  /** Per-pool USD totals for repay modal est. health (same source as SupplyBorrowModal borrow). */
+  const [repayPoolGlobalUserData, setRepayPoolGlobalUserData] = useState<
+    | {
+        totalCollateralValue: number;
+        totalBorrowValue: number;
+        lastUpdateTime: number;
+      }
+    | null
+    | undefined
+  >(undefined);
+
   const [userDepositIndexCache, setUserDepositIndexCache] = useState<
     Record<string, string>
   >({});
@@ -1230,6 +1254,55 @@ const PortfolioModals = ({
     onRefreshWalletBalance,
   ]);
 
+  useEffect(() => {
+    const needsPool =
+      repayModal.isOpen && repayModal.asset && activeAccount?.address;
+    if (!needsPool) {
+      setRepayPoolGlobalUserData(undefined);
+      return;
+    }
+    const networkToUse = (repayModal.network || currentNetwork) as NetworkId;
+    const tokens = getAllTokensWithDisplayInfo(networkToUse);
+    const tok = repayModal.poolId
+      ? tokens.find(
+          (t) =>
+            t.symbol === repayModal.asset &&
+            String(t.poolId) === String(repayModal.poolId)
+        )
+      : tokens.find((t) => t.symbol === repayModal.asset);
+    const poolIdStr = repayModal.poolId
+      ? String(repayModal.poolId)
+      : tok?.poolId != null
+        ? String(tok.poolId)
+        : null;
+    if (!poolIdStr) {
+      setRepayPoolGlobalUserData(null);
+      return;
+    }
+    let cancelled = false;
+    fetchUserGlobalDataForPool(
+      activeAccount.address,
+      networkToUse,
+      poolIdStr
+    )
+      .then((data) => {
+        if (!cancelled) setRepayPoolGlobalUserData(data ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setRepayPoolGlobalUserData(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    repayModal.isOpen,
+    repayModal.asset,
+    repayModal.poolId,
+    repayModal.network,
+    activeAccount?.address,
+    currentNetwork,
+  ]);
+
   const handleRepaySubmit = async (amount: string, isRepayAll?: boolean) => {
     if (!activeAccount?.address || !repayModal.asset) {
       console.error("No active account or asset for repayment");
@@ -1848,6 +1921,12 @@ const PortfolioModals = ({
               : undefined
             : undefined;
 
+          const repayAssetData = getAssetData(
+            repayModal.asset,
+            repayModal.poolId,
+            repayModal.network
+          );
+
           return (
             <RepayModal
               isOpen={repayModal.isOpen}
@@ -1873,6 +1952,11 @@ const PortfolioModals = ({
                 repayModal.asset,
                 repayModal.poolId
               )}
+              poolGlobalUserData={repayPoolGlobalUserData}
+              poolCollateralMarkets={repayPoolCollateralMarkets}
+              liquidationThresholdPercent={
+                repayAssetData?.liquidationThreshold ?? null
+              }
               lastUpdateTime={marketLastUpdateTime}
               userLastUpdateTime={userLastUpdateTime}
               availableAssets={

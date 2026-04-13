@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   Dialog,
   DialogContent,
@@ -20,6 +20,19 @@ import SupplyBorrowCongrats from "./SupplyBorrowCongrats";
 import { formatRelativeTime } from "@/utils/timeUtils";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { calculateBorrowAPY } from "@/utils/apyCalculations";
+import { useTokenPrice } from "@/hooks/useTokenPrice";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
+import type { PoolCollateralMarketRow } from "@/utils/poolCollateralMarketRows";
+import {
+  buildLiquidationThresholdSummaryForDeposit,
+  DEPOSIT_ESTIMATED_HEALTH_CRITICAL_MAX,
+  estimatePoolHealthAfterRepay,
+} from "@/utils/depositModalPoolHealthEstimate";
 
 interface RepayModalProps {
   isOpen: boolean;
@@ -55,6 +68,15 @@ interface RepayModalProps {
     network?: string;
   }[];
   onSelectAsset?: (asset: string, poolId?: string, network?: string) => void;
+  /** Per-pool user totals (USD) for est. health; undefined = loading */
+  poolGlobalUserData?: {
+    totalCollateralValue: number;
+    totalBorrowValue: number;
+    lastUpdateTime: number;
+  } | null;
+  poolCollateralMarkets?: PoolCollateralMarketRow[];
+  /** Percent 0–100; used with pool collateral rows for min LT (borrow modal parity). */
+  liquidationThresholdPercent?: number | null;
 }
 
 const RepayModal = ({
@@ -73,10 +95,15 @@ const RepayModal = ({
   onSubmit,
   availableAssets,
   onSelectAsset,
+  poolGlobalUserData,
+  poolCollateralMarkets,
+  liquidationThresholdPercent,
 }: RepayModalProps) => {
   const [amount, setAmount] = useState<number | "">("");
   const [fiatValue, setFiatValue] = useState(0);
   const { currentNetwork } = useNetwork();
+  const networkToUse = network || currentNetwork;
+  const { price: oracleTokenPrice } = useTokenPrice(tokenSymbol, networkToUse);
   const [showSuccess, setShowSuccess] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [transactionId, setTransactionId] = useState<string | null>(null);
@@ -87,12 +114,14 @@ const RepayModal = ({
     liquidationMargin: boolean;
     healthFactor: boolean;
     ltv: boolean;
+    collateralFactor: boolean;
   }>({
     borrowAPY: false,
     accruedInterest: false,
     liquidationMargin: false,
     healthFactor: false,
     ltv: false,
+    collateralFactor: false,
   });
 
   // Get health factor label and color based on ranges
@@ -120,8 +149,6 @@ const RepayModal = ({
       return { label: "Liquidatable", color: "text-red-600 dark:text-red-400" };
     }
   };
-
-  const healthFactorLabel = getHealthFactorLabel(marketStats.healthFactor);
 
   // Reset states when modal opens/closes
   useEffect(() => {
@@ -193,7 +220,6 @@ const RepayModal = ({
   };
 
   const handleViewTransaction = () => {
-    const networkToUse = network || currentNetwork;
     if (transactionId) {
       if (networkToUse === "voi-mainnet") {
         window.open(`https://voi.observer/tx/${transactionId}`, "_blank");
@@ -226,6 +252,67 @@ const RepayModal = ({
   const roundedMaxRepay = Math.round(maxRepayAmount * 1000000) / 1000000;
   const isValidAmount =
     amount !== "" && numAmount > 0 && roundedAmount <= roundedMaxRepay;
+
+  const hfTokenPrice = useMemo(() => {
+    if (oracleTokenPrice > 0 && Number.isFinite(oracleTokenPrice)) {
+      return oracleTokenPrice;
+    }
+    return marketStats.tokenPrice > 0 &&
+      Number.isFinite(marketStats.tokenPrice)
+      ? marketStats.tokenPrice
+      : 0;
+  }, [oracleTokenPrice, marketStats.tokenPrice]);
+
+  const liquidationSummaryForRepay = useMemo(
+    () =>
+      buildLiquidationThresholdSummaryForDeposit(
+        liquidationThresholdPercent ?? undefined,
+        poolCollateralMarkets,
+        poolId
+      ),
+    [liquidationThresholdPercent, poolCollateralMarkets, poolId]
+  );
+
+  const estimatedPoolHealthMeta = useMemo(() => {
+    if (poolGlobalUserData == null || !liquidationSummaryForRepay) {
+      return {
+        value: undefined as number | null | undefined,
+        deltaPercent: undefined as number | null | undefined,
+      };
+    }
+    const meta = estimatePoolHealthAfterRepay(
+      poolGlobalUserData,
+      liquidationSummaryForRepay,
+      numAmount,
+      hfTokenPrice
+    );
+    if (!meta) {
+      return {
+        value: undefined as number | null | undefined,
+        deltaPercent: undefined as number | null | undefined,
+      };
+    }
+    return { value: meta.value, deltaPercent: meta.deltaPercent };
+  }, [
+    poolGlobalUserData,
+    liquidationSummaryForRepay,
+    numAmount,
+    hfTokenPrice,
+  ]);
+
+  const showPoolHealthEstimate =
+    poolGlobalUserData != null &&
+    liquidationSummaryForRepay != null &&
+    estimatedPoolHealthMeta.value !== undefined;
+
+  const healthFactorDisplayValue: number | null = showPoolHealthEstimate
+    ? estimatedPoolHealthMeta.value ?? null
+    : marketStats.healthFactor;
+
+  const healthFactorLabel = getHealthFactorLabel(healthFactorDisplayValue);
+
+  const repayPoolHealthLoading =
+    poolGlobalUserData === undefined && Boolean(poolId);
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -664,65 +751,172 @@ const RepayModal = ({
                           )}
                         </div>
 
-                        {/* Health Factor */}
+                        {/* Health factor: pool-level estimate (borrow modal parity) or portfolio aggregate */}
                         <div className="border-b border-gray-200 dark:border-slate-700 pb-2 md:pb-3">
-                          <div className="flex justify-between items-center">
+                          <div className="flex justify-between items-start gap-2">
                             <button
+                              type="button"
                               onClick={() => toggleDetail("healthFactor")}
-                              className="flex items-center gap-1.5 md:gap-2 hover:opacity-70 transition-opacity"
+                              className="flex items-start gap-1.5 md:gap-2 hover:opacity-70 transition-opacity text-left min-w-0"
                             >
-                              <span className="text-xs md:text-sm text-slate-500 dark:text-slate-400">
-                                Health Factor
-                              </span>
-                              <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                              <div className="flex flex-col items-start min-w-0">
+                                <span className="text-xs md:text-sm text-slate-500 dark:text-slate-400 flex flex-wrap items-center gap-1">
+                                  {repayPoolHealthLoading
+                                    ? "Est. health factor"
+                                    : showPoolHealthEstimate
+                                      ? "Est. health factor"
+                                      : "Health factor"}
+                                  {!repayPoolHealthLoading &&
+                                    !showPoolHealthEstimate && (
+                                      <span className="text-[10px] text-slate-400 dark:text-slate-500 font-normal">
+                                        (portfolio)
+                                      </span>
+                                    )}
+                                  {showPoolHealthEstimate && (
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <span
+                                          className="inline-flex"
+                                          onClick={(e) => e.stopPropagation()}
+                                        >
+                                          <InfoIcon className="h-3 w-3 shrink-0 text-slate-400 dark:text-slate-500" />
+                                        </span>
+                                      </TooltipTrigger>
+                                      <TooltipContent className="max-w-xs">
+                                        <p>
+                                          Estimate for this lending pool after
+                                          this repay: (collateral × pool
+                                          minimum liquidation threshold) ÷ total
+                                          borrows (after subtracting this amount
+                                          in USD), same shape as on-chain health,
+                                          capped at 3.00 like Portfolio. The
+                                          colored change is percent vs your
+                                          current pool position before this
+                                          repay.
+                                        </p>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  )}
+                                </span>
+                              </div>
+                              {!showPoolHealthEstimate && (
+                                <InfoIcon className="h-3 w-3 shrink-0 text-slate-400 dark:text-slate-500 mt-0.5" />
+                              )}
                               {expandedDetails.healthFactor ? (
-                                <ChevronUp className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                                <ChevronUp className="h-3 w-3 shrink-0 text-slate-400 dark:text-slate-500 mt-0.5" />
                               ) : (
-                                <ChevronDown className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                                <ChevronDown className="h-3 w-3 shrink-0 text-slate-400 dark:text-slate-500 mt-0.5" />
                               )}
                             </button>
-                            <span
-                              className={`text-xs md:text-sm font-medium ${healthFactorLabel.color}`}
-                            >
-                              {healthFactorLabel.label}
-                              {marketStats.healthFactor !== null && (
-                                <> ({marketStats.healthFactor.toFixed(2)})</>
+                            <div className="flex min-w-0 flex-col items-end gap-0.5 text-right shrink-0">
+                              {repayPoolHealthLoading ? (
+                                <span className="text-xs md:text-sm text-slate-400 dark:text-slate-500">
+                                  …
+                                </span>
+                              ) : showPoolHealthEstimate ? (
+                                <>
+                                  <span
+                                    className={cn(
+                                      "text-xs md:text-sm font-medium tabular-nums",
+                                      estimatedPoolHealthMeta.value != null &&
+                                        estimatedPoolHealthMeta.value <
+                                          DEPOSIT_ESTIMATED_HEALTH_CRITICAL_MAX
+                                        ? "text-red-600 dark:text-red-400"
+                                        : "text-slate-800 dark:text-white"
+                                    )}
+                                  >
+                                    {estimatedPoolHealthMeta.value == null
+                                      ? "—"
+                                      : estimatedPoolHealthMeta.value.toFixed(2)}
+                                  </span>
+                                  {estimatedPoolHealthMeta.deltaPercent !=
+                                  null ? (
+                                    <span
+                                      className={cn(
+                                        "text-[10px] md:text-xs font-medium tabular-nums",
+                                        estimatedPoolHealthMeta.deltaPercent > 0
+                                          ? "text-green-600 dark:text-green-400"
+                                          : estimatedPoolHealthMeta.deltaPercent <
+                                              0
+                                            ? "text-red-600 dark:text-red-400"
+                                            : "text-slate-500 dark:text-slate-400"
+                                      )}
+                                    >
+                                      {estimatedPoolHealthMeta.deltaPercent > 0
+                                        ? "+"
+                                        : ""}
+                                      {estimatedPoolHealthMeta.deltaPercent.toFixed(
+                                        1
+                                      )}
+                                      %
+                                    </span>
+                                  ) : null}
+                                </>
+                              ) : (
+                                <span
+                                  className={`text-xs md:text-sm font-medium ${healthFactorLabel.color}`}
+                                >
+                                  {healthFactorLabel.label}
+                                  {marketStats.healthFactor !== null && (
+                                    <>
+                                      {" "}
+                                      ({marketStats.healthFactor.toFixed(2)})
+                                    </>
+                                  )}
+                                </span>
                               )}
-                            </span>
+                            </div>
                           </div>
                           {expandedDetails.healthFactor && (
                             <div className="mt-2 pt-2 border-t border-gray-200 dark:border-slate-700 space-y-2">
-                              <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                                Health Factor = (Weighted Collateral) / Borrowed
-                              </p>
-                              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                                Weighted Collateral = sum(Collateral × Collateral Factor) for each asset
-                              </p>
-                              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                                For each asset: (Collateral × Collateral Factor), then sum all assets.
-                              </p>
+                              {showPoolHealthEstimate ? (
+                                <>
+                                  <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                                    Health factor = (collateral × liquidation
+                                    threshold) ÷ borrowed
+                                  </p>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                                    Uses this pool&apos;s collateral and borrow
+                                    totals (USD) and the minimum liquidation
+                                    threshold across your collateral in this
+                                    pool, matching the borrow modal. Values are
+                                    capped at 3.00 for display.
+                                  </p>
+                                </>
+                              ) : (
+                                <>
+                                  <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                                    Portfolio aggregate health
+                                  </p>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                                    Shown when a pool-level estimate
+                                    isn&apos;t available. Based on global user
+                                    data (may differ from a single pool).
+                                  </p>
+                                </>
+                              )}
                               <p className="text-xs text-slate-600 dark:text-slate-400">
-                                {marketStats.healthFactor === null
+                                {healthFactorDisplayValue === null
                                   ? "Health factor data not available. Please refresh your position data."
-                                  : marketStats.healthFactor >= 3.0
-                                  ? `✓ Safe: ${marketStats.healthFactor.toFixed(
-                                      2
-                                    )} (excellent health)`
-                                  : marketStats.healthFactor >= 1.5
-                                  ? `✓ Moderate: ${marketStats.healthFactor.toFixed(
-                                      2
-                                    )} (good health)`
-                                  : marketStats.healthFactor >= 1.2
-                                  ? `⚠ Caution: ${marketStats.healthFactor.toFixed(
-                                      2
-                                    )} (monitor closely)`
-                                  : marketStats.healthFactor >= 1.0
-                                  ? `⚠ Critical: ${marketStats.healthFactor.toFixed(
-                                      2
-                                    )} (at liquidation threshold)`
-                                  : `✗ Liquidatable: ${marketStats.healthFactor.toFixed(
-                                      2
-                                    )} (can be liquidated)`}
+                                  : healthFactorDisplayValue >= 3.0
+                                    ? `✓ Safe: ${healthFactorDisplayValue.toFixed(
+                                        2
+                                      )} (excellent health)`
+                                    : healthFactorDisplayValue >= 1.5
+                                      ? `✓ Moderate: ${healthFactorDisplayValue.toFixed(
+                                          2
+                                        )} (good health)`
+                                      : healthFactorDisplayValue >= 1.2
+                                        ? `⚠ Caution: ${healthFactorDisplayValue.toFixed(
+                                            2
+                                          )} (monitor closely)`
+                                        : healthFactorDisplayValue >= 1.0
+                                          ? `⚠ Critical: ${healthFactorDisplayValue.toFixed(
+                                              2
+                                            )} (at liquidation threshold)`
+                                          : `✗ Liquidatable: ${healthFactorDisplayValue.toFixed(
+                                              2
+                                            )} (can be liquidated)`}
                               </p>
                               <div className="text-xs text-slate-600 dark:text-slate-400 space-y-1">
                                 <p>• Safe (≥3.0): Excellent health</p>

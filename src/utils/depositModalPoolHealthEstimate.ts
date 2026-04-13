@@ -288,3 +288,61 @@ export function estimatePoolHealthAfterBorrow(
 
   return { value, deltaPercent };
 }
+
+/**
+ * Pool-level HF after repaying debt vs current (same cap 3.0 as Portfolio).
+ * Collateral unchanged; borrow (USD) decreases by repayAmount × token price.
+ */
+export function estimatePoolHealthAfterRepay(
+  poolGlobalUserData: {
+    totalCollateralValue: number;
+    totalBorrowValue: number;
+  } | null,
+  liquidationSummary: LiquidationThresholdSummaryDeposit | null,
+  repayAmount: number,
+  tokenPrice: number
+): PoolHealthEstimateMeta | null {
+  if (poolGlobalUserData == null || liquidationSummary == null) return null;
+  const minLt = liquidationSummary.minAfter;
+  const ltBefore = liquidationSummary.minSup ?? liquidationSummary.minAfter;
+  if (!Number.isFinite(minLt) || !Number.isFinite(ltBefore)) return null;
+
+  const repayUsd =
+    Math.max(0, Number.isFinite(repayAmount) ? repayAmount : 0) *
+    (tokenPrice > 0 && Number.isFinite(tokenPrice) ? tokenPrice : 0);
+  const C0 = poolGlobalUserData.totalCollateralValue;
+  const B0 = poolGlobalUserData.totalBorrowValue;
+  const borrowAfter = Math.max(0, B0 - repayUsd);
+
+  const hfAfterRaw = calculateUserHealthFactor(
+    C0,
+    borrowAfter,
+    minLt,
+    "repay-modal-est-hf-after"
+  );
+  const hfBeforeRaw = calculateUserHealthFactor(
+    C0,
+    B0,
+    ltBefore,
+    "repay-modal-est-hf-before"
+  );
+
+  const cap = (h: number | null) => (h == null ? null : Math.min(h, 3.0));
+  const value = cap(hfAfterRaw);
+  const beforeCapped = cap(hfBeforeRaw);
+
+  let deltaPercent: number | null = null;
+  if (
+    beforeCapped != null &&
+    value != null &&
+    beforeCapped > 0 &&
+    Number.isFinite(beforeCapped)
+  ) {
+    const pct = ((value - beforeCapped) / beforeCapped) * 100;
+    if (Number.isFinite(pct) && Math.abs(pct) > 1e-6) {
+      deltaPercent = pct;
+    }
+  }
+
+  return { value, deltaPercent };
+}
