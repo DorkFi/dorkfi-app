@@ -2,6 +2,23 @@ import { useState, useEffect, useCallback } from 'react';
 import { fetchMarketInfo } from '@/services/lendingService';
 import { getAllTokensWithDisplayInfo } from '@/config';
 import { useNetwork } from '@/contexts/NetworkContext';
+import { usdPerTokenFromMarketInfoFormattedPrice } from '@/utils/assetDecimals';
+
+/**
+ * Same USD/token as Portfolio tables and wallet lines: `MarketInfo.price` is already ÷1e18
+ * in lendingService; we then apply 12 − tokenDecimals (e.g. ÷1e4 for 8-dec UNIT, ÷1e6 for 6-dec USDC).
+ */
+function usdPerTokenFromMarketInfo(
+  marketInfo: { price: string },
+  tokenDecimals: number
+): number | null {
+  const usd = usdPerTokenFromMarketInfoFormattedPrice(
+    marketInfo.price,
+    tokenDecimals
+  );
+  if (!Number.isFinite(usd) || usd <= 0) return null;
+  return usd;
+}
 
 interface UseTokenPriceResult {
   price: number;
@@ -57,14 +74,15 @@ export const useTokenPrice = (tokenSymbol: string, networkId?: string): UseToken
                 otherToken.underlyingContractId,
                 network
               );
-              
-              if (marketInfo && marketInfo.price) {
-                const scaledPrice = parseFloat(marketInfo.price);
-                const marketPrice = scaledPrice / Math.pow(10, 6);
-                console.log(`Market price for ${tokenSymbol} on ${network}: $${marketPrice}`);
-                setPrice(marketPrice);
-                setIsLoading(false);
-                return;
+              const decimals = otherToken.decimals ?? 6;
+              if (marketInfo) {
+                const marketPrice = usdPerTokenFromMarketInfo(marketInfo, decimals);
+                if (marketPrice != null && marketPrice > 0) {
+                  console.log(`Market price for ${tokenSymbol} on ${network}: $${marketPrice}`);
+                  setPrice(marketPrice);
+                  setIsLoading(false);
+                  return;
+                }
               }
             }
           }
@@ -80,13 +98,15 @@ export const useTokenPrice = (tokenSymbol: string, networkId?: string): UseToken
         networkToUse
       );
 
-      if (marketInfo && marketInfo.price) {
-        // Market prices are scaled by 10^6, so we need to divide by 10^6 to get USD price
-        const scaledPrice = parseFloat(marketInfo.price);
-        const marketPrice = scaledPrice / Math.pow(10, 6);
-        
-        console.log(`Market price for ${tokenSymbol}: $${marketPrice} (scaled by 10^6)`);
-        setPrice(marketPrice);
+      const decimals = token.decimals ?? 6;
+      if (marketInfo) {
+        const marketPrice = usdPerTokenFromMarketInfo(marketInfo, decimals);
+        if (marketPrice != null && marketPrice > 0) {
+          console.log(`Market price for ${tokenSymbol}: $${marketPrice} (decimals=${decimals})`);
+          setPrice(marketPrice);
+        } else {
+          throw new Error(`No market price data available for ${tokenSymbol}`);
+        }
       } else {
         throw new Error(`No market price data available for ${tokenSymbol}`);
       }

@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
-import { Badge } from "@/components/ui/badge";
 import { CardTitle } from "@/components/ui/card";
 import { useRiskLevel } from "@/hooks/useRiskLevel";
+import { formatHealthFactorBuffer } from "@/utils/healthFactorUx";
 import {
   Tooltip,
   TooltipContent,
@@ -13,11 +13,28 @@ import { Edit, HelpCircle } from "lucide-react";
 
 type Props = {
   healthFactor: number | null;
+  /** e.g. "Algorand · Market A" */
+  marketContextLine?: string | null;
   avatarSrc?: string;
   onEdit?: () => void;
 };
 
-export default function HealthWaterGauge({ healthFactor, avatarSrc, onEdit }: Props) {
+/** Map HF to water fill height % (matches gauge scale). */
+function mapHfToGaugeHeightPct(thresholdHf: number): number {
+  if (thresholdHf <= 0.8) {
+    const t = (thresholdHf - 0.1) / (0.8 - 0.1);
+    return Math.round(5 + t * 5);
+  }
+  const t = (thresholdHf - 0.8) / (3.0 - 0.8);
+  return Math.round(10 + t * 82);
+}
+
+export default function HealthWaterGauge({
+  healthFactor,
+  marketContextLine,
+  avatarSrc,
+  onEdit,
+}: Props) {
   const [isHovered, setIsHovered] = useState(false);
   
   // Calculate health factor value (use 0 as default for null to avoid hook order issues)
@@ -40,14 +57,12 @@ export default function HealthWaterGauge({ healthFactor, avatarSrc, onEdit }: Pr
     }
   }, [hf]);
 
-  // Threshold markers for risk levels
-  const thresholds = useMemo(() => [
-    { hf: 0.5, label: "Liquidatable", color: "bg-red-600/80", position: 8 },
-    { hf: 1.0, label: "Critical", color: "bg-red-500/60", position: 15 },
-    { hf: 1.2, label: "Caution", color: "bg-orange-500/60", position: 37 },
-    { hf: 1.5, label: "Moderate", color: "bg-yellow-500/60", position: 59 },
-    { hf: 3.0, label: "Safe", color: "bg-green-500/60", position: 81 },
-  ], []);
+  /** Single protocol line: liquidation at HF = 1.0 (no per-asset priority in UI). */
+  const thresholds = useMemo(() => {
+    const hf = 1.0;
+    const position = mapHfToGaugeHeightPct(hf);
+    return [{ hf, label: "Liquidation (HF = 1.0)", color: "bg-red-500/70", position }];
+  }, []);
   
   // Handle null health factor (no collateral) - AFTER all hooks are called
   if (healthFactor === null) {
@@ -55,6 +70,11 @@ export default function HealthWaterGauge({ healthFactor, avatarSrc, onEdit }: Pr
       <div className="relative w-full max-w-sm mx-auto">
         <div className="text-center py-8 px-6 rounded-xl bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900 border border-gray-200/50 dark:border-gray-700/50">
           <div className="text-sm text-muted-foreground mb-1 font-medium">Health Factor</div>
+          {marketContextLine ? (
+            <p className="text-xs font-medium text-ocean-teal dark:text-cyan-400 mb-2">
+              {marketContextLine}
+            </p>
+          ) : null}
           <div className="text-5xl font-bold text-gray-500 tracking-tight transition-all duration-300 mb-2">
             N/A
           </div>
@@ -69,24 +89,19 @@ export default function HealthWaterGauge({ healthFactor, avatarSrc, onEdit }: Pr
     );
   }
 
-  const getThresholdPosition = (thresholdHf: number) => {
-    if (thresholdHf <= 0.8) {
-      // Linear mapping from 0.1 to 0.8 -> 5% to 10%
-      const t = (thresholdHf - 0.1) / (0.8 - 0.1);
-      return Math.round(5 + t * 5);
-    } else {
-      // Original mapping from 0.8 to 3.0 -> 10% to 92%
-      const t = (thresholdHf - 0.8) / (3.0 - 0.8);
-      return Math.round(10 + t * 82);
-    }
-  };
-
   return (
     <TooltipProvider>
       <div className="w-full space-y-4 animate-fade-in">
         {/* Header with prominent risk display */}
-        <CardTitle className="text-2xl">Health Factor</CardTitle>
-        
+        <div className="space-y-1">
+          <CardTitle className="text-2xl">Health Factor</CardTitle>
+          {marketContextLine ? (
+            <p className="text-sm font-medium text-ocean-teal dark:text-cyan-400">
+              {marketContextLine}
+            </p>
+          ) : null}
+        </div>
+
       {/* Water gauge with threshold markers */}
       <div className="relative">
         <Tooltip>
@@ -215,9 +230,8 @@ export default function HealthWaterGauge({ healthFactor, avatarSrc, onEdit }: Pr
             </div>
           </TooltipTrigger>
           <TooltipContent side="top" className="max-w-[280px] sm:max-w-xs" sideOffset={5}>
-            <p className="font-medium mb-2">Interactive Risk Gauge</p>
-            <p className="text-sm">The water level represents your liquidation risk. Lower water means closer to liquidation.</p>
-            <p className="mt-2 text-xs text-muted-foreground">Threshold markers show critical risk levels.</p>
+            <p className="font-medium mb-2">Health factor gauge</p>
+            <p className="text-sm">Water height reflects your health factor. The red line is liquidation (HF = 1.0).</p>
           </TooltipContent>
         </Tooltip>
       </div>
@@ -231,9 +245,12 @@ export default function HealthWaterGauge({ healthFactor, avatarSrc, onEdit }: Pr
         <div className={`text-sm font-semibold ${riskLevel.color} uppercase tracking-wide`}>
           {riskLevel.label}
         </div>
-        {hf <= 1.2 && (
-          <div className="mt-2 text-xs text-red-500 font-medium animate-pulse">
-            ⚠️ Monitor Position Closely
+        <div className={`mt-2 text-sm font-medium ${riskLevel.color}`}>
+          {formatHealthFactorBuffer(healthFactor)}
+        </div>
+        {hf <= 1.2 && hf > 1 && (
+          <div className="mt-1 text-xs text-amber-600 dark:text-amber-400 font-medium">
+            Limited room before HF reaches 1.0
           </div>
         )}
       </div>

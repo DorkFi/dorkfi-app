@@ -9,7 +9,7 @@ const SupplyBorrowHeader = ({ mode, asset, assetIcon }: SupplyBorrowHeaderProps)
   return (
     <div className="space-y-2">
       <h2 className="text-2xl font-bold text-center text-slate-800 dark:text-white capitalize">
-        {mode}
+        {mode === "deposit" ? "supply" : mode}
       </h2>
       <div className="flex items-center justify-center gap-2">
         <img 

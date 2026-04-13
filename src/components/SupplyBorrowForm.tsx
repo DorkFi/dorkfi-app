@@ -6,6 +6,7 @@ import { useTokenPrice } from "@/hooks/useTokenPrice";
 import { formatRelativeTime } from "@/utils/timeUtils";
 import { getTokenConfig, NetworkId } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
+import { usdValueForHumanTokenAmount } from "@/utils/assetDecimals";
 
 interface SupplyBorrowFormProps {
   mode: "deposit" | "borrow";
@@ -63,7 +64,10 @@ const SupplyBorrowForm = ({
   const { currentNetwork } = useNetwork();
   // Use provided network or fallback to current network
   const networkToUse = (network || currentNetwork) as NetworkId;
-  const { price: tokenPrice, isLoading: priceLoading } = useTokenPrice(asset);
+  const { price: tokenPrice, isLoading: priceLoading } = useTokenPrice(
+    asset,
+    networkToUse
+  );
 
   // Get token config for decimal precision
   const tokenConfigRaw = getTokenConfig(networkToUse, asset);
@@ -138,13 +142,15 @@ const SupplyBorrowForm = ({
     const error = validateAmount(numAmount);
     setValidationError(error);
 
-    if (numAmount !== null && numAmount > 0 && tokenPrice > 0) {
-      const scaled = numAmount * (Math.pow(10, decimals) / Math.pow(10, 6));
-      setFiatValue(scaled * tokenPrice);
-    } else {
-      setFiatValue(0);
-    }
-    onAmountChange(numAmount !== null ? numAmount.toString() : "", fiatValue);
+    const nextFiat =
+      numAmount !== null && numAmount > 0 && tokenPrice > 0
+        ? usdValueForHumanTokenAmount(numAmount, tokenPrice)
+        : 0;
+    setFiatValue(nextFiat);
+    onAmountChange(
+      numAmount !== null ? numAmount.toString() : "",
+      nextFiat
+    );
   }, [
     amount,
     tokenPrice,
@@ -453,7 +459,7 @@ const SupplyBorrowForm = ({
               Processing...
             </div>
           ) : (
-            `${mode === "deposit" ? "Deposit" : "Borrow"} ${asset}`
+            `${mode === "deposit" ? "Supply" : "Borrow"} ${asset}`
           )}
         </Button>
       )}

@@ -68,7 +68,6 @@ const rewards = [
 The `networks` object must include entries for each network where the reward is available. Supported network IDs:
 - `"voi-mainnet"` - Voi mainnet
 - `"algorand-mainnet"` - Algorand mainnet
-- `"voi-testnet"` - Voi testnet (if applicable)
 - `"algorand-testnet"` - Algorand testnet (if applicable)
 
 Each network entry requires:

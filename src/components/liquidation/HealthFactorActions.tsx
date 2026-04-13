@@ -71,18 +71,25 @@ const HealthFactorActions = ({
       {onWithdraw && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <DorkFiButton
-              variant="withdraw"
-              size="lg"
-              onClick={onWithdraw}
-              className="w-full min-w-0 h-12 gap-2 mt-1"
-            >
-              <ArrowUpFromLine className="w-5 h-5 shrink-0" />
-              Withdraw
-            </DorkFiButton>
+            <span className="block w-full">
+              <DorkFiButton
+                variant="withdraw"
+                size="lg"
+                onClick={onWithdraw}
+                disabled={isCritical}
+                className="w-full min-w-0 h-12 gap-2 mt-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ArrowUpFromLine className="w-5 h-5 shrink-0" />
+                Withdraw
+              </DorkFiButton>
+            </span>
           </TooltipTrigger>
           <TooltipContent side="top" className="max-w-xs">
-            <p>Withdraw supplied assets back to your wallet.</p>
+            <p>
+              {isCritical
+                ? "Withdrawals are blocked while health factor is at or below 1.0. Supply collateral or repay debt first."
+                : "Withdraw supplied assets to your wallet (up to the HF-safe maximum)."}
+            </p>
           </TooltipContent>
         </Tooltip>
       )}

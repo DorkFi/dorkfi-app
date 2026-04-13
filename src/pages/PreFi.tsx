@@ -599,7 +599,7 @@ const chainApi = {
     return {
       address,
       connected: true,
-      network: "voi-testnet",
+      network: "voi-mainnet",
       mockMode: true,
     };
   },

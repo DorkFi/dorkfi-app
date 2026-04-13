@@ -7,7 +7,6 @@
 
 export type NetworkId =
   | "voi-mainnet"
-  | "voi-testnet"
   | "algorand-mainnet"
   | "algorand-testnet"
   | "base-mainnet"
@@ -175,7 +174,7 @@ const baseVoiMainnetConfig: BaseNetworkConfig = {
   rpcPort: 443,
   rpcToken: "",
   indexerUrl: "https://mainnet-idx.voi.nodely.dev",
-  explorerUrl: "https://voi.observer",
+  explorerUrl: "https://block.voi.network",
   faucetUrl: "https://faucet.voirewards.com/",
 };
 // prefi
@@ -890,41 +889,6 @@ const voiMainnetConfig: NetworkConfig = {
 };
 
 /**
- * VOI Testnet Configuration
- */
-const voiTestnetConfig: NetworkConfig = {
-  networkId: "voi-testnet",
-  walletNetworkId: "voitest",
-  name: "VOI Testnet",
-  networkType: "avm",
-  rpcUrl: "https://testnet-idx.voi.nodely.dev",
-  rpcPort: 443,
-  rpcToken: undefined, // Public endpoint, no token required
-  indexerUrl: "https://testnet-idx.voi.nodely.dev",
-  explorerUrl: "https://testnet.voi.observer",
-  contracts: {
-    lendingPools: ["TESTNET_LENDING_POOL_ID"], // TODO: Replace with actual testnet contract ID
-    priceOracle: undefined,
-    liquidationEngine: undefined,
-    governance: undefined,
-    treasury: undefined,
-    sToken: undefined, // TODO: Add actual sToken app ID
-  },
-  tokens: {
-    VOI: {
-      assetId: undefined, // Native token
-      poolId: "41760711", // Same pool ID as mainnet for now
-      decimals: 6,
-      name: "VOI",
-      symbol: "VOI",
-      logoPath: "/lovable-uploads/VOI.png",
-      tokenStandard: "network",
-    },
-    // Add testnet-specific tokens as needed
-  },
-};
-
-/**
  * Algorand Mainnet Configuration (for reference)
  */
 const algorandPrefiLendingPools = ["3207735602", "3212536201"];
@@ -1258,7 +1222,7 @@ const algorandMainnetPrefiConfig: NetworkConfig = {
   rpcPort: 443,
   rpcToken: undefined, // Public endpoint, no token required
   indexerUrl: "https://mainnet-idx.4160.nodely.dev",
-  explorerUrl: "https://algoexplorer.io",
+  explorerUrl: "https://allo.info",
   contracts: algorandPrefiContracts,
   tokens: algorandPrefiTokens,
 };
@@ -1824,7 +1788,7 @@ const algorandMainnetProdConfig: NetworkConfig = {
   rpcPort: 443,
   rpcToken: undefined, // Public endpoint, no token required
   indexerUrl: "https://mainnet-idx.4160.nodely.dev",
-  explorerUrl: "https://algoexplorer.io",
+  explorerUrl: "https://allo.info",
   contracts: algorandProdContracts,
   tokens: algorandProdTokens,
 };
@@ -2071,7 +2035,6 @@ const enabledNetworks = ["voi-mainnet", "algorand-mainnet"];
 export const config: GlobalConfig = {
   networks: {
     "voi-mainnet": voiMainnetConfig,
-    "voi-testnet": voiTestnetConfig,
     "algorand-mainnet": algorandMainnetConfig,
     "algorand-testnet": algorandTestnetConfig,
     "base-mainnet": baseMainnetConfig,
@@ -2698,7 +2661,7 @@ export const isCurrentNetworkEVM = (): boolean => {
 
 export const isCurrentNetworkVOI = (): boolean => {
   const networkId = getCurrentNetworkConfig().networkId;
-  return networkId === "voi-mainnet" || networkId === "voi-testnet";
+  return networkId === "voi-mainnet";
 };
 
 export const isCurrentNetworkAlgorand = (): boolean => {
@@ -2743,7 +2706,7 @@ export const getEnvironmentConfig = (): Partial<GlobalConfig> => {
 
   if (env === "development") {
     return {
-      defaultNetwork: "voi-testnet", // Use testnet in development
+      defaultNetwork: "voi-mainnet",
       features: {
         ...config.features,
         enableGovernance: true, // Enable governance in development for testing
@@ -2754,7 +2717,7 @@ export const getEnvironmentConfig = (): Partial<GlobalConfig> => {
 
   if (env === "test") {
     return {
-      defaultNetwork: "voi-testnet",
+      defaultNetwork: "voi-mainnet",
       features: {
         ...config.features,
         enablePreFi: false, // Disable PreFi in tests
@@ -2790,7 +2753,7 @@ export const getConfig = (): GlobalConfig => {
  */
 export const getAlgorandNetworkFromNetworkId = (
   networkId: NetworkId
-): "mainnet" | "testnet" | "local" | "voimain" | "voitest" | null => {
+): "mainnet" | "testnet" | "local" | "voimain" | null => {
   switch (networkId) {
     case "algorand-mainnet":
       return "mainnet";
@@ -2798,8 +2761,6 @@ export const getAlgorandNetworkFromNetworkId = (
       return "testnet";
     case "voi-mainnet":
       return "voimain";
-    case "voi-testnet":
-      return "voitest";
     case "localnet":
       return "local";
     default:

@@ -12,7 +12,11 @@ export interface RiskAssessment {
   level: 'liquidatable' | 'danger' | 'moderate' | 'safe';
   severity: number; // 0-100 scale
   timeToLiquidation?: string;
-  recommendedActions: string[];
+  /**
+   * Factual risk context only (not recommendations or investment advice).
+   * Safe to surface in UI as neutral information.
+   */
+  riskContextNotes: string[];
 }
 
 export const useRiskCalculations = (
@@ -25,40 +29,39 @@ export const useRiskCalculations = (
       let level: RiskAssessment['level'];
       let severity: number;
       let timeToLiquidation: string | undefined;
-      let recommendedActions: string[] = [];
+      let riskContextNotes: string[] = [];
 
       if (healthFactor <= thresholds.liquidatable) {
         level = 'liquidatable';
         severity = 100 - (healthFactor / thresholds.liquidatable) * 20;
         timeToLiquidation = 'Immediate';
-        recommendedActions = [
-          'Add collateral immediately',
-          'Repay debt to improve health factor',
-          'Consider partial liquidation'
+        riskContextNotes = [
+          'Health factor is at or below the liquidatable band in this model.',
+          'Liquidation can occur when health factor is below 1.0 on-chain.',
+          'Collateral, borrows, and oracle prices determine liquidation eligibility.',
         ];
       } else if (healthFactor <= thresholds.danger) {
         level = 'danger';
         severity = 80 - ((healthFactor - thresholds.liquidatable) / (thresholds.danger - thresholds.liquidatable)) * 30;
         timeToLiquidation = '< 24 hours';
-        recommendedActions = [
-          'Monitor position closely',
-          'Prepare to add collateral',
-          'Consider reducing leverage'
+        riskContextNotes = [
+          'Health factor is in the elevated-risk band in this model.',
+          'Distance to liquidation depends on collateral value, debt, and thresholds.',
         ];
       } else if (healthFactor <= thresholds.moderate) {
         level = 'moderate';
         severity = 50 - ((healthFactor - thresholds.danger) / (thresholds.moderate - thresholds.danger)) * 30;
         timeToLiquidation = '1-7 days';
-        recommendedActions = [
-          'Review position regularly',
-          'Set up alerts for health factor changes'
+        riskContextNotes = [
+          'Health factor is in the moderate band in this model.',
+          'Volatility in collateral or borrows can move health factor quickly.',
         ];
       } else {
         level = 'safe';
         severity = Math.max(0, 20 - (healthFactor - thresholds.moderate) * 2);
-        recommendedActions = [
-          'Position is healthy',
-          'Monitor for market changes'
+        riskContextNotes = [
+          'Health factor is above the moderate threshold in this model.',
+          'On-chain parameters and prices still change with markets.',
         ];
       }
 
@@ -66,7 +69,7 @@ export const useRiskCalculations = (
         level,
         severity: Math.max(0, Math.min(100, severity)),
         timeToLiquidation,
-        recommendedActions,
+        riskContextNotes,
       };
     };
   }, [thresholds]);

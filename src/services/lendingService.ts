@@ -1923,15 +1923,42 @@ const SCALE = 10n ** 18n;
 const BPS = 10000n;
 
 /**
- * Compute max withdrawable amount from user, market, and global user state.
- * Matches contract _withdraw_pure checks. All inputs/outputs in contract units (BigInt).
+ * Minimum implied health factor after a max-withdraw (off-chain UI cap).
+ * Max withdraw = min(deposit, amount that leaves HF at or above this value), not 1.0.
  */
+export const MAX_WITHDRAW_HEALTH_FACTOR_TARGET = 1.1;
+
+const MAX_WITHDRAW_HF_NUM = 110n; // 1.10 × 100 — pairs with MAX_WITHDRAW_HF_DEN for integer math
+const MAX_WITHDRAW_HF_DEN = 100n;
+
+function minBigInt(a: bigint, b: bigint): bigint {
+  return a < b ? a : b;
+}
+
+/**
+ * Compute max withdrawable amount from user, market, and global user state.
+ * Minimum remaining collateral uses **liquidation threshold** (basis points, 10000 = 100%),
+ * matching {@link calculateUserHealthFactor} / Portfolio HF — not collateral factor, so
+ * “MAX” does not imply an est. HF below 1.0 when LT is the binding constraint.
+ * Optional {@link GetMaxWithdrawableOptions.minLiquidationThresholdBps} should be the pool
+ * minimum LT (strictest) when the user has multiple collaterals in the pool.
+ * All inputs/outputs in contract units (BigInt).
+ */
+export type GetMaxWithdrawableOptions = {
+  /** Pool min liquidation threshold in bps (e.g. 8500 = 85%). Tightens max when &lt; this market’s LT. */
+  minLiquidationThresholdBps?: bigint;
+};
+
 export function getMaxWithdrawable(
   user: { scaled_deposits: bigint },
   market: {
     deposit_index: bigint;
     price: bigint;
-    collateral_factor: bigint;
+    /**
+     * Divisor bps for min remaining collateral (typically min(CF, LT) or pool min LT).
+     * Same numeric scale as on-chain market bps (10000 = 100%).
+     */
+    liquidation_threshold_bps: bigint;
   },
   globalUser: {
     total_collateral_value: bigint;
@@ -1941,7 +1968,7 @@ export function getMaxWithdrawable(
   const userScaledDeposits = user.scaled_deposits;
   const depositIndex = market.deposit_index;
   const price = market.price;
-  const collateralFactor = market.collateral_factor;
+  const ltBps = market.liquidation_threshold_bps;
   const totalCollateralValue = globalUser.total_collateral_value;
   const totalBorrowValue = globalUser.total_borrow_value;
 
@@ -1954,8 +1981,19 @@ export function getMaxWithdrawable(
     };
   }
 
+  if (ltBps <= 0n) {
+    return {
+      maxWithdrawScaled: 0n,
+      maxWithdrawUnderlying: 0n,
+    };
+  }
+
+  // ceil(borrow × BPS × 1.10 / ltBps) — aligns with HF = (C × LT) / B when LT is in same bps form
   const minRemainingCollateral =
-    (totalBorrowValue * BPS + collateralFactor - 1n) / collateralFactor;
+    (totalBorrowValue * BPS * MAX_WITHDRAW_HF_NUM +
+      ltBps * MAX_WITHDRAW_HF_DEN -
+      1n) /
+    (ltBps * MAX_WITHDRAW_HF_DEN);
   const maxWithdrawValue =
     totalCollateralValue > minRemainingCollateral
       ? totalCollateralValue - minRemainingCollateral
@@ -1990,7 +2028,8 @@ export const getMaxWithdrawableForMarket = async (
   marketId: string,
   userAddress: string,
   networkId: NetworkId,
-  tokenDecimals: number
+  tokenDecimals: number,
+  options?: GetMaxWithdrawableOptions
 ): Promise<{ maxWithdrawUnderlying: number; maxWithdrawScaled: bigint } | null> => {
   try {
     if (!isAlgorandCompatibleNetwork(networkId)) return null;
@@ -2022,23 +2061,39 @@ export const getMaxWithdrawableForMarket = async (
     const userData = UserData(userDataR.returnValue);
     const marketData = decodeMarketData(marketR.returnValue);
     const globalData = GlobalUserData(globalUserR.returnValue);
+    const thisLt = BigInt(marketData.liquidationThreshold || "0");
+    const thisCf = BigInt(marketData.collateralFactor || "0");
+    /** Stricter bps = larger min collateral required = lower max withdraw. */
+    let divisorBps: bigint;
+    if (
+      options?.minLiquidationThresholdBps != null &&
+      options.minLiquidationThresholdBps > 0n
+    ) {
+      divisorBps = minBigInt(options.minLiquidationThresholdBps, thisLt);
+    } else if (thisCf > 0n && thisLt > 0n) {
+      divisorBps = minBigInt(thisCf, thisLt);
+    } else {
+      divisorBps = thisLt > 0n ? thisLt : thisCf;
+    }
     const result = getMaxWithdrawable(
       { scaled_deposits: BigInt(userData.scaledDeposits?.toString() ?? "0") },
       {
         deposit_index: BigInt(marketData.depositIndex),
         price: BigInt(marketData.price),
-        collateral_factor: BigInt(marketData.collateralFactor),
+        liquidation_threshold_bps: divisorBps,
       },
       {
         total_collateral_value: globalData.totalCollateralValue,
         total_borrow_value: globalData.totalBorrowValue,
       }
     );
-    // Round to 3 decimals to reduce floating point issues when used in UI/validation
+    // Human amount: floor to token precision (cap 8) so HF-safe max matches Deposited Balance line
     const raw =
       Number(result.maxWithdrawUnderlying) / Math.pow(10, tokenDecimals);
+    const displayD = Math.min(Math.max(0, tokenDecimals), 8);
+    const factor = 10 ** displayD;
     const maxWithdrawUnderlying =
-      Math.floor(raw * 1e3) / 1e3;
+      Math.floor(raw * factor + Number.EPSILON) / factor;
     return {
       maxWithdrawUnderlying,
       maxWithdrawScaled: result.maxWithdrawScaled,

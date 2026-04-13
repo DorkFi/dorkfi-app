@@ -86,6 +86,7 @@ import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import VersionDisplay from "@/components/VersionDisplay";
+import NonCustodialComplianceStrip from "@/components/NonCustodialComplianceStrip";
 import {
   getNetworkConfig,
   isCurrentNetworkAlgorandCompatible,
@@ -148,6 +149,11 @@ import algosdk, { waitForConfirmation } from "algosdk";
 import BigNumber from "bignumber.js";
 import envoiService, { type EnvoiNameResponse } from "@/services/envoiService";
 import { fromBase } from "@/utils/calculationUtils";
+import {
+  collectDedupedLendingMarketKeys,
+  refreshAllLendingBackendSnapshots,
+  type RefreshAllSnapshotsResult,
+} from "@/utils/refreshAllLendingBackendSnapshots";
 import { ARC200Service } from "@/services/arc200Service";
 import { TokenContractModal } from "@/components/ui/TokenContractModal";
 import {
@@ -236,9 +242,9 @@ const MARKET_EXPORT_HEADERS = [
   "Current Borrow Rate (%)",
   "Supply Rate (%)",
   "Utilization (%)",
-  "Total Deposits",
+  "Total Supply",
   "Total Borrows",
-  "Max Total Deposits",
+  "Max Total Supply",
   "Max Total Borrows",
   "Reserves",
   "Deposit Index",
@@ -391,6 +397,62 @@ export default function AdminDashboard() {
   const [isMinting, setIsMinting] = useState(false);
   const [mintResult, setMintResult] = useState<string | null>(null);
   const [mintError, setMintError] = useState<string | null>(null);
+
+  const [bulkSnapshotLoading, setBulkSnapshotLoading] = useState(false);
+  const [bulkSnapshotProgress, setBulkSnapshotProgress] = useState<{
+    completed: number;
+    total: number;
+    label: string;
+  } | null>(null);
+  const [bulkSnapshotResult, setBulkSnapshotResult] =
+    useState<RefreshAllSnapshotsResult | null>(null);
+
+  const bulkSnapshotMarketCount = useMemo(
+    () => collectDedupedLendingMarketKeys().length,
+    []
+  );
+
+  const handleRefreshAllBackendSnapshots = useCallback(async () => {
+    if (!activeAccount?.address) {
+      toast.error("Connect a wallet to refresh user-specific snapshots.");
+      return;
+    }
+    setBulkSnapshotLoading(true);
+    setBulkSnapshotResult(null);
+    setBulkSnapshotProgress({ completed: 0, total: 0, label: "Starting…" });
+    try {
+      const result = await refreshAllLendingBackendSnapshots(
+        activeAccount.address,
+        {
+          concurrency: 4,
+          onProgress: (p) =>
+            setBulkSnapshotProgress({
+              completed: p.completed,
+              total: p.total,
+              label: p.currentLabel,
+            }),
+        }
+      );
+      setBulkSnapshotResult(result);
+      if (result.partialOrFailed === 0) {
+        toast.success(
+          `Refreshed all ${result.totalMarkets} market snapshots successfully.`
+        );
+      } else {
+        toast.warning(
+          `Refreshed ${result.fullySucceeded}/${result.totalMarkets} markets; ${result.partialOrFailed} had issues (see below).`
+        );
+      }
+    } catch (e) {
+      console.error("Bulk snapshot refresh failed:", e);
+      toast.error(
+        e instanceof Error ? e.message : "Bulk snapshot refresh failed."
+      );
+    } finally {
+      setBulkSnapshotLoading(false);
+      setBulkSnapshotProgress(null);
+    }
+  }, [activeAccount?.address]);
 
   // SToken state
   const [stokenInfo, setStokenInfo] = useState<any>(null);
@@ -7006,7 +7068,7 @@ export default function AdminDashboard() {
                             <div className="grid grid-cols-2 gap-4 text-sm">
                               <div>
                                 <p className="text-muted-foreground">
-                                  Total Deposits
+                                  Total Supply
                                 </p>
                                 <p className="font-semibold">
                                   {hasData && market.marketInfo
@@ -8348,7 +8410,7 @@ export default function AdminDashboard() {
                       </div>
                       <div className="flex-1">
                         <div className="text-sm font-medium text-slate-300">
-                          Total Deposits Comparison
+                          Total Supply Comparison
                         </div>
                         <div className="text-xs text-slate-400">
                           Method 1 (Sum): $
@@ -9001,7 +9063,7 @@ export default function AdminDashboard() {
                             {userGlobalMarketData.totalDeposits.toLocaleString()}
                           </div>
                           <div className="text-xs text-muted-foreground">
-                            Total Deposits
+                            Total Supply
                           </div>
                         </div>
                         <div className="text-center">
@@ -9023,7 +9085,7 @@ export default function AdminDashboard() {
                               Net Position
                             </div>
                             <div className="text-xs text-slate-400">
-                              Total Deposits - Total Borrows
+                              Total Supply - Total Borrows
                             </div>
                           </div>
                           <div className="text-right">
@@ -9206,7 +9268,7 @@ export default function AdminDashboard() {
                             {userGlobalFromGetUser.totalDeposits.toLocaleString()}
                           </div>
                           <div className="text-xs text-muted-foreground">
-                            Total Deposits
+                            Total Supply
                           </div>
                         </div>
                         <div className="text-center">
@@ -9248,7 +9310,7 @@ export default function AdminDashboard() {
                               Net Position (get_user)
                             </div>
                             <div className="text-xs text-slate-400">
-                              Total Deposits - Total Borrows
+                              Total Supply - Total Borrows
                             </div>
                           </div>
                           <div className="text-right">
@@ -10329,7 +10391,7 @@ export default function AdminDashboard() {
                               <div className="grid grid-cols-2 gap-4 text-sm">
                                 <div>
                                   <span className="text-muted-foreground">
-                                    Max Total Deposits:
+                                    Max Total Supply:
                                   </span>
                                   <span className="ml-2 font-mono">
                                     {stokenMarketInfo.marketInfo
@@ -10379,7 +10441,7 @@ export default function AdminDashboard() {
                               <div className="grid grid-cols-2 gap-4 text-sm">
                                 <div>
                                   <span className="text-muted-foreground">
-                                    Total Deposits:
+                                    Total Supply:
                                   </span>
                                   <span className="ml-2 font-mono">
                                     {stokenMarketInfo.marketInfo.totalDeposits
@@ -10644,7 +10706,7 @@ export default function AdminDashboard() {
                             Max Borrows
                           </th>
                           <th className="text-right p-2 font-semibold">
-                            Total Deposits
+                            Total Supply
                           </th>
                           <th className="text-right p-2 font-semibold">
                             Total Borrows
@@ -11366,27 +11428,93 @@ export default function AdminDashboard() {
                 </CardContent>
               </Card>
 
-              {/* Additional Tools Placeholder */}
+              {/* Refresh all backend snapshots (user data, chain market, user health) */}
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <Wrench className="h-5 w-5" />
-                    Additional Tools
+                    <Database className="h-5 w-5" />
+                    Refresh all lending snapshots
                   </CardTitle>
                   <p className="text-sm text-muted-foreground">
-                    More admin tools will be added here
+                    For every enabled network and configured pool/market, runs{" "}
+                    <code className="text-xs">fetchFreshUserData</code>,{" "}
+                    <code className="text-xs">fetchMarketInfoFromContract</code>{" "}
+                    (Algorand-compatible networks only), and{" "}
+                    <code className="text-xs">fetchFreshUserHealth</code>. Uses
+                    the connected wallet address for user-scoped API refreshes.
                   </p>
                 </CardHeader>
-                <CardContent>
-                  <div className="text-center py-8 text-muted-foreground">
-                    <Wrench className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <p className="text-lg font-medium">
-                      More Tools Coming Soon
+                <CardContent className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    Markets in scope:{" "}
+                    <span className="font-medium text-foreground">
+                      {bulkSnapshotMarketCount}
+                    </span>{" "}
+                    (deduped from token config). Requests run in batches of 4.
+                  </p>
+                  {!activeAccount?.address && (
+                    <p className="text-sm text-amber-600 dark:text-amber-400">
+                      Connect a wallet to run this action.
                     </p>
-                    <p className="text-sm">
-                      Additional admin tools will be available here
-                    </p>
-                  </div>
+                  )}
+                  {bulkSnapshotProgress && (
+                    <div className="text-sm text-muted-foreground space-y-1">
+                      <p>
+                        Progress: {bulkSnapshotProgress.completed} /{" "}
+                        {bulkSnapshotProgress.total}
+                      </p>
+                      <p className="text-xs">{bulkSnapshotProgress.label}</p>
+                    </div>
+                  )}
+                  {bulkSnapshotResult && (
+                    <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm space-y-2">
+                      <p>
+                        Succeeded:{" "}
+                        <span className="font-medium text-green-600 dark:text-green-400">
+                          {bulkSnapshotResult.fullySucceeded}
+                        </span>{" "}
+                        / {bulkSnapshotResult.totalMarkets}
+                      </p>
+                      {bulkSnapshotResult.failures.length > 0 && (
+                        <div className="max-h-40 overflow-y-auto space-y-1">
+                          <p className="text-xs font-medium text-destructive">
+                            Issues ({bulkSnapshotResult.failures.length})
+                          </p>
+                          {bulkSnapshotResult.failures.slice(0, 20).map((f) => (
+                            <p key={f.key} className="text-xs break-all">
+                              {f.label}: {f.issues.join(", ")}
+                            </p>
+                          ))}
+                          {bulkSnapshotResult.failures.length > 20 && (
+                            <p className="text-xs text-muted-foreground">
+                              …and{" "}
+                              {bulkSnapshotResult.failures.length - 20} more
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <DorkFiButton
+                    variant="primary"
+                    className="w-full"
+                    onClick={handleRefreshAllBackendSnapshots}
+                    disabled={
+                      bulkSnapshotLoading || !activeAccount?.address
+                    }
+                  >
+                    {bulkSnapshotLoading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Refreshing snapshots…
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        Refresh all pools &amp; markets
+                      </>
+                    )}
+                  </DorkFiButton>
                 </CardContent>
               </Card>
             </div>
@@ -14964,7 +15092,8 @@ export default function AdminDashboard() {
 
       {/* Footer */}
       <footer className="border-t border-border/40 mt-4 relative z-10">
-        <div className="max-w-6xl mx-auto px-4 py-4 md:py-6">
+        <div className="max-w-6xl mx-auto px-4 py-4 md:py-6 space-y-4">
+          <NonCustodialComplianceStrip />
           <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-center sm:text-left">
             <div className="text-muted-foreground text-sm">
               <p>© 2025 DorkFi Protocol. Admin Panel - Operator Controls.</p>
@@ -15145,7 +15274,7 @@ export default function AdminDashboard() {
 
                     <div>
                       <Label htmlFor="max-total-deposits">
-                        Max Total Deposits
+                        Max Total Supply
                       </Label>
                       <Input
                         id="max-total-deposits"
@@ -15445,7 +15574,7 @@ export default function AdminDashboard() {
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <Label htmlFor="max-total-deposits">
-                          Max Total Deposits
+                          Max Total Supply
                         </Label>
                         <div className="flex gap-2">
                           <Input
@@ -15633,7 +15762,7 @@ export default function AdminDashboard() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">
-                        Max Total Deposits
+                        Max Total Supply
                       </Label>
                       <p className="text-sm">
                         {Number(newMarket.maxTotalDeposits).toLocaleString()}
@@ -16057,7 +16186,7 @@ export default function AdminDashboard() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <p className="text-sm text-muted-foreground">
-                      Total Deposits
+                      Total Supply
                     </p>
                     <p className="text-lg font-semibold">
                       $
@@ -16235,7 +16364,7 @@ export default function AdminDashboard() {
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">
-                      Max Total Deposits:
+                      Max Total Supply:
                     </span>
                     <span>
                       {(() => {
@@ -16690,7 +16819,7 @@ export default function AdminDashboard() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">
-                    Max Total Deposits:
+                    Max Total Supply:
                   </span>
                   <span className="text-sm">
                     {Number(

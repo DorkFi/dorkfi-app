@@ -145,7 +145,6 @@ describe('GasStationService', () => {
     it('should return list of supported networks', () => {
       const networks = GasStationService.getSupportedNetworks();
       expect(networks).toContain('voi-mainnet');
-      expect(networks).toContain('voi-testnet');
       expect(networks).toContain('algorand-mainnet');
       expect(networks).toContain('algorand-testnet');
     });

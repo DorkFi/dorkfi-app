@@ -46,9 +46,9 @@ const MarketsTableActions = ({
               onDepositClick(asset, poolId);
             }}
             disabled={isLoadingBalance || depositDisabled}
-            title={depositDisabled ? "Market at deposit cap" : undefined}
+            title={depositDisabled ? "Market at supply cap" : undefined}
           >
-            {isLoadingBalance ? "Loading..." : "Deposit"}
+            {isLoadingBalance ? "Loading..." : "Supply"}
           </DorkFiButton>
         )}
         <DorkFiButton

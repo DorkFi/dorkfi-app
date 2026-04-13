@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import Header from "@/components/Header";
+import Footer from "@/components/Footer";
 import { GovernanceHero } from "@/components/governance/GovernanceHero";
 import { GovernanceDashboardCard } from "@/components/governance/GovernanceDashboardCard";
 import { GovernanceVotingInfoCard } from "@/components/governance/GovernanceVotingInfoCard";
@@ -490,6 +491,7 @@ const Governance = () => {
           />
         )}
       </div>
+      <Footer />
     </div>
   );
 };

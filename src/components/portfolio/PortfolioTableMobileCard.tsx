@@ -17,10 +17,6 @@ interface PortfolioTableMobileCardProps {
   rewardBonusAprPercent?: number;
   accruedInterest?: number;
   accruedInterestValue?: number;
-  collateralFactor?: number;
-  liquidationFactor?: number;
-  /** Network (or portfolio) health factor for supplied positions; null if unknown. */
-  positionHealth?: number | null;
   ltvUsage?: number;
   liquidationPrice?: number;
   network?: string;
@@ -46,9 +42,6 @@ const PortfolioTableMobileCard = ({
   rewardBonusAprPercent,
   accruedInterest,
   accruedInterestValue,
-  collateralFactor,
-  liquidationFactor,
-  positionHealth,
   ltvUsage,
   liquidationPrice,
   network,
@@ -220,95 +213,9 @@ const PortfolioTableMobileCard = ({
           </div>
         )}
 
-        {/* Additional Info Grid */}
+        {/* Additional Info Grid (borrow positions only) */}
+        {!isDeposit && (
         <div className="grid grid-cols-2 gap-3 pt-2 border-t border-border">
-          {isDeposit ? (
-            <>
-              {collateralFactor !== undefined && (
-                <div>
-                  <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                    Collateral Factor
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Info className="w-3 h-3 cursor-help" />
-                      </TooltipTrigger>
-                      <TooltipContent className="max-w-xs">
-                        <p>Maximum percentage of collateral value that can be borrowed</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                  <div className="text-sm font-semibold">
-                    {(collateralFactor * 100).toFixed(2)}%
-                  </div>
-                </div>
-              )}
-              {liquidationFactor !== undefined && (
-                <div>
-                  <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                    Liquidation Threshold
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Info className="w-3 h-3 cursor-help" />
-                      </TooltipTrigger>
-                      <TooltipContent className="max-w-xs">
-                        <p>LTV percentage at which position becomes liquidatable</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                  <div className="text-sm font-semibold">
-                    {(liquidationFactor * 100).toFixed(2)}%
-                  </div>
-                </div>
-              )}
-              {positionHealth !== undefined && (
-                <div className="col-span-2">
-                  <div className="text-xs text-muted-foreground mb-1">
-                    Position Health
-                  </div>
-                  {positionHealth === null ? (
-                    <span className="text-sm text-muted-foreground">—</span>
-                  ) : (
-                    (() => {
-                      const s = Math.min(positionHealth, 3);
-                      const barColor =
-                        s >= 2
-                          ? "bg-green-500"
-                          : s >= 1.5
-                            ? "bg-yellow-500"
-                            : s >= 1
-                              ? "bg-orange-500"
-                              : "bg-red-500";
-                      const textClass =
-                        s >= 2
-                          ? "text-green-600 dark:text-green-400"
-                          : s >= 1.5
-                            ? "text-yellow-600 dark:text-yellow-400"
-                            : s >= 1
-                              ? "text-orange-500"
-                              : "text-red-500";
-                      const barPct = Math.min(Math.max(s, 0), 3) * (100 / 3);
-                      return (
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2 max-w-[60px]">
-                            <div
-                              className={`h-2 rounded-full ${barColor}`}
-                              style={{ width: `${barPct}%` }}
-                            />
-                          </div>
-                          <span
-                            className={`text-sm font-semibold tabular-nums ${textClass}`}
-                          >
-                            {s.toFixed(2)}
-                          </span>
-                        </div>
-                      );
-                    })()
-                  )}
-                </div>
-              )}
-            </>
-          ) : (
-            <>
               {ltvUsage !== undefined && (
                 <div>
                   <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
@@ -374,9 +281,8 @@ const PortfolioTableMobileCard = ({
                   </div>
                 </div>
               )}
-            </>
-          )}
         </div>
+        )}
 
         {/* Action Buttons */}
         <div className="flex gap-2 pt-2">
