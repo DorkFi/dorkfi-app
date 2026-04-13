@@ -2,7 +2,7 @@
  * Algorand Service Documentation
  * 
  * The Algorand service provides a centralized way to manage Algorand Algod and Indexer clients
- * across different networks (Mainnet, Testnet, Local, VOI Main, VOI Test).
+ * across different networks (Mainnet, Testnet, Local, VOI Mainnet).
  * 
  * ## Basic Usage
  * 
@@ -15,11 +15,8 @@
  * // Switch to mainnet
  * const mainnetClients = algorandService.switchNetwork('mainnet');
  * 
- * // Switch to VOI Main
+ * // Switch to VOI Mainnet
  * const voiMainClients = algorandService.switchNetwork('voimain');
- * 
- * // Switch to VOI Test
- * const voiTestClients = algorandService.switchNetwork('voitest');
  * 
  * // Initialize clients for a specific network with custom config
  * const customClients = algorandService.initializeClients('testnet', {

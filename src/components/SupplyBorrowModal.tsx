@@ -56,6 +56,24 @@ import {
   maxBorrowTokenAmountForMinEstimatedHealth,
   shouldBlockDepositForLowEstimatedHealth,
 } from "@/utils/depositModalPoolHealthEstimate";
+import TransactionSignPreview from "./TransactionSignPreview";
+import { getExplorerTransactionUrl } from "@/utils/explorerLinks";
+
+/** Built transaction group ready for wallet signature (review step). */
+interface PendingSupplyBorrowSign {
+  txnsB64: string[];
+  poolAppId: string;
+  marketContractId: string;
+  underlyingAssetId?: string | null;
+  actualNetwork: NetworkId;
+  tokenSymbol: string;
+  originalSymbol: string;
+  originalTokenConfig: {
+    decimals: number;
+    tokenStandard: string;
+    poolId?: string | number;
+  };
+}
 
 interface SupplyBorrowModalProps {
   isOpen: boolean;
@@ -155,6 +173,10 @@ const SupplyBorrowModal = ({
     | null
     | undefined
   >(undefined);
+  const [pendingSign, setPendingSign] = useState<PendingSupplyBorrowSign | null>(
+    null
+  );
+  const [isSigning, setIsSigning] = useState(false);
 
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
@@ -536,6 +558,10 @@ const SupplyBorrowModal = ({
     fetchMaxBorrowAmount();
   }, [isOpen, mode, activeAccount?.address, asset, poolId, networkToUse, tokenPrice, assetData.totalBorrow, assetData.maxTotalBorrows]);
 
+  useEffect(() => {
+    setPendingSign(null);
+  }, [amount, asset, mode, poolId, network, networkToUse]);
+
   // Reset states when modal opens/closes
   useEffect(() => {
     if (isOpen) {
@@ -546,6 +572,8 @@ const SupplyBorrowModal = ({
       setTransactionId(null);
       setTransactionNetworkId(null);
       setRetryCount(0);
+      setPendingSign(null);
+      setIsSigning(false);
       if (mode !== "borrow") {
         setCalculatedMaxBorrow(null);
         setMaxBorrowError(null);
@@ -561,7 +589,233 @@ const SupplyBorrowModal = ({
     []
   );
 
-  const handleSubmit = async () => {
+  const finalizeAfterSign = async (
+    stxns: Uint8Array[],
+    pending: PendingSupplyBorrowSign,
+    res: { txid: string }
+  ) => {
+    const finalNetwork = pending.actualNetwork;
+    setTransactionNetworkId(finalNetwork);
+    const algorandNetwork = getAlgorandNetworkFromNetworkId(
+      finalNetwork as NetworkId
+    );
+    if (!algorandNetwork) {
+      throw new Error(`Invalid network: ${finalNetwork}`);
+    }
+    const algorandClients =
+      await algorandService.initializeClientsForTransactions(algorandNetwork);
+    await waitForConfirmation(algorandClients.algod, res.txid, 4);
+
+    const decodedStxns = stxns.map((txn: Uint8Array<ArrayBufferLike>) => {
+      return algosdk.decodeSignedTransaction(txn);
+    });
+    const poolTxn = decodedStxns
+      .slice()
+      .reverse()
+      .find(
+        (txn: any) =>
+          txn.txn.type === "appl" &&
+          Number(txn.txn.applicationCall.appIndex) ===
+            parseInt(pending.poolAppId, 10)
+      );
+    const poolTxnID = poolTxn?.txn?.txID?.();
+    if (!poolTxnID) {
+      throw new Error("Could not locate pool application transaction in group.");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+    let metadataUpdated = false;
+    let metaRetry = 0;
+    const maxRetries = 10;
+    const apiBaseUrl =
+      import.meta.env.VITE_DORKFI_API_URL || "https://dorkfi-api.nautilus.sh";
+    const networkParam = finalNetwork ? `?network=${finalNetwork}` : "";
+
+    while (!metadataUpdated && metaRetry < maxRetries) {
+      try {
+        const response = await fetch(
+          `${apiBaseUrl}/transaction-metadata/${poolTxnID}${networkParam}`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+          }
+        );
+
+        if (response.ok) {
+          const metaResult = await response.json();
+          console.log("Transaction metadata successfully updated:", metaResult.data);
+          metadataUpdated = true;
+        } else {
+          const errBody = await response.json();
+          throw new Error(errBody.error || "Failed to update transaction metadata");
+        }
+      } catch (err) {
+        metaRetry++;
+        if (metaRetry < maxRetries) {
+          const delay = 1000 * Math.pow(2, metaRetry - 1);
+          console.warn(
+            `Metadata update attempt ${metaRetry} failed, retrying in ${delay}ms:`,
+            err
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        } else {
+          console.error("Failed to update transaction metadata after all retries:", err);
+        }
+      }
+    }
+
+    if (!activeAccount?.address) return;
+
+    const apiNet = pending.actualNetwork;
+    Promise.all([
+      dorkfiAPIService.fetchFreshUserData(
+        activeAccount.address,
+        apiNet,
+        parseInt(pending.poolAppId, 10),
+        parseInt(pending.marketContractId, 10)
+      ),
+      fetchMarketInfoFromContract(
+        pending.poolAppId,
+        pending.marketContractId,
+        apiNet
+      ),
+      dorkfiAPIService.fetchFreshUserHealth(
+        apiNet,
+        parseInt(pending.poolAppId, 10),
+        activeAccount.address
+      ),
+    ])
+      .then(() => new Promise((resolve) => setTimeout(resolve, 2000)))
+      .then(() => {
+        if (onTransactionSuccess) {
+          onTransactionSuccess();
+        }
+      })
+      .catch((error) => {
+        console.error("Error calling fetchFreshUserData after transaction:", error);
+        if (onTransactionSuccess) {
+          onTransactionSuccess();
+        }
+      });
+
+    console.log("Transaction confirmed:", res);
+    setTransactionId(res.txid);
+    setPendingSign(null);
+    setShowSuccess(true);
+  };
+
+  const handleConfirmSign = async () => {
+    if (!pendingSign || !activeAccount?.address) {
+      setError("Connect your wallet to sign.");
+      return;
+    }
+    const pending = pendingSign;
+    setIsSigning(true);
+    setError(null);
+    try {
+      if (activeWallet) {
+        const walletId = activeWallet.id?.toLowerCase() || "";
+        const walletName = activeWallet.metadata?.name?.toLowerCase() || "";
+        const networkId = pending.actualNetwork as string;
+
+        const isUniversalWallet =
+          walletId === "lute" ||
+          walletId === "kibisis" ||
+          walletId === "vera" ||
+          walletId === "biatec";
+
+        const isVOIWallet = false;
+
+        const isAlgorandWallet =
+          walletId === "pera" ||
+          walletId === "defly" ||
+          walletName.includes("pera") ||
+          walletName.includes("defly");
+
+        const isWalletConnect = walletId === "walletconnect";
+        let isWalletConnectVOI = false;
+        let isWalletConnectAlgorand = false;
+
+        if (isWalletConnect) {
+          isWalletConnectVOI =
+            walletName.includes("vera") || walletName.includes("biatec");
+          isWalletConnectAlgorand =
+            walletName.includes("pera") || walletName.includes("defly");
+        }
+
+        const isSupported =
+          isUniversalWallet ||
+          (isVOIWallet && networkId === "voi-mainnet") ||
+          (isAlgorandWallet && networkId === "algorand-mainnet") ||
+          (isWalletConnect &&
+            ((isWalletConnectVOI && networkId === "voi-mainnet") ||
+              (isWalletConnectAlgorand && networkId === "algorand-mainnet") ||
+              (!isWalletConnectVOI &&
+                !isWalletConnectAlgorand &&
+                currentNetwork === "voi-mainnet" &&
+                networkId === "voi-mainnet") ||
+              (!isWalletConnectVOI && !isWalletConnectAlgorand))) ||
+          (!isVOIWallet && !isAlgorandWallet && !isWalletConnect);
+
+        if (!isSupported) {
+          const networkName =
+            networkId === "voi-mainnet" ? "VOI Mainnet" : "Algorand Mainnet";
+          throw new Error(
+            `Your wallet (${activeWallet.metadata?.name || walletId
+            }) does not support ${networkName}. Please switch to a compatible wallet or network.`
+          );
+        }
+      }
+
+      const walletName = activeWallet?.metadata?.name || "your wallet";
+      toast({
+        title: "Please Sign Transaction",
+        description: `Please open ${walletName} and sign the transaction`,
+        duration: 10000,
+      });
+
+      const stxns = await signTransactions(
+        pending.txnsB64.map((txn: string) =>
+          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+        )
+      );
+
+      const finalNetwork = pending.actualNetwork;
+      const algorandNetwork = getAlgorandNetworkFromNetworkId(
+        finalNetwork as NetworkId
+      );
+      if (!algorandNetwork) {
+        throw new Error(`Invalid network: ${finalNetwork}`);
+      }
+      const algorandClients =
+        await algorandService.initializeClientsForTransactions(algorandNetwork);
+      const res = await algorandClients.algod.sendRawTransaction(stxns).do();
+
+      await finalizeAfterSign(stxns, pending, res);
+    } catch (error) {
+      console.error(`${mode} sign error:`, error);
+      let errorMessage = `${mode} failed`;
+      if (error instanceof Error) {
+        const message = error.message.toLowerCase();
+        if (message.includes("compatible wallet")) {
+          errorMessage = error.message;
+        } else if (message.includes("rejected") || message.includes("user")) {
+          errorMessage = "Transaction was rejected or cancelled by user.";
+        } else if (message.includes("gas") || message.includes("fee")) {
+          errorMessage =
+            "Transaction failed due to insufficient gas fees. Please ensure you have enough tokens for gas.";
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      setError(errorMessage);
+    } finally {
+      setIsSigning(false);
+    }
+  };
+
+  const handleBuildTransaction = async () => {
     if (!activeAccount?.address) {
       setError("Please connect your wallet first");
       return;
@@ -787,30 +1041,25 @@ const SupplyBorrowModal = ({
 
       console.log(`${mode} result:`, result);
 
-      // Check if wallet is supported on the network for signing
       if (activeWallet) {
         const walletId = activeWallet.id?.toLowerCase() || "";
         const walletName = activeWallet.metadata?.name?.toLowerCase() || "";
         const networkId = actualNetwork as string;
 
-        // Universal wallets support all AVM networks
         const isUniversalWallet =
           walletId === "lute" ||
           walletId === "kibisis" ||
           walletId === "vera" ||
           walletId === "biatec";
 
-        // VOI-specific wallets only support VOI Mainnet
         const isVOIWallet = false;
 
-        // Algorand-specific wallets only support Algorand Mainnet
         const isAlgorandWallet =
           walletId === "pera" ||
           walletId === "defly" ||
           walletName.includes("pera") ||
           walletName.includes("defly");
 
-        // WalletConnect - check wallet name for specific restrictions
         const isWalletConnect = walletId === "walletconnect";
         let isWalletConnectVOI = false;
         let isWalletConnectAlgorand = false;
@@ -822,7 +1071,6 @@ const SupplyBorrowModal = ({
             walletName.includes("pera") || walletName.includes("defly");
         }
 
-        // Check if wallet supports the network
         const isSupported =
           isUniversalWallet ||
           (isVOIWallet && networkId === "voi-mainnet") ||
@@ -835,7 +1083,7 @@ const SupplyBorrowModal = ({
                 currentNetwork === "voi-mainnet" &&
                 networkId === "voi-mainnet") ||
               (!isWalletConnectVOI && !isWalletConnectAlgorand))) ||
-          (!isVOIWallet && !isAlgorandWallet && !isWalletConnect); // Unknown wallet types allow all networks
+          (!isVOIWallet && !isAlgorandWallet && !isWalletConnect);
 
         if (!isSupported) {
           const networkName =
@@ -847,119 +1095,29 @@ const SupplyBorrowModal = ({
         }
       }
 
-      // Show toast notification to prompt user to open wallet
-      const walletName = activeWallet?.metadata?.name || "your wallet";
-      toast({
-        title: "Please Sign Transaction",
-        description: `Please open ${walletName} and sign the transaction`,
-        duration: 10000,
-      });
+      const underlyingAssetId =
+        token && typeof token === "object" && "underlyingAssetId" in token
+          ? (token as { underlyingAssetId?: string }).underlyingAssetId
+          : undefined;
 
-      // Sign and send transactions
-      const stxns = await signTransactions(
-        result.txns.map((txn: string) =>
-          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
-        )
-      );
-
-      // Get the correct algod client for the asset's network (not currentNetwork)
-      const finalNetwork = actualNetwork || network || currentNetwork;
-      setTransactionNetworkId(finalNetwork);
-      const algorandNetwork = getAlgorandNetworkFromNetworkId(
-        finalNetwork as any
-      );
-      if (!algorandNetwork) {
-        throw new Error(`Invalid network: ${finalNetwork}`);
-      }
-      const algorandClients =
-        await algorandService.initializeClientsForTransactions(algorandNetwork);
-      const res = await algorandClients.algod.sendRawTransaction(stxns).do();
-      await waitForConfirmation(algorandClients.algod, res.txid, 4);
-
-      const decodedStxns = stxns.map((txn: Uint8Array<ArrayBufferLike>) => {
-        return algosdk.decodeSignedTransaction(txn);
-      });
-      const poolTxnID = decodedStxns.reverse().find((txn: any) => txn.txn.type === "appl" && Number(txn.txn.applicationCall.appIndex) === parseInt(token.poolId)).txn.txID()
-      await new Promise((resolve) => setTimeout(resolve, 5000));
-      // Retry until metadata update succeeds
-      let metadataUpdated = false;
-      let retryCount = 0;
-      const maxRetries = 10;
-      const apiBaseUrl = import.meta.env.VITE_DORKFI_API_URL || "https://dorkfi-api.nautilus.sh";
-      const networkParam = finalNetwork ? `?network=${finalNetwork}` : "";
-
-      while (!metadataUpdated && retryCount < maxRetries) {
-        try {
-          const response = await fetch(
-            `${apiBaseUrl}/transaction-metadata/${poolTxnID}${networkParam}`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-            }
-          );
-
-          if (response.ok) {
-            const result = await response.json();
-            console.log("Transaction metadata successfully updated:", result.data);
-            metadataUpdated = true;
-          } else {
-            const error = await response.json();
-            throw new Error(error.error || "Failed to update transaction metadata");
-          }
-        } catch (error) {
-          retryCount++;
-          if (retryCount < maxRetries) {
-            const delay = 1000 * Math.pow(2, retryCount - 1); // Exponential backoff
-            console.warn(`Metadata update attempt ${retryCount} failed, retrying in ${delay}ms:`, error);
-            await new Promise((resolve) => setTimeout(resolve, delay));
-          } else {
-            console.error("Failed to update transaction metadata after all retries:", error);
-          }
-        }
+      if (!result.txns || result.txns.length === 0) {
+        throw new Error("No transactions returned from protocol; nothing to sign.");
       }
 
-      // Wait for metadata update to complete, then refresh market data
-      Promise.all([
-        dorkfiAPIService.fetchFreshUserData(
-          activeAccount.address,
-          networkToUse,
-          parseInt(token.poolId),
-          parseInt(token.underlyingContractId)
-        ),
-        fetchMarketInfoFromContract(
-          token.poolId,
-          token.underlyingContractId,
-          networkToUse as NetworkId
-        ),
-        dorkfiAPIService.fetchFreshUserHealth(
-          networkToUse,
-          parseInt(token.poolId),
-          activeAccount.address
-        ),
-      ])
-        .then(() => {
-          // Wait a bit more to ensure backend has processed the metadata
-          return new Promise((resolve) => setTimeout(resolve, 2000));
-        })
-        .then(() => {
-          // Call the success callback to refresh data after metadata is processed
-          if (onTransactionSuccess) {
-            onTransactionSuccess();
-          }
-        })
-        .catch((error) => {
-          console.error("Error calling fetchFreshUserData after transaction:", error);
-          // Still call onTransactionSuccess even if API calls fail
-          if (onTransactionSuccess) {
-            onTransactionSuccess();
-          }
-        });
-
-      console.log("Transaction confirmed:", res);
-      setTransactionId(res.txid);
-      setShowSuccess(true);
+      setPendingSign({
+        txnsB64: result.txns,
+        poolAppId: token.poolId,
+        marketContractId: token.underlyingContractId,
+        underlyingAssetId: underlyingAssetId ?? null,
+        actualNetwork: actualNetwork as NetworkId,
+        tokenSymbol: asset,
+        originalSymbol,
+        originalTokenConfig: {
+          decimals: originalTokenConfig.decimals,
+          tokenStandard: String(originalTokenConfig.tokenStandard),
+          poolId: originalTokenConfig.poolId,
+        },
+      });
     } catch (error) {
       console.error(`${mode} error:`, error);
 
@@ -1016,17 +1174,11 @@ const SupplyBorrowModal = ({
   };
 
   const handleViewTransaction = () => {
-    const networkToUse = network || currentNetwork;
-    if (transactionId) {
-      if (networkToUse === "voi-mainnet") {
-        window.open(`https://voi.observer/tx/${transactionId}`, "_blank");
-      }
-      if (networkToUse === "algorand-mainnet") {
-        window.open(`https://allo.info/tx/${transactionId}`, "_blank");
-      }
-    } else {
+    if (!transactionId) {
       throw new Error("Transaction ID not found");
     }
+    const net = (transactionNetworkId || network || currentNetwork) as NetworkId;
+    window.open(getExplorerTransactionUrl(net, transactionId), "_blank");
   };
 
   const handleGoToPortfolio = () => {
@@ -1045,7 +1197,7 @@ const SupplyBorrowModal = ({
   const handleRetry = () => {
     setError(null);
     setRetryCount((prev) => prev + 1);
-    handleSubmit();
+    handleBuildTransaction();
   };
 
   return (
@@ -1207,8 +1359,8 @@ const SupplyBorrowModal = ({
                 userGlobalData={userGlobalData}
                 collateralFactor={assetData.collateralFactor}
                 onAmountChange={handleAmountChange}
-                onSubmit={handleSubmit}
-                isLoading={isLoading}
+                onSubmit={handleBuildTransaction}
+                isLoading={isLoading || isSigning}
                 disabled={
                   (mode === "borrow" && !userGlobalData) ||
                   (mode === "borrow" && borrowExceedsEffectiveCap) ||
@@ -1237,44 +1389,94 @@ const SupplyBorrowModal = ({
                 isSToken={assetData.isSToken || false}
                 poolCollateralMarkets={poolCollateralMarkets}
               />
+
+              {pendingSign && (
+                <TransactionSignPreview
+                  mode={mode}
+                  asset={pendingSign.tokenSymbol}
+                  amount={amount}
+                  networkId={pendingSign.actualNetwork}
+                  poolAppId={pendingSign.poolAppId}
+                  marketContractId={pendingSign.marketContractId}
+                  underlyingAssetId={pendingSign.underlyingAssetId}
+                  txnCount={pendingSign.txnsB64.length}
+                  estimatedFeeAlgoDisplay={(
+                    (pendingSign.txnsB64.length * algosdk.MIN_TXN_FEE) /
+                    1e6
+                  ).toFixed(4)}
+                  reserveFactorPercent={assetData.reserveFactor ?? null}
+                />
+              )}
             </div>
 
             {/* Action Buttons */}
             <div className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 border-t border-gray-200 dark:border-slate-700 px-6 py-3 flex gap-3 shrink-0">
-              <Button
-                variant="outline"
-                onClick={onClose}
-                disabled={isLoading}
-                className="flex-1"
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleSubmit}
-                disabled={
-                  !amount ||
-                  parseFloat(amount) <= 0 ||
-                  isLoading ||
-                  (mode === "borrow" && !userGlobalData) ||
-                  (mode === "borrow" && borrowNoCapacityAtHfTarget) ||
-                  (mode === "borrow" && borrowExceedsEffectiveCap) ||
-                  (mode === "borrow" && borrowSubmitBlockedBelowHfTarget) ||
-                  (mode === "deposit" && depositBlockedByLowEstimatedHealth)
-                }
-                className={`flex-1 font-semibold h-11 ${mode === "deposit"
-                  ? "bg-teal-600 hover:bg-teal-700 text-white"
-                  : "bg-whale-gold hover:bg-whale-gold/90 text-black"
-                  } disabled:opacity-50 disabled:cursor-not-allowed`}
-              >
-                {isLoading ? (
-                  <div className="flex items-center gap-2 justify-center">
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                    Processing...
-                  </div>
-                ) : (
-                  `${mode === "deposit" ? "Deposit" : "Borrow"} ${asset}`
-                )}
-              </Button>
+              {pendingSign ? (
+                <>
+                  <Button
+                    variant="outline"
+                    onClick={() => setPendingSign(null)}
+                    disabled={isSigning}
+                    className="flex-1"
+                  >
+                    Back to edit
+                  </Button>
+                  <Button
+                    onClick={handleConfirmSign}
+                    disabled={isSigning}
+                    className={`flex-1 font-semibold h-11 ${mode === "deposit"
+                      ? "bg-teal-600 hover:bg-teal-700 text-white"
+                      : "bg-whale-gold hover:bg-whale-gold/90 text-black"
+                      } disabled:opacity-50 disabled:cursor-not-allowed`}
+                  >
+                    {isSigning ? (
+                      <div className="flex items-center gap-2 justify-center">
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        Signing…
+                      </div>
+                    ) : (
+                      "Sign in wallet"
+                    )}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    variant="outline"
+                    onClick={onClose}
+                    disabled={isLoading}
+                    className="flex-1"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleBuildTransaction}
+                    disabled={
+                      !amount ||
+                      parseFloat(amount) <= 0 ||
+                      isLoading ||
+                      (mode === "borrow" && !userGlobalData) ||
+                      (mode === "borrow" && borrowNoCapacityAtHfTarget) ||
+                      (mode === "borrow" && borrowExceedsEffectiveCap) ||
+                      (mode === "borrow" && borrowSubmitBlockedBelowHfTarget) ||
+                      (mode === "deposit" && depositBlockedByLowEstimatedHealth)
+                    }
+                    className={`flex-1 font-semibold h-11 ${mode === "deposit"
+                      ? "bg-teal-600 hover:bg-teal-700 text-white"
+                      : "bg-whale-gold hover:bg-whale-gold/90 text-black"
+                      } disabled:opacity-50 disabled:cursor-not-allowed`}
+                  >
+                    {isLoading ? (
+                      <div className="flex items-center gap-2 justify-center">
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        Building transaction…
+                      </div>
+                    ) : (
+                      `${mode === "deposit" ? "Deposit" : "Borrow"} ${asset}`
+                    )}
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         )}

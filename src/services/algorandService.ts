@@ -11,8 +11,7 @@ export type AlgorandNetwork =
   | "mainnet"
   | "testnet"
   | "local"
-  | "voimain"
-  | "voitest";
+  | "voimain";
 
 export interface AlgorandConfig {
   network: AlgorandNetwork;
@@ -69,14 +68,6 @@ const NETWORK_CONFIGS: Record<
     indexerServer: "https://mainnet-idx.voi.nodely.dev",
     indexerPort: 443,
   },
-  voitest: {
-    algodToken: "",
-    algodServer: "https://testnet-api.voi.nodely.dev",
-    algodPort: 443,
-    indexerToken: "",
-    indexerServer: "https://testnet-idx.voi.nodely.dev",
-    indexerPort: 443,
-  },
 };
 
 class AlgorandService {
@@ -92,7 +83,6 @@ class AlgorandService {
       testnet: "algorand-testnet",
       local: "localnet",
       voimain: "voi-mainnet",
-      voitest: "voi-testnet",
     };
     return mapping[network];
   }

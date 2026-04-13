@@ -177,25 +177,6 @@ export const initializeVOIMainnet = async () => {
 };
 
 /**
- * Example: Initialize VOI Testnet clients
- */
-export const initializeVOITestnet = async () => {
-  try {
-    const clients = algorandService.initializeClients('voitest');
-    const connections = await algorandService.testConnections('voitest');
-    
-    return {
-      clients,
-      connections,
-      success: connections.both,
-    };
-  } catch (error) {
-    console.error('Failed to initialize VOI Testnet:', error);
-    throw error;
-  }
-};
-
-/**
  * Example: Get current network information
  */
 export const getCurrentNetworkInfo = () => {

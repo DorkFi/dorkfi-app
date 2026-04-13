@@ -405,7 +405,6 @@ export class GasStationService {
   static getSupportedNetworks(): NetworkId[] {
     return [
       "voi-mainnet",
-      "voi-testnet",
       "algorand-mainnet",
       "algorand-testnet",
     ];

@@ -73,10 +73,10 @@ export const canUsePreFi = () => {
   return isFeatureEnabled('enablePreFi');
 };
 
-// Example: Switch network configuration
-export const switchToTestnet = () => {
-  const testnetConfig = getNetworkConfig('voi-testnet');
-  console.log('Switched to testnet:', testnetConfig.name);
+// Example: Switch network configuration (Algorand testnet)
+export const switchToAlgorandTestnet = () => {
+  const testnetConfig = getNetworkConfig('algorand-testnet');
+  console.log('Switched to Algorand testnet:', testnetConfig.name);
   return testnetConfig;
 };
 

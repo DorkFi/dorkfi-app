@@ -5,7 +5,7 @@ The Gas Station is a new page in the DorkFi application that allows users to min
 ## Features
 
 ### 🎯 Core Functionality
-- **Multi-Network Support**: Works with VOI Mainnet, VOI Testnet, Algorand Mainnet, and Algorand Testnet
+- **Multi-Network Support**: Works with VOI Mainnet, Algorand Mainnet, and Algorand Testnet
 - **Token Type Support**: Supports network tokens, ARC200 tokens, and ASA tokens
 - **Network-Aware**: Automatically detects available tokens based on the current network
 - **Wallet Integration**: Seamlessly integrates with connected wallets
@@ -88,7 +88,6 @@ The Gas Station uses the existing network configuration system:
 // Supported networks
 const supportedNetworks = [
   'voi-mainnet',
-  'voi-testnet', 
   'algorand-mainnet',
   'algorand-testnet'
 ];

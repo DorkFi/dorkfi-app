@@ -28,6 +28,8 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { PoolCollateralMarketRow } from "@/utils/poolCollateralMarketRows";
+import type { NetworkId } from "@/config";
+import { getExplorerTransactionUrl } from "@/utils/explorerLinks";
 import {
   buildLiquidationThresholdSummaryForDeposit,
   DEPOSIT_ESTIMATED_HEALTH_CRITICAL_MAX,
@@ -220,19 +222,13 @@ const RepayModal = ({
   };
 
   const handleViewTransaction = () => {
-    if (transactionId) {
-      if (networkToUse === "voi-mainnet") {
-        window.open(`https://voi.observer/tx/${transactionId}`, "_blank");
-        return;
-      }
-      if (networkToUse === "algorand-mainnet") {
-        window.open(`https://allo.info/tx/${transactionId}`, "_blank");
-        return;
-      }
-      throw new Error("Invalid network");
-    } else {
+    if (!transactionId) {
       throw new Error("Transaction ID not found");
     }
+    window.open(
+      getExplorerTransactionUrl(networkToUse as NetworkId, transactionId),
+      "_blank"
+    );
   };
 
   const handleGoToPortfolio = () => {

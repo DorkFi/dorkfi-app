@@ -49,7 +49,6 @@ const getConfigNetworkIdFromWalletNetworkId = (
     mainnet: "algorand-mainnet",
     testnet: "algorand-testnet",
     voimain: "voi-mainnet",
-    voitest: "voi-testnet",
     local: "localnet",
     "ethereum-mainnet": "ethereum-mainnet",
     "ethereum-testnet": "ethereum-testnet",

@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import { getMarketLabel } from '@/config';
+import { getAllTokensWithDisplayInfo, getMarketLabel, type NetworkId } from '@/config';
 import { useMimirTokenPrice24h } from '@/hooks/useMimirTokenPrice24h';
 import { MarketData, UserPosition } from './types';
 import { MarketHeader } from './MarketHeader';
@@ -77,6 +77,30 @@ export const PremiumMarketModal = ({
     };
   }, [marketData, mimirChange24h, mimirHistory]);
 
+  const explorerIds = useMemo(() => {
+    if (!networkId) {
+      return { poolAppId: undefined as string | undefined, underlyingAssetId: undefined as string | undefined };
+    }
+    const poolId = poolIdFromRawMarket(rawMarket ?? null);
+    const tokens = getAllTokensWithDisplayInfo(networkId as NetworkId);
+    const t = tokens.find(
+      (x) =>
+        x.symbol === asset &&
+        (poolId == null || String(x.poolId) === String(poolId))
+    );
+    if (!t?.poolId) {
+      return {
+        poolAppId: poolId != null && String(poolId) !== '' ? String(poolId) : undefined,
+        underlyingAssetId: undefined as string | undefined,
+      };
+    }
+    const aid =
+      'underlyingAssetId' in t && t.underlyingAssetId != null && String(t.underlyingAssetId) !== ''
+        ? String(t.underlyingAssetId)
+        : undefined;
+    return { poolAppId: String(t.poolId), underlyingAssetId: aid };
+  }, [networkId, rawMarket, asset]);
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl w-full min-w-0 min-h-0 max-h-[min(90dvh,90vh)] flex flex-col overflow-hidden px-0 py-0 dorkfi-dark-bg-modal rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl card-hover hover:shadow-lg hover:border-ocean-teal/40 transition-all">
@@ -132,7 +156,12 @@ export const PremiumMarketModal = ({
               </section>
             )}
 
-            <MarketModalFooter asset={asset} />
+            <MarketModalFooter
+              asset={asset}
+              networkId={networkId}
+              poolAppId={explorerIds.poolAppId}
+              underlyingAssetId={explorerIds.underlyingAssetId}
+            />
 
           </div>
         </div>

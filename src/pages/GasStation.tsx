@@ -63,6 +63,7 @@ import {
 import { useNetwork } from "@/contexts/NetworkContext";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { getTokenImagePath } from "@/utils/tokenImageUtils";
+import Footer from "@/components/Footer";
 import GasStationService, {
   MintingRequest,
   MintingResult,
@@ -546,6 +547,7 @@ const GasStation: React.FC = () => {
           </DialogContent>
         </Dialog>
       </div>
+      <Footer />
     </div>
   );
 };

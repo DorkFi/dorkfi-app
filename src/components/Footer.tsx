@@ -1,11 +1,13 @@
 import React from 'react';
 import { ExternalLink } from 'lucide-react';
 import VersionDisplay from './VersionDisplay';
+import NonCustodialComplianceStrip from './NonCustodialComplianceStrip';
 
 const Footer = () => {
   return (
     <footer className="border-t border-border/40 mt-8 relative z-10">
-      <div className="max-w-[1200px] mx-auto px-4 py-6">
+      <div className="max-w-[1200px] mx-auto px-4 py-6 space-y-4">
+        <NonCustodialComplianceStrip />
         <div className="flex flex-col items-center justify-center gap-4 md:flex-row md:justify-between">
           <div className="text-left text-muted-foreground text-sm order-2 md:order-1">
             <p className="flex items-center gap-2">

@@ -86,6 +86,7 @@ import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import VersionDisplay from "@/components/VersionDisplay";
+import NonCustodialComplianceStrip from "@/components/NonCustodialComplianceStrip";
 import {
   getNetworkConfig,
   isCurrentNetworkAlgorandCompatible,
@@ -15091,7 +15092,8 @@ export default function AdminDashboard() {
 
       {/* Footer */}
       <footer className="border-t border-border/40 mt-4 relative z-10">
-        <div className="max-w-6xl mx-auto px-4 py-4 md:py-6">
+        <div className="max-w-6xl mx-auto px-4 py-4 md:py-6 space-y-4">
+          <NonCustodialComplianceStrip />
           <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-center sm:text-left">
             <div className="text-muted-foreground text-sm">
               <p>© 2025 DorkFi Protocol. Admin Panel - Operator Controls.</p>
