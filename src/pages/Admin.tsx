@@ -148,6 +148,11 @@ import algosdk, { waitForConfirmation } from "algosdk";
 import BigNumber from "bignumber.js";
 import envoiService, { type EnvoiNameResponse } from "@/services/envoiService";
 import { fromBase } from "@/utils/calculationUtils";
+import {
+  collectDedupedLendingMarketKeys,
+  refreshAllLendingBackendSnapshots,
+  type RefreshAllSnapshotsResult,
+} from "@/utils/refreshAllLendingBackendSnapshots";
 import { ARC200Service } from "@/services/arc200Service";
 import { TokenContractModal } from "@/components/ui/TokenContractModal";
 import {
@@ -391,6 +396,62 @@ export default function AdminDashboard() {
   const [isMinting, setIsMinting] = useState(false);
   const [mintResult, setMintResult] = useState<string | null>(null);
   const [mintError, setMintError] = useState<string | null>(null);
+
+  const [bulkSnapshotLoading, setBulkSnapshotLoading] = useState(false);
+  const [bulkSnapshotProgress, setBulkSnapshotProgress] = useState<{
+    completed: number;
+    total: number;
+    label: string;
+  } | null>(null);
+  const [bulkSnapshotResult, setBulkSnapshotResult] =
+    useState<RefreshAllSnapshotsResult | null>(null);
+
+  const bulkSnapshotMarketCount = useMemo(
+    () => collectDedupedLendingMarketKeys().length,
+    []
+  );
+
+  const handleRefreshAllBackendSnapshots = useCallback(async () => {
+    if (!activeAccount?.address) {
+      toast.error("Connect a wallet to refresh user-specific snapshots.");
+      return;
+    }
+    setBulkSnapshotLoading(true);
+    setBulkSnapshotResult(null);
+    setBulkSnapshotProgress({ completed: 0, total: 0, label: "Starting…" });
+    try {
+      const result = await refreshAllLendingBackendSnapshots(
+        activeAccount.address,
+        {
+          concurrency: 4,
+          onProgress: (p) =>
+            setBulkSnapshotProgress({
+              completed: p.completed,
+              total: p.total,
+              label: p.currentLabel,
+            }),
+        }
+      );
+      setBulkSnapshotResult(result);
+      if (result.partialOrFailed === 0) {
+        toast.success(
+          `Refreshed all ${result.totalMarkets} market snapshots successfully.`
+        );
+      } else {
+        toast.warning(
+          `Refreshed ${result.fullySucceeded}/${result.totalMarkets} markets; ${result.partialOrFailed} had issues (see below).`
+        );
+      }
+    } catch (e) {
+      console.error("Bulk snapshot refresh failed:", e);
+      toast.error(
+        e instanceof Error ? e.message : "Bulk snapshot refresh failed."
+      );
+    } finally {
+      setBulkSnapshotLoading(false);
+      setBulkSnapshotProgress(null);
+    }
+  }, [activeAccount?.address]);
 
   // SToken state
   const [stokenInfo, setStokenInfo] = useState<any>(null);
@@ -11366,27 +11427,93 @@ export default function AdminDashboard() {
                 </CardContent>
               </Card>
 
-              {/* Additional Tools Placeholder */}
+              {/* Refresh all backend snapshots (user data, chain market, user health) */}
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <Wrench className="h-5 w-5" />
-                    Additional Tools
+                    <Database className="h-5 w-5" />
+                    Refresh all lending snapshots
                   </CardTitle>
                   <p className="text-sm text-muted-foreground">
-                    More admin tools will be added here
+                    For every enabled network and configured pool/market, runs{" "}
+                    <code className="text-xs">fetchFreshUserData</code>,{" "}
+                    <code className="text-xs">fetchMarketInfoFromContract</code>{" "}
+                    (Algorand-compatible networks only), and{" "}
+                    <code className="text-xs">fetchFreshUserHealth</code>. Uses
+                    the connected wallet address for user-scoped API refreshes.
                   </p>
                 </CardHeader>
-                <CardContent>
-                  <div className="text-center py-8 text-muted-foreground">
-                    <Wrench className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <p className="text-lg font-medium">
-                      More Tools Coming Soon
+                <CardContent className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    Markets in scope:{" "}
+                    <span className="font-medium text-foreground">
+                      {bulkSnapshotMarketCount}
+                    </span>{" "}
+                    (deduped from token config). Requests run in batches of 4.
+                  </p>
+                  {!activeAccount?.address && (
+                    <p className="text-sm text-amber-600 dark:text-amber-400">
+                      Connect a wallet to run this action.
                     </p>
-                    <p className="text-sm">
-                      Additional admin tools will be available here
-                    </p>
-                  </div>
+                  )}
+                  {bulkSnapshotProgress && (
+                    <div className="text-sm text-muted-foreground space-y-1">
+                      <p>
+                        Progress: {bulkSnapshotProgress.completed} /{" "}
+                        {bulkSnapshotProgress.total}
+                      </p>
+                      <p className="text-xs">{bulkSnapshotProgress.label}</p>
+                    </div>
+                  )}
+                  {bulkSnapshotResult && (
+                    <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm space-y-2">
+                      <p>
+                        Succeeded:{" "}
+                        <span className="font-medium text-green-600 dark:text-green-400">
+                          {bulkSnapshotResult.fullySucceeded}
+                        </span>{" "}
+                        / {bulkSnapshotResult.totalMarkets}
+                      </p>
+                      {bulkSnapshotResult.failures.length > 0 && (
+                        <div className="max-h-40 overflow-y-auto space-y-1">
+                          <p className="text-xs font-medium text-destructive">
+                            Issues ({bulkSnapshotResult.failures.length})
+                          </p>
+                          {bulkSnapshotResult.failures.slice(0, 20).map((f) => (
+                            <p key={f.key} className="text-xs break-all">
+                              {f.label}: {f.issues.join(", ")}
+                            </p>
+                          ))}
+                          {bulkSnapshotResult.failures.length > 20 && (
+                            <p className="text-xs text-muted-foreground">
+                              …and{" "}
+                              {bulkSnapshotResult.failures.length - 20} more
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <DorkFiButton
+                    variant="primary"
+                    className="w-full"
+                    onClick={handleRefreshAllBackendSnapshots}
+                    disabled={
+                      bulkSnapshotLoading || !activeAccount?.address
+                    }
+                  >
+                    {bulkSnapshotLoading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Refreshing snapshots…
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        Refresh all pools &amp; markets
+                      </>
+                    )}
+                  </DorkFiButton>
                 </CardContent>
               </Card>
             </div>
