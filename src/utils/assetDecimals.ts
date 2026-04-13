@@ -40,3 +40,44 @@ export function getTokenPriceFromOracle(
   const divisor = Math.pow(10, adjustment);
   return rawPrice / divisor;
 }
+
+/**
+ * USD per 1 token from `MarketInfo.price` as returned by `fetchMarketInfo` in lendingService
+ * (`formatPrice`: on-chain price ÷ 1e18). Applies the same 12-decimal oracle adjustment as
+ * Portfolio `formatPriceFromContract(market.price, tokenDecimals)` — not `getTokenPriceFromOracle`
+ * on `priceRaw` (full integer), which would double-apply scaling vs the formatted field.
+ */
+export function usdPerTokenFromMarketInfoFormattedPrice(
+  formattedPrice: string | number,
+  tokenDecimals: number
+): number {
+  const price =
+    typeof formattedPrice === "string"
+      ? parseFloat(formattedPrice)
+      : formattedPrice;
+  if (!price || !Number.isFinite(price) || price === 0) return 0;
+  const adjustment = 12 - tokenDecimals;
+  return price / Math.pow(10, adjustment);
+}
+
+/**
+ * USD value for a **human** token amount (not smallest units) × USD per token from
+ * `useTokenPrice`. Used by SupplyBorrowForm for the "≈ $…" line above the wallet balance.
+ *
+ * Regression: never multiply by `10^(tokenDecimals − 6)` — that inflated 8-decimal assets
+ * (e.g. UNIT) by 100×.
+ */
+export function usdValueForHumanTokenAmount(
+  humanAmount: number,
+  usdPerToken: number
+): number {
+  if (
+    !Number.isFinite(humanAmount) ||
+    !Number.isFinite(usdPerToken) ||
+    humanAmount <= 0 ||
+    usdPerToken <= 0
+  ) {
+    return 0;
+  }
+  return humanAmount * usdPerToken;
+}

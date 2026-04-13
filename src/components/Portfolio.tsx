@@ -43,6 +43,7 @@ import {
   getAlgorandNetworkFromNetworkId,
   getNetworkConfig,
   getMarketLabel,
+  getNetworkDisplayName,
   NetworkId,
   TokenConfig,
 } from "@/config";
@@ -122,6 +123,19 @@ import {
 
 /* eslint-disable no-case-declarations -- many sort switch blocks use const in cases */
 /* eslint-disable react-hooks/exhaustive-deps -- many callbacks intentionally use stable deps subset */
+
+/** User-facing line e.g. "Algorand · Market A" for portfolio HF / overview. */
+function formatUserMarketLine(
+  networkId: string | null | undefined,
+  poolId: string | null | undefined
+): string | null {
+  if (!networkId || !poolId) return null;
+  const net = getNetworkDisplayName(networkId);
+  const letter = getMarketLabel(networkId as NetworkId, poolId);
+  if (letter) return `${net} · Market ${letter}`;
+  return `${net} · Pool ${poolId}`;
+}
+
 /** Used for portfolio items (deposits, borrows, etc.) that may have network/originalSymbol/interest fields at runtime */
 interface ItemWithNetwork {
   network?: string;
@@ -1290,7 +1304,7 @@ const Portfolio = () => {
       "portfolio"
     );
 
-  const healthFactor = useMemo(() => {
+  const { healthFactor, hfWorstPoolId, hfWorstNetwork } = useMemo(() => {
     const md = marketData as Array<{
       symbol?: string;
       poolId?: string;
@@ -1321,6 +1335,8 @@ const Portfolio = () => {
     };
 
     let worst: number | null = null;
+    let worstPoolId: string | null = null;
+    let worstNetwork: string | null = null;
 
     const gud = user?.globalUserData;
     if (Array.isArray(gud) && gud.length > 0) {
@@ -1328,6 +1344,12 @@ const Portfolio = () => {
         const rec = item as Record<string, unknown>;
         const poolId = String(rec.appId ?? rec.poolId ?? "");
         if (!poolId) continue;
+
+        const poolNetworkRaw = rec.network;
+        const poolNetwork =
+          poolNetworkRaw != null && String(poolNetworkRaw).trim() !== ""
+            ? String(poolNetworkRaw)
+            : null;
 
         let collateral = 0;
         let borrow = 0;
@@ -1355,7 +1377,11 @@ const Portfolio = () => {
           `pool:${poolId}`
         );
         if (hf != null && isFinite(hf)) {
-          if (worst === null || hf < worst) worst = hf;
+          if (worst === null || hf < worst) {
+            worst = hf;
+            worstPoolId = poolId;
+            worstNetwork = poolNetwork;
+          }
         }
       }
     }
@@ -1367,7 +1393,13 @@ const Portfolio = () => {
       "portfolio-aggregate-fallback"
     );
 
-    return worst !== null ? worst : aggregateFallback;
+    const healthFactorValue = worst !== null ? worst : aggregateFallback;
+
+    return {
+      healthFactor: healthFactorValue,
+      hfWorstPoolId: worstPoolId,
+      hfWorstNetwork: worstNetwork,
+    };
   }, [
     user?.globalUserData,
     deposits,
@@ -1381,74 +1413,6 @@ const Portfolio = () => {
   const saturateHealthFactor = (healthFactor: number | null): number | null => {
     if (healthFactor === null) return null;
     return Math.min(healthFactor, 3.0);
-  };
-
-  /**
-   * Supplied table: health per row — this pool's `globalUserData` collateral/borrow with **this row's**
-   * market liquidation threshold (same shape as using the collateral market LT on-chain). Rows in one pool
-   * can differ when assets have different LTs. Falls back to portfolio HF when pool/global data is missing.
-   */
-  const getSuppliedPositionHealth = (
-    deposit: ItemWithNetwork
-  ): number | null => {
-    const poolId =
-      deposit.poolId != null && deposit.poolId !== ""
-        ? String(deposit.poolId)
-        : "";
-    if (!poolId) {
-      return healthFactor;
-    }
-
-    const gud = user?.globalUserData;
-    if (!Array.isArray(gud) || gud.length === 0) {
-      return healthFactor;
-    }
-
-    const poolRec = gud.find(
-      (item: Record<string, unknown>) =>
-        String(item.appId ?? item.poolId ?? "") === poolId
-    );
-    if (!poolRec) {
-      return healthFactor;
-    }
-
-    let poolCollateral = 0;
-    let poolBorrow = 0;
-    try {
-      poolCollateral = Number(
-        BigInt(String(poolRec.totalCollateralValue ?? 0)) / BigInt(1e12)
-      );
-      poolBorrow = Number(
-        BigInt(String(poolRec.totalBorrowValue ?? 0)) / BigInt(1e12)
-      );
-    } catch {
-      return healthFactor;
-    }
-
-    const md = marketData as Array<{
-      symbol?: string;
-      poolId?: string;
-      liquidationThreshold?: unknown;
-      marketInfo?: { liquidationThreshold?: unknown };
-    }>;
-    const market = md.find(
-      (m) =>
-        m.symbol === deposit.asset &&
-        (deposit.poolId ? m.poolId === deposit.poolId : true)
-    );
-    const raw =
-      market?.liquidationThreshold ?? market?.marketInfo?.liquidationThreshold;
-    const lt =
-      raw !== undefined && raw !== null
-        ? normalizeLiquidationThresholdToDecimal(raw)
-        : normalizeLiquidationThresholdToDecimal(undefined);
-
-    return calculateUserHealthFactor(
-      poolCollateral,
-      poolBorrow,
-      lt,
-      `supplied-row:${poolId}:${deposit.asset}`
-    );
   };
 
   /** One row per lending pool (`globalUserData`), for Network Portfolio — not network-aggregated. */
@@ -1700,6 +1664,56 @@ const Portfolio = () => {
       : healthFactor;
 
   const displayHealthFactor = saturateHealthFactor(healthFactorToDisplay);
+
+  /** Which lending market the headline HF refers to (worst pool or tightest at-risk deposit). */
+  const positionOverviewMarketLine = useMemo(() => {
+    const useAtRisk =
+      lowestAtRiskHealthFactor !== null &&
+      (healthFactor === null || lowestAtRiskHealthFactor < healthFactor);
+    if (
+      useAtRisk &&
+      atRiskAssets.length > 0 &&
+      lowestAtRiskHealthFactor !== null
+    ) {
+      const minR = lowestAtRiskHealthFactor;
+      const tied = atRiskAssets.filter(
+        (a) => Math.abs(a.riskRatio - minR) < 1e-5
+      );
+      const lines = tied
+        .map((a) =>
+          formatUserMarketLine(
+            (a as ItemWithNetwork).network ?? undefined,
+            a.poolId
+          )
+        )
+        .filter((x): x is string => Boolean(x));
+      const uniq = [...new Set(lines)];
+      if (uniq.length === 1) return uniq[0];
+      if (uniq.length > 1) return uniq.join(" · ");
+    }
+    if (hfWorstPoolId && hfWorstNetwork) {
+      const line = formatUserMarketLine(hfWorstNetwork, hfWorstPoolId);
+      if (line) return line;
+    }
+    const poolLines = new Map<string, string>();
+    for (const d of deposits) {
+      const net = (d as ItemWithNetwork).network;
+      const pid = d.poolId;
+      if (!net || !pid) continue;
+      const line = formatUserMarketLine(net, pid);
+      if (line) poolLines.set(`${net}::${String(pid)}`, line);
+    }
+    if (poolLines.size === 1) return [...poolLines.values()][0];
+    if (poolLines.size > 1) return "Multiple markets";
+    return null;
+  }, [
+    lowestAtRiskHealthFactor,
+    healthFactor,
+    atRiskAssets,
+    hfWorstPoolId,
+    hfWorstNetwork,
+    deposits,
+  ]);
 
   // Calculate Net LTV (Loan-to-Value ratio)
   const netLTV =
@@ -4649,12 +4663,9 @@ const Portfolio = () => {
             <>
               <EnhancedHealthFactor
                 healthFactor={displayHealthFactor}
+                marketContextLine={positionOverviewMarketLine}
                 totalCollateral={totalCollateral}
                 totalBorrowed={totalBorrowed}
-                liquidationMargin={liquidationMargin}
-                netLTV={netLTV}
-                weightedCollateralFactor={weightedCollateralFactor}
-                weightedLiquidationThreshold={weightedLiquidationThreshold}
                 dorkNftImage={displayAvatar || undefined}
                 underwaterBg="/lovable-uploads/44ebe994-a30e-4eb1-a4a1-776aa2978776.png"
                 onAddCollateral={!isViewOnly ? handleAddCollateral : undefined}
@@ -5637,18 +5648,6 @@ const Portfolio = () => {
                                   liquidationThresholdB - liquidationThresholdA;
                                 break;
                               }
-                              case "positionHealth": {
-                                const hfA =
-                                  getSuppliedPositionHealth(
-                                    a as ItemWithNetwork
-                                  ) ?? -1;
-                                const hfB =
-                                  getSuppliedPositionHealth(
-                                    b as ItemWithNetwork
-                                  ) ?? -1;
-                                comparison = hfA - hfB;
-                                break;
-                              }
                               default:
                                 comparison = a.apy - b.apy;
                                 break;
@@ -5759,9 +5758,6 @@ const Portfolio = () => {
                                   accruedInterestValue={
                                     (deposit as ItemWithNetwork).accruedInterestValue
                                   }
-                                  positionHealth={getSuppliedPositionHealth(
-                                    deposit as ItemWithNetwork
-                                  )}
                                   network={(deposit as ItemWithNetwork).network}
                                   poolId={deposit.poolId}
                                   depositDisabled={depositCapReached}
@@ -5976,42 +5972,6 @@ const Portfolio = () => {
                                 Accrued Interest
                                 {suppliedAssetsSort.column ===
                                   "accruedInterest" ? (
-                                  suppliedAssetsSort.direction === "asc" ? (
-                                    <ArrowUp className="w-3 h-3" />
-                                  ) : (
-                                    <ArrowDown className="w-3 h-3" />
-                                  )
-                                ) : (
-                                  <ArrowUpDown className="w-3 h-3 opacity-50" />
-                                )}
-                              </button>
-                            </TableHead>
-                            <TableHead className="text-right">
-                              <button
-                                onClick={() => {
-                                  if (
-                                    suppliedAssetsSort.column ===
-                                    "positionHealth"
-                                  ) {
-                                    setSuppliedAssetsSort({
-                                      column: "positionHealth",
-                                      direction:
-                                        suppliedAssetsSort.direction === "asc"
-                                          ? "desc"
-                                          : "asc",
-                                    });
-                                  } else {
-                                    setSuppliedAssetsSort({
-                                      column: "positionHealth",
-                                      direction: "asc",
-                                    });
-                                  }
-                                }}
-                                className="flex w-full items-center justify-end gap-1 hover:text-foreground transition-colors"
-                              >
-                                Position Health
-                                {suppliedAssetsSort.column ===
-                                "positionHealth" ? (
                                   suppliedAssetsSort.direction === "asc" ? (
                                     <ArrowUp className="w-3 h-3" />
                                   ) : (
@@ -6286,18 +6246,6 @@ const Portfolio = () => {
                                       liquidationThresholdA;
                                     break;
                                   }
-                                  case "positionHealth": {
-                                    const hfA =
-                                      getSuppliedPositionHealth(
-                                        a as ItemWithNetwork
-                                      ) ?? -1;
-                                    const hfB =
-                                      getSuppliedPositionHealth(
-                                        b as ItemWithNetwork
-                                      ) ?? -1;
-                                    comparison = hfA - hfB;
-                                    break;
-                                  }
                                   default:
                                     comparison = a.apy - b.apy;
                                     break;
@@ -6526,65 +6474,6 @@ const Portfolio = () => {
                                       </span>
                                     )}
                                   </TableCell>
-                                  <TableCell className="text-right">
-                                    {(() => {
-                                      const rowHf = getSuppliedPositionHealth(
-                                        deposit as ItemWithNetwork
-                                      );
-                                      const displayRowHf =
-                                        rowHf !== null
-                                          ? saturateHealthFactor(rowHf)
-                                          : null;
-                                      if (displayRowHf === null && rowHf === null) {
-                                        return (
-                                          <span className="text-muted-foreground">
-                                            —
-                                          </span>
-                                        );
-                                      }
-                                      const shown = displayRowHf ?? rowHf ?? 0;
-                                      const hfBarColor =
-                                        shown >= 2
-                                          ? "bg-green-500"
-                                          : shown >= 1.5
-                                            ? "bg-yellow-500"
-                                            : shown >= 1
-                                              ? "bg-orange-500"
-                                              : "bg-red-500";
-                                      const barWidthPct = Math.min(
-                                        Math.max(shown, 0),
-                                        3
-                                      ) * (100 / 3);
-                                      const hfTextClass =
-                                        shown >= 2
-                                          ? "text-green-600 dark:text-green-400"
-                                          : shown >= 1.5
-                                            ? "text-yellow-600 dark:text-yellow-400"
-                                            : shown >= 1
-                                              ? "text-orange-500"
-                                              : "text-red-500";
-                                      return (
-                                        <div className="flex items-center justify-end gap-2">
-                                          <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2 max-w-[100px]">
-                                            <div
-                                              className={`h-2 rounded-full ${hfBarColor}`}
-                                              style={{
-                                                width: `${barWidthPct}%`,
-                                              }}
-                                            />
-                                          </div>
-                                          <span
-                                            className={`text-sm font-medium tabular-nums min-w-[50px] text-right ${hfTextClass}`}
-                                          >
-                                            {formatNumber(shown, {
-                                              minimumFractionDigits: 2,
-                                              maximumFractionDigits: 2,
-                                            })}
-                                          </span>
-                                        </div>
-                                      );
-                                    })()}
-                                  </TableCell>
                                   <TableCell className="whitespace-nowrap w-[1%]">
                                     <div className="flex items-center gap-2">
                                       {!isViewOnly && (
@@ -6733,18 +6622,6 @@ const Portfolio = () => {
                                 (b as ItemWithNetwork).accruedInterest || 0;
                               comparison = accruedInterestA - accruedInterestB;
                               break;
-                            case "positionHealth": {
-                              const hfSortA =
-                                getSuppliedPositionHealth(
-                                  a as ItemWithNetwork
-                                ) ?? -1;
-                              const hfSortB =
-                                getSuppliedPositionHealth(
-                                  b as ItemWithNetwork
-                                ) ?? -1;
-                              comparison = hfSortA - hfSortB;
-                              break;
-                            }
                             default:
                               comparison = a.apy - b.apy;
                               break;

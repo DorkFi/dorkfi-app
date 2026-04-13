@@ -150,6 +150,17 @@ const PortfolioModals = ({
       ),
     [deposits, marketData, depositModal.network, depositModal.poolId]
   );
+
+  const withdrawPoolCollateralMarkets = useMemo(
+    () =>
+      buildPoolCollateralMarketRows(
+        deposits,
+        marketData,
+        withdrawModal.network,
+        withdrawModal.poolId
+      ),
+    [deposits, marketData, withdrawModal.network, withdrawModal.poolId]
+  );
   const [userDepositIndexCache, setUserDepositIndexCache] = useState<
     Record<string, string>
   >({});
@@ -289,13 +300,28 @@ const PortfolioModals = ({
       setMaxWithdrawData(null);
       return;
     }
+    const minLiquidationThresholdBps =
+      withdrawPoolCollateralMarkets.length > 0
+        ? BigInt(
+            Math.round(
+              Math.min(
+                ...withdrawPoolCollateralMarkets.map(
+                  (r) => r.liquidationThresholdPercent
+                )
+              ) * 100
+            )
+          )
+        : undefined;
     let cancelled = false;
     getMaxWithdrawableForMarket(
       token.poolId,
       token.underlyingContractId,
       activeAccount.address,
       networkToUse,
-      token.decimals
+      token.decimals,
+      minLiquidationThresholdBps !== undefined
+        ? { minLiquidationThresholdBps }
+        : undefined
     ).then((data) => {
       if (!cancelled && data) {
         setMaxWithdrawData({
@@ -316,6 +342,7 @@ const PortfolioModals = ({
     withdrawModal.network,
     activeAccount?.address,
     currentNetwork,
+    withdrawPoolCollateralMarkets,
   ]);
 
   const getMarketStatsForDeposit = (asset: string, poolId?: string) => {
@@ -479,6 +506,11 @@ const PortfolioModals = ({
       // lastUpdateTime can be a number (timestamp in seconds) or string (ISO)
       // Check both lastUpdateTime (from contract) and lastUpdated (from MarketInfo)
       lastUpdateTime: market?.lastUpdateTime || market?.lastUpdated,
+      liquidationThreshold: market
+        ? liquidationThresholdToPercent(
+            market.liquidationThreshold ?? market.marketInfo?.liquidationThreshold
+          )
+        : undefined,
     };
   };
 
@@ -823,7 +855,11 @@ const PortfolioModals = ({
 
   const handleWithdrawSubmit = async (
     amount: string,
-    options?: { isMaxWithdraw?: boolean }
+    options?: {
+      isMaxWithdraw?: boolean;
+      withdrawAllConfirmed?: boolean;
+      unsafeHealthFactorOverrideConfirmed?: boolean;
+    }
   ) => {
     if (!activeAccount?.address || !withdrawModal.asset) {
       console.error("No active account or asset for withdrawal");
@@ -904,11 +940,8 @@ const PortfolioModals = ({
         networkId: networkToUse,
       });
 
-      // Call the lending service withdraw method (pass amount as string like PreFi)
-      // When max withdraw, use withdrawAll with health-factor-safe maxWithdrawScaled when available.
-      // Only use withdrawAll when the user has no borrows (avoids issues with collateral/health).
-      const hasNoBorrows =
-        !userGlobalData?.totalBorrowValue || userGlobalData.totalBorrowValue === 0;
+      // withdrawAll / maxWithdrawScaled only when the user confirmed in the modal (withdraw-all checkbox).
+      const withdrawAll = Boolean(options?.withdrawAllConfirmed);
       const result = await withdraw(
         token.poolId,
         token.underlyingContractId,
@@ -917,9 +950,11 @@ const PortfolioModals = ({
         activeAccount.address,
         networkToUse,
         {
-          withdrawAll: false, // options?.isMaxWithdraw && hasNoBorrows, // TODO renable later 
+          withdrawAll,
           maxWithdrawScaled:
-            options?.isMaxWithdraw && maxWithdrawData?.maxWithdrawScaled
+            withdrawAll &&
+            options?.isMaxWithdraw &&
+            maxWithdrawData?.maxWithdrawScaled
               ? BigInt(maxWithdrawData.maxWithdrawScaled)
               : undefined,
         }
@@ -1676,6 +1711,13 @@ const PortfolioModals = ({
               )}
               maxWithdrawUnderlying={maxWithdrawData?.maxWithdrawUnderlying ?? undefined}
               tokenDecimals={withdrawToken?.decimals ?? 8}
+              poolId={withdrawModal.poolId}
+              network={withdrawModal.network || currentNetwork}
+              poolCollateralMarkets={withdrawPoolCollateralMarkets}
+              poolHasNoBorrows={
+                !userGlobalData?.totalBorrowValue ||
+                userGlobalData.totalBorrowValue === 0
+              }
               onSubmit={handleWithdrawSubmit}
               onRefreshBalance={() => {
                 // Refresh market data

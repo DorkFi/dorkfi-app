@@ -40,7 +40,16 @@ const BorrowForm = ({
     setAmount(availableToBorrow.toString());
   };
 
-  const isValidAmount = amount && parseFloat(amount) > 0 && parseFloat(amount) <= availableToBorrow;
+  const parsedAmount = amount ? parseFloat(amount) : NaN;
+  const isValidAmount =
+    !!amount &&
+    Number.isFinite(parsedAmount) &&
+    parsedAmount > 0 &&
+    parsedAmount <= availableToBorrow + 1e-12;
+  const exceedsSafeBorrow =
+    Number.isFinite(parsedAmount) &&
+    parsedAmount > availableToBorrow + 1e-12 &&
+    parsedAmount > 0;
 
   return (
     <div className="space-y-3">
@@ -87,6 +96,11 @@ const BorrowForm = ({
           </>
         )}
       </p>
+      {exceedsSafeBorrow && (
+        <p className="text-sm font-medium text-destructive">
+          This action would reduce your health factor below 1.0. Borrow less or add collateral first.
+        </p>
+      )}
       
       <Button
         onClick={onSubmit}
