@@ -110,6 +110,9 @@ const RepayModal = ({
   const [isLoading, setIsLoading] = useState(false);
   const [transactionId, setTransactionId] = useState<string | null>(null);
   const [isRepayAll, setIsRepayAll] = useState(false);
+  const [workflowStep, setWorkflowStep] = useState<"amount" | "confirm">(
+    "amount"
+  );
   const [expandedDetails, setExpandedDetails] = useState<{
     borrowAPY: boolean;
     accruedInterest: boolean;
@@ -161,6 +164,7 @@ const RepayModal = ({
       setIsLoading(false);
       setTransactionId(null);
       setIsRepayAll(false);
+      setWorkflowStep("amount");
       setExpandedDetails({
         borrowAPY: false,
         accruedInterest: false,
@@ -196,7 +200,7 @@ const RepayModal = ({
     setIsRepayAll(roundedMax === roundedCurrentBorrow);
   };
 
-  const handleSubmit = async () => {
+  const handleConfirmRepay = async () => {
     const numAmount = amount !== "" && typeof amount === "number" ? amount : 0;
     const roundedAmount = Math.round(numAmount * 1000000) / 1000000;
     const roundedCurrentBorrow = Math.round(currentBorrow * 1000000) / 1000000;
@@ -241,6 +245,7 @@ const RepayModal = ({
     setAmount("");
     setFiatValue(0);
     setTransactionId(null);
+    setWorkflowStep("amount");
   };
 
   const numAmount = amount !== "" && typeof amount === "number" ? amount : 0;
@@ -248,6 +253,22 @@ const RepayModal = ({
   const roundedMaxRepay = Math.round(maxRepayAmount * 1000000) / 1000000;
   const isValidAmount =
     amount !== "" && numAmount > 0 && roundedAmount <= roundedMaxRepay;
+
+  const round6 = (n: number) => Math.round(n * 1e6) / 1e6;
+  /** Principal portion of debt; total owed = currentBorrow = principal + accrued (see lendingService index split). */
+  const principalBorrowExclInterest = Math.max(
+    0,
+    round6(currentBorrow - accruedInterest)
+  );
+  const estimatedRemainingBorrow = Math.max(
+    0,
+    round6(currentBorrow - numAmount)
+  );
+
+  const handleContinueToConfirm = () => {
+    if (!isValidAmount) return;
+    setWorkflowStep("confirm");
+  };
 
   const hfTokenPrice = useMemo(() => {
     if (oracleTokenPrice > 0 && Number.isFinite(oracleTokenPrice)) {
@@ -429,131 +450,262 @@ const RepayModal = ({
               <div className="flex flex-col lg:flex-row lg:gap-8 space-y-6 lg:space-y-0">
                 {/* Left Column: Input Form */}
                 <div className="flex-1 space-y-6 min-w-0">
-                  <div className="space-y-3">
-                    <Label
-                      htmlFor="amount"
-                      className="text-sm font-medium text-slate-600 dark:text-slate-300"
-                    >
-                      Amount
-                    </Label>
-                    <div className="relative">
-                      <LocaleNumberInput
-                        id="amount"
-                        placeholder="0.0"
-                        autoFocus
-                        value={amount}
-                        onChange={(v) => {
-                          setAmount(v ?? "");
-                          setIsRepayAll(false);
-                        }}
-                        formatOptions={{ maximumFractionDigits: 6 }}
-                        className="bg-white/80 dark:bg-slate-800 border-gray-300 dark:border-slate-600 text-slate-800 dark:text-white pr-16 text-lg h-12"
-                      />
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={handleMaxClick}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-whale-gold hover:bg-whale-gold/10 h-8 px-3"
-                      >
-                        MAX
-                      </Button>
-                    </div>
-                    {fiatValue > 0 && (
-                      <p className="text-sm text-slate-500 dark:text-slate-400">
-                        ≈ $
-                        {fiatValue.toLocaleString(undefined, {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
-                      </p>
-                    )}
-                    <div className="pt-2">
-                      <div className="flex flex-col gap-3">
-                        <div className="flex flex-row justify-between gap-2 p-3 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-gray-200 dark:border-slate-700">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
-                              Wallet Balance
-                            </p>
-                            <p className="text-xs text-slate-700 dark:text-slate-300 font-medium break-words">
-                              {walletBalance.toLocaleString()} {tokenSymbol}
-                              <span className="text-slate-500 dark:text-slate-400 ml-1">
-                                ($
-                                {(
-                                  walletBalance * marketStats.tokenPrice
-                                ).toLocaleString()}
-                                )
-                              </span>
-                            </p>
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
-                              Current Borrow
-                            </p>
-                            <p className="text-xs text-slate-700 dark:text-slate-300 font-medium break-words">
-                              {currentBorrow.toLocaleString()} {tokenSymbol}
-                              <span className="text-slate-500 dark:text-slate-400 ml-1">
-                                ($
-                                {(
-                                  currentBorrow * marketStats.tokenPrice
-                                ).toLocaleString()}
-                                )
-                              </span>
-                            </p>
+                  {workflowStep === "amount" ? (
+                    <>
+                      <div className="space-y-3">
+                        <Label
+                          htmlFor="amount"
+                          className="text-sm font-medium text-slate-600 dark:text-slate-300"
+                        >
+                          Amount
+                        </Label>
+                        <div className="relative">
+                          <LocaleNumberInput
+                            id="amount"
+                            placeholder="0.0"
+                            autoFocus
+                            value={amount}
+                            onChange={(v) => {
+                              setAmount(v ?? "");
+                              setIsRepayAll(false);
+                            }}
+                            formatOptions={{ maximumFractionDigits: 6 }}
+                            className="bg-white/80 dark:bg-slate-800 border-gray-300 dark:border-slate-600 text-slate-800 dark:text-white pr-16 text-lg h-12"
+                          />
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={handleMaxClick}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 text-whale-gold hover:bg-whale-gold/10 h-8 px-3"
+                          >
+                            MAX
+                          </Button>
+                        </div>
+                        {fiatValue > 0 && (
+                          <p className="text-sm text-slate-500 dark:text-slate-400">
+                            ≈ $
+                            {fiatValue.toLocaleString(undefined, {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </p>
+                        )}
+                        <div className="pt-2">
+                          <div className="flex flex-col gap-3">
+                            <div className="flex flex-row justify-between gap-2 p-3 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-gray-200 dark:border-slate-700">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
+                                  Wallet Balance
+                                </p>
+                                <p className="text-xs text-slate-700 dark:text-slate-300 font-medium break-words">
+                                  {walletBalance.toLocaleString()}{" "}
+                                  {tokenSymbol}
+                                  <span className="text-slate-500 dark:text-slate-400 ml-1">
+                                    ($
+                                    {(
+                                      walletBalance * marketStats.tokenPrice
+                                    ).toLocaleString()}
+                                    )
+                                  </span>
+                                </p>
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
+                                  Total owed
+                                </p>
+                                <p className="text-xs text-slate-700 dark:text-slate-300 font-medium break-words">
+                                  {currentBorrow.toLocaleString()}{" "}
+                                  {tokenSymbol}
+                                  <span className="text-slate-500 dark:text-slate-400 ml-1">
+                                    ($
+                                    {(
+                                      currentBorrow * marketStats.tokenPrice
+                                    ).toLocaleString()}
+                                    )
+                                  </span>
+                                </p>
+                              </div>
+                            </div>
+                            {accruedInterest > 0 && (
+                              <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50">
+                                <p className="text-xs font-medium text-amber-700 dark:text-amber-400 mb-1">
+                                  Accrued Interest
+                                </p>
+                                <p className="text-xs text-amber-800 dark:text-amber-300 font-medium break-words">
+                                  {accruedInterest.toLocaleString(undefined, {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 6,
+                                  })}{" "}
+                                  {tokenSymbol}
+                                  <span className="text-amber-600 dark:text-amber-400 ml-1">
+                                    ($
+                                    {(
+                                      accruedInterest * marketStats.tokenPrice
+                                    ).toLocaleString(undefined, {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    })}
+                                    )
+                                  </span>
+                                </p>
+                                <p className="text-xs text-amber-600 dark:text-amber-500 mt-1">
+                                  Included in total owed above. You&apos;ll see a
+                                  full breakdown on the next step before signing.
+                                  {userLastUpdateTime && (
+                                    <span className="block mt-1 text-blue-500 dark:text-blue-400">
+                                      Last interaction:{" "}
+                                      {formatRelativeTime(userLastUpdateTime)}
+                                    </span>
+                                  )}
+                                  {lastUpdateTime && (
+                                    <span className="block mt-1 text-amber-500 dark:text-amber-400">
+                                      Last updated:{" "}
+                                      {formatRelativeTime(lastUpdateTime)}
+                                    </span>
+                                  )}
+                                </p>
+                              </div>
+                            )}
                           </div>
                         </div>
-                        {accruedInterest > 0 && (
-                          <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50">
-                            <p className="text-xs font-medium text-amber-700 dark:text-amber-400 mb-1">
-                              Accrued Interest
-                            </p>
-                            <p className="text-xs text-amber-800 dark:text-amber-300 font-medium break-words">
+                      </div>
+
+                      <Button
+                        type="button"
+                        onClick={handleContinueToConfirm}
+                        disabled={!isValidAmount || isLoading}
+                        className="w-full font-semibold h-12 bg-whale-gold hover:bg-whale-gold/90 text-black disabled:opacity-50 disabled:cursor-not-allowed lg:mt-auto"
+                      >
+                        Continue
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <div className="space-y-3">
+                        <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                          Confirm repayment
+                        </h3>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          Review principal, interest, and your estimated
+                          remaining borrow for this market before you sign.
+                        </p>
+                        <div className="rounded-lg border border-gray-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 divide-y divide-gray-200 dark:divide-slate-700">
+                          <div className="flex justify-between gap-3 px-3 py-2.5">
+                            <span className="text-xs text-slate-500 dark:text-slate-400">
+                              Borrow (excl. accrued interest)
+                            </span>
+                            <span className="text-xs font-medium text-slate-800 dark:text-slate-200 text-right tabular-nums">
+                              {principalBorrowExclInterest.toLocaleString(
+                                undefined,
+                                {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 6,
+                                }
+                              )}{" "}
+                              {tokenSymbol}
+                              <span className="block text-[10px] text-slate-500 dark:text-slate-400 font-normal">
+                                ≈ $
+                                {(
+                                  principalBorrowExclInterest *
+                                  marketStats.tokenPrice
+                                ).toLocaleString(undefined, {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </span>
+                            </span>
+                          </div>
+                          <div className="flex justify-between gap-3 px-3 py-2.5">
+                            <span className="text-xs text-slate-500 dark:text-slate-400">
+                              Accrued interest
+                            </span>
+                            <span className="text-xs font-medium text-amber-700 dark:text-amber-300 text-right tabular-nums">
                               {accruedInterest.toLocaleString(undefined, {
                                 minimumFractionDigits: 2,
                                 maximumFractionDigits: 6,
                               })}{" "}
                               {tokenSymbol}
-                              <span className="text-amber-600 dark:text-amber-400 ml-1">
-                                ($
+                              <span className="block text-[10px] text-amber-600/90 dark:text-amber-400/90 font-normal">
+                                ≈ $
                                 {(
                                   accruedInterest * marketStats.tokenPrice
                                 ).toLocaleString(undefined, {
                                   minimumFractionDigits: 2,
                                   maximumFractionDigits: 2,
                                 })}
-                                )
                               </span>
-                            </p>
-                            <p className="text-xs text-amber-600 dark:text-amber-500 mt-1">
-                              This shows how much of your current borrow amount is
-                              interest that has accrued since last interaction. The
-                              current borrow amount above already includes this
-                              interest.
-                              {userLastUpdateTime && (
-                                <span className="block mt-1 text-blue-500 dark:text-blue-400">
-                                  Last interaction:{" "}
-                                  {formatRelativeTime(userLastUpdateTime)}
-                                </span>
-                              )}
-                              {lastUpdateTime && (
-                                <span className="block mt-1 text-amber-500 dark:text-amber-400">
-                                  Last updated:{" "}
-                                  {formatRelativeTime(lastUpdateTime)}
-                                </span>
-                              )}
-                            </p>
+                            </span>
                           </div>
-                        )}
+                          <div className="flex justify-between gap-3 px-3 py-2.5">
+                            <span className="text-xs text-slate-500 dark:text-slate-400">
+                              Payment
+                            </span>
+                            <span className="text-xs font-medium text-slate-800 dark:text-slate-200 text-right tabular-nums">
+                              {numAmount.toLocaleString(undefined, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 6,
+                              })}{" "}
+                              {tokenSymbol}
+                              <span className="block text-[10px] text-slate-500 dark:text-slate-400 font-normal">
+                                ≈ $
+                                {(
+                                  numAmount * marketStats.tokenPrice
+                                ).toLocaleString(undefined, {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </span>
+                            </span>
+                          </div>
+                          <div className="flex justify-between gap-3 px-3 py-2.5 bg-white/60 dark:bg-slate-900/30">
+                            <span className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                              Est. remaining borrow
+                            </span>
+                            <span className="text-xs font-semibold text-slate-900 dark:text-white text-right tabular-nums">
+                              {estimatedRemainingBorrow.toLocaleString(
+                                undefined,
+                                {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 6,
+                                }
+                              )}{" "}
+                              {tokenSymbol}
+                              <span className="block text-[10px] text-slate-500 dark:text-slate-400 font-normal">
+                                ≈ $
+                                {(
+                                  estimatedRemainingBorrow *
+                                  marketStats.tokenPrice
+                                ).toLocaleString(undefined, {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </span>
+                            </span>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
 
-                  <Button
-                    onClick={handleSubmit}
-                    disabled={!isValidAmount || isLoading}
-                    className="w-full font-semibold h-12 bg-whale-gold hover:bg-whale-gold/90 text-black disabled:opacity-50 disabled:cursor-not-allowed lg:mt-auto"
-                  >
-                    {isLoading ? "Processing..." : `Repay ${tokenSymbol}`}
-                  </Button>
+                      <div className="flex flex-col sm:flex-row gap-2 lg:mt-auto">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setWorkflowStep("amount")}
+                          disabled={isLoading}
+                          className="w-full sm:flex-1 h-12 border-slate-300 dark:border-slate-600"
+                        >
+                          Back
+                        </Button>
+                        <Button
+                          type="button"
+                          onClick={handleConfirmRepay}
+                          disabled={isLoading}
+                          className="w-full sm:flex-1 h-12 font-semibold bg-whale-gold hover:bg-whale-gold/90 text-black disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isLoading ? "Processing..." : "Confirm repayment"}
+                        </Button>
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {/* Right Column: Stats Card */}

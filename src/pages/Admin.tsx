@@ -114,6 +114,16 @@ import {
   decodeMarket,
   decodeUser,
   fetchUserBorrowBalance,
+  fetchAllMarkets,
+  fetchMarketInfo,
+  fetchMarketInfoFromContract,
+  fetchBorrowPositionChainDebug,
+  fetchBorrowPositionApiSnapshot,
+  impliedDebtFromScaledAndMarketIndex,
+  impliedAccruedFromApiUserAndMarketIndex,
+  type BorrowPositionApiSnapshot,
+  type BorrowPositionChainDebug,
+  type MarketInfo,
 } from "@/services/lendingService";
 import { useMemo } from "react";
 import { toast } from "sonner";
@@ -135,12 +145,6 @@ import {
   withdrawReserves,
   toggleMarketPause,
 } from "@/services/adminService";
-import {
-  fetchAllMarkets,
-  fetchMarketInfo,
-  fetchMarketInfoFromContract,
-  type MarketInfo,
-} from "@/services/lendingService";
 import dorkfiAPIService from "@/services/dorkfiAPIService";
 import { useOnDemandMarketData } from "@/hooks/useOnDemandMarketData";
 import WalletNetworkButton from "@/components/WalletNetworkButton";
@@ -406,6 +410,106 @@ export default function AdminDashboard() {
   } | null>(null);
   const [bulkSnapshotResult, setBulkSnapshotResult] =
     useState<RefreshAllSnapshotsResult | null>(null);
+
+  /** Authoritative borrow debug (Tools tab): chain vs API snapshot */
+  const [borrowDebugNetwork, setBorrowDebugNetwork] = useState<NetworkId>(
+    () => currentNetwork as NetworkId
+  );
+  const [borrowDebugAddress, setBorrowDebugAddress] = useState("");
+  const [borrowDebugPoolId, setBorrowDebugPoolId] = useState("");
+  const [borrowDebugMarketId, setBorrowDebugMarketId] = useState("");
+  const [borrowDebugChain, setBorrowDebugChain] =
+    useState<BorrowPositionChainDebug | null>(null);
+  const [borrowDebugApi, setBorrowDebugApi] =
+    useState<BorrowPositionApiSnapshot | null>(null);
+  const [borrowDebugError, setBorrowDebugError] = useState<string | null>(null);
+  const [borrowDebugLoading, setBorrowDebugLoading] = useState(false);
+  const [borrowDebugApiLoading, setBorrowDebugApiLoading] = useState(false);
+  const [borrowDebugQuickPick, setBorrowDebugQuickPick] = useState("__manual__");
+
+  useEffect(() => {
+    if (activeAccount?.address && !borrowDebugAddress) {
+      setBorrowDebugAddress(activeAccount.address);
+    }
+  }, [activeAccount?.address, borrowDebugAddress]);
+
+  useEffect(() => {
+    setBorrowDebugQuickPick("__manual__");
+  }, [borrowDebugNetwork]);
+
+  const borrowDebugTokenOptions = useMemo(() => {
+    return getAllTokensWithDisplayInfo(borrowDebugNetwork).filter(
+      (t) => t.underlyingContractId && t.poolId
+    );
+  }, [borrowDebugNetwork]);
+
+  const handleBorrowDebugLoadChain = useCallback(async () => {
+    const addr = borrowDebugAddress.trim();
+    const pool = borrowDebugPoolId.trim();
+    const mkt = borrowDebugMarketId.trim();
+    if (!addr || !pool || !mkt) {
+      toast.error("Enter user address, pool app ID, and market ID.");
+      return;
+    }
+    setBorrowDebugLoading(true);
+    setBorrowDebugError(null);
+    setBorrowDebugChain(null);
+    try {
+      const r = await fetchBorrowPositionChainDebug(
+        addr,
+        pool,
+        mkt,
+        borrowDebugNetwork
+      );
+      if (!r.ok) {
+        setBorrowDebugError(r.error);
+        toast.error(r.error);
+        return;
+      }
+      setBorrowDebugChain(r.data);
+      toast.success("Loaded on-chain borrow snapshot.");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setBorrowDebugError(msg);
+      toast.error(msg);
+    } finally {
+      setBorrowDebugLoading(false);
+    }
+  }, [borrowDebugAddress, borrowDebugPoolId, borrowDebugMarketId, borrowDebugNetwork]);
+
+  const handleBorrowDebugLoadApi = useCallback(async () => {
+    const addr = borrowDebugAddress.trim();
+    const pool = borrowDebugPoolId.trim();
+    const mkt = borrowDebugMarketId.trim();
+    if (!addr || !pool || !mkt) {
+      toast.error("Enter user address, pool app ID, and market ID.");
+      return;
+    }
+    setBorrowDebugApiLoading(true);
+    setBorrowDebugError(null);
+    setBorrowDebugApi(null);
+    try {
+      const r = await fetchBorrowPositionApiSnapshot(
+        addr,
+        pool,
+        mkt,
+        borrowDebugNetwork
+      );
+      if (!r.ok) {
+        setBorrowDebugError(r.error);
+        toast.error(r.error);
+        return;
+      }
+      setBorrowDebugApi(r.data);
+      toast.success("Indexer user row refreshed (POST).");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setBorrowDebugError(msg);
+      toast.error(msg);
+    } finally {
+      setBorrowDebugApiLoading(false);
+    }
+  }, [borrowDebugAddress, borrowDebugPoolId, borrowDebugMarketId, borrowDebugNetwork]);
 
   const bulkSnapshotMarketCount = useMemo(
     () => collectDedupedLendingMarketKeys().length,
@@ -5307,7 +5411,7 @@ export default function AdminDashboard() {
     }> = [];
 
     const markets = getMarketsFromConfig(currentNetwork);
-    const SCALE = 1e18; // Precision scaling factor
+    const PRICE_SCALE = 1e18; // oracle / price fields
 
     for (const market of markets) {
       const marketId = market.symbol.toLowerCase();
@@ -5338,58 +5442,60 @@ export default function AdminDashboard() {
           marketId,
         });
 
-        const scaledDeposits = Number(getUserData.scaled_deposits || "0");
-        const scaledBorrows = Number(getUserData.scaled_borrows || "0");
-        // Use CURRENT market indices, not user's stored indices
+        const INDEX_SCALE = 10n ** 18n;
+        const marketIndices =
+          userMarketIndices[marketId] || userMarketIndices[contractId];
 
-        const userDepositIndex =
-          getUserData.user_deposit_index || "1000000000000000000"; // 1e18
-        const userBorrowIndex =
-          getUserData.user_borrow_index || "1000000000000000000"; // 1e18
+        const scaledDeposits = BigInt(String(getUserData.scaled_deposits ?? "0"));
+        const scaledBorrows = BigInt(String(getUserData.scaled_borrows ?? "0"));
 
-        const currentDepositIndex =
-          getUserData.deposit_index || "1000000000000000000"; // 1e18
-        const currentBorrowIndex =
-          getUserData.borrow_index || "1000000000000000000"; // 1e18
-        const currentPrice =
-          parseFloat(getUserData.current_price || "0") / SCALE;
-        const lastPrice = parseFloat(getUserData.last_price || "0") / SCALE;
+        const currentDepositIndexStr =
+          marketIndices?.depositIndex?.toString() ??
+          getUserData.current_deposit_index ??
+          getUserData.deposit_index ??
+          "1000000000000000000";
+        const currentBorrowIndexStr =
+          marketIndices?.borrowIndex?.toString() ??
+          getUserData.current_borrow_index ??
+          getUserData.borrow_index ??
+          "1000000000000000000";
+
+        const currentDepositIndex = BigInt(currentDepositIndexStr);
+        const currentBorrowIndex = BigInt(currentBorrowIndexStr);
+
+        const currentPriceScaled =
+          parseFloat(getUserData.current_price || "0") / PRICE_SCALE;
+        const lastPrice =
+          parseFloat(getUserData.last_price || "0") / PRICE_SCALE;
 
         console.log(`🔍 Raw values for ${market.symbol}:`, {
-          scaledDeposits,
-          scaledBorrows,
-          currentDepositIndex,
-          currentBorrowIndex,
-          currentPrice,
+          scaledDeposits: scaledDeposits.toString(),
+          scaledBorrows: scaledBorrows.toString(),
+          currentDepositIndex: currentDepositIndexStr,
+          currentBorrowIndex: currentBorrowIndexStr,
+          currentPrice: currentPriceScaled,
           lastPrice,
           marketDecimals: market.decimals,
         });
 
-        // Calculate actual amounts using the formula from the documentation:
-        // actual_deposits = (scaled_deposits * current_deposit_index) // SCALE
-        // actual_borrows = (scaled_borrows * current_borrow_index) // SCALE
+        // Underlying = (scaled * market index) // SCALE (same pattern as get_user_borrow_amount).
         const actualDepositsRaw =
-          BigInt(userDepositIndex) === 0n
+          scaledDeposits === 0n
             ? 0n
-            : (BigInt(scaledDeposits) * BigInt(currentDepositIndex)) /
-            BigInt(userDepositIndex);
+            : (scaledDeposits * currentDepositIndex) / INDEX_SCALE;
 
-        // Handle case where borrow_index is 0 (no borrows yet)
         const actualBorrowsRaw =
-          BigInt(userBorrowIndex) === 0n
+          scaledBorrows === 0n
             ? 0n
-            : (BigInt(scaledBorrows) * BigInt(currentBorrowIndex)) /
-            BigInt(userBorrowIndex);
+            : (scaledBorrows * currentBorrowIndex) / INDEX_SCALE;
 
         console.log(`🔍 BigInt calculations for ${market.symbol}:`, {
           actualDepositsRaw: actualDepositsRaw.toString(),
           actualBorrowsRaw: actualBorrowsRaw.toString(),
-          SCALE,
+          INDEX_SCALE: INDEX_SCALE.toString(),
           tokenDecimals: market.decimals || 0,
         });
 
-        // Convert to numbers - the contract already returns amounts in correct units
-        // No need to apply decimal normalization as get_user returns the actual token amounts
         const actualDepositsNum =
           Number(actualDepositsRaw) / 10 ** (market.decimals || 0);
 
@@ -5402,8 +5508,9 @@ export default function AdminDashboard() {
           decimalsUsed: market.decimals || 6,
         });
 
-        // Use last_price from contract if available, otherwise use current market price
-        const priceToUse = lastPrice > 0 ? lastPrice : currentPrice;
+        // Use last_price from contract if available, otherwise current_price from get_user + market
+        const priceToUse =
+          lastPrice > 0 ? lastPrice : currentPriceScaled > 0 ? currentPriceScaled : currentPrice;
         const depositUSD = actualDepositsNum * priceToUse;
         const borrowUSD = actualBorrowsNum * priceToUse;
 
@@ -5421,8 +5528,8 @@ export default function AdminDashboard() {
           marketId: market.underlyingContractId || market.symbol,
           scaledDeposits: scaledDeposits.toString(),
           scaledBorrows: scaledBorrows.toString(),
-          currentDepositIndex,
-          currentBorrowIndex,
+          currentDepositIndex: currentDepositIndexStr,
+          currentBorrowIndex: currentBorrowIndexStr,
           actualDeposits: actualDepositsNum,
           actualBorrows: actualBorrowsNum,
           currentPrice: priceToUse,
@@ -5469,12 +5576,12 @@ export default function AdminDashboard() {
       totalBorrows,
       netPosition: totalDeposits - totalBorrows,
     };
-  }, [userGetUserData, userMarketPrices, currentNetwork]);
+  }, [userGetUserData, userMarketPrices, userMarketIndices, currentNetwork]);
 
   // Method 4 Breakdown - Show detailed get_user data with current market indices
   const method4Breakdown = useMemo(() => {
     const markets = getMarketsFromConfig(currentNetwork);
-    const SCALE = 1e18; // Precision scaling factor
+    const PRICE_SCALE = 1e18; // oracle / price fields
 
     return markets.map((market) => {
       const marketId = market.symbol.toLowerCase();
@@ -5504,58 +5611,61 @@ export default function AdminDashboard() {
         const scaledDeposits = getUserData.scaled_deposits || "0";
         const scaledBorrows = getUserData.scaled_borrows || "0";
 
-        // User's stored indices (snapshot from last interaction)
         const userDepositIndex =
-          getUserData.user_deposit_index || "1000000000000000000"; // 1e18
+          getUserData.user_deposit_index || "1000000000000000000";
 
         const userBorrowIndex =
-          getUserData.user_borrow_index || "1000000000000000000"; // 1e18
+          getUserData.user_borrow_index || "1000000000000000000";
 
-        // Current market indices (should be used for calculations)
-        // Get from market data, not user data
         const marketIndices =
           userMarketIndices[marketId] || userMarketIndices[contractId];
 
-        const currentDepositIndex =
-          marketIndices?.depositIndex || userDepositIndex;
+        const currentDepositIndexStr =
+          marketIndices?.depositIndex?.toString() ??
+          getUserData.current_deposit_index ??
+          getUserData.deposit_index ??
+          "1000000000000000000";
 
-        const currentBorrowIndex =
-          marketIndices?.borrowIndex || userBorrowIndex;
+        const currentBorrowIndexStr =
+          marketIndices?.borrowIndex?.toString() ??
+          getUserData.current_borrow_index ??
+          getUserData.borrow_index ??
+          "1000000000000000000";
 
-        const lastPrice = parseFloat(getUserData.last_price || "0") / SCALE;
+        const udi = BigInt(userDepositIndex);
+        const ubi = BigInt(userBorrowIndex);
+        const cdi = BigInt(currentDepositIndexStr);
+        const cbi = BigInt(currentBorrowIndexStr);
+
+        const sd = BigInt(String(scaledDeposits));
+        const sb = BigInt(String(scaledBorrows));
+
+        const lastPrice =
+          parseFloat(getUserData.last_price || "0") / PRICE_SCALE;
         const lastUpdateTime = getUserData.last_update_time || 0;
 
-        // Calculate actual amounts using CURRENT market indices (correct approach):
-        // actual_deposits = (scaled_deposits * current_deposit_index) // SCALE
-        // actual_borrows = (scaled_borrows * current_borrow_index) // SCALE
+        const INDEX_SCALE = 10n ** 18n;
+
         const actualDepositsRaw =
-          BigInt(userDepositIndex) === 0n
-            ? 0n
-            : (BigInt(scaledDeposits) * BigInt(currentDepositIndex)) /
-            BigInt(userDepositIndex);
+          sd === 0n ? 0n : (sd * cdi) / INDEX_SCALE;
 
-        // Handle case where borrow_index is 0 (no borrows yet)
         const actualBorrowsRaw =
-          BigInt(userBorrowIndex) === 0n
-            ? 0n
-            : (BigInt(scaledBorrows) * BigInt(currentBorrowIndex)) /
-            BigInt(userBorrowIndex);
+          sb === 0n ? 0n : (sb * cbi) / INDEX_SCALE;
 
-        // Convert to numbers - the contract already returns amounts in correct units
-        // No need to apply decimal normalization as get_user returns the actual token amounts
         const actualDepositsNum =
           Number(actualDepositsRaw) / 10 ** (market.decimals || 0);
 
         const actualBorrowsNum =
           Number(actualBorrowsRaw) / 10 ** (market.decimals || 0);
 
-        // Use current market price for accurate USD calculations
+        const contractPrice =
+          parseFloat(getUserData.current_price || "0") / PRICE_SCALE;
         const priceToUse =
           currentPrice > 0
             ? currentPrice
             : lastPrice > 0
               ? lastPrice
-              : currentPrice;
+              : contractPrice;
         const depositUSD = actualDepositsNum * priceToUse;
         const borrowUSD = actualBorrowsNum * priceToUse;
         const netPosition = depositUSD - borrowUSD;
@@ -5566,20 +5676,19 @@ export default function AdminDashboard() {
           netPosition,
         });
 
-        // Calculate interest earned/owed since last update
         const depositInterestRaw =
-          BigInt(userDepositIndex) > 0n
-            ? (BigInt(scaledDeposits) *
-              (BigInt(currentDepositIndex) - BigInt(userDepositIndex))) /
-            BigInt(userDepositIndex)
-            : 0n;
+          sd === 0n || udi === 0n
+            ? 0n
+            : cdi >= udi
+              ? (sd * (cdi - udi)) / INDEX_SCALE
+              : 0n;
 
         const borrowInterestRaw =
-          BigInt(userBorrowIndex) > 0n
-            ? (BigInt(scaledBorrows) *
-              (BigInt(currentBorrowIndex) - BigInt(userBorrowIndex))) /
-            BigInt(userBorrowIndex)
-            : 0n;
+          sb === 0n || ubi === 0n
+            ? 0n
+            : cbi >= ubi
+              ? (sb * (cbi - ubi)) / INDEX_SCALE
+              : 0n;
 
         const depositInterestNum =
           Number(depositInterestRaw) / 10 ** (market.decimals || 0);
@@ -5603,8 +5712,8 @@ export default function AdminDashboard() {
           scaledBorrowsUSD,
           userDepositIndex,
           userBorrowIndex,
-          currentDepositIndex,
-          currentBorrowIndex,
+          currentDepositIndex: currentDepositIndexStr,
+          currentBorrowIndex: currentBorrowIndexStr,
           actualDeposits: actualDepositsNum,
           actualBorrows: actualBorrowsNum,
           depositInterest: depositInterestNum,
@@ -11315,6 +11424,262 @@ export default function AdminDashboard() {
               <H2>Admin Tools</H2>
             </div>
 
+            <Card className="border-teal-500/25 bg-teal-500/[0.03]">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Database className="h-5 w-5 text-teal-600 dark:text-teal-400" />
+                  Borrow position debugger (authoritative)
+                </CardTitle>
+                <CardDescription>
+                  Reads <code className="text-xs">get_user</code> and{" "}
+                  <code className="text-xs">sync_market</code> for market indices
+                  (accrued interest / debt uses the same index path as{" "}
+                  <code className="text-xs">fetchUserBorrowBalance</code>). Use this to
+                  compare against indexer/API rows after{" "}
+                  <code className="text-xs">fetchFreshUserData</code>.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div className="space-y-2">
+                    <Label>Network</Label>
+                    <Select
+                      value={borrowDebugNetwork}
+                      onValueChange={(v) => setBorrowDebugNetwork(v as NetworkId)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Network" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {getEnabledNetworks().map((nid) => (
+                          <SelectItem key={nid} value={nid}>
+                            {nid}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <Label>User address</Label>
+                    <Input
+                      className="font-mono text-xs"
+                      placeholder="Algorand address"
+                      value={borrowDebugAddress}
+                      onChange={(e) => setBorrowDebugAddress(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Quick fill (token)</Label>
+                    <Select
+                      value={borrowDebugQuickPick}
+                      onValueChange={(v) => {
+                        setBorrowDebugQuickPick(v);
+                        if (v === "__manual__") return;
+                        const t = borrowDebugTokenOptions.find(
+                          (x) =>
+                            `${x.symbol}|${x.poolId}|${x.underlyingContractId}` ===
+                            v
+                        );
+                        if (t?.poolId && t.underlyingContractId) {
+                          setBorrowDebugPoolId(String(t.poolId));
+                          setBorrowDebugMarketId(String(t.underlyingContractId));
+                        }
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Pick market" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__manual__">— manual pool / market —</SelectItem>
+                        {borrowDebugTokenOptions.map((t) => (
+                          <SelectItem
+                            key={`${t.symbol}-${t.poolId}-${t.underlyingContractId}`}
+                            value={`${t.symbol}|${t.poolId}|${t.underlyingContractId}`}
+                          >
+                            {t.symbol} · pool {t.poolId} · mkt{" "}
+                            {t.underlyingContractId}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Pool (lending pool app ID)</Label>
+                    <Input
+                      className="font-mono text-xs"
+                      placeholder="e.g. 3345940978"
+                      value={borrowDebugPoolId}
+                      onChange={(e) => setBorrowDebugPoolId(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Market (underlying contract ID)</Label>
+                    <Input
+                      className="font-mono text-xs"
+                      placeholder="e.g. 3211740909"
+                      value={borrowDebugMarketId}
+                      onChange={(e) => setBorrowDebugMarketId(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="default"
+                    onClick={handleBorrowDebugLoadChain}
+                    disabled={borrowDebugLoading}
+                  >
+                    {borrowDebugLoading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Reading chain…
+                      </>
+                    ) : (
+                      <>
+                        <Database className="h-4 w-4 mr-2" />
+                        Load chain snapshot
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={handleBorrowDebugLoadApi}
+                    disabled={borrowDebugApiLoading}
+                  >
+                    {borrowDebugApiLoading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Refreshing API…
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        POST refresh API row
+                      </>
+                    )}
+                  </Button>
+                </div>
+                {borrowDebugError && (
+                  <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                    {borrowDebugError}
+                  </div>
+                )}
+                {borrowDebugChain && (
+                  <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2 text-sm">
+                    <p className="font-semibold text-foreground">
+                      On-chain (source of truth)
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 font-mono text-xs">
+                      <span className="text-muted-foreground">Token</span>
+                      <span>
+                        {borrowDebugChain.tokenSymbol} ({borrowDebugChain.decimals}{" "}
+                        decimals)
+                      </span>
+                      <span className="text-muted-foreground">scaledBorrows</span>
+                      <span className="break-all">{borrowDebugChain.scaledBorrows}</span>
+                      <span className="text-muted-foreground">user borrowIndex</span>
+                      <span className="break-all">{borrowDebugChain.userBorrowIndex}</span>
+                      <span className="text-muted-foreground">market borrowIndex</span>
+                      <span className="break-all">{borrowDebugChain.marketBorrowIndex}</span>
+                      <span className="text-muted-foreground">total debt (underlying)</span>
+                      <span>
+                        {borrowDebugChain.totalDebtUnderlying.toLocaleString(undefined, {
+                          maximumFractionDigits: 8,
+                        })}{" "}
+                        {borrowDebugChain.tokenSymbol}
+                      </span>
+                      <span className="text-muted-foreground">
+                        accrued (index delta)
+                      </span>
+                      <span>
+                        {borrowDebugChain.accruedInterestUnderlying.toLocaleString(
+                          undefined,
+                          { maximumFractionDigits: 8 }
+                        )}{" "}
+                        {borrowDebugChain.tokenSymbol}
+                      </span>
+                      <span className="text-muted-foreground">actualBorrowsRaw</span>
+                      <span className="break-all">{borrowDebugChain.actualBorrowsRaw}</span>
+                      <span className="text-muted-foreground">interestRaw</span>
+                      <span className="break-all">{borrowDebugChain.interestRaw}</span>
+                      <span className="text-muted-foreground">user lastUpdateTime</span>
+                      <span className="break-all">{borrowDebugChain.userLastUpdateTime}</span>
+                    </div>
+                  </div>
+                )}
+                {borrowDebugApi && !borrowDebugChain && (
+                  <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2 text-sm">
+                    <p className="font-semibold text-foreground">
+                      API / indexer row (load chain snapshot to compare)
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 font-mono text-xs">
+                      <span className="text-muted-foreground">scaledBorrows</span>
+                      <span className="break-all">{borrowDebugApi.scaledBorrows}</span>
+                      <span className="text-muted-foreground">borrowIndex</span>
+                      <span className="break-all">{borrowDebugApi.borrowIndex}</span>
+                      <span className="text-muted-foreground">scaledDeposits</span>
+                      <span className="break-all">{borrowDebugApi.scaledDeposits}</span>
+                      <span className="text-muted-foreground">depositIndex</span>
+                      <span className="break-all">{borrowDebugApi.depositIndex}</span>
+                    </div>
+                  </div>
+                )}
+                {borrowDebugApi && borrowDebugChain && (
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2 text-sm">
+                    <p className="font-semibold">Indexer vs chain</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 font-mono text-xs">
+                      <span className="text-muted-foreground">scaledBorrows match</span>
+                      <span>
+                        {borrowDebugApi.scaledBorrows ===
+                        borrowDebugChain.scaledBorrows
+                          ? "yes"
+                          : "no (mismatch)"}
+                      </span>
+                      <span className="text-muted-foreground">user borrowIndex match</span>
+                      <span>
+                        {borrowDebugApi.borrowIndex ===
+                        borrowDebugChain.userBorrowIndex
+                          ? "yes"
+                          : "no (mismatch)"}
+                      </span>
+                      <span className="text-muted-foreground">
+                        API row → debt @ chain market index
+                      </span>
+                      <span>
+                        {impliedDebtFromScaledAndMarketIndex(
+                          borrowDebugApi.scaledBorrows,
+                          borrowDebugChain.marketBorrowIndex,
+                          borrowDebugChain.decimals
+                        ).toLocaleString(undefined, { maximumFractionDigits: 8 })}{" "}
+                        {borrowDebugChain.tokenSymbol}
+                      </span>
+                      <span className="text-muted-foreground">
+                        API row → accrued @ chain mkt index
+                      </span>
+                      <span>
+                        {impliedAccruedFromApiUserAndMarketIndex(
+                          borrowDebugApi.scaledBorrows,
+                          borrowDebugApi.borrowIndex,
+                          borrowDebugChain.marketBorrowIndex,
+                          borrowDebugChain.decimals
+                        ).toLocaleString(undefined, { maximumFractionDigits: 8 })}{" "}
+                        {borrowDebugChain.tokenSymbol}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground pt-1">
+                      If scaled borrows matches but totals differ from the UI, check
+                      stale <code className="text-[10px]">marketData.borrowIndex</code>{" "}
+                      in the client transform; chain block above uses a fresh contract
+                      read.
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Mint AToken Tool */}
               <Card>
@@ -13313,8 +13678,9 @@ export default function AdminDashboard() {
               <CardHeader>
                 <CardTitle>Compare API vs Contract Data</CardTitle>
                 <CardDescription>
-                  Compare results from getMarketData (API) and
-                  fetchMarketInfoFromContract (on-chain)
+                  Compare results from getMarketData (API) and on-chain{" "}
+                  <code className="text-xs">get_market</code> (via{" "}
+                  <code className="text-xs">fetchMarketInfoFromContract</code>)
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
@@ -13424,12 +13790,13 @@ export default function AdminDashboard() {
                       );
                       setApiMarketsResult(apiResult);
 
-                      // Call fetchMarketInfoFromContract
+                      // On-chain read: lending pool get_market (decoded by fetchMarketInfoFromContract)
                       const contractResult =
                         await fetchMarketInfoFromContract(
                           testPoolId,
                           testMarketId,
-                          currentNetwork
+                          currentNetwork,
+                          "get_market"
                         );
                       setContractMarketResult(contractResult);
                     } catch (error: any) {
@@ -13533,7 +13900,7 @@ export default function AdminDashboard() {
                       <CardHeader>
                         <CardTitle className="flex items-center gap-2">
                           <Hash className="h-5 w-5" />
-                          Contract Result (fetchMarketInfoFromContract)
+                          Contract Result (get_market)
                         </CardTitle>
                         <CardDescription>
                           Network: {currentNetwork}, Pool ID: {testPoolId}, Market

@@ -417,12 +417,21 @@ export const enhanceAVMMarketInfo = (
   return marketInfo;
 };
 
+/** Which on-chain read to use for market state in {@link fetchMarketInfoFromContract}. */
+export type FetchMarketInfoContractMethod = "sync_market" | "get_market";
+
 export const fetchMarketInfoFromContract = async (
   poolId: string,
   marketId: string,
-  networkId: NetworkId
+  networkId: NetworkId,
+  method: FetchMarketInfoContractMethod = "get_market"
 ): Promise<MarketData> => {
-  console.log("fetchMarketInfoFromContract", { poolId, marketId, networkId });
+  console.log("fetchMarketInfoFromContract", {
+    poolId,
+    marketId,
+    networkId,
+    method,
+  });
   try {
     if (!poolId || !marketId || !networkId) {
       throw new Error(
@@ -453,14 +462,14 @@ export const fetchMarketInfoFromContract = async (
         }
       );
       ci.setFee(5000);
-      let marketR = await ci.sync_market(Number(marketId));
+      const marketR =
+        method === "sync_market"
+          ? await ci.sync_market(Number(marketId))
+          : await ci.get_market(Number(marketId));
       if (!marketR.success) {
-        marketR = await ci.get_market(Number(marketId));
-        console.log("marketR", { marketR });
-        if (!marketR.success) {
-          console.error(`Contract call failed for market ${marketId}:`, marketR);
-          throw new Error(`Failed to get market info for market ${marketId}`);
-        }
+        console.log("marketR", { marketR, method });
+        console.error(`Contract call failed for market ${marketId}:`, marketR);
+        throw new Error(`Failed to get market info for market ${marketId}`);
       }
 
       if (!marketR.returnValue || !Array.isArray(marketR.returnValue)) {
@@ -494,15 +503,23 @@ export const fetchMarketInfoFromContract = async (
 };
 
 /**
- * Fetch market information for a specific market
+ * Fetch market information for a specific market.
+ * @param contractReadMethod — When reading from chain (`source === "contract"` or API fallback), which ABI method to use. Use `"sync_market"` for index-based accrued interest / position math; `"get_market"` is lighter (default).
  */
 export const fetchMarketInfo = async (
   poolId: string,
   marketId: string,
   networkId: NetworkId,
-  source: "contract" | "api" = "api"
+  source: "contract" | "api" = "api",
+  contractReadMethod: FetchMarketInfoContractMethod = "get_market"
 ): Promise<MarketInfo | null> => {
-  console.log("fetchMarketInfo", { poolId, marketId, networkId });
+  console.log("fetchMarketInfo", {
+    poolId,
+    marketId,
+    networkId,
+    source,
+    contractReadMethod,
+  });
   try {
     if (!poolId || !marketId || !networkId || !source) {
       throw new Error(
@@ -526,7 +543,8 @@ export const fetchMarketInfo = async (
         marketData = await fetchMarketInfoFromContract(
           poolId,
           marketId,
-          networkId
+          networkId,
+          contractReadMethod
         );
       } else if (source === "api") {
         const getMarketResponse = await dorkfiAPIService.getMarketData(
@@ -538,7 +556,8 @@ export const fetchMarketInfo = async (
           marketData = await fetchMarketInfoFromContract(
             poolId,
             marketId,
-            networkId
+            networkId,
+            contractReadMethod
           );
         } else {
           // Convert API Market to local MarketData format
@@ -1405,6 +1424,109 @@ export const fetchUserDataFromChain = async (
   }
 };
 
+/** Debt split from scaled borrows and borrow indices (matches pool accounting). */
+export type BorrowDebtFromIndices = {
+  /** Underlying at user's last borrow-index snapshot: scaled × I_user ÷ SCALE */
+  principalAtUserIndex: number;
+  /**
+   * Portion of debt from index growth since that snapshot: scaled × (I_market − I_user) ÷ SCALE.
+   * Same increment the contract uses before folding into scaled borrows on sync.
+   */
+  indexIncrementAccrued: number;
+  /** Total owed: scaled × I_market ÷ SCALE (= principal + increment when indices are consistent). */
+  totalDebt: number;
+};
+
+const BORROW_INDEX_SCALE = BigInt(1e18);
+
+/**
+ * Underlying borrow amount from scaled borrows and borrow indices.
+ * Total is computed once from I_market; increment uses (I_market − I_user) so the split stays
+ * consistent with interest resolution and UI “accrued” lines.
+ */
+export function borrowDebtFromScaledAndIndices(
+  scaledBorrows: string,
+  userBorrowIndex: string,
+  marketBorrowIndex: string,
+  decimals: number
+): BorrowDebtFromIndices {
+  const dec = Math.pow(10, decimals);
+  const sb = BigInt(scaledBorrows || "0");
+  const im = BigInt(marketBorrowIndex || "0");
+  const iu = BigInt(userBorrowIndex || "0");
+
+  if (sb === 0n) {
+    return {
+      principalAtUserIndex: 0,
+      indexIncrementAccrued: 0,
+      totalDebt: 0,
+    };
+  }
+
+  const totalRaw = (sb * im) / BORROW_INDEX_SCALE;
+
+  // Align with contract: if user's stored borrow index is 0, treat snapshot as market index (no split).
+  if (iu === 0n && im > 0n) {
+    const total = Number(totalRaw) / dec;
+    return {
+      principalAtUserIndex: total,
+      indexIncrementAccrued: 0,
+      totalDebt: total,
+    };
+  }
+
+  if (iu > im) {
+    const total = Number(totalRaw) / dec;
+    return {
+      principalAtUserIndex: total,
+      indexIncrementAccrued: 0,
+      totalDebt: total,
+    };
+  }
+
+  const principalRaw = (sb * iu) / BORROW_INDEX_SCALE;
+  const incrementRaw = (sb * (im - iu)) / BORROW_INDEX_SCALE;
+
+  return {
+    principalAtUserIndex: Number(principalRaw) / dec,
+    indexIncrementAccrued: Number(incrementRaw) / dec,
+    totalDebt: Number(totalRaw) / dec,
+  };
+}
+
+/**
+ * Compute implied total debt from API scaled borrows × chain market borrow index (debug).
+ */
+export function impliedDebtFromScaledAndMarketIndex(
+  scaledBorrows: string,
+  marketBorrowIndex: string,
+  decimals: number
+): number {
+  return borrowDebtFromScaledAndIndices(
+    scaledBorrows,
+    marketBorrowIndex,
+    marketBorrowIndex,
+    decimals
+  ).totalDebt;
+}
+
+/**
+ * Compute UI "accrued interest" delta from API user row + chain market borrow index.
+ */
+export function impliedAccruedFromApiUserAndMarketIndex(
+  scaledBorrows: string,
+  userBorrowIndex: string,
+  marketBorrowIndex: string,
+  decimals: number
+): number {
+  return borrowDebtFromScaledAndIndices(
+    scaledBorrows,
+    userBorrowIndex,
+    marketBorrowIndex,
+    decimals
+  ).indexIncrementAccrued;
+}
+
 /**
  * Fetch user borrow balance for a specific market
  * This gets the user's scaled borrows from the lending pool contract
@@ -1461,65 +1583,73 @@ export const fetchUserBorrowBalance = async (
           return { balance: 0, interest: 0 }; // Return 0 instead of null for no borrows
         }
 
-        // Get current market data to access borrow index - fetch fresh from contract
-        // to ensure we have the latest borrow index for accurate interest calculations
-        const marketInfo = await fetchMarketInfo(
-          poolId,
-          marketId,
-          networkId,
-          "contract"
-        );
+        // Market index (sync_market) + readonly get_user_borrow_amount in parallel:
+        // total debt matches the contract's (scaled_borrows * market.borrow_index) // SCALE.
+        const [marketInfo, borrowAmountR] = await Promise.all([
+          fetchMarketInfo(
+            poolId,
+            marketId,
+            networkId,
+            "contract",
+            "sync_market"
+          ),
+          ci.get_user_borrow_amount(userAddress, Number(marketId)),
+        ]);
         if (!marketInfo) {
           console.warn(`Failed to get market info for market ${marketId}`);
           return null;
         }
 
-        // Convert scaled borrows to actual token amount using borrow index scaling
+        // Convert scaled borrows to actual token amount using borrow index scaling.
+        // You cannot get *current* total debt from userBorrowIndex alone: that field is the
+        // market borrow index at the user's last sync. Accrual since then requires the
+        // *current* market borrow index (sync_market / get_market). Algebraically,
+        // debt at user index (last sync) = scaled × userBorrowIndex / SCALE; current debt =
+        // scaled × currentBorrowIndex / SCALE; accrued = current − debt_at_user_index.
         // Formula from docs: underlying_amount = (scaled_borrows * current_borrow_index) / SCALE
+        // Preferred: balance from get_user_borrow_amount (matches contract exactly).
         const scaledBorrows = userData.scaledBorrows.toString();
-        const userBorrowIndex = userData.borrowIndex.toString(); // User's stored borrow index (when they borrowed)
-        const currentBorrowIndex = marketInfo.borrowIndex; // Current market borrow index (includes accrued interest) - fresh from contract
-        const SCALE = BigInt(1e18);
+        const userBorrowIndex = userData.borrowIndex.toString(); // Market borrow index at user's last interaction (snapshot)
+        const currentBorrowIndex = marketInfo.borrowIndex; // Current market borrow index — required for "now" debt
 
         console.log({
           userBorrowIndex,
           currentBorrowIndex,
         });
 
-        // Calculate actual borrows using current borrow index (includes accrued interest):
-        // underlying_amount = (scaled_borrows * current_borrow_index) / SCALE
-        const actualBorrowsRaw =
-          BigInt(scaledBorrows) === 0n
-            ? 0n
-            : (BigInt(scaledBorrows) * BigInt(currentBorrowIndex)) / SCALE;
+        const { totalDebt, indexIncrementAccrued, principalAtUserIndex } =
+          borrowDebtFromScaledAndIndices(
+            scaledBorrows,
+            userBorrowIndex,
+            currentBorrowIndex,
+            token.decimals
+          );
 
-        // Convert to human-readable format by accounting for token decimals
-        const actualBorrowAmount =
-          Number(actualBorrowsRaw) / Math.pow(10, token.decimals);
-
-        // Single-division interest: compute index delta before dividing to
-        // avoid double-truncation from two independent BigInt divisions.
-        const interestRaw =
-          BigInt(scaledBorrows) === 0n
-            ? 0n
-            : (BigInt(scaledBorrows) * (BigInt(currentBorrowIndex) - BigInt(userBorrowIndex))) / SCALE;
-        const accruedInterest = Number(interestRaw) / Math.pow(10, token.decimals);
+        const dec = Math.pow(10, token.decimals);
+        let balance = totalDebt;
+        if (
+          borrowAmountR.success &&
+          borrowAmountR.returnValue !== undefined &&
+          borrowAmountR.returnValue !== null
+        ) {
+          const raw = BigInt(String(borrowAmountR.returnValue as bigint));
+          balance = Number(raw) / dec;
+        }
 
         console.log(`User borrow balance for ${token.symbol}:`, {
           scaledBorrows: scaledBorrows.toString(),
           userBorrowIndex: userBorrowIndex.toString(),
           currentBorrowIndex: currentBorrowIndex.toString(),
-          actualBorrowsRaw: actualBorrowsRaw.toString(),
-          interestRaw: interestRaw.toString(),
-          actualBorrowAmount,
-          accruedInterest,
+          principalAtUserIndex,
+          indexIncrementAccrued,
+          totalDebt,
+          balanceFromReadonly: balance,
           tokenDecimals: token.decimals,
-          formula: `(${scaledBorrows} * ${currentBorrowIndex}) / ${SCALE.toString()} = ${actualBorrowsRaw.toString()}`,
         });
 
         return {
-          balance: actualBorrowAmount,
-          interest: accruedInterest,
+          balance,
+          interest: indexIncrementAccrued,
         };
       } else {
         console.warn(
@@ -1536,6 +1666,219 @@ export const fetchUserBorrowBalance = async (
     return null;
   }
 };
+
+/** On-chain snapshot for admin/debug; same formulas as {@link fetchUserBorrowBalance}. */
+export type BorrowPositionChainDebug = {
+  poolId: string;
+  marketId: string;
+  networkId: NetworkId;
+  tokenSymbol: string;
+  decimals: number;
+  scaledBorrows: string;
+  scaledDeposits: string;
+  userBorrowIndex: string;
+  userDepositIndex: string;
+  marketBorrowIndex: string;
+  marketDepositIndex: string;
+  userLastUpdateTime: string;
+  totalDebtUnderlying: number;
+  accruedInterestUnderlying: number;
+  actualBorrowsRaw: string;
+  interestRaw: string;
+};
+
+/**
+ * Read `get_user` + market state from contracts and compute total debt / index-delta interest.
+ * Uses `sync_market` for current indices so accrued-interest / debt math matches on-chain accrual
+ * (same as {@link fetchUserBorrowBalance}).
+ * Use this as the source of truth when comparing Portfolio/API display issues.
+ */
+export async function fetchBorrowPositionChainDebug(
+  userAddress: string,
+  poolId: string,
+  marketId: string,
+  networkId: NetworkId
+): Promise<
+  { ok: true; data: BorrowPositionChainDebug } | { ok: false; error: string }
+> {
+  try {
+    if (!isAlgorandCompatibleNetwork(networkId)) {
+      return { ok: false, error: "Only Algorand-compatible networks are supported." };
+    }
+
+    const networkConfig = getNetworkConfig(networkId);
+    const clients = algorandService.initializeClients(
+      networkConfig.walletNetworkId as AlgorandNetwork
+    );
+
+    const ci = new CONTRACT(
+      Number(poolId),
+      clients.algod,
+      undefined,
+      { ...LendingPoolAppSpec.contract, events: [] },
+      {
+        addr: algosdk.getApplicationAddress(Number(poolId)),
+        sk: new Uint8Array(),
+      }
+    );
+    ci.setFee(2000);
+
+    const userDataR = await ci.get_user(userAddress, Number(marketId));
+    if (!userDataR.success) {
+      return {
+        ok: false,
+        error: `get_user failed for pool ${poolId} market ${marketId}`,
+      };
+    }
+
+    const userData = UserData(userDataR.returnValue);
+    const tokens = getAllTokensWithDisplayInfo(networkId);
+    const token =
+      tokens.find(
+        (t) =>
+          t.underlyingContractId === marketId &&
+          String(t.poolId) === String(poolId)
+      ) || tokens.find((t) => t.underlyingContractId === marketId);
+
+    if (!token) {
+      return {
+        ok: false,
+        error: `No token config for market ${marketId} (pool ${poolId})`,
+      };
+    }
+
+    const [marketInfo, borrowAmountR] = await Promise.all([
+      fetchMarketInfo(
+        poolId,
+        marketId,
+        networkId,
+        "contract",
+        "sync_market"
+      ),
+      ci.get_user_borrow_amount(userAddress, Number(marketId)),
+    ]);
+    if (!marketInfo) {
+      return {
+        ok: false,
+        error: "fetchMarketInfo (contract, sync_market) failed",
+      };
+    }
+
+    const scaledBorrows = userData.scaledBorrows.toString();
+    const scaledDeposits = userData.scaledDeposits.toString();
+    const userBorrowIndex = userData.borrowIndex.toString();
+    const userDepositIndex = userData.depositIndex.toString();
+    const currentBorrowIndex = marketInfo.borrowIndex;
+    const marketDepositIndex = marketInfo.depositIndex;
+    const decimals = token.decimals;
+
+    const debt = borrowDebtFromScaledAndIndices(
+      scaledBorrows,
+      userBorrowIndex,
+      String(currentBorrowIndex),
+      decimals
+    );
+    const SCALE = BORROW_INDEX_SCALE;
+    const sb = BigInt(scaledBorrows);
+    const im = BigInt(String(currentBorrowIndex));
+    const iu = BigInt(userBorrowIndex);
+    let actualBorrowsRaw =
+      sb === 0n ? 0n : (sb * im) / SCALE;
+    if (
+      borrowAmountR.success &&
+      borrowAmountR.returnValue !== undefined &&
+      borrowAmountR.returnValue !== null
+    ) {
+      actualBorrowsRaw = BigInt(String(borrowAmountR.returnValue as bigint));
+    }
+    const interestRaw =
+      sb === 0n || im < iu || iu === 0n
+        ? 0n
+        : (sb * (im - iu)) / SCALE;
+
+    return {
+      ok: true,
+      data: {
+        poolId: String(poolId),
+        marketId: String(marketId),
+        networkId,
+        tokenSymbol: token.symbol,
+        decimals,
+        scaledBorrows,
+        scaledDeposits,
+        userBorrowIndex,
+        userDepositIndex,
+        marketBorrowIndex: String(currentBorrowIndex),
+        marketDepositIndex: String(marketDepositIndex),
+        userLastUpdateTime: userData.lastUpdateTime.toString(),
+        totalDebtUnderlying: debt.totalDebt,
+        accruedInterestUnderlying: debt.indexIncrementAccrued,
+        actualBorrowsRaw: actualBorrowsRaw.toString(),
+        interestRaw: interestRaw.toString(),
+      },
+    };
+  } catch (error) {
+    console.error("fetchBorrowPositionChainDebug:", error);
+    return {
+      ok: false,
+      error:
+        error instanceof Error ? error.message : "fetchBorrowPositionChainDebug failed",
+    };
+  }
+}
+
+/** Latest indexer row for this user/pool/market (POST refresh). */
+export type BorrowPositionApiSnapshot = {
+  scaledBorrows: string;
+  scaledDeposits: string;
+  borrowIndex: string;
+  depositIndex: string;
+};
+
+export async function fetchBorrowPositionApiSnapshot(
+  userAddress: string,
+  poolId: string,
+  marketId: string,
+  networkId: NetworkId
+): Promise<
+  | { ok: true; data: BorrowPositionApiSnapshot }
+  | { ok: false; error: string }
+> {
+  try {
+    const res = await dorkfiAPIService.fetchFreshUserData(
+      userAddress,
+      networkId,
+      parseInt(String(poolId), 10),
+      parseInt(String(marketId), 10)
+    );
+    if (!res.success || !res.data) {
+      return {
+        ok: false,
+        error:
+          (res as { error?: string }).error ||
+          "fetchFreshUserData returned no data",
+      };
+    }
+    const ud = res.data;
+    return {
+      ok: true,
+      data: {
+        scaledBorrows: String(ud.scaledBorrows ?? ""),
+        scaledDeposits: String(ud.scaledDeposits ?? ""),
+        borrowIndex: String(ud.borrowIndex ?? ""),
+        depositIndex: String(ud.depositIndex ?? ""),
+      },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "fetchBorrowPositionApiSnapshot failed",
+    };
+  }
+}
 
 /**
  * Fetch user deposit balance for a specific market
@@ -1594,12 +1937,13 @@ export const fetchUserDepositBalance = async (
           return 0; // Return 0 instead of null for no deposits
         }
 
-        // Get current market data to access deposit index (contract = fresh indices for chain-backed reads)
+        // Get current market data to access deposit index (sync_market = accrued supply index)
         const marketInfo = await fetchMarketInfo(
           poolId,
           marketId,
           networkId,
-          "contract"
+          "contract",
+          "sync_market"
         );
         if (!marketInfo) {
           console.warn(`Failed to get market info for market ${marketId}`);
@@ -2157,12 +2501,13 @@ export const withdraw = async (
 
       console.log("withdraw:amountInSmallestUnit", { amountInSmallestUnit });
 
-      // Get market info
+      // Get market info (sync_market for index-based accrued supply interest math)
       const marketInfo = await fetchMarketInfo(
         poolId,
         marketId,
         networkId,
-        "contract"
+        "contract",
+        "sync_market"
       );
       if (!marketInfo) {
         throw new Error("Failed to fetch market info");
