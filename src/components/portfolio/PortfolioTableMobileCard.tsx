@@ -4,9 +4,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { getTokenConfig, getMarketLabel } from "@/config";
+import { marketPoolBadgeBgClassName } from "@/constants/marketUi";
+import { shouldShowConfigSymbolUnderDisplayAsset } from "@/utils/portfolioAssetSubline";
 
 interface PortfolioTableMobileCardProps {
   asset: string;
+  /** Canonical token key when display `asset` is shared (e.g. fALGO vs ALGO both "Algo"). */
+  configSymbol?: string;
   icon: string;
   value: number;
   balance?: number;
@@ -34,6 +38,7 @@ interface PortfolioTableMobileCardProps {
 
 const PortfolioTableMobileCard = ({
   asset,
+  configSymbol,
   icon,
   value,
   balance,
@@ -87,11 +92,9 @@ const PortfolioTableMobileCard = ({
               />
               {marketLabel && (
                 <div
-                  className={`absolute -top-0.5 -right-0.5 w-5 h-5 rounded-full ${
-                    marketLabel === "A"
-                      ? "bg-blue-500 dark:bg-blue-600"
-                      : "bg-purple-500 dark:bg-purple-600"
-                  } border-2 border-white dark:border-slate-800 flex items-center justify-center z-10`}
+                  className={`absolute -top-0.5 -right-0.5 w-5 h-5 rounded-full ${marketPoolBadgeBgClassName(
+                    marketLabel
+                  )} border-2 border-white dark:border-slate-800 flex items-center justify-center z-10`}
                 >
                   <span className="text-[10px] font-bold text-white leading-none">
                     {marketLabel}
@@ -103,6 +106,11 @@ const PortfolioTableMobileCard = ({
               <div className="font-semibold text-base text-slate-800 dark:text-white">
                 {asset}
               </div>
+              {shouldShowConfigSymbolUnderDisplayAsset(asset, configSymbol) && (
+                  <div className="text-[10px] text-muted-foreground leading-tight">
+                    {configSymbol}
+                  </div>
+                )}
               {network && (
                 <div className="text-xs text-muted-foreground">
                   {network.split("-")[0].charAt(0).toUpperCase() +
@@ -183,8 +191,7 @@ const PortfolioTableMobileCard = ({
               {balance.toLocaleString("en-US", {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2,
-              })}{" "}
-              {asset}
+              })}
             </div>
           </div>
         )}
@@ -199,8 +206,7 @@ const PortfolioTableMobileCard = ({
               {isDeposit ? "+" : ""}{accruedInterest.toLocaleString("en-US", {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: displayDecimals,
-              })}{" "}
-              {asset}
+              })}
             </div>
             {accruedInterestValue && (
               <div className="text-xs mt-1 text-amber-600 dark:text-amber-400">

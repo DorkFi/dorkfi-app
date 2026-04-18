@@ -11,8 +11,13 @@ import MarketsTableActions from "./MarketsTableActions";
 import APYDisplay from "@/components/APYDisplay";
 import BorrowAPYDisplay from "@/components/BorrowAPYDisplay";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { getNetworkConfig } from "@/config";
+import { getMarketLabel } from "@/config";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
+import {
+  borrowApyBadgeClassName,
+  BORROW_APY_BADGE_STOKEN,
+  marketPoolBadgeBgClassName,
+} from "@/constants/marketUi";
 
 interface STokenRowProps {
   market: OnDemandMarketData;
@@ -68,41 +73,13 @@ const STokenRow = ({
               className="w-10 h-10 rounded-full object-contain flex-shrink-0" // Updated size to match MarketsDesktopTable
             />
             {(() => {
-              // For nested rows (expanded), always show badge based on index
-              // Markets are sorted: A first (index 0), then B (index 1)
-              if (isNested && typeof marketIndex === 'number') {
-                const marketLabel = marketIndex === 0 ? "A" : marketIndex === 1 ? "B" : null;
-                if (marketLabel) {
-                  const bgColor = marketLabel === "A" 
-                    ? "bg-blue-500 dark:bg-blue-600" 
-                    : "bg-purple-500 dark:bg-purple-600";
-                  return (
-                    <div className={`absolute -top-1 -right-1 w-5 h-5 rounded-full ${bgColor} border-2 border-white dark:border-slate-800 flex items-center justify-center`}>
-                      <span className="text-xs font-bold text-white">{marketLabel}</span>
-                    </div>
-                  );
-                }
-              }
-              
-              // For non-nested rows, try to determine label from poolId
-              const networkConfig = getNetworkConfig(currentNetwork);
-              const lendingPools = networkConfig?.contracts?.lendingPools || [];
-              
-              let marketLabel: string | null = null;
               const poolId = market.marketInfo?.poolId || market.poolId;
-              
-              if (poolId && lendingPools.length >= 2) {
-                if (String(poolId) === String(lendingPools[0])) {
-                  marketLabel = "A";
-                } else if (String(poolId) === String(lendingPools[1])) {
-                  marketLabel = "B";
-                }
-              }
-              
+              const marketLabel = poolId
+                ? getMarketLabel(currentNetwork, poolId)
+                : null;
+
               if (marketLabel) {
-                const bgColor = marketLabel === "A" 
-                  ? "bg-blue-500 dark:bg-blue-600" 
-                  : "bg-purple-500 dark:bg-purple-600";
+                const bgColor = marketPoolBadgeBgClassName(marketLabel);
                 return (
                   <div className={`absolute -top-1 -right-1 w-5 h-5 rounded-full ${bgColor} border-2 border-white dark:border-slate-800 flex items-center justify-center`}>
                     <span className="text-xs font-bold text-white">{marketLabel}</span>
@@ -162,11 +139,17 @@ const STokenRow = ({
         ) : market.error ? (
           <ErrorCell error={market.error} />
         ) : (
-          <Badge className="bg-gradient-to-r from-red-100 to-pink-100 text-red-800 dark:from-red-900 dark:to-pink-900 dark:text-red-200 border border-red-300 dark:border-red-600">
+          <Badge
+            className={borrowApyBadgeClassName(
+              market.intrinsicBorrowApyPercent,
+              BORROW_APY_BADGE_STOKEN
+            )}
+          >
             <BorrowAPYDisplay 
               apyCalculation={market.apyCalculation}
               borrowApyCalculation={market.borrowApyCalculation}
               fallbackAPY={market.borrowAPY}
+              intrinsicBorrowApyPercent={market.intrinsicBorrowApyPercent}
               showTooltip={true}
               networkId={currentNetwork}
               asset={market.asset}

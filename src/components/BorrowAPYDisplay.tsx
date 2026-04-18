@@ -14,6 +14,13 @@ interface BorrowAPYDisplayProps {
   apyCalculation?: APYCalculationResult;
   borrowApyCalculation?: APYCalculationResult; // Add this for borrow-specific calculation
   fallbackAPY?: number;
+  /** Intrinsic borrow APY from token config (% points); added to displayed borrow APY. */
+  intrinsicBorrowApyPercent?: number | null;
+  /**
+   * When true, use black text for the silver borrow badge without adding
+   * {@link intrinsicBorrowApyPercent} to `fallbackAPY` (use when the fallback already includes intrinsic).
+   */
+  useIntrinsicBorrowBadgeStyle?: boolean;
   showTooltip?: boolean;
   className?: string;
   /** When set with asset + poolId, enables A-market WAD tooltip suppression (see shouldHideBorrowTooltipUtilizationForWad). */
@@ -29,6 +36,8 @@ export const BorrowAPYDisplay: React.FC<BorrowAPYDisplayProps> = ({
   apyCalculation,
   borrowApyCalculation,
   fallbackAPY = 0,
+  intrinsicBorrowApyPercent,
+  useIntrinsicBorrowBadgeStyle = false,
   showTooltip = true,
   className = '',
   networkId,
@@ -37,11 +46,21 @@ export const BorrowAPYDisplay: React.FC<BorrowAPYDisplayProps> = ({
   market,
   marketIndex,
 }) => {
+  const intrinsicBorrow =
+    typeof intrinsicBorrowApyPercent === "number" &&
+    Number.isFinite(intrinsicBorrowApyPercent)
+      ? intrinsicBorrowApyPercent
+      : 0;
   // Use the fallbackAPY which should contain the proper borrow APY calculation
   // The apyCalculation.borrowRate is just the raw rate, not the APY
-  const borrowAPY = fallbackAPY;
+  const borrowAPY = fallbackAPY + intrinsicBorrow;
   const formattedAPY = formatAPY(borrowAPY);
-  const colorClass = getAPYColorClass(borrowAPY);
+  const hasIntrinsicBorrow =
+    intrinsicBorrow > 0 || Boolean(useIntrinsicBorrowBadgeStyle);
+  const colorClass = hasIntrinsicBorrow ? "text-black" : getAPYColorClass(borrowAPY);
+  const infoIconClass = hasIntrinsicBorrow
+    ? "h-3 w-3 text-black/55"
+    : "h-3 w-3 text-gray-400 hover:text-gray-600";
 
   // Use borrowApyCalculation for tooltip if available, otherwise fall back to apyCalculation
   const tooltipCalculation = borrowApyCalculation || apyCalculation;
@@ -56,7 +75,7 @@ export const BorrowAPYDisplay: React.FC<BorrowAPYDisplayProps> = ({
       marketIndex
     );
 
-  if (!showTooltip || !tooltipCalculation) {
+  if (!showTooltip || (!tooltipCalculation && intrinsicBorrow <= 0)) {
     return (
       <span className={`font-medium ${colorClass} ${className}`}>
         {formattedAPY}
@@ -67,9 +86,9 @@ export const BorrowAPYDisplay: React.FC<BorrowAPYDisplayProps> = ({
   const tooltipContent = (
     <div className="space-y-2 text-sm">
       <div className="font-semibold text-white mb-2">Borrow APY Calculation Breakdown</div>
-      
+
       <div className="space-y-1">
-        {!hideUtilizationInTooltip && (
+        {tooltipCalculation && !hideUtilizationInTooltip && (
           <div className="flex justify-between">
             <span className="text-gray-300">Utilization Rate:</span>
             <span className="text-white font-mono">
@@ -78,13 +97,24 @@ export const BorrowAPYDisplay: React.FC<BorrowAPYDisplayProps> = ({
           </div>
         )}
 
-        <div className="flex justify-between">
-          <span className="text-gray-300">Borrow Rate:</span>
-          <span className="text-white font-mono">
-            {(tooltipCalculation.borrowRate * 100).toFixed(2)}%
-          </span>
-        </div>
-        
+        {tooltipCalculation ? (
+          <div className="flex justify-between">
+            <span className="text-gray-300">Borrow Rate:</span>
+            <span className="text-white font-mono">
+              {(tooltipCalculation.borrowRate * 100).toFixed(2)}%
+            </span>
+          </div>
+        ) : null}
+
+        {intrinsicBorrow > 0 ? (
+          <div className="flex justify-between">
+            <span className="text-gray-300">Intrinsic APY:</span>
+            <span className="text-white font-mono">
+              +{intrinsicBorrow.toFixed(2)}%
+            </span>
+          </div>
+        ) : null}
+
         <div className="border-t border-gray-600 pt-1 mt-2">
           <div className="flex justify-between font-semibold">
             <span className="text-white">Borrow APY:</span>
@@ -92,14 +122,17 @@ export const BorrowAPYDisplay: React.FC<BorrowAPYDisplayProps> = ({
           </div>
         </div>
       </div>
-      
-      <div className="text-xs text-gray-400 mt-2">
-        Borrow APY = (1 + Borrow Rate)^365 - 1
-      </div>
-      
-      <div className="text-xs text-gray-400">
-        Compound interest calculation for annual yield
-      </div>
+
+      {tooltipCalculation ? (
+        <>
+          <div className="text-xs text-gray-400 mt-2">
+            Borrow APY = (1 + Borrow Rate)^365 - 1
+          </div>
+          <div className="text-xs text-gray-400">
+            Compound interest calculation for annual yield
+          </div>
+        </>
+      ) : null}
     </div>
   );
 
@@ -111,7 +144,7 @@ export const BorrowAPYDisplay: React.FC<BorrowAPYDisplayProps> = ({
             <span className={`font-medium ${colorClass} ${className}`}>
               {formattedAPY}
             </span>
-            <Info className="h-3 w-3 text-gray-400 hover:text-gray-600" />
+            <Info className={infoIconClass} />
           </div>
         </TooltipTrigger>
         <TooltipContent 

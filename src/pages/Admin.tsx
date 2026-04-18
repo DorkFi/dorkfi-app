@@ -4620,7 +4620,10 @@ export default function AdminDashboard() {
 
                 // Fetch wallet balance based on token standard
                 let balance = 0n;
-                if (tokenStandard === "network") {
+                if (
+                  tokenStandard === "network" ||
+                  tokenStandard === "network-asa"
+                ) {
                   // For network VOI, get account balance minus minimum balance
                   const accInfo = await algorandClients.algod
                     .accountInformation(userAddress)

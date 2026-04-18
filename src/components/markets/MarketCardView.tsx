@@ -14,8 +14,11 @@ import { ArrowRightLeft } from "lucide-react";
 import { getTokenConfig, getAllTokensWithDisplayInfo, getMarketLabel } from "@/config";
 import { isAtDepositCap, isAtBorrowCap } from "@/constants/lendingCaps";
 import {
+  borrowApyBadgeClassName,
+  BORROW_APY_BADGE_DEFAULT,
   depositApyBadgeClassName,
   isIntrinsicDepositApyBadge,
+  marketPoolBadgeBgClassName,
 } from "@/constants/marketUi";
 import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
@@ -25,9 +28,9 @@ interface MarketCardViewProps {
   markets: OnDemandMarketData[];
   onRowClick: (market: OnDemandMarketData) => void;
   onInfoClick: (e: React.MouseEvent, market: OnDemandMarketData) => void;
-  onDepositClick: (asset: string, poolId?: string) => void;
-  onBorrowClick: (asset: string, poolId?: string) => void;
-  onMintClick?: (asset: string, poolId?: string) => void;
+  onDepositClick: (asset: string, poolId?: string, marketRowKey?: string) => void;
+  onBorrowClick: (asset: string, poolId?: string, marketRowKey?: string) => void;
+  onMintClick?: (asset: string, poolId?: string, marketRowKey?: string) => void;
   onMigrateClick?: (asset: string) => void;
 }
 
@@ -129,7 +132,9 @@ const MarketCardView = ({
     const marketMap = new Map<string, OnDemandMarketData>();
     markets.forEach((market) => {
       const poolId = market.marketInfo?.poolId || market.poolId || "default";
-      const key = `${market.asset}-${poolId}`;
+      const key =
+        (market as { _sortKey?: string })._sortKey ??
+        `${market.asset}-${poolId}`;
       const existing = marketMap.get(key);
       if (!existing) {
         marketMap.set(key, market);
@@ -188,11 +193,9 @@ const MarketCardView = ({
                   <img src={market.icon} alt={market.asset} className="w-10 h-10 md:w-8 md:h-8 rounded-full object-contain flex-shrink-0" />
                   {marketLabel && (
                     <div
-                      className={`absolute -top-1 -right-1 w-5 h-5 rounded-full ${
-                        marketLabel === "A"
-                          ? "bg-blue-500 dark:bg-blue-600"
-                          : "bg-purple-500 dark:bg-purple-600"
-                      } border-2 border-white dark:border-slate-800 flex items-center justify-center z-10`}
+                      className={`absolute -top-1 -right-1 w-5 h-5 rounded-full ${marketPoolBadgeBgClassName(
+                        marketLabel
+                      )} border-2 border-white dark:border-slate-800 flex items-center justify-center z-10`}
                     >
                       <span className="text-xs font-bold text-white">
                         {marketLabel}
@@ -239,11 +242,17 @@ const MarketCardView = ({
               </div>
               <div className="flex flex-col items-center md:items-start">
                 <div className="text-sm text-muted-foreground mb-1">Borrow APY</div>
-                <Badge className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
+                <Badge
+                  className={borrowApyBadgeClassName(
+                    market.intrinsicBorrowApyPercent,
+                    BORROW_APY_BADGE_DEFAULT
+                  )}
+                >
                   <BorrowAPYDisplay 
                     apyCalculation={market.apyCalculation}
                     borrowApyCalculation={market.borrowApyCalculation}
                     fallbackAPY={market.borrowAPY}
+                    intrinsicBorrowApyPercent={market.intrinsicBorrowApyPercent}
                     showTooltip={true}
                     networkId={currentNetwork}
                     asset={market.asset}
@@ -273,7 +282,14 @@ const MarketCardView = ({
               <div className="flex gap-2 justify-center md:justify-start">
                 <DorkFiButton
                   variant="secondary"
-                  onClick={e => { e.stopPropagation(); onDepositClick(market.asset, market.marketInfo?.poolId || market.poolId); }}
+                  onClick={e => {
+                    e.stopPropagation();
+                    onDepositClick(
+                      market.asset,
+                      market.marketInfo?.poolId || market.poolId,
+                      (market as { _sortKey?: string })._sortKey
+                    );
+                  }}
                   disabled={isAtDepositCap(Number(market.totalSupply ?? 0), Number(market.supplyCap ?? 0))}
                   title={
                     isAtDepositCap(Number(market.totalSupply ?? 0), Number(market.supplyCap ?? 0))
@@ -286,7 +302,11 @@ const MarketCardView = ({
                   onClick={e => {
                     e.stopPropagation();
                     if (isAtBorrowCap(Number(market.totalBorrow ?? 0), Number(market.borrowCap ?? 0))) return;
-                    onBorrowClick(market.asset, market.marketInfo?.poolId || market.poolId);
+                    onBorrowClick(
+                      market.asset,
+                      market.marketInfo?.poolId || market.poolId,
+                      (market as { _sortKey?: string })._sortKey
+                    );
                   }}
                   disabled={isAtBorrowCap(Number(market.totalBorrow ?? 0), Number(market.borrowCap ?? 0))}
                   title={

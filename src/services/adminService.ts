@@ -15,6 +15,7 @@ import {
   isCurrentNetworkAlgorand,
   NetworkId,
   getAllTokens,
+  tokenStandardUsesAsaStyleNt200Txns,
 } from "@/config";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
 import { APP_SPEC as MarketControllerAppSpec } from "@/clients/MarketControllerClient";
@@ -1293,7 +1294,10 @@ export const withdrawReserves = async (
         });
       }
 
-      if (token.tokenStandard === "network" || token.tokenStandard === "asa") {
+      if (
+        token.tokenStandard === "network" ||
+        tokenStandardUsesAsaStyleNt200Txns(token.tokenStandard)
+      ) {
         const txnO = (await builder.token.withdraw(amount)).obj as any;
         const note = new TextEncoder().encode(
           `token withdraw ${Number(amount) / 10 ** token.decimals} ${

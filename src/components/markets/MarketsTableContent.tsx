@@ -12,10 +12,10 @@ interface MarketsTableContentProps {
   userDeposits?: Record<string, number>;
   onRowClick: (market: OnDemandMarketData) => void;
   onInfoClick: (e: React.MouseEvent, market: OnDemandMarketData) => void;
-  onDepositClick: (asset: string, poolId?: string) => void;
+  onDepositClick: (asset: string, poolId?: string, marketRowKey?: string) => void;
   onWithdrawClick?: (asset: string) => void;
-  onBorrowClick: (asset: string, poolId?: string) => void;
-  onMintClick?: (asset: string, poolId?: string) => void;
+  onBorrowClick: (asset: string, poolId?: string, marketRowKey?: string) => void;
+  onMintClick?: (asset: string, poolId?: string, marketRowKey?: string) => void;
   onMigrateClick?: (asset: string) => void;
   isLoadingBalance?: boolean;
 }

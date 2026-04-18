@@ -1,11 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import BigNumber from "bignumber.js";
 import {
   fetchUserBorrowBalance,
   fetchUserDepositBalance,
 } from "@/services/lendingService";
 import dorkfiAPIService from "@/services/dorkfiAPIService";
 import type { UserData } from "@/services/dorkfiAPIService";
-import { getAllTokensWithDisplayInfo, type NetworkId } from "@/config";
+import {
+  getAllTokensWithDisplayInfo,
+  getAlgorandNetworkFromNetworkId,
+  getTokenConfig,
+  type NetworkId,
+  type TokenConfig,
+  getAnyFolksAdapter,
+} from "@/config";
+import algorandService from "@/services/algorandService";
+import {
+  estimateFolksDepositMintedFAssetAmount,
+  folksFAssetHumanToUnderlyingHuman,
+} from "@/services/folksDepositAdapter";
+import { marketRowForPortfolioPosition } from "@/utils/marketRowForPortfolioPosition";
 
 export type PortfolioChainLiveOverride = {
   balance?: number;
@@ -21,24 +35,146 @@ const KEY_PREFIX = {
   borrow: "b",
 } as const;
 
+const CHAIN_KEY_NO_MARKET = "_";
+
 export function portfolioPositionChainKey(
   kind: keyof typeof KEY_PREFIX,
   network: string,
   poolId: string,
-  asset: string
+  asset: string,
+  marketId?: string | null
 ): string {
-  return `${KEY_PREFIX[kind]}|${network}|${poolId}|${asset}`;
+  const mid =
+    marketId != null && marketId !== "" ? String(marketId) : CHAIN_KEY_NO_MARKET;
+  return `${KEY_PREFIX[kind]}|${network}|${poolId}|${mid}|${asset}`;
 }
 
 function parseChainKey(key: string):
-  | { kind: "deposit" | "borrow"; network: string; poolId: string; asset: string }
+  | {
+      kind: "deposit" | "borrow";
+      network: string;
+      poolId: string;
+      marketId: string;
+      asset: string;
+    }
   | null {
   const parts = key.split("|");
-  if (parts.length !== 4) return null;
-  const [prefix, network, poolId, asset] = parts;
-  if (prefix === "d") return { kind: "deposit", network, poolId, asset };
-  if (prefix === "b") return { kind: "borrow", network, poolId, asset };
+  if (parts.length === 5) {
+    const [prefix, network, poolId, marketIdRaw, asset] = parts;
+    const marketId =
+      marketIdRaw === CHAIN_KEY_NO_MARKET ? "" : marketIdRaw;
+    if (prefix === "d")
+      return { kind: "deposit", network, poolId, marketId, asset };
+    if (prefix === "b")
+      return { kind: "borrow", network, poolId, marketId, asset };
+    return null;
+  }
+  // Legacy: d|network|poolId|asset (display symbol only — collides for ALGO vs fALGO)
+  if (parts.length === 4) {
+    const [prefix, network, poolId, asset] = parts;
+    if (prefix === "d")
+      return { kind: "deposit", network, poolId, marketId: "", asset };
+    if (prefix === "b")
+      return { kind: "borrow", network, poolId, marketId: "", asset };
+  }
   return null;
+}
+
+function resolvePollToken(
+  networkId: NetworkId,
+  poolId: string,
+  asset: string,
+  marketId: string
+) {
+  const tokens = getAllTokensWithDisplayInfo(networkId);
+  if (marketId !== "") {
+    const byContract = tokens.find(
+      (t) =>
+        String(t.underlyingContractId ?? "") === String(marketId) &&
+        String(t.poolId ?? "") === String(poolId)
+    );
+    if (byContract) return byContract;
+  }
+  return tokens.find(
+    (t) => t.symbol === asset && String(t.poolId ?? "") === String(poolId)
+  );
+}
+
+type PollToken = NonNullable<ReturnType<typeof resolvePollToken>>;
+
+function tokenConfigForPollToken(
+  networkId: NetworkId,
+  token: PollToken
+): TokenConfig | undefined {
+  const sym = token.configKey ?? token.originalSymbol ?? token.symbol;
+  const raw = getTokenConfig(networkId, sym);
+  return Array.isArray(raw)
+    ? raw.find((c) => String(c.poolId) === String(token.poolId)) ?? raw[0]
+    : raw;
+}
+
+/**
+ * Folks f-asset deposits are indexed in f-units; portfolio rows show underlying + USD/underlying.
+ * Cache key: network + Folks pool name (shared across markets in the same poll sweep).
+ */
+async function folksMintedFAssetForOneUnderlyingAtomic(
+  networkId: NetworkId,
+  token: PollToken,
+  cache: Map<string, bigint>
+): Promise<bigint | null> {
+  if (networkId !== "algorand-mainnet") return null;
+  const tc = tokenConfigForPollToken(networkId, token);
+  const folksPoll = tc ? getAnyFolksAdapter(tc) : undefined;
+  if (!folksPoll) return null;
+  const poolName = folksPoll.folksParams.pool;
+  const cacheKey = `${networkId}|${poolName}`;
+  if (cache.has(cacheKey)) {
+    const v = cache.get(cacheKey)!;
+    return v > 0n ? v : null;
+  }
+  const algodNet = getAlgorandNetworkFromNetworkId(networkId);
+  if (!algodNet) return null;
+  try {
+    const clients = algorandService.initializeClients(algodNet);
+    const oneUnderlyingAtomic = BigInt(
+      new BigNumber(1).shiftedBy(token.decimals).toFixed(0)
+    );
+    const { mintedFAsset } = await estimateFolksDepositMintedFAssetAmount({
+      poolName,
+      underlyingAmount: oneUnderlyingAtomic,
+      algod: clients.algod,
+    });
+    cache.set(cacheKey, mintedFAsset);
+    return mintedFAsset > 0n ? mintedFAsset : null;
+  } catch {
+    return null;
+  }
+}
+
+function folksDepositOverrideToUnderlying(
+  o: PortfolioChainLiveOverride,
+  tokenPrice: number,
+  tokenDecimals: number,
+  minted: bigint | null
+): PortfolioChainLiveOverride {
+  if (minted == null || minted <= 0n) return o;
+  const balance = folksFAssetHumanToUnderlyingHuman(
+    o.balance ?? 0,
+    minted,
+    tokenDecimals
+  );
+  const accruedInterest = folksFAssetHumanToUnderlyingHuman(
+    o.accruedInterest ?? 0,
+    minted,
+    tokenDecimals
+  );
+  return {
+    ...o,
+    balance,
+    value: balance * tokenPrice,
+    accruedInterest,
+    accruedInterestValue: accruedInterest * tokenPrice,
+  };
 }
 
 function bigIntStr(v: string | number | bigint | undefined | null): bigint {
@@ -120,6 +256,8 @@ function borrowFromUserDataAndMarket(
 type PositionRow = {
   asset: string;
   poolId?: string;
+  /** Underlying market contract id — required to disambiguate display symbol + pool (e.g. ALGO vs fALGO). */
+  marketId?: string;
   balance: number;
   value: number;
   tokenPrice?: number;
@@ -207,29 +345,21 @@ export function usePortfolioVisibleChainLive(opts: {
     if (!address) return;
     const keys = [...visibleKeysRef.current];
     const batch: Record<string, PortfolioChainLiveOverride> = {};
+    const folksMintCache = new Map<string, bigint>();
 
     for (const portfolioKey of keys) {
       const parsedKey = parseChainKey(portfolioKey);
       if (!parsedKey) continue;
-      const { kind, network, poolId, asset } = parsedKey;
+      const { kind, network, poolId, asset, marketId } = parsedKey;
       const networkId = network as NetworkId;
-      const tokens = getAllTokensWithDisplayInfo(networkId);
-      const token = tokens.find(
-        (t) => t.symbol === asset && String(t.poolId) === String(poolId)
-      );
+      const token = resolvePollToken(networkId, poolId, asset, marketId);
       if (!token?.underlyingContractId || !token.poolId) continue;
 
-      const mkt = (
-        marketData as {
-          symbol?: string;
-          poolId?: string;
-          price?: string | number;
-        }[]
-      ).find(
-        (m) =>
-          m.symbol === token.symbol &&
-          String(m.poolId) === String(token.poolId)
-      );
+      const mkt = marketRowForPortfolioPosition(marketData as unknown[], {
+        marketId: token.underlyingContractId,
+        poolId: token.poolId,
+        displaySymbol: token.symbol,
+      }) as { price?: string | number } | undefined;
       const tp = mkt?.price
         ? formatPriceFromContract(
             mkt.price as string | number,
@@ -246,7 +376,17 @@ export function usePortfolioVisibleChainLive(opts: {
             networkId
           );
           if (bal == null) continue;
-          batch[portfolioKey] = { balance: bal, value: bal * tp };
+          const minted = await folksMintedFAssetForOneUnderlyingAtomic(
+            networkId,
+            token,
+            folksMintCache
+          );
+          batch[portfolioKey] = folksDepositOverrideToUnderlying(
+            { balance: bal, value: bal * tp },
+            tp,
+            token.decimals,
+            minted
+          );
         } else {
           const borrow = await fetchUserBorrowBalance(
             address,
@@ -279,6 +419,7 @@ export function usePortfolioVisibleChainLive(opts: {
   const fetchVisibleWithApiPost = useCallback(async () => {
     if (!address) return;
     const keys = [...visibleKeysRef.current];
+    const folksMintCache = new Map<string, bigint>();
 
     type RowRef = { portfolioKey: string; kind: "deposit" | "borrow" };
     const groups = new Map<
@@ -297,29 +438,21 @@ export function usePortfolioVisibleChainLive(opts: {
     for (const portfolioKey of keys) {
       const parsed = parseChainKey(portfolioKey);
       if (!parsed) continue;
-      const { kind, network, poolId, asset } = parsed;
+      const { kind, network, poolId, asset, marketId } = parsed;
       const networkId = network as NetworkId;
-      const tokens = getAllTokensWithDisplayInfo(networkId);
-      const token = tokens.find(
-        (t) => t.symbol === asset && String(t.poolId) === String(poolId)
-      );
+      const token = resolvePollToken(networkId, poolId, asset, marketId);
       if (!token?.underlyingContractId || !token.poolId) continue;
 
       const snapId = `${network}|${token.poolId}|${token.underlyingContractId}`;
       if (!groups.has(snapId)) {
-        const market = (
-          marketData as {
-            symbol?: string;
-            poolId?: string;
-            price?: string | number;
-            depositIndex?: string | number | bigint;
-            borrowIndex?: string | number | bigint;
-          }[]
-        ).find(
-          (m) =>
-            m.symbol === asset &&
-            (poolId ? String(m.poolId) === String(poolId) : true)
-        );
+        const market = marketRowForPortfolioPosition(
+          marketData as unknown[],
+          {
+            marketId: token.underlyingContractId,
+            poolId: token.poolId,
+            displaySymbol: token.symbol,
+          }
+        ) as MarketRow | undefined;
         groups.set(snapId, {
           network,
           networkId,
@@ -340,6 +473,27 @@ export function usePortfolioVisibleChainLive(opts: {
             group.tokenDecimals
           )
         : 1;
+
+      let groupDepositMinted: bigint | null = null;
+      const firstKey = group.rows[0]?.portfolioKey;
+      if (firstKey) {
+        const fp = parseChainKey(firstKey);
+        if (fp) {
+          const t0 = resolvePollToken(
+            group.networkId,
+            fp.poolId,
+            fp.asset,
+            fp.marketId
+          );
+          if (t0) {
+            groupDepositMinted = await folksMintedFAssetForOneUnderlyingAtomic(
+              group.networkId,
+              t0,
+              folksMintCache
+            );
+          }
+        }
+      }
 
       let ud: UserData | null = null;
       if (useApiUserData) {
@@ -381,7 +535,15 @@ export function usePortfolioVisibleChainLive(opts: {
                   tokenPrice
                 );
           if (o && Number.isFinite(o.balance)) {
-            batch[row.portfolioKey] = o;
+            batch[row.portfolioKey] =
+              row.kind === "deposit"
+                ? folksDepositOverrideToUnderlying(
+                    o,
+                    tokenPrice,
+                    group.tokenDecimals,
+                    groupDepositMinted
+                  )
+                : o;
             continue;
           }
         }
@@ -395,25 +557,17 @@ export function usePortfolioVisibleChainLive(opts: {
       for (const row of needFallback) {
         const parsedKey = parseChainKey(row.portfolioKey);
         if (!parsedKey) continue;
-        const { network: fbNet, poolId: fbPool, asset } = parsedKey;
+        const { network: fbNet, poolId: fbPool, asset, marketId: fbMid } =
+          parsedKey;
         const networkId = fbNet as NetworkId;
-        const tokens = getAllTokensWithDisplayInfo(networkId);
-        const token = tokens.find(
-          (t) => t.symbol === asset && String(t.poolId) === String(fbPool)
-        );
+        const token = resolvePollToken(networkId, fbPool, asset, fbMid);
         if (!token?.underlyingContractId || !token.poolId) continue;
 
-        const mkt = (
-          marketData as {
-            symbol?: string;
-            poolId?: string;
-            price?: string | number;
-          }[]
-        ).find(
-          (m) =>
-            m.symbol === token.symbol &&
-            String(m.poolId) === String(token.poolId)
-        );
+        const mkt = marketRowForPortfolioPosition(marketData as unknown[], {
+          marketId: token.underlyingContractId,
+          poolId: token.poolId,
+          displaySymbol: token.symbol,
+        }) as { price?: string | number } | undefined;
         const tp = mkt?.price
           ? formatPriceFromContract(
               mkt.price as string | number,
@@ -430,12 +584,19 @@ export function usePortfolioVisibleChainLive(opts: {
               networkId
             );
             if (bal == null) continue;
+            const minted = await folksMintedFAssetForOneUnderlyingAtomic(
+              networkId,
+              token,
+              folksMintCache
+            );
             setOverrides((prev) => ({
               ...prev,
-              [row.portfolioKey]: {
-                balance: bal,
-                value: bal * tp,
-              },
+              [row.portfolioKey]: folksDepositOverrideToUnderlying(
+                { balance: bal, value: bal * tp },
+                tp,
+                token.decimals,
+                minted
+              ),
             }));
           } else {
             const borrow = await fetchUserBorrowBalance(
@@ -549,7 +710,13 @@ export function usePortfolioVisibleChainLive(opts: {
     (row: PositionRow): PositionRow => {
       const net = (row as { network?: string }).network ?? "";
       const poolId = String(row.poolId ?? "");
-      const key = portfolioPositionChainKey("deposit", net, poolId, row.asset);
+      const key = portfolioPositionChainKey(
+        "deposit",
+        net,
+        poolId,
+        row.asset,
+        row.marketId
+      );
       const o = overrides[key];
       if (!o || (o.balance === undefined && o.value === undefined)) return row;
       return {
@@ -573,7 +740,13 @@ export function usePortfolioVisibleChainLive(opts: {
     (row: PositionRow): PositionRow => {
       const net = (row as { network?: string }).network ?? "";
       const poolId = String(row.poolId ?? "");
-      const key = portfolioPositionChainKey("borrow", net, poolId, row.asset);
+      const key = portfolioPositionChainKey(
+        "borrow",
+        net,
+        poolId,
+        row.asset,
+        row.marketId
+      );
       const o = overrides[key];
       if (!o || (o.balance === undefined && o.value === undefined)) return row;
       return {

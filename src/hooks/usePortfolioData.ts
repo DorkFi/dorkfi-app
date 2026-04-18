@@ -9,7 +9,7 @@ import {
 } from "@/services/lendingService";
 import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
-import { getTokenConfig } from "@/config";
+import { getTokenConfig, tokenStandardUsesNativeWalletBalance } from "@/config";
 import { getAllTokensWithDisplayInfo } from "@/config";
 
 export interface PortfolioPosition {
@@ -306,7 +306,9 @@ export const usePortfolioData = () => {
             console.log(`No ARC200 balance found for ${asset}`);
             balance = 0;
           }
-        } else if (originalTokenConfig.tokenStandard === "network") {
+        } else if (
+          tokenStandardUsesNativeWalletBalance(originalTokenConfig.tokenStandard)
+        ) {
           // For network tokens (like VOI), fetch native balance
           console.log(`Fetching network token balance for ${asset}`);
           try {

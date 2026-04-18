@@ -1,8 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -32,6 +33,11 @@ import {
   getAlgorandNetworkFromNetworkId,
   getNetworkConfig,
   NetworkId,
+  getFolksAdaptersForPhase,
+  tokenAdapterStableId,
+  resolveDepositFolksAdapter,
+  type FolksTokenAdapterConfig,
+  type TokenConfig,
 } from "@/config";
 import algorandService from "@/services/algorandService";
 import algosdk, { waitForConfirmation } from "algosdk";
@@ -42,7 +48,9 @@ import {
   SelectItem,
   SelectTrigger,
 } from "@/components/ui/select";
-import { ChevronDown } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import { Check, ChevronDown } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useTokenPrice } from "@/hooks/useTokenPrice";
 import { calculateMaxBorrowAmount } from "@/services/adminService";
@@ -75,11 +83,70 @@ interface PendingSupplyBorrowSign {
   };
 }
 
+type SupplyBorrowTokenRow = {
+  symbol: string;
+  poolId?: string;
+  configKey?: string;
+  originalSymbol?: string;
+  underlyingContractId?: string;
+  /** Config `contractId` when it differs from `underlyingContractId` (display ASA). */
+  originalContractId?: string;
+};
+
+/** When display `asset` + `poolId` match multiple config rows (e.g. Algo vs fALGO), pass the tokens map key from the market row (`configSymbol`). */
+export function resolveSupplyBorrowToken<T extends SupplyBorrowTokenRow>(
+  tokens: T[],
+  asset: string,
+  poolId: string | undefined,
+  configSymbol: string | undefined,
+  marketId?: string | null
+): T | undefined {
+  const poolOk = (t: T) =>
+    poolId == null || poolId === "" || String(t.poolId) === String(poolId);
+
+  // Prefer config key first: API `marketId` may not match `underlyingContractId` (e.g. asset id),
+  // and display `symbol` + pool collide for ALGO vs fALGO.
+  if (configSymbol) {
+    const byKey = tokens.find(
+      (t) =>
+        poolOk(t) &&
+        (t.configKey === configSymbol ||
+          t.originalSymbol === configSymbol ||
+          t.symbol === configSymbol)
+    );
+    if (byKey) return byKey;
+  }
+
+  if (marketId != null && marketId !== "" && poolId != null && poolId !== "") {
+    const byContract = tokens.find(
+      (t) =>
+        String(t.underlyingContractId ?? "") === String(marketId) &&
+        String(t.poolId ?? "") === String(poolId)
+    );
+    if (byContract) return byContract;
+    const byOriginal = tokens.find(
+      (t) =>
+        String(t.originalContractId ?? "") === String(marketId) &&
+        String(t.poolId ?? "") === String(poolId)
+    );
+    if (byOriginal) return byOriginal;
+  }
+
+  if (poolId != null && poolId !== "") {
+    return tokens.find((t) => t.symbol === asset && poolOk(t));
+  }
+  return tokens.find((t) => t.symbol === asset);
+}
+
 interface SupplyBorrowModalProps {
   isOpen: boolean;
   onClose: () => void;
   asset: string;
   poolId?: string; // Pool ID to identify specific market when multiple markets exist for same symbol
+  /** Config `tokens` key for this row (e.g. `fALGO`); required to disambiguate when `symbol` + `poolId` collide. */
+  configSymbol?: string;
+  /** Underlying market contract id; wins when display `symbol` + `poolId` collide (e.g. ALGO vs fALGO). */
+  marketId?: string;
   network?: string; // Network ID for cross-network operations
   transactionId?: string;
   mode: "deposit" | "borrow";
@@ -114,6 +181,8 @@ interface SupplyBorrowModalProps {
   userBorrowBalance?: number;
   onTransactionSuccess?: () => void;
   onRefreshWalletBalance?: () => void;
+  /** Refetch wallet / market balances when the user picks a different deposit route (e.g. fALGO vs ALGO). */
+  onDepositRouteChange?: () => void | Promise<void>;
   /** When provided (e.g. from health card), show asset dropdown like Withdraw modal */
   availableAssets?: {
     asset: string;
@@ -126,6 +195,11 @@ interface SupplyBorrowModalProps {
   walletBalanceLastUpdated?: number;
   /** Supplied collateral markets in this pool (for deposit mode LT comparison). */
   poolCollateralMarkets?: PoolCollateralMarketRow[];
+  /**
+   * When a deposit adapter uses `depositWalletBasis: "market_token"`, wallet balance of that ASA
+   * (e.g. f-ASA units). Omit when only underlying routes exist.
+   */
+  walletBalanceMarketToken?: number;
 }
 
 const SupplyBorrowModal = ({
@@ -133,6 +207,8 @@ const SupplyBorrowModal = ({
   onClose,
   asset,
   poolId,
+  configSymbol,
+  marketId,
   network,
   mode,
   assetData,
@@ -141,10 +217,13 @@ const SupplyBorrowModal = ({
   userGlobalData,
   userBorrowBalance = 0,
   onTransactionSuccess,
+  onRefreshWalletBalance,
+  onDepositRouteChange,
   availableAssets,
   onSelectAsset,
   walletBalanceLastUpdated,
   poolCollateralMarkets,
+  walletBalanceMarketToken,
 }: SupplyBorrowModalProps) => {
   const [amount, setAmount] = useState("");
   const [fiatValue, setFiatValue] = useState(0);
@@ -175,6 +254,10 @@ const SupplyBorrowModal = ({
     null
   );
   const [isSigning, setIsSigning] = useState(false);
+  /** Selected Folks deposit route; defaults to first {@link getFolksAdaptersForPhase} entry. */
+  const [selectedDepositAdapterId, setSelectedDepositAdapterId] =
+    useState<string>("");
+  const [depositRoutePickerOpen, setDepositRoutePickerOpen] = useState(false);
 
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
@@ -183,6 +266,192 @@ const SupplyBorrowModal = ({
   // Use provided network or fallback to current network
   const networkToUse = network || currentNetwork;
   const { price: tokenPrice } = useTokenPrice(asset, networkToUse);
+
+  const resolvedDepositTokenConfig = useMemo((): TokenConfig | null => {
+    if (mode !== "deposit") return null;
+    const tokens = getAllTokensWithDisplayInfo(networkToUse as NetworkId);
+    const tok = resolveSupplyBorrowToken(
+      tokens,
+      asset,
+      poolId,
+      configSymbol,
+      marketId
+    );
+    if (!tok?.underlyingContractId) return null;
+    const originalSymbol =
+      (tok as { configKey?: string }).configKey ??
+      ("originalSymbol" in tok
+        ? (tok as { originalSymbol?: string }).originalSymbol
+        : asset);
+    const raw = getTokenConfig(networkToUse as NetworkId, originalSymbol);
+    if (!raw) return null;
+    return Array.isArray(raw)
+      ? raw.find((tc) => String(tc.poolId) === String(tok.poolId)) ?? raw[0]
+      : raw;
+  }, [mode, networkToUse, asset, poolId, configSymbol, marketId]);
+
+  const depositFolksAdapters = useMemo((): FolksTokenAdapterConfig[] => {
+    if (!resolvedDepositTokenConfig) return [];
+    return getFolksAdaptersForPhase(resolvedDepositTokenConfig, "deposit");
+  }, [resolvedDepositTokenConfig]);
+
+  const depositMultiRoute =
+    mode === "deposit" && depositFolksAdapters.length > 1;
+
+  useEffect(() => {
+    if (!isOpen) setDepositRoutePickerOpen(false);
+  }, [isOpen]);
+
+  /** f-ASA wallet balance (human) when config exposes a `market_token` deposit route; fills in if parent omits `walletBalanceMarketToken`. */
+  const [fetchedFAssetWalletHuman, setFetchedFAssetWalletHuman] = useState<
+    number | undefined
+  >(undefined);
+
+  useEffect(() => {
+    if (!isOpen || mode !== "deposit" || !resolvedDepositTokenConfig) {
+      setFetchedFAssetWalletHuman(undefined);
+      return;
+    }
+    const needMarketTokenBalance = getFolksAdaptersForPhase(
+      resolvedDepositTokenConfig,
+      "deposit"
+    ).some(
+      (a) => (a.depositWalletBasis ?? "underlying") === "market_token"
+    );
+    if (!needMarketTokenBalance || !activeAccount?.address) {
+      setFetchedFAssetWalletHuman(undefined);
+      return;
+    }
+    const aln = getAlgorandNetworkFromNetworkId(networkToUse as NetworkId);
+    if (!aln) {
+      setFetchedFAssetWalletHuman(undefined);
+      return;
+    }
+    const aid = resolvedDepositTokenConfig.assetId;
+    if (aid == null || String(aid).trim() === "") {
+      setFetchedFAssetWalletHuman(undefined);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { algod } = algorandService.initializeClients(aln as any);
+        const info = await algod
+          .accountAssetInformation(activeAccount.address, Number(aid))
+          .do();
+        const raw = (info as { assetHolding?: { amount?: number | bigint } })
+          .assetHolding?.amount;
+        const dec = resolvedDepositTokenConfig.decimals ?? 6;
+        const human =
+          raw != null ? Number(raw) / 10 ** dec : 0;
+        if (!cancelled) setFetchedFAssetWalletHuman(human);
+      } catch {
+        if (!cancelled) setFetchedFAssetWalletHuman(0);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isOpen,
+    mode,
+    resolvedDepositTokenConfig,
+    activeAccount?.address,
+    networkToUse,
+    selectedDepositAdapterId,
+  ]);
+
+  const selectedDepositAdapter = useMemo(() => {
+    if (!resolvedDepositTokenConfig || !selectedDepositAdapterId) {
+      return undefined;
+    }
+    return resolveDepositFolksAdapter(
+      resolvedDepositTokenConfig,
+      selectedDepositAdapterId
+    );
+  }, [resolvedDepositTokenConfig, selectedDepositAdapterId]);
+
+  const effectiveDepositWalletBalance = useMemo(() => {
+    if (mode !== "deposit") return propWalletBalance;
+    const basis =
+      selectedDepositAdapter?.depositWalletBasis ?? "underlying";
+    if (basis === "market_token") {
+      const ext =
+        walletBalanceMarketToken ?? fetchedFAssetWalletHuman;
+      return ext !== undefined && ext !== null && Number.isFinite(ext)
+        ? ext
+        : 0;
+    }
+    return propWalletBalance;
+  }, [
+    mode,
+    selectedDepositAdapterId,
+    selectedDepositAdapter?.depositWalletBasis,
+    propWalletBalance,
+    walletBalanceMarketToken,
+    fetchedFAssetWalletHuman,
+  ]);
+
+  /** USD under wallet row: follows selected deposit route (underlying vs f-asset). */
+  const effectiveDepositWalletBalanceUSD = useMemo(() => {
+    if (mode !== "deposit") return propWalletBalanceUSD;
+    const basis =
+      selectedDepositAdapter?.depositWalletBasis ?? "underlying";
+    if (basis === "market_token") {
+      const b = effectiveDepositWalletBalance;
+      if (tokenPrice > 0 && Number.isFinite(b)) {
+        return b * tokenPrice;
+      }
+      return 0;
+    }
+    return propWalletBalanceUSD;
+  }, [
+    mode,
+    selectedDepositAdapterId,
+    selectedDepositAdapter?.depositWalletBasis,
+    propWalletBalanceUSD,
+    effectiveDepositWalletBalance,
+    tokenPrice,
+  ]);
+
+  useEffect(() => {
+    if (!isOpen || mode !== "deposit") return;
+    const list = depositFolksAdapters;
+    if (list.length === 0) {
+      setSelectedDepositAdapterId("");
+      return;
+    }
+    setSelectedDepositAdapterId((prev) => {
+      const ids = list.map((a) => tokenAdapterStableId(a));
+      if (prev && ids.includes(prev)) return prev;
+      return ids[0] ?? "";
+    });
+  }, [isOpen, mode, depositFolksAdapters]);
+
+  const prevDepositAdapterIdRef = useRef<string>("");
+  const onDepositRouteChangeRef = useRef(onDepositRouteChange);
+  onDepositRouteChangeRef.current = onDepositRouteChange;
+
+  useEffect(() => {
+    if (!isOpen) {
+      prevDepositAdapterIdRef.current = "";
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (mode !== "deposit" || !isOpen) return;
+    if (!selectedDepositAdapterId) return;
+    const prev = prevDepositAdapterIdRef.current;
+    const changed = prev !== "" && prev !== selectedDepositAdapterId;
+    if (changed) {
+      setAmount("");
+      setFiatValue(0);
+      void Promise.resolve(onDepositRouteChangeRef.current?.()).catch(
+        () => {}
+      );
+    }
+    prevDepositAdapterIdRef.current = selectedDepositAdapterId;
+  }, [mode, isOpen, selectedDepositAdapterId]);
 
   const depositBlockedByLowEstimatedHealth = useMemo(() => {
     if (mode !== "deposit") return false;
@@ -377,9 +646,13 @@ const SupplyBorrowModal = ({
         const tokens = getAllTokensWithDisplayInfo(networkToUse as any);
         // If poolId is provided, find the token that matches both symbol and poolId
         // Otherwise, fall back to finding by symbol only (for backward compatibility)
-        const token = poolId
-          ? tokens.find((t) => t.symbol === asset && t.poolId === poolId)
-          : tokens.find((t) => t.symbol === asset);
+        const token = resolveSupplyBorrowToken(
+          tokens,
+          asset,
+          poolId,
+          configSymbol,
+          marketId
+        );
 
         if (!token) {
           throw new Error(
@@ -394,9 +667,10 @@ const SupplyBorrowModal = ({
           );
         }
 
-        // Use originalSymbol to look up the config, as asset might be a display symbol
+        // Prefer config key so Folks / multi-row tokens resolve the correct `tokens[...]` entry
         const originalSymbol =
-          "originalSymbol" in token ? (token as any).originalSymbol : asset;
+          (token as { configKey?: string }).configKey ??
+          ("originalSymbol" in token ? (token as any).originalSymbol : asset);
         const tokenConfigRaw = getTokenConfig(
           networkToUse as any,
           originalSymbol
@@ -554,11 +828,23 @@ const SupplyBorrowModal = ({
     };
 
     fetchMaxBorrowAmount();
-  }, [isOpen, mode, activeAccount?.address, asset, poolId, networkToUse, tokenPrice, assetData.totalBorrow, assetData.maxTotalBorrows]);
+  }, [
+    isOpen,
+    mode,
+    activeAccount?.address,
+    asset,
+    poolId,
+    configSymbol,
+    marketId,
+    networkToUse,
+    tokenPrice,
+    assetData.totalBorrow,
+    assetData.maxTotalBorrows,
+  ]);
 
   useEffect(() => {
     setPendingSign(null);
-  }, [amount, asset, mode, poolId, network, networkToUse]);
+  }, [amount, asset, mode, poolId, configSymbol, marketId, network, networkToUse]);
 
   // Reset states when modal opens/closes
   useEffect(() => {
@@ -824,8 +1110,11 @@ const SupplyBorrowModal = ({
       return;
     }
 
-    // For deposits, check wallet balance
-    if (mode === "deposit" && parseFloat(amount) > propWalletBalance) {
+    // For deposits, check wallet balance (per selected deposit adapter basis)
+    if (
+      mode === "deposit" &&
+      parseFloat(amount) > effectiveDepositWalletBalance
+    ) {
       setError("Insufficient wallet balance");
       return;
     }
@@ -878,9 +1167,13 @@ const SupplyBorrowModal = ({
 
       // If poolId is provided, find the token that matches both symbol and poolId
       // Otherwise, fall back to finding by symbol only (for backward compatibility)
-      let token = poolId
-        ? tokens.find((t) => t.symbol === asset && t.poolId === poolId)
-        : tokens.find((t) => t.symbol === asset);
+      let token = resolveSupplyBorrowToken(
+        tokens,
+        asset,
+        poolId,
+        configSymbol,
+        marketId
+      );
 
       // If token not found in specified network, try other enabled networks
       let actualNetwork = networkToUse;
@@ -894,9 +1187,13 @@ const SupplyBorrowModal = ({
           const otherTokens = getAllTokensWithDisplayInfo(
             enabledNetwork as any
           );
-          const otherToken = poolId
-            ? otherTokens.find((t) => t.symbol === asset && t.poolId === poolId)
-            : otherTokens.find((t) => t.symbol === asset);
+          const otherToken = resolveSupplyBorrowToken(
+            otherTokens,
+            asset,
+            poolId,
+            configSymbol,
+            marketId
+          );
 
           if (otherToken) {
             // Found token in another network, use that network
@@ -909,9 +1206,11 @@ const SupplyBorrowModal = ({
 
       console.log("Token lookup result:", {
         poolIdProvided: poolId,
+        configSymbol,
         tokenFound: !!token,
         tokenPoolId: token?.poolId,
         tokenSymbol: token?.symbol,
+        tokenConfigKey: (token as { configKey?: string } | undefined)?.configKey,
         tokenUnderlyingContractId: token?.underlyingContractId,
         networkUsed: actualNetwork,
       });
@@ -946,9 +1245,9 @@ const SupplyBorrowModal = ({
       }
 
       // Get the original token config to access tokenStandard
-      // Use originalSymbol to look up the config, as asset might be a display symbol
       const originalSymbol =
-        "originalSymbol" in token ? (token as any).originalSymbol : asset;
+        (token as { configKey?: string }).configKey ??
+        ("originalSymbol" in token ? (token as any).originalSymbol : asset);
       const tokenConfigRaw = getTokenConfig(
         actualNetwork as any,
         originalSymbol
@@ -997,6 +1296,7 @@ const SupplyBorrowModal = ({
         amount: amountInAtomicUnits,
         userAddress: activeAccount.address,
         networkId: actualNetwork,
+        depositAdapterId: selectedDepositAdapterId || undefined,
       });
 
       if (poolId && token.poolId !== poolId) {
@@ -1017,7 +1317,10 @@ const SupplyBorrowModal = ({
           originalTokenConfig.tokenStandard,
           amountInAtomicUnits,
           activeAccount.address,
-          actualNetwork as NetworkId
+          actualNetwork as NetworkId,
+          selectedDepositAdapterId.trim() !== ""
+            ? { depositAdapterId: selectedDepositAdapterId }
+            : undefined
         );
       } else if (mode === "borrow") {
         // Call the lending service borrow method
@@ -1199,6 +1502,7 @@ const SupplyBorrowModal = ({
   };
 
   return (
+    <>
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-white rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-[95vw] md:max-w-md max-h-[min(90vh,90dvh)] overflow-y-auto overflow-x-hidden flex flex-col p-0 overscroll-contain">
         {showSuccess ? (
@@ -1341,11 +1645,57 @@ const SupplyBorrowModal = ({
                   </div>
                 )}
 
+              {mode === "deposit" && depositFolksAdapters.length === 1 && (
+                <div className="space-y-2 rounded-lg border border-slate-200/80 bg-white/60 p-3 dark:border-slate-600 dark:bg-slate-800/60">
+                  <Label className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                    Deposit route
+                  </Label>
+                  <div className="text-sm font-medium text-slate-800 dark:text-slate-100">
+                    {depositFolksAdapters[0].label ?? depositFolksAdapters[0].name}
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {(depositFolksAdapters[0].depositWalletBasis ??
+                    "underlying") === "market_token"
+                      ? "f-asset from wallet"
+                      : "Underlying (e.g. ALGO)"}
+                  </p>
+                </div>
+              )}
+
               <SupplyBorrowForm
+                key={
+                  mode === "deposit" && selectedDepositAdapterId
+                    ? `dep-${selectedDepositAdapterId}`
+                    : `${mode}-form`
+                }
                 mode={mode}
                 asset={asset}
-                walletBalance={propWalletBalance}
-                walletBalanceUSD={propWalletBalanceUSD}
+                walletBalance={
+                  mode === "deposit"
+                    ? effectiveDepositWalletBalance
+                    : propWalletBalance
+                }
+                walletBalanceUSD={
+                  mode === "deposit"
+                    ? effectiveDepositWalletBalanceUSD
+                    : propWalletBalanceUSD
+                }
+                walletBalanceDisplaySymbol={
+                  mode === "deposit" && selectedDepositAdapter
+                    ? selectedDepositAdapter.label ??
+                      selectedDepositAdapter.name ??
+                      asset
+                    : undefined
+                }
+                walletBalanceRowTitle={
+                  mode === "deposit" && selectedDepositAdapter
+                    ? `Wallet balance · ${
+                        selectedDepositAdapter.label ??
+                        selectedDepositAdapter.name ??
+                        asset
+                      }`
+                    : undefined
+                }
                 availableToSupplyOrBorrow={
                   mode === "borrow"
                     ? effectiveBorrowCap ?? borrowLiquidityOnlyTokens ?? 0
@@ -1370,6 +1720,29 @@ const SupplyBorrowModal = ({
                 maxBorrowError={maxBorrowError}
                 network={networkToUse}
                 walletBalanceLastUpdated={walletBalanceLastUpdated}
+                onRefreshWalletBalance={onRefreshWalletBalance}
+                amountFieldEndAdornment={
+                  depositMultiRoute ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setDepositRoutePickerOpen(true)}
+                      className="h-8 max-w-full gap-1 px-2 text-teal-600 hover:bg-teal-500/15 dark:text-teal-400"
+                      title="Choose deposit route"
+                    >
+                      <span className="truncate text-sm font-medium">
+                        {selectedDepositAdapter?.label ??
+                          selectedDepositAdapter?.name ??
+                          asset}
+                      </span>
+                      <ChevronDown
+                        className="h-4 w-4 shrink-0 opacity-80"
+                        aria-hidden
+                      />
+                    </Button>
+                  ) : undefined
+                }
               />
 
               <SupplyBorrowStats
@@ -1479,6 +1852,67 @@ const SupplyBorrowModal = ({
         )}
       </DialogContent>
     </Dialog>
+
+    <Dialog
+      open={depositRoutePickerOpen && depositMultiRoute}
+      onOpenChange={(open) => {
+        if (depositMultiRoute) setDepositRoutePickerOpen(open);
+      }}
+    >
+      <DialogContent className="max-h-[min(85vh,85dvh)] min-h-0 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-900 sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-slate-900 dark:text-white">
+            Deposit route
+          </DialogTitle>
+          <DialogDescription>
+            Choose what you supply from your wallet for this market.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="mt-4 grid gap-2">
+          {depositFolksAdapters.map((a) => {
+            const sid = tokenAdapterStableId(a);
+            const selected = sid === selectedDepositAdapterId;
+            const basis = a.depositWalletBasis ?? "underlying";
+            const basisLabel =
+              basis === "market_token"
+                ? "f-asset from wallet"
+                : "Underlying (e.g. ALGO)";
+            return (
+              <button
+                key={sid}
+                type="button"
+                onClick={() => {
+                  setSelectedDepositAdapterId(sid);
+                  setDepositRoutePickerOpen(false);
+                }}
+                className={cn(
+                  "flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors",
+                  selected
+                    ? "border-teal-500 bg-teal-50/90 dark:border-teal-500 dark:bg-teal-950/40"
+                    : "border-slate-200 bg-white/80 hover:border-teal-300 hover:bg-teal-50/50 dark:border-slate-600 dark:bg-slate-800/60 dark:hover:border-teal-700 dark:hover:bg-slate-800"
+                )}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    {a.label ?? a.name}
+                  </div>
+                  <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                    {basisLabel}
+                  </div>
+                </div>
+                {selected ? (
+                  <Check
+                    className="mt-0.5 h-5 w-5 shrink-0 text-teal-600 dark:text-teal-400"
+                    aria-hidden
+                  />
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 };
 

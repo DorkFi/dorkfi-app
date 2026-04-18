@@ -20,6 +20,15 @@ import {
   getPreFiParameters,
   TokenConfig,
   getEnabledNetworks,
+  TokenStandard,
+  tokenStandardUsesNt200Arc200Balance,
+  tokenStandardUsesAsaStyleNt200Txns,
+  tokenStandardUsesNativeWalletBalance,
+  getFolksAdapterForPhase,
+  getTokenAdaptersForPhase,
+  tokenConfigHasAdapters,
+  resolveDepositFolksAdapter,
+  resolveWithdrawFolksAdapter,
 } from "@/config";
 import algorandService, { AlgorandNetwork } from "./algorandService";
 import { ARC200Service } from "./arc200Service";
@@ -31,7 +40,7 @@ import {
 } from "@/clients/DorkFiLendingPoolClient";
 import algosdk from "algosdk";
 import BigNumber from "bignumber.js";
-import { TokenStandard } from "@/config";
+import { calcDepositReturn } from "@folks-finance/algorand-sdk";
 import {
   calculateDepositAPY,
   calculateBorrowAPY,
@@ -42,6 +51,12 @@ import {
   DEFAULT_LIQUIDATION_THRESHOLD_DECIMAL,
 } from "@/utils/userHealth";
 import dorkfiAPIService from "./dorkfiAPIService";
+import {
+  buildFolksDepositMintTxns,
+  buildFolksWithdrawFromPoolTxns,
+  estimateFolksDepositMintedFAssetAmount,
+  folksMintTxnsToArccjsExtraTxns,
+} from "./folksDepositAdapter";
 
 export interface MarketData {
   appId: string;
@@ -618,9 +633,12 @@ export const fetchMarketInfo = async (
         throw new Error(`Token ${token.symbol} missing underlyingContractId`);
       }
 
-      // Get the original token config to access isStoken property
-      // For tokens with multiple markets (array), find the one matching the poolId
-      const tokenConfigRaw = networkConfig.tokens[token.symbol];
+      // Config map is keyed by `tokens` object keys (e.g. `fALGO`), not display `symbol` (`Algo`).
+      const tokenConfigKey =
+        (token as { configKey?: string }).configKey ??
+        token.originalSymbol ??
+        token.symbol;
+      const tokenConfigRaw = networkConfig.tokens[tokenConfigKey];
       console.log("fetchMarketInfo tokenConfigRaw", { tokenConfigRaw, token });
       let tokenConfig: TokenConfig | undefined;
       if (Array.isArray(tokenConfigRaw)) {
@@ -921,7 +939,11 @@ export async function fetchFreshMarketInfo(
     }
 
     const networkConfig = getNetworkConfig(networkId);
-    const tokenConfigRaw = networkConfig.tokens[token.symbol];
+    const tokenConfigKey =
+      (token as { configKey?: string }).configKey ??
+      token.originalSymbol ??
+      token.symbol;
+    const tokenConfigRaw = networkConfig.tokens[tokenConfigKey];
     let tokenConfig: TokenConfig | undefined;
     if (Array.isArray(tokenConfigRaw)) {
       tokenConfig =
@@ -1568,10 +1590,14 @@ export const fetchUserBorrowBalance = async (
 
         // Get token info to convert scaled borrows to actual amount
         const tokens = getAllTokensWithDisplayInfo(networkId);
-        const token = tokens.find((t) => t.underlyingContractId === marketId);
+        const token = tokens.find(
+          (t) =>
+            t.underlyingContractId === marketId &&
+            String(t.poolId ?? "") === String(poolId)
+        );
 
         if (!token) {
-          console.warn(`Token not found for market ${marketId}`);
+          console.warn(`Token not found for market ${marketId} pool ${poolId}`);
           return null;
         }
 
@@ -1922,10 +1948,14 @@ export const fetchUserDepositBalance = async (
 
         // Get token info to convert scaled deposits to actual amount
         const tokens = getAllTokensWithDisplayInfo(networkId);
-        const token = tokens.find((t) => t.underlyingContractId === marketId);
+        const token = tokens.find(
+          (t) =>
+            t.underlyingContractId === marketId &&
+            String(t.poolId ?? "") === String(poolId)
+        );
 
         if (!token) {
-          console.warn(`Token not found for market ${marketId}`);
+          console.warn(`Token not found for market ${marketId} pool ${poolId}`);
           return null;
         }
 
@@ -2042,7 +2072,7 @@ export const fetchUserWalletBalance = async (
 
       let balance = 0n;
 
-      if (tokenConfig.tokenStandard === "network") {
+      if (tokenStandardUsesNativeWalletBalance(tokenConfig.tokenStandard)) {
         // For network tokens (like VOI), get balance from account info
         const accountInfo = await clients.algod
           .accountInformation(userAddress)
@@ -2403,10 +2433,10 @@ export const getMaxWithdrawableForMarket = async (
     ]);
     if (!userDataR.success || !marketR.success || !globalUserR.success) return null;
     const userData = UserData(userDataR.returnValue);
-    const marketData = decodeMarketData(marketR.returnValue);
+    const m = decodeMarket(marketR.returnValue as RawMarket);
     const globalData = GlobalUserData(globalUserR.returnValue);
-    const thisLt = BigInt(marketData.liquidationThreshold || "0");
-    const thisCf = BigInt(marketData.collateralFactor || "0");
+    const thisLt = m.liquidationThreshold;
+    const thisCf = m.collateralFactor;
     /** Stricter bps = larger min collateral required = lower max withdraw. */
     let divisorBps: bigint;
     if (
@@ -2422,8 +2452,8 @@ export const getMaxWithdrawableForMarket = async (
     const result = getMaxWithdrawable(
       { scaled_deposits: BigInt(userData.scaledDeposits?.toString() ?? "0") },
       {
-        deposit_index: BigInt(marketData.depositIndex),
-        price: BigInt(marketData.price),
+        deposit_index: m.depositIndex,
+        price: m.price,
         liquidation_threshold_bps: divisorBps,
       },
       {
@@ -2452,6 +2482,7 @@ export const getMaxWithdrawableForMarket = async (
  * Withdraw tokens from a lending market
  * @param options.withdrawAll - When true (withdraw all / max): use full nToken balance or options.maxWithdrawScaled if provided
  * @param options.maxWithdrawScaled - When set with withdrawAll, use this scaled amount for the contract call (health-factor-safe max)
+ * @param options.withdrawAdapterId - Folks withdraw-phase adapter id (see {@link resolveWithdrawFolksAdapter}); omit for first withdraw adapter.
  */
 export const withdraw = async (
   poolId: string,
@@ -2460,7 +2491,11 @@ export const withdraw = async (
   amount: string,
   userAddress: string,
   networkId: NetworkId,
-  options?: { withdrawAll?: boolean; maxWithdrawScaled?: bigint }
+  options?: {
+    withdrawAll?: boolean;
+    maxWithdrawScaled?: bigint;
+    withdrawAdapterId?: string;
+  }
 ): Promise<
   | { success: boolean; txId?: string; error?: string }
   | { success: true; txns: string[] }
@@ -2482,17 +2517,50 @@ export const withdraw = async (
         networkConfig.walletNetworkId as AlgorandNetwork
       );
 
-      // Get token information
+      // Get token information (same pool + market — avoids wrong row when symbols collide)
       const allTokens = getAllTokensWithDisplayInfo(networkId);
-      const token = allTokens.find(
-        (token) => token.underlyingContractId === marketId
-      );
+      const token =
+        allTokens.find(
+          (t) =>
+            String(t.underlyingContractId) === String(marketId) &&
+            String(t.poolId) === String(poolId)
+        ) ?? allTokens.find((t) => String(t.underlyingContractId) === String(marketId));
 
       if (!token) {
         throw new Error("Token not found");
       }
 
       console.log("withdraw:token", { token });
+
+      const tokenConfigLookupForWithdraw =
+        token.configKey ?? token.originalSymbol ?? token.symbol;
+      const rawTokenConfigWithdraw = getTokenConfig(
+        networkId,
+        tokenConfigLookupForWithdraw
+      );
+      const tokenConfigForWithdraw: TokenConfig | undefined = Array.isArray(
+        rawTokenConfigWithdraw
+      )
+        ? rawTokenConfigWithdraw.find(
+            (c) => String(c.poolId) === String(poolId)
+          ) ?? rawTokenConfigWithdraw[0]
+        : rawTokenConfigWithdraw;
+
+      const folksWithdrawAdapter = resolveWithdrawFolksAdapter(
+        tokenConfigForWithdraw ?? {},
+        options?.withdrawAdapterId
+      );
+
+      const withdrawReceiveIsMarketToken =
+        folksWithdrawAdapter != null &&
+        folksWithdrawAdapter.withdrawReceiveBasis === "market_token";
+
+      /** Append Folks pool redeem (f-ASA → native) after nt200 withdraw when user receives underlying. */
+      const folksWithdrawUsesFolksRedeem =
+        folksWithdrawAdapter != null &&
+        !withdrawReceiveIsMarketToken &&
+        networkConfig.networkId === "algorand-mainnet" &&
+        tokenStandardUsesAsaStyleNt200Txns(tokenStandard);
 
       // Convert amount to proper units (considering decimals)
       const amountInSmallestUnit = BigInt(
@@ -2592,37 +2660,10 @@ export const withdraw = async (
       accruedInterest = Math.max(accruedInterest, 0);
       accruedInterest = 0; // disables accrued interest withdraw for now
 
-      // Calculate ratio using user depositIndex and market deposit index
-      let depositIndexRatio: BigNumber | undefined;
-      if (userDepositIndex && currentDepositIndex) {
-        const userIndexBigInt = BigInt(userDepositIndex);
-        const currentIndexBigInt = BigInt(currentDepositIndex.toString());
-
-        if (currentIndexBigInt > 0n) {
-          // Ratio represents: userDepositIndex / currentDepositIndex
-          // This ratio can be used to calculate original deposit from current value
-          // Use BigNumber for high precision calculation
-          depositIndexRatio = new BigNumber(
-            userIndexBigInt.toString()
-          ).dividedBy(currentIndexBigInt.toString());
-
-          console.log("withdraw:deposit index ratio:", {
-            userDepositIndex,
-            currentDepositIndex: currentDepositIndex.toString(),
-            ratio: depositIndexRatio.toString(),
-            ratioDecimal: depositIndexRatio.toNumber(),
-          });
-        }
-      }
-
+      // User amount is in smallest **underlying** units (matches Withdraw modal), except Folks
+      // `network-asa` where that means native/ASA underlying (e.g. ALGO) and pool math uses f-asset.
+      // Do not scale by userDepositIndex/currentDepositIndex — that broke partial-withdraw simulation / HF safety.
       let adjustedAmount = amountInSmallestUnit;
-      if (depositIndexRatio) {
-        adjustedAmount = BigInt(
-          new BigNumber(amountInSmallestUnit)
-            .multipliedBy(depositIndexRatio)
-            .toFixed(0)
-        );
-      }
 
       const ci = new CONTRACT(
         Number(poolId),
@@ -2682,6 +2723,17 @@ export const withdraw = async (
         ntoken_balance = BigInt(ntoken_balanceR.returnValue);
       }
 
+      let folksDepositInterestIndex: bigint | null = null;
+      if (folksWithdrawUsesFolksRedeem && folksWithdrawAdapter != null) {
+        const { depositInterestIndex } =
+          await estimateFolksDepositMintedFAssetAmount({
+            poolName: folksWithdrawAdapter.folksParams.pool,
+            underlyingAmount: BigInt(1),
+            algod: clients.algod,
+          });
+        folksDepositInterestIndex = depositInterestIndex;
+      }
+
       // Withdraw all: use maxWithdrawScaled (health-factor-safe) when provided, else full nToken balance
       let underlying_amount = BigInt(0);
       const maxWithdrawAmount =
@@ -2720,19 +2772,51 @@ export const withdraw = async (
         // Optimized search to find the ntoken amount that gives us the EXACT desired underlying amount
         // If user already has tokens, we can withdraw less from the pool
         const requestedUnderlyingAmount = BigInt(amountInSmallestUnit);
-        const targetUnderlyingAmount =
-          token_balance > BigInt(0) && requestedUnderlyingAmount > token_balance
-            ? requestedUnderlyingAmount - token_balance
+        const requestedPoolReturnUnits =
+          folksWithdrawUsesFolksRedeem &&
+          folksDepositInterestIndex != null &&
+          folksDepositInterestIndex > BigInt(0)
+            ? calcDepositReturn(
+                requestedUnderlyingAmount,
+                folksDepositInterestIndex
+              )
             : requestedUnderlyingAmount;
+
+        const targetUnderlyingAmount =
+          token_balance > BigInt(0) &&
+          requestedPoolReturnUnits > token_balance
+            ? requestedPoolReturnUnits - token_balance
+            : requestedPoolReturnUnits;
+
+        if (
+          folksWithdrawUsesFolksRedeem &&
+          targetUnderlyingAmount === BigInt(0) &&
+          requestedUnderlyingAmount > BigInt(0)
+        ) {
+          throw new Error(
+            "Withdraw amount is already covered by your f-asset on the token app; try a larger amount or use Max."
+          );
+        }
+
+        if (folksWithdrawUsesFolksRedeem) {
+          adjustedAmount =
+            targetUnderlyingAmount > ntoken_balance
+              ? ntoken_balance
+              : targetUnderlyingAmount > BigInt(0)
+                ? targetUnderlyingAmount
+                : ntoken_balance;
+        } else {
+          adjustedAmount = amountInSmallestUnit;
+        }
 
         if (
           token_balance > BigInt(0) &&
-          targetUnderlyingAmount < requestedUnderlyingAmount
+          targetUnderlyingAmount < requestedPoolReturnUnits
         ) {
           console.log(
             "withdraw:adjusted target underlying amount based on user token balance",
             {
-              requestedUnderlyingAmount: requestedUnderlyingAmount.toString(),
+              requestedPoolReturnUnits: requestedPoolReturnUnits.toString(),
               userTokenBalance: token_balance.toString(),
               adjustedTargetUnderlyingAmount: targetUnderlyingAmount.toString(),
               note: "User already has tokens, so we need to withdraw less from pool",
@@ -3646,7 +3730,10 @@ export const withdraw = async (
       }
 
       // cond a token withdraw - use underlying_amount (actual amount received from pool)
-      if (tokenStandard == "network" || tokenStandard == "asa") {
+      if (
+        tokenStandard == "network" ||
+        tokenStandardUsesAsaStyleNt200Txns(tokenStandard)
+      ) {
         const formmatedWithdrawAmount = new BigNumber(underlying_amount)
           .dividedBy(10 ** token.decimals)
           .toFixed(token.decimals);
@@ -3657,6 +3744,22 @@ export const withdraw = async (
           note: new TextEncoder().encode(note),
           desc: note,
         });
+
+        if (
+          folksWithdrawUsesFolksRedeem &&
+          folksWithdrawAdapter != null &&
+          underlying_amount > BigInt(0)
+        ) {
+          const folksRedeemTxns = await buildFolksWithdrawFromPoolTxns({
+            poolName: folksWithdrawAdapter.folksParams.pool,
+            userAddress,
+            fAssetAmount: underlying_amount,
+            algod: clients.algod,
+          });
+          if (folksRedeemTxns.length > 0) {
+            buildN.push(...folksMintTxnsToArccjsExtraTxns(folksRedeemTxns));
+          }
+        }
       } else if (tokenStandard == "arc200-exchange") {
         const txnO = (
           await builder.arc200Exchange.arc200_swapBack(
@@ -3742,7 +3845,8 @@ export const deposit = async (
   tokenStandard: TokenStandard,
   amount: string,
   userAddress: string,
-  networkId: NetworkId
+  networkId: NetworkId,
+  options?: { depositAdapterId?: string }
 ): Promise<
   | { success: boolean; txId?: string; error?: string }
   | { success: true; txns: string[] }
@@ -3755,6 +3859,7 @@ export const deposit = async (
     amount,
     userAddress,
     networkId,
+    depositAdapterId: options?.depositAdapterId,
   });
 
   try {
@@ -3929,15 +4034,11 @@ export const deposit = async (
         }
       );
 
-      // Get user's token balance for network, asa, or arc200-exchange standards
+      // Get user's token balance for network, asa, network-asa, or arc200-exchange standards
       let token_balance = BigInt(0);
       let adjustedDepositAmount = bigAmount;
 
-      if (
-        tokenStandard === "network" ||
-        tokenStandard === "asa" ||
-        tokenStandard === "arc200-exchange"
-      ) {
+      if (tokenStandardUsesNt200Arc200Balance(tokenStandard)) {
         const token_balanceR = await ciToken.arc200_balanceOf(userAddress);
         console.log("deposit:token_balanceR (user)", { token_balanceR });
         token_balance = BigInt(token_balanceR.returnValue);
@@ -4054,6 +4155,165 @@ export const deposit = async (
       };
       console.log("Contracts initialized successfully");
 
+      // `token.symbol` is often the display symbol when marketOverride exists (e.g. "Algo").
+      // `configKey` / `originalSymbol` is the canonical `tokens` map key (e.g. "fALGO") for getTokenConfig + adapter.
+      const tokenConfigLookupSymbol =
+        token.configKey ?? token.originalSymbol ?? token.symbol;
+      const rawTokenConfigForDeposit = getTokenConfig(
+        networkId,
+        tokenConfigLookupSymbol
+      );
+      const tokenConfigForDeposit: TokenConfig | undefined = Array.isArray(
+        rawTokenConfigForDeposit
+      )
+        ? poolId != null && poolId !== ""
+          ? rawTokenConfigForDeposit.find(
+            (c) => String(c.poolId) === String(poolId)
+          ) ?? rawTokenConfigForDeposit[0]
+          : rawTokenConfigForDeposit[0]
+        : rawTokenConfigForDeposit;
+
+      const folksForDeposit = resolveDepositFolksAdapter(
+        tokenConfigForDeposit ?? {},
+        options?.depositAdapterId
+      );
+      const depositPhaseAdapters = tokenConfigForDeposit
+        ? getTokenAdaptersForPhase(tokenConfigForDeposit, "deposit")
+        : [];
+
+      if (tokenStandard === "network-asa" && !folksForDeposit) {
+        throw new Error(
+          "tokenStandard network-asa requires a Folks adapter for deposit (adapter / adapters with deposit phase)."
+        );
+      }
+
+      /** ASA index (`xaid`) for nt200 `deposit` axfer — f-ASA for Folks `network-asa`, else display `underlyingAssetId`. */
+      let nt200DepositAxferAssetId =
+        token.underlyingAssetId != null &&
+        String(token.underlyingAssetId).trim() !== ""
+          ? Number(token.underlyingAssetId)
+          : NaN;
+
+      const normalizeFolksUnderlyingAssetId = (
+        raw: string | undefined | null
+      ): string => {
+        const s = String(raw ?? "").trim();
+        if (s === "" || s === "-") return "0";
+        return s;
+      };
+
+      let folksMintTxns: algosdk.Transaction[] | null = null;
+      if (depositPhaseAdapters.length > 0) {
+        for (const a of depositPhaseAdapters) {
+          if (a.type !== "folks") {
+            throw new Error(`Unsupported deposit adapter type: ${a.type}`);
+          }
+        }
+        if (!folksForDeposit) {
+          throw new Error(
+            "Deposit adapters are configured but none apply to the deposit phase (check phases)."
+          );
+        }
+        if (networkConfig.networkId !== "algorand-mainnet") {
+          throw new Error(
+            "Folks deposit adapter is only supported on Algorand mainnet"
+          );
+        }
+        const fp = folksForDeposit.folksParams;
+        const cfgAssetStr = String(tokenConfigForDeposit.assetId ?? "").trim();
+        const fpFAssetStr = String(fp.fAssetId ?? "").trim();
+        const fpUnderlyingNorm = normalizeFolksUnderlyingAssetId(fp.assetId);
+        const cfgAsUnderlyingNorm = normalizeFolksUnderlyingAssetId(
+          cfgAssetStr !== "" ? cfgAssetStr : undefined
+        );
+        const fAssetMatchesMarket =
+          fpFAssetStr !== "" && cfgAssetStr !== "" && cfgAssetStr === fpFAssetStr;
+        const underlyingMatches =
+          cfgAsUnderlyingNorm !== "" &&
+          cfgAsUnderlyingNorm === fpUnderlyingNorm;
+        if (!fAssetMatchesMarket && !underlyingMatches) {
+          throw new Error(
+            `Folks deposit adapter pool does not match this token row (config assetId ${String(tokenConfigForDeposit.assetId)} vs pool underlying ${fp.assetId} / fAsset ${fp.fAssetId})`
+          );
+        }
+        if (tokenStandardUsesAsaStyleNt200Txns(tokenStandard)) {
+          const fAsa = Number(fp.fAssetId);
+          if (!Number.isFinite(fAsa) || fAsa <= 0) {
+            throw new Error(
+              "Folks deposit adapter (ASA): invalid folksParams.fAssetId for nt200 axfer"
+            );
+          }
+          nt200DepositAxferAssetId = fAsa;
+        }
+        const skipFolksMint =
+          folksForDeposit.depositWalletBasis === "market_token";
+        if (adjustedDepositAmount > BigInt(0) && !skipFolksMint) {
+          folksMintTxns = await buildFolksDepositMintTxns({
+            poolName: fp.pool,
+            userAddress,
+            amount: adjustedDepositAmount,
+            algod: clients.algod,
+          });
+        } else if (skipFolksMint) {
+          console.log(
+            "folksMintTxns skipped: market_token deposit (f-ASA from wallet, no Folks mint)",
+            { bigAmount: bigAmount.toString(), token_balance: token_balance.toString() }
+          );
+        } else {
+          console.log(
+            "folksMintTxns skipped: adjustedDepositAmount is 0 (nt200 ARC200 balance already covers requested deposit)",
+            { bigAmount: bigAmount.toString(), token_balance: token_balance.toString() }
+          );
+        }
+      } else if (tokenStandard === "network-asa") {
+        console.warn(
+          "folksMintTxns skipped: no adapter on resolved token config row",
+          { tokenConfigLookupSymbol, displaySymbol: token.symbol }
+        );
+      }
+
+      console.log("folksMintTxns", {
+        folksMintTxns,
+        tokenConfigLookupSymbol,
+        hasAdapter: tokenConfigHasAdapters(tokenConfigForDeposit),
+        adjustedDepositAmount: adjustedDepositAmount.toString(),
+        networkId: networkConfig.networkId,
+      });
+
+      /** Units of the nt200 / ARC200 market token (e.g. fALGO) to move after Folks mint. */
+      let depositIntoNt200Amount = adjustedDepositAmount;
+      /** Folks-estimated f-asset minted for this deposit (0 when no Folks mint). */
+      let mintedFAssetForArc200 = BigInt(0);
+      if (folksMintTxns && folksMintTxns.length > 0 && folksForDeposit) {
+        const fp = folksForDeposit.folksParams;
+        const { mintedFAsset, depositInterestIndex } =
+          await estimateFolksDepositMintedFAssetAmount({
+            poolName: fp.pool,
+            underlyingAmount: adjustedDepositAmount,
+            algod: clients.algod,
+          });
+        depositIntoNt200Amount = mintedFAsset;
+        mintedFAssetForArc200 = mintedFAsset;
+        console.log("folksMint: underlying → f-asset (nt200 deposit units)", {
+          underlyingForFolks: adjustedDepositAmount.toString(),
+          mintedFAsset: mintedFAsset.toString(),
+          depositInterestIndex: depositInterestIndex.toString(),
+        });
+      }
+
+      const useMintedFAssetForArc200ApproveAndLending =
+        folksMintTxns &&
+        folksMintTxns.length > 0 &&
+        folksForDeposit != null;
+      /** Total ARC200 units the pool should pull (f-asset); Folks path must match minted f-asset + balance already on nt200. */
+      const arc200ApproveAndLendingAmount = useMintedFAssetForArc200ApproveAndLending
+        ? token_balance + mintedFAssetForArc200
+        : bigAmount;
+
+      /** ARC200 / nt200 leg label (not display `symbol`, which may show underlying as "Algo"). */
+      const nt200DepositNoteSymbol =
+        token.originalSymbol === "fALGO" ? "fAlgo" : token.originalSymbol;
+
       let customTx: any;
 
       for (const p of [
@@ -4070,207 +4330,222 @@ export const deposit = async (
 
         const buildN = [];
 
-        // TODO fund ntoken
 
-        // conditionally deposit to token
-        // Skip deposit if adjusted amount is 0 (user already has enough tokens)
-        if (adjustedDepositAmount > BigInt(0)) {
-          if (tokenStandard == "network") {
-            // ------------------------------------------------------------
-            // TODO move this to setup market workflow
-            // ------------------------------------------------------------
-            // {
-            //   const txnO = (
-            //     await builder.token.createBalanceBox(
-            //       algosdk.encodeAddress(
-            //         algosdk.getApplicationAddress(Number(poolId)).publicKey
-            //       )
-            //     )
-            //   ).obj;
-            //   console.log("createBalanceBox", { txnO });
-            //   buildN.push({
-            //     ...txnO,
-            //     payment: 28500,
-            //     note: new TextEncoder().encode("nt200 createBalanceBox"),
-            //   });
-            // }
-            // ------------------------------------------------------------
-            if (p1 > 0) {
-              const txnO = (await builder.token.createBalanceBox(userAddress))
-                .obj;
-              buildN.push({
-                ...txnO,
-                payment: 28500,
-                note: new TextEncoder().encode("nt200 createBalanceBox"),
-              });
-            }
-            {
-              const txnO = (await builder.token.deposit(adjustedDepositAmount))
-                .obj;
-              const formattedDepositAmount = new BigNumber(
-                adjustedDepositAmount
+        // create balance box for pool on setup
+        if (false) {
+          const txnO = (
+            await builder.token.createBalanceBox(
+              algosdk.encodeAddress(
+                algosdk.getApplicationAddress(Number(poolId)).publicKey
               )
+            )
+          ).obj;
+          console.log("createBalanceBox", { txnO });
+          buildN.push({
+            ...txnO,
+            payment: 28500,
+            note: new TextEncoder().encode("nt200 createBalanceBox"),
+          });
+        }
+
+        if (folksMintTxns && folksMintTxns.length > 0) {
+          buildN.push(...folksMintTxnsToArccjsExtraTxns(folksMintTxns));
+        }
+
+        if (true) {
+          // TODO fund ntoken
+
+          // conditionally deposit to token
+          // Skip deposit if adjusted amount is 0 (user already has enough tokens)
+          if (adjustedDepositAmount > BigInt(0)) {
+            if (tokenStandard == "network") {
+              // ------------------------------------------------------------
+              // TODO move this to setup market workflow
+              // ------------------------------------------------------------
+              // {
+              //   const txnO = (
+              //     await builder.token.createBalanceBox(
+              //       algosdk.encodeAddress(
+              //         algosdk.getApplicationAddress(Number(poolId)).publicKey
+              //       )
+              //     )
+              //   ).obj;
+              //   console.log("createBalanceBox", { txnO });
+              //   buildN.push({
+              //     ...txnO,
+              //     payment: 28500,
+              //     note: new TextEncoder().encode("nt200 createBalanceBox"),
+              //   });
+              // }
+              // ------------------------------------------------------------
+              if (p1 > 0) {
+                const txnO = (await builder.token.createBalanceBox(userAddress))
+                  .obj;
+                buildN.push({
+                  ...txnO,
+                  payment: 28500,
+                  note: new TextEncoder().encode("nt200 createBalanceBox"),
+                });
+              }
+              {
+                const txnO = (await builder.token.deposit(depositIntoNt200Amount))
+                  .obj;
+                const formattedDepositAmount = new BigNumber(
+                  depositIntoNt200Amount
+                )
+                  .dividedBy(10 ** token.decimals)
+                  .toFixed(token.decimals);
+                const note = new TextEncoder().encode(
+                  `nt200 deposit ${formattedDepositAmount} ${nt200DepositNoteSymbol}`
+                );
+                buildN.push({
+                  ...txnO,
+                  payment: depositIntoNt200Amount,
+                  note,
+                });
+              }
+            } else if (tokenStandardUsesAsaStyleNt200Txns(tokenStandard)) {
+              const aamt = depositIntoNt200Amount;
+              if (!Number.isFinite(nt200DepositAxferAssetId)) {
+                throw new Error(
+                  "nt200 ASA deposit: missing axfer asset id (set underlyingAssetId or use Folks adapter with fAssetId)"
+                );
+              }
+              const xaid = nt200DepositAxferAssetId;
+              const payment = p1 > 0 ? 28501 : 0;
+              const axfer = { payment, aamt, xaid };
+              const formattedDepositAmount = new BigNumber(depositIntoNt200Amount)
                 .dividedBy(10 ** token.decimals)
                 .toFixed(token.decimals);
               const note = new TextEncoder().encode(
-                `nt200 deposit ${formattedDepositAmount} ${token.symbol}`
+                `nt200 deposit ${formattedDepositAmount} ${nt200DepositNoteSymbol}`
               );
+              const txnO = (await builder.token.deposit(depositIntoNt200Amount))
+                .obj;
               buildN.push({
                 ...txnO,
-                payment: adjustedDepositAmount,
+                ...axfer,
+                note,
+              });
+            } else if (tokenStandard == "arc200-exchange") {
+              const axfer = {
+                aamt: depositIntoNt200Amount,
+                xaid: Number(token.underlyingAssetId),
+              };
+              const formattedDepositAmount = new BigNumber(depositIntoNt200Amount)
+                .dividedBy(10 ** token.decimals)
+                .toFixed(token.decimals);
+              const note = new TextEncoder().encode(
+                `arc200_redeem ${formattedDepositAmount} ${nt200DepositNoteSymbol}`
+              );
+              const txnO = (
+                await builder.arc200Exchange.arc200_redeem(depositIntoNt200Amount)
+              ).obj;
+              buildN.push({
+                ...txnO,
+                ...axfer,
                 note,
               });
             }
-          } else if (tokenStandard == "asa") {
-            // ------------------------------------------------------------
-            // TODO move this to setup market workflow
-            // ------------------------------------------------------------
-            // {
-            //   const txnO = (
-            //     await builder.token.createBalanceBox(
-            //       algosdk.encodeAddress(
-            //         algosdk.getApplicationAddress(Number(poolId)).publicKey
-            //       )
-            //     )
-            //   ).obj;
-            //   console.log("createBalanceBox", { txnO });
-            //   buildN.push({
-            //     ...txnO,
-            //     payment: 28500,
-            //     note: new TextEncoder().encode("nt200 createBalanceBox"),
-            //   });
-            // }
-            // ------------------------------------------------------------
-            const aamt = adjustedDepositAmount;
-            const xaid = Number(token.underlyingAssetId);
-            const payment = p1 > 0 ? 28501 : 0;
-            const axfer = { payment, aamt, xaid };
-            const formattedDepositAmount = new BigNumber(adjustedDepositAmount)
+          } else {
+            console.log(
+              "deposit:skipping token deposit, user already has sufficient balance",
+              {
+                requestedAmount: bigAmount.toString(),
+                userTokenBalance: token_balance.toString(),
+              }
+            );
+          }
+
+          // approve spending of token
+          // Buffer on total ARC200 pull; when Folks mints, base on minted f-asset (+ existing nt200 balance), not `amount` (may be underlying units).
+          {
+            const approvalAmount = BigInt(
+              new BigNumber(arc200ApproveAndLendingAmount.toString())
+                .multipliedBy(1.1)
+                .toFixed(0)
+            ); // TODO only increase for NODE
+            const txnO = (
+              await builder.token.arc200_approve(
+                algosdk.encodeAddress(
+                  algosdk.getApplicationAddress(Number(poolId)).publicKey
+                ),
+                approvalAmount
+              )
+            ).obj;
+            const formattedApprovalAmount = new BigNumber(approvalAmount)
               .dividedBy(10 ** token.decimals)
               .toFixed(token.decimals);
             const note = new TextEncoder().encode(
-              `nt200 deposit ${formattedDepositAmount} ${token.symbol}`
+              `arc200 approve ${formattedApprovalAmount} ${nt200DepositNoteSymbol}`
             );
-            const txnO = (await builder.token.deposit(adjustedDepositAmount))
-              .obj;
             buildN.push({
               ...txnO,
-              ...axfer,
+              payment: p2 > 0 ? 28502 : 0,
               note,
             });
-          } else if (tokenStandard == "arc200-exchange") {
-            const axfer = {
-              aamt: adjustedDepositAmount,
-              xaid: Number(token.underlyingAssetId),
-            };
-            const formattedDepositAmount = new BigNumber(adjustedDepositAmount)
+          }
+
+          // ------------------------------------------------------------
+          // TODO move this to setup market workflow
+          // REM ensures that the pool can hold a balance prior to first
+          //     first deposit
+          // ------------------------------------------------------------
+          {
+            const receiver = algosdk.encodeAddress(
+              algosdk.getApplicationAddress(Number(poolId)).publicKey
+            );
+            const txnO = (await builder.token.arc200_transfer(receiver, 0)).obj;
+            buildN.push({
+              ...txnO,
+              payment: 28504,
+              note: new TextEncoder().encode(`arc200 transfer`),
+            });
+          }
+          // ------------------------------------------------------------
+
+          // deposit to lending pool
+          {
+            // ------------------------------------------------------------
+            // TODO fetch from config
+            // ------------------------------------------------------------
+            const foreignApps = [];
+            if (networkConfig.networkId === "voi-mainnet") {
+              foreignApps.push(47138065);
+            }
+            if (networkConfig.networkId === "algorand-mainnet") {
+              foreignApps.push(3333688254);
+            }
+            // ------------------------------------------------------------
+            const payment = p3 > 0 ? 9e5 : 1e5;
+            console.log("=== CREATING DEPOSIT TRANSACTION ===");
+            console.log("Deposit transaction params:", {
+              marketId: Number(marketId),
+              amount: arc200ApproveAndLendingAmount.toString(),
+              poolId: Number(poolId),
+              payment,
+              foreignApps,
+            });
+            const formattedAmount = new BigNumber(arc200ApproveAndLendingAmount)
               .dividedBy(10 ** token.decimals)
               .toFixed(token.decimals);
             const note = new TextEncoder().encode(
-              `arc200_redeem ${formattedDepositAmount} ${token.symbol}`
+              `lending deposit ${formattedAmount} ${nt200DepositNoteSymbol}`
             );
             const txnO = (
-              await builder.arc200Exchange.arc200_redeem(adjustedDepositAmount)
-            ).obj;
+              await builder.lending.deposit(
+                Number(marketId),
+                arc200ApproveAndLendingAmount
+              )
+            ).obj as any;
             buildN.push({
               ...txnO,
-              ...axfer,
               note,
+              payment,
+              foreignApps,
             });
+            console.log("Deposit transaction added to buildN");
           }
-        } else {
-          console.log(
-            "deposit:skipping token deposit, user already has sufficient balance",
-            {
-              requestedAmount: bigAmount.toString(),
-              userTokenBalance: token_balance.toString(),
-            }
-          );
-        }
-
-        // approve spending of token
-        // Use the original amount for approval (not adjusted) to ensure sufficient approval
-        {
-          const approvalAmount = BigInt(
-            new BigNumber(amount).multipliedBy(1.1).toFixed(0)
-          ); // TODO only increase for NODE
-          const txnO = (
-            await builder.token.arc200_approve(
-              algosdk.encodeAddress(
-                algosdk.getApplicationAddress(Number(poolId)).publicKey
-              ),
-              approvalAmount
-            )
-          ).obj;
-          const formattedApprovalAmount = new BigNumber(approvalAmount)
-            .dividedBy(10 ** token.decimals)
-            .toFixed(token.decimals);
-          const note = new TextEncoder().encode(
-            `arc200 approve ${formattedApprovalAmount} ${token.symbol}`
-          );
-          buildN.push({
-            ...txnO,
-            payment: p2 > 0 ? 28502 : 0,
-            note,
-          });
-        }
-
-        // ------------------------------------------------------------
-        // TODO move this to setup market workflow
-        // REM ensures that the pool can hold a balance prior to first
-        //     first deposit
-        // ------------------------------------------------------------
-        {
-          const receiver = algosdk.encodeAddress(
-            algosdk.getApplicationAddress(Number(poolId)).publicKey
-          );
-          const txnO = (await builder.token.arc200_transfer(receiver, 0)).obj;
-          buildN.push({
-            ...txnO,
-            payment: 28504,
-            note: new TextEncoder().encode(`arc200 transfer`),
-          });
-        }
-        // ------------------------------------------------------------
-
-        // deposit to lending pool
-        {
-          // ------------------------------------------------------------
-          // TODO fetch from config
-          // ------------------------------------------------------------
-          const foreignApps = [];
-          if (networkConfig.networkId === "voi-mainnet") {
-            foreignApps.push(47138065);
-          }
-          if (networkConfig.networkId === "algorand-mainnet") {
-            foreignApps.push(3333688254);
-          }
-          // ------------------------------------------------------------
-          const payment = p3 > 0 ? 9e5 : 1e5;
-          console.log("=== CREATING DEPOSIT TRANSACTION ===");
-          console.log("Deposit transaction params:", {
-            marketId: Number(marketId),
-            amount: BigInt(amount).toString(),
-            poolId: Number(poolId),
-            payment,
-            foreignApps,
-          });
-          const formattedAmount = new BigNumber(BigInt(amount))
-            .dividedBy(10 ** token.decimals)
-            .toFixed(token.decimals);
-          const note = new TextEncoder().encode(
-            `lending deposit ${formattedAmount} ${token.symbol}`
-          );
-          const txnO = (
-            await builder.lending.deposit(Number(marketId), BigInt(amount))
-          ).obj as any;
-          buildN.push({
-            ...txnO,
-            note,
-            payment,
-            foreignApps,
-          });
-          console.log("Deposit transaction added to buildN");
         }
 
         console.log("=== TRANSACTION BUILD ===");
@@ -4751,7 +5026,10 @@ export const borrow = async (
       // Check if user is opted into the asset (for ASA and arc200-exchange tokens)
       // Note: If not opted in, the transaction will include an opt-in automatically
       let optIn = {};
-      if (tokenStandard === "asa" || tokenStandard === "arc200-exchange") {
+      if (
+        tokenStandardUsesAsaStyleNt200Txns(tokenStandard) ||
+        tokenStandard === "arc200-exchange"
+      ) {
         if (token.underlyingAssetId) {
           try {
             const accountAssetInfo = await clients.algod
@@ -4970,7 +5248,10 @@ export const borrow = async (
         const buildN = [];
 
         // cond create balance box user if needed and network token
-        if (tokenStandard == "network" || tokenStandard == "asa") {
+        if (
+          tokenStandard == "network" ||
+          tokenStandardUsesAsaStyleNt200Txns(tokenStandard)
+        ) {
           if (p1 > 0) {
             const txnO = (await builder.token.createBalanceBox(userAddress))
               .obj;
@@ -5015,7 +5296,7 @@ export const borrow = async (
           }
         }
         // user withdraws from nnt200 token
-        else if (tokenStandard == "asa") {
+        else if (tokenStandardUsesAsaStyleNt200Txns(tokenStandard)) {
           const txnO = (await builder.token.withdraw(BigInt(amount))).obj;
           buildN.push({
             ...txnO,
@@ -5301,7 +5582,7 @@ export const repay = async (
               payment: bigAmount,
             });
           }
-        } else if (tokenStandard === "asa") {
+        } else if (tokenStandardUsesAsaStyleNt200Txns(tokenStandard)) {
           // create balance box for pool
           // {
           //   const addr = algosdk.encodeAddress(
@@ -5640,7 +5921,7 @@ export const repayOnBehalf = async (
               description: "nt200 deposit",
             });
           }
-        } else if (tokenStandard === "asa") {
+        } else if (tokenStandardUsesAsaStyleNt200Txns(tokenStandard)) {
           // create balance box for pool
           // {
           //   const addr = algosdk.encodeAddress(
@@ -5995,7 +6276,7 @@ export const repayAll = async (
               payment: bigAmount,
             });
           }
-        } else if (tokenStandard === "asa") {
+        } else if (tokenStandardUsesAsaStyleNt200Txns(tokenStandard)) {
           // create balance box for pool
           // {
           //   const addr = algosdk.encodeAddress(
@@ -6163,10 +6444,15 @@ export const mint = async (
         throw new Error("Token not found");
       }
 
-      // Get the original token config to access tokenStandard
-      const originalTokenConfigRaw = getTokenConfig(networkId, token.symbol);
+      // Get the original token config to access tokenStandard (use canonical config key)
+      const originalTokenConfigRaw = getTokenConfig(
+        networkId,
+        token.configKey ?? token.originalSymbol ?? token.symbol
+      );
       if (!originalTokenConfigRaw) {
-        throw new Error(`Token config not found for ${token.symbol}`);
+        throw new Error(
+          `Token config not found for ${token.configKey ?? token.originalSymbol ?? token.symbol}`
+        );
       }
 
       const originalTokenConfig = Array.isArray(originalTokenConfigRaw)

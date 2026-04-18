@@ -6,6 +6,7 @@ import { useAddressName } from "@/hooks/useAddressName";
 import { useAvatarImage } from "@/hooks/useAvatarImage";
 import { useToast } from "@/hooks/use-toast";
 import { isAtDepositCap, isAtBorrowCap } from "@/constants/lendingCaps";
+import { marketPoolBadgeBgClassName } from "@/constants/marketUi";
 import { useBreakpoint } from "@/hooks/useBreakpoint";
 import algosdk, { waitForConfirmation } from "algosdk";
 import BigNumber from "bignumber.js";
@@ -28,6 +29,10 @@ import {
   fetchUserDataFromChain,
 } from "@/services/lendingService";
 import {
+  estimateFolksDepositMintedFAssetAmount,
+  folksFAssetHumanToUnderlyingHuman,
+} from "@/services/folksDepositAdapter";
+import {
   usePortfolioVisibleChainLive,
   portfolioPositionChainKey,
 } from "@/hooks/usePortfolioVisibleChainLive";
@@ -46,9 +51,16 @@ import {
   getNetworkDisplayName,
   NetworkId,
   TokenConfig,
+  tokenStandardUsesNativeWalletBalance,
+  getAnyFolksAdapter,
 } from "@/config";
 import { getAllTokensWithDisplayInfo } from "@/config";
 import { getTokenImagePath } from "@/utils/tokenImageUtils";
+import { marketRowForPortfolioPosition } from "@/utils/marketRowForPortfolioPosition";
+import { usdPerTokenFromMarketInfoPrice } from "@/utils/assetDecimals";
+import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
+import { portfolioWalletBalanceCacheKey } from "@/utils/portfolioWalletBalanceCacheKey";
+import { shouldShowConfigSymbolUnderDisplayAsset } from "@/utils/portfolioAssetSubline";
 import {
   calculateUserHealthFactor,
   normalizeLiquidationThresholdToDecimal,
@@ -57,6 +69,7 @@ import EnhancedHealthFactor from "./EnhancedHealthFactor";
 import DepositsList from "./DepositsList";
 import BorrowsList from "./BorrowsList";
 import PortfolioModals from "./PortfolioModals";
+import { resolveSupplyBorrowToken } from "./SupplyBorrowModal";
 import PortfolioTableMobileCard from "./portfolio/PortfolioTableMobileCard";
 import AccruedInterestMobileCard from "./portfolio/AccruedInterestMobileCard";
 import NFTSelectionModal from "./liquidation/NFTSelectionModal";
@@ -140,9 +153,38 @@ function formatUserMarketLine(
 interface ItemWithNetwork {
   network?: string;
   originalSymbol?: string;
+  /** Config `tokens` key when display symbol + pool collide (e.g. fALGO). */
+  configSymbol?: string;
+  /** Lending market app id (underlying ARC200 / nt200 contract). Disambiguates same pool + display symbol. */
+  marketId?: string;
   accruedInterest?: number;
   interest?: number;
   accruedInterestValue?: number;
+}
+
+/** Folks f-asset rows show underlying balance; if their market row has no usable price, use native ALGO same pool. */
+function folksUnderlyingUsdFallbackSamePool(
+  marketRows: unknown[],
+  networkId: NetworkId,
+  poolId: string,
+  currentUnderlyingMarketId: string
+): number {
+  const tokens = getAllTokensWithDisplayInfo(networkId);
+  const ref = tokens.find(
+    (t) =>
+      String(t.poolId) === String(poolId) &&
+      t.configKey === "ALGO" &&
+      String(t.underlyingContractId ?? "") !==
+        String(currentUnderlyingMarketId)
+  );
+  if (!ref?.underlyingContractId) return 0;
+  const m = marketRowForPortfolioPosition(marketRows, {
+    marketId: ref.underlyingContractId,
+    poolId,
+    displaySymbol: ref.symbol,
+  }) as { price?: string | number } | undefined;
+  if (!m?.price) return 0;
+  return usdPerTokenFromMarketInfoPrice(m.price, ref.decimals);
 }
 
 /** Standalone "Accrued Interest" summary card + table (below Supplied/Borrowed). */
@@ -198,6 +240,8 @@ const Portfolio = () => {
     asset: string | null;
     poolId?: string;
     network?: string;
+    configSymbol?: string;
+    marketId?: string;
   }>({
     isOpen: false,
     asset: null,
@@ -207,6 +251,8 @@ const Portfolio = () => {
     asset: string | null;
     poolId?: string;
     network?: string;
+    marketId?: string;
+    configSymbol?: string;
   }>({
     isOpen: false,
     asset: null,
@@ -216,6 +262,8 @@ const Portfolio = () => {
     asset: string | null;
     poolId?: string;
     network?: string;
+    configSymbol?: string;
+    marketId?: string;
   }>({
     isOpen: false,
     asset: null,
@@ -225,6 +273,8 @@ const Portfolio = () => {
     asset: string | null;
     poolId?: string;
     network?: string;
+    configSymbol?: string;
+    marketId?: string;
   }>({
     isOpen: false,
     asset: null,
@@ -237,6 +287,9 @@ const Portfolio = () => {
     lastUpdateTime: number;
   } | null>(null);
   const [marketData, setMarketData] = useState<unknown[]>([]);
+  /** Folks: minted f-asset (atomic) for 1.0 underlying; key `networkId|configSymbol|poolId`. */
+  const [folksMintedOneUnderlyingByKey, setFolksMintedOneUnderlyingByKey] =
+    useState<Record<string, string>>({});
   const [userPositions, setUserPositions] = useState<unknown[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [isLoadingPositions, setIsLoadingPositions] = useState(false);
@@ -337,26 +390,12 @@ const Portfolio = () => {
 
   console.log("marketData", marketData);
 
-  // Helper function to format price from contract using decimal adjustment
-  // The price oracle contract stores prices in a 12-decimal scale
-  // This converts from contract format back to token's native decimal format
-  const formatPriceFromContract = (
-    contractPrice: string | number,
-    tokenDecimals: number
-  ): number => {
-    const price =
-      typeof contractPrice === "string"
-        ? parseFloat(contractPrice)
-        : contractPrice;
-
-    if (!price || price === 0) return 1;
-
-    // Calculate adjustment: 12 (oracle decimals) - token decimals
-    const targetAdjustment = 12 - tokenDecimals;
-    const divisor = Math.pow(10, targetAdjustment);
-
-    return price / divisor;
-  };
+  // Human USD per 1 underlying token for `MarketInfo` rows (see `usdPerTokenFromMarketInfoPrice`).
+  const formatPriceFromContract = useCallback(
+    (contractPrice: string | number, tokenDecimals: number) =>
+      usdPerTokenFromMarketInfoPrice(contractPrice, tokenDecimals),
+    []
+  );
 
   const { attachChainPollRow, mergeDeposit, mergeBorrow } =
     usePortfolioVisibleChainLive({
@@ -421,10 +460,12 @@ const Portfolio = () => {
 
       for (const token of tokens) {
         if (token.underlyingContractId && token.poolId) {
-          // Find matching market by both symbol and poolId to handle multiple markets for same token
-          let market = markets.find(
-            (m) => m.symbol === token.symbol && m.poolId === token.poolId
-          );
+          // Match by market id + pool (display symbol can collide, e.g. ALGO vs fALGO both "Algo")
+          let market = marketRowForPortfolioPosition(markets, {
+            marketId: token.underlyingContractId,
+            poolId: token.poolId,
+            displaySymbol: token.symbol,
+          });
 
           console.log({
             fetchUserPositions: {
@@ -434,9 +475,13 @@ const Portfolio = () => {
             },
           });
 
-          // Fallback to symbol-only match if poolId match not found (for backward compatibility)
           if (!market) {
-            market = markets.find((m) => m.symbol === token.symbol);
+            market = markets.find(
+              (m) =>
+                (m as { symbol?: string }).symbol === token.symbol &&
+                String((m as { poolId?: string }).poolId) ===
+                  String(token.poolId)
+            ) as Record<string, unknown> | undefined;
           }
 
           // Fetch both deposit and borrow balances for this token
@@ -465,7 +510,7 @@ const Portfolio = () => {
             // For multi-market tokens (array), find the one matching the token's poolId
             const originalTokenConfigRaw = getTokenConfig(
               networkId as NetworkId,
-              token.symbol
+              token.configKey ?? token.originalSymbol ?? token.symbol
             );
 
             // Handle array of token configs (multiple markets)
@@ -483,9 +528,30 @@ const Portfolio = () => {
               networkId
             );
 
-            const tokenPrice = market?.price
-              ? formatPriceFromContract(market.price, token.decimals)
-              : 1;
+            let tokenPrice = market?.price
+              ? usdPerTokenFromMarketInfoPrice(market.price, token.decimals)
+              : 0;
+            if (!Number.isFinite(tokenPrice) || tokenPrice <= 0) {
+              const cfg = getTokenConfig(
+                networkId as NetworkId,
+                token.configKey ?? token.originalSymbol ?? ""
+              );
+              const tc = Array.isArray(cfg)
+                ? cfg.find((c) => String(c.poolId) === String(token.poolId)) ??
+                cfg[0]
+                : cfg;
+              if (getAnyFolksAdapter(tc ?? {})) {
+                tokenPrice = folksUnderlyingUsdFallbackSamePool(
+                  markets,
+                  networkId as NetworkId,
+                  String(token.poolId),
+                  String(token.underlyingContractId)
+                );
+              }
+            }
+            if (!Number.isFinite(tokenPrice) || tokenPrice <= 0) {
+              tokenPrice = 1;
+            }
 
             console.log(`Deposit position for ${token.symbol}:`, {
               depositBalance,
@@ -499,6 +565,8 @@ const Portfolio = () => {
             positions.push({
               asset: token.symbol,
               originalSymbol: token.originalSymbol ?? token.symbol,
+              configSymbol: token.configKey,
+              marketId: token.underlyingContractId,
               icon: token.logoPath,
               balance: depositBalance,
               nTokenBalance: nTokenBalance,
@@ -515,9 +583,30 @@ const Portfolio = () => {
 
           // Add borrow position if user has borrows
           if (borrowBalance && borrowBalance > 0) {
-            const tokenPrice = market?.price
-              ? formatPriceFromContract(market.price, token.decimals)
-              : 1;
+            let tokenPrice = market?.price
+              ? usdPerTokenFromMarketInfoPrice(market.price, token.decimals)
+              : 0;
+            if (!Number.isFinite(tokenPrice) || tokenPrice <= 0) {
+              const cfg = getTokenConfig(
+                networkId as NetworkId,
+                token.configKey ?? token.originalSymbol ?? ""
+              );
+              const tc = Array.isArray(cfg)
+                ? cfg.find((c) => String(c.poolId) === String(token.poolId)) ??
+                cfg[0]
+                : cfg;
+              if (getAnyFolksAdapter(tc ?? {})) {
+                tokenPrice = folksUnderlyingUsdFallbackSamePool(
+                  markets,
+                  networkId as NetworkId,
+                  String(token.poolId),
+                  String(token.underlyingContractId)
+                );
+              }
+            }
+            if (!Number.isFinite(tokenPrice) || tokenPrice <= 0) {
+              tokenPrice = 1;
+            }
 
             console.log(`Borrow position for ${token.symbol}:`, {
               borrowBalance,
@@ -530,6 +619,8 @@ const Portfolio = () => {
 
             positions.push({
               asset: token.symbol,
+              configSymbol: token.configKey,
+              marketId: token.underlyingContractId,
               icon: token.logoPath,
               balance: borrowBalance,
               value: borrowBalance * tokenPrice,
@@ -555,6 +646,84 @@ const Portfolio = () => {
       return [];
     }
   };
+
+  // Folks fALGO (etc.): cache minted f-asset for 1.0 underlying so supplied table matches market table.
+  useEffect(() => {
+    const list = user?.computed?.deposits;
+    if (!Array.isArray(list)) {
+      setFolksMintedOneUnderlyingByKey({});
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      const fetched: Record<string, string> = {};
+
+      for (const item of list) {
+        const networkId = item.network as NetworkId | undefined;
+        const marketId =
+          item.marketId?.toString() || item.underlyingContractId?.toString();
+        const appId = item.appId?.toString() || item.poolId?.toString();
+        if (!networkId || !marketId || !appId) continue;
+        if (networkId !== "algorand-mainnet") continue;
+
+        const tokens = getAllTokensWithDisplayInfo(networkId);
+        const token = tokens.find(
+          (t) =>
+            (t.underlyingContractId === marketId ||
+              t.originalContractId === marketId) &&
+            t.poolId === appId
+        );
+        if (!token) continue;
+
+        const configSym =
+          token.configKey ?? token.originalSymbol ?? token.symbol;
+        const key = `${networkId}|${configSym}|${appId}`;
+
+        const raw = getTokenConfig(networkId, configSym);
+        const tc: TokenConfig | undefined = Array.isArray(raw)
+          ? raw.find((c) => String(c.poolId) === String(appId)) ?? raw[0]
+          : raw;
+
+        const folksTc = getAnyFolksAdapter(tc ?? {});
+        if (!folksTc) continue;
+
+        const algodNet = getAlgorandNetworkFromNetworkId(networkId);
+        if (!algodNet) continue;
+
+        try {
+          const clients = algorandService.initializeClients(algodNet);
+          const oneUnderlyingAtomic = BigInt(
+            new BigNumber(1).shiftedBy(token.decimals).toFixed(0)
+          );
+          const { mintedFAsset } = await estimateFolksDepositMintedFAssetAmount(
+            {
+              poolName: folksTc.folksParams.pool,
+              underlyingAmount: oneUnderlyingAtomic,
+              algod: clients.algod,
+            }
+          );
+          if (mintedFAsset > BigInt(0)) {
+            fetched[key] = mintedFAsset.toString();
+          }
+        } catch (e) {
+          console.warn(
+            "[Portfolio] Folks mint ratio for supplied display failed",
+            { key, error: e }
+          );
+        }
+      }
+
+      if (!cancelled) {
+        setFolksMintedOneUnderlyingByKey(fetched);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.computed?.deposits]);
 
   // Transform user.computed.deposits and user.computed.borrows into table format
   const transformedDepositsAndBorrows = useMemo(() => {
@@ -592,12 +761,12 @@ const Portfolio = () => {
             return;
           }
 
-          // Find market data
-          const market = marketData.find(
-            (m) =>
-              m.symbol === token.symbol &&
-              (m.poolId === appId || m.appId === appId)
-          );
+          // Find market data (do not match display symbol only — ALGO vs fALGO both "Algo" on same pool)
+          const market = marketRowForPortfolioPosition(marketData, {
+            marketId,
+            poolId: appId,
+            displaySymbol: token.symbol,
+          }) as { depositIndex?: string; borrowIndex?: string; price?: string; apyCalculation?: { apy?: number }; supplyRate?: number } | undefined;
 
           console.log("[Portfolio] Market data:", {
             market,
@@ -676,10 +845,30 @@ const Portfolio = () => {
             return; // Skip zero balances
           }
 
-          // Get token price
-          const tokenPrice = market?.price
-            ? formatPriceFromContract(market.price, token.decimals)
-            : 1;
+          // Get token price (MarketInfo.price is already human USD/token; Folks f-asset may need ALGO oracle fallback)
+          let tokenPrice = market?.price
+            ? usdPerTokenFromMarketInfoPrice(market.price, token.decimals)
+            : 0;
+          if (!Number.isFinite(tokenPrice) || tokenPrice <= 0) {
+            const cfg = getTokenConfig(
+              networkId as NetworkId,
+              token.configKey ?? token.originalSymbol ?? ""
+            );
+            const tc = Array.isArray(cfg)
+              ? cfg.find((c) => String(c.poolId) === String(appId)) ?? cfg[0]
+              : cfg;
+            if (getAnyFolksAdapter(tc ?? {})) {
+              tokenPrice = folksUnderlyingUsdFallbackSamePool(
+                marketData,
+                networkId as NetworkId,
+                appId,
+                marketId
+              );
+            }
+          }
+          if (!Number.isFinite(tokenPrice) || tokenPrice <= 0) {
+            tokenPrice = 1;
+          }
 
           // Get APY
           const apy =
@@ -721,12 +910,39 @@ const Portfolio = () => {
             }
           }
 
+          const folksDisplayKey = `${String(networkId)}|${String(
+            token.configKey ?? token.originalSymbol ?? token.symbol
+          )}|${String(appId)}`;
+          const mintedOneStr = folksMintedOneUnderlyingByKey[folksDisplayKey];
+          let balanceForDisplay = actualBalance;
+          let accruedInterestForDisplay = accruedInterest;
+          if (mintedOneStr) {
+            try {
+              const mf = BigInt(mintedOneStr);
+              if (mf > BigInt(0)) {
+                balanceForDisplay = folksFAssetHumanToUnderlyingHuman(
+                  actualBalance,
+                  mf,
+                  token.decimals
+                );
+                accruedInterestForDisplay = folksFAssetHumanToUnderlyingHuman(
+                  accruedInterest,
+                  mf,
+                  token.decimals
+                );
+              }
+            } catch {
+              /* ignore invalid cache */
+            }
+          }
+
           transformedDeposits.push({
             asset: token.symbol,
             originalSymbol: token.originalSymbol ?? token.symbol,
+            configSymbol: token.configKey ?? token.originalSymbol,
             icon: token.logoPath,
-            balance: actualBalance,
-            value: actualBalance * tokenPrice,
+            balance: balanceForDisplay,
+            value: balanceForDisplay * tokenPrice,
             apy: apy,
             tokenPrice: tokenPrice,
             poolId: appId,
@@ -736,8 +952,8 @@ const Portfolio = () => {
             userDepositIndex: userDepositIndex, // User deposit index from user.userData for this matching market
             marketId: marketId, // Include marketId for matching
             appId: appId, // Include appId for matching
-            accruedInterest: accruedInterest, // Accrued interest for deposits
-            accruedInterestValue: accruedInterest * tokenPrice, // Accrued interest in USD
+            accruedInterest: accruedInterestForDisplay,
+            accruedInterestValue: accruedInterestForDisplay * tokenPrice,
           });
         } catch (error) {
           console.error("Error transforming deposit item:", error, item);
@@ -776,12 +992,11 @@ const Portfolio = () => {
             return;
           }
 
-          // Find market data
-          const market = marketData.find(
-            (m) =>
-              m.symbol === token.symbol &&
-              (m.poolId === appId || m.appId === appId)
-          );
+          const market = marketRowForPortfolioPosition(marketData, {
+            marketId,
+            poolId: appId,
+            displaySymbol: token.symbol,
+          }) as { borrowIndex?: string; price?: string; borrowApyCalculation?: { apy?: number }; borrowRateCurrent?: number } | undefined;
 
           // Calculate actual balance from scaled borrows
           // Formula: actual_borrows = (scaled_borrows * current_borrow_index) / SCALE
@@ -851,9 +1066,29 @@ const Portfolio = () => {
           }
 
           // Get token price
-          const tokenPrice = market?.price
-            ? formatPriceFromContract(market.price, token.decimals)
-            : 1;
+          let tokenPrice = market?.price
+            ? usdPerTokenFromMarketInfoPrice(market.price, token.decimals)
+            : 0;
+          if (!Number.isFinite(tokenPrice) || tokenPrice <= 0) {
+            const cfg = getTokenConfig(
+              networkId as NetworkId,
+              token.configKey ?? token.originalSymbol ?? ""
+            );
+            const tc = Array.isArray(cfg)
+              ? cfg.find((c) => String(c.poolId) === String(appId)) ?? cfg[0]
+              : cfg;
+            if (getAnyFolksAdapter(tc ?? {})) {
+              tokenPrice = folksUnderlyingUsdFallbackSamePool(
+                marketData,
+                networkId as NetworkId,
+                appId,
+                marketId
+              );
+            }
+          }
+          if (!Number.isFinite(tokenPrice) || tokenPrice <= 0) {
+            tokenPrice = 1;
+          }
 
           // Get APY
           const apy =
@@ -899,12 +1134,14 @@ const Portfolio = () => {
 
           transformedBorrows.push({
             asset: token.symbol,
+            configSymbol: token.configKey ?? token.originalSymbol,
             icon: token.logoPath,
             balance: actualBalance,
             value: actualBalance * tokenPrice,
             apy: apy,
             tokenPrice: tokenPrice,
             poolId: appId,
+            marketId: marketId,
             network: networkId,
             type: "borrow",
             interest: accruedInterest, // Accrued interest for borrows (interest owed) - using 'interest' to match Borrow interface
@@ -918,7 +1155,12 @@ const Portfolio = () => {
     }
 
     return { deposits: transformedDeposits, borrows: transformedBorrows };
-  }, [user?.computed?.deposits, user?.computed?.borrows, marketData]);
+  }, [
+    user?.computed?.deposits,
+    user?.computed?.borrows,
+    marketData,
+    folksMintedOneUnderlyingByKey,
+  ]);
 
   // Use transformed deposits and borrows from user.computed, fallback to userPositions
   // If user.computed exists but transformation resulted in empty arrays, fall back to userPositions
@@ -1047,9 +1289,6 @@ const Portfolio = () => {
       deposits.reduce((sum, deposit) => sum + deposit.value, 0);
 
   console.log({
-    userGlobalData,
-    userComputed: user?.computed,
-    deposits,
   });
 
   const totalBorrowed =
@@ -1105,7 +1344,11 @@ const Portfolio = () => {
     // 2. Collateral without debt doesn't create liquidation risk
     // 3. Each borrowed asset has its own liquidation threshold
     borrows.forEach((borrow) => {
-      const market = marketData.find((m) => m.symbol === borrow.asset);
+      const market = marketRowForPortfolioPosition(marketData, {
+        marketId: (borrow as ItemWithNetwork).marketId,
+        poolId: borrow.poolId,
+        displaySymbol: borrow.asset,
+      }) as { liquidationThreshold?: unknown } | undefined;
       console.log(
         `Borrow asset: ${borrow.asset}, value: ${borrow.value}, market found:`,
         !!market
@@ -1152,7 +1395,11 @@ const Portfolio = () => {
     let totalDepositValue = 0;
 
     deposits.forEach((deposit) => {
-      const market = marketData.find((m) => m.symbol === deposit.asset);
+      const market = marketRowForPortfolioPosition(marketData, {
+        marketId: (deposit as ItemWithNetwork).marketId,
+        poolId: deposit.poolId,
+        displaySymbol: deposit.asset,
+      });
       if (market && deposit.value > 0) {
         const collateralFactor = market.collateralFactor || 0.8;
         weightedCollateralFactor += deposit.value * collateralFactor;
@@ -1183,11 +1430,11 @@ const Portfolio = () => {
     const thresholds: number[] = [];
     for (const deposit of deposits) {
       if (!deposit.value || deposit.value <= 0) continue;
-      const market = md.find(
-        (m) =>
-          m.symbol === deposit.asset &&
-          (deposit.poolId ? m.poolId === deposit.poolId : true)
-      );
+      const market = marketRowForPortfolioPosition(marketData, {
+        marketId: (deposit as ItemWithNetwork).marketId,
+        poolId: deposit.poolId,
+        displaySymbol: deposit.asset,
+      }) as (typeof md)[0] | undefined;
       const raw =
         market?.liquidationThreshold ??
         market?.marketInfo?.liquidationThreshold;
@@ -1209,15 +1456,16 @@ const Portfolio = () => {
     return deposits
       .map((deposit) => {
         // Find market data for this deposit to get liquidation factor
-        const market = marketData.find(
-          (m) =>
-            m.symbol === deposit.asset &&
-            (deposit.poolId ? m.poolId === deposit.poolId : true)
-        );
+        const market = marketRowForPortfolioPosition(marketData, {
+          marketId: (deposit as ItemWithNetwork).marketId,
+          poolId: deposit.poolId,
+          displaySymbol: deposit.asset,
+        });
 
         const liquidationFactor =
           market?.liquidationThreshold ??
-          market?.marketInfo?.liquidationThreshold ??
+          (market as { marketInfo?: { liquidationThreshold?: unknown } })
+            ?.marketInfo?.liquidationThreshold ??
           0.85;
 
         // Convert to number if needed
@@ -1317,11 +1565,11 @@ const Portfolio = () => {
       for (const deposit of deposits) {
         if (String(deposit.poolId ?? "") !== poolId) continue;
         if (!deposit.value || deposit.value <= 0) continue;
-        const market = md.find(
-          (m) =>
-            m.symbol === deposit.asset &&
-            (deposit.poolId ? m.poolId === deposit.poolId : true)
-        );
+        const market = marketRowForPortfolioPosition(marketData, {
+          marketId: (deposit as ItemWithNetwork).marketId,
+          poolId: deposit.poolId,
+          displaySymbol: deposit.asset,
+        }) as (typeof md)[0] | undefined;
         const raw =
           market?.liquidationThreshold ??
           market?.marketInfo?.liquidationThreshold;
@@ -1433,11 +1681,11 @@ const Portfolio = () => {
       for (const deposit of deposits) {
         if (String(deposit.poolId ?? "") !== poolId) continue;
         if (!deposit.value || deposit.value <= 0) continue;
-        const market = md.find(
-          (m) =>
-            m.symbol === deposit.asset &&
-            (deposit.poolId ? m.poolId === deposit.poolId : true)
-        );
+        const market = marketRowForPortfolioPosition(marketData, {
+          marketId: (deposit as ItemWithNetwork).marketId,
+          poolId: deposit.poolId,
+          displaySymbol: deposit.asset,
+        }) as (typeof md)[0] | undefined;
         const raw =
           market?.liquidationThreshold ??
           market?.marketInfo?.liquidationThreshold;
@@ -1751,14 +1999,15 @@ const Portfolio = () => {
       if (networkDeposits.length > 0) {
         const liquidationThresholds: number[] = [];
         networkDeposits.forEach((deposit) => {
-          const market = marketData.find(
-            (m) =>
-              m.symbol === deposit.asset &&
-              (deposit.poolId ? m.poolId === deposit.poolId : true)
-          );
+          const market = marketRowForPortfolioPosition(marketData, {
+            marketId: (deposit as ItemWithNetwork).marketId,
+            poolId: deposit.poolId,
+            displaySymbol: deposit.asset,
+          });
           const threshold =
             market?.liquidationThreshold ??
-            market?.marketInfo?.liquidationThreshold ??
+            (market as { marketInfo?: { liquidationThreshold?: unknown } })
+              ?.marketInfo?.liquidationThreshold ??
             0.85;
           const thresholdNum =
             typeof threshold === "string"
@@ -1808,8 +2057,10 @@ const Portfolio = () => {
           deposit.apy +
           getRewardsBonusSupplyAprPercent(
             (deposit as ItemWithNetwork).network ?? currentNetwork,
-            deposit.asset,
-            deposit.poolId,
+            (deposit as ItemWithNetwork).configSymbol ??
+              (deposit as ItemWithNetwork).originalSymbol ??
+              deposit.asset,
+            deposit.poolId != null ? String(deposit.poolId) : undefined,
             rewardsAprByBaseUrl
           ),
       }));
@@ -1868,7 +2119,8 @@ const Portfolio = () => {
   const fetchWalletBalance = async (
     asset: string,
     networkId?: string,
-    doFetch?: boolean
+    doFetch?: boolean,
+    opts?: { poolId?: string; marketId?: string; configSymbol?: string }
   ) => {
     if (!displayAddress) {
       return { balance: 0, balanceUSD: 0, lastUpdated: Date.now() };
@@ -1881,30 +2133,45 @@ const Portfolio = () => {
       return { balance: 0, balanceUSD: 0, lastUpdated: Date.now() };
     }
 
-    // Check if we already have this balance cached (with network-specific key)
-    const cacheKey = `${networkToUse}-${asset}`;
+    const legacyKey = `${networkToUse}-${asset}`;
+    const preliminaryKey = portfolioWalletBalanceCacheKey(networkToUse, {
+      marketId: opts?.marketId,
+      poolId: opts?.poolId,
+      configSymbol: opts?.configSymbol,
+      displaySymbol: asset,
+    });
     console.log("[Portfolio] fetchWalletBalance cache check:", {
       asset,
       networkId,
       networkToUse,
-      cacheKey,
-      cached: !!walletBalances[cacheKey],
+      preliminaryKey,
+      legacyKey,
+      cached:
+        !!walletBalances[preliminaryKey] ||
+        (!!walletBalances[legacyKey] && preliminaryKey === legacyKey),
     });
-    if (walletBalances[cacheKey] && !doFetch) {
-      console.log(
-        "[Portfolio] Using cached balance:",
-        walletBalances[cacheKey]
-      );
-      return walletBalances[cacheKey];
+    const cachedEarly =
+      walletBalances[preliminaryKey] ||
+      (preliminaryKey === legacyKey ? walletBalances[legacyKey] : undefined);
+    if (cachedEarly && !doFetch) {
+      console.log("[Portfolio] Using cached balance:", cachedEarly);
+      return cachedEarly;
     }
 
     try {
       console.log("[Portfolio] Fetching fresh balance for:", {
         asset,
         networkToUse,
+        opts,
       });
       const tokens = getAllTokensWithDisplayInfo(networkToUse as NetworkId);
-      const token = tokens.find((t) => t.symbol === asset);
+      const token = resolveSupplyBorrowToken(
+        tokens,
+        asset,
+        opts?.poolId,
+        opts?.configSymbol,
+        opts?.marketId
+      );
 
       console.log("token", token);
 
@@ -1915,13 +2182,26 @@ const Portfolio = () => {
         return { balance: 0, balanceUSD: 0, lastUpdated: Date.now() };
       }
 
+      const cacheKey = portfolioWalletBalanceCacheKey(networkToUse, {
+        marketId: token.underlyingContractId,
+        poolId: token.poolId,
+        configSymbol: token.configKey,
+        displaySymbol: asset,
+      });
+
+      if (walletBalances[cacheKey] && !doFetch) {
+        return walletBalances[cacheKey];
+      }
+
       // Get the original token config to access tokenStandard
-      // Use originalSymbol to look up the config, as asset might be a display symbol
-      const originalSymbol =
-        "originalSymbol" in token ? (token as ItemWithNetwork).originalSymbol : asset;
+      const configLookupKey =
+        token.configKey ??
+        ("originalSymbol" in token
+          ? (token as ItemWithNetwork).originalSymbol
+          : asset);
       const originalTokenConfigRaw = getTokenConfig(
         networkToUse as NetworkId,
-        originalSymbol
+        configLookupKey
       );
       console.log("originalTokenConfigRaw", { originalTokenConfigRaw, token });
       if (!originalTokenConfigRaw) {
@@ -1999,7 +2279,9 @@ const Portfolio = () => {
           console.log(`No ARC200 balance found for ${asset}`);
           balance = 0;
         }
-      } else if (originalTokenConfig.tokenStandard === "network") {
+      } else if (
+        tokenStandardUsesNativeWalletBalance(originalTokenConfig.tokenStandard)
+      ) {
         // For network tokens (like VOI), fetch native balance
         console.log(`[Portfolio] Entering network token balance fetch for ${asset}`, {
           tokenStandard: originalTokenConfig.tokenStandard,
@@ -2013,8 +2295,7 @@ const Portfolio = () => {
             .accountInformation(displayAddress)
             .do();
           console.log("accountInfo", accountInfo);
-          // Convert from micro-units to units (divide by 1,000,000)
-          balance = Math.max(0, Number(accountInfo.amount) - Number(accountInfo.minBalance) - 1e6) / 1e6;
+          balance = spendableAlgoHumanFromAccount(accountInfo);
           console.log(`Network token balance for ${asset}: ${balance}`);
         } catch (error) {
           console.error(
@@ -2088,7 +2369,11 @@ const Portfolio = () => {
       // Calculate USD value using market data
       // Note: marketData might only contain current network's data
       // For cross-network balances, we might need to fetch market data separately
-      const market = marketData.find((m) => m.symbol === asset);
+      const market = marketRowForPortfolioPosition(marketData, {
+        marketId: token.underlyingContractId,
+        poolId: token.poolId,
+        displaySymbol: asset,
+      }) as { price?: string | number } | undefined;
       let tokenPrice = 1;
 
       if (market?.price) {
@@ -2113,8 +2398,9 @@ const Portfolio = () => {
 
       setWalletBalances((prev) => ({
         ...prev,
-        [cacheKey]: balanceData, // Store with network-specific key
-        [asset]: balanceData, // Also store with asset key for backward compatibility
+        [cacheKey]: balanceData,
+        ...(cacheKey === legacyKey ? { [legacyKey]: balanceData } : {}),
+        [asset]: balanceData,
       }));
 
       console.log(
@@ -2134,24 +2420,38 @@ const Portfolio = () => {
 
   // Refresh wallet balance for a specific asset
   const refreshWalletBalance = useCallback(
-    async (asset: string, networkId?: string) => {
+    async (
+      asset: string,
+      networkId?: string,
+      opts?: { poolId?: string; marketId?: string; configSymbol?: string }
+    ) => {
       if (!activeAccount?.address) return;
 
+      const nid = (networkId || currentNetwork) as string;
+      if (!nid) return;
+
       try {
-        // Clear cached balance
+        const primary = portfolioWalletBalanceCacheKey(nid, {
+          marketId: opts?.marketId,
+          poolId: opts?.poolId,
+          configSymbol: opts?.configSymbol,
+          displaySymbol: asset,
+        });
+        const legacy = `${nid}-${asset}`;
         setWalletBalances((prev) => {
           const newBalances = { ...prev };
+          delete newBalances[primary];
+          delete newBalances[legacy];
           delete newBalances[asset];
           return newBalances;
         });
 
-        // Fetch fresh balance using the provided network
-        await fetchWalletBalance(asset, networkId, true);
+        await fetchWalletBalance(asset, networkId, true, opts);
       } catch (error) {
         console.error("Error refreshing wallet balance:", error);
       }
     },
-     
+
     [activeAccount?.address, currentNetwork]
   );
 
@@ -2866,11 +3166,21 @@ const Portfolio = () => {
             currentNetwork) as NetworkId;
           const tokens = getAllTokensWithDisplayInfo(networkToUse);
 
-          const token = deposit.poolId
-            ? tokens.find(
-              (t) => t.symbol === deposit.asset && t.poolId === deposit.poolId
-            )
-            : tokens.find((t) => t.symbol === deposit.asset);
+          const mid = (deposit as ItemWithNetwork).marketId;
+          const token =
+            mid && deposit.poolId
+              ? tokens.find(
+                (t) =>
+                  String(t.underlyingContractId) === String(mid) &&
+                  String(t.poolId) === String(deposit.poolId)
+                )
+              : deposit.poolId
+                ? tokens.find(
+                  (t) =>
+                    t.symbol === deposit.asset &&
+                    String(t.poolId) === String(deposit.poolId)
+                )
+                : tokens.find((t) => t.symbol === deposit.asset);
 
           if (!token?.poolId || !token?.underlyingContractId) continue;
 
@@ -2940,11 +3250,21 @@ const Portfolio = () => {
             currentNetwork) as NetworkId;
           const tokens = getAllTokensWithDisplayInfo(networkToUse);
 
-          const token = borrow.poolId
-            ? tokens.find(
-              (t) => t.symbol === borrow.asset && t.poolId === borrow.poolId
-            )
-            : tokens.find((t) => t.symbol === borrow.asset);
+          const bMid = (borrow as ItemWithNetwork).marketId;
+          const token =
+            bMid && borrow.poolId
+              ? tokens.find(
+                (t) =>
+                  String(t.underlyingContractId) === String(bMid) &&
+                  String(t.poolId) === String(borrow.poolId)
+                )
+              : borrow.poolId
+                ? tokens.find(
+                  (t) =>
+                    t.symbol === borrow.asset &&
+                    String(t.poolId) === String(borrow.poolId)
+                )
+                : tokens.find((t) => t.symbol === borrow.asset);
 
           if (!token?.poolId || !token?.underlyingContractId) continue;
 
@@ -3569,7 +3889,9 @@ const Portfolio = () => {
   const handleDepositClick = async (
     asset: string,
     poolId?: string,
-    networkId?: string
+    networkId?: string,
+    configSymbol?: string,
+    marketId?: string
   ) => {
     if (!activeAccount?.address) {
       return;
@@ -3585,16 +3907,11 @@ const Portfolio = () => {
     }
 
     // Don't open modal if market is at or over deposit cap
-    const market = marketData.find(
-      (m: any) =>
-        m.symbol === asset &&
-        (poolId != null && poolId !== ""
-          ? String(m.poolId) === String(poolId)
-          : true) &&
-        (networkId != null && networkId !== ""
-          ? m.networkId === networkId
-          : true)
-    ) as any;
+    const market = marketRowForPortfolioPosition(marketData, {
+      marketId,
+      poolId,
+      displaySymbol: asset,
+    }) as any;
     if (market) {
       const totalSupply = Number(market.totalDeposits ?? 0);
       const maxTotalDeposits = Number(market.maxTotalDeposits ?? 0);
@@ -3613,20 +3930,36 @@ const Portfolio = () => {
 
     try {
       // Fetch wallet balance before opening modal using the deposit's network
-      const balanceResult = await fetchWalletBalance(asset, networkId, true);
+      const balanceResult = await fetchWalletBalance(asset, networkId, true, {
+        poolId,
+        marketId,
+        configSymbol,
+      });
 
       // In the background, prefetch wallet balances for other deposit assets
       if (deposits.length > 0) {
-        const otherDeposits = deposits.filter(
-          (d) => d.asset !== asset || d.poolId !== poolId
-        );
+        const otherDeposits = deposits.filter((d) => {
+          const dn = d as ItemWithNetwork;
+          if (marketId != null && dn.marketId != null) {
+            return (
+              String(dn.marketId) !== String(marketId) ||
+              String(d.poolId ?? "") !== String(poolId ?? "")
+            );
+          }
+          return d.asset !== asset || d.poolId !== poolId;
+        });
         if (otherDeposits.length > 0) {
           Promise.all(
             otherDeposits.map((d) =>
               fetchWalletBalance(
                 d.asset,
                 (d as ItemWithNetwork).network || networkId,
-                true
+                true,
+                {
+                  poolId: d.poolId,
+                  marketId: (d as ItemWithNetwork).marketId,
+                  configSymbol: (d as ItemWithNetwork).configSymbol,
+                }
               ).catch((error) =>
                 console.error(
                   "[Portfolio] Error prefetching wallet balance for deposit asset",
@@ -3645,33 +3978,64 @@ const Portfolio = () => {
       }
 
       // Open modal after balance is fetched
-      setDepositModal({ isOpen: true, asset, poolId, network: networkId });
+      setDepositModal({
+        isOpen: true,
+        asset,
+        poolId,
+        network: networkId,
+        configSymbol,
+        marketId,
+      });
     } catch (error) {
       console.error("Error fetching wallet balance for deposit:", error);
       // Still open modal even if balance fetch fails
-      setDepositModal({ isOpen: true, asset, poolId, network: networkId });
+      setDepositModal({
+        isOpen: true,
+        asset,
+        poolId,
+        network: networkId,
+        configSymbol,
+        marketId,
+      });
     } finally {
       setIsLoadingWalletBalance(false);
     }
   };
 
   const prefetchWithdrawIndicesRef = useRef<
-    ((asset: string, poolId?: string) => Promise<void>) | null
+    | ((
+        asset: string,
+        poolId?: string,
+        marketId?: string,
+        networkIdOverride?: string
+      ) => Promise<void>)
+    | null
   >(null);
 
   const handleWithdrawClick = (
     asset: string,
     poolId?: string,
-    networkId?: string
+    networkId?: string,
+    marketId?: string,
+    configSymbol?: string
   ) => {
     // Open modal immediately; indices and max withdraw load in background when modal opens
-    setWithdrawModal({ isOpen: true, asset, poolId, network: networkId });
+    setWithdrawModal({
+      isOpen: true,
+      asset,
+      poolId,
+      network: networkId,
+      marketId,
+      configSymbol,
+    });
   };
 
   const handleBorrowClick = async (
     asset: string,
     poolId?: string,
-    networkId?: string
+    networkId?: string,
+    configSymbol?: string,
+    marketId?: string
   ) => {
     if (marketData.length === 0) {
       toast({
@@ -3684,16 +4048,11 @@ const Portfolio = () => {
 
     // Don't open modal if market is at or over borrow cap.
     // marketData entries are MarketInfo from fetchAllMarkets (totalBorrows, maxTotalBorrows).
-    const market = marketData.find(
-      (m: any) =>
-        m.symbol === asset &&
-        (poolId != null && poolId !== ""
-          ? String(m.poolId) === String(poolId)
-          : true) &&
-        (networkId != null && networkId !== ""
-          ? m.networkId === networkId
-          : true)
-    ) as any;
+    const market = marketRowForPortfolioPosition(marketData, {
+      marketId,
+      poolId,
+      displaySymbol: asset,
+    }) as any;
     if (market) {
       const totalBorrows = Number(market.totalBorrows ?? 0);
       const maxTotalBorrows = Number(market.maxTotalBorrows ?? 0);
@@ -3733,9 +4092,13 @@ const Portfolio = () => {
 
         // Fetch user's current borrow balance for this specific asset
         const tokens = getAllTokensWithDisplayInfo(networkToUse);
-        const token = poolId
-          ? tokens.find((t) => t.symbol === asset && t.poolId === poolId)
-          : tokens.find((t) => t.symbol === asset);
+        const token = resolveSupplyBorrowToken(
+          tokens,
+          asset,
+          poolId,
+          configSymbol,
+          marketId
+        );
 
         if (token && token.poolId && token.underlyingContractId) {
           const borrowData = await fetchUserBorrowBalance(
@@ -3756,7 +4119,14 @@ const Portfolio = () => {
       }
 
       // Open modal regardless of connection status
-      setBorrowModal({ isOpen: true, asset, poolId, network: networkToUse });
+      setBorrowModal({
+        isOpen: true,
+        asset,
+        poolId,
+        network: networkToUse,
+        configSymbol,
+        marketId,
+      });
     } catch (error) {
       console.error("Error fetching user data for borrow:", error);
       // Still open modal even if data fetch fails
@@ -3765,6 +4135,8 @@ const Portfolio = () => {
         asset,
         poolId,
         network: networkId || currentNetwork,
+        configSymbol,
+        marketId,
       });
     } finally {
       setIsLoadingBorrowData(false);
@@ -3774,7 +4146,9 @@ const Portfolio = () => {
   const handleRepayClick = async (
     asset: string,
     poolId?: string,
-    networkId?: string
+    networkId?: string,
+    configSymbol?: string,
+    marketId?: string
   ) => {
     if (!activeAccount?.address) {
       console.error("No active account for repayment");
@@ -3801,14 +4175,32 @@ const Portfolio = () => {
       }
 
       // Fetch wallet balance for the asset before opening modal using the asset's network
-      await refreshWalletBalance(asset, networkToUse);
+      await refreshWalletBalance(asset, networkToUse, {
+        poolId,
+        marketId,
+        configSymbol,
+      });
 
       // Open modal after data is fetched
-      setRepayModal({ isOpen: true, asset, poolId, network: networkToUse });
+      setRepayModal({
+        isOpen: true,
+        asset,
+        poolId,
+        network: networkToUse,
+        configSymbol,
+        marketId,
+      });
     } catch (error) {
       console.error("Error fetching data for repay:", error);
       // Still open modal even if data fetch fails
-      setRepayModal({ isOpen: true, asset, poolId, network: networkId });
+      setRepayModal({
+        isOpen: true,
+        asset,
+        poolId,
+        network: networkId,
+        configSymbol,
+        marketId,
+      });
     }
   };
 
@@ -3821,7 +4213,9 @@ const Portfolio = () => {
       handleDepositClick(
         largest.asset,
         largest.poolId,
-        (largest as ItemWithNetwork).network
+        (largest as ItemWithNetwork).network,
+        (largest as ItemWithNetwork).configSymbol,
+        (largest as ItemWithNetwork).marketId
       );
     } else if (marketData.length > 0) {
       const m = marketData[0] as { symbol?: string; poolId?: string };
@@ -4680,7 +5074,9 @@ const Portfolio = () => {
                           handleRepayClick(
                             largestBorrow.asset,
                             largestBorrow.poolId,
-                            (largestBorrow as ItemWithNetwork).network
+                            (largestBorrow as ItemWithNetwork).network,
+                            (largestBorrow as ItemWithNetwork).configSymbol,
+                            (largestBorrow as ItemWithNetwork).marketId
                           );
                         }
                       }
@@ -4695,7 +5091,9 @@ const Portfolio = () => {
                         handleWithdrawClick(
                           largestDeposit.asset,
                           largestDeposit.poolId,
-                          (largestDeposit as ItemWithNetwork).network
+                          (largestDeposit as ItemWithNetwork).network,
+                          (largestDeposit as ItemWithNetwork).marketId,
+                          (largestDeposit as ItemWithNetwork).configSymbol
                         );
                       }
                     : undefined
@@ -5527,15 +5925,21 @@ const Portfolio = () => {
                                 break;
                               }
                               case "collateralFactor": {
-                                const marketACF = marketData.find(
-                                  (m) =>
-                                    m.symbol === a.asset &&
-                                    (a.poolId ? m.poolId === a.poolId : true)
+                                const marketACF = marketRowForPortfolioPosition(
+                                  marketData,
+                                  {
+                                    marketId: (a as ItemWithNetwork).marketId,
+                                    poolId: a.poolId,
+                                    displaySymbol: a.asset,
+                                  }
                                 );
-                                const marketBCF = marketData.find(
-                                  (m) =>
-                                    m.symbol === b.asset &&
-                                    (b.poolId ? m.poolId === b.poolId : true)
+                                const marketBCF = marketRowForPortfolioPosition(
+                                  marketData,
+                                  {
+                                    marketId: (b as ItemWithNetwork).marketId,
+                                    poolId: b.poolId,
+                                    displaySymbol: b.asset,
+                                  }
                                 );
                                 let collateralFactorA =
                                   marketACF?.collateralFactor ??
@@ -5580,23 +5984,31 @@ const Portfolio = () => {
                                 break;
                               }
                               case "liquidationFactor": {
-                                const marketALF = marketData.find(
-                                  (m) =>
-                                    m.symbol === a.asset &&
-                                    (a.poolId ? m.poolId === a.poolId : true)
+                                const marketALF = marketRowForPortfolioPosition(
+                                  marketData,
+                                  {
+                                    marketId: (a as ItemWithNetwork).marketId,
+                                    poolId: a.poolId,
+                                    displaySymbol: a.asset,
+                                  }
                                 );
-                                const marketBLF = marketData.find(
-                                  (m) =>
-                                    m.symbol === b.asset &&
-                                    (b.poolId ? m.poolId === b.poolId : true)
+                                const marketBLF = marketRowForPortfolioPosition(
+                                  marketData,
+                                  {
+                                    marketId: (b as ItemWithNetwork).marketId,
+                                    poolId: b.poolId,
+                                    displaySymbol: b.asset,
+                                  }
                                 );
                                 let liquidationThresholdA =
                                   marketALF?.liquidationThreshold ??
-                                  marketALF?.marketInfo?.liquidationThreshold ??
+                                  (marketALF as { marketInfo?: { liquidationThreshold?: unknown } })
+                                    ?.marketInfo?.liquidationThreshold ??
                                   0.85;
                                 let liquidationThresholdB =
                                   marketBLF?.liquidationThreshold ??
-                                  marketBLF?.marketInfo?.liquidationThreshold ??
+                                  (marketBLF as { marketInfo?: { liquidationThreshold?: unknown } })
+                                    ?.marketInfo?.liquidationThreshold ??
                                   0.85;
                                 if (
                                   typeof liquidationThresholdA === "string"
@@ -5686,23 +6098,29 @@ const Portfolio = () => {
                                   "deposit",
                                   String(depositNet),
                                   String(deposit.poolId ?? ""),
-                                  deposit.asset
+                                  deposit.asset,
+                                  (deposit as ItemWithNetwork).marketId
                                 );
                               const rewardsBonusApr = getRewardsBonusSupplyAprPercent(
                                 (deposit as ItemWithNetwork).network ??
                                   currentNetwork,
-                                deposit.asset,
-                                deposit.poolId,
+                                (deposit as ItemWithNetwork).configSymbol ??
+                                  (deposit as ItemWithNetwork).originalSymbol ??
+                                  deposit.asset,
+                                deposit.poolId != null
+                                  ? String(deposit.poolId)
+                                  : undefined,
                                 rewardsAprByBaseUrl
                               );
                               const depositApyWithRewards =
                                 deposit.apy + rewardsBonusApr;
-                              const market = marketData.find(
-                                (m) =>
-                                  m.symbol === deposit.asset &&
-                                  (deposit.poolId
-                                    ? m.poolId === deposit.poolId
-                                    : true)
+                              const market = marketRowForPortfolioPosition(
+                                marketData,
+                                {
+                                  marketId: (deposit as ItemWithNetwork).marketId,
+                                  poolId: deposit.poolId,
+                                  displaySymbol: deposit.asset,
+                                }
                               );
                               const depositCapReached = isAtDepositCap(
                                 Number(market?.totalDeposits ?? 0),
@@ -5711,11 +6129,14 @@ const Portfolio = () => {
                               const depositNetForRewards =
                                 (deposit as ItemWithNetwork).network ||
                                 currentNetwork;
+                              const rewardKeyMobile =
+                                (deposit as ItemWithNetwork).configSymbol ??
+                                (deposit as ItemWithNetwork).originalSymbol ??
+                                deposit.asset;
                               const rewardBonusAprMobile =
                                 getRewardsBonusSupplyAprPercent(
                                   depositNetForRewards as NetworkId,
-                                  (deposit as ItemWithNetwork).originalSymbol ??
-                                    deposit.asset,
+                                  rewardKeyMobile,
                                   deposit.poolId
                                     ? String(deposit.poolId)
                                     : undefined,
@@ -5724,20 +6145,22 @@ const Portfolio = () => {
                               const intrinsicAprMobile =
                                 getIntrinsicSupplyApyPercent(
                                   depositNetForRewards as NetworkId,
-                                  (deposit as ItemWithNetwork).originalSymbol ??
-                                    deposit.asset,
+                                  rewardKeyMobile,
                                   deposit.poolId
                                     ? String(deposit.poolId)
                                     : undefined
                                 );
                               return (
                                 <div
-                                  key={`${deposit.asset}-${deposit.poolId || "default"
+                                  key={`${deposit.asset}-${deposit.poolId || "default"}-${(deposit as ItemWithNetwork).marketId ?? ""
                                     }`}
                                   ref={attachChainPollRow(depositChainPollKey)}
                                 >
                                 <PortfolioTableMobileCard
                                   asset={deposit.asset}
+                                  configSymbol={
+                                    (deposit as ItemWithNetwork).configSymbol
+                                  }
                                   icon={deposit.icon}
                                   value={deposit.value}
                                   balance={deposit.balance}
@@ -5767,7 +6190,9 @@ const Portfolio = () => {
                                         handleDepositClick(
                                           deposit.asset,
                                           deposit.poolId,
-                                          (deposit as ItemWithNetwork).network
+                                          (deposit as ItemWithNetwork).network,
+                                          (deposit as ItemWithNetwork).configSymbol,
+                                          (deposit as ItemWithNetwork).marketId
                                         )
                                       : undefined
                                   }
@@ -5777,7 +6202,9 @@ const Portfolio = () => {
                                         handleWithdrawClick(
                                           deposit.asset,
                                           deposit.poolId,
-                                          (deposit as ItemWithNetwork).network
+                                          (deposit as ItemWithNetwork).network,
+                                          (deposit as ItemWithNetwork).marketId,
+                                          (deposit as ItemWithNetwork).configSymbol
                                         )
                                       : undefined
                                   }
@@ -6102,20 +6529,21 @@ const Portfolio = () => {
                                     break;
                                   }
                                   case "collateralFactor": {
-                                    // Find markets for each deposit to get their collateral factors
-                                    const marketACF = marketData.find(
-                                      (m) =>
-                                        m.symbol === a.asset &&
-                                        (a.poolId
-                                          ? m.poolId === a.poolId
-                                          : true)
+                                    const marketACF = marketRowForPortfolioPosition(
+                                      marketData,
+                                      {
+                                        marketId: (a as ItemWithNetwork).marketId,
+                                        poolId: a.poolId,
+                                        displaySymbol: a.asset,
+                                      }
                                     );
-                                    const marketBCF = marketData.find(
-                                      (m) =>
-                                        m.symbol === b.asset &&
-                                        (b.poolId
-                                          ? m.poolId === b.poolId
-                                          : true)
+                                    const marketBCF = marketRowForPortfolioPosition(
+                                      marketData,
+                                      {
+                                        marketId: (b as ItemWithNetwork).marketId,
+                                        poolId: b.poolId,
+                                        displaySymbol: b.asset,
+                                      }
                                     );
                                     let collateralFactorA =
                                       marketACF?.collateralFactor ??
@@ -6169,30 +6597,31 @@ const Portfolio = () => {
                                     break;
                                   }
                                   case "liquidationFactor": {
-                                    // Find markets for each deposit to get their liquidation thresholds
-                                    const marketALF = marketData.find(
-                                      (m) =>
-                                        m.symbol === a.asset &&
-                                        (a.poolId
-                                          ? m.poolId === a.poolId
-                                          : true)
+                                    const marketALF = marketRowForPortfolioPosition(
+                                      marketData,
+                                      {
+                                        marketId: (a as ItemWithNetwork).marketId,
+                                        poolId: a.poolId,
+                                        displaySymbol: a.asset,
+                                      }
                                     );
-                                    const marketBLF = marketData.find(
-                                      (m) =>
-                                        m.symbol === b.asset &&
-                                        (b.poolId
-                                          ? m.poolId === b.poolId
-                                          : true)
+                                    const marketBLF = marketRowForPortfolioPosition(
+                                      marketData,
+                                      {
+                                        marketId: (b as ItemWithNetwork).marketId,
+                                        poolId: b.poolId,
+                                        displaySymbol: b.asset,
+                                      }
                                     );
                                     let liquidationThresholdA =
                                       marketALF?.liquidationThreshold ??
-                                      marketALF?.marketInfo
-                                        ?.liquidationThreshold ??
+                                      (marketALF as { marketInfo?: { liquidationThreshold?: unknown } })
+                                        ?.marketInfo?.liquidationThreshold ??
                                       0.85;
                                     let liquidationThresholdB =
                                       marketBLF?.liquidationThreshold ??
-                                      marketBLF?.marketInfo
-                                        ?.liquidationThreshold ??
+                                      (marketBLF as { marketInfo?: { liquidationThreshold?: unknown } })
+                                        ?.marketInfo?.liquidationThreshold ??
                                       0.85;
                                     // Convert to number if needed and normalize to decimal format
                                     if (
@@ -6273,13 +6702,13 @@ const Portfolio = () => {
                                 deposit.poolId
                               );
 
-                              // Find market matching both symbol and poolId if available
-                              const market = marketData.find(
-                                (m) =>
-                                  m.symbol === deposit.asset &&
-                                  (deposit.poolId
-                                    ? m.poolId === deposit.poolId
-                                    : true)
+                              const market = marketRowForPortfolioPosition(
+                                marketData,
+                                {
+                                  marketId: (deposit as ItemWithNetwork).marketId,
+                                  poolId: deposit.poolId,
+                                  displaySymbol: deposit.asset,
+                                }
                               );
 
                               const depositCapReached = isAtDepositCap(
@@ -6290,10 +6719,13 @@ const Portfolio = () => {
                               const depositNetworkForToken =
                                 (deposit as ItemWithNetwork).network || currentNetwork;
 
+                              const rewardConfigKey =
+                                (deposit as ItemWithNetwork).configSymbol ??
+                                (deposit as ItemWithNetwork).originalSymbol ??
+                                deposit.asset;
                               const rewardBonusApr = getRewardsBonusSupplyAprPercent(
                                 depositNetworkForToken as NetworkId,
-                                (deposit as ItemWithNetwork).originalSymbol ??
-                                  deposit.asset,
+                                rewardConfigKey,
                                 deposit.poolId != null
                                   ? String(deposit.poolId)
                                   : undefined,
@@ -6301,8 +6733,7 @@ const Portfolio = () => {
                               );
                               const intrinsicApr = getIntrinsicSupplyApyPercent(
                                 depositNetworkForToken as NetworkId,
-                                (deposit as ItemWithNetwork).originalSymbol ??
-                                  deposit.asset,
+                                rewardConfigKey,
                                 deposit.poolId != null
                                   ? String(deposit.poolId)
                                   : undefined
@@ -6374,7 +6805,8 @@ const Portfolio = () => {
                                       ""
                                   ),
                                   String(deposit.poolId ?? ""),
-                                  deposit.asset
+                                  deposit.asset,
+                                  (deposit as ItemWithNetwork).marketId
                                 );
 
                               return (
@@ -6395,10 +6827,9 @@ const Portfolio = () => {
                                         />
                                         {depositMarketLabel && (
                                           <div
-                                            className={`absolute -top-1 -right-1 w-4 h-4 rounded-full ${depositMarketLabel === "A"
-                                              ? "bg-blue-500 dark:bg-blue-600"
-                                              : "bg-purple-500 dark:bg-purple-600"
-                                              } border-2 border-white dark:border-slate-800 flex items-center justify-center z-10`}
+                                            className={`absolute -top-1 -right-1 w-4 h-4 rounded-full ${marketPoolBadgeBgClassName(
+                                              depositMarketLabel
+                                            )} border-2 border-white dark:border-slate-800 flex items-center justify-center z-10`}
                                           >
                                             <span className="text-[9px] font-bold text-white leading-none">
                                               {depositMarketLabel}
@@ -6409,6 +6840,17 @@ const Portfolio = () => {
                                       <span className="font-medium truncate text-center">
                                         {deposit.asset}
                                       </span>
+                                      {shouldShowConfigSymbolUnderDisplayAsset(
+                                        deposit.asset,
+                                        (deposit as ItemWithNetwork).configSymbol
+                                      ) && (
+                                          <span className="text-[10px] text-muted-foreground truncate text-center max-w-[5rem] leading-tight">
+                                            {
+                                              (deposit as ItemWithNetwork)
+                                                .configSymbol
+                                            }
+                                          </span>
+                                        )}
                                     </div>
                                   </TableCell>
                                   <TableCell className="font-medium text-center">
@@ -6455,8 +6897,7 @@ const Portfolio = () => {
                                           {formatNumber(deposit.accruedInterest, {
                                             minimumFractionDigits: 2,
                                             maximumFractionDigits: 6,
-                                          })}{" "}
-                                          {deposit.asset}
+                                          })}
                                         </span>
                                         <span className="text-xs text-muted-foreground">
                                           {formatCurrency(
@@ -6488,7 +6929,9 @@ const Portfolio = () => {
                                                 handleDepositClick(
                                                   deposit.asset,
                                                   deposit.poolId,
-                                                  (deposit as ItemWithNetwork).network
+                                                  (deposit as ItemWithNetwork).network,
+                                                  (deposit as ItemWithNetwork).configSymbol,
+                                                  (deposit as ItemWithNetwork).marketId
                                                 );
                                               }}
                                               disabled={depositCapReached}
@@ -6512,7 +6955,9 @@ const Portfolio = () => {
                                               handleWithdrawClick(
                                                 deposit.asset,
                                                 deposit.poolId,
-                                                (deposit as ItemWithNetwork).network
+                                                (deposit as ItemWithNetwork).network,
+                                                (deposit as ItemWithNetwork).marketId,
+                                                (deposit as ItemWithNetwork).configSymbol
                                               );
                                             }}
                                             title="Withdraw this asset back to your wallet"
@@ -7125,10 +7570,9 @@ const Portfolio = () => {
                                             />
                                             {marketLabel && (
                                               <div
-                                                className={`absolute -top-1 -right-1 w-4 h-4 rounded-full ${marketLabel === "A"
-                                                  ? "bg-blue-500"
-                                                  : "bg-purple-500"
-                                                  } border-2 border-white dark:border-slate-800 flex items-center justify-center`}
+                                                className={`absolute -top-1 -right-1 w-4 h-4 rounded-full ${marketPoolBadgeBgClassName(
+                                                  marketLabel
+                                                )} border-2 border-white dark:border-slate-800 flex items-center justify-center`}
                                               >
                                                 <span className="text-xs font-bold text-white">
                                                   {marketLabel}
@@ -7219,13 +7663,16 @@ const Portfolio = () => {
                                       <TableCell>
                                         <div className="flex items-center gap-2">
                                           {!isViewOnly && (() => {
-                                            const atRiskMarket = marketData.find(
-                                              (m) =>
-                                                m.symbol === asset.asset &&
-                                                (asset.poolId
-                                                  ? m.poolId === asset.poolId
-                                                  : true)
-                                            ) as any;
+                                            const atRiskMarket =
+                                              marketRowForPortfolioPosition(
+                                                marketData,
+                                                {
+                                                  marketId: (asset as ItemWithNetwork)
+                                                    .marketId,
+                                                  poolId: asset.poolId,
+                                                  displaySymbol: asset.asset,
+                                                }
+                                              ) as any;
                                             const depositCapReached =
                                               atRiskMarket &&
                                               isAtDepositCap(
@@ -7241,7 +7688,9 @@ const Portfolio = () => {
                                                   handleDepositClick(
                                                     asset.asset,
                                                     asset.poolId,
-                                                    (asset as ItemWithNetwork).network
+                                                    (asset as ItemWithNetwork).network,
+                                                    (asset as ItemWithNetwork).configSymbol,
+                                                    (asset as ItemWithNetwork).marketId
                                                   );
                                                 }}
                                                 disabled={depositCapReached}
@@ -7514,14 +7963,16 @@ const Portfolio = () => {
                                   "borrow",
                                   String(borrowNet),
                                   String(borrow.poolId ?? ""),
-                                  borrow.asset
+                                  borrow.asset,
+                                  (borrow as ItemWithNetwork).marketId
                                 );
-                              const market = marketData.find(
-                                (m) =>
-                                  m.symbol === borrow.asset &&
-                                  (borrow.poolId
-                                    ? m.poolId === borrow.poolId
-                                    : true)
+                              const market = marketRowForPortfolioPosition(
+                                marketData,
+                                {
+                                  marketId: (borrow as ItemWithNetwork).marketId,
+                                  poolId: borrow.poolId,
+                                  displaySymbol: borrow.asset,
+                                }
                               ) as any;
                               const borrowCapReached =
                                 market &&
@@ -7586,6 +8037,9 @@ const Portfolio = () => {
                                 >
                                 <PortfolioTableMobileCard
                                   asset={borrow.asset}
+                                  configSymbol={
+                                    (borrow as ItemWithNetwork).configSymbol
+                                  }
                                   icon={borrow.icon}
                                   value={borrow.value}
                                   balance={borrow.balance}
@@ -7608,7 +8062,9 @@ const Portfolio = () => {
                                         handleBorrowClick(
                                           borrow.asset,
                                           borrow.poolId,
-                                          (borrow as ItemWithNetwork).network
+                                          (borrow as ItemWithNetwork).network,
+                                          (borrow as ItemWithNetwork).configSymbol,
+                                          (borrow as ItemWithNetwork).marketId
                                         )
                                       : undefined
                                   }
@@ -7618,7 +8074,9 @@ const Portfolio = () => {
                                         handleRepayClick(
                                           borrow.asset,
                                           borrow.poolId,
-                                          (borrow as ItemWithNetwork).network
+                                          (borrow as ItemWithNetwork).network,
+                                          (borrow as ItemWithNetwork).configSymbol,
+                                          (borrow as ItemWithNetwork).marketId
                                         )
                                       : undefined
                                   }
@@ -8006,12 +8464,13 @@ const Portfolio = () => {
                               const borrow = mergeBorrow(
                                 borrowRaw as ItemWithNetwork
                               ) as ItemWithNetwork;
-                              const market = marketData.find(
-                                (m) =>
-                                  m.symbol === borrow.asset &&
-                                    (borrow.poolId
-                                    ? m.poolId === borrow.poolId
-                                    : true)
+                              const market = marketRowForPortfolioPosition(
+                                marketData,
+                                {
+                                  marketId: (borrow as ItemWithNetwork).marketId,
+                                  poolId: borrow.poolId,
+                                  displaySymbol: borrow.asset,
+                                }
                               ) as any;
                               const borrowCapReached =
                                 market &&
@@ -8134,7 +8593,8 @@ const Portfolio = () => {
                                       ""
                                   ),
                                   String(borrow.poolId ?? ""),
-                                  borrow.asset
+                                  borrow.asset,
+                                  (borrow as ItemWithNetwork).marketId
                                 );
 
                               return (
@@ -8153,10 +8613,9 @@ const Portfolio = () => {
                                         />
                                         {borrowMarketLabel && (
                                           <div
-                                            className={`absolute -top-1 -right-1 w-4 h-4 rounded-full ${borrowMarketLabel === "A"
-                                              ? "bg-blue-500 dark:bg-blue-600"
-                                              : "bg-purple-500 dark:bg-purple-600"
-                                              } border-2 border-white dark:border-slate-800 flex items-center justify-center z-10`}
+                                            className={`absolute -top-1 -right-1 w-4 h-4 rounded-full ${marketPoolBadgeBgClassName(
+                                              borrowMarketLabel
+                                            )} border-2 border-white dark:border-slate-800 flex items-center justify-center z-10`}
                                           >
                                             <span className="text-[9px] font-bold text-white leading-none">
                                               {borrowMarketLabel}
@@ -8167,6 +8626,17 @@ const Portfolio = () => {
                                       <span className="font-medium truncate text-center">
                                         {borrow.asset}
                                       </span>
+                                      {shouldShowConfigSymbolUnderDisplayAsset(
+                                        borrow.asset,
+                                        (borrow as ItemWithNetwork).configSymbol
+                                      ) && (
+                                          <span className="text-[10px] text-muted-foreground truncate text-center max-w-[5rem] leading-tight">
+                                            {
+                                              (borrow as ItemWithNetwork)
+                                                .configSymbol
+                                            }
+                                          </span>
+                                        )}
                                     </div>
                                   </TableCell>
                                   <TableCell className="font-medium text-center">
@@ -8193,8 +8663,7 @@ const Portfolio = () => {
                                           {formatNumber(borrow.accruedInterest, {
                                             minimumFractionDigits: 2,
                                             maximumFractionDigits: 6,
-                                          })}{" "}
-                                          {borrow.asset}
+                                          })}
                                         </span>
                                         <span className="text-xs text-muted-foreground">
                                           {formatCurrency(
@@ -8257,7 +8726,9 @@ const Portfolio = () => {
                                                 handleBorrowClick(
                                                   borrow.asset,
                                                   borrow.poolId,
-                                                  (borrow as ItemWithNetwork).network
+                                                  (borrow as ItemWithNetwork).network,
+                                                  (borrow as ItemWithNetwork).configSymbol,
+                                                  (borrow as ItemWithNetwork).marketId
                                                 );
                                               }}
                                               disabled={borrowCapReached}
@@ -8281,7 +8752,9 @@ const Portfolio = () => {
                                               handleRepayClick(
                                                 borrow.asset,
                                                 borrow.poolId,
-                                                (borrow as ItemWithNetwork).network
+                                                (borrow as ItemWithNetwork).network,
+                                                (borrow as ItemWithNetwork).configSymbol,
+                                                (borrow as ItemWithNetwork).marketId
                                               );
                                             }}
                                             title="Repay this debt to improve health factor"
@@ -8910,10 +9383,9 @@ const Portfolio = () => {
                                         />
                                         {accruedMarketLabel && (
                                           <div
-                                            className={`absolute -top-1 -right-1 w-4 h-4 rounded-full ${accruedMarketLabel === "A"
-                                              ? "bg-blue-500 dark:bg-blue-600"
-                                              : "bg-purple-500 dark:bg-purple-600"
-                                              } border-2 border-white dark:border-slate-800 flex items-center justify-center z-10`}
+                                            className={`absolute -top-1 -right-1 w-4 h-4 rounded-full ${marketPoolBadgeBgClassName(
+                                              accruedMarketLabel
+                                            )} border-2 border-white dark:border-slate-800 flex items-center justify-center z-10`}
                                           >
                                             <span className="text-[9px] font-bold text-white leading-none">
                                               {accruedMarketLabel}
@@ -9238,6 +9710,7 @@ const Portfolio = () => {
         marketData={marketData}
         userGlobalData={userGlobalData}
         userBorrowBalance={userBorrowBalance}
+        folksMintedOneUnderlyingByKey={folksMintedOneUnderlyingByKey}
         prefetchWithdrawIndicesRef={prefetchWithdrawIndicesRef}
         onCloseDepositModal={() =>
           setDepositModal({
@@ -9245,6 +9718,8 @@ const Portfolio = () => {
             asset: null,
             poolId: undefined,
             network: undefined,
+            configSymbol: undefined,
+            marketId: undefined,
           })
         }
         onCloseWithdrawModal={() =>
@@ -9253,6 +9728,8 @@ const Portfolio = () => {
             asset: null,
             poolId: undefined,
             network: undefined,
+            marketId: undefined,
+            configSymbol: undefined,
           })
         }
         onCloseBorrowModal={() =>
@@ -9261,6 +9738,8 @@ const Portfolio = () => {
             asset: null,
             poolId: undefined,
             network: undefined,
+            configSymbol: undefined,
+            marketId: undefined,
           })
         }
         onCloseRepayModal={() =>
@@ -9269,16 +9748,86 @@ const Portfolio = () => {
             asset: null,
             poolId: undefined,
             network: undefined,
+            configSymbol: undefined,
+            marketId: undefined,
           })
         }
-        onSelectWithdrawAsset={(asset, poolId, network) =>
-          setWithdrawModal((prev) => ({ ...prev, asset, poolId, network }))
+        onSelectWithdrawAsset={(asset, poolId, network, pick) =>
+          setWithdrawModal((prev) => {
+            const candidates = deposits.filter(
+              (d) =>
+                d.asset === asset &&
+                String(d.poolId ?? "") === String(poolId ?? "")
+            ) as ItemWithNetwork[];
+            const hit =
+              (pick?.marketId != null && pick.marketId !== ""
+                ? candidates.find(
+                    (d) => String(d.marketId) === String(pick.marketId)
+                  )
+                : undefined) ??
+              (pick?.configSymbol != null && pick.configSymbol !== ""
+                ? candidates.find((d) => d.configSymbol === pick.configSymbol)
+                : undefined) ??
+              candidates.find(
+                (d) => String(d.marketId) === String(prev.marketId)
+              ) ??
+              candidates.find((d) => d.configSymbol === prev.configSymbol) ??
+              candidates[0];
+            return {
+              ...prev,
+              asset,
+              poolId,
+              network,
+              marketId: hit?.marketId ?? prev.marketId,
+              configSymbol: hit?.configSymbol ?? prev.configSymbol,
+            };
+          })
         }
         onSelectDepositAsset={(asset, poolId, network) =>
-          setDepositModal((prev) => ({ ...prev, asset, poolId, network }))
+          setDepositModal((prev) => {
+            const candidates = deposits.filter(
+              (d) =>
+                d.asset === asset &&
+                String(d.poolId ?? "") === String(poolId ?? "")
+            ) as ItemWithNetwork[];
+            const hit =
+              candidates.find(
+                (d) => String(d.marketId) === String(prev.marketId)
+              ) ??
+              candidates.find((d) => d.configSymbol === prev.configSymbol) ??
+              candidates[0];
+            return {
+              ...prev,
+              asset,
+              poolId,
+              network,
+              configSymbol: hit?.configSymbol ?? prev.configSymbol,
+              marketId: hit?.marketId ?? prev.marketId,
+            };
+          })
         }
         onSelectRepayAsset={(asset, poolId, network) =>
-          setRepayModal((prev) => ({ ...prev, asset, poolId, network }))
+          setRepayModal((prev) => {
+            const candidates = borrows.filter(
+              (b) =>
+                b.asset === asset &&
+                String(b.poolId ?? "") === String(poolId ?? "")
+            ) as ItemWithNetwork[];
+            const hit =
+              candidates.find(
+                (b) => String(b.marketId) === String(prev.marketId)
+              ) ??
+              candidates.find((b) => b.configSymbol === prev.configSymbol) ??
+              candidates[0];
+            return {
+              ...prev,
+              asset,
+              poolId,
+              network,
+              configSymbol: hit?.configSymbol ?? prev.configSymbol,
+              marketId: hit?.marketId ?? prev.marketId,
+            };
+          })
         }
         onRefreshWalletBalance={refreshWalletBalance}
         onRefreshMarket={() => displayAddress && fetchUser(displayAddress)}

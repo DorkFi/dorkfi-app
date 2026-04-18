@@ -20,11 +20,19 @@ import STokenRow from "./STokenRow";
 import React, { useState, useEffect, useMemo } from "react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { useWallet } from "@txnlab/use-wallet-react";
-import { getTokenConfig, getAllTokensWithDisplayInfo, getNetworkConfig } from "@/config";
+import {
+  getTokenConfig,
+  getAllTokensWithDisplayInfo,
+  getNetworkConfig,
+  getMarketLabel as marketLetterForPoolId,
+} from "@/config";
 import { isAtDepositCap, isAtBorrowCap } from "@/constants/lendingCaps";
 import {
+  borrowApyBadgeClassName,
+  BORROW_APY_BADGE_DEFAULT,
   depositApyBadgeClassName,
   isIntrinsicDepositApyBadge,
+  marketPoolBadgeBgClassName,
 } from "@/constants/marketUi";
 import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
@@ -36,9 +44,9 @@ interface MarketsDesktopTableProps {
   sortOrder?: SortOrder;
   onRowClick: (market: OnDemandMarketData) => void;
   onInfoClick: (e: React.MouseEvent, market: OnDemandMarketData) => void;
-  onDepositClick: (asset: string, poolId?: string) => void;
-  onBorrowClick: (asset: string, poolId?: string) => void;
-  onMintClick?: (asset: string, poolId?: string) => void;
+  onDepositClick: (asset: string, poolId?: string, marketRowKey?: string) => void;
+  onBorrowClick: (asset: string, poolId?: string, marketRowKey?: string) => void;
+  onMintClick?: (asset: string, poolId?: string, marketRowKey?: string) => void;
   onMigrateClick?: (asset: string) => void;
   isLoadingBalance?: boolean;
 }
@@ -86,10 +94,9 @@ const MarketsDesktopTable = ({
   >({});
   const [expandedSymbols, setExpandedSymbols] = useState<Set<string>>(new Set());
 
-  // Helper function to get market label (A or B) based on poolId
+  // Resolve pool id then label via {@link marketLetterForPoolId} (A/B/D map + lendingPools fallback).
   const getMarketLabel = (market: OnDemandMarketData, marketIndex?: number): string | null => {
     const networkConfig = getNetworkConfig(currentNetwork);
-    const lendingPools = networkConfig.contracts.lendingPools;
     
     // Try to get poolId from multiple sources
     let poolId: string | null = null;
@@ -102,9 +109,10 @@ const MarketsDesktopTable = ({
       poolId = market.poolId || null;
     }
     
-    // Priority 3: Try to match market to token config by poolId
+    // Priority 3: Try to match market to token config by poolId (use config key, not display `asset`)
     if (!poolId) {
-      const tokenConfigRaw = networkConfig.tokens[market.asset];
+      const tokenKey = market.configSymbol ?? market.asset;
+      const tokenConfigRaw = networkConfig.tokens[tokenKey];
       if (Array.isArray(tokenConfigRaw)) {
         // Try to find matching config by comparing poolIds from market data
         // First check if we can match by marketInfo or market.poolId
@@ -130,13 +138,9 @@ const MarketsDesktopTable = ({
       }
     }
     
-    // Determine label from poolId
-    if (poolId && lendingPools.length >= 2) {
-      // Compare as strings to ensure exact match
-      if (String(poolId) === String(lendingPools[0])) return "A";
-      if (String(poolId) === String(lendingPools[1])) return "B";
+    if (poolId) {
+      return marketLetterForPoolId(currentNetwork, poolId);
     }
-    
     return null;
   };
 
@@ -216,10 +220,11 @@ const MarketsDesktopTable = ({
       poolId = market.poolId || null;
     }
     
-    // Priority 3: From token config
+    // Priority 3: From token config (canonical symbol — `market.asset` is often a display override)
     if (!poolId) {
       const networkConfig = getNetworkConfig(currentNetwork);
-      const tokenConfigRaw = networkConfig.tokens[market.asset];
+      const tokenKey = market.configSymbol ?? market.asset;
+      const tokenConfigRaw = networkConfig.tokens[tokenKey];
       if (Array.isArray(tokenConfigRaw)) {
         if (index !== undefined && tokenConfigRaw[index]?.poolId) {
           poolId = tokenConfigRaw[index].poolId;
@@ -248,15 +253,29 @@ const MarketsDesktopTable = ({
     const networkConfig = getNetworkConfig(currentNetwork);
     const lendingPools = networkConfig.contracts.lendingPools;
     
+    const sameListedMarket = (
+      a: OnDemandMarketData,
+      b: OnDemandMarketData
+    ): boolean => {
+      const poolA = String(a.marketInfo?.poolId ?? a.poolId ?? "");
+      const poolB = String(b.marketInfo?.poolId ?? b.poolId ?? "");
+      if (!poolA || !poolB || poolA !== poolB) return false;
+      const csA = a.configSymbol;
+      const csB = b.configSymbol;
+      if (csA != null && csB != null) return csA === csB;
+      const kA = (a as { _sortKey?: string })._sortKey;
+      const kB = (b as { _sortKey?: string })._sortKey;
+      if (kA && kB) return kA === kB;
+      // Legacy: same pool only when we cannot distinguish config rows
+      return true;
+    };
+
     markets.forEach((market) => {
       const key = market.asset;
       if (!groups[key]) {
         groups[key] = [];
       }
-      // Only add if not already present (check by poolId to avoid duplicates)
-      const existingMarket = groups[key].find(
-        (m) => m.marketInfo?.poolId === market.marketInfo?.poolId
-      );
+      const existingMarket = groups[key].find((m) => sameListedMarket(m, market));
       if (!existingMarket) {
         groups[key].push(market);
       }
@@ -377,22 +396,7 @@ const MarketsDesktopTable = ({
                   className="w-10 h-10 rounded-full object-contain"
                 />
                 {(() => {
-                  // For nested rows (expanded), always show badge based on index
-                  // Markets are sorted: A first (index 0), then B (index 1)
-                  if (isNested && typeof marketIndex === 'number') {
-                    const marketLabel = marketIndex === 0 ? "A" : marketIndex === 1 ? "B" : null;
-                    if (marketLabel) {
-                      const bgColor = marketLabel === "A" 
-                        ? "bg-blue-500 dark:bg-blue-600" 
-                        : "bg-purple-500 dark:bg-purple-600";
-                      return (
-                        <div className={`absolute -top-1 -right-1 w-5 h-5 rounded-full ${bgColor} border-2 border-white dark:border-slate-800 flex items-center justify-center`}>
-                          <span className="text-xs font-bold text-white">{marketLabel}</span>
-                        </div>
-                      );
-                    }
-                  }
-                  
+                  // A/B from lending pool id only — never from row index (multiple rows can share pool A, e.g. ALGO + fALGO).
                   // For non-nested rows, try to determine label from poolId
                   const networkConfig = getNetworkConfig(currentNetwork);
                   const lendingPools = networkConfig.contracts.lendingPools;
@@ -421,9 +425,7 @@ const MarketsDesktopTable = ({
                   }
                   
                   if (marketLabel) {
-                    const bgColor = marketLabel === "A" 
-                      ? "bg-blue-500 dark:bg-blue-600" 
-                      : "bg-purple-500 dark:bg-purple-600";
+                    const bgColor = marketPoolBadgeBgClassName(marketLabel);
                     return (
                       <div className={`absolute -top-1 -right-1 w-5 h-5 rounded-full ${bgColor} border-2 border-white dark:border-slate-800 flex items-center justify-center`}>
                         <span className="text-xs font-bold text-white">{marketLabel}</span>
@@ -516,10 +518,16 @@ const MarketsDesktopTable = ({
           ) : market.error ? (
             <ErrorCell error={market.error} />
           ) : (
-            <Badge className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
+            <Badge
+              className={borrowApyBadgeClassName(
+                market.intrinsicBorrowApyPercent,
+                BORROW_APY_BADGE_DEFAULT
+              )}
+            >
               <BorrowAPYDisplay 
                 apyCalculation={market.apyCalculation}
                 fallbackAPY={market.borrowAPY}
+                intrinsicBorrowApyPercent={market.intrinsicBorrowApyPercent}
                 showTooltip={true}
                 networkId={currentNetwork}
                 asset={market.asset}
@@ -632,6 +640,7 @@ const MarketsDesktopTable = ({
               <MarketsTableActions
                 asset={market.asset}
                 poolId={finalPoolId}
+                marketRowKey={(market as { _sortKey?: string })._sortKey}
                 onDepositClick={onDepositClick}
                 onBorrowClick={onBorrowClick}
                 onMintClick={onMintClick}
@@ -831,7 +840,10 @@ const MarketsDesktopTable = ({
                               
                               // If poolId not on market, get from token config
                               if (!poolId) {
-                                const tokenConfigRaw = networkConfig.tokens[mainMarket.asset];
+                                const tokenKey =
+                                  mainMarket.configSymbol ?? mainMarket.asset;
+                                const tokenConfigRaw =
+                                  networkConfig.tokens[tokenKey];
                                 if (Array.isArray(tokenConfigRaw) && tokenConfigRaw.length > 0) {
                                   // Find matching config by comparing with main market
                                   const matchingConfig = tokenConfigRaw.find(tc => {
@@ -864,9 +876,8 @@ const MarketsDesktopTable = ({
                               }
                               
                               if (marketLabel) {
-                                const bgColor = marketLabel === "A" 
-                                  ? "bg-blue-500 dark:bg-blue-600" 
-                                  : "bg-purple-500 dark:bg-purple-600";
+                                const bgColor =
+                                  marketPoolBadgeBgClassName(marketLabel);
                                 return (
                                   <div className={`absolute -top-1 -right-1 w-5 h-5 rounded-full ${bgColor} border-2 border-white dark:border-slate-800 flex items-center justify-center`}>
                                     <span className="text-xs font-bold text-white">{marketLabel}</span>
@@ -970,10 +981,16 @@ const MarketsDesktopTable = ({
                     ) : mainMarket.error ? (
                       <ErrorCell error={mainMarket.error} />
                     ) : (
-                      <Badge className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
+                      <Badge
+                        className={borrowApyBadgeClassName(
+                          mainMarket.intrinsicBorrowApyPercent,
+                          BORROW_APY_BADGE_DEFAULT
+                        )}
+                      >
                         <BorrowAPYDisplay 
                           apyCalculation={mainMarket.apyCalculation}
                           fallbackAPY={mainMarket.borrowAPY}
+                          intrinsicBorrowApyPercent={mainMarket.intrinsicBorrowApyPercent}
                           showTooltip={true}
                           networkId={currentNetwork}
                           asset={mainMarket.asset}
@@ -1065,6 +1082,9 @@ const MarketsDesktopTable = ({
                         <MarketsTableActions
                           asset={mainMarket.asset}
                           poolId={finalPoolId}
+                          marketRowKey={
+                            (mainMarket as { _sortKey?: string })._sortKey
+                          }
                           onDepositClick={onDepositClick}
                           onBorrowClick={onBorrowClick}
                           onMintClick={onMintClick}

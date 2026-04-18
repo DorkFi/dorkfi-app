@@ -38,3 +38,39 @@ export function isIntrinsicDepositApyBadge(
     intrinsicSupplyApyPercent > 0
   );
 }
+
+/** Default red borrow APY badge (main markets). */
+export const BORROW_APY_BADGE_DEFAULT =
+  "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200";
+
+/** S-token borrow APY badge when no intrinsic borrow uplift. */
+export const BORROW_APY_BADGE_STOKEN =
+  "bg-gradient-to-r from-red-100 to-pink-100 text-red-800 dark:from-red-900 dark:to-pink-900 dark:text-red-200 border border-red-300 dark:border-red-600";
+
+/**
+ * Borrow APY badge: same silver gradient as deposit intrinsic when
+ * `intrinsicBorrowApyPercent` is set and positive; otherwise `fallbackClassName`
+ * ({@link BORROW_APY_BADGE_DEFAULT} or {@link BORROW_APY_BADGE_STOKEN}).
+ */
+export function borrowApyBadgeClassName(
+  intrinsicBorrowApyPercent: number | null | undefined,
+  fallbackClassName: string
+): string {
+  if (
+    typeof intrinsicBorrowApyPercent === "number" &&
+    Number.isFinite(intrinsicBorrowApyPercent) &&
+    intrinsicBorrowApyPercent > 0
+  ) {
+    return DEPOSIT_APY_BADGE_INTRINSIC;
+  }
+  return fallbackClassName;
+}
+
+/** Background classes for A/B/D pool letter badges (markets table, portfolio, lists). */
+export function marketPoolBadgeBgClassName(
+  label: string | null | undefined
+): string {
+  if (label === "A") return "bg-blue-500 dark:bg-blue-600";
+  if (label === "D") return "bg-amber-500 dark:bg-amber-600";
+  return "bg-purple-500 dark:bg-purple-600";
+}
