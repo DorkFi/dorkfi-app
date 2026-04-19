@@ -258,6 +258,20 @@ const SupplyBorrowModal = ({
   const [selectedDepositAdapterId, setSelectedDepositAdapterId] =
     useState<string>("");
   const [depositRoutePickerOpen, setDepositRoutePickerOpen] = useState(false);
+  /**
+   * When the parent opens borrow but never set `userGlobalData` (e.g. pre-fetch threw),
+   * load aggregate user totals here so the modal is not stuck on "Loading…" forever.
+   */
+  const [borrowUserGlobalFallback, setBorrowUserGlobalFallback] = useState<{
+    totalCollateralValue: number;
+    totalBorrowValue: number;
+    lastUpdateTime: number;
+    healthFactorIndex?: number;
+  } | null>(null);
+  const [borrowUserGlobalFallbackStatus, setBorrowUserGlobalFallbackStatus] =
+    useState<"idle" | "loading" | "ready" | "failed">("idle");
+  const [borrowUserGlobalFallbackRetry, setBorrowUserGlobalFallbackRetry] =
+    useState(0);
 
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
@@ -265,7 +279,74 @@ const SupplyBorrowModal = ({
 
   // Use provided network or fallback to current network
   const networkToUse = network || currentNetwork;
+
+  const effectiveUserGlobalData = useMemo(() => {
+    if (userGlobalData != null) return userGlobalData;
+    return borrowUserGlobalFallback;
+  }, [userGlobalData, borrowUserGlobalFallback]);
+
   const { price: tokenPrice } = useTokenPrice(asset, networkToUse);
+
+  const parentUserGlobalProvided = userGlobalData != null;
+
+  useEffect(() => {
+    if (mode !== "borrow" || !isOpen) {
+      setBorrowUserGlobalFallback(null);
+      setBorrowUserGlobalFallbackStatus("idle");
+      setBorrowUserGlobalFallbackRetry(0);
+      return;
+    }
+    if (!activeAccount?.address) {
+      setBorrowUserGlobalFallback(null);
+      setBorrowUserGlobalFallbackStatus("idle");
+      return;
+    }
+    if (parentUserGlobalProvided) {
+      setBorrowUserGlobalFallback(null);
+      setBorrowUserGlobalFallbackStatus("idle");
+      return;
+    }
+
+    let cancelled = false;
+    setBorrowUserGlobalFallbackStatus("loading");
+
+    (async () => {
+      try {
+        const data = await fetchUserGlobalData(
+          activeAccount.address,
+          networkToUse as NetworkId
+        );
+        if (cancelled) return;
+        if (data != null) {
+          setBorrowUserGlobalFallback(data);
+          setBorrowUserGlobalFallbackStatus("ready");
+        } else {
+          setBorrowUserGlobalFallback(null);
+          setBorrowUserGlobalFallbackStatus("failed");
+        }
+      } catch {
+        if (!cancelled) {
+          setBorrowUserGlobalFallback(null);
+          setBorrowUserGlobalFallbackStatus("failed");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    mode,
+    isOpen,
+    activeAccount?.address,
+    networkToUse,
+    parentUserGlobalProvided,
+    borrowUserGlobalFallbackRetry,
+  ]);
+
+  const retryBorrowUserGlobalFetch = useCallback(() => {
+    setBorrowUserGlobalFallbackRetry((n) => n + 1);
+  }, []);
 
   const resolvedDepositTokenConfig = useMemo((): TokenConfig | null => {
     if (mode !== "deposit") return null;
@@ -696,13 +777,14 @@ const SupplyBorrowModal = ({
         }
 
         const marketPoolId = token.poolId;
-        const marketId = token.underlyingContractId;
+        /** Contract market id for on-chain borrow math (avoid shadowing `marketId` prop — TDZ above). */
+        const underlyingMarketId = token.underlyingContractId;
         const decimals = tokenConfig.decimals;
 
         console.log("SupplyBorrowModal: Calling calculateMaxBorrowAmount", {
           poolId: marketPoolId,
           userId: activeAccount.address,
-          marketId,
+          marketId: underlyingMarketId,
           asset,
         });
 
@@ -711,7 +793,7 @@ const SupplyBorrowModal = ({
         const maxBorrowBigInt = await calculateMaxBorrowAmount(
           marketPoolId,
           activeAccount.address,
-          marketId,
+          underlyingMarketId,
           storageAppId ? Number(storageAppId) : undefined
         );
 
@@ -784,7 +866,10 @@ const SupplyBorrowModal = ({
             depositsMinusBorrowed,
             finalMaxBorrow,
           });
-        } else if (userGlobalData && userGlobalData.totalCollateralValue > 0) {
+        } else if (
+          effectiveUserGlobalData &&
+          effectiveUserGlobalData.totalCollateralValue > 0
+        ) {
           // Borrowing power must be based on collateral in this pool only (not aggregate across pools)
           const poolData =
             poolId != null && poolId !== ""
@@ -796,7 +881,9 @@ const SupplyBorrowModal = ({
               : null;
           console.log("SupplyBorrowModal: Pool data", { poolData, poolId });
           const collateralForBorrow =
-            poolData != null ? poolData.totalCollateralValue : userGlobalData.totalCollateralValue;
+            poolData != null
+              ? poolData.totalCollateralValue
+              : effectiveUserGlobalData.totalCollateralValue;
           const maxBorrowUSD = collateralForBorrow * (assetData.collateralFactor / 100);
           const calculatedMaxBorrow = capByBorrowCap(
             tokenPrice != null && tokenPrice > 0
@@ -840,6 +927,7 @@ const SupplyBorrowModal = ({
     tokenPrice,
     assetData.totalBorrow,
     assetData.maxTotalBorrows,
+    effectiveUserGlobalData?.totalCollateralValue,
   ]);
 
   useEffect(() => {
@@ -1120,8 +1208,12 @@ const SupplyBorrowModal = ({
     }
 
     if (mode === "borrow") {
-      if (!userGlobalData) {
-        setError("User data is still loading. Try again in a moment.");
+      if (!effectiveUserGlobalData) {
+        setError(
+          borrowUserGlobalFallbackStatus === "failed"
+            ? "Could not load your account summary. Use Retry above or try again later."
+            : "User data is still loading. Try again in a moment."
+        );
         return;
       }
       if (borrowNoCapacityAtHfTarget) {
@@ -1636,14 +1728,31 @@ const SupplyBorrowModal = ({
               )}
 
               {mode === "borrow" &&
-                !userGlobalData &&
-                activeAccount?.address && (
+                !effectiveUserGlobalData &&
+                activeAccount?.address &&
+                (borrowUserGlobalFallbackStatus === "failed" ? (
+                  <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 mb-4">
+                    <p className="text-red-600 dark:text-red-400 text-sm mb-2">
+                      Could not load your account summary. Check your connection
+                      and try again.
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="text-red-700 border-red-300 hover:bg-red-50 dark:text-red-300 dark:border-red-600 dark:hover:bg-red-900/30"
+                      onClick={retryBorrowUserGlobalFetch}
+                    >
+                      Retry
+                    </Button>
+                  </div>
+                ) : (
                   <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3 mb-4">
                     <p className="text-yellow-600 dark:text-yellow-400 text-sm">
                       Loading user data... Please wait before borrowing.
                     </p>
                   </div>
-                )}
+                ))}
 
               {mode === "deposit" && depositFolksAdapters.length === 1 && (
                 <div className="space-y-2 rounded-lg border border-slate-200/80 bg-white/60 p-3 dark:border-slate-600 dark:bg-slate-800/60">
@@ -1704,13 +1813,13 @@ const SupplyBorrowModal = ({
                 supplyAPY={assetData.supplyAPY}
                 totalSupply={assetData.totalSupply}
                 maxTotalDeposits={assetData.maxTotalDeposits}
-                userGlobalData={userGlobalData}
+                userGlobalData={effectiveUserGlobalData}
                 collateralFactor={assetData.collateralFactor}
                 onAmountChange={handleAmountChange}
                 onSubmit={handleBuildTransaction}
                 isLoading={isLoading || isSigning}
                 disabled={
-                  (mode === "borrow" && !userGlobalData) ||
+                  (mode === "borrow" && !effectiveUserGlobalData) ||
                   (mode === "borrow" && borrowExceedsEffectiveCap) ||
                   (mode === "borrow" && borrowSubmitBlockedBelowHfTarget) ||
                   (mode === "borrow" && borrowNoCapacityAtHfTarget)
@@ -1751,7 +1860,7 @@ const SupplyBorrowModal = ({
                 poolId={poolId}
                 network={networkToUse}
                 assetData={assetData}
-                userGlobalData={userGlobalData}
+                userGlobalData={effectiveUserGlobalData}
                 poolGlobalUserData={poolGlobalUserData}
                 depositAmount={mode === "deposit" ? parseFloat(amount) || 0 : 0}
                 borrowAmount={mode === "borrow" ? parseFloat(amount) || 0 : 0}
@@ -1825,7 +1934,7 @@ const SupplyBorrowModal = ({
                       !amount ||
                       parseFloat(amount) <= 0 ||
                       isLoading ||
-                      (mode === "borrow" && !userGlobalData) ||
+                      (mode === "borrow" && !effectiveUserGlobalData) ||
                       (mode === "borrow" && borrowNoCapacityAtHfTarget) ||
                       (mode === "borrow" && borrowExceedsEffectiveCap) ||
                       (mode === "borrow" && borrowSubmitBlockedBelowHfTarget) ||

@@ -1140,87 +1140,111 @@ export const fetchUserGlobalData = async (
       let totalBorrowValueUSD = 0;
       let lastUpdateTime = 0;
 
-      for (const poolId of networkConfig.contracts.lendingPools) {
-        const ci = new CONTRACT(
-          Number(poolId),
-          clients.algod,
-          undefined,
-          { ...LendingPoolAppSpec.contract, events: [] },
-          {
-            addr: algosdk.getApplicationAddress(Number(poolId)),
-            sk: new Uint8Array(),
-          }
-        );
-
-        const globalUserR = await ci.get_global_user(userAddress);
-        if (globalUserR.success) {
-          const globalUser = GlobalUserData(globalUserR.returnValue);
-          console.log(`Global user data for pool ${poolId}:`, globalUser);
-
-          // Contract stores totalCollateralValue with scaling: (deposit_amount * price) // SCALE
-          // Where SCALE = 1e18, so we need to divide by 1e18 to get USD value
-          const poolCollateralValueUSD = new BigNumber(
-            globalUser.totalCollateralValue.toString()
-          )
-            .div(1e12) // Correct scaling factor for collateral value
-            .toNumber();
-          const poolBorrowValueUSD = new BigNumber(
-            globalUser.totalBorrowValue.toString()
-          )
-            .div(1e12) // Correct scaling factor for borrow value
-            .toNumber();
-
-          console.log(`Pool ${poolId} values:`, {
-            collateralValueUSD: poolCollateralValueUSD,
-            borrowValueUSD: poolBorrowValueUSD,
-          });
-
-          // Aggregate values from all pools
-          totalCollateralValueUSD += poolCollateralValueUSD;
-          totalBorrowValueUSD += poolBorrowValueUSD;
-          // Use the latest update time from all pools
-          lastUpdateTime = Math.max(
-            lastUpdateTime,
-            Number(globalUser.lastUpdateTime)
+      const lendingPools = networkConfig.contracts?.lendingPools ?? [];
+      for (const poolId of lendingPools) {
+        const poolIdNum = Number(poolId);
+        if (!Number.isFinite(poolIdNum) || poolIdNum <= 0) {
+          console.warn(
+            `fetchUserGlobalData: skipping invalid lending pool id: ${String(poolId)}`
           );
-        } else {
-          console.warn(`Failed to get global user data for pool ${poolId}`);
+          continue;
+        }
+        try {
+          const ci = new CONTRACT(
+            poolIdNum,
+            clients.algod,
+            undefined,
+            { ...LendingPoolAppSpec.contract, events: [] },
+            {
+              addr: algosdk.encodeAddress(
+                algosdk.getApplicationAddress(poolIdNum).publicKey
+              ),
+              sk: new Uint8Array(),
+            }
+          );
+          ci.setFee(2000);
+
+          const globalUserR = await ci.get_global_user(userAddress);
+          if (globalUserR.success) {
+            const globalUser = GlobalUserData(globalUserR.returnValue);
+            console.log(`Global user data for pool ${poolId}:`, globalUser);
+
+            // Contract stores totalCollateralValue with scaling: (deposit_amount * price) // SCALE
+            // Where SCALE = 1e18, so we need to divide by 1e18 to get USD value
+            const poolCollateralValueUSD = new BigNumber(
+              globalUser.totalCollateralValue.toString()
+            )
+              .div(1e12) // Correct scaling factor for collateral value
+              .toNumber();
+            const poolBorrowValueUSD = new BigNumber(
+              globalUser.totalBorrowValue.toString()
+            )
+              .div(1e12) // Correct scaling factor for borrow value
+              .toNumber();
+
+            console.log(`Pool ${poolId} values:`, {
+              collateralValueUSD: poolCollateralValueUSD,
+              borrowValueUSD: poolBorrowValueUSD,
+            });
+
+            // Aggregate values from all pools
+            totalCollateralValueUSD += poolCollateralValueUSD;
+            totalBorrowValueUSD += poolBorrowValueUSD;
+            // Use the latest update time from all pools
+            lastUpdateTime = Math.max(
+              lastUpdateTime,
+              Number(globalUser.lastUpdateTime)
+            );
+          } else {
+            console.warn(`Failed to get global user data for pool ${poolId}`);
+          }
+        } catch (poolError) {
+          console.warn(
+            `fetchUserGlobalData: pool ${poolId} read failed (continuing other pools):`,
+            poolError
+          );
         }
       }
 
       // Same ratio as on-chain _calculate_user_health(collateral, borrow, liquidation_threshold);
       // here we only have pooled totals, so we use a default LT when user deposit breakdown is unavailable.
       let healthFactorIndex: number | undefined;
+      try {
+        if (totalBorrowValueUSD === 0 && totalCollateralValueUSD > 0) {
+          healthFactorIndex = 3.0;
+          console.log(
+            `[HealthFactorIndex] No borrows - excellent health (capped at 3.0): ${healthFactorIndex}`
+          );
+        } else if (totalCollateralValueUSD === 0 && totalBorrowValueUSD > 0) {
+          healthFactorIndex = 0;
+          console.log(
+            `[HealthFactorIndex] No collateral but has borrows: ${healthFactorIndex}`
+          );
+        } else if (totalBorrowValueUSD > 0 && totalCollateralValueUSD > 0) {
+          const hfRaw = calculateUserHealthFactor(
+            totalCollateralValueUSD,
+            totalBorrowValueUSD,
+            DEFAULT_LIQUIDATION_THRESHOLD_DECIMAL,
+            "fetchUserGlobalData"
+          );
+          if (hfRaw != null) {
+            healthFactorIndex = Math.min(hfRaw, 3.0);
+          }
 
-      if (totalBorrowValueUSD === 0 && totalCollateralValueUSD > 0) {
-        healthFactorIndex = 3.0;
-        console.log(
-          `[HealthFactorIndex] No borrows - excellent health (capped at 3.0): ${healthFactorIndex}`
-        );
-      } else if (totalCollateralValueUSD === 0 && totalBorrowValueUSD > 0) {
-        healthFactorIndex = 0;
-        console.log(
-          `[HealthFactorIndex] No collateral but has borrows: ${healthFactorIndex}`
-        );
-      } else if (totalBorrowValueUSD > 0 && totalCollateralValueUSD > 0) {
-        const hfRaw = calculateUserHealthFactor(
-          totalCollateralValueUSD,
-          totalBorrowValueUSD,
-          DEFAULT_LIQUIDATION_THRESHOLD_DECIMAL,
-          "fetchUserGlobalData"
-        );
-        if (hfRaw != null) {
-          healthFactorIndex = Math.min(hfRaw, 3.0);
+          console.log(`[HealthFactorIndex] Calculation:`, {
+            totalCollateralValueUSD,
+            totalBorrowValueUSD,
+            liquidationThreshold: DEFAULT_LIQUIDATION_THRESHOLD_DECIMAL,
+            healthFactorIndex,
+            formula: `(${totalCollateralValueUSD.toFixed(2)} × ${DEFAULT_LIQUIDATION_THRESHOLD_DECIMAL}) / ${totalBorrowValueUSD.toFixed(2)}`,
+            note: "Matches contract (collateral × liquidation_threshold) / borrow; default LT without per-user markets. Portfolio refines LT from deposits. Capped at 3.0 for display.",
+          });
         }
-
-        console.log(`[HealthFactorIndex] Calculation:`, {
-          totalCollateralValueUSD,
-          totalBorrowValueUSD,
-          liquidationThreshold: DEFAULT_LIQUIDATION_THRESHOLD_DECIMAL,
-          healthFactorIndex,
-          formula: `(${totalCollateralValueUSD.toFixed(2)} × ${DEFAULT_LIQUIDATION_THRESHOLD_DECIMAL}) / ${totalBorrowValueUSD.toFixed(2)}`,
-          note: "Matches contract (collateral × liquidation_threshold) / borrow; default LT without per-user markets. Portfolio refines LT from deposits. Capped at 3.0 for display.",
-        });
+      } catch (hfError) {
+        console.warn(
+          "fetchUserGlobalData: health factor display calc failed (totals still returned):",
+          hfError
+        );
       }
 
       return {
@@ -1568,13 +1592,16 @@ export const fetchUserBorrowBalance = async (
         networkConfig.walletNetworkId as AlgorandNetwork
       );
 
+      const poolIdNum = Number(poolId);
       const ci = new CONTRACT(
-        Number(poolId),
+        poolIdNum,
         clients.algod,
         undefined,
         { ...LendingPoolAppSpec.contract, events: [] },
         {
-          addr: algosdk.getApplicationAddress(Number(poolId)),
+          addr: algosdk.encodeAddress(
+            algosdk.getApplicationAddress(poolIdNum).publicKey
+          ),
           sk: new Uint8Array(),
         }
       );
@@ -1737,13 +1764,16 @@ export async function fetchBorrowPositionChainDebug(
       networkConfig.walletNetworkId as AlgorandNetwork
     );
 
+    const poolIdNum = Number(poolId);
     const ci = new CONTRACT(
-      Number(poolId),
+      poolIdNum,
       clients.algod,
       undefined,
       { ...LendingPoolAppSpec.contract, events: [] },
       {
-        addr: algosdk.getApplicationAddress(Number(poolId)),
+        addr: algosdk.encodeAddress(
+          algosdk.getApplicationAddress(poolIdNum).publicKey
+        ),
         sk: new Uint8Array(),
       }
     );
@@ -5006,11 +5036,9 @@ export const borrow = async (
           originalContractId: t.originalContractId,
         }))
       );
-      console.log("Looking for marketId:", marketId);
+      console.log("Looking for marketId:", marketId, "poolId:", poolId);
 
-      const token = allTokens.find(
-        (token) => token.underlyingContractId === marketId
-      );
+      const token = resolveDisplayTokenForPoolMarket(networkId, poolId, marketId);
 
       console.log("Token found:", token);
 
@@ -5369,6 +5397,27 @@ export const borrow = async (
 };
 
 /**
+ * Resolve a `getAllTokensWithDisplayInfo` row for lending ops.
+ * Same market contract id can exist on multiple pools (e.g. fALGO on A vs D); match pool first.
+ */
+function resolveDisplayTokenForPoolMarket(
+  networkId: NetworkId,
+  poolId: string,
+  marketId: string
+): ReturnType<typeof getAllTokensWithDisplayInfo>[number] | undefined {
+  const allTokens = getAllTokensWithDisplayInfo(networkId);
+  const byPool = allTokens.find(
+    (t) =>
+      String(t.underlyingContractId ?? "") === String(marketId) &&
+      String(t.poolId ?? "") === String(poolId)
+  );
+  if (byPool) return byPool;
+  return allTokens.find(
+    (t) => String(t.underlyingContractId ?? "") === String(marketId)
+  );
+}
+
+/**
  * Repay borrowed tokens to a lending market
  */
 export const repay = async (
@@ -5400,21 +5449,19 @@ export const repay = async (
       const tokenInfo = await ARC200Service.getTokenInfo(marketId);
       console.log("tokenInfo", { tokenInfo });
 
-      // Get token information
       const allTokens = getAllTokensWithDisplayInfo(networkId);
       console.log(
         "All available tokens:",
         allTokens.map((t) => ({
           symbol: t.symbol,
+          poolId: t.poolId,
           underlyingContractId: t.underlyingContractId,
           originalContractId: t.originalContractId,
         }))
       );
-      console.log("Looking for marketId:", marketId);
+      console.log("Looking for marketId:", marketId, "poolId:", poolId);
 
-      const token = allTokens.find(
-        (token) => token.underlyingContractId === marketId
-      );
+      const token = resolveDisplayTokenForPoolMarket(networkId, poolId, marketId);
 
       console.log("Token found:", token);
 
@@ -5742,15 +5789,14 @@ export const repayOnBehalf = async (
         "All available tokens:",
         allTokens.map((t) => ({
           symbol: t.symbol,
+          poolId: t.poolId,
           underlyingContractId: t.underlyingContractId,
           originalContractId: t.originalContractId,
         }))
       );
-      console.log("Looking for marketId:", marketId);
+      console.log("Looking for marketId:", marketId, "poolId:", poolId);
 
-      const token = allTokens.find(
-        (token) => token.underlyingContractId === marketId
-      );
+      const token = resolveDisplayTokenForPoolMarket(networkId, poolId, marketId);
 
       console.log("Token found:", token);
 
@@ -6094,11 +6140,9 @@ export const repayAll = async (
           originalContractId: t.originalContractId,
         }))
       );
-      console.log("Looking for marketId:", marketId);
+      console.log("Looking for marketId:", marketId, "poolId:", poolId);
 
-      const token = allTokens.find(
-        (token) => token.underlyingContractId === marketId
-      );
+      const token = resolveDisplayTokenForPoolMarket(networkId, poolId, marketId);
 
       console.log("Token found:", token);
 

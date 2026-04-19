@@ -2386,7 +2386,7 @@ const Portfolio = () => {
         tokenPrice = 1;
       }
 
-      console.log({ market, tokenPrice, marketData, asset });
+      //console.log({ market, tokenPrice, marketData, asset });
 
       const balanceUSD = balance * tokenPrice;
 
