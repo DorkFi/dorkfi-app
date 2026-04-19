@@ -29,6 +29,7 @@ import {
   tokenConfigHasAdapters,
   resolveDepositFolksAdapter,
   resolveWithdrawFolksAdapter,
+  resolveBorrowFolksAdapter,
 } from "@/config";
 import algorandService, { AlgorandNetwork } from "./algorandService";
 import { ARC200Service } from "./arc200Service";
@@ -5010,12 +5011,20 @@ export const borrow = async (
   tokenStandard: TokenStandard,
   amount: string,
   userAddress: string,
-  networkId: NetworkId
+  networkId: NetworkId,
+  options?: { borrowAdapterId?: string }
 ): Promise<
   | { success: boolean; txId?: string; error?: string }
   | { success: true; txns: string[] }
 > => {
-  console.log("borrow", { poolId, marketId, amount, userAddress, networkId });
+  console.log("borrow", {
+    poolId,
+    marketId,
+    amount,
+    userAddress,
+    networkId,
+    borrowAdapterId: options?.borrowAdapterId,
+  });
 
   try {
     const networkConfig = getNetworkConfig(networkId);
@@ -5243,6 +5252,49 @@ export const borrow = async (
         ),
       };
 
+      const tokenConfigLookupBorrow =
+        (token as { configKey?: string }).configKey ??
+        (token as { originalSymbol?: string }).originalSymbol ??
+        token.symbol;
+      const rawTokenConfigBorrow = getTokenConfig(
+        networkId,
+        tokenConfigLookupBorrow as never
+      );
+      const tokenConfigForBorrow: TokenConfig | undefined = Array.isArray(
+        rawTokenConfigBorrow
+      )
+        ? rawTokenConfigBorrow.find(
+            (c) => String(c.poolId) === String(poolId)
+          ) ?? rawTokenConfigBorrow[0]
+        : rawTokenConfigBorrow;
+
+      const folksBorrowAdapter = resolveBorrowFolksAdapter(
+        tokenConfigForBorrow ?? {},
+        options?.borrowAdapterId
+      );
+      const borrowUsesFolksRedeem =
+        folksBorrowAdapter != null &&
+        folksBorrowAdapter.borrowReceiveBasis === "underlying" &&
+        networkConfig.networkId === "algorand-mainnet" &&
+        tokenStandardUsesAsaStyleNt200Txns(tokenStandard);
+
+      let folksBorrowExtraTxns: Record<string, unknown>[] = [];
+      if (borrowUsesFolksRedeem && folksBorrowAdapter) {
+        const amt = BigInt(amount);
+        if (amt > BigInt(0)) {
+          const folksRedeemTxns = await buildFolksWithdrawFromPoolTxns({
+            poolName: folksBorrowAdapter.folksParams.pool,
+            userAddress,
+            fAssetAmount: amt,
+            algod: clients.algod,
+          });
+          if (folksRedeemTxns.length > 0) {
+            folksBorrowExtraTxns =
+              folksMintTxnsToArccjsExtraTxns(folksRedeemTxns);
+          }
+        }
+      }
+
       ciLending.setFee(5000);
 
       // const calculate_user_debt_interestR =
@@ -5331,6 +5383,9 @@ export const borrow = async (
             ...optIn,
             note: new TextEncoder().encode("nt200 withdraw"),
           });
+          if (folksBorrowExtraTxns.length > 0) {
+            buildN.push(...folksBorrowExtraTxns);
+          }
         }
         // user withdraws from arc200-exchange
         else if (tokenStandard == "arc200-exchange") {

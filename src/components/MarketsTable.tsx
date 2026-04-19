@@ -722,6 +722,73 @@ const MarketsTable = () => {
     [markets, currentNetwork]
   );
 
+  const borrowModalAvailableAssets = useMemo(() => {
+    type Row = (typeof markets)[number] & {
+      _sortKey?: string;
+      configSymbol?: string;
+      marketInfo?: { marketId?: string | number };
+    };
+    return markets.map((raw) => {
+      const m = raw as Row;
+      const rowKey = m._sortKey;
+      const mid =
+        m.marketInfo?.marketId != null
+          ? String(m.marketInfo.marketId)
+          : undefined;
+      return {
+        asset: m.asset,
+        icon: typeof m.icon === "string" ? m.icon : "",
+        value:
+          typeof m.borrowAPY === "number" && !Number.isNaN(m.borrowAPY)
+            ? m.borrowAPY
+            : undefined,
+        poolId: m.poolId != null ? String(m.poolId) : undefined,
+        network: currentNetwork,
+        configSymbol:
+          typeof m.configSymbol === "string" ? m.configSymbol : undefined,
+        marketId: mid,
+        marketRowKey: rowKey,
+      };
+    });
+  }, [markets, currentNetwork]);
+
+  const borrowModalMarketId = useMemo(() => {
+    if (!borrowModal.marketRowKey) return undefined;
+    const row = markets.find(
+      (m) => (m as { _sortKey?: string })._sortKey === borrowModal.marketRowKey
+    ) as { marketInfo?: { marketId?: string | number } } | undefined;
+    return row?.marketInfo?.marketId != null
+      ? String(row.marketInfo.marketId)
+      : undefined;
+  }, [markets, borrowModal.marketRowKey]);
+
+  const handleSelectBorrowMarket = useCallback(
+    (
+      nextAsset: string,
+      nextPoolId?: string,
+      _nextNetwork?: string,
+      pick?: {
+        marketId?: string;
+        configSymbol?: string;
+        marketRowKey?: string;
+      }
+    ) => {
+      const rowKey = pick?.marketRowKey;
+      setBorrowModal((prev) => ({
+        ...prev,
+        isOpen: true,
+        asset: nextAsset,
+        poolId: nextPoolId,
+        marketRowKey: rowKey,
+        configSymbol:
+          pick?.configSymbol ??
+          (rowKey ? configSymbolFromMarketRowKey(rowKey) : undefined) ??
+          prev.configSymbol,
+      }));
+    },
+    [configSymbolFromMarketRowKey]
+  );
+
   useEffect(() => {
     setNewMarketsOnly(false);
     setRewardMarketsOnly(false);
@@ -1158,7 +1225,7 @@ const MarketsTable = () => {
     }
   };
 
-  // Fetch user data when wallet connects while borrow modal is open
+  // Fetch user data when wallet connects while borrow modal is open (or when switching asset in-modal)
   useEffect(() => {
     if (borrowModal.isOpen && borrowModal.asset && activeAccount?.address) {
       const fetchData = async () => {
@@ -1183,7 +1250,30 @@ const MarketsTable = () => {
               currentNetwork
             );
             setUserBorrowBalance(borrowData?.balance || 0);
+          } else {
+            setUserBorrowBalance(0);
           }
+
+          let poolCollateralRows: PoolCollateralMarketRow[] = [];
+          if (
+            borrowModal.poolId != null &&
+            borrowModal.poolId !== ""
+          ) {
+            try {
+              poolCollateralRows =
+                await fetchPoolCollateralMarketRowsForDeposit(
+                  activeAccount.address,
+                  currentNetwork as NetworkId,
+                  borrowModal.poolId
+                );
+            } catch (e) {
+              console.error(
+                "Error loading pool collateral markets for borrow:",
+                e
+              );
+            }
+          }
+          setDepositPoolCollateralMarkets(poolCollateralRows);
         } catch (error) {
           console.error("Error fetching user data:", error);
         }
@@ -1197,6 +1287,7 @@ const MarketsTable = () => {
     borrowModal.asset,
     borrowModal.poolId,
     borrowModal.marketRowKey,
+    borrowModal.configSymbol,
     currentNetwork,
     resolveTokenForDisplayedAsset,
   ]);
@@ -3266,6 +3357,8 @@ const MarketsTable = () => {
               asset={borrowModal.asset}
               poolId={borrowModal.poolId}
               configSymbol={borrowModal.configSymbol}
+              marketId={borrowModalMarketId}
+              marketRowKey={borrowModal.marketRowKey}
               network={currentNetwork}
               mode="borrow"
               assetData={getAssetData(
@@ -3273,6 +3366,12 @@ const MarketsTable = () => {
                 borrowModal.poolId,
                 borrowModal.marketRowKey
               )}
+              availableAssets={
+                borrowModalAvailableAssets.length >= 2
+                  ? borrowModalAvailableAssets
+                  : undefined
+              }
+              onSelectAsset={handleSelectBorrowMarket}
               userGlobalData={userGlobalData}
               userBorrowBalance={userBorrowBalance}
               poolCollateralMarkets={depositPoolCollateralMarkets}

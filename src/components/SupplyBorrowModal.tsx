@@ -34,11 +34,18 @@ import {
   getNetworkConfig,
   NetworkId,
   getFolksAdaptersForPhase,
+  getAnyFolksAdapter,
   tokenAdapterStableId,
   resolveDepositFolksAdapter,
+  resolveBorrowFolksAdapter,
   type FolksTokenAdapterConfig,
   type TokenConfig,
 } from "@/config";
+import {
+  estimateFolksDepositMintedFAssetAmount,
+  folksFAssetHumanToUnderlyingHuman,
+  folksUnderlyingHumanToFAssetHuman,
+} from "@/services/folksDepositAdapter";
 import algorandService from "@/services/algorandService";
 import algosdk, { waitForConfirmation } from "algosdk";
 import BigNumber from "bignumber.js";
@@ -138,6 +145,68 @@ export function resolveSupplyBorrowToken<T extends SupplyBorrowTokenRow>(
   return tokens.find((t) => t.symbol === asset);
 }
 
+/** Row in the optional supply/borrow asset picker (same disambiguation idea as Withdraw modal). */
+export type SupplyBorrowAvailableAsset = {
+  asset: string;
+  icon: string;
+  value?: number;
+  poolId?: string;
+  network?: string;
+  marketId?: string;
+  configSymbol?: string;
+  /** Stable id for this table row (e.g. on-demand `_sortKey`). */
+  marketRowKey?: string;
+};
+
+/** Stable Select value when the same display asset appears on multiple pools or contracts. */
+export function supplyBorrowAssetRowKey(
+  a: SupplyBorrowAvailableAsset,
+  index: number
+): string {
+  const rk =
+    a.marketRowKey != null && String(a.marketRowKey).trim() !== ""
+      ? String(a.marketRowKey)
+      : "";
+  if (rk !== "") return rk;
+  const pool = a.poolId ?? "";
+  const net = a.network ?? "";
+  const mid =
+    a.marketId != null && String(a.marketId) !== "" ? String(a.marketId) : "";
+  const cfg =
+    a.configSymbol != null && String(a.configSymbol) !== ""
+      ? String(a.configSymbol)
+      : "";
+  if (mid === "" && cfg === "") {
+    return `${a.asset}|${pool}|${net}|i${index}`;
+  }
+  return `${a.asset}|${pool}|${net}|${mid}|${cfg}`;
+}
+
+/** Borrow amount field vs protocol: user may enter ALGO (underlying route) or f-asset; caps are in market-token human. */
+function borrowInputToMarketTokenHuman(
+  amountStr: string,
+  receiveBasis: "underlying" | "market_token" | undefined,
+  mintedFAssetPerOneUnderlying: bigint | null,
+  decimals: number
+): number | null {
+  const amt = parseFloat(amountStr) || 0;
+  if (amt <= 0) return 0;
+  if (receiveBasis === "underlying") {
+    if (
+      mintedFAssetPerOneUnderlying == null ||
+      mintedFAssetPerOneUnderlying <= BigInt(0)
+    ) {
+      return null;
+    }
+    return folksUnderlyingHumanToFAssetHuman(
+      amt,
+      mintedFAssetPerOneUnderlying,
+      decimals
+    );
+  }
+  return amt;
+}
+
 interface SupplyBorrowModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -147,6 +216,8 @@ interface SupplyBorrowModalProps {
   configSymbol?: string;
   /** Underlying market contract id; wins when display `symbol` + `poolId` collide (e.g. ALGO vs fALGO). */
   marketId?: string;
+  /** On-demand / table row key when the picker needs to match the open market exactly. */
+  marketRowKey?: string;
   network?: string; // Network ID for cross-network operations
   transactionId?: string;
   mode: "deposit" | "borrow";
@@ -183,15 +254,18 @@ interface SupplyBorrowModalProps {
   onRefreshWalletBalance?: () => void;
   /** Refetch wallet / market balances when the user picks a different deposit route (e.g. fALGO vs ALGO). */
   onDepositRouteChange?: () => void | Promise<void>;
-  /** When provided (e.g. from health card), show asset dropdown like Withdraw modal */
-  availableAssets?: {
-    asset: string;
-    icon: string;
-    value?: number;
-    poolId?: string;
-    network?: string;
-  }[];
-  onSelectAsset?: (asset: string, poolId?: string, network?: string) => void;
+  /** When provided, show an in-modal asset picker (deposit and/or borrow), same pattern as Withdraw. */
+  availableAssets?: SupplyBorrowAvailableAsset[];
+  onSelectAsset?: (
+    asset: string,
+    poolId?: string,
+    network?: string,
+    pick?: {
+      marketId?: string;
+      configSymbol?: string;
+      marketRowKey?: string;
+    }
+  ) => void;
   walletBalanceLastUpdated?: number;
   /** Supplied collateral markets in this pool (for deposit mode LT comparison). */
   poolCollateralMarkets?: PoolCollateralMarketRow[];
@@ -209,6 +283,7 @@ const SupplyBorrowModal = ({
   poolId,
   configSymbol,
   marketId,
+  marketRowKey,
   network,
   mode,
   assetData,
@@ -258,6 +333,15 @@ const SupplyBorrowModal = ({
   const [selectedDepositAdapterId, setSelectedDepositAdapterId] =
     useState<string>("");
   const [depositRoutePickerOpen, setDepositRoutePickerOpen] = useState(false);
+  const [selectedBorrowAdapterId, setSelectedBorrowAdapterId] =
+    useState<string>("");
+  const [borrowRoutePickerOpen, setBorrowRoutePickerOpen] = useState(false);
+  /** Folks mint: f-asset out for 1.0 underlying in smallest units (for ALGO ↔ fALGO borrow UI). */
+  const [folksMintedFAssetPerOneUnderlying, setFolksMintedFAssetPerOneUnderlying] =
+    useState<bigint | null>(null);
+  const [folksMintRatioStatus, setFolksMintRatioStatus] = useState<
+    "idle" | "loading" | "ready" | "failed"
+  >("idle");
   /**
    * When the parent opens borrow but never set `userGlobalData` (e.g. pre-fetch threw),
    * load aggregate user totals here so the modal is not stuck on "Loading…" forever.
@@ -286,6 +370,36 @@ const SupplyBorrowModal = ({
   }, [userGlobalData, borrowUserGlobalFallback]);
 
   const { price: tokenPrice } = useTokenPrice(asset, networkToUse);
+
+  const supplyBorrowSelectRowKey = useMemo(() => {
+    if (!availableAssets?.length) return "";
+    const idx = availableAssets.findIndex(
+      (a) =>
+        a.asset === asset &&
+        String(a.poolId ?? "") === String(poolId ?? "") &&
+        String(a.network ?? "") === String(network ?? "") &&
+        String(a.marketId ?? "") === String(marketId ?? "") &&
+        String(a.configSymbol ?? "") === String(configSymbol ?? "") &&
+        String(a.marketRowKey ?? "") === String(marketRowKey ?? "")
+    );
+    if (idx >= 0) return supplyBorrowAssetRowKey(availableAssets[idx], idx);
+    const loose = availableAssets.findIndex(
+      (a) =>
+        a.asset === asset &&
+        String(a.poolId ?? "") === String(poolId ?? "") &&
+        String(a.network ?? "") === String(network ?? "")
+    );
+    if (loose >= 0) return supplyBorrowAssetRowKey(availableAssets[loose], loose);
+    return supplyBorrowAssetRowKey(availableAssets[0], 0);
+  }, [
+    availableAssets,
+    asset,
+    poolId,
+    network,
+    marketId,
+    configSymbol,
+    marketRowKey,
+  ]);
 
   const parentUserGlobalProvided = userGlobalData != null;
 
@@ -379,8 +493,94 @@ const SupplyBorrowModal = ({
   const depositMultiRoute =
     mode === "deposit" && depositFolksAdapters.length > 1;
 
+  const resolvedBorrowTokenConfig = useMemo((): TokenConfig | null => {
+    if (mode !== "borrow") return null;
+    const tokens = getAllTokensWithDisplayInfo(networkToUse as NetworkId);
+    const tok = resolveSupplyBorrowToken(
+      tokens,
+      asset,
+      poolId,
+      configSymbol,
+      marketId
+    );
+    if (!tok?.underlyingContractId) return null;
+    const originalSymbol =
+      (tok as { configKey?: string }).configKey ??
+      ("originalSymbol" in tok
+        ? (tok as { originalSymbol?: string }).originalSymbol
+        : asset);
+    const raw = getTokenConfig(networkToUse as NetworkId, originalSymbol);
+    if (!raw) return null;
+    return Array.isArray(raw)
+      ? raw.find((tc) => String(tc.poolId) === String(tok.poolId)) ?? raw[0]
+      : raw;
+  }, [mode, networkToUse, asset, poolId, configSymbol, marketId]);
+
+  const borrowFolksAdapters = useMemo((): FolksTokenAdapterConfig[] => {
+    if (!resolvedBorrowTokenConfig) return [];
+    return getFolksAdaptersForPhase(resolvedBorrowTokenConfig, "borrow");
+  }, [resolvedBorrowTokenConfig]);
+
+  const borrowMultiRoute =
+    mode === "borrow" && borrowFolksAdapters.length > 1;
+
+  const selectedBorrowAdapter = useMemo(() => {
+    if (!resolvedBorrowTokenConfig || !selectedBorrowAdapterId) {
+      return undefined;
+    }
+    return resolveBorrowFolksAdapter(
+      resolvedBorrowTokenConfig,
+      selectedBorrowAdapterId
+    );
+  }, [resolvedBorrowTokenConfig, selectedBorrowAdapterId]);
+
+  useEffect(() => {
+    if (!isOpen || mode !== "borrow" || !resolvedBorrowTokenConfig) {
+      setFolksMintedFAssetPerOneUnderlying(null);
+      setFolksMintRatioStatus("idle");
+      return;
+    }
+    const folks = getAnyFolksAdapter(resolvedBorrowTokenConfig);
+    const aln = getAlgorandNetworkFromNetworkId(networkToUse as NetworkId);
+    if (!folks || !aln) {
+      setFolksMintedFAssetPerOneUnderlying(null);
+      setFolksMintRatioStatus("idle");
+      return;
+    }
+    setFolksMintRatioStatus("loading");
+    let cancelled = false;
+    (async () => {
+      try {
+        const { algod } = algorandService.initializeClients(aln as any);
+        const dec = resolvedBorrowTokenConfig.decimals ?? 6;
+        const oneUnderlying = BigInt(10) ** BigInt(dec);
+        const { mintedFAsset } = await estimateFolksDepositMintedFAssetAmount({
+          poolName: folks.folksParams.pool,
+          underlyingAmount: oneUnderlying,
+          algod,
+        });
+        if (!cancelled) {
+          setFolksMintedFAssetPerOneUnderlying(mintedFAsset);
+          setFolksMintRatioStatus("ready");
+        }
+      } catch {
+        if (!cancelled) {
+          setFolksMintedFAssetPerOneUnderlying(null);
+          setFolksMintRatioStatus("failed");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, mode, resolvedBorrowTokenConfig, networkToUse]);
+
   useEffect(() => {
     if (!isOpen) setDepositRoutePickerOpen(false);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) setBorrowRoutePickerOpen(false);
   }, [isOpen]);
 
   /** f-ASA wallet balance (human) when config exposes a `market_token` deposit route; fills in if parent omits `walletBalanceMarketToken`. */
@@ -509,13 +709,30 @@ const SupplyBorrowModal = ({
     });
   }, [isOpen, mode, depositFolksAdapters]);
 
+  useEffect(() => {
+    if (!isOpen || mode !== "borrow") return;
+    const list = borrowFolksAdapters;
+    if (list.length === 0) {
+      setSelectedBorrowAdapterId("");
+      return;
+    }
+    setSelectedBorrowAdapterId((prev) => {
+      const ids = list.map((a) => tokenAdapterStableId(a));
+      if (prev && ids.includes(prev)) return prev;
+      return ids[0] ?? "";
+    });
+  }, [isOpen, mode, borrowFolksAdapters]);
+
   const prevDepositAdapterIdRef = useRef<string>("");
   const onDepositRouteChangeRef = useRef(onDepositRouteChange);
   onDepositRouteChangeRef.current = onDepositRouteChange;
 
+  const prevBorrowAdapterIdRef = useRef<string>("");
+
   useEffect(() => {
     if (!isOpen) {
       prevDepositAdapterIdRef.current = "";
+      prevBorrowAdapterIdRef.current = "";
     }
   }, [isOpen]);
 
@@ -533,6 +750,18 @@ const SupplyBorrowModal = ({
     }
     prevDepositAdapterIdRef.current = selectedDepositAdapterId;
   }, [mode, isOpen, selectedDepositAdapterId]);
+
+  useEffect(() => {
+    if (mode !== "borrow" || !isOpen) return;
+    if (!selectedBorrowAdapterId) return;
+    const prev = prevBorrowAdapterIdRef.current;
+    const changed = prev !== "" && prev !== selectedBorrowAdapterId;
+    if (changed) {
+      setAmount("");
+      setFiatValue(0);
+    }
+    prevBorrowAdapterIdRef.current = selectedBorrowAdapterId;
+  }, [mode, isOpen, selectedBorrowAdapterId]);
 
   const depositBlockedByLowEstimatedHealth = useMemo(() => {
     if (mode !== "deposit") return false;
@@ -631,6 +860,88 @@ const SupplyBorrowModal = ({
     return Math.max(0, Math.min(borrowLiquidityOnlyTokens, hfSafeMaxBorrowTokens));
   }, [mode, borrowLiquidityOnlyTokens, hfSafeMaxBorrowTokens]);
 
+  const borrowInputReceiveBasis =
+    selectedBorrowAdapter?.borrowReceiveBasis ?? "market_token";
+
+  const amountBorrowMarketTokenHuman = useMemo((): number | null => {
+    if (mode !== "borrow") return 0;
+    return borrowInputToMarketTokenHuman(
+      amount,
+      borrowInputReceiveBasis,
+      folksMintedFAssetPerOneUnderlying,
+      borrowTokenDecimals
+    );
+  }, [
+    mode,
+    amount,
+    borrowInputReceiveBasis,
+    folksMintedFAssetPerOneUnderlying,
+    borrowTokenDecimals,
+  ]);
+
+  const effectiveBorrowCapInInputUnits = useMemo(() => {
+    if (mode !== "borrow" || effectiveBorrowCap == null) return null;
+    if (borrowInputReceiveBasis !== "underlying") {
+      return effectiveBorrowCap;
+    }
+    if (
+      folksMintRatioStatus === "ready" &&
+      folksMintedFAssetPerOneUnderlying != null &&
+      folksMintedFAssetPerOneUnderlying > BigInt(0)
+    ) {
+      return folksFAssetHumanToUnderlyingHuman(
+        effectiveBorrowCap,
+        folksMintedFAssetPerOneUnderlying,
+        borrowTokenDecimals
+      );
+    }
+    return null;
+  }, [
+    mode,
+    effectiveBorrowCap,
+    borrowInputReceiveBasis,
+    folksMintRatioStatus,
+    folksMintedFAssetPerOneUnderlying,
+    borrowTokenDecimals,
+  ]);
+
+  const maxBorrowableUnitSymbol = useMemo(() => {
+    if (mode !== "borrow") return undefined;
+    if (
+      borrowInputReceiveBasis === "underlying" &&
+      folksMintRatioStatus === "ready"
+    ) {
+      return "ALGO";
+    }
+    return asset;
+  }, [mode, borrowInputReceiveBasis, folksMintRatioStatus, asset]);
+
+  const borrowMaxLineLoading = useMemo(() => {
+    if (mode !== "borrow") return false;
+    return (
+      isLoadingMaxBorrow ||
+      (borrowInputReceiveBasis === "underlying" &&
+        folksMintRatioStatus === "loading")
+    );
+  }, [mode, isLoadingMaxBorrow, borrowInputReceiveBasis, folksMintRatioStatus]);
+
+  const borrowFolksRateUnavailable = useMemo(
+    () =>
+      mode === "borrow" &&
+      borrowInputReceiveBasis === "underlying" &&
+      folksMintRatioStatus === "failed",
+    [mode, borrowInputReceiveBasis, folksMintRatioStatus]
+  );
+
+  /** Underlying-route borrow needs Folks mint ratio before submit. */
+  const borrowFolksBlockingSubmit = useMemo(() => {
+    if (mode !== "borrow") return false;
+    if (borrowInputReceiveBasis !== "underlying") return false;
+    const a = parseFloat(amount) || 0;
+    if (a <= 0) return false;
+    return folksMintRatioStatus !== "ready";
+  }, [mode, borrowInputReceiveBasis, amount, folksMintRatioStatus]);
+
   /** Est. pool HF after borrowing `amount` (for submit / button guard). */
   const estimatedHealthFactorAfterBorrow = useMemo(() => {
     if (
@@ -662,9 +973,10 @@ const SupplyBorrowModal = ({
 
   const borrowExceedsEffectiveCap = useMemo(() => {
     if (mode !== "borrow" || effectiveBorrowCap == null) return false;
-    const a = parseFloat(amount) || 0;
-    return a > effectiveBorrowCap + 1e-9;
-  }, [mode, amount, effectiveBorrowCap]);
+    const m = amountBorrowMarketTokenHuman;
+    if (m === null) return false;
+    return m > effectiveBorrowCap + 1e-9;
+  }, [mode, amountBorrowMarketTokenHuman, effectiveBorrowCap]);
 
   const borrowNoCapacityAtHfTarget = useMemo(() => {
     return (
@@ -1325,17 +1637,6 @@ const SupplyBorrowModal = ({
         );
       }
 
-      // For borrows, check liquidity and HF-safe cap (same target as withdraw modal)
-      if (mode === "borrow") {
-        const borrowAmount = parseFloat(amount);
-
-        if (borrowAmount > assetData.liquidity) {
-          setError("Insufficient liquidity available for borrowing");
-          setIsLoading(false);
-          return;
-        }
-      }
-
       // Get the original token config to access tokenStandard
       const originalSymbol =
         (token as { configKey?: string }).configKey ??
@@ -1373,8 +1674,47 @@ const SupplyBorrowModal = ({
         );
       }
 
+      // For borrows, check liquidity in market-token human (f-asset); input may be ALGO on underlying route
+      if (mode === "borrow") {
+        const marketHuman = borrowInputToMarketTokenHuman(
+          amount,
+          borrowInputReceiveBasis,
+          folksMintedFAssetPerOneUnderlying,
+          originalTokenConfig.decimals
+        );
+        if (marketHuman === null) {
+          setError(
+            "Wait for Folks rate to load, or switch borrow route to f-asset."
+          );
+          setIsLoading(false);
+          return;
+        }
+        if (marketHuman > assetData.liquidity + 1e-9) {
+          setError("Insufficient liquidity available for borrowing");
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      let amountHumanForAtomic = amount;
+      if (
+        mode === "borrow" &&
+        borrowInputReceiveBasis === "underlying" &&
+        folksMintedFAssetPerOneUnderlying != null &&
+        folksMintedFAssetPerOneUnderlying > BigInt(0)
+      ) {
+        const parsed = parseFloat(amount) || 0;
+        amountHumanForAtomic = String(
+          folksUnderlyingHumanToFAssetHuman(
+            parsed,
+            folksMintedFAssetPerOneUnderlying,
+            originalTokenConfig.decimals
+          )
+        );
+      }
+
       // Convert amount to atomic units (considering token decimals)
-      const amountInAtomicUnits = new BigNumber(amount)
+      const amountInAtomicUnits = new BigNumber(amountHumanForAtomic)
         .multipliedBy(10 ** originalTokenConfig.decimals)
         .toFixed(0);
 
@@ -1422,7 +1762,10 @@ const SupplyBorrowModal = ({
           originalTokenConfig.tokenStandard,
           amountInAtomicUnits,
           activeAccount.address,
-          actualNetwork as NetworkId
+          actualNetwork as NetworkId,
+          selectedBorrowAdapterId.trim() !== ""
+            ? { borrowAdapterId: selectedBorrowAdapterId }
+            : undefined
         );
       } else {
         throw new Error(`Unsupported mode: ${mode}`);
@@ -1617,28 +1960,32 @@ const SupplyBorrowModal = ({
                 <DialogTitle className="sr-only">
                   {mode === "deposit" ? "Supply" : "Borrow"} {asset}
                 </DialogTitle>
-                {mode === "deposit" &&
-                availableAssets &&
+                {availableAssets &&
                 availableAssets.length > 0 &&
                 onSelectAsset ? (
                   <div className="space-y-2">
                     <h2 className="text-2xl font-bold text-center text-slate-800 dark:text-white capitalize">
-                      supply
+                      {mode === "deposit" ? "supply" : "borrow"}
                     </h2>
                     <div className="flex items-center justify-center gap-3 pb-2 mt-3 h-14">
                       <Select
-                        value={`${asset}-${poolId ?? ""}-${network ?? ""}`}
+                        value={supplyBorrowSelectRowKey}
                         onValueChange={(value) => {
-                          const selected = availableAssets.find(
-                            (a) =>
-                              `${a.asset}-${a.poolId ?? ""}-${a.network ?? ""}` ===
-                              value
+                          const idx = availableAssets.findIndex(
+                            (a, i) => supplyBorrowAssetRowKey(a, i) === value
                           );
+                          const selected =
+                            idx >= 0 ? availableAssets[idx] : undefined;
                           if (selected) {
                             onSelectAsset(
                               selected.asset,
                               selected.poolId,
-                              selected.network
+                              selected.network,
+                              {
+                                marketId: selected.marketId,
+                                configSymbol: selected.configSymbol,
+                                marketRowKey: selected.marketRowKey,
+                              }
                             );
                           }
                         }}
@@ -1657,10 +2004,10 @@ const SupplyBorrowModal = ({
                           </div>
                         </SelectTrigger>
                         <SelectContent>
-                          {availableAssets.map((a) => (
+                          {availableAssets.map((a, i) => (
                             <SelectItem
-                              key={`${a.asset}-${a.poolId ?? ""}-${a.network ?? ""}`}
-                              value={`${a.asset}-${a.poolId ?? ""}-${a.network ?? ""}`}
+                              key={supplyBorrowAssetRowKey(a, i)}
+                              value={supplyBorrowAssetRowKey(a, i)}
                             >
                               <span className="flex items-center gap-2">
                                 <img
@@ -1672,10 +2019,15 @@ const SupplyBorrowModal = ({
                                 {a.value != null && (
                                   <span className="text-xs text-muted-foreground">
                                     —{" "}
-                                    {a.value.toLocaleString(undefined, {
-                                      minimumFractionDigits: 2,
-                                      maximumFractionDigits: 2,
-                                    })}
+                                    {mode === "borrow"
+                                      ? `${Number(a.value).toLocaleString(undefined, {
+                                          minimumFractionDigits: 2,
+                                          maximumFractionDigits: 2,
+                                        })}% borrow APY`
+                                      : Number(a.value).toLocaleString(undefined, {
+                                          minimumFractionDigits: 2,
+                                          maximumFractionDigits: 2,
+                                        })}
                                   </span>
                                 )}
                               </span>
@@ -1771,6 +2123,23 @@ const SupplyBorrowModal = ({
                 </div>
               )}
 
+              {mode === "borrow" && borrowFolksAdapters.length === 1 && (
+                <div className="space-y-2 rounded-lg border border-slate-200/80 bg-white/60 p-3 dark:border-slate-600 dark:bg-slate-800/60">
+                  <Label className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                    Borrow route
+                  </Label>
+                  <div className="text-sm font-medium text-slate-800 dark:text-slate-100">
+                    {borrowFolksAdapters[0].label ?? borrowFolksAdapters[0].name}
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {(borrowFolksAdapters[0].borrowReceiveBasis ??
+                    "market_token") === "underlying"
+                      ? "Receive native ALGO (Folks redeem)"
+                      : "Receive f-asset in wallet"}
+                  </p>
+                </div>
+              )}
+
               <SupplyBorrowForm
                 key={
                   mode === "deposit" && selectedDepositAdapterId
@@ -1807,7 +2176,7 @@ const SupplyBorrowModal = ({
                 }
                 availableToSupplyOrBorrow={
                   mode === "borrow"
-                    ? effectiveBorrowCap ?? borrowLiquidityOnlyTokens ?? 0
+                    ? effectiveBorrowCapInInputUnits ?? 0
                     : assetData.liquidity
                 }
                 supplyAPY={assetData.supplyAPY}
@@ -1822,11 +2191,14 @@ const SupplyBorrowModal = ({
                   (mode === "borrow" && !effectiveUserGlobalData) ||
                   (mode === "borrow" && borrowExceedsEffectiveCap) ||
                   (mode === "borrow" && borrowSubmitBlockedBelowHfTarget) ||
-                  (mode === "borrow" && borrowNoCapacityAtHfTarget)
+                  (mode === "borrow" && borrowNoCapacityAtHfTarget) ||
+                  (mode === "borrow" && borrowFolksBlockingSubmit)
                 }
                 hideButton={true}
-                isLoadingMaxBorrow={isLoadingMaxBorrow}
+                isLoadingMaxBorrow={borrowMaxLineLoading}
                 maxBorrowError={maxBorrowError}
+                maxBorrowableUnitSymbol={maxBorrowableUnitSymbol}
+                borrowFolksRateUnavailable={borrowFolksRateUnavailable}
                 network={networkToUse}
                 walletBalanceLastUpdated={walletBalanceLastUpdated}
                 onRefreshWalletBalance={onRefreshWalletBalance}
@@ -1850,6 +2222,25 @@ const SupplyBorrowModal = ({
                         aria-hidden
                       />
                     </Button>
+                  ) : borrowMultiRoute ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setBorrowRoutePickerOpen(true)}
+                      className="h-8 max-w-full gap-1 px-2 text-whale-gold hover:bg-whale-gold/15 dark:text-whale-gold"
+                      title="Choose borrow route"
+                    >
+                      <span className="truncate text-sm font-medium">
+                        {selectedBorrowAdapter?.label ??
+                          selectedBorrowAdapter?.name ??
+                          asset}
+                      </span>
+                      <ChevronDown
+                        className="h-4 w-4 shrink-0 opacity-80"
+                        aria-hidden
+                      />
+                    </Button>
                   ) : undefined
                 }
               />
@@ -1863,7 +2254,13 @@ const SupplyBorrowModal = ({
                 userGlobalData={effectiveUserGlobalData}
                 poolGlobalUserData={poolGlobalUserData}
                 depositAmount={mode === "deposit" ? parseFloat(amount) || 0 : 0}
-                borrowAmount={mode === "borrow" ? parseFloat(amount) || 0 : 0}
+                borrowAmount={
+                  mode === "borrow"
+                    ? amountBorrowMarketTokenHuman != null
+                      ? amountBorrowMarketTokenHuman
+                      : 0
+                    : 0
+                }
                 userBorrowBalance={userBorrowBalance}
                 isSToken={assetData.isSToken || false}
                 poolCollateralMarkets={poolCollateralMarkets}
@@ -1938,6 +2335,7 @@ const SupplyBorrowModal = ({
                       (mode === "borrow" && borrowNoCapacityAtHfTarget) ||
                       (mode === "borrow" && borrowExceedsEffectiveCap) ||
                       (mode === "borrow" && borrowSubmitBlockedBelowHfTarget) ||
+                      (mode === "borrow" && borrowFolksBlockingSubmit) ||
                       (mode === "deposit" && depositBlockedByLowEstimatedHealth)
                     }
                     className={`flex-1 font-semibold h-11 ${mode === "deposit"
@@ -2012,6 +2410,66 @@ const SupplyBorrowModal = ({
                 {selected ? (
                   <Check
                     className="mt-0.5 h-5 w-5 shrink-0 text-teal-600 dark:text-teal-400"
+                    aria-hidden
+                  />
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog
+      open={borrowRoutePickerOpen && borrowMultiRoute}
+      onOpenChange={(open) => {
+        if (borrowMultiRoute) setBorrowRoutePickerOpen(open);
+      }}
+    >
+      <DialogContent className="max-h-[min(85vh,85dvh)] min-h-0 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-900 sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-slate-900 dark:text-white">
+            Borrow route
+          </DialogTitle>
+          <DialogDescription>
+            Choose what you receive in your wallet after this borrow.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="mt-4 grid gap-2">
+          {borrowFolksAdapters.map((a) => {
+            const sid = tokenAdapterStableId(a);
+            const selected = sid === selectedBorrowAdapterId;
+            const basis = a.borrowReceiveBasis ?? "market_token";
+            const basisLabel =
+              basis === "underlying"
+                ? "Native ALGO (Folks redeem)"
+                : "f-asset in wallet";
+            return (
+              <button
+                key={sid}
+                type="button"
+                onClick={() => {
+                  setSelectedBorrowAdapterId(sid);
+                  setBorrowRoutePickerOpen(false);
+                }}
+                className={cn(
+                  "flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors",
+                  selected
+                    ? "border-amber-500 bg-amber-50/90 dark:border-amber-500 dark:bg-amber-950/40"
+                    : "border-slate-200 bg-white/80 hover:border-amber-300 hover:bg-amber-50/50 dark:border-slate-600 dark:bg-slate-800/60 dark:hover:border-amber-700 dark:hover:bg-slate-800"
+                )}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    {a.label ?? a.name}
+                  </div>
+                  <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                    {basisLabel}
+                  </div>
+                </div>
+                {selected ? (
+                  <Check
+                    className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400"
                     aria-hidden
                   />
                 ) : null}

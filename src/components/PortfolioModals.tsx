@@ -6,6 +6,7 @@ import BorrowModal from "./BorrowModal";
 import RepayModal from "./RepayModal";
 import SupplyBorrowModal, {
   resolveSupplyBorrowToken,
+  type SupplyBorrowAvailableAsset,
 } from "./SupplyBorrowModal";
 import MintModal from "./MintModal"; // Added MintModal import
 import { useWallet } from "@txnlab/use-wallet-react";
@@ -121,7 +122,16 @@ interface PortfolioModalsProps {
     network?: string;
     configSymbol?: string;
     marketId?: string;
+    marketRowKey?: string;
   };
+  /** When set (≥2 rows), borrow modal shows an asset picker like Withdraw. */
+  borrowMarketPickerAssets?: SupplyBorrowAvailableAsset[];
+  onSelectBorrowMarket?: (
+    asset: string,
+    poolId?: string,
+    network?: string,
+    pick?: { marketId?: string; configSymbol?: string; marketRowKey?: string }
+  ) => void;
   repayModal: {
     isOpen: boolean;
     asset: string | null;
@@ -176,6 +186,8 @@ const PortfolioModals = ({
   depositModal,
   withdrawModal,
   borrowModal,
+  borrowMarketPickerAssets,
+  onSelectBorrowMarket,
   repayModal,
   deposits,
   borrows,
@@ -2341,6 +2353,7 @@ const PortfolioModals = ({
             poolId={borrowModal.poolId}
             configSymbol={borrowModal.configSymbol}
             marketId={borrowModal.marketId}
+            marketRowKey={borrowModal.marketRowKey}
             network={borrowModal.network}
             mode="borrow"
             assetData={getAssetData(
@@ -2350,6 +2363,8 @@ const PortfolioModals = ({
               borrowModal.configSymbol,
               borrowModal.marketId
             )}
+            availableAssets={borrowMarketPickerAssets}
+            onSelectAsset={onSelectBorrowMarket}
             userGlobalData={userGlobalData}
             userBorrowBalance={userBorrowBalance || 0}
             poolCollateralMarkets={borrowPoolCollateralMarkets}

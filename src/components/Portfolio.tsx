@@ -264,6 +264,7 @@ const Portfolio = () => {
     network?: string;
     configSymbol?: string;
     marketId?: string;
+    marketRowKey?: string;
   }>({
     isOpen: false,
     asset: null,
@@ -4142,6 +4143,93 @@ const Portfolio = () => {
       setIsLoadingBorrowData(false);
     }
   };
+
+  const borrowModalMarketPickerRows = useMemo(() => {
+    if (!Array.isArray(marketData) || marketData.length === 0) return [];
+    return (marketData as Array<Record<string, unknown>>).map((m, i) => {
+      const symbol = String(m.symbol ?? "");
+      const poolId =
+        m.poolId != null
+          ? String(m.poolId)
+          : m.appId != null
+            ? String(m.appId)
+            : "";
+      const mi = m.marketInfo as Record<string, unknown> | undefined;
+      const borrowApy =
+        typeof m.borrowApyCalculation === "object" &&
+        m.borrowApyCalculation != null &&
+        typeof (m.borrowApyCalculation as { apy?: number }).apy === "number"
+          ? (m.borrowApyCalculation as { apy: number }).apy
+          : typeof m.borrowRateCurrent === "number"
+            ? (m.borrowRateCurrent as number) * 100
+            : undefined;
+      return {
+        asset: symbol,
+        icon: getTokenImagePath(symbol),
+        value: borrowApy,
+        poolId: poolId || undefined,
+        network: currentNetwork,
+        marketId:
+          m.marketId != null
+            ? String(m.marketId)
+            : mi?.marketId != null
+              ? String(mi.marketId)
+              : undefined,
+        configSymbol:
+          typeof m.configSymbol === "string" ? m.configSymbol : undefined,
+        marketRowKey: `portfolio-borrow|${symbol}|${poolId}|${i}`,
+      };
+    });
+  }, [marketData, currentNetwork]);
+
+  const handleSelectBorrowAssetForModal = useCallback(
+    async (
+      nextAsset: string,
+      nextPoolId?: string,
+      nextNetwork?: string,
+      pick?: { marketId?: string; configSymbol?: string; marketRowKey?: string }
+    ) => {
+      const networkToUse = (nextNetwork || currentNetwork) as NetworkId;
+      setBorrowModal((prev) => ({
+        ...prev,
+        isOpen: true,
+        asset: nextAsset,
+        poolId: nextPoolId,
+        network: networkToUse,
+        configSymbol: pick?.configSymbol ?? prev.configSymbol,
+        marketId: pick?.marketId ?? prev.marketId,
+        marketRowKey: pick?.marketRowKey ?? prev.marketRowKey,
+      }));
+      if (!activeAccount?.address) return;
+      try {
+        const tokens = getAllTokensWithDisplayInfo(networkToUse);
+        const token = resolveSupplyBorrowToken(
+          tokens,
+          nextAsset,
+          nextPoolId,
+          pick?.configSymbol,
+          pick?.marketId
+        );
+        if (token?.poolId && token?.underlyingContractId) {
+          const borrowData = await fetchUserBorrowBalance(
+            activeAccount.address,
+            token.poolId,
+            token.underlyingContractId,
+            networkToUse
+          );
+          setUserBorrowBalance(borrowData?.balance || 0);
+        } else {
+          setUserBorrowBalance(0);
+        }
+      } catch (e) {
+        console.error(
+          "Error refreshing borrow balance after asset switch:",
+          e
+        );
+      }
+    },
+    [activeAccount?.address, currentNetwork]
+  );
 
   const handleRepayClick = async (
     asset: string,
@@ -9703,6 +9791,12 @@ const Portfolio = () => {
         depositModal={depositModal}
         withdrawModal={withdrawModal}
         borrowModal={borrowModal}
+        borrowMarketPickerAssets={
+          borrowModalMarketPickerRows.length >= 2
+            ? borrowModalMarketPickerRows
+            : undefined
+        }
+        onSelectBorrowMarket={handleSelectBorrowAssetForModal}
         repayModal={repayModal}
         deposits={deposits}
         borrows={borrows}
@@ -9740,6 +9834,7 @@ const Portfolio = () => {
             network: undefined,
             configSymbol: undefined,
             marketId: undefined,
+            marketRowKey: undefined,
           })
         }
         onCloseRepayModal={() =>

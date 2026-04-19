@@ -17,7 +17,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip
 import APYDisplay from "@/components/APYDisplay";
 import BorrowAPYDisplay from "@/components/BorrowAPYDisplay";
 import STokenRow from "./STokenRow";
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { useWallet } from "@txnlab/use-wallet-react";
 import {
@@ -37,6 +37,7 @@ import {
 import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
+import { migrationBalanceEffectKey } from "./migrationBalanceEffectKey";
 
 interface MarketsDesktopTableProps {
   markets: OnDemandMarketData[];
@@ -93,6 +94,10 @@ const MarketsDesktopTable = ({
     Record<string, string | null>
   >({});
   const [expandedSymbols, setExpandedSymbols] = useState<Set<string>>(new Set());
+  /** Avoid ARC200 spam: `markets` is a new array ref whenever on-demand loading flags change. */
+  const marketsMigrationKey = migrationBalanceEffectKey(markets);
+  const marketsRef = useRef(markets);
+  marketsRef.current = markets;
 
   // Resolve pool id then label via {@link marketLetterForPoolId} (A/B/D map + lendingPools fallback).
   const getMarketLabel = (market: OnDemandMarketData, marketIndex?: number): string | null => {
@@ -161,7 +166,7 @@ const MarketsDesktopTable = ({
         ARC200Service.initialize(clients);
 
         // Check balance for each market that has migration
-        for (const market of markets) {
+        for (const market of marketsRef.current) {
           if (market.isSToken) continue;
 
           const token = tokens.find((t) => t.symbol === market.asset);
@@ -208,7 +213,7 @@ const MarketsDesktopTable = ({
     };
 
     checkMigrationBalances();
-  }, [markets, activeAccount?.address, currentNetwork]);
+  }, [marketsMigrationKey, activeAccount?.address, currentNetwork]);
 
   // Helper to get poolId for sorting
   const getPoolIdForSorting = (market: OnDemandMarketData, index?: number): string | null => {

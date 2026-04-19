@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { OnDemandMarketData } from "@/hooks/useOnDemandMarketData";
@@ -21,6 +21,7 @@ import {
   marketPoolBadgeBgClassName,
 } from "@/constants/marketUi";
 import { ARC200Service } from "@/services/arc200Service";
+import { migrationBalanceEffectKey } from "./migrationBalanceEffectKey";
 import algorandService from "@/services/algorandService";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 
@@ -49,6 +50,9 @@ const MarketCardView = ({
   const [migrationBalances, setMigrationBalances] = useState<
     Record<string, string | null>
   >({});
+  const marketsMigrationKey = migrationBalanceEffectKey(markets);
+  const marketsRef = useRef(markets);
+  marketsRef.current = markets;
 
   // Check migration balances for markets that have migration property
   useEffect(() => {
@@ -67,7 +71,7 @@ const MarketCardView = ({
         ARC200Service.initialize(clients);
 
         // Check balance for each market that has migration
-        for (const market of markets) {
+        for (const market of marketsRef.current) {
           if (market.isSToken) continue;
 
           const token = tokens.find((t) => t.symbol === market.asset);
@@ -125,7 +129,7 @@ const MarketCardView = ({
     };
 
     checkMigrationBalances();
-  }, [markets, activeAccount?.address, currentNetwork]);
+  }, [marketsMigrationKey, activeAccount?.address, currentNetwork]);
 
   // One card per asset+pool so A and B markets both appear on mobile
   const deduplicatedMarkets = useMemo(() => {

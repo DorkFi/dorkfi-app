@@ -150,7 +150,7 @@ export interface TokenConfig {
 }
 
 /** Which user flows an adapter participates in (omit = both, for backward compatibility). */
-export type AdapterPhase = "deposit" | "withdraw";
+export type AdapterPhase = "deposit" | "withdraw" | "borrow";
 
 export type TokenAdapterConfig = {
   /**
@@ -176,8 +176,13 @@ export type TokenAdapterConfig = {
    */
   withdrawReceiveBasis?: "underlying" | "market_token";
   /**
+   * For borrow routes (Folks `network-asa`): what the user receives after nt200 releases borrowed f-ASA.
+   * `market_token` = keep f-ASA (e.g. fALGO). `underlying` = append Folks pool redeem to native ALGO.
+   */
+  borrowReceiveBasis?: "underlying" | "market_token";
+  /**
    * When set, this adapter runs only for these flows.
-   * When omitted, runs for both deposit and withdraw.
+   * When omitted, applies to deposit and withdraw; borrow requires `phases` containing `"borrow"`.
    */
   phases?: AdapterPhase[];
 };
@@ -239,6 +244,28 @@ export const FOLKS_MAINNET_ALGO_WITHDRAW_FASSET_WALLET = {
   folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.ALGO,
 } satisfies TokenAdapterConfig;
 
+/** Folks: after borrow + nt200 withdraw, user keeps f-ASA (no Folks redeem in group). */
+export const FOLKS_MAINNET_ALGO_BORROW_FASSET_WALLET = {
+  id: "folks-mainnet-algo-borrow-falgo",
+  name: "fALGO",
+  type: "folks" as const,
+  label: "fALGO",
+  borrowReceiveBasis: "market_token" as const,
+  phases: ["borrow"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.ALGO,
+} satisfies TokenAdapterConfig;
+
+/** Folks: after borrow + nt200 withdraw, redeem f-ASA → native ALGO in the same atomic group. */
+export const FOLKS_MAINNET_ALGO_BORROW_UNDERLYING = {
+  id: "folks-mainnet-algo-borrow-algo",
+  name: "ALGO",
+  type: "folks" as const,
+  label: "ALGO",
+  borrowReceiveBasis: "underlying" as const,
+  phases: ["borrow"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.ALGO,
+} satisfies TokenAdapterConfig;
+
 export type FolksTokenAdapterConfig = Extract<
   TokenAdapterConfig,
   { type: "folks" }
@@ -249,6 +276,10 @@ function adapterAppliesToPhase(
   phase: AdapterPhase
 ): boolean {
   const p = adapter.phases;
+  // Borrow is opt-in only so legacy adapters without `phases` stay deposit+withdraw.
+  if (phase === "borrow") {
+    return p != null && p.includes("borrow");
+  }
   if (p == null || p.length === 0) {
     return true;
   }
@@ -340,6 +371,28 @@ export function resolveWithdrawFolksAdapter(
     console.warn(
       "[resolveWithdrawFolksAdapter] withdrawAdapterId not found; using first withdraw-phase Folks adapter.",
       { withdrawAdapterId: want, available: list.map(tokenAdapterStableId) }
+    );
+  }
+  return list[0];
+}
+
+/** Resolve which Folks borrow-phase adapter to run (matches `borrowAdapterId` or first). */
+export function resolveBorrowFolksAdapter(
+  token: Pick<TokenConfig, "adapter" | "adapters">,
+  borrowAdapterId?: string | null
+): FolksTokenAdapterConfig | undefined {
+  const list = getFolksAdaptersForPhase(token, "borrow");
+  if (list.length === 0) return undefined;
+  const want =
+    borrowAdapterId != null && String(borrowAdapterId).trim() !== ""
+      ? String(borrowAdapterId).trim()
+      : null;
+  if (want != null) {
+    const hit = list.find((a) => tokenAdapterStableId(a) === want);
+    if (hit) return hit;
+    console.warn(
+      "[resolveBorrowFolksAdapter] borrowAdapterId not found; using first borrow-phase Folks adapter.",
+      { borrowAdapterId: want, available: list.map(tokenAdapterStableId) }
     );
   }
   return list[0];
@@ -1595,6 +1648,8 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
       FOLKS_MAINNET_ALGO_DEPOSIT_UNDERLYING,
       FOLKS_MAINNET_ALGO_WITHDRAW,
       FOLKS_MAINNET_ALGO_WITHDRAW_FASSET_WALLET,
+      FOLKS_MAINNET_ALGO_BORROW_FASSET_WALLET,
+      FOLKS_MAINNET_ALGO_BORROW_UNDERLYING,
     ],
     dataAddedAt: "2026-04-17T00:00:00.000Z",
     intrinsicApyPercent: 2.14, // TODO fetch from source
@@ -1621,6 +1676,8 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
       FOLKS_MAINNET_ALGO_DEPOSIT_UNDERLYING,
       FOLKS_MAINNET_ALGO_WITHDRAW,
       FOLKS_MAINNET_ALGO_WITHDRAW_FASSET_WALLET,
+      FOLKS_MAINNET_ALGO_BORROW_FASSET_WALLET,
+      FOLKS_MAINNET_ALGO_BORROW_UNDERLYING,
     ],
     dataAddedAt: "2026-04-17T00:00:00.000Z",
     intrinsicApyPercent: 2.14, // TODO fetch from source

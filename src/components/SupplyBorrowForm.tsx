@@ -39,6 +39,10 @@ interface SupplyBorrowFormProps {
   walletBalanceDisplaySymbol?: string;
   /** Deposit: override the teal card title (defaults to “Wallet Balance”). */
   walletBalanceRowTitle?: string;
+  /** Borrow: suffix for max line (e.g. `ALGO` vs `fALGO`) when route changes units. */
+  maxBorrowableUnitSymbol?: string;
+  /** Borrow: Folks mint ratio failed while ALGO receive route is selected. */
+  borrowFolksRateUnavailable?: boolean;
 }
 
 const SupplyBorrowForm = ({
@@ -65,6 +69,8 @@ const SupplyBorrowForm = ({
   amountFieldEndAdornment,
   walletBalanceDisplaySymbol,
   walletBalanceRowTitle,
+  maxBorrowableUnitSymbol,
+  borrowFolksRateUnavailable = false,
 }: SupplyBorrowFormProps) => {
   const [amount, setAmount] = useState<number | "">("");
   const [fiatValue, setFiatValue] = useState(0);
@@ -106,6 +112,9 @@ const SupplyBorrowForm = ({
 
     // Check available liquidity for borrows
     if (mode === "borrow") {
+      if (borrowFolksRateUnavailable && value > 0) {
+        return "Folks rate unavailable for ALGO borrow; pick f-asset or retry.";
+      }
       const buffer = 0.1;
       const maxBorrowable = availableToSupplyOrBorrow * (1 - buffer);
       const roundedMaxBorrowable = Number(maxBorrowable.toFixed(decimals));
@@ -171,6 +180,7 @@ const SupplyBorrowForm = ({
     decimals,
     mode,
     asset,
+    borrowFolksRateUnavailable,
   ]);
 
   // Calculate max borrowable amount based on market liquidity only
@@ -401,13 +411,20 @@ const SupplyBorrowForm = ({
                     ? "Calculating..."
                     : maxBorrowError
                       ? "Error"
-                      : `${calculateMaxBorrowable().toLocaleString(undefined, {
-                        maximumFractionDigits: 6,
-                      })} ${asset}`}
+                      : borrowFolksRateUnavailable
+                        ? "—"
+                        : `${calculateMaxBorrowable().toLocaleString(undefined, {
+                            maximumFractionDigits: 6,
+                          })} ${maxBorrowableUnitSymbol ?? asset}`}
               </div>
               {mode === "borrow" && maxBorrowError && (
                 <div className="text-xs text-red-500 dark:text-red-400 mt-1">
                   {maxBorrowError}
+                </div>
+              )}
+              {mode === "borrow" && borrowFolksRateUnavailable && !maxBorrowError && (
+                <div className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                  Folks rate unavailable; choose f-asset borrow or retry.
                 </div>
               )}
               <div

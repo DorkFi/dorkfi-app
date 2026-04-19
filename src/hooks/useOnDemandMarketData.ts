@@ -177,8 +177,8 @@ interface UseOnDemandMarketDataProps {
   multiPoolOnly?: boolean;
 }
 
-// Throttle duration: 1 minute
-const DEFAULT_THROTTLE_MS = 60 * 1000;
+// Throttle duration: 2 minute
+const DEFAULT_THROTTLE_MS = 120 * 1000;
 
 export const useOnDemandMarketData = ({
   searchTerm = "",

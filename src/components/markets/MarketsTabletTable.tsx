@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -26,6 +26,7 @@ import {
 } from "@/constants/marketUi";
 import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
+import { migrationBalanceEffectKey } from "./migrationBalanceEffectKey";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
@@ -61,6 +62,9 @@ const MarketsTabletTable = ({
     Record<string, string | null>
   >({});
   const [expandedSymbols, setExpandedSymbols] = useState<Set<string>>(new Set());
+  const marketsMigrationKey = migrationBalanceEffectKey(markets);
+  const marketsRef = useRef(markets);
+  marketsRef.current = markets;
 
   const getMarketLabel = (market: OnDemandMarketData, marketIndex?: number): string | null => {
     const networkConfig = getNetworkConfig(currentNetwork);
@@ -128,7 +132,7 @@ const MarketsTabletTable = ({
         ARC200Service.initialize(clients);
 
         // Check balance for each market that has migration
-        for (const market of markets) {
+        for (const market of marketsRef.current) {
           if (market.isSToken) continue;
 
           const token = tokens.find((t) => t.symbol === market.asset);
@@ -175,7 +179,7 @@ const MarketsTabletTable = ({
     };
 
     checkMigrationBalances();
-  }, [markets, activeAccount?.address, currentNetwork]);
+  }, [marketsMigrationKey, activeAccount?.address, currentNetwork]);
 
   // Helper to get poolId for sorting (must be before useMemo to keep hooks order)
   const getPoolIdForSorting = (market: OnDemandMarketData, index?: number): string | null => {
