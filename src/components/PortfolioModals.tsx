@@ -1644,14 +1644,24 @@ const PortfolioModals = ({
     currentNetwork,
   ]);
 
-  const handleRepaySubmit = async (amount: string, isRepayAll?: boolean) => {
+  const handleRepaySubmit = async (
+    amount: string,
+    opts?: { isRepayAll?: boolean; repayAdapterId?: string }
+  ) => {
     if (!activeAccount?.address || !repayModal.asset) {
       console.error("No active account or asset for repayment");
       return;
     }
 
+    const isRepayAll = opts?.isRepayAll === true;
+
     try {
-      console.log(`Repaying ${amount} ${repayModal.asset}${isRepayAll ? " (repayAll)" : ""}`);
+      console.log(
+        `Repaying ${amount} ${repayModal.asset}${isRepayAll ? " (repayAll)" : ""}`,
+        opts?.repayAdapterId != null
+          ? { repayAdapterId: opts.repayAdapterId }
+          : undefined
+      );
 
       // Find the borrow to get its network
       const borrow = repayModal.poolId
@@ -1724,6 +1734,11 @@ const PortfolioModals = ({
       });
 
       // Call the appropriate lending service method based on isRepayAll flag
+      const repayOpts =
+        opts?.repayAdapterId != null && String(opts.repayAdapterId).trim() !== ""
+          ? { repayAdapterId: String(opts.repayAdapterId).trim() }
+          : undefined;
+
       const result = isRepayAll
         ? await repayAll(
             token.poolId,
@@ -1731,7 +1746,8 @@ const PortfolioModals = ({
             originalTokenConfig.tokenStandard,
             amount, // Pass amount as string (though repayAll may not use it)
             activeAccount.address,
-            networkToUse
+            networkToUse,
+            repayOpts
           )
         : await repay(
             token.poolId,
@@ -1739,7 +1755,8 @@ const PortfolioModals = ({
             originalTokenConfig.tokenStandard,
             amount, // Pass amount as string
             activeAccount.address,
-            networkToUse
+            networkToUse,
+            repayOpts
           );
 
       if (!result.success) {
@@ -2460,6 +2477,37 @@ const PortfolioModals = ({
             repayModal.marketId
           );
 
+          const networkRep = (repayModal.network ||
+            (borrow as { network?: string }).network ||
+            currentNetwork) as NetworkId;
+          const tokensRep = getAllTokensWithDisplayInfo(networkRep);
+          const repayTokenRow = resolveSupplyBorrowToken(
+            tokensRep,
+            repayModal.asset ?? "",
+            repayModal.poolId,
+            repayModal.configSymbol,
+            repayModal.marketId
+          );
+          const cfgSymRep =
+            repayTokenRow.configKey ??
+            repayTokenRow.originalSymbol ??
+            repayTokenRow.symbol;
+          const rawTcRep = getTokenConfig(networkRep, cfgSymRep);
+          const tcRepayModal = Array.isArray(rawTcRep)
+            ? rawTcRep.find(
+                (c) => String(c.poolId) === String(repayTokenRow.poolId)
+              ) ?? rawTcRep[0]
+            : rawTcRep;
+          const repayFolksAdaptersList = tcRepayModal
+            ? getFolksAdaptersForPhase(tcRepayModal, "repay")
+            : [];
+          const repayDecimals =
+            tcRepayModal?.decimals ?? repayTokenRow.decimals ?? 6;
+
+          const repayMintKey = `${networkRep}|${cfgSymRep}|${String(
+            repayTokenRow.poolId ?? ""
+          )}`;
+
           return (
             <RepayModal
               isOpen={repayModal.isOpen}
@@ -2514,6 +2562,12 @@ const PortfolioModals = ({
               }
               onSelectAsset={onSelectRepayAsset}
               onSubmit={handleRepaySubmit}
+              repayFolksAdapters={repayFolksAdaptersList}
+              repayTokenDecimals={repayDecimals}
+              folksMintOneUnderlyingAtomic={
+                folksMintedOneUnderlyingByKey?.[repayMintKey]
+              }
+              repayTokenConfig={tcRepayModal ?? undefined}
             />
           );
         })()}

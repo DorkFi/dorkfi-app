@@ -53,6 +53,7 @@ import {
   TokenConfig,
   tokenStandardUsesNativeWalletBalance,
   getAnyFolksAdapter,
+  getFolksAdapterForPhase,
 } from "@/config";
 import { getAllTokensWithDisplayInfo } from "@/config";
 import { getTokenImagePath } from "@/utils/tokenImageUtils";
@@ -648,10 +649,14 @@ const Portfolio = () => {
     }
   };
 
-  // Folks fALGO (etc.): cache minted f-asset for 1.0 underlying so supplied table matches market table.
+  // Folks fALGO (etc.): cache minted f-asset for 1.0 underlying (deposits + borrows so borrow-only users get a ratio for repay/UX).
   useEffect(() => {
-    const list = user?.computed?.deposits;
-    if (!Array.isArray(list)) {
+    const deposits = user?.computed?.deposits;
+    const borrows = user?.computed?.borrows;
+    const fromDeposits = Array.isArray(deposits) ? deposits : [];
+    const fromBorrows = Array.isArray(borrows) ? borrows : [];
+    const list = [...fromDeposits, ...fromBorrows];
+    if (list.length === 0) {
       setFolksMintedOneUnderlyingByKey({});
       return;
     }
@@ -682,12 +687,16 @@ const Portfolio = () => {
           token.configKey ?? token.originalSymbol ?? token.symbol;
         const key = `${networkId}|${configSym}|${appId}`;
 
+        if (fetched[key]) continue;
+
         const raw = getTokenConfig(networkId, configSym);
         const tc: TokenConfig | undefined = Array.isArray(raw)
           ? raw.find((c) => String(c.poolId) === String(appId)) ?? raw[0]
           : raw;
 
-        const folksTc = getAnyFolksAdapter(tc ?? {});
+        const folksTc =
+          getFolksAdapterForPhase(tc ?? {}, "deposit") ??
+          getAnyFolksAdapter(tc ?? {});
         if (!folksTc) continue;
 
         const algodNet = getAlgorandNetworkFromNetworkId(networkId);
@@ -710,7 +719,7 @@ const Portfolio = () => {
           }
         } catch (e) {
           console.warn(
-            "[Portfolio] Folks mint ratio for supplied display failed",
+            "[Portfolio] Folks mint ratio for supplied/borrow display failed",
             { key, error: e }
           );
         }
@@ -724,7 +733,7 @@ const Portfolio = () => {
     return () => {
       cancelled = true;
     };
-  }, [user?.computed?.deposits]);
+  }, [user?.computed?.deposits, user?.computed?.borrows]);
 
   // Transform user.computed.deposits and user.computed.borrows into table format
   const transformedDepositsAndBorrows = useMemo(() => {
@@ -2306,10 +2315,11 @@ const Portfolio = () => {
           balance = 0;
         }
       } else if (
-        originalTokenConfig.tokenStandard === "asa" &&
+        (originalTokenConfig.tokenStandard === "asa" ||
+          originalTokenConfig.tokenStandard === "network-asa") &&
         token.underlyingAssetId
       ) {
-        // For ASA tokens, fetch asset balance
+        // For ASA and Folks network-asa (e.g. fALGO): wallet holds the f-ASA; fetch by asset id.
         console.log(
           `Fetching ASA balance for ${asset} (asset ID: ${token.underlyingAssetId})`
         );

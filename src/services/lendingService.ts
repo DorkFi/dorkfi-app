@@ -30,6 +30,7 @@ import {
   resolveDepositFolksAdapter,
   resolveWithdrawFolksAdapter,
   resolveBorrowFolksAdapter,
+  resolveRepayFolksAdapter,
 } from "@/config";
 import algorandService, { AlgorandNetwork } from "./algorandService";
 import { ARC200Service } from "./arc200Service";
@@ -5482,11 +5483,19 @@ export const repay = async (
   amount: string,
   userAddress: string,
   networkId: NetworkId,
+  options?: { repayAdapterId?: string }
 ): Promise<
   | { success: boolean; txId?: string; error?: string }
   | { success: true; txns: string[] }
 > => {
-  console.log("repay", { poolId, marketId, amount, userAddress, networkId });
+  console.log("repay", {
+    poolId,
+    marketId,
+    amount,
+    userAddress,
+    networkId,
+    repayAdapterId: options?.repayAdapterId,
+  });
 
   try {
     const networkConfig = getNetworkConfig(networkId);
@@ -5529,10 +5538,124 @@ export const repay = async (
         throw new Error("Token not found");
       }
 
-      // Convert amount to proper units (considering decimals)
-      const bigAmount = BigInt(
+      const tokenConfigLookupSymbol =
+        token.configKey ?? token.originalSymbol ?? token.symbol;
+      const rawTokenConfigForRepay = getTokenConfig(
+        networkId,
+        tokenConfigLookupSymbol
+      );
+      const tokenConfigForRepay: TokenConfig | undefined = Array.isArray(
+        rawTokenConfigForRepay
+      )
+        ? poolId != null && poolId !== ""
+          ? rawTokenConfigForRepay.find(
+              (c) => String(c.poolId) === String(poolId)
+            ) ?? rawTokenConfigForRepay[0]
+          : rawTokenConfigForRepay[0]
+        : rawTokenConfigForRepay;
+
+      const repayPhaseAdapters = tokenConfigForRepay
+        ? getTokenAdaptersForPhase(tokenConfigForRepay, "repay")
+        : [];
+      const folksForRepay = resolveRepayFolksAdapter(
+        tokenConfigForRepay ?? {},
+        options?.repayAdapterId
+      );
+
+      if (
+        tokenStandard === "network-asa" &&
+        repayPhaseAdapters.length > 0 &&
+        !folksForRepay
+      ) {
+        throw new Error(
+          "tokenStandard network-asa requires a Folks repay adapter when repay-phase adapters are configured."
+        );
+      }
+
+      /** ASA index for nt200 `deposit` axfer before repay. */
+      let nt200RepayAxferXaid =
+        token.underlyingAssetId != null &&
+        String(token.underlyingAssetId).trim() !== ""
+          ? Number(token.underlyingAssetId)
+          : NaN;
+
+      let repayArc200Units = BigInt(
         new BigNumber(amount).multipliedBy(10 ** token.decimals).toFixed(0)
       );
+
+      let folksMintTxns: algosdk.Transaction[] | null = null;
+
+      const normalizeFolksUnderlyingAssetId = (
+        raw: string | undefined | null
+      ): string => {
+        const s = String(raw ?? "").trim();
+        if (s === "" || s === "-") return "0";
+        return s;
+      };
+
+      if (repayPhaseAdapters.length > 0 && folksForRepay) {
+        for (const a of repayPhaseAdapters) {
+          if (a.type !== "folks") {
+            throw new Error(`Unsupported repay adapter type: ${a.type}`);
+          }
+        }
+        if (networkConfig.networkId !== "algorand-mainnet") {
+          throw new Error(
+            "Folks repay adapter is only supported on Algorand mainnet"
+          );
+        }
+        const fp = folksForRepay.folksParams;
+        if (!tokenConfigForRepay) {
+          throw new Error("Token config missing for Folks repay");
+        }
+        const cfgAssetStr = String(tokenConfigForRepay.assetId ?? "").trim();
+        const fpFAssetStr = String(fp.fAssetId ?? "").trim();
+        const fpUnderlyingNorm = normalizeFolksUnderlyingAssetId(fp.assetId);
+        const cfgAsUnderlyingNorm = normalizeFolksUnderlyingAssetId(
+          cfgAssetStr !== "" ? cfgAssetStr : undefined
+        );
+        const fAssetMatchesMarket =
+          fpFAssetStr !== "" && cfgAssetStr !== "" && cfgAssetStr === fpFAssetStr;
+        const underlyingMatches =
+          cfgAsUnderlyingNorm !== "" &&
+          cfgAsUnderlyingNorm === fpUnderlyingNorm;
+        if (!fAssetMatchesMarket && !underlyingMatches) {
+          throw new Error(
+            `Folks repay adapter pool does not match this token row (config assetId ${String(tokenConfigForRepay.assetId)} vs pool underlying ${fp.assetId} / fAsset ${fp.fAssetId})`
+          );
+        }
+        if (tokenStandardUsesAsaStyleNt200Txns(tokenStandard)) {
+          const fAsa = Number(fp.fAssetId);
+          if (!Number.isFinite(fAsa) || fAsa <= 0) {
+            throw new Error(
+              "Folks repay adapter (ASA): invalid folksParams.fAssetId for nt200 axfer"
+            );
+          }
+          nt200RepayAxferXaid = fAsa;
+        }
+        const skipFolksMint =
+          folksForRepay.repayWalletBasis === "market_token";
+        if (!skipFolksMint) {
+          const underlyingAtomic = BigInt(
+            new BigNumber(amount).multipliedBy(10 ** token.decimals).toFixed(0)
+          );
+          if (underlyingAtomic <= BigInt(0)) {
+            throw new Error("Repay amount must be positive");
+          }
+          folksMintTxns = await buildFolksDepositMintTxns({
+            poolName: fp.pool,
+            userAddress,
+            amount: underlyingAtomic,
+            algod: clients.algod,
+          });
+          const { mintedFAsset } = await estimateFolksDepositMintedFAssetAmount({
+            poolName: fp.pool,
+            underlyingAmount: underlyingAtomic,
+            algod: clients.algod,
+          });
+          repayArc200Units = mintedFAsset;
+        }
+      }
 
       const symbol = token.symbol;
 
@@ -5647,7 +5770,7 @@ export const repay = async (
       console.log("repay parameters:", {
         poolId: Number(poolId),
         marketId: Number(marketId),
-        amount: bigAmount,
+        amount: repayArc200Units,
         userAddress,
         tokenStandard,
       });
@@ -5663,6 +5786,10 @@ export const repay = async (
       ]) {
         const buildN = [];
 
+        if (folksMintTxns && folksMintTxns.length > 0) {
+          buildN.push(...folksMintTxnsToArccjsExtraTxns(folksMintTxns));
+        }
+
         if (tokenStandard == "network") {
           // create balance box for pool
           // create balance box for user
@@ -5677,11 +5804,11 @@ export const repay = async (
           }
           // user withdraws from nt200 token
           {
-            const txnO = (await builder.token.deposit(bigAmount)).obj;
+            const txnO = (await builder.token.deposit(repayArc200Units)).obj;
             buildN.push({
               ...txnO,
               note: new TextEncoder().encode("nt200 deposit"),
-              payment: bigAmount,
+              payment: repayArc200Units,
             });
           }
         } else if (tokenStandardUsesAsaStyleNt200Txns(tokenStandard)) {
@@ -5713,10 +5840,10 @@ export const repay = async (
           }
           // deposit to arc200
           {
-            const txnO = (await builder.token.deposit(bigAmount)).obj;
+            const txnO = (await builder.token.deposit(repayArc200Units)).obj;
             const axfer = {
-              aamt: bigAmount,
-              xaid: Number(token.underlyingAssetId),
+              aamt: repayArc200Units,
+              xaid: nt200RepayAxferXaid,
             };
             buildN.push({
               ...txnO,
@@ -5728,11 +5855,12 @@ export const repay = async (
           }
         } else if (tokenStandard == "arc200-exchange") {
           const axfer = {
-            aamt: bigAmount,
+            aamt: repayArc200Units,
             xaid: Number(token.underlyingAssetId),
           };
-          const txnO = (await builder.arc200Exchange.arc200_redeem(bigAmount))
-            .obj;
+          const txnO = (
+            await builder.arc200Exchange.arc200_redeem(repayArc200Units)
+          ).obj;
           buildN.push({
             ...txnO,
             ...axfer,
@@ -5746,8 +5874,9 @@ export const repay = async (
           const addr = algosdk.encodeAddress(
             algosdk.getApplicationAddress(Number(poolId)).publicKey
           );
-          const txnO = (await builder.token.arc200_approve(addr, bigAmount))
-            .obj;
+          const txnO = (
+            await builder.token.arc200_approve(addr, repayArc200Units)
+          ).obj;
           buildN.push({
             ...txnO,
             note: new TextEncoder().encode(
@@ -5759,7 +5888,7 @@ export const repay = async (
         // repay tp lending pool
         {
           const txnO = (
-            await builder.lending.repay(Number(marketId), bigAmount)
+            await builder.lending.repay(Number(marketId), repayArc200Units)
           ).obj as any;
           buildN.push({
             ...txnO,
@@ -6163,11 +6292,19 @@ export const repayAll = async (
   amount: string,
   userAddress: string,
   networkId: NetworkId,
+  options?: { repayAdapterId?: string }
 ): Promise<
   | { success: boolean; txId?: string; error?: string }
   | { success: true; txns: string[] }
 > => {
-  console.log("repay", { poolId, marketId, amount, userAddress, networkId });
+  console.log("repayAll", {
+    poolId,
+    marketId,
+    amount,
+    userAddress,
+    networkId,
+    repayAdapterId: options?.repayAdapterId,
+  });
 
   try {
     const networkConfig = getNetworkConfig(networkId);
@@ -6210,16 +6347,137 @@ export const repayAll = async (
         throw new Error("Token not found");
       }
 
-      // TODO use calculated value based on interest per minute
-      // Convert amount to proper units (considering decimals)
-      const bigAmountSurplus = BigInt(
-        new BigNumber(amount).multipliedBy(10 ** token.decimals).multipliedBy(0.01).plus(1).toFixed(0)
+      const tokenConfigLookupSymbol =
+        token.configKey ?? token.originalSymbol ?? token.symbol;
+      const rawTokenConfigForRepay = getTokenConfig(
+        networkId,
+        tokenConfigLookupSymbol
+      );
+      const tokenConfigForRepay: TokenConfig | undefined = Array.isArray(
+        rawTokenConfigForRepay
+      )
+        ? poolId != null && poolId !== ""
+          ? rawTokenConfigForRepay.find(
+              (c) => String(c.poolId) === String(poolId)
+            ) ?? rawTokenConfigForRepay[0]
+          : rawTokenConfigForRepay[0]
+        : rawTokenConfigForRepay;
+
+      const repayPhaseAdapters = tokenConfigForRepay
+        ? getTokenAdaptersForPhase(tokenConfigForRepay, "repay")
+        : [];
+      const folksForRepay = resolveRepayFolksAdapter(
+        tokenConfigForRepay ?? {},
+        options?.repayAdapterId
       );
 
-      const bigAmount = BigInt(
-        new BigNumber(amount).multipliedBy(10 ** token.decimals)
-          .plus(bigAmountSurplus).toFixed(0)
-      )
+      if (
+        tokenStandard === "network-asa" &&
+        repayPhaseAdapters.length > 0 &&
+        !folksForRepay
+      ) {
+        throw new Error(
+          "tokenStandard network-asa requires a Folks repay adapter when repay-phase adapters are configured."
+        );
+      }
+
+      /** ASA index for nt200 `deposit` axfer before repay_all. */
+      let nt200RepayAxferXaid =
+        token.underlyingAssetId != null &&
+        String(token.underlyingAssetId).trim() !== ""
+          ? Number(token.underlyingAssetId)
+          : NaN;
+
+      // TODO use calculated value based on interest per minute
+      const bigAmountSurplus = BigInt(
+        new BigNumber(amount)
+          .multipliedBy(10 ** token.decimals)
+          .multipliedBy(0.01)
+          .plus(1)
+          .toFixed(0)
+      );
+
+      let repayArc200Units = BigInt(
+        new BigNumber(amount)
+          .multipliedBy(10 ** token.decimals)
+          .plus(bigAmountSurplus)
+          .toFixed(0)
+      );
+
+      let folksMintTxns: algosdk.Transaction[] | null = null;
+
+      const normalizeFolksUnderlyingAssetIdRa = (
+        raw: string | undefined | null
+      ): string => {
+        const s = String(raw ?? "").trim();
+        if (s === "" || s === "-") return "0";
+        return s;
+      };
+
+      if (repayPhaseAdapters.length > 0 && folksForRepay) {
+        for (const a of repayPhaseAdapters) {
+          if (a.type !== "folks") {
+            throw new Error(`Unsupported repay adapter type: ${a.type}`);
+          }
+        }
+        if (networkConfig.networkId !== "algorand-mainnet") {
+          throw new Error(
+            "Folks repay adapter is only supported on Algorand mainnet"
+          );
+        }
+        const fp = folksForRepay.folksParams;
+        if (!tokenConfigForRepay) {
+          throw new Error("Token config missing for Folks repayAll");
+        }
+        const cfgAssetStr = String(tokenConfigForRepay.assetId ?? "").trim();
+        const fpFAssetStr = String(fp.fAssetId ?? "").trim();
+        const fpUnderlyingNorm = normalizeFolksUnderlyingAssetIdRa(fp.assetId);
+        const cfgAsUnderlyingNorm = normalizeFolksUnderlyingAssetIdRa(
+          cfgAssetStr !== "" ? cfgAssetStr : undefined
+        );
+        const fAssetMatchesMarket =
+          fpFAssetStr !== "" && cfgAssetStr !== "" && cfgAssetStr === fpFAssetStr;
+        const underlyingMatches =
+          cfgAsUnderlyingNorm !== "" &&
+          cfgAsUnderlyingNorm === fpUnderlyingNorm;
+        if (!fAssetMatchesMarket && !underlyingMatches) {
+          throw new Error(
+            `Folks repay adapter pool does not match this token row (config assetId ${String(tokenConfigForRepay.assetId)} vs pool underlying ${fp.assetId} / fAsset ${fp.fAssetId})`
+          );
+        }
+        if (tokenStandardUsesAsaStyleNt200Txns(tokenStandard)) {
+          const fAsa = Number(fp.fAssetId);
+          if (!Number.isFinite(fAsa) || fAsa <= 0) {
+            throw new Error(
+              "Folks repay adapter (ASA): invalid folksParams.fAssetId for nt200 axfer"
+            );
+          }
+          nt200RepayAxferXaid = fAsa;
+        }
+        const skipFolksMint =
+          folksForRepay.repayWalletBasis === "market_token";
+        if (!skipFolksMint) {
+          const underlyingAtomic = BigInt(
+            new BigNumber(amount).multipliedBy(10 ** token.decimals).toFixed(0)
+          );
+          if (underlyingAtomic <= BigInt(0)) {
+            throw new Error("Repay amount must be positive");
+          }
+          folksMintTxns = await buildFolksDepositMintTxns({
+            poolName: fp.pool,
+            userAddress,
+            amount: underlyingAtomic,
+            algod: clients.algod,
+          });
+          const { mintedFAsset } = await estimateFolksDepositMintedFAssetAmount({
+            poolName: fp.pool,
+            underlyingAmount: underlyingAtomic,
+            algod: clients.algod,
+          });
+          const surplusF = (mintedFAsset * 1n) / 100n + 1n;
+          repayArc200Units = mintedFAsset + surplusF;
+        }
+      }
 
       const symbol = token.symbol;
 
@@ -6331,10 +6589,10 @@ export const repayAll = async (
         ),
       };
 
-      console.log("repay parameters:", {
+      console.log("repayAll parameters:", {
         poolId: Number(poolId),
         marketId: Number(marketId),
-        amount: bigAmount,
+        amount: repayArc200Units,
         userAddress,
         tokenStandard,
       });
@@ -6349,6 +6607,10 @@ export const repayAll = async (
         [1, 1],
       ]) {
         const buildN = [];
+
+        if (folksMintTxns && folksMintTxns.length > 0) {
+          buildN.push(...folksMintTxnsToArccjsExtraTxns(folksMintTxns));
+        }
 
         if (tokenStandard == "network") {
           // create balance box for pool
@@ -6366,13 +6628,13 @@ export const repayAll = async (
           }
           // user withdraws from nt200 token
           {
-            const txnO = (await builder.token.deposit(bigAmount)).obj;
+            const txnO = (await builder.token.deposit(repayArc200Units)).obj;
             const description = "nt200 deposit";
             buildN.push({
               ...txnO,
               note: new TextEncoder().encode(description),
               description,
-              payment: bigAmount,
+              payment: repayArc200Units,
             });
           }
         } else if (tokenStandardUsesAsaStyleNt200Txns(tokenStandard)) {
@@ -6406,10 +6668,10 @@ export const repayAll = async (
           }
           // deposit to arc200
           {
-            const txnO = (await builder.token.deposit(bigAmount)).obj;
+            const txnO = (await builder.token.deposit(repayArc200Units)).obj;
             const axfer = {
-              aamt: bigAmount,
-              xaid: Number(token.underlyingAssetId),
+              aamt: repayArc200Units,
+              xaid: nt200RepayAxferXaid,
             };
             const description = `nt200 deposit ${symbol} token for user (${userAddress})`;
             buildN.push({
@@ -6423,11 +6685,12 @@ export const repayAll = async (
           }
         } else if (tokenStandard == "arc200-exchange") {
           const axfer = {
-            aamt: bigAmount,
+            aamt: repayArc200Units,
             xaid: Number(token.underlyingAssetId),
           };
-          const txnO = (await builder.arc200Exchange.arc200_redeem(bigAmount))
-            .obj;
+          const txnO = (
+            await builder.arc200Exchange.arc200_redeem(repayArc200Units)
+          ).obj;
           const description = "arc200_redeem";
           buildN.push({
             ...txnO,
@@ -6443,8 +6706,9 @@ export const repayAll = async (
           const addr = algosdk.encodeAddress(
             algosdk.getApplicationAddress(Number(poolId)).publicKey
           );
-          const txnO = (await builder.token.arc200_approve(addr, bigAmount))
-            .obj;
+          const txnO = (
+            await builder.token.arc200_approve(addr, repayArc200Units)
+          ).obj;
           const description = `arc200 approve ${symbol} token spending to pool (${addr}) for user (${userAddress})`;
           buildN.push({
             ...txnO,

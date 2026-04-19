@@ -150,7 +150,7 @@ export interface TokenConfig {
 }
 
 /** Which user flows an adapter participates in (omit = both, for backward compatibility). */
-export type AdapterPhase = "deposit" | "withdraw" | "borrow";
+export type AdapterPhase = "deposit" | "withdraw" | "borrow" | "repay";
 
 export type TokenAdapterConfig = {
   /**
@@ -181,8 +181,14 @@ export type TokenAdapterConfig = {
    */
   borrowReceiveBasis?: "underlying" | "market_token";
   /**
+   * For repay routes (Folks `network-asa`): what the user spends from the wallet before nt200 deposit + repay.
+   * `market_token` = f-ASA already held. `underlying` = native / primary ASA → Folks mint f-asset, then repay.
+   */
+  repayWalletBasis?: "underlying" | "market_token";
+  /**
    * When set, this adapter runs only for these flows.
-   * When omitted, applies to deposit and withdraw; borrow requires `phases` containing `"borrow"`.
+   * When omitted, applies to deposit and withdraw; borrow requires `phases` containing `"borrow"`;
+   * repay requires `phases` containing `"repay"`.
    */
   phases?: AdapterPhase[];
 };
@@ -266,6 +272,28 @@ export const FOLKS_MAINNET_ALGO_BORROW_UNDERLYING = {
   folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.ALGO,
 } satisfies TokenAdapterConfig;
 
+/** Repay using f-ASA from the wallet (no Folks mint preamble). */
+export const FOLKS_MAINNET_ALGO_REPAY_FASSET_WALLET = {
+  id: "folks-mainnet-algo-repay-falgo",
+  name: "fALGO",
+  type: "folks" as const,
+  label: "fALGO",
+  repayWalletBasis: "market_token" as const,
+  phases: ["repay"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.ALGO,
+} satisfies TokenAdapterConfig;
+
+/** Repay with native ALGO → Folks mint f-asset, then nt200 deposit + repay. */
+export const FOLKS_MAINNET_ALGO_REPAY_UNDERLYING = {
+  id: "folks-mainnet-algo-repay-algo",
+  name: "ALGO",
+  type: "folks" as const,
+  label: "ALGO",
+  repayWalletBasis: "underlying" as const,
+  phases: ["repay"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.ALGO,
+} satisfies TokenAdapterConfig;
+
 export type FolksTokenAdapterConfig = Extract<
   TokenAdapterConfig,
   { type: "folks" }
@@ -276,9 +304,12 @@ function adapterAppliesToPhase(
   phase: AdapterPhase
 ): boolean {
   const p = adapter.phases;
-  // Borrow is opt-in only so legacy adapters without `phases` stay deposit+withdraw.
+  // Borrow / repay are opt-in only so legacy adapters without `phases` stay deposit+withdraw.
   if (phase === "borrow") {
     return p != null && p.includes("borrow");
+  }
+  if (phase === "repay") {
+    return p != null && p.includes("repay");
   }
   if (p == null || p.length === 0) {
     return true;
@@ -393,6 +424,28 @@ export function resolveBorrowFolksAdapter(
     console.warn(
       "[resolveBorrowFolksAdapter] borrowAdapterId not found; using first borrow-phase Folks adapter.",
       { borrowAdapterId: want, available: list.map(tokenAdapterStableId) }
+    );
+  }
+  return list[0];
+}
+
+/** Resolve which Folks repay-phase adapter to run (matches `repayAdapterId` or first). */
+export function resolveRepayFolksAdapter(
+  token: Pick<TokenConfig, "adapter" | "adapters">,
+  repayAdapterId?: string | null
+): FolksTokenAdapterConfig | undefined {
+  const list = getFolksAdaptersForPhase(token, "repay");
+  if (list.length === 0) return undefined;
+  const want =
+    repayAdapterId != null && String(repayAdapterId).trim() !== ""
+      ? String(repayAdapterId).trim()
+      : null;
+  if (want != null) {
+    const hit = list.find((a) => tokenAdapterStableId(a) === want);
+    if (hit) return hit;
+    console.warn(
+      "[resolveRepayFolksAdapter] repayAdapterId not found; using first repay-phase Folks adapter.",
+      { repayAdapterId: want, available: list.map(tokenAdapterStableId) }
     );
   }
   return list[0];
@@ -1650,6 +1703,8 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
       FOLKS_MAINNET_ALGO_WITHDRAW_FASSET_WALLET,
       FOLKS_MAINNET_ALGO_BORROW_FASSET_WALLET,
       FOLKS_MAINNET_ALGO_BORROW_UNDERLYING,
+      FOLKS_MAINNET_ALGO_REPAY_FASSET_WALLET,
+      FOLKS_MAINNET_ALGO_REPAY_UNDERLYING,
     ],
     dataAddedAt: "2026-04-17T00:00:00.000Z",
     intrinsicApyPercent: 2.14, // TODO fetch from source
@@ -1667,9 +1722,9 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     tokenStandard: "asa",
     /**
      * Same Folks leg as the `network-asa` row under `tokens.ALGO[]` for this pool, so anything
-     * that resolves `getTokenConfig("fALGO")` still sees adapter metadata. Supply/withdraw UX
+     * that resolves `getTokenConfig("fALGO")` still sees adapter metadata. Supply/withdraw/borrow/repay UX
      * that offers per-adapter inputs should read {@link getFolksAdaptersForPhase} and pass
-     * {@link tokenAdapterStableId} into `lendingService` once those options are wired.
+     * {@link tokenAdapterStableId} into `lendingService` for the matching phase.
      */
     adapters: [
       FOLKS_MAINNET_ALGO_DEPOSIT_FALGO_WALLET,
@@ -1678,6 +1733,8 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
       FOLKS_MAINNET_ALGO_WITHDRAW_FASSET_WALLET,
       FOLKS_MAINNET_ALGO_BORROW_FASSET_WALLET,
       FOLKS_MAINNET_ALGO_BORROW_UNDERLYING,
+      FOLKS_MAINNET_ALGO_REPAY_FASSET_WALLET,
+      FOLKS_MAINNET_ALGO_REPAY_UNDERLYING,
     ],
     dataAddedAt: "2026-04-17T00:00:00.000Z",
     intrinsicApyPercent: 2.14, // TODO fetch from source

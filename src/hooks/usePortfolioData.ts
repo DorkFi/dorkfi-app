@@ -327,10 +327,11 @@ export const usePortfolioData = () => {
             balance = 0;
           }
         } else if (
-          originalTokenConfig.tokenStandard === "asa" &&
+          (originalTokenConfig.tokenStandard === "asa" ||
+            originalTokenConfig.tokenStandard === "network-asa") &&
           token.underlyingAssetId
         ) {
-          // For ASA tokens, fetch asset balance
+          // For ASA and Folks network-asa (e.g. fALGO): wallet holds the f-ASA.
           console.log(
             `Fetching ASA balance for ${asset} (asset ID: ${token.underlyingAssetId})`
           );
