@@ -2215,6 +2215,18 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
       logoPath: "/lovable-uploads/WAD_fixed.png",
       tokenStandard: "arc200-exchange",
     },
+    {
+      assetId: "3334160924",
+      contractId: "3333688448",
+      poolId: "3526240577",
+      nTokenId: "3527318445",
+      decimals: 6,
+      name: "WAD",
+      symbol: "WAD",
+      logoPath: "/lovable-uploads/WAD_fixed.png",
+      tokenStandard: "arc200-exchange",
+      dataAddedAt: "2026-04-19T00:00:00.000Z",
+    },
   ],
 };
 const algorandMainnetProdConfig: NetworkConfig = {
