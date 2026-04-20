@@ -7,8 +7,10 @@ import {
   getLendingPools,
   getMarketLabel,
   getRewardsProgramPublicBaseUrl,
-  getIntrinsicSupplyApyPercent,
+  resolveIntrinsicSupplyApyPercent,
   getIntrinsicBorrowApyPercent,
+  tokenRowUsesLiveIntrinsicApy,
+  type LiveIntrinsicSupplyApySnapshot,
   getAlgorandNetworkFromNetworkId,
   type TokenConfig,
   getAnyFolksAdapter,
@@ -22,6 +24,8 @@ import algorandService from "@/services/algorandService";
 import { normalizeWadUsdPerToken } from "@/lib/utils";
 import { APYCalculationResult } from "@/utils/apyCalculations";
 import BigNumber from "bignumber.js";
+import { useTinymanLiquidStakingLiveApyPercent } from "@/hooks/useTinymanLiquidStakingLiveApyPercent";
+import { useXalgoGovernanceLiveApyPercent } from "@/hooks/useXalgoGovernanceLiveApyPercent";
 
 export interface OnDemandMarketData {
   asset: string;
@@ -198,6 +202,20 @@ export const useOnDemandMarketData = ({
   >({});
   const [loadingMarkets, setLoadingMarkets] = useState<Set<string>>(new Set());
   const { currentNetwork } = useNetwork();
+  const algorandMainnetMarkets = currentNetwork === "algorand-mainnet";
+  const tinymanLiveIntrinsicApyPct = useTinymanLiquidStakingLiveApyPercent(
+    algorandMainnetMarkets
+  );
+  const xalgoLiveIntrinsicApyPct = useXalgoGovernanceLiveApyPercent(
+    algorandMainnetMarkets
+  );
+  const liveIntrinsicSupplyApy = useMemo<LiveIntrinsicSupplyApySnapshot>(
+    () => ({
+      tinymanLiquidStakingPercent: tinymanLiveIntrinsicApyPct,
+      xalgoGovernanceLambdaPercent: xalgoLiveIntrinsicApyPct,
+    }),
+    [tinymanLiveIntrinsicApyPct, xalgoLiveIntrinsicApyPct]
+  );
 
   // Get token configuration for current network
   const tokens = useMemo(
@@ -236,12 +254,13 @@ export const useOnDemandMarketData = ({
         tokenConfig as TokenConfig | undefined
       );
 
-      const intrinsicApr = getIntrinsicSupplyApyPercent(
+      const intrinsicApr = resolveIntrinsicSupplyApyPercent(
         currentNetwork,
         tokensMapKey,
         token.poolId != null && token.poolId !== ""
           ? String(token.poolId)
-          : undefined
+          : undefined,
+        liveIntrinsicSupplyApy
       );
       const intrinsicBorrowApy = getIntrinsicBorrowApyPercent(
         currentNetwork,
@@ -289,6 +308,38 @@ export const useOnDemandMarketData = ({
       setMarketsData(initialData);
     }
   }, [tokens, currentNetwork]);
+
+  useEffect(() => {
+    if (currentNetwork !== "algorand-mainnet") return;
+    setMarketsData((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [key, row] of Object.entries(prev)) {
+        const sym = row.configSymbol ?? row.asset;
+        const poolId =
+          row.poolId != null && String(row.poolId) !== ""
+            ? String(row.poolId)
+            : undefined;
+        if (
+          !tokenRowUsesLiveIntrinsicApy(currentNetwork, sym, poolId)
+        ) {
+          continue;
+        }
+        const resolved = resolveIntrinsicSupplyApyPercent(
+          currentNetwork,
+          sym,
+          poolId,
+          liveIntrinsicSupplyApy
+        );
+        const newIntrinsic = resolved > 0 ? resolved : undefined;
+        if (row.intrinsicSupplyApyPercent !== newIntrinsic) {
+          next[key] = { ...row, intrinsicSupplyApyPercent: newIntrinsic };
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [currentNetwork, liveIntrinsicSupplyApy]);
 
   // Load individual market data
   const loadMarketData = useCallback(
@@ -487,12 +538,13 @@ export const useOnDemandMarketData = ({
               tokenConfig as TokenConfig | undefined
             );
 
-            const intrinsicApr = getIntrinsicSupplyApyPercent(
+            const intrinsicApr = resolveIntrinsicSupplyApyPercent(
               currentNetwork,
               tokensMapKey,
               tokenPoolId != null && tokenPoolId !== ""
                 ? String(tokenPoolId)
-                : undefined
+                : undefined,
+              liveIntrinsicSupplyApy
             );
             const intrinsicBorrowApy = getIntrinsicBorrowApyPercent(
               currentNetwork,
@@ -603,7 +655,14 @@ export const useOnDemandMarketData = ({
         }
       }
     },
-    [tokens, currentNetwork, loadingMarkets, marketsData, throttleMs]
+    [
+      tokens,
+      currentNetwork,
+      loadingMarkets,
+      marketsData,
+      throttleMs,
+      liveIntrinsicSupplyApy,
+    ]
   );
 
   // Load market data for visible markets

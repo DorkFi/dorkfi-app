@@ -42,7 +42,8 @@ import algorandService from "@/services/algorandService";
 import {
   getAllTokens,
   getTokenConfig,
-  getIntrinsicSupplyApyPercent,
+  resolveIntrinsicSupplyApyPercent,
+  type LiveIntrinsicSupplyApySnapshot,
   isFeatureEnabled,
   getEnabledNetworks,
   getAlgorandNetworkFromNetworkId,
@@ -135,6 +136,8 @@ import {
   useRewardsAprBonusMap,
   getRewardsBonusSupplyAprPercent,
 } from "@/hooks/useRewardsAprBonusMap";
+import { useTinymanLiquidStakingLiveApyPercent } from "@/hooks/useTinymanLiquidStakingLiveApyPercent";
+import { useXalgoGovernanceLiveApyPercent } from "@/hooks/useXalgoGovernanceLiveApyPercent";
 
 /* eslint-disable no-case-declarations -- many sort switch blocks use const in cases */
 /* eslint-disable react-hooks/exhaustive-deps -- many callbacks intentionally use stable deps subset */
@@ -207,6 +210,24 @@ const Portfolio = () => {
     []
   );
   const rewardsAprByBaseUrl = useRewardsAprBonusMap(rewardsAprNetworks);
+  const liveIntrinsicApyFetchEnabled = useMemo(
+    () =>
+      (getEnabledNetworks() as NetworkId[]).includes("algorand-mainnet"),
+    []
+  );
+  const tinymanLiveIntrinsicApyPct = useTinymanLiquidStakingLiveApyPercent(
+    liveIntrinsicApyFetchEnabled
+  );
+  const xalgoLiveIntrinsicApyPct = useXalgoGovernanceLiveApyPercent(
+    liveIntrinsicApyFetchEnabled
+  );
+  const liveIntrinsicSupplyApy = useMemo<LiveIntrinsicSupplyApySnapshot>(
+    () => ({
+      tinymanLiquidStakingPercent: tinymanLiveIntrinsicApyPct,
+      xalgoGovernanceLambdaPercent: xalgoLiveIntrinsicApyPct,
+    }),
+    [tinymanLiveIntrinsicApyPct, xalgoLiveIntrinsicApyPct]
+  );
 
   // Use address from route params if available, otherwise fall back to activeAccount address
   const displayAddress = routeAddress || activeAccount?.address;
@@ -6291,12 +6312,13 @@ const Portfolio = () => {
                                   rewardsAprByBaseUrl
                                 );
                               const intrinsicAprMobile =
-                                getIntrinsicSupplyApyPercent(
+                                resolveIntrinsicSupplyApyPercent(
                                   depositNetForRewards as NetworkId,
                                   rewardKeyMobile,
                                   deposit.poolId
                                     ? String(deposit.poolId)
-                                    : undefined
+                                    : undefined,
+                                  liveIntrinsicSupplyApy
                                 );
                               return (
                                 <div
@@ -6879,13 +6901,15 @@ const Portfolio = () => {
                                   : undefined,
                                 rewardsAprByBaseUrl
                               );
-                              const intrinsicApr = getIntrinsicSupplyApyPercent(
-                                depositNetworkForToken as NetworkId,
-                                rewardConfigKey,
-                                deposit.poolId != null
-                                  ? String(deposit.poolId)
-                                  : undefined
-                              );
+                              const intrinsicApr =
+                                resolveIntrinsicSupplyApyPercent(
+                                  depositNetworkForToken as NetworkId,
+                                  rewardConfigKey,
+                                  deposit.poolId != null
+                                    ? String(deposit.poolId)
+                                    : undefined,
+                                  liveIntrinsicSupplyApy
+                                );
 
                               // Get network name from deposit or infer
                               let networkName = "Unknown";
