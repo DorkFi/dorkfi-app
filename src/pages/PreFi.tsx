@@ -310,6 +310,7 @@ const getCopyValue = (market: Market): string | null => {
   switch (market.tokenStandard) {
     case "asa":
     case "network-asa":
+    case "asa-asa":
       console.log("ASA token - assetId:", market.assetId);
       return market.assetId || null;
     case "arc200":

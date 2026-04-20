@@ -16,6 +16,7 @@ import { CONTRACT } from "ulujs";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
 import algorandService from "@/services/algorandService";
 import { getNetworkConfig } from "@/config";
+import { LENDING_USER_HEALTH_ROUND_LOOKBACK } from "@/constants/lendingUserHealthIndexer";
 import algosdk from "algosdk";
 
 interface DashboardProps {
@@ -203,9 +204,8 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
       });
 
       type EventGroup = { name: string; events?: unknown[] };
-      // Fetch events from the last 2M rounds (similar to LiquidationMarkets)
       const events = (await ci.getEvents({
-        minRound: Math.max(0, lastRound - 2e6),
+        minRound: Math.max(0, lastRound - LENDING_USER_HEALTH_ROUND_LOOKBACK),
       })) as EventGroup[];
 
       console.log("🔍 Debug - All events fetched:", events);
@@ -214,7 +214,10 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
         events.map((e) => e.name)
       );
       console.log("🔍 Debug - Last round:", lastRound);
-      console.log("🔍 Debug - Min round:", Math.max(0, lastRound - 2e6));
+      console.log(
+        "🔍 Debug - Min round:",
+        Math.max(0, lastRound - LENDING_USER_HEALTH_ROUND_LOOKBACK)
+      );
 
       const allUserHealthEvents =
         events
@@ -273,11 +276,17 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
           return uniqueUsers.size;
         }
 
-        // Try fetching from a smaller range (last 100k rounds)
-        console.log("🔍 Debug - Trying smaller range (last 100k rounds)...");
+        // Retry with a tighter window (half lookback) in case the primary query timed out
+        const narrowLookback = Math.max(
+          20_000,
+          Math.floor(LENDING_USER_HEALTH_ROUND_LOOKBACK / 2)
+        );
+        console.log(
+          `🔍 Debug - Trying smaller range (last ${narrowLookback} rounds)...`
+        );
         try {
           const recentEvents = (await ci.getEvents({
-            minRound: Math.max(0, lastRound - 100000),
+            minRound: Math.max(0, lastRound - narrowLookback),
           })) as EventGroup[];
 
           console.log("🔍 Debug - Recent events:", recentEvents);

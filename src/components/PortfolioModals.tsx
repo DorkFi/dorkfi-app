@@ -34,6 +34,7 @@ import {
   getFolksAdaptersForPhase,
   tokenConfigHasNonFolksAdapter,
   tokenConfigHasAdapters,
+  tokenStandardIsFolksAsaBridge,
 } from "@/config";
 import algorandService, { AlgorandNetwork } from "@/services/algorandService";
 import algosdk, { waitForConfirmation } from "algosdk";
@@ -2221,7 +2222,8 @@ const PortfolioModals = ({
 
           const withdrawAmountIsUnderlying =
             folksWithdrawAdapters.length > 0 &&
-            tcWithdraw?.tokenStandard === "network-asa";
+            tcWithdraw != null &&
+            tokenStandardIsFolksAsaBridge(tcWithdraw.tokenStandard);
 
           const underlyingDepositAdapter = tcWithdraw
             ? getFolksAdaptersForPhase(tcWithdraw, "deposit").find(

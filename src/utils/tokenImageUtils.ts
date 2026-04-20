@@ -69,6 +69,7 @@ export const getTokenImagePath = (symbol: string): string => {
     tALGO: "/lovable-uploads/tALGO.webp",
     xALGO: "/lovable-uploads/xALGO.webp",
     fALGO: "/lovable-uploads/fALGO.webp",
+    fUSDC: "/lovable-uploads/fUSDC.webp",
   };
 
   // Normalize symbol for case-insensitive lookup

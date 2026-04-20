@@ -73,6 +73,7 @@ import {
 } from "@/utils/depositModalPoolHealthEstimate";
 import TransactionSignPreview from "./TransactionSignPreview";
 import { getExplorerTransactionUrl } from "@/utils/explorerLinks";
+import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
 
 /** Built transaction group ready for wallet signature (review step). */
 interface PendingSupplyBorrowSign {
@@ -329,7 +330,7 @@ const SupplyBorrowModal = ({
     null
   );
   const [isSigning, setIsSigning] = useState(false);
-  /** Selected Folks deposit route; defaults to first {@link getFolksAdaptersForPhase} entry. */
+  /** Selected Folks deposit route; defaults to underlying when both f-asset and underlying routes exist. */
   const [selectedDepositAdapterId, setSelectedDepositAdapterId] =
     useState<string>("");
   const [depositRoutePickerOpen, setDepositRoutePickerOpen] = useState(false);
@@ -608,20 +609,28 @@ const SupplyBorrowModal = ({
       setFetchedFAssetWalletHuman(undefined);
       return;
     }
-    const aid = resolvedDepositTokenConfig.assetId;
-    if (aid == null || String(aid).trim() === "") {
+    const folks = getAnyFolksAdapter(resolvedDepositTokenConfig);
+    const fAssetStr =
+      folks?.type === "folks"
+        ? String(folks.folksParams.fAssetId ?? "").trim()
+        : "";
+    if (
+      fAssetStr === "" ||
+      !Number.isFinite(Number(fAssetStr)) ||
+      Number(fAssetStr) <= 0
+    ) {
       setFetchedFAssetWalletHuman(undefined);
       return;
     }
+    const fAssetAsa = Number(fAssetStr);
     let cancelled = false;
     (async () => {
       try {
         const { algod } = algorandService.initializeClients(aln as any);
         const info = await algod
-          .accountAssetInformation(activeAccount.address, Number(aid))
+          .accountAssetInformation(activeAccount.address, fAssetAsa)
           .do();
-        const raw = (info as { assetHolding?: { amount?: number | bigint } })
-          .assetHolding?.amount;
+        const raw = getAccountAssetHoldingAmountAtomic(info);
         const dec = resolvedDepositTokenConfig.decimals ?? 6;
         const human =
           raw != null ? Number(raw) / 10 ** dec : 0;
@@ -705,7 +714,11 @@ const SupplyBorrowModal = ({
     setSelectedDepositAdapterId((prev) => {
       const ids = list.map((a) => tokenAdapterStableId(a));
       if (prev && ids.includes(prev)) return prev;
-      return ids[0] ?? "";
+      const preferred =
+        list.find(
+          (a) => (a.depositWalletBasis ?? "underlying") === "underlying"
+        ) ?? list[0];
+      return preferred ? tokenAdapterStableId(preferred) : "";
     });
   }, [isOpen, mode, depositFolksAdapters]);
 

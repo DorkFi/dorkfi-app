@@ -24,6 +24,7 @@ import {
   tokenStandardUsesNt200Arc200Balance,
   tokenStandardUsesAsaStyleNt200Txns,
   tokenStandardUsesNativeWalletBalance,
+  tokenStandardIsFolksAsaBridge,
   getFolksAdapterForPhase,
   getTokenAdaptersForPhase,
   tokenConfigHasAdapters,
@@ -2110,7 +2111,10 @@ export const fetchUserWalletBalance = async (
           .accountInformation(userAddress)
           .do();
         balance = (x => x >= BigInt(0) ? x : BigInt(0))(BigInt(accountInfo.amount) - BigInt(accountInfo.minBalance) - BigInt(1e6));
-      } else if (tokenConfig.tokenStandard === "asa") {
+      } else if (
+        tokenConfig.tokenStandard === "asa" ||
+        tokenConfig.tokenStandard === "asa-asa"
+      ) {
         // For ASA tokens, get balance from account asset information
         const accountAssetInfo = await clients.algod
           .accountAssetInformation(userAddress, Number(tokenConfig.assetId))
@@ -4213,9 +4217,9 @@ export const deposit = async (
         ? getTokenAdaptersForPhase(tokenConfigForDeposit, "deposit")
         : [];
 
-      if (tokenStandard === "network-asa" && !folksForDeposit) {
+      if (tokenStandardIsFolksAsaBridge(tokenStandard) && !folksForDeposit) {
         throw new Error(
-          "tokenStandard network-asa requires a Folks adapter for deposit (adapter / adapters with deposit phase)."
+          "tokenStandard network-asa / asa-asa requires a Folks adapter for deposit (adapter / adapters with deposit phase)."
         );
       }
 
@@ -4297,7 +4301,7 @@ export const deposit = async (
             { bigAmount: bigAmount.toString(), token_balance: token_balance.toString() }
           );
         }
-      } else if (tokenStandard === "network-asa") {
+      } else if (tokenStandardIsFolksAsaBridge(tokenStandard)) {
         console.warn(
           "folksMintTxns skipped: no adapter on resolved token config row",
           { tokenConfigLookupSymbol, displaySymbol: token.symbol }
@@ -5563,12 +5567,12 @@ export const repay = async (
       );
 
       if (
-        tokenStandard === "network-asa" &&
+        tokenStandardIsFolksAsaBridge(tokenStandard) &&
         repayPhaseAdapters.length > 0 &&
         !folksForRepay
       ) {
         throw new Error(
-          "tokenStandard network-asa requires a Folks repay adapter when repay-phase adapters are configured."
+          "tokenStandard network-asa / asa-asa requires a Folks repay adapter when repay-phase adapters are configured."
         );
       }
 
@@ -6372,12 +6376,12 @@ export const repayAll = async (
       );
 
       if (
-        tokenStandard === "network-asa" &&
+        tokenStandardIsFolksAsaBridge(tokenStandard) &&
         repayPhaseAdapters.length > 0 &&
         !folksForRepay
       ) {
         throw new Error(
-          "tokenStandard network-asa requires a Folks repay adapter when repay-phase adapters are configured."
+          "tokenStandard network-asa / asa-asa requires a Folks repay adapter when repay-phase adapters are configured."
         );
       }
 

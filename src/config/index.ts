@@ -57,7 +57,17 @@ export type TokenStandard =
   | "arc200"
   | "arc200-exchange"
   /** Native-coin wallet balance (like `network`), but deposits use ASA-style f-asset + ARC200 nt200 (for adapter flows). */
-  | "network-asa";
+  | "network-asa"
+  /**
+   * Like `network-asa` (Folks + f-asset nt200), but the wallet-spendable collateral is the row ASA
+   * (`assetId`), not the network native coin (`assetId` `"0"` / network token).
+   */
+  | "asa-asa";
+
+/** `network-asa` or `asa-asa`: Folks-wrapped nt200 markets (shared deposit/repay adapter rules). */
+export function tokenStandardIsFolksAsaBridge(standard: TokenStandard): boolean {
+  return standard === "network-asa" || standard === "asa-asa";
+}
 
 /** ARC200 `balanceOf` on the nt200 underlying (used in lending deposit sizing). */
 export function tokenStandardUsesNt200Arc200Balance(
@@ -67,6 +77,7 @@ export function tokenStandardUsesNt200Arc200Balance(
     standard === "network" ||
     standard === "asa" ||
     standard === "network-asa" ||
+    standard === "asa-asa" ||
     standard === "arc200-exchange"
   );
 }
@@ -75,7 +86,7 @@ export function tokenStandardUsesNt200Arc200Balance(
 export function tokenStandardUsesAsaStyleNt200Txns(
   standard: TokenStandard
 ): boolean {
-  return standard === "asa" || standard === "network-asa";
+  return standard === "asa" || standard === "network-asa" || standard === "asa-asa";
 }
 
 /** Wallet UI: native L1 balance (e.g. ALGO) like `network`, not ASA holding. */
@@ -94,7 +105,7 @@ export interface TokenConfig {
   name: string;
   symbol: string;
   logoPath: string;
-  tokenStandard: TokenStandard; // network | asa | arc200 | arc200-exchange | network-asa (adapter + f-asset ASA)
+  tokenStandard: TokenStandard; // network | asa | arc200 | arc200-exchange | network-asa | asa-asa
   // Market override configuration
   marketOverride?: {
     displayName: string;
@@ -292,6 +303,88 @@ export const FOLKS_MAINNET_ALGO_REPAY_UNDERLYING = {
   repayWalletBasis: "underlying" as const,
   phases: ["repay"] as const,
   folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.ALGO,
+} satisfies TokenAdapterConfig;
+
+/** Folks USDC pool — same phase split as {@link FOLKS_MAINNET_ALGO_DEPOSIT_FALGO_WALLET} / underlying, for `asa-asa` rows whose `assetId` is USDC. */
+export const FOLKS_MAINNET_USDC_DEPOSIT_FUSDC_WALLET = {
+  id: "folks-mainnet-usdc-deposit-fusdc",
+  name: "fUSDC",
+  type: "folks" as const,
+  label: "fUSDC",
+  depositWalletBasis: "market_token" as const,
+  phases: ["deposit"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.USDC,
+} satisfies TokenAdapterConfig;
+
+/** Deposit USDC → Folks mint fUSDC, then nt200 supply. */
+export const FOLKS_MAINNET_USDC_DEPOSIT_UNDERLYING = {
+  id: "folks-mainnet-usdc-deposit-usdc",
+  name: "USDC",
+  type: "folks" as const,
+  label: "USDC",
+  depositWalletBasis: "underlying" as const,
+  phases: ["deposit"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.USDC,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_USDC_WITHDRAW = {
+  id: "folks-mainnet-usdc-withdraw",
+  name: "USDC",
+  type: "folks" as const,
+  label: "USDC",
+  withdrawReceiveBasis: "underlying" as const,
+  phases: ["withdraw"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.USDC,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_USDC_WITHDRAW_FASSET_WALLET = {
+  id: "folks-mainnet-usdc-withdraw-fusdc",
+  name: "fUSDC",
+  type: "folks" as const,
+  label: "fUSDC",
+  withdrawReceiveBasis: "market_token" as const,
+  phases: ["withdraw"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.USDC,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_USDC_BORROW_FUSDC_WALLET = {
+  id: "folks-mainnet-usdc-borrow-fusdc",
+  name: "fUSDC",
+  type: "folks" as const,
+  label: "fUSDC",
+  borrowReceiveBasis: "market_token" as const,
+  phases: ["borrow"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.USDC,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_USDC_BORROW_UNDERLYING = {
+  id: "folks-mainnet-usdc-borrow-usdc",
+  name: "USDC",
+  type: "folks" as const,
+  label: "USDC",
+  borrowReceiveBasis: "underlying" as const,
+  phases: ["borrow"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.USDC,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_USDC_REPAY_FUSDC_WALLET = {
+  id: "folks-mainnet-usdc-repay-fusdc",
+  name: "fUSDC",
+  type: "folks" as const,
+  label: "fUSDC",
+  repayWalletBasis: "market_token" as const,
+  phases: ["repay"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.USDC,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_USDC_REPAY_UNDERLYING = {
+  id: "folks-mainnet-usdc-repay-usdc",
+  name: "USDC",
+  type: "folks" as const,
+  label: "USDC",
+  repayWalletBasis: "underlying" as const,
+  phases: ["repay"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.USDC,
 } satisfies TokenAdapterConfig;
 
 export type FolksTokenAdapterConfig = Extract<
@@ -1791,7 +1884,62 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     logoPath: "/lovable-uploads/USDC.webp",
     tokenStandard: "asa",
     dataAddedAt: "2026-03-26T00:00:00.000Z",
+  }, {
+    assetId: "31566704",
+    poolId: "3526240577",
+    contractId: "3527735223",
+    nTokenId: "3527752141",
+    decimals: 6,
+    name: "Folks V2 USDC",
+    symbol: "fUSDC",
+    marketOverride: {
+      displayName: "USD Coin",
+      displaySymbol: "USDC",
+      isSmartContract: true,
+    },
+    logoPath: "/lovable-uploads/USDC.webp",
+    tokenStandard: "asa-asa",
+    adapters: [
+      FOLKS_MAINNET_USDC_DEPOSIT_FUSDC_WALLET,
+      FOLKS_MAINNET_USDC_DEPOSIT_UNDERLYING,
+      FOLKS_MAINNET_USDC_WITHDRAW,
+      FOLKS_MAINNET_USDC_WITHDRAW_FASSET_WALLET,
+      FOLKS_MAINNET_USDC_BORROW_FUSDC_WALLET,
+      FOLKS_MAINNET_USDC_BORROW_UNDERLYING,
+      FOLKS_MAINNET_USDC_REPAY_FUSDC_WALLET,
+      FOLKS_MAINNET_USDC_REPAY_UNDERLYING,
+    ],
+    dataAddedAt: "2026-04-19T00:00:00.000Z",
+    intrinsicApyPercent: 3.68, // TODO fetch from source
+    intrinsicBorrowApyPercent: 3.68, // TODO fetch from source
   }],
+  fUSDC: {
+    assetId: "971384592",
+    poolId: "3333688282",
+    contractId: "3527735223",
+    nTokenId: "3527764569",
+    decimals: 6,
+    name: "Folks V2 USDC",
+    symbol: "fUSDC",
+    logoPath: "/lovable-uploads/fUSDC.webp",
+    tokenStandard: "asa",
+    /**
+     * Same Folks leg as the `asa-asa` row under `tokens.USDC[]` for this pool, so
+     * `getTokenConfig("fUSDC")` resolves adapter metadata for mint-ratio / route pickers.
+     */
+    adapters: [
+      FOLKS_MAINNET_USDC_DEPOSIT_FUSDC_WALLET,
+      FOLKS_MAINNET_USDC_DEPOSIT_UNDERLYING,
+      FOLKS_MAINNET_USDC_WITHDRAW,
+      FOLKS_MAINNET_USDC_WITHDRAW_FASSET_WALLET,
+      FOLKS_MAINNET_USDC_BORROW_FUSDC_WALLET,
+      FOLKS_MAINNET_USDC_BORROW_UNDERLYING,
+      FOLKS_MAINNET_USDC_REPAY_FUSDC_WALLET,
+      FOLKS_MAINNET_USDC_REPAY_UNDERLYING,
+    ],
+    dataAddedAt: "2026-04-19T00:00:00.000Z",
+    intrinsicApyPercent: 3.68, // TODO fetch from source
+  },
   UNIT: {
     assetId: "3121954282",
     poolId: "3333688282",

@@ -70,6 +70,7 @@ export class GasStationService {
       case "arc200":
         return await this.mintARC200Token(request);
       case "asa":
+      case "asa-asa":
         return await this.mintASAToken(request);
       default:
         throw new Error(`Unsupported token standard: ${tokenStandard}`);
@@ -344,6 +345,7 @@ export class GasStationService {
         mintingCost = "0.001~0.0305 VOI";
         break;
       case "asa":
+      case "asa-asa":
         description = `Algorand Standard Asset with minting permissions`;
         mintingCost = "0.0305 VOI";
         break;

@@ -43,6 +43,7 @@ import {
 import type { UserPosition as MarketDetailUserPosition } from "@/components/market-modal/types";
 import { normalizeWadUsdPerToken, roundUsdToCents } from "@/lib/utils";
 import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
+import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
 import { useToast } from "@/hooks/use-toast";
 import { isAtDepositCap, isAtBorrowCap } from "@/constants/lendingCaps";
 import algosdk, { waitForConfirmation } from "algosdk";
@@ -2445,6 +2446,25 @@ const MarketsTable = () => {
         ) &&
         folksDepositAdapters.some((a) => a.folksParams.pool === "ALGO");
 
+      /** Folks underlying-ASA id when a deposit adapter spends underlying (e.g. USDC for `tokens.fUSDC`). */
+      const folksUnderlyingDepositAdapter = folksDepositAdapters.find(
+        (a) =>
+          a.type === "folks" &&
+          (a.depositWalletBasis ?? "underlying") === "underlying"
+      );
+      const folksUnderlyingAsaStr =
+        folksUnderlyingDepositAdapter?.type === "folks"
+          ? String(folksUnderlyingDepositAdapter.folksParams.assetId ?? "").trim()
+          : "";
+      const folksUnderlyingAsaIdForWallet =
+        folksUnderlyingAsaStr !== "" && folksUnderlyingAsaStr !== "-"
+          ? parseInt(folksUnderlyingAsaStr, 10)
+          : NaN;
+      const useFolksUnderlyingAsaWalletBalance =
+        folksUnderlyingDepositAdapter?.type === "folks" &&
+        Number.isFinite(folksUnderlyingAsaIdForWallet) &&
+        folksUnderlyingAsaIdForWallet > 0;
+
       // Initialize ARC200Service with current clients
       const clients = await getSyncedClientsForReads();
       ARC200Service.initialize(clients);
@@ -2476,6 +2496,31 @@ const MarketsTable = () => {
         } catch (error) {
           console.error(
             `Error fetching native ALGO balance for Folks hybrid market ${asset}:`,
+            error
+          );
+          balance = 0;
+        }
+      } else if (useFolksUnderlyingAsaWalletBalance) {
+        // Standalone f-asset rows (e.g. `tokens.fUSDC`) use f-ASA in config; default deposit route is
+        // underlying USDC (`folksParams.assetId`), same as `SupplyBorrowModal` after route selection.
+        try {
+          const accAssetInfo = await clients.algod
+            .accountAssetInformation(
+              activeAccount.address,
+              folksUnderlyingAsaIdForWallet
+            )
+            .do();
+          const atomic = getAccountAssetHoldingAmountAtomic(accAssetInfo);
+          if (atomic != null) {
+            balance =
+              Number(atomic) /
+              Math.pow(10, originalTokenConfig.decimals);
+          } else {
+            balance = 0;
+          }
+        } catch (error) {
+          console.error(
+            `Error fetching Folks underlying ASA balance for ${asset}:`,
             error
           );
           balance = 0;
@@ -2536,6 +2581,35 @@ const MarketsTable = () => {
           balance = 0;
         }
       } else if (
+        originalTokenConfig.tokenStandard === "asa-asa" &&
+        originalTokenConfig.assetId != null &&
+        String(originalTokenConfig.assetId).trim() !== ""
+      ) {
+        const assetId = parseInt(String(originalTokenConfig.assetId).trim(), 10);
+        console.log(
+          `Fetching ASA balance for ${asset} (asa-asa asset ID: ${assetId})`
+        );
+        try {
+          const clients = await getSyncedClientsForReads();
+          const accAssetInfo = await clients.algod
+            .accountAssetInformation(activeAccount.address, assetId)
+            .do();
+
+          const atomic = getAccountAssetHoldingAmountAtomic(accAssetInfo);
+          if (atomic != null) {
+            balance =
+              Number(atomic) /
+              Math.pow(10, originalTokenConfig.decimals);
+            console.log(`ASA balance for ${asset}: ${balance}`);
+          } else {
+            console.log(`No ASA balance found for ${asset}`);
+            balance = 0;
+          }
+        } catch (error) {
+          console.error(`Error fetching ASA balance for ${asset}:`, error);
+          balance = 0;
+        }
+      } else if (
         (originalTokenConfig.tokenStandard === "asa" ||
           originalTokenConfig.tokenStandard === "network-asa") &&
         token.underlyingAssetId
@@ -2551,10 +2625,11 @@ const MarketsTable = () => {
             .accountAssetInformation(activeAccount.address, assetId)
             .do();
 
-          if (accAssetInfo.assetHolding) {
+          const atomic = getAccountAssetHoldingAmountAtomic(accAssetInfo);
+          if (atomic != null) {
             // Convert from smallest units to human readable format
             balance =
-              Number(accAssetInfo.assetHolding.amount) /
+              Number(atomic) /
               Math.pow(10, originalTokenConfig.decimals);
             console.log(`ASA balance for ${asset}: ${balance}`);
           } else {
@@ -2577,10 +2652,11 @@ const MarketsTable = () => {
             .accountAssetInformation(activeAccount.address, assetId)
             .do();
 
-          if (accAssetInfo.assetHolding) {
+          const atomic = getAccountAssetHoldingAmountAtomic(accAssetInfo);
+          if (atomic != null) {
             // Convert from smallest units to human readable format
             balance =
-              Number(accAssetInfo.assetHolding.amount) /
+              Number(atomic) /
               Math.pow(10, originalTokenConfig.decimals);
             console.log(`ASA balance for ${asset}: ${balance}`);
           } else {

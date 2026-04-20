@@ -61,6 +61,7 @@ import { marketRowForPortfolioPosition } from "@/utils/marketRowForPortfolioPosi
 import { usdPerTokenFromMarketInfoPrice } from "@/utils/assetDecimals";
 import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
 import { portfolioWalletBalanceCacheKey } from "@/utils/portfolioWalletBalanceCacheKey";
+import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
 import { shouldShowConfigSymbolUnderDisplayAsset } from "@/utils/portfolioAssetSubline";
 import {
   calculateUserHealthFactor,
@@ -2192,10 +2193,29 @@ const Portfolio = () => {
         return { balance: 0, balanceUSD: 0, lastUpdated: Date.now() };
       }
 
+      // Keys must match {@link PortfolioModals} / `refreshWalletBalance`: same fields as
+      // `depositModal` (opts). Do not fall back to `token.underlyingContractId` or
+      // `token.configKey` when opts omit them — that produced `m:…|p:…` or `c:USDC|p:…`
+      // while the modal used `s:USDC|p:…` (display + pool only), so balance read as 0.
+      const optMid =
+        opts?.marketId != null && String(opts.marketId).trim() !== ""
+          ? String(opts.marketId)
+          : undefined;
+      const optPid =
+        opts?.poolId != null && String(opts.poolId).trim() !== ""
+          ? String(opts.poolId)
+          : token.poolId != null && String(token.poolId).trim() !== ""
+            ? String(token.poolId)
+            : undefined;
+      const optCfg =
+        opts?.configSymbol != null && String(opts.configSymbol).trim() !== ""
+          ? String(opts.configSymbol)
+          : undefined;
+
       const cacheKey = portfolioWalletBalanceCacheKey(networkToUse, {
-        marketId: token.underlyingContractId,
-        poolId: token.poolId,
-        configSymbol: token.configKey,
+        marketId: optMid,
+        poolId: optPid,
+        configSymbol: optCfg,
         displaySymbol: asset,
       });
 
@@ -2315,6 +2335,34 @@ const Portfolio = () => {
           balance = 0;
         }
       } else if (
+        originalTokenConfig.tokenStandard === "asa-asa" &&
+        originalTokenConfig.assetId != null &&
+        String(originalTokenConfig.assetId).trim() !== ""
+      ) {
+        // Folks `asa-asa`: wallet holds the row ASA (e.g. USDC), not the network coin.
+        const assetId = parseInt(String(originalTokenConfig.assetId).trim(), 10);
+        console.log(
+          `Fetching ASA balance for ${asset} (asa-asa asset ID: ${assetId})`
+        );
+        try {
+          const accAssetInfo = await clients.algod
+            .accountAssetInformation(displayAddress, assetId)
+            .do();
+
+          const atomic = getAccountAssetHoldingAmountAtomic(accAssetInfo);
+          if (atomic != null) {
+            balance =
+              Number(atomic) / Math.pow(10, originalTokenConfig.decimals);
+            console.log(`ASA balance for ${asset}: ${balance}`);
+          } else {
+            console.log(`No ASA balance found for ${asset}`);
+            balance = 0;
+          }
+        } catch (error) {
+          console.error(`Error fetching ASA balance for ${asset}:`, error);
+          balance = 0;
+        }
+      } else if (
         (originalTokenConfig.tokenStandard === "asa" ||
           originalTokenConfig.tokenStandard === "network-asa") &&
         token.underlyingAssetId
@@ -2330,10 +2378,11 @@ const Portfolio = () => {
             .accountAssetInformation(displayAddress, assetId)
             .do();
 
-          if (accAssetInfo.assetHolding) {
+          const atomic = getAccountAssetHoldingAmountAtomic(accAssetInfo);
+          if (atomic != null) {
             // Convert from smallest units to human readable format
             balance =
-              Number(accAssetInfo.assetHolding.amount) /
+              Number(atomic) /
               Math.pow(10, originalTokenConfig.decimals);
             console.log(`ASA balance for ${asset}: ${balance}`);
           } else {
@@ -2356,10 +2405,11 @@ const Portfolio = () => {
             .accountAssetInformation(displayAddress, assetId)
             .do();
 
-          if (accAssetInfo.assetHolding) {
+          const atomic = getAccountAssetHoldingAmountAtomic(accAssetInfo);
+          if (atomic != null) {
             // Convert from smallest units to human readable format
             balance =
-              Number(accAssetInfo.assetHolding.amount) /
+              Number(atomic) /
               Math.pow(10, originalTokenConfig.decimals);
             console.log(`ASA balance for ${asset}: ${balance}`);
           } else {
