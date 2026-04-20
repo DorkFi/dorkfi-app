@@ -149,12 +149,21 @@ export interface TokenConfig {
    */
   intrinsicApyLiveSource?:
     | "tinyman_liquid_staking"
-    | "xalgo_governance_lambda";
+    | "xalgo_governance_lambda"
+    | "folks_mainnet_algo_pool_deposit";
   /**
    * Optional intrinsic borrow APY in percentage points (e.g. 1.5 for 1.5%), added to displayed
    * borrow APY for this listing (e.g. wrapped-asset borrow uplift).
    */
   intrinsicBorrowApyPercent?: number;
+  /**
+   * When set on Algorand mainnet, {@link resolveIntrinsicBorrowApyPercent} may prefer a live rate
+   * over {@link intrinsicBorrowApyPercent} when the corresponding fetch succeeds.
+   */
+  intrinsicBorrowApyLiveSource?:
+    | "tinyman_liquid_staking"
+    | "xalgo_governance_lambda"
+    | "folks_mainnet_algo_pool_deposit";
   /**
    * Optional wrapped-asset / bridge adapters (e.g. Folks mint/redeem), in order.
    * Use {@link TokenAdapterConfig.phases} to split deposit vs withdraw legs, and `id` + `label`
@@ -1807,8 +1816,10 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
       FOLKS_MAINNET_ALGO_REPAY_UNDERLYING,
     ],
     dataAddedAt: "2026-04-17T00:00:00.000Z",
-    intrinsicApyPercent: 2.14, // TODO fetch from source
-    intrinsicBorrowApyPercent: 2.14, // TODO fetch from source
+    intrinsicApyPercent: 2.14,
+    intrinsicApyLiveSource: "folks_mainnet_algo_pool_deposit",
+    intrinsicBorrowApyPercent: 2.14,
+    intrinsicBorrowApyLiveSource: "folks_mainnet_algo_pool_deposit",
   }],
   fALGO: {
     assetId: "971381860",
@@ -1837,7 +1848,8 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
       FOLKS_MAINNET_ALGO_REPAY_UNDERLYING,
     ],
     dataAddedAt: "2026-04-17T00:00:00.000Z",
-    intrinsicApyPercent: 2.14, // TODO fetch from source
+    intrinsicApyPercent: 2.14,
+    intrinsicApyLiveSource: "folks_mainnet_algo_pool_deposit",
   },
   tALGO: {
     assetId: "2537013734",
@@ -3092,6 +3104,8 @@ export const getIntrinsicSupplyApyPercent = (
 export type LiveIntrinsicSupplyApySnapshot = {
   tinymanLiquidStakingPercent?: number | null;
   xalgoGovernanceLambdaPercent?: number | null;
+  /** Folks mainnet ALGO lending pool deposit APY (fALGO), percentage points. */
+  folksMainnetAlgoDepositPercent?: number | null;
 };
 
 /**
@@ -3127,10 +3141,17 @@ export const resolveIntrinsicSupplyApyPercent = (
     }
     return base;
   }
+  if (source === "folks_mainnet_algo_pool_deposit") {
+    const v = live?.folksMainnetAlgoDepositPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+      return v;
+    }
+    return base;
+  }
   return base;
 };
 
-/** Whether this listing uses any configured live intrinsic APY source on Algorand mainnet. */
+/** Whether this listing uses any configured live intrinsic supply APY source on Algorand mainnet. */
 export const tokenRowUsesLiveIntrinsicApy = (
   networkId: NetworkId | string | undefined,
   symbol: string,
@@ -3143,7 +3164,31 @@ export const tokenRowUsesLiveIntrinsicApy = (
     poolId
   );
   const s = row?.intrinsicApyLiveSource;
-  return s === "tinyman_liquid_staking" || s === "xalgo_governance_lambda";
+  return (
+    s === "tinyman_liquid_staking" ||
+    s === "xalgo_governance_lambda" ||
+    s === "folks_mainnet_algo_pool_deposit"
+  );
+};
+
+/** Whether this listing uses any configured live intrinsic borrow APY source on Algorand mainnet. */
+export const tokenRowUsesLiveIntrinsicBorrowApy = (
+  networkId: NetworkId | string | undefined,
+  symbol: string,
+  poolId: string | undefined
+): boolean => {
+  if (networkId !== "algorand-mainnet") return false;
+  const row = resolveTokenConfigRowWithPool(
+    networkId as NetworkId,
+    symbol,
+    poolId
+  );
+  const s = row?.intrinsicBorrowApyLiveSource;
+  return (
+    s === "tinyman_liquid_staking" ||
+    s === "xalgo_governance_lambda" ||
+    s === "folks_mainnet_algo_pool_deposit"
+  );
 };
 
 /** Intrinsic borrow APY (% points) from config when set; 0 if unset or not applicable. */
@@ -3161,6 +3206,49 @@ export const getIntrinsicBorrowApyPercent = (
   if (!row) return 0;
   const v = row.intrinsicBorrowApyPercent;
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
+};
+
+/**
+ * Intrinsic borrow APY (% points) for display: on Algorand mainnet, prefers a live rate when
+ * {@link TokenConfig.intrinsicBorrowApyLiveSource} is set and the matching snapshot field is valid;
+ * otherwise {@link getIntrinsicBorrowApyPercent}.
+ */
+export const resolveIntrinsicBorrowApyPercent = (
+  networkId: NetworkId | string | undefined,
+  symbol: string,
+  poolId: string | undefined,
+  live?: LiveIntrinsicSupplyApySnapshot | null
+): number => {
+  const base = getIntrinsicBorrowApyPercent(networkId, symbol, poolId);
+  if (networkId !== "algorand-mainnet") return base;
+  const row = resolveTokenConfigRowWithPool(
+    networkId as NetworkId,
+    symbol,
+    poolId
+  );
+  const source = row?.intrinsicBorrowApyLiveSource;
+  if (source === "tinyman_liquid_staking") {
+    const v = live?.tinymanLiquidStakingPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+      return v;
+    }
+    return base;
+  }
+  if (source === "xalgo_governance_lambda") {
+    const v = live?.xalgoGovernanceLambdaPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+      return v;
+    }
+    return base;
+  }
+  if (source === "folks_mainnet_algo_pool_deposit") {
+    const v = live?.folksMainnetAlgoDepositPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+      return v;
+    }
+    return base;
+  }
+  return base;
 };
 
 export const getAllTokens = (networkId: NetworkId): TokenConfig[] => {

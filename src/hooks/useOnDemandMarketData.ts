@@ -8,8 +8,9 @@ import {
   getMarketLabel,
   getRewardsProgramPublicBaseUrl,
   resolveIntrinsicSupplyApyPercent,
-  getIntrinsicBorrowApyPercent,
+  resolveIntrinsicBorrowApyPercent,
   tokenRowUsesLiveIntrinsicApy,
+  tokenRowUsesLiveIntrinsicBorrowApy,
   type LiveIntrinsicSupplyApySnapshot,
   getAlgorandNetworkFromNetworkId,
   type TokenConfig,
@@ -26,6 +27,7 @@ import { APYCalculationResult } from "@/utils/apyCalculations";
 import BigNumber from "bignumber.js";
 import { useTinymanLiquidStakingLiveApyPercent } from "@/hooks/useTinymanLiquidStakingLiveApyPercent";
 import { useXalgoGovernanceLiveApyPercent } from "@/hooks/useXalgoGovernanceLiveApyPercent";
+import { useFolksMainnetAlgoDepositLiveApyPercent } from "@/hooks/useFolksMainnetAlgoDepositLiveApyPercent";
 
 export interface OnDemandMarketData {
   asset: string;
@@ -209,12 +211,20 @@ export const useOnDemandMarketData = ({
   const xalgoLiveIntrinsicApyPct = useXalgoGovernanceLiveApyPercent(
     algorandMainnetMarkets
   );
+  const folksAlgoDepositLiveApyPct = useFolksMainnetAlgoDepositLiveApyPercent(
+    algorandMainnetMarkets
+  );
   const liveIntrinsicSupplyApy = useMemo<LiveIntrinsicSupplyApySnapshot>(
     () => ({
       tinymanLiquidStakingPercent: tinymanLiveIntrinsicApyPct,
       xalgoGovernanceLambdaPercent: xalgoLiveIntrinsicApyPct,
+      folksMainnetAlgoDepositPercent: folksAlgoDepositLiveApyPct,
     }),
-    [tinymanLiveIntrinsicApyPct, xalgoLiveIntrinsicApyPct]
+    [
+      tinymanLiveIntrinsicApyPct,
+      xalgoLiveIntrinsicApyPct,
+      folksAlgoDepositLiveApyPct,
+    ]
   );
 
   // Get token configuration for current network
@@ -262,12 +272,13 @@ export const useOnDemandMarketData = ({
           : undefined,
         liveIntrinsicSupplyApy
       );
-      const intrinsicBorrowApy = getIntrinsicBorrowApyPercent(
+      const intrinsicBorrowApy = resolveIntrinsicBorrowApyPercent(
         currentNetwork,
         tokensMapKey,
         token.poolId != null && token.poolId !== ""
           ? String(token.poolId)
-          : undefined
+          : undefined,
+        liveIntrinsicSupplyApy
       );
 
       initialData[key] = {
@@ -320,21 +331,39 @@ export const useOnDemandMarketData = ({
           row.poolId != null && String(row.poolId) !== ""
             ? String(row.poolId)
             : undefined;
-        if (
-          !tokenRowUsesLiveIntrinsicApy(currentNetwork, sym, poolId)
-        ) {
-          continue;
-        }
-        const resolved = resolveIntrinsicSupplyApyPercent(
-          currentNetwork,
-          sym,
-          poolId,
-          liveIntrinsicSupplyApy
-        );
-        const newIntrinsic = resolved > 0 ? resolved : undefined;
-        if (row.intrinsicSupplyApyPercent !== newIntrinsic) {
-          next[key] = { ...row, intrinsicSupplyApyPercent: newIntrinsic };
+        let rowNext = row;
+        const patchRow = (partial: Partial<OnDemandMarketData>) => {
+          rowNext = { ...rowNext, ...partial };
           changed = true;
+        };
+
+        if (tokenRowUsesLiveIntrinsicApy(currentNetwork, sym, poolId)) {
+          const resolved = resolveIntrinsicSupplyApyPercent(
+            currentNetwork,
+            sym,
+            poolId,
+            liveIntrinsicSupplyApy
+          );
+          const newSupply = resolved > 0 ? resolved : undefined;
+          if (rowNext.intrinsicSupplyApyPercent !== newSupply) {
+            patchRow({ intrinsicSupplyApyPercent: newSupply });
+          }
+        }
+        if (tokenRowUsesLiveIntrinsicBorrowApy(currentNetwork, sym, poolId)) {
+          const resolvedBorrow = resolveIntrinsicBorrowApyPercent(
+            currentNetwork,
+            sym,
+            poolId,
+            liveIntrinsicSupplyApy
+          );
+          const newBorrow =
+            resolvedBorrow > 0 ? resolvedBorrow : undefined;
+          if (rowNext.intrinsicBorrowApyPercent !== newBorrow) {
+            patchRow({ intrinsicBorrowApyPercent: newBorrow });
+          }
+        }
+        if (rowNext !== row) {
+          next[key] = rowNext;
         }
       }
       return changed ? next : prev;
@@ -546,12 +575,13 @@ export const useOnDemandMarketData = ({
                 : undefined,
               liveIntrinsicSupplyApy
             );
-            const intrinsicBorrowApy = getIntrinsicBorrowApyPercent(
+            const intrinsicBorrowApy = resolveIntrinsicBorrowApyPercent(
               currentNetwork,
               tokensMapKey,
               tokenPoolId != null && tokenPoolId !== ""
                 ? String(tokenPoolId)
-                : undefined
+                : undefined,
+              liveIntrinsicSupplyApy
             );
 
             // Safely resolve supplyAPY - avoid NaN when supplyRate is undefined

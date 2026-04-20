@@ -138,6 +138,7 @@ import {
 } from "@/hooks/useRewardsAprBonusMap";
 import { useTinymanLiquidStakingLiveApyPercent } from "@/hooks/useTinymanLiquidStakingLiveApyPercent";
 import { useXalgoGovernanceLiveApyPercent } from "@/hooks/useXalgoGovernanceLiveApyPercent";
+import { useFolksMainnetAlgoDepositLiveApyPercent } from "@/hooks/useFolksMainnetAlgoDepositLiveApyPercent";
 
 /* eslint-disable no-case-declarations -- many sort switch blocks use const in cases */
 /* eslint-disable react-hooks/exhaustive-deps -- many callbacks intentionally use stable deps subset */
@@ -221,12 +222,20 @@ const Portfolio = () => {
   const xalgoLiveIntrinsicApyPct = useXalgoGovernanceLiveApyPercent(
     liveIntrinsicApyFetchEnabled
   );
+  const folksAlgoDepositLiveApyPct = useFolksMainnetAlgoDepositLiveApyPercent(
+    liveIntrinsicApyFetchEnabled
+  );
   const liveIntrinsicSupplyApy = useMemo<LiveIntrinsicSupplyApySnapshot>(
     () => ({
       tinymanLiquidStakingPercent: tinymanLiveIntrinsicApyPct,
       xalgoGovernanceLambdaPercent: xalgoLiveIntrinsicApyPct,
+      folksMainnetAlgoDepositPercent: folksAlgoDepositLiveApyPct,
     }),
-    [tinymanLiveIntrinsicApyPct, xalgoLiveIntrinsicApyPct]
+    [
+      tinymanLiveIntrinsicApyPct,
+      xalgoLiveIntrinsicApyPct,
+      folksAlgoDepositLiveApyPct,
+    ]
   );
 
   // Use address from route params if available, otherwise fall back to activeAccount address
