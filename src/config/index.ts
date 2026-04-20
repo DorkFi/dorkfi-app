@@ -1827,7 +1827,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     contractId: "3524740731",
     nTokenId: "3526254085",
     decimals: 6,
-    name: "Algorand",
+    name: "Folks V2 ALGO",
     symbol: "fALGO",
     logoPath: "/lovable-uploads/fALGO.webp",
     tokenStandard: "asa",
