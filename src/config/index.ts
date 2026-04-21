@@ -1864,6 +1864,13 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     intrinsicApyPercent: 2.14,
     intrinsicApyLiveSource: "folks_mainnet_algo_pool_deposit",
   },
+  /**
+   * Tinyman tALGO: nt200 / lending use the tALGO ASA (`assetId`) directly — no Folks f-tALGO leg.
+   * The supply modal offers a synthetic “deposit ALGO” route (Tinyman `mint`) that locks ALGO in the
+   * [Tinyman liquid staking](https://github.com/tinymanorg/tinyman-consensus-staking) app (mainnet app
+   * `2537013674`), mints tALGO, then calls the same `deposit()` path; see `TALGO_TINYMAN_DEPOSIT_ALGO_ROUTE_ID`
+   * in `SupplyBorrowModal` / `talgoMintSupplySingleGroup`.
+   */
   tALGO: {
     assetId: "2537013734",
     poolId: "3333688282",

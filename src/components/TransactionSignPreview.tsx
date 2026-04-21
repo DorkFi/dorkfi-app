@@ -25,7 +25,8 @@ export interface TransactionSignPreviewProps {
     | "xalgo-consensus-mint"
     | "xalgo-mint-supply-combined"
     | "xalgo-borrow-burn-combined"
-    | "xalgo-withdraw-burn-combined";
+    | "xalgo-withdraw-burn-combined"
+    | "talgo-tinyman-mint-supply-combined";
   /** Minimum xALGO (human) supplied after mint when `previewVariant` is combined. */
   mintThenSupplyXalgoHumanMin?: string | null;
   /** Folks governance consensus app id (combined flow); mint-only still passes consensus via `poolAppId`. */
@@ -35,7 +36,7 @@ export interface TransactionSignPreviewProps {
 /**
  * Structured summary shown after transactions are built and before the wallet prompts for a signature.
  */
-const TransactionSignPreview: React.FC<TransactionSignPreviewProps> = ({
+export default function TransactionSignPreview({
   mode,
   asset,
   amount,
@@ -50,8 +51,9 @@ const TransactionSignPreview: React.FC<TransactionSignPreviewProps> = ({
   previewVariant = "lending",
   mintThenSupplyXalgoHumanMin,
   governanceConsensusAppId,
-}) => {
+}: TransactionSignPreviewProps) {
   const isCombo = previewVariant === "xalgo-mint-supply-combined";
+  const isTalgoCombo = previewVariant === "talgo-tinyman-mint-supply-combined";
   const isBorrowBurn = previewVariant === "xalgo-borrow-burn-combined";
   const isWithdrawBurn = previewVariant === "xalgo-withdraw-burn-combined";
   const isMintOnlyConsensus = previewVariant === "xalgo-consensus-mint";
@@ -62,7 +64,8 @@ const TransactionSignPreview: React.FC<TransactionSignPreviewProps> = ({
       ? getExplorerApplicationUrl(networkId, String(lendingPoolAppId).trim())
       : null;
   const consensusAppForUrl =
-    (isCombo || isBorrowBurn || isWithdrawBurn) && governanceConsensusAppId
+    (isCombo || isTalgoCombo || isBorrowBurn || isWithdrawBurn) &&
+    governanceConsensusAppId
       ? String(governanceConsensusAppId).trim()
       : isMintOnlyConsensus
         ? poolAppId
@@ -104,6 +107,12 @@ const TransactionSignPreview: React.FC<TransactionSignPreviewProps> = ({
                 burn via Folks Governance consensus, receive at least {amount}{" "}
                 ALGO — one atomic wallet group.
               </>
+            ) : isTalgoCombo && mintThenSupplyXalgoHumanMin ? (
+              <>
+                Mint tALGO (Tinyman liquid staking) with {amount} ALGO, then supply
+                at least {mintThenSupplyXalgoHumanMin} {asset} to the lending pool —
+                one atomic wallet group.
+              </>
             ) : isCombo && mintThenSupplyXalgoHumanMin ? (
               <>
                 Mint xALGO (consensus) with {amount} ALGO, then supply at least{" "}
@@ -140,6 +149,11 @@ const TransactionSignPreview: React.FC<TransactionSignPreviewProps> = ({
               Atomic group: DorkFi lending borrow, nt200 withdraw (xALGO), then
               governance <code className="text-[11px]">burn</code> → ALGO
             </span>
+          ) : isTalgoCombo ? (
+            <span className="font-medium">
+              Atomic group: Tinyman <code className="text-[11px]">mint</code>{" "}
+              (ALGO → tALGO), nt200, and DorkFi lending deposit
+            </span>
           ) : isCombo ? (
             <span className="font-medium">
               Atomic group: governance <code className="text-[11px]">immediate_mint</code>
@@ -155,11 +169,15 @@ const TransactionSignPreview: React.FC<TransactionSignPreviewProps> = ({
             </>
           )}
         </li>
-        {(isCombo || isBorrowBurn || isWithdrawBurn) &&
+        {(isCombo || isTalgoCombo || isBorrowBurn || isWithdrawBurn) &&
           consensusUrl &&
           consensusAppForUrl ? (
           <li className="break-all">
-            <span className="text-muted-foreground">Governance consensus app:</span>{" "}
+            <span className="text-muted-foreground">
+              {isTalgoCombo
+                ? "Tinyman tALGO staking app:"
+                : "Governance consensus app:"}
+            </span>{" "}
             <a
               href={consensusUrl}
               target="_blank"
@@ -254,6 +272,4 @@ const TransactionSignPreview: React.FC<TransactionSignPreviewProps> = ({
       </p>
     </div>
   );
-};
-
-export default TransactionSignPreview;
+}

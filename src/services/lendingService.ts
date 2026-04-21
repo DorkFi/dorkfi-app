@@ -68,6 +68,11 @@ import {
   fetchXalgoMainnetConsensusState,
   minAlgoOutBurnFloor,
 } from "./xalgoConsensusAdapter";
+import {
+  MAINNET_TALGO_ASA_ID,
+  buildTalgoMintUnsignedWithOptionalOptIn,
+  fetchMinTalgoOutMintFloorFromChain,
+} from "./tinymanTalgoAdapter";
 
 export interface MarketData {
   appId: string;
@@ -3960,6 +3965,11 @@ export const deposit = async (
      * into `buildN` (same arccjs path as Folks f-asset mint) so `ci.custom()` simulation sees minted xALGO before nt200 axfer.
      */
     xalgoConsensusMintAlgoMicros?: bigint;
+    /**
+     * When set on Algorand mainnet tALGO Tinyman mint+supply, prepend Tinyman `mint`
+     * into `buildN` (same arccjs path as Folks f-asset / xALGO mint preamble).
+     */
+    tinymanTalgoMintAlgoMicros?: bigint;
   }
 ): Promise<
   | { success: boolean; txId?: string; error?: string }
@@ -3975,6 +3985,7 @@ export const deposit = async (
     networkId,
     depositAdapterId: options?.depositAdapterId,
     xalgoConsensusMintAlgoMicros: options?.xalgoConsensusMintAlgoMicros?.toString(),
+    tinymanTalgoMintAlgoMicros: options?.tinymanTalgoMintAlgoMicros?.toString(),
   });
 
   try {
@@ -4445,10 +4456,23 @@ export const deposit = async (
         token.originalSymbol === "fALGO" ? "fAlgo" : token.originalSymbol;
 
       let consensusMintArccjsExtras: Record<string, unknown>[] | null = null;
+      let tinymanTalgoMintArccjsExtras: Record<string, unknown>[] | null = null;
+      const xalgoMintMicros = options?.xalgoConsensusMintAlgoMicros;
+      const talgoMintMicros = options?.tinymanTalgoMintAlgoMicros;
+      if (
+        xalgoMintMicros != null &&
+        xalgoMintMicros > 0n &&
+        talgoMintMicros != null &&
+        talgoMintMicros > 0n
+      ) {
+        throw new Error(
+          "Cannot combine Governance xALGO mint and Tinyman tALGO mint in one deposit."
+        );
+      }
       if (
         networkConfig.networkId === "algorand-mainnet" &&
-        options?.xalgoConsensusMintAlgoMicros != null &&
-        options.xalgoConsensusMintAlgoMicros > 0n
+        xalgoMintMicros != null &&
+        xalgoMintMicros > 0n
       ) {
         if (folksMintTxns != null && folksMintTxns.length > 0) {
           throw new Error(
@@ -4464,7 +4488,7 @@ export const deposit = async (
             "xalgoConsensusMintAlgoMicros is only valid for the mainnet Governance xALGO market."
           );
         }
-        const algoMicro = options.xalgoConsensusMintAlgoMicros;
+        const algoMicro = xalgoMintMicros;
         const spMint = await clients.algod.getTransactionParams().do();
         const { unsigned: mintUnsigned, consensusState } =
           await buildGovernanceXalgoMintUnsignedWithOptionalOptIn({
@@ -4486,6 +4510,43 @@ export const deposit = async (
         }
         consensusMintArccjsExtras = folksMintTxnsToArccjsExtraTxns(mintUnsigned);
       }
+      if (
+        networkConfig.networkId === "algorand-mainnet" &&
+        talgoMintMicros != null &&
+        talgoMintMicros > 0n
+      ) {
+        if (folksMintTxns != null && folksMintTxns.length > 0) {
+          throw new Error(
+            "Tinyman tALGO mint preamble cannot be combined with Folks mint transactions in one deposit."
+          );
+        }
+        const underlyingId = Number(String(token.underlyingAssetId ?? "").trim());
+        if (underlyingId !== MAINNET_TALGO_ASA_ID || token.symbol !== "tALGO") {
+          throw new Error(
+            "tinymanTalgoMintAlgoMicros is only valid for the mainnet Tinyman tALGO market."
+          );
+        }
+        const algoMicro = talgoMintMicros;
+        const spMint = await clients.algod.getTransactionParams().do();
+        const { unsigned: mintUnsigned } =
+          await buildTalgoMintUnsignedWithOptionalOptIn({
+            algod: clients.algod,
+            senderAddr: userAddress,
+            algoMicroAlgos: algoMicro,
+            suggestedParams: spMint,
+          });
+        const minAtomic = await fetchMinTalgoOutMintFloorFromChain(
+          clients.algod,
+          algoMicro,
+          150n
+        );
+        if (minAtomic !== bigAmount) {
+          throw new Error(
+            `Tinyman mint min tALGO (${minAtomic.toString()}) must equal deposit amount (${bigAmount.toString()}). Refresh quote and retry.`
+          );
+        }
+        tinymanTalgoMintArccjsExtras = folksMintTxnsToArccjsExtraTxns(mintUnsigned);
+      }
 
       let customTx: any;
 
@@ -4501,7 +4562,7 @@ export const deposit = async (
       ]) {
         const [p1, p2, p3] = p;
 
-        // `buildN`: pool `custom()` extras — governance xALGO mint (if `xalgoConsensusMintAlgoMicros`), then Folks mint,
+        // `buildN`: pool `custom()` extras — governance xALGO mint, Tinyman tALGO mint, then Folks mint,
         // nt200 deposit / approve, lending deposit (same arccjs simulation path as fALGO preamble).
         const buildN = [];
 
@@ -4524,6 +4585,9 @@ export const deposit = async (
 
         if (consensusMintArccjsExtras && consensusMintArccjsExtras.length > 0) {
           buildN.push(...consensusMintArccjsExtras);
+        }
+        if (tinymanTalgoMintArccjsExtras && tinymanTalgoMintArccjsExtras.length > 0) {
+          buildN.push(...tinymanTalgoMintArccjsExtras);
         }
 
         if (folksMintTxns && folksMintTxns.length > 0) {

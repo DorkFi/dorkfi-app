@@ -28,3 +28,4 @@ export async function fetchTinymanLiquidStakingStatistics(): Promise<TinymanLiqu
   }
   return (await res.json()) as TinymanLiquidStakingStatistics;
 }
+
