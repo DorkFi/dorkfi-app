@@ -994,16 +994,15 @@ const SupplyBorrowModal = ({
     borrowTokenDecimals,
   ]);
 
+  /** Human unit for max borrowable line: Folks underlying is USDC on some pools, ALGO on others — never hardcode ALGO. */
   const maxBorrowableUnitSymbol = useMemo(() => {
     if (mode !== "borrow") return undefined;
-    if (
-      borrowInputReceiveBasis === "underlying" &&
-      folksMintRatioStatus === "ready"
-    ) {
-      return "ALGO";
-    }
-    return asset;
-  }, [mode, borrowInputReceiveBasis, folksMintRatioStatus, asset]);
+    return (
+      selectedBorrowAdapter?.label ??
+      selectedBorrowAdapter?.name ??
+      asset
+    );
+  }, [mode, selectedBorrowAdapter, asset]);
 
   const borrowMaxLineLoading = useMemo(() => {
     if (mode !== "borrow") return false;
