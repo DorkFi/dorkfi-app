@@ -4566,23 +4566,6 @@ export const deposit = async (
         // nt200 deposit / approve, lending deposit (same arccjs simulation path as fALGO preamble).
         const buildN = [];
 
-        // create balance box for pool on setup
-        if (false) {
-          const txnO = (
-            await builder.token.createBalanceBox(
-              algosdk.encodeAddress(
-                algosdk.getApplicationAddress(Number(poolId)).publicKey
-              )
-            )
-          ).obj;
-          console.log("createBalanceBox", { txnO });
-          buildN.push({
-            ...txnO,
-            payment: 28500,
-            note: new TextEncoder().encode("nt200 createBalanceBox"),
-          });
-        }
-
         if (consensusMintArccjsExtras && consensusMintArccjsExtras.length > 0) {
           buildN.push(...consensusMintArccjsExtras);
         }
@@ -4594,7 +4577,8 @@ export const deposit = async (
           buildN.push(...folksMintTxnsToArccjsExtraTxns(folksMintTxns));
         }
 
-        if (true) {
+        const runNt200DepositAndLendingPath = true;
+        if (runNt200DepositAndLendingPath) {
           // TODO fund ntoken
 
           // conditionally deposit to token

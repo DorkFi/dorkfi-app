@@ -1746,7 +1746,12 @@ const algorandProdMarketController = "3333688332";
 const algorandProdSToken = "3333688448";
 const algorandProdBeacon = "3209233839";
 const algorandProdAppStorageId = "3333688254";
-const algorandProdLendingPools = [algorandProdAMarket, algorandProdBMarket,/* C Market */, algorandProdDMarket];
+// A, B, D markets (C market slot not used on prod)
+const algorandProdLendingPools = [
+  algorandProdAMarket,
+  algorandProdBMarket,
+  algorandProdDMarket,
+];
 const algorandProdContracts: ContractConfig = {
   lendingPools: algorandProdLendingPools,
   priceOracle: algorandProdPriceOracle,
