@@ -3,6 +3,8 @@
  * See docs/ASSET_DECIMALS_AND_DISPLAY.md for context.
  */
 
+import BigNumber from "bignumber.js";
+
 /** Max fraction digits we show for asset amounts (e.g. goBTC has 8). */
 const MAX_DISPLAY_DECIMALS = 8;
 
@@ -58,6 +60,40 @@ export function usdPerTokenFromMarketInfoFormattedPrice(
   if (!price || !Number.isFinite(price) || price === 0) return 0;
   const adjustment = 12 - tokenDecimals;
   return price / Math.pow(10, adjustment);
+}
+
+/**
+ * Human USD per 1 token from a market `price` field (same as Portfolio / chain live).
+ *
+ * - Normal case: `fetchMarketInfo` sets `price` to on-chain ÷ 1e18 (`formatPrice`); that value
+ *   is still on the **12-decimal oracle scale** → apply `÷ 10^(12 − tokenDecimals)` (e.g. ÷1e6
+ *   for 6-decimal USDC). See {@link usdPerTokenFromMarketInfoFormattedPrice}.
+ * - Raw on-chain uint still present (e.g. some API payloads): if the numeric value is ≥ 1e12,
+ *   divide by 1e18 first, then apply the same 12-decimal adjustment.
+ *
+ * Do **not** return the formatted number as-is when it is below 1e9 — values like `7120000`
+ * are common and skipping the oracle divisor inflates USD by ~1e6 for 6-decimal assets.
+ */
+export function usdPerTokenFromMarketInfoPrice(
+  priceField: string | number | undefined | null,
+  tokenDecimals: number
+): number {
+  if (priceField === undefined || priceField === null || priceField === "") {
+    return 0;
+  }
+  const rawStr = String(priceField).replace(/,/g, "").trim();
+  if (rawStr === "") return 0;
+  const p = parseFloat(rawStr);
+  if (!Number.isFinite(p) || p <= 0) return 0;
+
+  let postWadStr = rawStr;
+  if (p >= 1e12) {
+    postWadStr = new BigNumber(rawStr)
+      .div(new BigNumber(10).pow(18))
+      .toFixed(12);
+  }
+
+  return usdPerTokenFromMarketInfoFormattedPrice(postWadStr, tokenDecimals);
 }
 
 /**

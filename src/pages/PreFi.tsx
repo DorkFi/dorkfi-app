@@ -79,6 +79,7 @@ import BigNumber from "bignumber.js";
 import { ARC200TokenService } from "@/services/mimirApi/arc200TokenService";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
 import { updateTransactionMetadata } from "@/utils/transactionUtils";
+import { spendableAlgoMicroAlgosFromAccount } from "@/utils/algorandWalletBalance";
 import { DorkFiLendingPoolClient } from "@/clients/DorkFiLendingPoolClient";
 import { abi, CONTRACT } from "ulujs";
 
@@ -308,6 +309,8 @@ const getCopyValue = (market: Market): string | null => {
 
   switch (market.tokenStandard) {
     case "asa":
+    case "network-asa":
+    case "asa-asa":
       console.log("ASA token - assetId:", market.assetId);
       return market.assetId || null;
     case "arc200":
@@ -644,7 +647,7 @@ const chainApi = {
       const nTokenId = market.nTokenId;
 
       let balance = 0n;
-      if (tokenStandard === "network") {
+      if (tokenStandard === "network" || tokenStandard === "network-asa") {
         // For network VOI, get account balance minus minimum balance
         console.log(`[PreFi] Fetching network token balance for ${market.symbol}`, {
           address,
@@ -656,9 +659,7 @@ const chainApi = {
           .accountInformation(address)
           .do();
         console.log(`[PreFi] accountInfo for ${market.symbol}:`, accInfo);
-        balance = BigInt(
-          Math.max(0, Number(accInfo.amount) - Number(accInfo.minBalance) - 1e6)
-        );
+        balance = spendableAlgoMicroAlgosFromAccount(accInfo);
         console.log(`[PreFi] Calculated balance for ${market.symbol}:`, {
           amount: accInfo.amount,
           minBalance: accInfo.minBalance,
@@ -3508,15 +3509,14 @@ export default function PreFiDashboard() {
                 [selectedMarket.id]: false,
               }));
 
-              // Close modal and show success
+              // Close modal here; tell WithdrawModal not to show embedded success (PreFi flow).
               closeWithdrawModal();
-
-              // Refresh balances from blockchain to ensure accuracy (silent refresh)
               setTimeout(() => {
                 if (selectedMarket) {
                   loadMarket(selectedMarket, false); // false = no loading indicators
                 }
               }, 1000); // Small delay to ensure transaction is fully processed
+              return { skipSuccessModal: true };
             } catch (error) {
               console.error("Withdraw failed:", error);
               setLoadingMap((prev) => ({

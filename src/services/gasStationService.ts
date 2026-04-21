@@ -65,10 +65,12 @@ export class GasStationService {
 
     switch (tokenStandard) {
       case "network":
+      case "network-asa":
         return await this.mintNetworkToken(request);
       case "arc200":
         return await this.mintARC200Token(request);
       case "asa":
+      case "asa-asa":
         return await this.mintASAToken(request);
       default:
         throw new Error(`Unsupported token standard: ${tokenStandard}`);
@@ -331,7 +333,11 @@ export class GasStationService {
 
     switch (tokenStandard) {
       case "network":
-        description = `Native ${symbol} tokens minted via network faucet`;
+      case "network-asa":
+        description =
+          tokenStandard === "network-asa"
+            ? `Native ${symbol} balance; deposits use wrapped ASA (adapter)`
+            : `Native ${symbol} tokens minted via network faucet`;
         mintingCost = "0.0305 VOI";
         break;
       case "arc200":
@@ -339,6 +345,7 @@ export class GasStationService {
         mintingCost = "0.001~0.0305 VOI";
         break;
       case "asa":
+      case "asa-asa":
         description = `Algorand Standard Asset with minting permissions`;
         mintingCost = "0.0305 VOI";
         break;

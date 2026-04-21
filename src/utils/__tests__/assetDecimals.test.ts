@@ -8,6 +8,7 @@ import {
   getDisplayDecimals,
   getTokenPriceFromOracle,
   usdPerTokenFromMarketInfoFormattedPrice,
+  usdPerTokenFromMarketInfoPrice,
   usdValueForHumanTokenAmount,
 } from "../assetDecimals";
 
@@ -96,6 +97,26 @@ describe("usdPerTokenFromMarketInfoFormattedPrice", () => {
     const formattedLikeFetchMarketInfo = "1";
     const correct = usdPerTokenFromMarketInfoFormattedPrice(formattedLikeFetchMarketInfo, 8);
     expect(correct).toBe(1 / 10_000);
+  });
+});
+
+describe("usdPerTokenFromMarketInfoPrice", () => {
+  it("applies 12-dec oracle divisor for typical fetchMarketInfo strings (< 1e9)", () => {
+    expect(usdPerTokenFromMarketInfoPrice("7120000", 6)).toBe(7.12);
+    expect(usdPerTokenFromMarketInfoPrice(250_000, 6)).toBe(0.25);
+  });
+
+  it("divides raw wad (>= 1e12) by 1e18 then applies oracle divisor", () => {
+    // 7.12e6 * 1e18 — same post-wad as formatted "7120000" from fetchMarketInfo
+    const raw = "7120000000000000000000000";
+    expect(usdPerTokenFromMarketInfoPrice(raw, 6)).toBeCloseTo(7.12, 5);
+  });
+
+  it("matches formatted-only helper for post-wad values", () => {
+    const s = "7120000";
+    expect(usdPerTokenFromMarketInfoPrice(s, 6)).toBe(
+      usdPerTokenFromMarketInfoFormattedPrice(s, 6)
+    );
   });
 });
 

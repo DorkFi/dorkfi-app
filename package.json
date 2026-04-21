@@ -1,7 +1,7 @@
 {
   "name": "vite_react_shadcn_ts",
   "private": true,
-  "version": "0.1.631",
+  "version": "0.1.651",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -17,6 +17,7 @@
   "dependencies": {
     "@agoralabs-sh/avm-web-provider": "^1.7.0",
     "@algorandfoundation/algokit-utils": "^9.1.2",
+    "@folks-finance/algorand-sdk": "^0.2.4",
     "@hookform/resolvers": "^3.9.0",
     "@noble/hashes": "^2.0.1",
     "@perawallet/connect": "^1.4.2",

@@ -5,130 +5,15 @@ import { convertServiceProposalToUI } from "@/utils/governanceUtils";
 import { isProposalBlacklisted } from "@/constants/governanceConstants";
 import { useWallet } from "@txnlab/use-wallet-react";
 import algorandService, { AlgorandNetwork } from "@/services/algorandService";
-import { getCurrentNetworkConfig, getNetworkConfig, getAlgorandNetworkFromNetworkId, getNetworksWithGovernance, type NetworkId } from "@/config";
+import { getNetworkConfig, getAlgorandNetworkFromNetworkId, getNetworksWithGovernance, type NetworkId } from "@/config";
 import algosdk, { waitForConfirmation } from "algosdk";
 import { toast } from "@/hooks/use-toast";
 
-// Mock data for development (fallback)
-const mockProposals: Proposal[] = [
-  {
-    id: "prop-001",
-    title: "Adjust USDC Interest Rate Parameters",
-    description: "Proposal to increase the base borrowing rate for USDC from 2% to 3.5% to better align with market conditions and improve protocol sustainability.",
-    category: "interest-rates",
-    proposer: "ALGORAND_ADDRESS_123...XYZ",
-    status: "active",
-    votesFor: 1250000,
-    votesAgainst: 350000,
-    totalVotes: 1600000,
-    quorum: 1000000,
-    startTime: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
-    endTime: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
-    details: {
-      type: "interest-rates",
-      baseRate: 3.5,
-      slope1: 4.0,
-      slope2: 75,
-      optimalUtilization: 80,
-      asset: "USDC"
-    }
-  },
-  {
-    id: "prop-002",
-    title: "Add ALGO as Collateral Asset",
-    description: "Enable native ALGO token as an approved collateral type with a 65% collateral factor and 75% liquidation threshold.",
-    category: "collateral-listing",
-    proposer: "ALGORAND_ADDRESS_456...ABC",
-    status: "active",
-    votesFor: 890000,
-    votesAgainst: 620000,
-    totalVotes: 1510000,
-    quorum: 1000000,
-    startTime: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
-    endTime: new Date(Date.now() + 6 * 24 * 60 * 60 * 1000),
-    details: {
-      type: "collateral-listing",
-      assetName: "Algorand",
-      assetSymbol: "ALGO",
-      assetId: 0,
-      collateralFactor: 65,
-      liquidationThreshold: 75,
-      liquidationPenalty: 10
-    }
-  },
-  {
-    id: "prop-003",
-    title: "Increase Liquidation Bonus for WBTC",
-    description: "Raise the liquidation bonus for WBTC positions from 5% to 7.5% to incentivize liquidators and reduce protocol risk.",
-    category: "liquidation-settings",
-    proposer: "ALGORAND_ADDRESS_789...DEF",
-    status: "passed",
-    votesFor: 2100000,
-    votesAgainst: 450000,
-    totalVotes: 2550000,
-    quorum: 1000000,
-    startTime: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000),
-    endTime: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
-    executionTime: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
-    details: {
-      type: "liquidation-settings",
-      asset: "WBTC",
-      closeFactor: 50,
-      liquidationBonus: 7.5,
-      liquidationThreshold: 80
-    }
-  },
-  {
-    id: "prop-004",
-    title: "Treasury Allocation: Security Audit Fund",
-    description: "Allocate 50,000 USDC from protocol treasury to fund a comprehensive security audit by Trail of Bits.",
-    category: "treasury",
-    proposer: "ALGORAND_ADDRESS_101...GHI",
-    status: "passed",
-    votesFor: 1850000,
-    votesAgainst: 280000,
-    totalVotes: 2130000,
-    quorum: 1000000,
-    startTime: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000),
-    endTime: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
-    executionTime: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000),
-    details: {
-      type: "treasury",
-      recipient: "Trail of Bits",
-      amount: 50000,
-      asset: "USDC",
-      purpose: "Comprehensive security audit"
-    }
-  },
-  {
-    id: "prop-005",
-    title: "Deploy to Arbitrum Network",
-    description: "Expand DorkFi protocol to Arbitrum for lower transaction costs and broader user access.",
-    category: "features",
-    proposer: "ALGORAND_ADDRESS_202...JKL",
-    status: "rejected",
-    votesFor: 650000,
-    votesAgainst: 1420000,
-    totalVotes: 2070000,
-    quorum: 1000000,
-    startTime: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000),
-    endTime: new Date(Date.now() - 13 * 24 * 60 * 60 * 1000),
-    details: {
-      type: "features",
-      featureName: "Arbitrum Deployment",
-      description: "Full protocol deployment on Arbitrum L2",
-      blockchain: "Arbitrum"
-    }
-  }
-];
-
-const mockStats: VotingStats = {
-  totalUnitSupply: 10000000,
-  yourVotingPower: 50000,
-  activeProposals: 2,
-  totalProposals: 5,
-  participationRate: 42.5
-};
+function fetchErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  return "Failed to load governance data";
+}
 
 /**
  * Calculate voting stats from proposals
@@ -144,7 +29,7 @@ const calculateStatsFromProposals = (
   const maxQuorum = proposals.length > 0
     ? Math.max(...proposals.map((p) => p.quorum))
     : 0;
-  const totalUnitSupply = maxQuorum > 0 ? maxQuorum * 2 : 10000000; // Estimate if no proposals
+  const totalUnitSupply = maxQuorum > 0 ? maxQuorum * 2 : 0;
 
   // Calculate participation rate from average of proposals
   const avgParticipation = proposals.length > 0
@@ -176,7 +61,7 @@ export const getVoteKey = (
 /**
  * Group raw proposals (one per network) by proposalId and aggregate voting data.
  * Returns one card per shared proposalId with summed votes and networkIds list.
- * Proposals without networkId (e.g. mock) are passed through as single-item groups.
+ * Proposals without networkId are passed through as single-item groups.
  */
 function mergeProposalsById(raw: Proposal[]): Proposal[] {
   const byId = new Map<string, Proposal[]>();
@@ -286,11 +171,8 @@ export const useGovernanceData = (networkId: NetworkId | null) => {
     [proposals]
   );
 
-  const stats = useMemo<VotingStats | null>(
-    () =>
-      mergedProposals.length > 0
-        ? calculateStatsFromProposals(mergedProposals, yourVotingPower)
-        : mockStats,
+  const stats = useMemo<VotingStats>(
+    () => calculateStatsFromProposals(mergedProposals, yourVotingPower),
     [mergedProposals, yourVotingPower]
   );
 
@@ -302,27 +184,44 @@ export const useGovernanceData = (networkId: NetworkId | null) => {
 
       try {
         const governanceNetworks = getNetworksWithGovernance();
-        const perNetwork = await Promise.all(
+        type NetResult =
+          | { ok: true; proposals: Proposal[] }
+          | { ok: false; proposals: Proposal[]; message: string };
+
+        const results: NetResult[] = await Promise.all(
           governanceNetworks.map(async (netId) => {
             try {
-              return await fetchProposalsForNetwork(netId);
+              const proposals = await fetchProposalsForNetwork(netId);
+              return { ok: true as const, proposals };
             } catch (err: unknown) {
               console.error(`Failed to fetch governance events for ${netId}:`, err);
-              return [] as Proposal[];
+              return {
+                ok: false as const,
+                proposals: [] as Proposal[],
+                message: fetchErrorMessage(err),
+              };
             }
           })
         );
-        const fetchedProposals = perNetwork.flat();
+        const fetchedProposals = results.flatMap((r) => r.proposals);
 
         if (fetchedProposals.length > 0) {
           setProposals(fetchedProposals);
+          setError(null);
         } else {
-          setProposals(mockProposals);
+          setProposals([]);
+          const anyNetworkSucceeded = results.some((r) => r.ok);
+          if (!anyNetworkSucceeded && governanceNetworks.length > 0) {
+            const failed = results.find((r): r is Extract<NetResult, { ok: false }> => !r.ok);
+            setError(failed?.message ?? "Failed to load governance data");
+          } else {
+            setError(null);
+          }
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error("Failed to fetch governance data:", err);
-        setError(err?.message || "Failed to load governance data");
-        setProposals(mockProposals);
+        setError(fetchErrorMessage(err));
+        setProposals([]);
       } finally {
         setLoading(false);
       }

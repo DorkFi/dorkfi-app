@@ -3,6 +3,7 @@ import { RefreshCw } from "lucide-react";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { getTokenConfig, getMarketLabel } from "@/config";
+import { marketPoolBadgeBgClassName } from "@/constants/marketUi";
 
 interface AccruedInterestMobileCardProps {
   asset: string;
@@ -66,11 +67,9 @@ const AccruedInterestMobileCard = ({
               />
               {marketLabel && (
                 <div
-                  className={`absolute -top-0.5 -right-0.5 w-5 h-5 rounded-full ${
-                    marketLabel === "A"
-                      ? "bg-blue-500 dark:bg-blue-600"
-                      : "bg-purple-500 dark:bg-purple-600"
-                  } border-2 border-white dark:border-slate-800 flex items-center justify-center z-10`}
+                  className={`absolute -top-0.5 -right-0.5 w-5 h-5 rounded-full ${marketPoolBadgeBgClassName(
+                    marketLabel
+                  )} border-2 border-white dark:border-slate-800 flex items-center justify-center z-10`}
                 >
                   <span className="text-[10px] font-bold text-white leading-none">
                     {marketLabel}

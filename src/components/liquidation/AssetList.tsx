@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { AlertTriangle } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { getMarketLabel, type NetworkId } from '@/config';
+import { marketPoolBadgeBgClassName } from '@/constants/marketUi';
 
 interface Asset {
   symbol: string;
@@ -84,11 +85,9 @@ export default function AssetList({
                         </span>
                         {marketLabel && (
                           <div
-                            className={`absolute -bottom-0.5 -left-0.5 w-4 h-4 rounded-full ${
-                              marketLabel === "A"
-                                ? "bg-blue-500 dark:bg-blue-600"
-                                : "bg-purple-500 dark:bg-purple-600"
-                            } border border-white dark:border-slate-800 flex items-center justify-center z-[1]`}
+                            className={`absolute -bottom-0.5 -left-0.5 w-4 h-4 rounded-full ${marketPoolBadgeBgClassName(
+                              marketLabel
+                            )} border border-white dark:border-slate-800 flex items-center justify-center z-[1]`}
                           >
                             <span className="text-[9px] font-bold text-white leading-none">
                               {marketLabel}

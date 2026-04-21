@@ -11,6 +11,7 @@ import { APP_SPEC as LendingPoolAppSpec } from '@/clients/DorkFiLendingPoolClien
 import { CONTRACT } from 'ulujs';
 import algosdk from 'algosdk';
 import BigNumber from 'bignumber.js';
+import { LENDING_USER_HEALTH_ROUND_LOOKBACK } from '@/constants/lendingUserHealthIndexer';
 
 interface UserHealthEvent {
   timestamp: number;
@@ -73,7 +74,7 @@ const UserHealthChart: React.FC<UserHealthChartProps> = ({ className }) => {
       
       type EventGroup = { name: string; events?: unknown[] };
       const events = (await ci.getEvents({
-        minRound: Math.max(0, lastRound - 2e6), // Last 2M rounds
+        minRound: Math.max(0, lastRound - LENDING_USER_HEALTH_ROUND_LOOKBACK),
       })) as EventGroup[];
 
       const decodeHealthFactor = (event: unknown[]) => ({

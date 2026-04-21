@@ -17,6 +17,10 @@ import { getAllTokensWithDisplayInfo } from "@/config";
 import { APYCalculationResult } from "@/utils/apyCalculations";
 import { useToast } from "@/hooks/use-toast";
 import { isAtBorrowCap as isAtBorrowCapUtil } from "@/constants/lendingCaps";
+import {
+  borrowApyBadgeClassName,
+  BORROW_APY_BADGE_DEFAULT,
+} from "@/constants/marketUi";
 
 interface MarketDetailModalProps {
   isOpen: boolean;
@@ -41,6 +45,8 @@ interface MarketDetailModalProps {
     reserveFactor: number;
     collectorContract: string;
     apyCalculation?: APYCalculationResult;
+    borrowApyCalculation?: APYCalculationResult;
+    intrinsicBorrowApyPercent?: number | null;
   };
 }
 
@@ -300,11 +306,22 @@ const MarketDetailModal = ({ isOpen, onClose, asset, marketData }: MarketDetailM
                       </Tooltip>
                     </div>
                     <div className="flex items-center justify-center gap-1">
-                      <Badge className="bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200">
+                      <Badge
+                        className={borrowApyBadgeClassName(
+                          marketData.intrinsicBorrowApyPercent,
+                          BORROW_APY_BADGE_DEFAULT
+                        )}
+                      >
                         APY: <BorrowAPYDisplay 
                           apyCalculation={marketData.apyCalculation}
                           borrowApyCalculation={marketData.borrowApyCalculation}
                           fallbackAPY={marketData.borrowAPY}
+                          useIntrinsicBorrowBadgeStyle={
+                            typeof marketData.intrinsicBorrowApyPercent ===
+                              "number" &&
+                            Number.isFinite(marketData.intrinsicBorrowApyPercent) &&
+                            marketData.intrinsicBorrowApyPercent > 0
+                          }
                           showTooltip={false}
                         />
                       </Badge>

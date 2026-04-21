@@ -9,8 +9,9 @@ import {
 } from "@/services/lendingService";
 import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
-import { getTokenConfig } from "@/config";
+import { getTokenConfig, tokenStandardUsesNativeWalletBalance } from "@/config";
 import { getAllTokensWithDisplayInfo } from "@/config";
+import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
 
 export interface PortfolioPosition {
   asset: string;
@@ -306,7 +307,9 @@ export const usePortfolioData = () => {
             console.log(`No ARC200 balance found for ${asset}`);
             balance = 0;
           }
-        } else if (originalTokenConfig.tokenStandard === "network") {
+        } else if (
+          tokenStandardUsesNativeWalletBalance(originalTokenConfig.tokenStandard)
+        ) {
           // For network tokens (like VOI), fetch native balance
           console.log(`Fetching network token balance for ${asset}`);
           try {
@@ -325,10 +328,43 @@ export const usePortfolioData = () => {
             balance = 0;
           }
         } else if (
-          originalTokenConfig.tokenStandard === "asa" &&
+          originalTokenConfig.tokenStandard === "asa-asa" &&
+          originalTokenConfig.assetId != null &&
+          String(originalTokenConfig.assetId).trim() !== ""
+        ) {
+          const assetId = parseInt(
+            String(originalTokenConfig.assetId).trim(),
+            10
+          );
+          console.log(
+            `Fetching ASA balance for ${asset} (asa-asa asset ID: ${assetId})`
+          );
+          try {
+            const clients = await algorandService.getCurrentClientsForReads();
+            const accAssetInfo = await clients.algod
+              .accountAssetInformation(activeAccount.address, assetId)
+              .do();
+
+            const atomic = getAccountAssetHoldingAmountAtomic(accAssetInfo);
+            if (atomic != null) {
+              balance =
+                Number(atomic) /
+                Math.pow(10, originalTokenConfig.decimals);
+              console.log(`ASA balance for ${asset}: ${balance}`);
+            } else {
+              console.log(`No ASA balance found for ${asset}`);
+              balance = 0;
+            }
+          } catch (error) {
+            console.error(`Error fetching ASA balance for ${asset}:`, error);
+            balance = 0;
+          }
+        } else if (
+          (originalTokenConfig.tokenStandard === "asa" ||
+            originalTokenConfig.tokenStandard === "network-asa") &&
           token.underlyingAssetId
         ) {
-          // For ASA tokens, fetch asset balance
+          // For ASA and Folks network-asa (e.g. fALGO): wallet holds the f-ASA.
           console.log(
             `Fetching ASA balance for ${asset} (asset ID: ${token.underlyingAssetId})`
           );
@@ -339,10 +375,11 @@ export const usePortfolioData = () => {
               .accountAssetInformation(activeAccount.address, assetId)
               .do();
 
-            if (accAssetInfo.assetHolding) {
+            const atomic = getAccountAssetHoldingAmountAtomic(accAssetInfo);
+            if (atomic != null) {
               // Convert from smallest units to human readable format
               balance =
-                Number(accAssetInfo.assetHolding.amount) /
+                Number(atomic) /
                 Math.pow(10, originalTokenConfig.decimals);
               console.log(`ASA balance for ${asset}: ${balance}`);
             } else {

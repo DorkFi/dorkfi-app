@@ -5,13 +5,29 @@ import {
   NetworkId,
   getNetworkConfig,
   getLendingPools,
+  getMarketLabel,
   getRewardsProgramPublicBaseUrl,
-  getIntrinsicSupplyApyPercent,
+  resolveIntrinsicSupplyApyPercent,
+  resolveIntrinsicBorrowApyPercent,
+  tokenRowUsesLiveIntrinsicApy,
+  tokenRowUsesLiveIntrinsicBorrowApy,
+  type LiveIntrinsicSupplyApySnapshot,
+  getAlgorandNetworkFromNetworkId,
   type TokenConfig,
+  getAnyFolksAdapter,
 } from "@/config";
 import { fetchMarketInfo, type MarketInfo } from "@/services/lendingService";
+import {
+  estimateFolksDepositMintedFAssetAmount,
+  folksFAssetHumanToUnderlyingHuman,
+} from "@/services/folksDepositAdapter";
+import algorandService from "@/services/algorandService";
 import { normalizeWadUsdPerToken } from "@/lib/utils";
 import { APYCalculationResult } from "@/utils/apyCalculations";
+import BigNumber from "bignumber.js";
+import { useTinymanLiquidStakingLiveApyPercent } from "@/hooks/useTinymanLiquidStakingLiveApyPercent";
+import { useXalgoGovernanceLiveApyPercent } from "@/hooks/useXalgoGovernanceLiveApyPercent";
+import { useFolksMainnetAlgoDepositLiveApyPercent } from "@/hooks/useFolksMainnetAlgoDepositLiveApyPercent";
 
 export interface OnDemandMarketData {
   asset: string;
@@ -63,6 +79,45 @@ export interface OnDemandMarketData {
    * on-chain supply APY for display (e.g. governance staking).
    */
   intrinsicSupplyApyPercent?: number | null;
+  /**
+   * Intrinsic borrow APY from token config (`intrinsicBorrowApyPercent`); percentage points added
+   * to on-chain borrow APY for display.
+   */
+  intrinsicBorrowApyPercent?: number | null;
+  /** Cache key from `useOnDemandMarketData` (`marketsData`); unique per config row when display names collide. */
+  _sortKey?: string;
+}
+
+/**
+ * Stable row / cache key: canonical config symbol (not display override) + pool id.
+ * Required when multiple markets share the same display name and pool (e.g. ALGO vs fALGO both "Algo").
+ */
+export function marketRowCacheKey(token: {
+  originalSymbol?: string;
+  symbol: string;
+  poolId?: string | null;
+}): string {
+  const sym = (token.originalSymbol ?? token.symbol).toLowerCase();
+  return token.poolId != null && String(token.poolId) !== ""
+    ? `${sym}-${String(token.poolId)}`
+    : sym;
+}
+
+/** `network.tokens` object key (e.g. `ALGO` when the row's `originalSymbol` is `fALGO`). */
+function tokenConfigObjectKey(token: {
+  configKey?: string;
+  originalSymbol?: string;
+  symbol: string;
+}): string {
+  return token.configKey ?? token.originalSymbol ?? token.symbol;
+}
+
+/** Pool app id for filters (skeleton rows may only have `marketInfo.poolId` after load). */
+export function marketRowPoolIdForFilter(m: OnDemandMarketData): string {
+  const raw =
+    m.poolId ??
+    (m as { marketInfo?: { poolId?: string | number } }).marketInfo?.poolId;
+  return raw != null && String(raw) !== "" ? String(raw) : "";
 }
 
 export type SortField =
@@ -83,7 +138,7 @@ const NUMERIC_SORT_FIELDS: SortField[] = [
   "utilization",
 ];
 
-export type MarketFilter = "all" | "A" | "B";
+export type MarketFilter = "all" | "A" | "B" | "D";
 
 function getRewardsMetaForTokenRow(
   networkId: NetworkId,
@@ -119,7 +174,7 @@ interface UseOnDemandMarketDataProps {
   pageSize?: number;
   autoLoad?: boolean; // Whether to automatically load markets when they come into view
   throttleMs?: number; // Throttle duration in milliseconds (default: 1 minute)
-  marketFilter?: MarketFilter; // "all" | "A" (first lending pool) | "B" (second lending pool)
+  marketFilter?: MarketFilter; // "all" | "A" | "B" | "D" (third lending pool when configured)
   /** When true, only markets flagged as new (recent `dataAddedAt` in config) are shown. */
   newMarketsOnly?: boolean;
   /** When true, only markets with `hasRewards` in config are shown. */
@@ -128,8 +183,8 @@ interface UseOnDemandMarketDataProps {
   multiPoolOnly?: boolean;
 }
 
-// Throttle duration: 1 minute
-const DEFAULT_THROTTLE_MS = 60 * 1000;
+// Throttle duration: 2 minute
+const DEFAULT_THROTTLE_MS = 120 * 1000;
 
 export const useOnDemandMarketData = ({
   searchTerm = "",
@@ -149,6 +204,28 @@ export const useOnDemandMarketData = ({
   >({});
   const [loadingMarkets, setLoadingMarkets] = useState<Set<string>>(new Set());
   const { currentNetwork } = useNetwork();
+  const algorandMainnetMarkets = currentNetwork === "algorand-mainnet";
+  const tinymanLiveIntrinsicApyPct = useTinymanLiquidStakingLiveApyPercent(
+    algorandMainnetMarkets
+  );
+  const xalgoLiveIntrinsicApyPct = useXalgoGovernanceLiveApyPercent(
+    algorandMainnetMarkets
+  );
+  const folksAlgoDepositLiveApyPct = useFolksMainnetAlgoDepositLiveApyPercent(
+    algorandMainnetMarkets
+  );
+  const liveIntrinsicSupplyApy = useMemo<LiveIntrinsicSupplyApySnapshot>(
+    () => ({
+      tinymanLiquidStakingPercent: tinymanLiveIntrinsicApyPct,
+      xalgoGovernanceLambdaPercent: xalgoLiveIntrinsicApyPct,
+      folksMainnetAlgoDepositPercent: folksAlgoDepositLiveApyPct,
+    }),
+    [
+      tinymanLiveIntrinsicApyPct,
+      xalgoLiveIntrinsicApyPct,
+      folksAlgoDepositLiveApyPct,
+    ]
+  );
 
   // Get token configuration for current network
   const tokens = useMemo(
@@ -168,18 +245,15 @@ export const useOnDemandMarketData = ({
     const initialData: Record<string, OnDemandMarketData> = {};
 
     tokens.forEach((token) => {
-      // Config keys use canonical symbols (e.g. "ALGO"); display `token.symbol` may be overridden ("Algo").
+      // Row id for UI / cache (may be `fALGO`); `network.tokens` key is often `ALGO` — use {@link tokenConfigObjectKey}.
       const configSymbol = token.originalSymbol ?? token.symbol;
+      const tokensMapKey = tokenConfigObjectKey(token);
 
-      // Use poolId in key to support multiple markets per symbol (e.g. 2 WAD markets)
-      const key =
-        token.poolId != null && token.poolId !== ""
-          ? `${token.symbol.toLowerCase()}-${String(token.poolId)}`
-          : token.symbol.toLowerCase();
+      const key = marketRowCacheKey(token);
 
       // Get the original token config to access isStoken property
       const networkConfig = getNetworkConfig(currentNetwork);
-      const tokenConfigRaw = networkConfig.tokens[configSymbol];
+      const tokenConfigRaw = networkConfig.tokens[tokensMapKey];
       // Compare poolIds as strings to ensure exact match
       const tokenConfig = Array.isArray(tokenConfigRaw)
         ? tokenConfigRaw.find((tc) => String(tc.poolId) === String(token.poolId)) || tokenConfigRaw[0]
@@ -190,12 +264,21 @@ export const useOnDemandMarketData = ({
         tokenConfig as TokenConfig | undefined
       );
 
-      const intrinsicApr = getIntrinsicSupplyApyPercent(
+      const intrinsicApr = resolveIntrinsicSupplyApyPercent(
         currentNetwork,
-        configSymbol,
+        tokensMapKey,
         token.poolId != null && token.poolId !== ""
           ? String(token.poolId)
-          : undefined
+          : undefined,
+        liveIntrinsicSupplyApy
+      );
+      const intrinsicBorrowApy = resolveIntrinsicBorrowApyPercent(
+        currentNetwork,
+        tokensMapKey,
+        token.poolId != null && token.poolId !== ""
+          ? String(token.poolId)
+          : undefined,
+        liveIntrinsicSupplyApy
       );
 
       initialData[key] = {
@@ -227,6 +310,8 @@ export const useOnDemandMarketData = ({
         ...rewardsMeta,
         intrinsicSupplyApyPercent:
           intrinsicApr > 0 ? intrinsicApr : undefined,
+        intrinsicBorrowApyPercent:
+          intrinsicBorrowApy > 0 ? intrinsicBorrowApy : undefined,
       };
     });
 
@@ -235,17 +320,70 @@ export const useOnDemandMarketData = ({
     }
   }, [tokens, currentNetwork]);
 
+  useEffect(() => {
+    if (currentNetwork !== "algorand-mainnet") return;
+    setMarketsData((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [key, row] of Object.entries(prev)) {
+        const sym = row.configSymbol ?? row.asset;
+        const poolId =
+          row.poolId != null && String(row.poolId) !== ""
+            ? String(row.poolId)
+            : undefined;
+        let rowNext = row;
+        const patchRow = (partial: Partial<OnDemandMarketData>) => {
+          rowNext = { ...rowNext, ...partial };
+          changed = true;
+        };
+
+        if (tokenRowUsesLiveIntrinsicApy(currentNetwork, sym, poolId)) {
+          const resolved = resolveIntrinsicSupplyApyPercent(
+            currentNetwork,
+            sym,
+            poolId,
+            liveIntrinsicSupplyApy
+          );
+          const newSupply = resolved > 0 ? resolved : undefined;
+          if (rowNext.intrinsicSupplyApyPercent !== newSupply) {
+            patchRow({ intrinsicSupplyApyPercent: newSupply });
+          }
+        }
+        if (tokenRowUsesLiveIntrinsicBorrowApy(currentNetwork, sym, poolId)) {
+          const resolvedBorrow = resolveIntrinsicBorrowApyPercent(
+            currentNetwork,
+            sym,
+            poolId,
+            liveIntrinsicSupplyApy
+          );
+          const newBorrow =
+            resolvedBorrow > 0 ? resolvedBorrow : undefined;
+          if (rowNext.intrinsicBorrowApyPercent !== newBorrow) {
+            patchRow({ intrinsicBorrowApyPercent: newBorrow });
+          }
+        }
+        if (rowNext !== row) {
+          next[key] = rowNext;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [currentNetwork, liveIntrinsicSupplyApy]);
+
   // Load individual market data
   const loadMarketData = useCallback(
     async (marketKey: string, bypassCache = false) => {
-      // Parse marketKey to handle both old format (symbol) and new format (symbol-poolId)
-      const parts = marketKey.split('-');
+      // Parse marketKey: canonical symbol + optional pool id (e.g. falgo-3333688282, algo-3333688282)
+      const parts = marketKey.split("-");
       const symbol = parts[0];
-      const poolIdFromKey = parts.length > 1 ? parts.slice(1).join('-') : undefined;
+      const poolIdFromKey = parts.length > 1 ? parts.slice(1).join("-") : undefined;
+
+      const canonical = (t: (typeof tokens)[0]) =>
+        (t.originalSymbol ?? t.symbol).toLowerCase();
 
       // Find matching tokens (compare poolId as string so "123" and 123 both match – e.g. 2 WAD markets)
       const matchingTokens = tokens.filter((t) => {
-        const matchesSymbol = t.symbol.toLowerCase() === symbol.toLowerCase();
+        const matchesSymbol = canonical(t) === symbol.toLowerCase();
         if (poolIdFromKey != null && poolIdFromKey !== "") {
           return matchesSymbol && String(t.poolId) === String(poolIdFromKey);
         }
@@ -256,10 +394,7 @@ export const useOnDemandMarketData = ({
 
       // Load all matching markets (key must match initialData: symbol-poolId as string)
       for (const token of matchingTokens) {
-        const tokenMarketKey =
-          token.poolId != null && token.poolId !== ""
-            ? `${token.symbol.toLowerCase()}-${String(token.poolId)}`
-            : token.symbol.toLowerCase();
+        const tokenMarketKey = marketRowCacheKey(token);
 
         // Skip if already loading this specific market
         if (loadingMarkets.has(tokenMarketKey)) {
@@ -339,43 +474,114 @@ export const useOnDemandMarketData = ({
             const supplyCapAmount = parseFloat(marketInfo.maxTotalDeposits) || 0;
             const borrowCapAmount = parseFloat(marketInfo.maxTotalBorrows) || 0;
 
+            // Get the original token config to access isStoken / Folks adapter
+            const networkConfig = getNetworkConfig(currentNetwork);
+            const configSymbol = token.originalSymbol ?? token.symbol;
+            const tokensMapKey = tokenConfigObjectKey(token);
+            const tokenConfigRaw = networkConfig.tokens[tokensMapKey];
+            const tokenConfig = Array.isArray(tokenConfigRaw)
+              ? tokenConfigRaw.find(
+                (tc) => String(tc.poolId) === String(tokenPoolId)
+              ) || tokenConfigRaw[0]
+              : tokenConfigRaw;
+
+            /** On-chain totals are f-asset; for Folks markets show underlying-equivalent using minted f-asset for 1.0 underlying. */
+            let totalSupplyDisplay = totalSupplyAmount;
+            let totalBorrowDisplay = totalBorrowAmount;
+            let supplyCapDisplay = supplyCapAmount;
+            let borrowCapDisplay = borrowCapAmount;
+            const folksOd = tokenConfig
+              ? getAnyFolksAdapter(tokenConfig)
+              : undefined;
+            if (
+              folksOd &&
+              currentNetwork === "algorand-mainnet"
+            ) {
+              const algodNet = getAlgorandNetworkFromNetworkId(currentNetwork);
+              if (algodNet) {
+                try {
+                  const clients = algorandService.initializeClients(algodNet);
+                  const oneUnderlyingAtomic = BigInt(
+                    new BigNumber(1).shiftedBy(token.decimals).toFixed(0)
+                  );
+                  const { mintedFAsset } =
+                    await estimateFolksDepositMintedFAssetAmount({
+                      poolName: folksOd.folksParams.pool,
+                      underlyingAmount: oneUnderlyingAtomic,
+                      algod: clients.algod,
+                    });
+                  if (mintedFAsset > BigInt(0)) {
+                    const dec = token.decimals;
+                    totalSupplyDisplay = folksFAssetHumanToUnderlyingHuman(
+                      totalSupplyAmount,
+                      mintedFAsset,
+                      dec
+                    );
+                    totalBorrowDisplay = folksFAssetHumanToUnderlyingHuman(
+                      totalBorrowAmount,
+                      mintedFAsset,
+                      dec
+                    );
+                    supplyCapDisplay = folksFAssetHumanToUnderlyingHuman(
+                      supplyCapAmount,
+                      mintedFAsset,
+                      dec
+                    );
+                    borrowCapDisplay = folksFAssetHumanToUnderlyingHuman(
+                      borrowCapAmount,
+                      mintedFAsset,
+                      dec
+                    );
+                  }
+                } catch (e) {
+                  console.warn(
+                    "Folks mint ratio for market table underlying display failed",
+                    { configSymbol, tokensMapKey, error: e }
+                  );
+                }
+              }
+            }
+
             // WAD: oracle can be micro-USD per token; store TVL as micro-USD (÷1e6 in UI).
             // All other assets: legacy decimal-scaled formula (do not change — used across the app).
             const decScale =
               Math.pow(10, token.decimals + 6) / Math.pow(10, 12);
             const totalSupplyUSD = isWad
-              ? Number(totalSupplyAmount * tokenPrice * 1e6)
-              : Number(totalSupplyAmount * tokenPrice * decScale);
+              ? Number(totalSupplyDisplay * tokenPrice * 1e6)
+              : Number(totalSupplyDisplay * tokenPrice * decScale);
             const totalBorrowUSD = isWad
-              ? Number(totalBorrowAmount * tokenPrice * 1e6)
-              : Number(totalBorrowAmount * tokenPrice * decScale);
+              ? Number(totalBorrowDisplay * tokenPrice * 1e6)
+              : Number(totalBorrowDisplay * tokenPrice * decScale);
             console.log(`USD calculations for ${token.symbol}:`, {
               tokenPrice,
               totalSupplyAmount,
+              totalSupplyDisplay,
               totalSupplyUSD,
               totalBorrowAmount,
+              totalBorrowDisplay,
               totalBorrowUSD,
             });
-
-            // Get the original token config to access isStoken property
-            const networkConfig = getNetworkConfig(currentNetwork);
-            const configSymbol = token.originalSymbol ?? token.symbol;
-            const tokenConfigRaw = networkConfig.tokens[configSymbol];
-            const tokenConfig = Array.isArray(tokenConfigRaw)
-              ? tokenConfigRaw.find((tc) => tc.poolId === tokenPoolId) || tokenConfigRaw[0]
-              : tokenConfigRaw;
 
             const rewardsMeta = getRewardsMetaForTokenRow(
               currentNetwork,
               tokenConfig as TokenConfig | undefined
             );
 
-            const intrinsicApr = getIntrinsicSupplyApyPercent(
+            const intrinsicApr = resolveIntrinsicSupplyApyPercent(
               currentNetwork,
-              configSymbol,
+              tokensMapKey,
               tokenPoolId != null && tokenPoolId !== ""
                 ? String(tokenPoolId)
-                : undefined
+                : undefined,
+              liveIntrinsicSupplyApy
+            );
+            const intrinsicBorrowApy = resolveIntrinsicBorrowApyPercent(
+              currentNetwork,
+              tokensMapKey,
+              tokenPoolId != null && tokenPoolId !== ""
+                ? String(tokenPoolId)
+                : undefined,
+              liveIntrinsicSupplyApy
             );
 
             // Safely resolve supplyAPY - avoid NaN when supplyRate is undefined
@@ -402,10 +608,10 @@ export const useOnDemandMarketData = ({
               asset: token.symbol,
               configSymbol,
               icon: token.logoPath,
-              totalSupply: totalSupplyAmount,
+              totalSupply: totalSupplyDisplay,
               totalSupplyUSD,
               supplyAPY: supplyAPYValue,
-              totalBorrow: totalBorrowAmount,
+              totalBorrow: totalBorrowDisplay,
               totalBorrowUSD,
               borrowAPY: borrowAPYValue,
               utilization: tokenConfig?.isStoken
@@ -413,11 +619,11 @@ export const useOnDemandMarketData = ({
                 : marketInfo.utilizationRate * 100,
               collateralFactor: marketInfo.collateralFactor * 100,
               walletBalance: 0, // This would need wallet integration
-              supplyCap: supplyCapAmount,
+              supplyCap: supplyCapDisplay,
               supplyCapUSD: isWad
-                ? supplyCapAmount * tokenPrice * 1e6
-                : supplyCapAmount * tokenPrice,
-              borrowCap: borrowCapAmount,
+                ? supplyCapDisplay * tokenPrice * 1e6
+                : supplyCapDisplay * tokenPrice,
+              borrowCap: borrowCapDisplay,
               maxLTV: marketInfo.collateralFactor * 100,
               liquidationThreshold: marketInfo.liquidationThreshold * 100,
               liquidationPenalty: marketInfo.liquidationBonus * 100,
@@ -435,6 +641,8 @@ export const useOnDemandMarketData = ({
               ...rewardsMeta,
               intrinsicSupplyApyPercent:
                 intrinsicApr > 0 ? intrinsicApr : undefined,
+              intrinsicBorrowApyPercent:
+                intrinsicBorrowApy > 0 ? intrinsicBorrowApy : undefined,
             };
 
             console.log(`Market data for ${token.symbol}:`, marketData);
@@ -477,7 +685,14 @@ export const useOnDemandMarketData = ({
         }
       }
     },
-    [tokens, currentNetwork, loadingMarkets, marketsData, throttleMs]
+    [
+      tokens,
+      currentNetwork,
+      loadingMarkets,
+      marketsData,
+      throttleMs,
+      liveIntrinsicSupplyApy,
+    ]
   );
 
   // Load market data for visible markets
@@ -506,7 +721,7 @@ export const useOnDemandMarketData = ({
     }));
   }, [marketsData, loadingMarkets]);
 
-  // Lending pool IDs for A/B filter (first = A, second = B)
+  /** Lending pool app ids in order: A = [0], B = [1], D = [2] when present. */
   const lendingPools = useMemo(() => {
     try {
       return getLendingPools(currentNetwork as NetworkId) ?? [];
@@ -514,6 +729,13 @@ export const useOnDemandMarketData = ({
       return [];
     }
   }, [currentNetwork]);
+
+  const hasDMarketTab = useMemo(() => {
+    const nid = currentNetwork as NetworkId;
+    return lendingPools.some(
+      (pid) => getMarketLabel(nid, String(pid)) === "D"
+    );
+  }, [lendingPools, currentNetwork]);
 
   const newMarketsCount = useMemo(() => {
     return marketDataArray.filter((market) => {
@@ -531,29 +753,33 @@ export const useOnDemandMarketData = ({
     }).length;
   }, [marketDataArray]);
 
-  /** Display asset keys (configSymbol or asset) that appear in more than one pool. */
+  /**
+   * Display `asset` keys (what users see, e.g. "Algo") with more than one distinct listed market.
+   * Counts: (1) same config on multiple pools, e.g. ALGO @ A + ALGO @ B, and (2) same display label
+   * with different listings on the same pool, e.g. ALGO + fALGO both shown as "Algo".
+   */
   const multiPoolAssetKeys = useMemo(() => {
-    const poolIdsByKey = new Map<string, Set<string>>();
+    const rowIdsByDisplayAsset = new Map<string, Set<string>>();
     marketDataArray.forEach((m) => {
-      const key = (m.configSymbol ?? m.asset).toLowerCase();
-      const pid =
-        m.poolId != null && m.poolId !== ""
-          ? String(m.poolId)
-          : "_default";
-      if (!poolIdsByKey.has(key)) poolIdsByKey.set(key, new Set());
-      poolIdsByKey.get(key)!.add(pid);
+      const displayKey = m.asset.toLowerCase();
+      const rowId =
+        (m as { _sortKey?: string })._sortKey ??
+        `${m.configSymbol ?? ""}|${m.poolId ?? ""}`;
+      if (!rowIdsByDisplayAsset.has(displayKey)) {
+        rowIdsByDisplayAsset.set(displayKey, new Set());
+      }
+      rowIdsByDisplayAsset.get(displayKey)!.add(rowId);
     });
     const multi = new Set<string>();
-    poolIdsByKey.forEach((pids, key) => {
-      if (pids.size > 1) multi.add(key);
+    rowIdsByDisplayAsset.forEach((ids, displayKey) => {
+      if (ids.size > 1) multi.add(displayKey);
     });
     return multi;
   }, [marketDataArray]);
 
   const multiPoolMarketsCount = useMemo(() => {
     return marketDataArray.filter((market) => {
-      const key = (market.configSymbol ?? market.asset).toLowerCase();
-      if (!multiPoolAssetKeys.has(key)) return false;
+      if (!multiPoolAssetKeys.has(market.asset.toLowerCase())) return false;
       if (market.marketInfo?.isPaused) return false;
       return true;
     }).length;
@@ -573,29 +799,42 @@ export const useOnDemandMarketData = ({
     if (rewardMarketsOnly) {
       filtered = filtered.filter((market) => market.hasRewards === true);
     }
-    // Multi-pool only (same asset listed in more than one lending pool)
+    // Multi-pool: same display asset with multiple listed markets (multi-pool and/or multi-contract).
     if (multiPoolOnly) {
       filtered = filtered.filter((market) =>
-        multiPoolAssetKeys.has(
-          (market.configSymbol ?? market.asset).toLowerCase()
-        )
+        multiPoolAssetKeys.has(market.asset.toLowerCase())
       );
     }
-    // Filter by market (All / A / B)
-    if (marketFilter !== "all" && lendingPools.length >= 2) {
-      const poolIdA = lendingPools[0];
-      const poolIdB = lendingPools[1];
-      filtered = filtered.filter((market) => {
-        const pid = market.poolId != null ? String(market.poolId) : "";
-        if (marketFilter === "A") return pid === String(poolIdA);
-        if (marketFilter === "B") return pid === String(poolIdB);
-        return true;
-      });
+    // Filter by market (All / A / B / D — D uses {@link getMarketLabel} === "D", not only `lendingPools[2]`)
+    if (marketFilter !== "all") {
+      const nid = currentNetwork as NetworkId;
+      if (
+        (marketFilter === "A" || marketFilter === "B") &&
+        lendingPools.length >= 2
+      ) {
+        const poolIdA = lendingPools[0];
+        const poolIdB = lendingPools[1];
+        filtered = filtered.filter((market) => {
+          const pid = marketRowPoolIdForFilter(market);
+          if (marketFilter === "A") return pid === String(poolIdA);
+          if (marketFilter === "B") return pid === String(poolIdB);
+          return true;
+        });
+      } else if (marketFilter === "D") {
+        filtered = filtered.filter(
+          (market) =>
+            getMarketLabel(nid, marketRowPoolIdForFilter(market) || undefined) ===
+            "D"
+        );
+      }
     }
     // Filter data based on search term
-    filtered = filtered.filter((market) =>
-      market.asset.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    const q = searchTerm.toLowerCase();
+    filtered = filtered.filter((market) => {
+      if (market.asset.toLowerCase().includes(q)) return true;
+      const cs = market.configSymbol?.toLowerCase();
+      return cs != null && cs !== "" && cs.includes(q);
+    });
 
     // Sort data (with stable tie-breaker so desc is true reverse of asc)
     const isNumericField = NUMERIC_SORT_FIELDS.includes(sortField);
@@ -694,6 +933,7 @@ export const useOnDemandMarketData = ({
     marketDataArray,
     marketFilter,
     lendingPools,
+    currentNetwork,
     newMarketsOnly,
     rewardMarketsOnly,
     multiPoolOnly,
@@ -745,5 +985,6 @@ export const useOnDemandMarketData = ({
     newMarketsCount,
     rewardMarketsCount,
     multiPoolMarketsCount,
+    hasDMarketTab,
   };
 };

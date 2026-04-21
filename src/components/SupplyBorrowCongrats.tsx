@@ -11,6 +11,8 @@ interface SupplyBorrowCongratsProps {
   onGoToPortfolio: () => void;
   onMakeAnother: () => void;
   onClose: () => void;
+  /** When true, disables “View transaction” (e.g. no tx id yet). */
+  viewTransactionDisabled?: boolean;
 }
 
 const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
@@ -22,6 +24,7 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
   onGoToPortfolio,
   onMakeAnother,
   onClose,
+  viewTransactionDisabled = false,
 }) => {
   const getTransactionMessage = () => {
     switch (transactionType) {
@@ -71,6 +74,7 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
           variant="primary"
           className="w-full bg-ocean-teal hover:bg-ocean-teal/90 text-white rounded-xl py-3 text-lg"
           onClick={onViewTransaction}
+          disabled={viewTransactionDisabled}
         >
           View Transaction
         </DorkFiButton>

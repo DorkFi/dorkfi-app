@@ -5,6 +5,13 @@
  * and other global settings used throughout the application.
  */
 
+import {
+  FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY,
+  type FolksFinancePoolParams,
+} from "@/constants/folksFinance";
+
+export type { FolksFinancePoolParams } from "@/constants/folksFinance";
+
 export type NetworkId =
   | "voi-mainnet"
   | "algorand-mainnet"
@@ -44,7 +51,50 @@ export interface ContractConfig {
   // Add more contracts as needed
 }
 
-export type TokenStandard = "network" | "asa" | "arc200" | "arc200-exchange";
+export type TokenStandard =
+  | "network"
+  | "asa"
+  | "arc200"
+  | "arc200-exchange"
+  /** Native-coin wallet balance (like `network`), but deposits use ASA-style f-asset + ARC200 nt200 (for adapter flows). */
+  | "network-asa"
+  /**
+   * Like `network-asa` (Folks + f-asset nt200), but the wallet-spendable collateral is the row ASA
+   * (`assetId`), not the network native coin (`assetId` `"0"` / network token).
+   */
+  | "asa-asa";
+
+/** `network-asa` or `asa-asa`: Folks-wrapped nt200 markets (shared deposit/repay adapter rules). */
+export function tokenStandardIsFolksAsaBridge(standard: TokenStandard): boolean {
+  return standard === "network-asa" || standard === "asa-asa";
+}
+
+/** ARC200 `balanceOf` on the nt200 underlying (used in lending deposit sizing). */
+export function tokenStandardUsesNt200Arc200Balance(
+  standard: TokenStandard
+): boolean {
+  return (
+    standard === "network" ||
+    standard === "asa" ||
+    standard === "network-asa" ||
+    standard === "asa-asa" ||
+    standard === "arc200-exchange"
+  );
+}
+
+/** Lending deposit/withdraw paths that use ASA fields (`aamt` / `xaid`) on nt200. */
+export function tokenStandardUsesAsaStyleNt200Txns(
+  standard: TokenStandard
+): boolean {
+  return standard === "asa" || standard === "network-asa" || standard === "asa-asa";
+}
+
+/** Wallet UI: native L1 balance (e.g. ALGO) like `network`, not ASA holding. */
+export function tokenStandardUsesNativeWalletBalance(
+  standard: TokenStandard
+): boolean {
+  return standard === "network" || standard === "network-asa";
+}
 
 export interface TokenConfig {
   assetId?: string;
@@ -55,7 +105,7 @@ export interface TokenConfig {
   name: string;
   symbol: string;
   logoPath: string;
-  tokenStandard: TokenStandard; // Token standard: network, asa, or arc200
+  tokenStandard: TokenStandard; // network | asa | arc200 | arc200-exchange | network-asa | asa-asa
   // Market override configuration
   marketOverride?: {
     displayName: string;
@@ -93,6 +143,458 @@ export interface TokenConfig {
    * itself (e.g. governance staking), added to on-chain supply APY for display.
    */
   intrinsicApyPercent?: number;
+  /**
+   * When set on Algorand mainnet, {@link resolveIntrinsicSupplyApyPercent} may prefer a live rate
+   * over {@link intrinsicApyPercent} when the corresponding fetch succeeds.
+   */
+  intrinsicApyLiveSource?:
+    | "tinyman_liquid_staking"
+    | "xalgo_governance_lambda"
+    | "folks_mainnet_algo_pool_deposit";
+  /**
+   * Optional intrinsic borrow APY in percentage points (e.g. 1.5 for 1.5%), added to displayed
+   * borrow APY for this listing (e.g. wrapped-asset borrow uplift).
+   */
+  intrinsicBorrowApyPercent?: number;
+  /**
+   * When set on Algorand mainnet, {@link resolveIntrinsicBorrowApyPercent} may prefer a live rate
+   * over {@link intrinsicBorrowApyPercent} when the corresponding fetch succeeds.
+   */
+  intrinsicBorrowApyLiveSource?:
+    | "tinyman_liquid_staking"
+    | "xalgo_governance_lambda"
+    | "folks_mainnet_algo_pool_deposit";
+  /**
+   * Optional wrapped-asset / bridge adapters (e.g. Folks mint/redeem), in order.
+   * Use {@link TokenAdapterConfig.phases} to split deposit vs withdraw legs, and `id` + `label`
+   * when the UI should let the user pick among multiple withdraw (or deposit) routes.
+   * Lending markets under a map key like `ALGO: [...]` are canonical for `network-asa`; the
+   * standalone `tokens.fALGO` row mirrors adapter metadata for lookups by `getTokenConfig("fALGO")`.
+   */
+  adapters?: TokenAdapterConfig[];
+  /** @deprecated Use {@link adapters} or set both — merged after `adapters` in {@link getTokenAdapterList}. */
+  adapter?: TokenAdapterConfig;
+  /**
+   * When true on Algorand mainnet Folks-backed markets, the deposit modal requires a standalone
+   * ASA opt-in to this row’s Folks f-asset before building the main supply transaction group.
+   * Workaround for first-time deposits where bundling opt-in with Folks mint + nt200 would exceed
+   * the maximum atomic group size (e.g. d-pool USDC / fUSDC).
+   */
+  requireStandaloneFAssetOptInBeforeDeposit?: boolean;
+  /**
+   * When true on Algorand mainnet, the deposit modal requires a standalone opt-in to this row’s
+   * {@link assetId} (the market / wrapper ASA, e.g. xALGO) before supply. Skipped when the user
+   * selects a route that does not spend that ASA from the wallet (e.g. xALGO consensus ALGO deposit).
+   */
+  requireStandaloneMarketAsaOptInBeforeDeposit?: boolean;
+}
+
+/** Which user flows an adapter participates in (omit = both, for backward compatibility). */
+export type AdapterPhase = "deposit" | "withdraw" | "borrow" | "repay";
+
+export type TokenAdapterConfig = {
+  /**
+   * Stable id for UI selection and `deposit` / `withdraw` options (see {@link tokenAdapterStableId}).
+   * Required when multiple adapters share the same `type` + pool for a phase.
+   */
+  id?: string;
+  /** Human label for deposit/withdraw route pickers. */
+  label?: string;
+  name: string;
+  type: "folks";
+  folksParams: FolksFinancePoolParams;
+  /**
+   * For deposit routes: what the user spends from the wallet for this adapter.
+   * `underlying` = native / primary ASA (e.g. ALGO in for Folks mint). `market_token` = f-ASA already held.
+   * Omit = underlying for `network-asa` + Folks (legacy behavior).
+   */
+  depositWalletBasis?: "underlying" | "market_token";
+  /**
+   * For withdraw routes: what the user receives after nt200 pool withdraw (+ token app).
+   * `underlying` = Folks redeem f-ASA to native (e.g. ALGO). `market_token` = keep f-ASA in the wallet.
+   * Omit = underlying for Folks `network-asa` (legacy).
+   */
+  withdrawReceiveBasis?: "underlying" | "market_token";
+  /**
+   * For borrow routes (Folks `network-asa`): what the user receives after nt200 releases borrowed f-ASA.
+   * `market_token` = keep f-ASA (e.g. fALGO). `underlying` = append Folks pool redeem to native ALGO.
+   */
+  borrowReceiveBasis?: "underlying" | "market_token";
+  /**
+   * For repay routes (Folks `network-asa`): what the user spends from the wallet before nt200 deposit + repay.
+   * `market_token` = f-ASA already held. `underlying` = native / primary ASA → Folks mint f-asset, then repay.
+   */
+  repayWalletBasis?: "underlying" | "market_token";
+  /**
+   * When set, this adapter runs only for these flows.
+   * When omitted, applies to deposit and withdraw; borrow requires `phases` containing `"borrow"`;
+   * repay requires `phases` containing `"repay"`.
+   */
+  phases?: AdapterPhase[];
+};
+
+/**
+ * Shared Folks ALGO mainnet adapter (single deposit+withdraw slot). Prefer the split adapters
+ * below when a market needs separate deposit routes (f-ASA vs ALGO).
+ */
+export const FOLKS_MAINNET_ALGO_TOKEN_ADAPTER = {
+  id: "folks-mainnet-algo",
+  name: "ALGO",
+  type: "folks" as const,
+  label: "Folks (ALGO pool)",
+  depositWalletBasis: "underlying" as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.ALGO,
+} satisfies TokenAdapterConfig;
+
+/** Default fALGO deposit: spend f-ASA from the wallet (no Folks mint). */
+export const FOLKS_MAINNET_ALGO_DEPOSIT_FALGO_WALLET = {
+  id: "folks-mainnet-algo-deposit-falgo",
+  name: "fALGO",
+  type: "folks" as const,
+  label: "fALGO",
+  depositWalletBasis: "market_token" as const,
+  phases: ["deposit"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.ALGO,
+} satisfies TokenAdapterConfig;
+
+/** Deposit native ALGO → Folks mint f-asset, then nt200 supply. */
+export const FOLKS_MAINNET_ALGO_DEPOSIT_UNDERLYING = {
+  id: "folks-mainnet-algo-deposit-algo",
+  name: "ALGO",
+  type: "folks" as const,
+  label: "ALGO",
+  depositWalletBasis: "underlying" as const,
+  phases: ["deposit"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.ALGO,
+} satisfies TokenAdapterConfig;
+
+/** Folks: nt200 withdraw → token, then redeem f-ASA to native ALGO. */
+export const FOLKS_MAINNET_ALGO_WITHDRAW = {
+  id: "folks-mainnet-algo-withdraw",
+  name: "ALGO",
+  type: "folks" as const,
+  label: "ALGO",
+  withdrawReceiveBasis: "underlying" as const,
+  phases: ["withdraw"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.ALGO,
+} satisfies TokenAdapterConfig;
+
+/** Folks: nt200 withdraw → user receives f-ASA (no pool redeem to native). */
+export const FOLKS_MAINNET_ALGO_WITHDRAW_FASSET_WALLET = {
+  id: "folks-mainnet-algo-withdraw-falgo",
+  name: "fALGO",
+  type: "folks" as const,
+  label: "fALGO",
+  withdrawReceiveBasis: "market_token" as const,
+  phases: ["withdraw"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.ALGO,
+} satisfies TokenAdapterConfig;
+
+/** Folks: after borrow + nt200 withdraw, user keeps f-ASA (no Folks redeem in group). */
+export const FOLKS_MAINNET_ALGO_BORROW_FASSET_WALLET = {
+  id: "folks-mainnet-algo-borrow-falgo",
+  name: "fALGO",
+  type: "folks" as const,
+  label: "fALGO",
+  borrowReceiveBasis: "market_token" as const,
+  phases: ["borrow"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.ALGO,
+} satisfies TokenAdapterConfig;
+
+/** Folks: after borrow + nt200 withdraw, redeem f-ASA → native ALGO in the same atomic group. */
+export const FOLKS_MAINNET_ALGO_BORROW_UNDERLYING = {
+  id: "folks-mainnet-algo-borrow-algo",
+  name: "ALGO",
+  type: "folks" as const,
+  label: "ALGO",
+  borrowReceiveBasis: "underlying" as const,
+  phases: ["borrow"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.ALGO,
+} satisfies TokenAdapterConfig;
+
+/** Repay using f-ASA from the wallet (no Folks mint preamble). */
+export const FOLKS_MAINNET_ALGO_REPAY_FASSET_WALLET = {
+  id: "folks-mainnet-algo-repay-falgo",
+  name: "fALGO",
+  type: "folks" as const,
+  label: "fALGO",
+  repayWalletBasis: "market_token" as const,
+  phases: ["repay"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.ALGO,
+} satisfies TokenAdapterConfig;
+
+/** Repay with native ALGO → Folks mint f-asset, then nt200 deposit + repay. */
+export const FOLKS_MAINNET_ALGO_REPAY_UNDERLYING = {
+  id: "folks-mainnet-algo-repay-algo",
+  name: "ALGO",
+  type: "folks" as const,
+  label: "ALGO",
+  repayWalletBasis: "underlying" as const,
+  phases: ["repay"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.ALGO,
+} satisfies TokenAdapterConfig;
+
+/** Folks USDC pool — same phase split as {@link FOLKS_MAINNET_ALGO_DEPOSIT_FALGO_WALLET} / underlying, for `asa-asa` rows whose `assetId` is USDC. */
+export const FOLKS_MAINNET_USDC_DEPOSIT_FUSDC_WALLET = {
+  id: "folks-mainnet-usdc-deposit-fusdc",
+  name: "fUSDC",
+  type: "folks" as const,
+  label: "fUSDC",
+  depositWalletBasis: "market_token" as const,
+  phases: ["deposit"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.USDC,
+} satisfies TokenAdapterConfig;
+
+/** Deposit USDC → Folks mint fUSDC, then nt200 supply. */
+export const FOLKS_MAINNET_USDC_DEPOSIT_UNDERLYING = {
+  id: "folks-mainnet-usdc-deposit-usdc",
+  name: "USDC",
+  type: "folks" as const,
+  label: "USDC",
+  depositWalletBasis: "underlying" as const,
+  phases: ["deposit"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.USDC,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_USDC_WITHDRAW = {
+  id: "folks-mainnet-usdc-withdraw",
+  name: "USDC",
+  type: "folks" as const,
+  label: "USDC",
+  withdrawReceiveBasis: "underlying" as const,
+  phases: ["withdraw"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.USDC,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_USDC_WITHDRAW_FASSET_WALLET = {
+  id: "folks-mainnet-usdc-withdraw-fusdc",
+  name: "fUSDC",
+  type: "folks" as const,
+  label: "fUSDC",
+  withdrawReceiveBasis: "market_token" as const,
+  phases: ["withdraw"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.USDC,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_USDC_BORROW_FUSDC_WALLET = {
+  id: "folks-mainnet-usdc-borrow-fusdc",
+  name: "fUSDC",
+  type: "folks" as const,
+  label: "fUSDC",
+  borrowReceiveBasis: "market_token" as const,
+  phases: ["borrow"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.USDC,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_USDC_BORROW_UNDERLYING = {
+  id: "folks-mainnet-usdc-borrow-usdc",
+  name: "USDC",
+  type: "folks" as const,
+  label: "USDC",
+  borrowReceiveBasis: "underlying" as const,
+  phases: ["borrow"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.USDC,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_USDC_REPAY_FUSDC_WALLET = {
+  id: "folks-mainnet-usdc-repay-fusdc",
+  name: "fUSDC",
+  type: "folks" as const,
+  label: "fUSDC",
+  repayWalletBasis: "market_token" as const,
+  phases: ["repay"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.USDC,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_USDC_REPAY_UNDERLYING = {
+  id: "folks-mainnet-usdc-repay-usdc",
+  name: "USDC",
+  type: "folks" as const,
+  label: "USDC",
+  repayWalletBasis: "underlying" as const,
+  phases: ["repay"] as const,
+  folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.USDC,
+} satisfies TokenAdapterConfig;
+
+export type FolksTokenAdapterConfig = Extract<
+  TokenAdapterConfig,
+  { type: "folks" }
+>;
+
+function adapterAppliesToPhase(
+  adapter: TokenAdapterConfig,
+  phase: AdapterPhase
+): boolean {
+  const p = adapter.phases;
+  // Borrow / repay are opt-in only so legacy adapters without `phases` stay deposit+withdraw.
+  if (phase === "borrow") {
+    return p != null && p.includes("borrow");
+  }
+  if (phase === "repay") {
+    return p != null && p.includes("repay");
+  }
+  if (p == null || p.length === 0) {
+    return true;
+  }
+  return p.includes(phase);
+}
+
+/**
+ * Ordered merge of `adapters` then legacy singular `adapter` (when present).
+ */
+export function getTokenAdapterList(
+  token: Pick<TokenConfig, "adapter" | "adapters">
+): TokenAdapterConfig[] {
+  const primary = token.adapters ?? [];
+  const legacy = token.adapter ? [token.adapter] : [];
+  return [...primary, ...legacy];
+}
+
+export function getTokenAdaptersForPhase(
+  token: Pick<TokenConfig, "adapter" | "adapters">,
+  phase: AdapterPhase
+): TokenAdapterConfig[] {
+  return getTokenAdapterList(token).filter((a) => adapterAppliesToPhase(a, phase));
+}
+
+/** First Folks adapter that applies to `phase`. */
+export function getFolksAdapterForPhase(
+  token: Pick<TokenConfig, "adapter" | "adapters">,
+  phase: AdapterPhase
+): FolksTokenAdapterConfig | undefined {
+  return getFolksAdaptersForPhase(token, phase)[0];
+}
+
+/** All Folks adapters for `phase` (e.g. multiple withdraw exit routes). */
+export function getFolksAdaptersForPhase(
+  token: Pick<TokenConfig, "adapter" | "adapters">,
+  phase: AdapterPhase
+): FolksTokenAdapterConfig[] {
+  return getTokenAdaptersForPhase(token, phase).filter(
+    (a): a is FolksTokenAdapterConfig => a.type === "folks"
+  );
+}
+
+/** Stable id for passing adapter choice through modals → `lendingService`. */
+export function tokenAdapterStableId(adapter: TokenAdapterConfig): string {
+  const raw = adapter.id != null ? String(adapter.id).trim() : "";
+  if (raw !== "") return raw;
+  if (adapter.type === "folks") {
+    return `folks:${adapter.folksParams.pool}`;
+  }
+  return `${adapter.type}:${adapter.name}`;
+}
+
+/** Resolve which Folks deposit adapter to run (matches `depositAdapterId` or first). */
+export function resolveDepositFolksAdapter(
+  token: Pick<TokenConfig, "adapter" | "adapters">,
+  depositAdapterId?: string | null
+): FolksTokenAdapterConfig | undefined {
+  const list = getFolksAdaptersForPhase(token, "deposit");
+  if (list.length === 0) return undefined;
+  const want =
+    depositAdapterId != null && String(depositAdapterId).trim() !== ""
+      ? String(depositAdapterId).trim()
+      : null;
+  if (want != null) {
+    const hit = list.find((a) => tokenAdapterStableId(a) === want);
+    if (hit) return hit;
+    console.warn(
+      "[resolveDepositFolksAdapter] depositAdapterId not found; using first deposit-phase Folks adapter.",
+      { depositAdapterId: want, available: list.map(tokenAdapterStableId) }
+    );
+  }
+  return list[0];
+}
+
+/** Resolve which Folks withdraw adapter to run (matches `withdrawAdapterId` or first). */
+export function resolveWithdrawFolksAdapter(
+  token: Pick<TokenConfig, "adapter" | "adapters">,
+  withdrawAdapterId?: string | null
+): FolksTokenAdapterConfig | undefined {
+  const list = getFolksAdaptersForPhase(token, "withdraw");
+  if (list.length === 0) return undefined;
+  const want =
+    withdrawAdapterId != null && String(withdrawAdapterId).trim() !== ""
+      ? String(withdrawAdapterId).trim()
+      : null;
+  if (want != null) {
+    const hit = list.find((a) => tokenAdapterStableId(a) === want);
+    if (hit) return hit;
+    console.warn(
+      "[resolveWithdrawFolksAdapter] withdrawAdapterId not found; using first withdraw-phase Folks adapter.",
+      { withdrawAdapterId: want, available: list.map(tokenAdapterStableId) }
+    );
+  }
+  return list[0];
+}
+
+/** Resolve which Folks borrow-phase adapter to run (matches `borrowAdapterId` or first). */
+export function resolveBorrowFolksAdapter(
+  token: Pick<TokenConfig, "adapter" | "adapters">,
+  borrowAdapterId?: string | null
+): FolksTokenAdapterConfig | undefined {
+  const list = getFolksAdaptersForPhase(token, "borrow");
+  if (list.length === 0) return undefined;
+  const want =
+    borrowAdapterId != null && String(borrowAdapterId).trim() !== ""
+      ? String(borrowAdapterId).trim()
+      : null;
+  if (want != null) {
+    const hit = list.find((a) => tokenAdapterStableId(a) === want);
+    if (hit) return hit;
+    console.warn(
+      "[resolveBorrowFolksAdapter] borrowAdapterId not found; using first borrow-phase Folks adapter.",
+      { borrowAdapterId: want, available: list.map(tokenAdapterStableId) }
+    );
+  }
+  return list[0];
+}
+
+/** Resolve which Folks repay-phase adapter to run (matches `repayAdapterId` or first). */
+export function resolveRepayFolksAdapter(
+  token: Pick<TokenConfig, "adapter" | "adapters">,
+  repayAdapterId?: string | null
+): FolksTokenAdapterConfig | undefined {
+  const list = getFolksAdaptersForPhase(token, "repay");
+  if (list.length === 0) return undefined;
+  const want =
+    repayAdapterId != null && String(repayAdapterId).trim() !== ""
+      ? String(repayAdapterId).trim()
+      : null;
+  if (want != null) {
+    const hit = list.find((a) => tokenAdapterStableId(a) === want);
+    if (hit) return hit;
+    console.warn(
+      "[resolveRepayFolksAdapter] repayAdapterId not found; using first repay-phase Folks adapter.",
+      { repayAdapterId: want, available: list.map(tokenAdapterStableId) }
+    );
+  }
+  return list[0];
+}
+
+/** Any Folks adapter on the row (ignores `phases`), for pricing / mint-ratio reads. */
+export function getAnyFolksAdapter(
+  token: Pick<TokenConfig, "adapter" | "adapters">
+): FolksTokenAdapterConfig | undefined {
+  return getTokenAdapterList(token).find(
+    (a): a is FolksTokenAdapterConfig => a.type === "folks"
+  );
+}
+
+export function tokenConfigHasAdapters(
+  token: Pick<TokenConfig, "adapter" | "adapters"> | null | undefined
+): boolean {
+  if (token == null) return false;
+  return getTokenAdapterList(token).length > 0;
+}
+
+/** True if any configured adapter is not Folks (e.g. future bridge types). */
+export function tokenConfigHasNonFolksAdapter(
+  token: Pick<TokenConfig, "adapter" | "adapters"> | null | undefined
+): boolean {
+  if (token == null) return false;
+  return getTokenAdapterList(token).some((a) => a.type !== "folks");
 }
 
 /** Markets with `dataAddedAt` within this window are treated as "new" on the Markets page. */
@@ -1228,6 +1730,7 @@ const algorandMainnetPrefiConfig: NetworkConfig = {
 };
 const algorandProdAMarket = "3333688282";
 const algorandProdBMarket = "3345940978";
+const algorandProdDMarket = "3526240577";
 const algorandProdPriceOracle = "3333688500";
 const algorandProdLiquidationEngine = undefined;
 const algorandProdGovernance = {
@@ -1243,7 +1746,12 @@ const algorandProdMarketController = "3333688332";
 const algorandProdSToken = "3333688448";
 const algorandProdBeacon = "3209233839";
 const algorandProdAppStorageId = "3333688254";
-const algorandProdLendingPools = [algorandProdAMarket, algorandProdBMarket];
+// A, B, D markets (C market slot not used on prod)
+const algorandProdLendingPools = [
+  algorandProdAMarket,
+  algorandProdBMarket,
+  algorandProdDMarket,
+];
 const algorandProdContracts: ContractConfig = {
   lendingPools: algorandProdLendingPools,
   priceOracle: algorandProdPriceOracle,
@@ -1300,7 +1808,74 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
       isSmartContract: true,
     },
     dataAddedAt: "2026-03-26T00:00:00.000Z",
+  }, {
+    assetId: "0",
+    poolId: "3526240577",
+    contractId: "3524740731",
+    nTokenId: "3526254085",
+    decimals: 6,
+    name: "Algorand",
+    symbol: "fALGO",
+    logoPath: "/lovable-uploads/Algo.webp",
+    tokenStandard: "network-asa",
+    marketOverride: {
+      displayName: "Algo",
+      displaySymbol: "Algo",
+      isSmartContract: true,
+    },
+    adapters: [
+      FOLKS_MAINNET_ALGO_DEPOSIT_FALGO_WALLET,
+      FOLKS_MAINNET_ALGO_DEPOSIT_UNDERLYING,
+      FOLKS_MAINNET_ALGO_WITHDRAW,
+      FOLKS_MAINNET_ALGO_WITHDRAW_FASSET_WALLET,
+      FOLKS_MAINNET_ALGO_BORROW_FASSET_WALLET,
+      FOLKS_MAINNET_ALGO_BORROW_UNDERLYING,
+      FOLKS_MAINNET_ALGO_REPAY_FASSET_WALLET,
+      FOLKS_MAINNET_ALGO_REPAY_UNDERLYING,
+    ],
+    dataAddedAt: "2026-04-17T00:00:00.000Z",
+    intrinsicApyPercent: 2.14,
+    intrinsicApyLiveSource: "folks_mainnet_algo_pool_deposit",
+    intrinsicBorrowApyPercent: 2.14,
+    intrinsicBorrowApyLiveSource: "folks_mainnet_algo_pool_deposit",
   }],
+  fALGO: {
+    assetId: "971381860",
+    poolId: "3333688282",
+    contractId: "3524740731",
+    nTokenId: "3526254085",
+    decimals: 6,
+    name: "Folks V2 ALGO",
+    symbol: "fALGO",
+    logoPath: "/lovable-uploads/fALGO.webp",
+    tokenStandard: "asa",
+    /**
+     * Same Folks leg as the `network-asa` row under `tokens.ALGO[]` for this pool, so anything
+     * that resolves `getTokenConfig("fALGO")` still sees adapter metadata. Supply/withdraw/borrow/repay UX
+     * that offers per-adapter inputs should read {@link getFolksAdaptersForPhase} and pass
+     * {@link tokenAdapterStableId} into `lendingService` for the matching phase.
+     */
+    adapters: [
+      FOLKS_MAINNET_ALGO_DEPOSIT_FALGO_WALLET,
+      FOLKS_MAINNET_ALGO_DEPOSIT_UNDERLYING,
+      FOLKS_MAINNET_ALGO_WITHDRAW,
+      FOLKS_MAINNET_ALGO_WITHDRAW_FASSET_WALLET,
+      FOLKS_MAINNET_ALGO_BORROW_FASSET_WALLET,
+      FOLKS_MAINNET_ALGO_BORROW_UNDERLYING,
+      FOLKS_MAINNET_ALGO_REPAY_FASSET_WALLET,
+      FOLKS_MAINNET_ALGO_REPAY_UNDERLYING,
+    ],
+    dataAddedAt: "2026-04-17T00:00:00.000Z",
+    intrinsicApyPercent: 2.14,
+    intrinsicApyLiveSource: "folks_mainnet_algo_pool_deposit",
+  },
+  /**
+   * Tinyman tALGO: nt200 / lending use the tALGO ASA (`assetId`) directly — no Folks f-tALGO leg.
+   * The supply modal offers a synthetic “deposit ALGO” route (Tinyman `mint`) that locks ALGO in the
+   * [Tinyman liquid staking](https://github.com/tinymanorg/tinyman-consensus-staking) app (mainnet app
+   * `2537013674`), mints tALGO, then calls the same `deposit()` path; see `TALGO_TINYMAN_DEPOSIT_ALGO_ROUTE_ID`
+   * in `SupplyBorrowModal` / `talgoMintSupplySingleGroup`.
+   */
   tALGO: {
     assetId: "2537013734",
     poolId: "3333688282",
@@ -1313,7 +1888,22 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     tokenStandard: "asa",
     dataAddedAt: "2026-03-23T00:00:00.000Z",
     intrinsicApyPercent: 4.51,
+    intrinsicApyLiveSource: "tinyman_liquid_staking",
   },
+  /**
+   * Governance xALGO: nt200 / lending use the xALGO ASA (`assetId`) directly — no Folks f-xALGO leg.
+   * The supply modal still offers a synthetic “deposit ALGO” route (consensus `immediate_mint`) that
+   * mints xALGO then calls the same `deposit()` path; see `XALGO_CONSENSUS_DEPOSIT_ALGO_ROUTE_ID` in
+   * `SupplyBorrowModal` / `xalgoMintSupplySingleGroup` — not an entry in `adapters` (those are Folks-only).
+   * Borrow modal: synthetic “receive ALGO” route appends consensus `burn` after `borrow` + withdraw;
+   * see `XALGO_CONSENSUS_BORROW_ALGO_ROUTE_ID` and `xalgoBorrowBurnSingleGroup`.
+   * Withdraw modal (portfolio): synthetic “receive ALGO” route appends consensus `burn` after nt200
+   * withdraw; default route receives xALGO. See `XALGO_CONSENSUS_WITHDRAW_ALGO_ROUTE_ID` in
+   * `WithdrawModal` / `lendingService.withdraw`.
+   * Repay modal (portfolio): synthetic “repay with ALGO” route prepends consensus `immediate_mint`
+   * then nt200 deposit + repay; default repays with wallet xALGO. See `XALGO_CONSENSUS_REPAY_ALGO_ROUTE_ID`
+   * in `RepayModal` / `lendingService.repay`.
+   */
   xALGO: {
     assetId: "1134696561",
     poolId: "3333688282",
@@ -1324,8 +1914,10 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     symbol: "xALGO",
     logoPath: "/lovable-uploads/xALGO.webp",
     tokenStandard: "asa",
+    requireStandaloneMarketAsaOptInBeforeDeposit: true,
     dataAddedAt: "2026-03-23T00:00:00.000Z",
     intrinsicApyPercent: 4.49,
+    intrinsicApyLiveSource: "xalgo_governance_lambda",
   },
   USDC: [{
     assetId: "31566704",
@@ -1353,7 +1945,63 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     logoPath: "/lovable-uploads/USDC.webp",
     tokenStandard: "asa",
     dataAddedAt: "2026-03-26T00:00:00.000Z",
+  }, {
+    assetId: "31566704",
+    poolId: "3526240577",
+    contractId: "3527735223",
+    nTokenId: "3527752141",
+    decimals: 6,
+    name: "Folks V2 USDC",
+    symbol: "fUSDC",
+    marketOverride: {
+      displayName: "USD Coin",
+      displaySymbol: "USDC",
+      isSmartContract: true,
+    },
+    logoPath: "/lovable-uploads/USDC.webp",
+    tokenStandard: "asa-asa",
+    requireStandaloneFAssetOptInBeforeDeposit: true,
+    adapters: [
+      FOLKS_MAINNET_USDC_DEPOSIT_FUSDC_WALLET,
+      FOLKS_MAINNET_USDC_DEPOSIT_UNDERLYING,
+      FOLKS_MAINNET_USDC_WITHDRAW,
+      FOLKS_MAINNET_USDC_WITHDRAW_FASSET_WALLET,
+      FOLKS_MAINNET_USDC_BORROW_FUSDC_WALLET,
+      FOLKS_MAINNET_USDC_BORROW_UNDERLYING,
+      FOLKS_MAINNET_USDC_REPAY_FUSDC_WALLET,
+      FOLKS_MAINNET_USDC_REPAY_UNDERLYING,
+    ],
+    dataAddedAt: "2026-04-19T00:00:00.000Z",
+    intrinsicApyPercent: 3.68, // TODO fetch from source
+    intrinsicBorrowApyPercent: 3.68, // TODO fetch from source
   }],
+  fUSDC: {
+    assetId: "971384592",
+    poolId: "3333688282",
+    contractId: "3527735223",
+    nTokenId: "3527764569",
+    decimals: 6,
+    name: "Folks V2 USDC",
+    symbol: "fUSDC",
+    logoPath: "/lovable-uploads/fUSDC.webp",
+    tokenStandard: "asa",
+    /**
+     * Same Folks leg as the `asa-asa` row under `tokens.USDC[]` for this pool, so
+     * `getTokenConfig("fUSDC")` resolves adapter metadata for mint-ratio / route pickers.
+     */
+    adapters: [
+      FOLKS_MAINNET_USDC_DEPOSIT_FUSDC_WALLET,
+      FOLKS_MAINNET_USDC_DEPOSIT_UNDERLYING,
+      FOLKS_MAINNET_USDC_WITHDRAW,
+      FOLKS_MAINNET_USDC_WITHDRAW_FASSET_WALLET,
+      FOLKS_MAINNET_USDC_BORROW_FUSDC_WALLET,
+      FOLKS_MAINNET_USDC_BORROW_UNDERLYING,
+      FOLKS_MAINNET_USDC_REPAY_FUSDC_WALLET,
+      FOLKS_MAINNET_USDC_REPAY_UNDERLYING,
+    ],
+    dataAddedAt: "2026-04-19T00:00:00.000Z",
+    intrinsicApyPercent: 3.68, // TODO fetch from source
+  },
   UNIT: {
     assetId: "3121954282",
     poolId: "3333688282",
@@ -1446,7 +2094,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     tokenStandard: "asa",
     dataAddedAt: "2026-04-11T00:00:00.000Z",
   }
-],
+  ],
   COMPX: {
     assetId: "1732165149",
     poolId: "3345940978",
@@ -1777,6 +2425,18 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
       logoPath: "/lovable-uploads/WAD_fixed.png",
       tokenStandard: "arc200-exchange",
     },
+    {
+      assetId: "3334160924",
+      contractId: "3333688448",
+      poolId: "3526240577",
+      nTokenId: "3527318445",
+      decimals: 6,
+      name: "WAD",
+      symbol: "WAD",
+      logoPath: "/lovable-uploads/WAD_fixed.png",
+      tokenStandard: "arc200-exchange",
+      dataAddedAt: "2026-04-19T00:00:00.000Z",
+    },
   ],
 };
 const algorandMainnetProdConfig: NetworkConfig = {
@@ -1785,6 +2445,7 @@ const algorandMainnetProdConfig: NetworkConfig = {
   name: "Algorand Mainnet",
   networkType: "avm",
   rpcUrl: "https://mainnet-api.algorand.dork.fi",
+  rpcPublicUrl: "https://mainnet-api.algorand.dork.fi",
   rpcPort: 443,
   rpcToken: undefined, // Public endpoint, no token required
   indexerUrl: "https://mainnet-idx.4160.nodely.dev",
@@ -2069,6 +2730,8 @@ export const marketLabelMap: Record<string, string> = {
   // Algorand Mainnet (prod pools in this file)
   "algorand-mainnet-3333688282": "A",
   "algorand-mainnet-3345940978": "B",
+  /** Third prod lending pool (array order is A, B, D — no “C” market id). */
+  "algorand-mainnet-3526240577": "D",
 };
 
 /**
@@ -2432,6 +3095,36 @@ export const getTokenConfig = (
   return config.networks[networkId].tokens[symbol];
 };
 
+/**
+ * Single `TokenConfig` row for `symbol` + optional `poolId`, or any row matching `poolId` when
+ * `getTokenConfig(symbol)` misses (e.g. fALGO row stored under `tokens.ALGO[]`).
+ */
+function resolveTokenConfigRowWithPool(
+  networkId: NetworkId,
+  symbol: string,
+  poolId: string | undefined
+): TokenConfig | undefined {
+  const raw = getTokenConfig(networkId, symbol);
+  if (raw) {
+    return Array.isArray(raw)
+      ? poolId != null && poolId !== ""
+        ? raw.find((c) => String(c.poolId) === String(poolId)) ?? raw[0]
+        : raw[0]
+      : raw;
+  }
+  if (poolId == null || poolId === "") return undefined;
+  const book = config.networks[networkId].tokens;
+  for (const val of Object.values(book)) {
+    if (Array.isArray(val)) {
+      const hit = val.find((c) => String(c.poolId) === String(poolId));
+      if (hit) return hit;
+    } else if (val && String(val.poolId) === String(poolId)) {
+      return val;
+    }
+  }
+  return undefined;
+}
+
 /** Intrinsic supply APY (% points) from config when set; 0 if unset or not applicable. */
 export const getIntrinsicSupplyApyPercent = (
   networkId: NetworkId | string | undefined,
@@ -2439,15 +3132,165 @@ export const getIntrinsicSupplyApyPercent = (
   poolId: string | undefined
 ): number => {
   if (!networkId) return 0;
-  const raw = getTokenConfig(networkId as NetworkId, symbol);
-  if (!raw) return 0;
-  const row = Array.isArray(raw)
-    ? poolId != null && poolId !== ""
-      ? raw.find((c) => String(c.poolId) === String(poolId)) ?? raw[0]
-      : raw[0]
-    : raw;
+  const row = resolveTokenConfigRowWithPool(
+    networkId as NetworkId,
+    symbol,
+    poolId
+  );
+  if (!row) return 0;
   const v = row.intrinsicApyPercent;
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
+};
+
+/** Optional live intrinsic supply APY values (percentage points) for {@link resolveIntrinsicSupplyApyPercent}. */
+export type LiveIntrinsicSupplyApySnapshot = {
+  tinymanLiquidStakingPercent?: number | null;
+  xalgoGovernanceLambdaPercent?: number | null;
+  /** Folks mainnet ALGO lending pool deposit APY (fALGO), percentage points. */
+  folksMainnetAlgoDepositPercent?: number | null;
+};
+
+/**
+ * Intrinsic supply APY (% points) for display: on Algorand mainnet, prefers a live rate when
+ * {@link TokenConfig.intrinsicApyLiveSource} is set and the matching snapshot field is valid;
+ * otherwise {@link getIntrinsicSupplyApyPercent}.
+ */
+export const resolveIntrinsicSupplyApyPercent = (
+  networkId: NetworkId | string | undefined,
+  symbol: string,
+  poolId: string | undefined,
+  live?: LiveIntrinsicSupplyApySnapshot | null
+): number => {
+  const base = getIntrinsicSupplyApyPercent(networkId, symbol, poolId);
+  if (networkId !== "algorand-mainnet") return base;
+  const row = resolveTokenConfigRowWithPool(
+    networkId as NetworkId,
+    symbol,
+    poolId
+  );
+  const source = row?.intrinsicApyLiveSource;
+  if (source === "tinyman_liquid_staking") {
+    const v = live?.tinymanLiquidStakingPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+      return v;
+    }
+    return base;
+  }
+  if (source === "xalgo_governance_lambda") {
+    const v = live?.xalgoGovernanceLambdaPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+      return v;
+    }
+    return base;
+  }
+  if (source === "folks_mainnet_algo_pool_deposit") {
+    const v = live?.folksMainnetAlgoDepositPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+      return v;
+    }
+    return base;
+  }
+  return base;
+};
+
+/** Whether this listing uses any configured live intrinsic supply APY source on Algorand mainnet. */
+export const tokenRowUsesLiveIntrinsicApy = (
+  networkId: NetworkId | string | undefined,
+  symbol: string,
+  poolId: string | undefined
+): boolean => {
+  if (networkId !== "algorand-mainnet") return false;
+  const row = resolveTokenConfigRowWithPool(
+    networkId as NetworkId,
+    symbol,
+    poolId
+  );
+  const s = row?.intrinsicApyLiveSource;
+  return (
+    s === "tinyman_liquid_staking" ||
+    s === "xalgo_governance_lambda" ||
+    s === "folks_mainnet_algo_pool_deposit"
+  );
+};
+
+/** Whether this listing uses any configured live intrinsic borrow APY source on Algorand mainnet. */
+export const tokenRowUsesLiveIntrinsicBorrowApy = (
+  networkId: NetworkId | string | undefined,
+  symbol: string,
+  poolId: string | undefined
+): boolean => {
+  if (networkId !== "algorand-mainnet") return false;
+  const row = resolveTokenConfigRowWithPool(
+    networkId as NetworkId,
+    symbol,
+    poolId
+  );
+  const s = row?.intrinsicBorrowApyLiveSource;
+  return (
+    s === "tinyman_liquid_staking" ||
+    s === "xalgo_governance_lambda" ||
+    s === "folks_mainnet_algo_pool_deposit"
+  );
+};
+
+/** Intrinsic borrow APY (% points) from config when set; 0 if unset or not applicable. */
+export const getIntrinsicBorrowApyPercent = (
+  networkId: NetworkId | string | undefined,
+  symbol: string,
+  poolId: string | undefined
+): number => {
+  if (!networkId) return 0;
+  const row = resolveTokenConfigRowWithPool(
+    networkId as NetworkId,
+    symbol,
+    poolId
+  );
+  if (!row) return 0;
+  const v = row.intrinsicBorrowApyPercent;
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
+};
+
+/**
+ * Intrinsic borrow APY (% points) for display: on Algorand mainnet, prefers a live rate when
+ * {@link TokenConfig.intrinsicBorrowApyLiveSource} is set and the matching snapshot field is valid;
+ * otherwise {@link getIntrinsicBorrowApyPercent}.
+ */
+export const resolveIntrinsicBorrowApyPercent = (
+  networkId: NetworkId | string | undefined,
+  symbol: string,
+  poolId: string | undefined,
+  live?: LiveIntrinsicSupplyApySnapshot | null
+): number => {
+  const base = getIntrinsicBorrowApyPercent(networkId, symbol, poolId);
+  if (networkId !== "algorand-mainnet") return base;
+  const row = resolveTokenConfigRowWithPool(
+    networkId as NetworkId,
+    symbol,
+    poolId
+  );
+  const source = row?.intrinsicBorrowApyLiveSource;
+  if (source === "tinyman_liquid_staking") {
+    const v = live?.tinymanLiquidStakingPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+      return v;
+    }
+    return base;
+  }
+  if (source === "xalgo_governance_lambda") {
+    const v = live?.xalgoGovernanceLambdaPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+      return v;
+    }
+    return base;
+  }
+  if (source === "folks_mainnet_algo_pool_deposit") {
+    const v = live?.folksMainnetAlgoDepositPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+      return v;
+    }
+    return base;
+  }
+  return base;
 };
 
 export const getAllTokens = (networkId: NetworkId): TokenConfig[] => {
@@ -2525,6 +3368,8 @@ export const getTokenDisplayInfo = (
 export const getAllTokensWithDisplayInfo = (networkId: NetworkId) => {
   const tokens = config.networks[networkId].tokens;
   const result: Array<{
+    /** Config `tokens` object key (e.g. `fALGO`); stable when `symbol` is display-only. */
+    configKey: string;
     symbol: string;
     name: string;
     underlyingAssetId?: string;
@@ -2551,6 +3396,7 @@ export const getAllTokensWithDisplayInfo = (networkId: NetworkId) => {
             decimals: config.decimals,
             logoPath: config.logoPath,
             isNew: isNewMarketByDataAddedAt(config.dataAddedAt),
+            configKey: symbol,
           });
         }
       });
@@ -2564,6 +3410,7 @@ export const getAllTokensWithDisplayInfo = (networkId: NetworkId) => {
           decimals: tokenConfig.decimals,
           logoPath: tokenConfig.logoPath,
           isNew: isNewMarketByDataAddedAt(tokenConfig.dataAddedAt),
+          configKey: symbol,
         });
       }
     }

@@ -8,6 +8,7 @@ import {
   fetchMarketInfo,
   fetchUserDepositBalance,
 } from "@/services/lendingService";
+import { marketRowForPortfolioPosition } from "@/utils/marketRowForPortfolioPosition";
 
 export type PoolCollateralMarketRow = {
   symbol: string;
@@ -45,7 +46,13 @@ export function collateralFactorToPercent(raw: unknown): number | undefined {
   return n > 0 && n <= 1 ? n * 100 : n;
 }
 
-type DepositLike = { asset: string; poolId?: string; network?: string };
+type DepositLike = {
+  asset: string;
+  poolId?: string;
+  network?: string;
+  /** Underlying market id — disambiguates display symbol + pool (e.g. ALGO vs fALGO both "Algo"). */
+  marketId?: string;
+};
 
 /** One row per supplied market in the pool (from user deposits), for deposit modal LT comparison. */
 export function buildPoolCollateralMarketRows(
@@ -62,18 +69,32 @@ export function buildPoolCollateralMarketRows(
     if (dPool !== String(poolId)) continue;
     const dNet = d.network;
     if (networkId && dNet && dNet !== networkId) continue;
-    const key = `${d.asset}__${dPool}`;
+    const dMid =
+      d.marketId != null && String(d.marketId) !== ""
+        ? String(d.marketId)
+        : "";
+    const key = `${d.asset}__${dPool}__${dMid}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const m = markets.find(
-      (mm: any) =>
-        (mm.symbol === d.asset || mm.asset === d.asset) &&
-        String(mm.poolId ?? mm.appId) === String(poolId) &&
-        (!networkId ||
-          !mm.networkId ||
-          mm.networkId === networkId ||
-          mm.network === networkId)
-    );
+    let m: Record<string, unknown> | undefined;
+    if (dMid !== "") {
+      m = marketRowForPortfolioPosition(markets, {
+        marketId: dMid,
+        poolId: String(poolId),
+        displaySymbol: d.asset,
+      }) as Record<string, unknown> | undefined;
+    }
+    if (!m) {
+      m = markets.find(
+        (mm: any) =>
+          (mm.symbol === d.asset || mm.asset === d.asset) &&
+          String(mm.poolId ?? mm.appId) === String(poolId) &&
+          (!networkId ||
+            !mm.networkId ||
+            mm.networkId === networkId ||
+            mm.network === networkId)
+      ) as Record<string, unknown> | undefined;
+    }
     if (!m) continue;
     const ltPct = liquidationThresholdToPercent(
       m.liquidationThreshold ?? m.marketInfo?.liquidationThreshold

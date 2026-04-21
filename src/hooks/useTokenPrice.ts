@@ -2,23 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { fetchMarketInfo } from '@/services/lendingService';
 import { getAllTokensWithDisplayInfo } from '@/config';
 import { useNetwork } from '@/contexts/NetworkContext';
-import { usdPerTokenFromMarketInfoFormattedPrice } from '@/utils/assetDecimals';
-
-/**
- * Same USD/token as Portfolio tables and wallet lines: `MarketInfo.price` is already ÷1e18
- * in lendingService; we then apply 12 − tokenDecimals (e.g. ÷1e4 for 8-dec UNIT, ÷1e6 for 6-dec USDC).
- */
-function usdPerTokenFromMarketInfo(
-  marketInfo: { price: string },
-  tokenDecimals: number
-): number | null {
-  const usd = usdPerTokenFromMarketInfoFormattedPrice(
-    marketInfo.price,
-    tokenDecimals
-  );
-  if (!Number.isFinite(usd) || usd <= 0) return null;
-  return usd;
-}
+import { usdPerTokenFromMarketInfoPrice } from '@/utils/assetDecimals';
 
 interface UseTokenPriceResult {
   price: number;
@@ -76,7 +60,8 @@ export const useTokenPrice = (tokenSymbol: string, networkId?: string): UseToken
               );
               const decimals = otherToken.decimals ?? 6;
               if (marketInfo) {
-                const marketPrice = usdPerTokenFromMarketInfo(marketInfo, decimals);
+                const usd = usdPerTokenFromMarketInfoPrice(marketInfo.price, decimals);
+                const marketPrice = Number.isFinite(usd) && usd > 0 ? usd : null;
                 if (marketPrice != null && marketPrice > 0) {
                   console.log(`Market price for ${tokenSymbol} on ${network}: $${marketPrice}`);
                   setPrice(marketPrice);
@@ -100,7 +85,8 @@ export const useTokenPrice = (tokenSymbol: string, networkId?: string): UseToken
 
       const decimals = token.decimals ?? 6;
       if (marketInfo) {
-        const marketPrice = usdPerTokenFromMarketInfo(marketInfo, decimals);
+        const usd = usdPerTokenFromMarketInfoPrice(marketInfo.price, decimals);
+        const marketPrice = Number.isFinite(usd) && usd > 0 ? usd : null;
         if (marketPrice != null && marketPrice > 0) {
           console.log(`Market price for ${tokenSymbol}: $${marketPrice} (decimals=${decimals})`);
           setPrice(marketPrice);

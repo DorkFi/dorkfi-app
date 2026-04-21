@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { LocaleNumberInput } from "@/components/ui/LocaleNumberInput";
@@ -33,6 +33,21 @@ interface SupplyBorrowFormProps {
   maxBorrowError?: string | null;
   network?: string; // Optional network parameter for cross-network operations
   walletBalanceLastUpdated?: number;
+  /** When set, replaces the MAX control on the amount field (e.g. multi-route deposit picker). */
+  amountFieldEndAdornment?: ReactNode;
+  /** Deposit: suffix after the numeric wallet balance (e.g. route label `fALGO` vs `ALGO`). */
+  walletBalanceDisplaySymbol?: string;
+  /** Deposit: override the teal card title (defaults to “Wallet Balance”). */
+  walletBalanceRowTitle?: string;
+  /** Borrow: suffix for max line (e.g. `ALGO` vs `fALGO`) when route changes units. */
+  maxBorrowableUnitSymbol?: string;
+  /** Borrow: Folks mint ratio failed while ALGO receive route is selected. */
+  borrowFolksRateUnavailable?: boolean;
+  /**
+   * Deposit: native spendable balance is still loading (e.g. xALGO “ALGO (consensus)” route).
+   * Skips amount-vs-wallet validation until the parent supplies a real balance.
+   */
+  depositWalletBalancePending?: boolean;
 }
 
 const SupplyBorrowForm = ({
@@ -56,6 +71,12 @@ const SupplyBorrowForm = ({
   maxBorrowError = null,
   network,
   walletBalanceLastUpdated,
+  amountFieldEndAdornment,
+  walletBalanceDisplaySymbol,
+  walletBalanceRowTitle,
+  maxBorrowableUnitSymbol,
+  borrowFolksRateUnavailable = false,
+  depositWalletBalancePending = false,
 }: SupplyBorrowFormProps) => {
   const [amount, setAmount] = useState<number | "">("");
   const [fiatValue, setFiatValue] = useState(0);
@@ -91,12 +112,19 @@ const SupplyBorrowForm = ({
     const value = numValue;
 
     // Check wallet balance for deposits
-    if (mode === "deposit" && value > walletBalance) {
+    if (
+      mode === "deposit" &&
+      !depositWalletBalancePending &&
+      value > walletBalance
+    ) {
       return "Insufficient wallet balance";
     }
 
     // Check available liquidity for borrows
     if (mode === "borrow") {
+      if (borrowFolksRateUnavailable && value > 0) {
+        return "Folks rate unavailable for ALGO borrow; pick f-asset or retry.";
+      }
       const buffer = 0.1;
       const maxBorrowable = availableToSupplyOrBorrow * (1 - buffer);
       const roundedMaxBorrowable = Number(maxBorrowable.toFixed(decimals));
@@ -162,6 +190,8 @@ const SupplyBorrowForm = ({
     decimals,
     mode,
     asset,
+    borrowFolksRateUnavailable,
+    depositWalletBalancePending,
   ]);
 
   // Calculate max borrowable amount based on market liquidity only
@@ -247,18 +277,25 @@ const SupplyBorrowForm = ({
             onChange={(v) => setAmount(v ?? "")}
             formatOptions={{ maximumFractionDigits: decimals }}
             showValidationMessage={true}
-            className={`bg-white/70 dark:bg-slate-800 border-gray-300 dark:border-slate-600 text-slate-800 dark:text-white pr-16 text-lg h-12 ${validationError ? "border-red-300 dark:border-red-600" : ""
-              }`}
+            className={`bg-white/70 dark:bg-slate-800 border-gray-300 dark:border-slate-600 text-slate-800 dark:text-white text-lg h-12 ${
+              amountFieldEndAdornment != null ? "pr-36" : "pr-16"
+            } ${validationError ? "border-red-300 dark:border-red-600" : ""}`}
           />
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={handleMaxClick}
-            disabled={mode === "borrow" && isLoadingMaxBorrow}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-teal-400 hover:bg-teal-400/10 h-8 px-3 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {mode === "borrow" && isLoadingMaxBorrow ? "..." : "MAX"}
-          </Button>
+          {amountFieldEndAdornment != null ? (
+            <div className="absolute right-1 top-1/2 flex max-w-[calc(100%-3rem)] -translate-y-1/2 items-center justify-end">
+              {amountFieldEndAdornment}
+            </div>
+          ) : (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleMaxClick}
+              disabled={mode === "borrow" && isLoadingMaxBorrow}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-teal-400 hover:bg-teal-400/10 h-8 px-3 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {mode === "borrow" && isLoadingMaxBorrow ? "..." : "MAX"}
+            </Button>
+          )}
         </div>
 
         {/* Validation Error */}
@@ -339,7 +376,9 @@ const SupplyBorrowForm = ({
                   : "text-whale-gold"
                   }`}
               >
-                {mode === "deposit" ? "Wallet Balance" : "Max Borrowable"}
+                {mode === "deposit"
+                  ? walletBalanceRowTitle ?? "Wallet Balance"
+                  : "Max Borrowable"}
               </span>
               {mode === "deposit" && onRefreshWalletBalance && (
                 <Button
@@ -376,20 +415,29 @@ const SupplyBorrowForm = ({
                   }`}
               >
                 {mode === "deposit"
-                  ? `${walletBalance.toLocaleString(undefined, {
-                    maximumFractionDigits: 6,
-                  })} ${asset}`
+                  ? depositWalletBalancePending
+                    ? `Loading… ${walletBalanceDisplaySymbol ?? asset}`
+                    : `${walletBalance.toLocaleString(undefined, {
+                        maximumFractionDigits: 6,
+                      })} ${walletBalanceDisplaySymbol ?? asset}`
                   : isLoadingMaxBorrow
                     ? "Calculating..."
                     : maxBorrowError
                       ? "Error"
-                      : `${calculateMaxBorrowable().toLocaleString(undefined, {
-                        maximumFractionDigits: 6,
-                      })} ${asset}`}
+                      : borrowFolksRateUnavailable
+                        ? "—"
+                        : `${calculateMaxBorrowable().toLocaleString(undefined, {
+                            maximumFractionDigits: 6,
+                          })} ${maxBorrowableUnitSymbol ?? asset}`}
               </div>
               {mode === "borrow" && maxBorrowError && (
                 <div className="text-xs text-red-500 dark:text-red-400 mt-1">
                   {maxBorrowError}
+                </div>
+              )}
+              {mode === "borrow" && borrowFolksRateUnavailable && !maxBorrowError && (
+                <div className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                  Folks rate unavailable; choose f-asset borrow or retry.
                 </div>
               )}
               <div
@@ -400,10 +448,12 @@ const SupplyBorrowForm = ({
               >
                 {mode === "deposit" ? (
                   <>
-                    {`≈ $${walletBalanceUSD.toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}`}
+                    {depositWalletBalancePending
+                      ? "—"
+                      : `≈ $${walletBalanceUSD.toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}`}
                     {walletBalanceLastUpdated && (
                       <span className="ml-2 text-[11px] opacity-80">
                         · Updated {formatRelativeTime(walletBalanceLastUpdated)}

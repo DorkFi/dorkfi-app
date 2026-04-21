@@ -18,6 +18,7 @@ import { CONTRACT } from "ulujs";
 import algosdk from "algosdk";
 import BigNumber from "bignumber.js";
 import { RefreshCw } from "lucide-react";
+import { LENDING_USER_HEALTH_ROUND_LOOKBACK } from "@/constants/lendingUserHealthIndexer";
 
 const ITEMS_PER_PAGE = 10;
 
@@ -182,7 +183,7 @@ export default function LiquidationMarkets({
     const status = await clients.algod.status().do();
     const lastRound = status["last-round"];
     const events: any = await ci.getEvents({
-      minRound: Math.max(0, lastRound - 2e6),
+      minRound: Math.max(0, lastRound - LENDING_USER_HEALTH_ROUND_LOOKBACK),
     });
     const allUserHealthEvents =
       events

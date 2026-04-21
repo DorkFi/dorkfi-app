@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { marketPoolBadgeBgClassName } from "@/constants/marketUi";
 
 interface MarketPoolBadgeProps {
   label: string | null | undefined;
@@ -6,7 +7,7 @@ interface MarketPoolBadgeProps {
 }
 
 /**
- * A/B lending pool indicator (matches markets table + portfolio badges).
+ * A/B/D lending pool indicator (matches markets table + portfolio badges).
  */
 export function MarketPoolBadge({ label, className }: MarketPoolBadgeProps) {
   if (!label) return null;
@@ -14,9 +15,7 @@ export function MarketPoolBadge({ label, className }: MarketPoolBadgeProps) {
     <div
       className={cn(
         "absolute -top-1 -right-1 w-5 h-5 rounded-full border-2 border-white dark:border-slate-800 flex items-center justify-center z-10",
-        label === "A"
-          ? "bg-blue-500 dark:bg-blue-600"
-          : "bg-purple-500 dark:bg-purple-600",
+        marketPoolBadgeBgClassName(label),
         className
       )}
     >

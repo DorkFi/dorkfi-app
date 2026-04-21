@@ -49,7 +49,7 @@ const Governance = () => {
     ? currentNetwork
     : null;
 
-  const { proposals, stats, loading, userVotes, vote, batchVote, userVoterInfo, getVoteKey } =
+  const { proposals, stats, loading, error, userVotes, vote, batchVote, userVoterInfo, getVoteKey } =
     useGovernanceData(effectiveGovernanceNetwork);
   const [selectedStatus, setSelectedStatus] = useState<ProposalStatus | "all">("all");
   const [batchMode, setBatchMode] = useState(false);
@@ -86,9 +86,6 @@ const Governance = () => {
   }, [userVoterInfo, stats?.yourVotingPower, nftBoostEnabled, userNFTs]);
 
   const handleVote = async (proposalId: string, support: boolean, networkId?: NetworkId) => {
-    if (!stats) {
-      throw new Error("Voting stats not loaded");
-    }
     await vote(proposalId, support, effectiveVotingPower, networkId);
   };
 
@@ -437,8 +434,25 @@ const Governance = () => {
               </div>
               
               {filteredProposals.length === 0 ? (
-                <div className="text-center py-12 text-muted-foreground px-4">
-                  No proposals found matching your filters
+                <div className="text-center py-12 px-4 space-y-2">
+                  {error ? (
+                    <>
+                      <p className="text-destructive font-medium">
+                        Could not load proposals
+                      </p>
+                      <p className="text-sm text-muted-foreground">{error}</p>
+                    </>
+                  ) : proposals.length === 0 ? (
+                    <p className="text-muted-foreground">
+                      No on-chain proposals yet. When the indexer has indexed proposal events, they
+                      will appear here.
+                    </p>
+                  ) : (
+                    <p className="text-muted-foreground">
+                      No proposals match the selected status filter. Try &quot;All&quot; to see every
+                      proposal.
+                    </p>
+                  )}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 lg:gap-6">

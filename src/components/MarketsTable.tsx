@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ExternalLink, RefreshCw, ChevronDown } from "lucide-react";
@@ -6,14 +6,17 @@ import { useWallet } from "@txnlab/use-wallet-react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import {
   getAllTokensWithDisplayInfo,
+  getFolksAdaptersForPhase,
   getTokenConfig,
   getAlgorandNetworkFromNetworkId,
+  tokenStandardUsesNativeWalletBalance,
 } from "@/config";
 import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
 
 import {
   useOnDemandMarketData,
+  marketRowCacheKey,
   SortField,
   SortOrder,
   type MarketFilter,
@@ -39,6 +42,8 @@ import {
 } from "@/services/lendingService";
 import type { UserPosition as MarketDetailUserPosition } from "@/components/market-modal/types";
 import { normalizeWadUsdPerToken, roundUsdToCents } from "@/lib/utils";
+import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
+import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
 import { useToast } from "@/hooks/use-toast";
 import { isAtDepositCap, isAtBorrowCap } from "@/constants/lendingCaps";
 import algosdk, { waitForConfirmation } from "algosdk";
@@ -147,6 +152,11 @@ function normalizeMarketData(md: Record<string, unknown>) {
     !Number.isNaN(md.intrinsicSupplyApyPercent)
       ? md.intrinsicSupplyApyPercent
       : 0;
+  const intrinsicBorrowBonus =
+    typeof md.intrinsicBorrowApyPercent === "number" &&
+    !Number.isNaN(md.intrinsicBorrowApyPercent)
+      ? md.intrinsicBorrowApyPercent
+      : 0;
 
   return {
     icon: String(md.icon ?? ""),
@@ -161,7 +171,7 @@ function normalizeMarketData(md: Record<string, unknown>) {
     availableLiquidity: availableUsdWhole,
     utilization,
     supplyAPY: baseSupplyApy + rewardsBonus + intrinsicBonus,
-    borrowAPY: Number(md.borrowAPY ?? 0),
+    borrowAPY: Number(md.borrowAPY ?? 0) + intrinsicBorrowBonus,
     ...(borrowRateFrac !== undefined ? { borrowRate: borrowRateFrac } : {}),
     ...(slopeFrac !== undefined ? { slope: slopeFrac } : {}),
     maxLTV: Number(md.maxLTV ?? md.collateralFactor ?? 0),
@@ -188,19 +198,32 @@ function poolIdFromMarketRow(market: Record<string, unknown>): string | undefine
   return undefined;
 }
 
-/** Matches `useOnDemandMarketData` cache keys (`symbol` or `symbol-poolId`). */
-function marketKeyForOnDemandLoad(asset: string, poolId?: string): string {
-  return poolId != null && poolId !== ""
-    ? `${asset.toLowerCase()}-${String(poolId)}`
-    : asset.toLowerCase();
+/** Matches `useOnDemandMarketData` cache keys (canonical symbol + optional pool id). */
+function marketKeyForOnDemandLoad(
+  poolId: string | undefined,
+  configSymbol: string | undefined,
+  displayAssetFallback: string
+): string {
+  return marketRowCacheKey({
+    originalSymbol: configSymbol,
+    symbol: displayAssetFallback,
+    poolId,
+  });
 }
 
-/** Find the current row on the markets page (same asset + pool); used to merge fresh chain data into the detail modal. */
+/** Find the current row on the markets page; prefer `_sortKey` when display asset + pool collide. */
 function findMarketRowOnPage(
   pageMarkets: Record<string, unknown>[],
   asset: string,
-  poolId?: string
+  poolId?: string,
+  marketRowKey?: string
 ): Record<string, unknown> | null {
+  if (marketRowKey) {
+    const byKey = pageMarkets.find(
+      (m) => (m as { _sortKey?: string })._sortKey === marketRowKey
+    );
+    if (byKey) return byKey;
+  }
   if (poolId != null && poolId !== "") {
     const found = pageMarkets.find(
       (m) =>
@@ -219,6 +242,15 @@ function networkIdToChainId(
   return networkId.toLowerCase().includes("algorand") ? "algorand" : "voi";
 }
 
+/** Wallet cache key: same display `asset` can map to multiple pools (e.g. Algo vs fAlgo). */
+function marketsTableWalletBalanceCacheKey(
+  asset: string,
+  poolId?: string,
+  marketRowKey?: string
+): string {
+  return `${asset}|p=${poolId ?? ""}|rk=${marketRowKey ?? ""}`;
+}
+
 const MarketsTable = () => {
   const { formatPercent } = useNumberI18n();
   const [searchTerm, setSearchTerm] = useState("");
@@ -232,34 +264,52 @@ const MarketsTable = () => {
     isOpen: boolean;
     asset: string | null;
     poolId?: string;
+    /** `useOnDemandMarketData` row key (`_sortKey`); disambiguates same display asset + pool. */
+    marketRowKey?: string;
+    /** Config `tokens` key from the row (e.g. `fALGO`); passed to SupplyBorrowModal for token resolution. */
+    configSymbol?: string;
   }>({
     isOpen: false,
     asset: null,
     poolId: undefined,
+    marketRowKey: undefined,
+    configSymbol: undefined,
   });
   const [withdrawModal, setWithdrawModal] = useState({
     isOpen: false,
     asset: null,
   });
-  const [borrowModal, setBorrowModal] = useState({
+  const [borrowModal, setBorrowModal] = useState<{
+    isOpen: boolean;
+    asset: string | null;
+    poolId?: string;
+    marketRowKey?: string;
+    configSymbol?: string;
+  }>({
     isOpen: false,
     asset: null,
+    poolId: undefined,
+    marketRowKey: undefined,
+    configSymbol: undefined,
   });
   const [mintModal, setMintModal] = useState<{
     isOpen: boolean;
     asset: string | null;
     poolId?: string;
-  }>({ isOpen: false, asset: null });
+    marketRowKey?: string;
+  }>({ isOpen: false, asset: null, poolId: undefined, marketRowKey: undefined });
   const [detailModal, setDetailModal] = useState<{
     isOpen: boolean;
     asset: string | null;
     poolId?: string;
     marketData: Record<string, unknown> | null;
+    marketRowKey?: string;
   }>({
     isOpen: false,
     asset: null,
     poolId: undefined,
     marketData: null,
+    marketRowKey: undefined,
   });
   const [walletBalances, setWalletBalances] = useState<
     Record<string, { balance: number; balanceUSD: number }>
@@ -602,6 +652,7 @@ const MarketsTable = () => {
     newMarketsCount,
     rewardMarketsCount,
     multiPoolMarketsCount,
+    hasDMarketTab,
   } = useOnDemandMarketData({
     searchTerm,
     sortField,
@@ -626,6 +677,119 @@ const MarketsTable = () => {
     }));
   }, [marketsPage, rewardsAprByBaseUrl]);
 
+  /** Resolve config token row when display `asset` + `poolId` match multiple markets (e.g. Algo vs fALGO). */
+  const configSymbolFromMarketRowKey = useCallback(
+    (marketRowKey: string | undefined) => {
+      if (!marketRowKey) return undefined;
+      const row = markets.find(
+        (m) => (m as { _sortKey?: string })._sortKey === marketRowKey
+      );
+      const cs = row?.configSymbol;
+      return typeof cs === "string" ? cs : undefined;
+    },
+    [markets]
+  );
+
+  const resolveTokenForDisplayedAsset = useCallback(
+    (
+      asset: string,
+      poolId: string | undefined,
+      marketRowKey: string | undefined
+    ) => {
+      const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+      if (marketRowKey) {
+        const row = markets.find(
+          (m) => (m as { _sortKey?: string })._sortKey === marketRowKey
+        );
+        const cs = row?.configSymbol;
+        if (cs) {
+          const t = tokens.find(
+            (x) =>
+              (x.originalSymbol ?? x.symbol) === cs &&
+              (poolId == null ||
+                poolId === "" ||
+                String(x.poolId) === String(poolId))
+          );
+          if (t) return t;
+        }
+      }
+      if (poolId != null && poolId !== "") {
+        return tokens.find(
+          (t) => t.symbol === asset && String(t.poolId) === String(poolId)
+        );
+      }
+      return tokens.find((t) => t.symbol === asset);
+    },
+    [markets, currentNetwork]
+  );
+
+  const borrowModalAvailableAssets = useMemo(() => {
+    type Row = (typeof markets)[number] & {
+      _sortKey?: string;
+      configSymbol?: string;
+      marketInfo?: { marketId?: string | number };
+    };
+    return markets.map((raw) => {
+      const m = raw as Row;
+      const rowKey = m._sortKey;
+      const mid =
+        m.marketInfo?.marketId != null
+          ? String(m.marketInfo.marketId)
+          : undefined;
+      return {
+        asset: m.asset,
+        icon: typeof m.icon === "string" ? m.icon : "",
+        value:
+          typeof m.borrowAPY === "number" && !Number.isNaN(m.borrowAPY)
+            ? m.borrowAPY
+            : undefined,
+        poolId: m.poolId != null ? String(m.poolId) : undefined,
+        network: currentNetwork,
+        configSymbol:
+          typeof m.configSymbol === "string" ? m.configSymbol : undefined,
+        marketId: mid,
+        marketRowKey: rowKey,
+      };
+    });
+  }, [markets, currentNetwork]);
+
+  const borrowModalMarketId = useMemo(() => {
+    if (!borrowModal.marketRowKey) return undefined;
+    const row = markets.find(
+      (m) => (m as { _sortKey?: string })._sortKey === borrowModal.marketRowKey
+    ) as { marketInfo?: { marketId?: string | number } } | undefined;
+    return row?.marketInfo?.marketId != null
+      ? String(row.marketInfo.marketId)
+      : undefined;
+  }, [markets, borrowModal.marketRowKey]);
+
+  const handleSelectBorrowMarket = useCallback(
+    (
+      nextAsset: string,
+      nextPoolId?: string,
+      _nextNetwork?: string,
+      pick?: {
+        marketId?: string;
+        configSymbol?: string;
+        marketRowKey?: string;
+      }
+    ) => {
+      const rowKey = pick?.marketRowKey;
+      setBorrowModal((prev) => ({
+        ...prev,
+        isOpen: true,
+        asset: nextAsset,
+        poolId: nextPoolId,
+        marketRowKey: rowKey,
+        configSymbol:
+          pick?.configSymbol ??
+          (rowKey ? configSymbolFromMarketRowKey(rowKey) : undefined) ??
+          prev.configSymbol,
+      }));
+    },
+    [configSymbolFromMarketRowKey]
+  );
+
   useEffect(() => {
     setNewMarketsOnly(false);
     setRewardMarketsOnly(false);
@@ -644,6 +808,13 @@ const MarketsTable = () => {
     if (multiPoolMarketsCount === 0) setMultiPoolOnly(false);
   }, [multiPoolMarketsCount]);
 
+  useEffect(() => {
+    if (!hasDMarketTab && marketFilter === "D") {
+      setMarketFilter("all");
+      setCurrentPage(1);
+    }
+  }, [hasDMarketTab, marketFilter]);
+
   const handleSearchTermChange = (value: string) => {
     setSearchTerm(value);
     handleSearchChange(value);
@@ -655,9 +826,13 @@ const MarketsTable = () => {
     handleSortChange(field, order);
   };
 
-  const handleDepositClick = async (asset: string, poolId?: string) => {
+  const handleDepositClick = async (
+    asset: string,
+    poolId?: string,
+    marketRowKey?: string
+  ) => {
     // Don't open modal if market is at or over deposit cap (95% threshold)
-    const assetData = getAssetData(asset, poolId);
+    const assetData = getAssetData(asset, poolId, marketRowKey);
     if (assetData) {
       const totalSupply = Number(assetData.totalSupply ?? 0);
       const maxTotalDeposits = Number(assetData.maxTotalDeposits ?? 0);
@@ -675,7 +850,9 @@ const MarketsTable = () => {
 
     try {
       // Fetch wallet balance before opening modal
-      await fetchWalletBalance(asset, poolId);
+      await fetchWalletBalance(asset, poolId, marketRowKey, {
+        bypassCache: true,
+      });
 
       let poolCollateralRows: PoolCollateralMarketRow[] = [];
       if (activeAccount?.address && poolId != null && poolId !== "") {
@@ -692,13 +869,32 @@ const MarketsTable = () => {
       setDepositPoolCollateralMarkets(poolCollateralRows);
 
       // Open modal after balance is fetched
-      console.log("Opening deposit modal with:", { asset, poolId });
-      setDepositModal({ isOpen: true, asset, poolId });
+      const configSymbol = configSymbolFromMarketRowKey(marketRowKey);
+      console.log("Opening deposit modal with:", {
+        asset,
+        poolId,
+        marketRowKey,
+        configSymbol,
+      });
+      setDepositModal({
+        isOpen: true,
+        asset,
+        poolId,
+        marketRowKey,
+        configSymbol,
+      });
     } catch (error) {
       console.error("Error fetching wallet balance for deposit:", error);
       setDepositPoolCollateralMarkets([]);
       // Still open modal even if balance fetch fails
-      setDepositModal({ isOpen: true, asset, poolId });
+      const configSymbol = configSymbolFromMarketRowKey(marketRowKey);
+      setDepositModal({
+        isOpen: true,
+        asset,
+        poolId,
+        marketRowKey,
+        configSymbol,
+      });
     } finally {
       setIsLoadingBalance(false);
     }
@@ -708,9 +904,13 @@ const MarketsTable = () => {
     setWithdrawModal({ isOpen: true, asset });
   };
 
-  const handleBorrowClick = async (asset: string, poolId?: string) => {
+  const handleBorrowClick = async (
+    asset: string,
+    poolId?: string,
+    marketRowKey?: string
+  ) => {
     // Don't open modal if market is at or over borrow cap (95% threshold)
-    const assetData = getAssetData(asset, poolId);
+    const assetData = getAssetData(asset, poolId, marketRowKey);
     if (assetData) {
       const totalBorrow = Number(assetData.totalBorrow ?? 0);
       const maxTotalBorrows = Number(assetData.maxTotalBorrows ?? 0);
@@ -737,12 +937,7 @@ const MarketsTable = () => {
         setUserGlobalData(globalData);
 
         // Fetch user's current borrow balance for this specific asset
-        const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-        // If poolId is provided, find the token that matches both symbol and poolId
-        // Otherwise, fall back to finding by symbol only (for backward compatibility)
-        const token = poolId
-          ? tokens.find((t) => t.symbol === asset && t.poolId === poolId)
-          : tokens.find((t) => t.symbol === asset);
+        const token = resolveTokenForDisplayedAsset(asset, poolId, marketRowKey);
 
         if (token && token.poolId && token.underlyingContractId) {
           const borrowData = await fetchUserBorrowBalance(
@@ -779,17 +974,35 @@ const MarketsTable = () => {
       setDepositPoolCollateralMarkets(poolCollateralRows);
 
       // Open modal regardless of connection status
-      setBorrowModal({ isOpen: true, asset, poolId });
+      const configSymbol = configSymbolFromMarketRowKey(marketRowKey);
+      setBorrowModal({
+        isOpen: true,
+        asset,
+        poolId,
+        marketRowKey,
+        configSymbol,
+      });
     } catch (error) {
       console.error("Error fetching user data for borrow:", error);
       setDepositPoolCollateralMarkets([]);
-      setBorrowModal({ isOpen: true, asset, poolId });
+      const configSymbol = configSymbolFromMarketRowKey(marketRowKey);
+      setBorrowModal({
+        isOpen: true,
+        asset,
+        poolId,
+        marketRowKey,
+        configSymbol,
+      });
     } finally {
       setIsLoadingGlobalData(false);
     }
   };
 
-  const handleMintClick = async (asset: string, poolId?: string) => {
+  const handleMintClick = async (
+    asset: string,
+    poolId?: string,
+    marketRowKey?: string
+  ) => {
     setIsLoadingGlobalData(true);
 
     try {
@@ -801,14 +1014,7 @@ const MarketsTable = () => {
         );
         setUserGlobalData(globalData);
 
-        // Fetch user's current borrow balance for this specific asset (use poolId for 2 WAD markets etc.)
-        const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-        const token =
-          poolId != null && poolId !== ""
-            ? tokens.find(
-              (t) => t.symbol === asset && String(t.poolId) === String(poolId)
-            )
-            : tokens.find((t) => t.symbol === asset);
+        const token = resolveTokenForDisplayedAsset(asset, poolId, marketRowKey);
 
         if (token && token.poolId && token.underlyingContractId) {
           const borrowData = await fetchUserBorrowBalance(
@@ -828,11 +1034,11 @@ const MarketsTable = () => {
       }
 
       // Open modal regardless of connection status, pass poolId if available
-      setMintModal({ isOpen: true, asset, poolId });
+      setMintModal({ isOpen: true, asset, poolId, marketRowKey });
     } catch (error) {
       console.error("Error fetching user data for mint:", error);
       // Still open modal even if data fetch fails
-      setMintModal({ isOpen: true, asset, poolId });
+      setMintModal({ isOpen: true, asset, poolId, marketRowKey });
     } finally {
       setIsLoadingGlobalData(false);
     }
@@ -947,8 +1153,14 @@ const MarketsTable = () => {
 
       // Wait a bit for the blockchain state to update, then refresh
       setTimeout(() => {
-        loadMarketDataWithBypass(asset.toLowerCase());
-        refreshWalletBalance(asset);
+        loadMarketDataWithBypass(
+          marketRowCacheKey({
+            originalSymbol,
+            symbol: token.symbol,
+            poolId: token.poolId,
+          })
+        );
+        refreshWalletBalance(asset, token.poolId, undefined);
       }, 2000);
     } catch (error) {
       console.error("Migration error:", error);
@@ -963,14 +1175,25 @@ const MarketsTable = () => {
 
   const handleCloseDepositModal = () => {
     const asset = depositModal.asset;
-    setDepositModal({ isOpen: false, asset: null, poolId: undefined });
+    const poolId = depositModal.poolId;
+    const rowKey = depositModal.marketRowKey;
+    setDepositModal({
+      isOpen: false,
+      asset: null,
+      poolId: undefined,
+      marketRowKey: undefined,
+      configSymbol: undefined,
+    });
     setDepositPoolCollateralMarkets([]);
 
     // Refresh market data and wallet balance after deposit
     if (asset) {
-      loadMarketDataWithBypass(asset.toLowerCase());
+      loadMarketDataWithBypass(
+        rowKey ??
+          marketKeyForOnDemandLoad(poolId, undefined, asset)
+      );
       // Refresh wallet balance to show updated amount after deposit
-      refreshWalletBalance(asset);
+      void refreshWalletBalance(asset, poolId, rowKey);
     }
   };
 
@@ -980,11 +1203,22 @@ const MarketsTable = () => {
 
   const handleCloseBorrowModal = () => {
     const asset = borrowModal.asset;
-    setBorrowModal({ isOpen: false, asset: null, poolId: undefined });
+    const poolId = borrowModal.poolId;
+    const rowKey = borrowModal.marketRowKey;
+    setBorrowModal({
+      isOpen: false,
+      asset: null,
+      poolId: undefined,
+      marketRowKey: undefined,
+      configSymbol: undefined,
+    });
 
     // Refresh market data and user global data after borrow
     if (asset) {
-      loadMarketDataWithBypass(asset.toLowerCase());
+      loadMarketDataWithBypass(
+        rowKey ??
+          marketKeyForOnDemandLoad(poolId, undefined, asset)
+      );
       // Refresh user global data to show updated collateral/borrow values
       if (activeAccount?.address) {
         refreshUserGlobalData();
@@ -992,7 +1226,7 @@ const MarketsTable = () => {
     }
   };
 
-  // Fetch user data when wallet connects while borrow modal is open
+  // Fetch user data when wallet connects while borrow modal is open (or when switching asset in-modal)
   useEffect(() => {
     if (borrowModal.isOpen && borrowModal.asset && activeAccount?.address) {
       const fetchData = async () => {
@@ -1003,16 +1237,11 @@ const MarketsTable = () => {
           );
           setUserGlobalData(globalData);
 
-          const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-          // If poolId is provided, find the token that matches both symbol and poolId
-          // Otherwise, fall back to finding by symbol only (for backward compatibility)
-          const token = borrowModal.poolId
-            ? tokens.find(
-              (t) =>
-                t.symbol === borrowModal.asset &&
-                t.poolId === borrowModal.poolId
-            )
-            : tokens.find((t) => t.symbol === borrowModal.asset);
+          const token = resolveTokenForDisplayedAsset(
+            borrowModal.asset,
+            borrowModal.poolId,
+            borrowModal.marketRowKey
+          );
 
           if (token && token.poolId && token.underlyingContractId) {
             const borrowData = await fetchUserBorrowBalance(
@@ -1022,7 +1251,30 @@ const MarketsTable = () => {
               currentNetwork
             );
             setUserBorrowBalance(borrowData?.balance || 0);
+          } else {
+            setUserBorrowBalance(0);
           }
+
+          let poolCollateralRows: PoolCollateralMarketRow[] = [];
+          if (
+            borrowModal.poolId != null &&
+            borrowModal.poolId !== ""
+          ) {
+            try {
+              poolCollateralRows =
+                await fetchPoolCollateralMarketRowsForDeposit(
+                  activeAccount.address,
+                  currentNetwork as NetworkId,
+                  borrowModal.poolId
+                );
+            } catch (e) {
+              console.error(
+                "Error loading pool collateral markets for borrow:",
+                e
+              );
+            }
+          }
+          setDepositPoolCollateralMarkets(poolCollateralRows);
         } catch (error) {
           console.error("Error fetching user data:", error);
         }
@@ -1035,7 +1287,10 @@ const MarketsTable = () => {
     borrowModal.isOpen,
     borrowModal.asset,
     borrowModal.poolId,
+    borrowModal.marketRowKey,
+    borrowModal.configSymbol,
     currentNetwork,
+    resolveTokenForDisplayedAsset,
   ]);
 
   // Fetch user data when wallet connects while mint modal is open
@@ -1049,15 +1304,11 @@ const MarketsTable = () => {
           );
           setUserGlobalData(globalData);
 
-          const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-          // Use poolId when there are multiple markets for the same asset (e.g. 2 WAD markets)
-          const token = mintModal.poolId != null
-            ? tokens.find(
-              (t) =>
-                t.symbol === mintModal.asset &&
-                String(t.poolId) === String(mintModal.poolId)
-            )
-            : tokens.find((t) => t.symbol === mintModal.asset);
+          const token = resolveTokenForDisplayedAsset(
+            mintModal.asset,
+            mintModal.poolId,
+            mintModal.marketRowKey
+          );
 
           if (token && token.poolId && token.underlyingContractId) {
             const borrowData = await fetchUserBorrowBalance(
@@ -1080,16 +1331,28 @@ const MarketsTable = () => {
     mintModal.isOpen,
     mintModal.asset,
     mintModal.poolId,
+    mintModal.marketRowKey,
     currentNetwork,
+    resolveTokenForDisplayedAsset,
   ]);
 
   const handleCloseMintModal = () => {
     const asset = mintModal.asset;
-    setMintModal({ isOpen: false, asset: null, poolId: undefined });
+    const poolId = mintModal.poolId;
+    const rowKey = mintModal.marketRowKey;
+    setMintModal({
+      isOpen: false,
+      asset: null,
+      poolId: undefined,
+      marketRowKey: undefined,
+    });
 
     // Refresh market data and user global data after mint
     if (asset) {
-      loadMarketDataWithBypass(asset.toLowerCase());
+      loadMarketDataWithBypass(
+        rowKey ??
+          marketKeyForOnDemandLoad(poolId, undefined, asset)
+      );
       // Refresh user global data to show updated collateral/borrow values
       if (activeAccount?.address) {
         refreshUserGlobalData();
@@ -1101,14 +1364,22 @@ const MarketsTable = () => {
     const asset = typeof market.asset === "string" ? market.asset : null;
     if (!asset) return;
     const poolId = poolIdFromMarketRow(market);
+    const configSymbol =
+      typeof (market as { configSymbol?: string }).configSymbol === "string"
+        ? (market as { configSymbol?: string }).configSymbol
+        : undefined;
+    const rowKey = (market as { _sortKey?: string })._sortKey;
     setDetailModal({
       isOpen: true,
       asset,
       poolId,
       marketData: market,
+      marketRowKey: rowKey,
     });
     // Fresh on-chain read for modal (fetchMarketInfo(..., "contract") via useOnDemandMarketData).
-    void loadMarketDataWithBypass(marketKeyForOnDemandLoad(asset, poolId));
+    void loadMarketDataWithBypass(
+      marketKeyForOnDemandLoad(poolId, configSymbol, asset)
+    );
   };
 
   const handleRowClick = (market: Record<string, unknown>) => {
@@ -1126,6 +1397,7 @@ const MarketsTable = () => {
       asset: null,
       poolId: undefined,
       marketData: null,
+      marketRowKey: undefined,
     });
   };
 
@@ -1137,7 +1409,8 @@ const MarketsTable = () => {
     const fresh = findMarketRowOnPage(
       markets as Record<string, unknown>[],
       detailModal.asset,
-      detailModal.poolId
+      detailModal.poolId,
+      detailModal.marketRowKey
     );
     if (!fresh) return;
     setDetailModal((prev) => {
@@ -1154,7 +1427,13 @@ const MarketsTable = () => {
       }
       return { ...prev, marketData: fresh };
     });
-  }, [markets, detailModal.isOpen, detailModal.asset, detailModal.poolId]);
+  }, [
+    markets,
+    detailModal.isOpen,
+    detailModal.asset,
+    detailModal.poolId,
+    detailModal.marketRowKey,
+  ]);
 
   // Load all markets when component mounts
   useEffect(() => {
@@ -1456,7 +1735,7 @@ const MarketsTable = () => {
             });
             // withdraw if token standard is network or asa
             if (
-              reward.tokenStandard === "network" ||
+              tokenStandardUsesNativeWalletBalance(reward.tokenStandard) ||
               reward.tokenStandard === "asa"
             ) {
               // TODO: cond optin for asa
@@ -2049,16 +2328,26 @@ const MarketsTable = () => {
   };
 
   // Refresh wallet balance for a specific asset (clears cache and refetches)
-  const refreshWalletBalance = async (asset: string) => {
-    // Clear the cached balance for this asset
+  const refreshWalletBalance = async (
+    asset: string,
+    poolId?: string,
+    marketRowKey?: string
+  ) => {
+    const cacheKey = marketsTableWalletBalanceCacheKey(
+      asset,
+      poolId,
+      marketRowKey
+    );
     setWalletBalances((prev) => {
       const newBalances = { ...prev };
+      delete newBalances[cacheKey];
       delete newBalances[asset];
       return newBalances;
     });
 
-    // Fetch fresh balance
-    await fetchWalletBalance(asset);
+    await fetchWalletBalance(asset, poolId, marketRowKey, {
+      bypassCache: true,
+    });
   };
 
   // Refresh user global data (clears cache and refetches)
@@ -2077,23 +2366,33 @@ const MarketsTable = () => {
   };
 
   // Fetch wallet balance for a specific asset
-  const fetchWalletBalance = async (asset: string, poolId?: string) => {
+  const fetchWalletBalance = async (
+    asset: string,
+    poolId?: string,
+    marketRowKey?: string,
+    opts?: { bypassCache?: boolean }
+  ) => {
     if (!activeAccount?.address) {
       return { balance: 0, balanceUSD: 0 };
     }
 
-    // Check if we already have this balance cached (use asset as key since wallet balance is same for all markets)
-    if (walletBalances[asset]) {
-      return walletBalances[asset];
+    const cacheKey = marketsTableWalletBalanceCacheKey(
+      asset,
+      poolId,
+      marketRowKey
+    );
+
+    if (!opts?.bypassCache && walletBalances[cacheKey] !== undefined) {
+      return walletBalances[cacheKey];
     }
 
     try {
       const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-      // If poolId is provided, find the token that matches both symbol and poolId
-      // Otherwise, fall back to finding by symbol only (for backward compatibility)
-      const token = poolId
-        ? tokens.find((t) => t.symbol === asset && t.poolId === poolId)
-        : tokens.find((t) => t.symbol === asset);
+      const token =
+        resolveTokenForDisplayedAsset(asset, poolId, marketRowKey) ??
+        (poolId
+          ? tokens.find((t) => t.symbol === asset && t.poolId === poolId)
+          : tokens.find((t) => t.symbol === asset));
 
       if (!token) {
         console.error(
@@ -2103,14 +2402,15 @@ const MarketsTable = () => {
         return { balance: 0, balanceUSD: 0 };
       }
 
-      // Get the original token config to access tokenStandard
-      // Use originalSymbol to look up the config, as asset might be a display symbol
+      // `network.tokens` key (e.g. `ALGO`); row may have `originalSymbol` `fALGO` under that key.
       const originalSymbol =
         "originalSymbol" in token ? (token as { originalSymbol?: string }).originalSymbol : asset;
-      const tokenConfigRaw = getTokenConfig(currentNetwork, originalSymbol);
+      const tokensMapKey =
+        (token as { configKey?: string }).configKey ?? originalSymbol;
+      const tokenConfigRaw = getTokenConfig(currentNetwork, tokensMapKey);
       if (!tokenConfigRaw) {
         console.error(
-          `Original token config not found for ${asset} (originalSymbol: ${originalSymbol})`
+          `Original token config not found for ${asset} (tokensMapKey: ${tokensMapKey}, originalSymbol: ${originalSymbol})`
         );
         return { balance: 0, balanceUSD: 0 };
       }
@@ -2125,10 +2425,45 @@ const MarketsTable = () => {
 
       if (!originalTokenConfig) {
         console.error(
-          `Original token config not found for ${asset} (originalSymbol: ${originalSymbol})`
+          `Original token config not found for ${asset} (tokensMapKey: ${tokensMapKey}, poolId: ${token.poolId})`
         );
         return { balance: 0, balanceUSD: 0 };
       }
+
+      // Folks fALGO row: `getAllTokensWithDisplayInfo` can match the standalone `tokens.fALGO`
+      // (ASA) when display symbol + pool id collide with another market. That path reads the
+      // f-ASA wallet balance (often 0) while the ALGO deposit route spends native ALGO.
+      // `SupplyBorrowModal` loads f-ASA separately; cache native spendable here for underlying route.
+      const folksDepositAdapters = getFolksAdaptersForPhase(
+        originalTokenConfig,
+        "deposit"
+      );
+      const useNativeAlgoForFolksAlgoHybridDeposit =
+        currentNetwork === "algorand-mainnet" &&
+        folksDepositAdapters.some((a) => a.depositWalletBasis === "market_token") &&
+        folksDepositAdapters.some(
+          (a) => (a.depositWalletBasis ?? "underlying") === "underlying"
+        ) &&
+        folksDepositAdapters.some((a) => a.folksParams.pool === "ALGO");
+
+      /** Folks underlying-ASA id when a deposit adapter spends underlying (e.g. USDC for `tokens.fUSDC`). */
+      const folksUnderlyingDepositAdapter = folksDepositAdapters.find(
+        (a) =>
+          a.type === "folks" &&
+          (a.depositWalletBasis ?? "underlying") === "underlying"
+      );
+      const folksUnderlyingAsaStr =
+        folksUnderlyingDepositAdapter?.type === "folks"
+          ? String(folksUnderlyingDepositAdapter.folksParams.assetId ?? "").trim()
+          : "";
+      const folksUnderlyingAsaIdForWallet =
+        folksUnderlyingAsaStr !== "" && folksUnderlyingAsaStr !== "-"
+          ? parseInt(folksUnderlyingAsaStr, 10)
+          : NaN;
+      const useFolksUnderlyingAsaWalletBalance =
+        folksUnderlyingDepositAdapter?.type === "folks" &&
+        Number.isFinite(folksUnderlyingAsaIdForWallet) &&
+        folksUnderlyingAsaIdForWallet > 0;
 
       // Initialize ARC200Service with current clients
       const clients = await getSyncedClientsForReads();
@@ -2143,12 +2478,54 @@ const MarketsTable = () => {
         underlyingAssetId: token.underlyingAssetId,
         poolId: token.poolId,
         address: activeAccount.address,
+        useNativeAlgoForFolksAlgoHybridDeposit,
       });
 
       let balance = 0;
 
       // Handle different token standards
-      if (
+      if (useNativeAlgoForFolksAlgoHybridDeposit) {
+        console.log(
+          `[MarketsTable] Folks ALGO hybrid deposit market — using native spendable ALGO for ${asset}`
+        );
+        try {
+          const accountInfo = await clients.algod
+            .accountInformation(activeAccount.address)
+            .do();
+          balance = spendableAlgoHumanFromAccount(accountInfo);
+        } catch (error) {
+          console.error(
+            `Error fetching native ALGO balance for Folks hybrid market ${asset}:`,
+            error
+          );
+          balance = 0;
+        }
+      } else if (useFolksUnderlyingAsaWalletBalance) {
+        // Standalone f-asset rows (e.g. `tokens.fUSDC`) use f-ASA in config; default deposit route is
+        // underlying USDC (`folksParams.assetId`), same as `SupplyBorrowModal` after route selection.
+        try {
+          const accAssetInfo = await clients.algod
+            .accountAssetInformation(
+              activeAccount.address,
+              folksUnderlyingAsaIdForWallet
+            )
+            .do();
+          const atomic = getAccountAssetHoldingAmountAtomic(accAssetInfo);
+          if (atomic != null) {
+            balance =
+              Number(atomic) /
+              Math.pow(10, originalTokenConfig.decimals);
+          } else {
+            balance = 0;
+          }
+        } catch (error) {
+          console.error(
+            `Error fetching Folks underlying ASA balance for ${asset}:`,
+            error
+          );
+          balance = 0;
+        }
+      } else if (
         originalTokenConfig.tokenStandard === "arc200" &&
         token.underlyingContractId
       ) {
@@ -2174,7 +2551,9 @@ const MarketsTable = () => {
           console.log(`No ARC200 balance found for ${asset}`);
           balance = 0;
         }
-      } else if (originalTokenConfig.tokenStandard === "network") {
+      } else if (
+        tokenStandardUsesNativeWalletBalance(originalTokenConfig.tokenStandard)
+      ) {
         // For network tokens (like VOI), fetch native balance
         console.log(`[MarketsTable] Entering network token balance fetch for ${asset}`, {
           tokenStandard: originalTokenConfig.tokenStandard,
@@ -2188,8 +2567,7 @@ const MarketsTable = () => {
             .accountInformation(activeAccount.address)
             .do();
           console.log(`[MarketsTable] accountInfo for ${asset}:`, accountInfo);
-          // Convert from micro-units to units (divide by 1,000,000)
-          balance = Math.max(0, Number(accountInfo.amount) - Number(accountInfo.minBalance) - 1e6) / 1e6;
+          balance = spendableAlgoHumanFromAccount(accountInfo);
           console.log(`[MarketsTable] Network token balance for ${asset}:`, {
             rawAmount: accountInfo.amount,
             balance,
@@ -2203,10 +2581,40 @@ const MarketsTable = () => {
           balance = 0;
         }
       } else if (
-        originalTokenConfig.tokenStandard === "asa" &&
+        originalTokenConfig.tokenStandard === "asa-asa" &&
+        originalTokenConfig.assetId != null &&
+        String(originalTokenConfig.assetId).trim() !== ""
+      ) {
+        const assetId = parseInt(String(originalTokenConfig.assetId).trim(), 10);
+        console.log(
+          `Fetching ASA balance for ${asset} (asa-asa asset ID: ${assetId})`
+        );
+        try {
+          const clients = await getSyncedClientsForReads();
+          const accAssetInfo = await clients.algod
+            .accountAssetInformation(activeAccount.address, assetId)
+            .do();
+
+          const atomic = getAccountAssetHoldingAmountAtomic(accAssetInfo);
+          if (atomic != null) {
+            balance =
+              Number(atomic) /
+              Math.pow(10, originalTokenConfig.decimals);
+            console.log(`ASA balance for ${asset}: ${balance}`);
+          } else {
+            console.log(`No ASA balance found for ${asset}`);
+            balance = 0;
+          }
+        } catch (error) {
+          console.error(`Error fetching ASA balance for ${asset}:`, error);
+          balance = 0;
+        }
+      } else if (
+        (originalTokenConfig.tokenStandard === "asa" ||
+          originalTokenConfig.tokenStandard === "network-asa") &&
         token.underlyingAssetId
       ) {
-        // For ASA tokens, fetch asset balance
+        // For ASA and Folks network-asa (e.g. fALGO): wallet holds the f-ASA; fetch by asset id.
         console.log(
           `Fetching ASA balance for ${asset} (asset ID: ${token.underlyingAssetId})`
         );
@@ -2217,10 +2625,11 @@ const MarketsTable = () => {
             .accountAssetInformation(activeAccount.address, assetId)
             .do();
 
-          if (accAssetInfo.assetHolding) {
+          const atomic = getAccountAssetHoldingAmountAtomic(accAssetInfo);
+          if (atomic != null) {
             // Convert from smallest units to human readable format
             balance =
-              Number(accAssetInfo.assetHolding.amount) /
+              Number(atomic) /
               Math.pow(10, originalTokenConfig.decimals);
             console.log(`ASA balance for ${asset}: ${balance}`);
           } else {
@@ -2243,10 +2652,11 @@ const MarketsTable = () => {
             .accountAssetInformation(activeAccount.address, assetId)
             .do();
 
-          if (accAssetInfo.assetHolding) {
+          const atomic = getAccountAssetHoldingAmountAtomic(accAssetInfo);
+          if (atomic != null) {
             // Convert from smallest units to human readable format
             balance =
-              Number(accAssetInfo.assetHolding.amount) /
+              Number(atomic) /
               Math.pow(10, originalTokenConfig.decimals);
             console.log(`ASA balance for ${asset}: ${balance}`);
           } else {
@@ -2264,10 +2674,15 @@ const MarketsTable = () => {
         balance = 0;
       }
 
-      // Calculate USD value
-      const market = markets.find((m) => m.asset === asset);
-      const tokenPrice = market
-        ? (market.totalSupplyUSD / market.totalSupply || 1) / 10 ** 6
+      // Calculate USD value (same display asset may map to multiple rows)
+      const marketForPrice = marketRowKey
+        ? markets.find(
+            (m) => (m as { _sortKey?: string })._sortKey === marketRowKey
+          )
+        : markets.find((m) => m.asset === asset);
+      const tokenPrice = marketForPrice
+        ? (marketForPrice.totalSupplyUSD / marketForPrice.totalSupply || 1) /
+          10 ** 6
         : 1;
       const balanceUSD = balance * tokenPrice;
 
@@ -2284,7 +2699,7 @@ const MarketsTable = () => {
 
       setWalletBalances((prev) => ({
         ...prev,
-        [asset]: balanceData,
+        [cacheKey]: balanceData,
       }));
 
       console.log(`Final balance data for ${asset}:`, balanceData);
@@ -2295,11 +2710,17 @@ const MarketsTable = () => {
     }
   };
 
-  const getAssetData = (asset: string, poolId?: string) => {
+  const getAssetData = (asset: string, poolId?: string, marketRowKey?: string) => {
     const poolIdStr = poolId != null && poolId !== "" ? String(poolId) : null;
     let market: (typeof markets)[0] | undefined;
 
-    if (poolIdStr) {
+    if (marketRowKey) {
+      market = markets.find(
+        (m) => (m as { _sortKey?: string })._sortKey === marketRowKey
+      );
+    }
+
+    if (!market && poolIdStr) {
       // Exact match by asset + poolId (required for 2 WAD markets etc. – never use another market’s data)
       market = markets.find(
         (m) =>
@@ -2338,6 +2759,11 @@ const MarketsTable = () => {
       !Number.isNaN(market.intrinsicSupplyApyPercent)
         ? market.intrinsicSupplyApyPercent
         : 0;
+    const intrinsicBorrowBonus =
+      typeof market.intrinsicBorrowApyPercent === "number" &&
+      !Number.isNaN(market.intrinsicBorrowApyPercent)
+        ? market.intrinsicBorrowApyPercent
+        : 0;
     const baseSupplyApy =
       typeof market.supplyAPY === "number" && !Number.isNaN(market.supplyAPY)
         ? market.supplyAPY
@@ -2346,13 +2772,14 @@ const MarketsTable = () => {
           ? market.apyCalculation.apy
           : 0;
     const supplyAPY = baseSupplyApy + rewardsBonus + intrinsicBonus;
-    const borrowAPY =
+    const borrowAPYBase =
       typeof market.borrowAPY === "number" && !Number.isNaN(market.borrowAPY)
         ? market.borrowAPY
         : (typeof market.borrowApyCalculation?.apy === "number" &&
           !Number.isNaN(market.borrowApyCalculation?.apy))
           ? market.borrowApyCalculation.apy
           : 0;
+    const borrowAPY = borrowAPYBase + intrinsicBorrowBonus;
 
     const marketInfo = (market as { marketInfo?: { borrowRate?: number; slope?: number; reserveFactor?: number } }).marketInfo;
     const apyParameters =
@@ -2423,11 +2850,16 @@ const MarketsTable = () => {
     const poolId = detailModal.poolId;
     const tokens = getAllTokensWithDisplayInfo(currentNetwork);
     const token =
-      poolId != null && poolId !== ""
+      resolveTokenForDisplayedAsset(
+        asset,
+        poolId,
+        detailModal.marketRowKey
+      ) ??
+      (poolId != null && poolId !== ""
         ? tokens.find(
             (t) => t.symbol === asset && String(t.poolId) === String(poolId)
           )
-        : tokens.find((t) => t.symbol === asset);
+        : tokens.find((t) => t.symbol === asset));
 
     if (!token?.poolId || !token.underlyingContractId) {
       setDetailModalUserPosition(null);
@@ -2440,7 +2872,7 @@ const MarketsTable = () => {
       const norm = normalizeMarketData(row);
       const price =
         norm.price > 0 && Number.isFinite(norm.price) ? norm.price : 0;
-      const assetData = getAssetData(asset, poolId);
+      const assetData = getAssetData(asset, poolId, detailModal.marketRowKey);
 
       setDetailModalUserPosition({
         supplied: 0,
@@ -2573,9 +3005,11 @@ const MarketsTable = () => {
     detailModal.isOpen,
     detailModal.asset,
     detailModal.poolId,
+    detailModal.marketRowKey,
     detailModal.marketData,
     activeAccount?.address,
     currentNetwork,
+    resolveTokenForDisplayedAsset,
     // Not `markets`: that list is rebuilt on every row/rewards update and caused a full
     // Promise.all per tick while the modal stayed open. `detailModal.marketData` is enough;
     // the sync effect updates it when the selected row’s `lastFetched` advances.
@@ -2742,7 +3176,7 @@ const MarketsTable = () => {
                 )}
               </div>
             </div>
-            {/* Market filter: All / A / B */}
+            {/* Market filter: All / A / B / D (D when network has a third lending pool) */}
             <Tabs
               value={marketFilter}
               onValueChange={(v) => {
@@ -2751,7 +3185,13 @@ const MarketsTable = () => {
               }}
               className="w-full mt-4"
             >
-              <TabsList className="grid w-full max-w-md grid-cols-3">
+              <TabsList
+                className={`grid w-full gap-1 ${
+                  hasDMarketTab
+                    ? "max-w-3xl grid-cols-2 sm:grid-cols-4"
+                    : "max-w-md grid-cols-3"
+                }`}
+              >
                 <TabsTrigger value="all" className="text-sm">
                   All Markets
                 </TabsTrigger>
@@ -2761,6 +3201,11 @@ const MarketsTable = () => {
                 <TabsTrigger value="B" className="text-sm">
                   B Markets
                 </TabsTrigger>
+                {hasDMarketTab && (
+                  <TabsTrigger value="D" className="text-sm">
+                    D Markets
+                  </TabsTrigger>
+                )}
               </TabsList>
             </Tabs>
           </div>
@@ -2835,11 +3280,19 @@ const MarketsTable = () => {
             marketData={normalizeMarketData(detailModal.marketData)}
             userPosition={detailModalUserPosition ?? undefined}
             onDeposit={() =>
-              handleDepositClick(detailModal.asset!, detailModal.poolId)
+              handleDepositClick(
+                detailModal.asset!,
+                detailModal.poolId,
+                detailModal.marketRowKey
+              )
             }
             onWithdraw={() => handleWithdrawClick(detailModal.asset!)}
             onBorrow={() =>
-              handleBorrowClick(detailModal.asset!, detailModal.poolId)
+              handleBorrowClick(
+                detailModal.asset!,
+                detailModal.poolId,
+                detailModal.marketRowKey
+              )
             }
             onRepay={() => {}}
           />
@@ -2848,28 +3301,86 @@ const MarketsTable = () => {
         {/* Deposit Modal */}
         {depositModal.isOpen &&
           depositModal.asset &&
-          getAssetData(depositModal.asset, depositModal.poolId) && (
+          getAssetData(
+            depositModal.asset,
+            depositModal.poolId,
+            depositModal.marketRowKey
+          ) && (
             <SupplyBorrowModal
               isOpen={depositModal.isOpen}
               onClose={handleCloseDepositModal}
               asset={depositModal.asset}
               poolId={depositModal.poolId}
+              configSymbol={depositModal.configSymbol}
               network={currentNetwork}
               mode="deposit"
-              assetData={getAssetData(depositModal.asset, depositModal.poolId)!}
-              walletBalance={walletBalances[depositModal.asset]?.balance || 0}
+              assetData={
+                getAssetData(
+                  depositModal.asset,
+                  depositModal.poolId,
+                  depositModal.marketRowKey
+                )!
+              }
+              walletBalance={
+                walletBalances[
+                  marketsTableWalletBalanceCacheKey(
+                    depositModal.asset,
+                    depositModal.poolId,
+                    depositModal.marketRowKey
+                  )
+                ]?.balance || 0
+              }
               walletBalanceUSD={
-                walletBalances[depositModal.asset]?.balanceUSD || 0
+                walletBalances[
+                  marketsTableWalletBalanceCacheKey(
+                    depositModal.asset,
+                    depositModal.poolId,
+                    depositModal.marketRowKey
+                  )
+                ]?.balanceUSD || 0
               }
               poolCollateralMarkets={depositPoolCollateralMarkets}
+              onRefreshWalletBalance={
+                depositModal.asset
+                  ? () => {
+                      void refreshWalletBalance(
+                        depositModal.asset,
+                        depositModal.poolId,
+                        depositModal.marketRowKey
+                      );
+                    }
+                  : undefined
+              }
+              onDepositRouteChange={
+                depositModal.asset
+                  ? () => {
+                      void refreshWalletBalance(
+                        depositModal.asset,
+                        depositModal.poolId,
+                        depositModal.marketRowKey
+                      );
+                    }
+                  : undefined
+              }
               onTransactionSuccess={async () => {
                 // Refresh wallet balance immediately after successful transaction
                 if (depositModal.asset) {
-                  refreshWalletBalance(depositModal.asset);
+                  void refreshWalletBalance(
+                    depositModal.asset,
+                    depositModal.poolId,
+                    depositModal.marketRowKey
+                  );
                   // Wait a bit for backend to process metadata, then refresh market data
                   // This ensures the blockchain state and API are in sync
                   setTimeout(() => {
-                    loadMarketDataWithBypass(depositModal.asset.toLowerCase());
+                    loadMarketDataWithBypass(
+                      depositModal.marketRowKey ??
+                        marketKeyForOnDemandLoad(
+                          depositModal.poolId,
+                          undefined,
+                          depositModal.asset
+                        )
+                    );
                   }, 3000);
                 }
               }}
@@ -2912,22 +3423,46 @@ const MarketsTable = () => {
         {/* Borrow Modal */}
         {borrowModal.isOpen &&
           borrowModal.asset &&
-          getAssetData(borrowModal.asset, borrowModal.poolId) && (
+          getAssetData(
+            borrowModal.asset,
+            borrowModal.poolId,
+            borrowModal.marketRowKey
+          ) && (
             <SupplyBorrowModal
               isOpen={borrowModal.isOpen}
               onClose={handleCloseBorrowModal}
               asset={borrowModal.asset}
               poolId={borrowModal.poolId}
+              configSymbol={borrowModal.configSymbol}
+              marketId={borrowModalMarketId}
+              marketRowKey={borrowModal.marketRowKey}
               network={currentNetwork}
               mode="borrow"
-              assetData={getAssetData(borrowModal.asset, borrowModal.poolId)}
+              assetData={getAssetData(
+                borrowModal.asset,
+                borrowModal.poolId,
+                borrowModal.marketRowKey
+              )}
+              availableAssets={
+                borrowModalAvailableAssets.length >= 2
+                  ? borrowModalAvailableAssets
+                  : undefined
+              }
+              onSelectAsset={handleSelectBorrowMarket}
               userGlobalData={userGlobalData}
               userBorrowBalance={userBorrowBalance}
               poolCollateralMarkets={depositPoolCollateralMarkets}
               onTransactionSuccess={() => {
                 // Refresh market data after successful borrow
                 if (borrowModal.asset) {
-                  loadMarketDataWithBypass(borrowModal.asset.toLowerCase());
+                  loadMarketDataWithBypass(
+                    borrowModal.marketRowKey ??
+                      marketKeyForOnDemandLoad(
+                        borrowModal.poolId,
+                        undefined,
+                        borrowModal.asset
+                      )
+                  );
                 }
               }}
             />
@@ -2936,19 +3471,34 @@ const MarketsTable = () => {
         {/* Mint Modal */}
         {mintModal.isOpen &&
           mintModal.asset &&
-          getAssetData(mintModal.asset, mintModal.poolId) && (
+          getAssetData(
+            mintModal.asset,
+            mintModal.poolId,
+            mintModal.marketRowKey
+          ) && (
             <MintModal
               isOpen={mintModal.isOpen}
               onClose={handleCloseMintModal}
               asset={mintModal.asset}
               poolId={mintModal.poolId}
-              assetData={getAssetData(mintModal.asset, mintModal.poolId)}
+              assetData={getAssetData(
+                mintModal.asset,
+                mintModal.poolId,
+                mintModal.marketRowKey
+              )}
               userGlobalData={userGlobalData}
               userBorrowBalance={userBorrowBalance}
               onTransactionSuccess={() => {
                 // Refresh market data after successful mint
                 if (mintModal.asset) {
-                  loadMarketDataWithBypass(mintModal.asset.toLowerCase());
+                  loadMarketDataWithBypass(
+                    mintModal.marketRowKey ??
+                      marketKeyForOnDemandLoad(
+                        mintModal.poolId,
+                        undefined,
+                        mintModal.asset
+                      )
+                  );
                 }
               }}
             />

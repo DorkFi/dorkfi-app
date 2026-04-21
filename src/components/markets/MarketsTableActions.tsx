@@ -5,9 +5,11 @@ import { ArrowRightLeft } from "lucide-react";
 interface MarketsTableActionsProps {
   asset: string;
   poolId?: string; // Pool ID to identify specific market when multiple markets exist for same symbol
-  onDepositClick: (asset: string, poolId?: string) => void;
-  onBorrowClick: (asset: string, poolId?: string) => void;
-  onMintClick?: (asset: string, poolId?: string) => void;
+  /** Row cache key from `useOnDemandMarketData` when display symbol + pool collide (e.g. Algo vs fALGO). */
+  marketRowKey?: string;
+  onDepositClick: (asset: string, poolId?: string, marketRowKey?: string) => void;
+  onBorrowClick: (asset: string, poolId?: string, marketRowKey?: string) => void;
+  onMintClick?: (asset: string, poolId?: string, marketRowKey?: string) => void;
   onMigrateClick?: (asset: string) => void;
   migrationBalance?: string; // Formatted balance to display
   isLoadingBalance?: boolean;
@@ -25,6 +27,7 @@ interface MarketsTableActionsProps {
 const MarketsTableActions = ({
   asset,
   poolId,
+  marketRowKey,
   onDepositClick,
   onBorrowClick,
   onMintClick,
@@ -43,7 +46,7 @@ const MarketsTableActions = ({
             variant="secondary"
             onClick={(e) => {
               e.stopPropagation();
-              onDepositClick(asset, poolId);
+              onDepositClick(asset, poolId, marketRowKey);
             }}
             disabled={isLoadingBalance || depositDisabled}
             title={depositDisabled ? "Market at supply cap" : undefined}
@@ -56,9 +59,9 @@ const MarketsTableActions = ({
           onClick={(e) => {
             e.stopPropagation();
             if (isSToken && onMintClick) {
-              onMintClick(asset, poolId);
+              onMintClick(asset, poolId, marketRowKey);
             } else if (!borrowDisabled) {
-              onBorrowClick(asset, poolId);
+              onBorrowClick(asset, poolId, marketRowKey);
             }
           }}
           disabled={!isSToken && borrowDisabled}

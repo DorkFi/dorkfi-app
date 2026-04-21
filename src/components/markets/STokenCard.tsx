@@ -7,10 +7,15 @@ import APYDisplay from "@/components/APYDisplay";
 import BorrowAPYDisplay from "@/components/BorrowAPYDisplay";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import { useNetwork } from "@/contexts/NetworkContext";
+import {
+  borrowApyBadgeClassName,
+  BORROW_APY_BADGE_STOKEN,
+  marketPoolBadgeBgClassName,
+} from "@/constants/marketUi";
 
 interface STokenCardProps {
   market: OnDemandMarketData;
-  /** A/B pool badge from parent (mobile card view). */
+  /** A/B/D pool badge from parent (mobile card view). */
   marketLabel?: string | null;
   onRowClick: (market: OnDemandMarketData) => void;
   onInfoClick: (e: React.MouseEvent, market: OnDemandMarketData) => void;
@@ -43,11 +48,9 @@ const STokenCard = ({
             <img src={market.icon} alt={market.asset} className="w-10 h-10 md:w-8 md:h-8 rounded-full object-contain flex-shrink-0" />
             {marketLabel && (
               <div
-                className={`absolute -top-1 -right-1 w-5 h-5 rounded-full ${
-                  marketLabel === "A"
-                    ? "bg-blue-500 dark:bg-blue-600"
-                    : "bg-purple-500 dark:bg-purple-600"
-                } border-2 border-white dark:border-slate-800 flex items-center justify-center z-10`}
+                className={`absolute -top-1 -right-1 w-5 h-5 rounded-full ${marketPoolBadgeBgClassName(
+                  marketLabel
+                )} border-2 border-white dark:border-slate-800 flex items-center justify-center z-10`}
               >
                 <span className="text-xs font-bold text-white">{marketLabel}</span>
               </div>
@@ -67,11 +70,17 @@ const STokenCard = ({
       <div className="grid grid-cols-1 gap-4 sm:gap-2 md:grid-cols-1 text-center">
         <div className="flex flex-col items-center md:items-start">
           <div className="text-sm text-muted-foreground mb-1">Borrow APY</div>
-          <Badge className="bg-gradient-to-r from-red-100 to-pink-100 text-red-800 dark:from-red-900 dark:to-pink-900 dark:text-red-200 border border-red-300 dark:border-red-600">
+          <Badge
+            className={borrowApyBadgeClassName(
+              market.intrinsicBorrowApyPercent,
+              BORROW_APY_BADGE_STOKEN
+            )}
+          >
             <BorrowAPYDisplay 
               apyCalculation={market.apyCalculation}
               borrowApyCalculation={market.borrowApyCalculation}
               fallbackAPY={market.borrowAPY}
+              intrinsicBorrowApyPercent={market.intrinsicBorrowApyPercent}
               showTooltip={true}
               networkId={currentNetwork}
               asset={market.asset}
