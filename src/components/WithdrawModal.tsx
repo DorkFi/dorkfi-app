@@ -41,6 +41,7 @@ import {
   type FolksTokenAdapterConfig,
   type NetworkId,
 } from "@/config";
+import { XALGO_CONSENSUS_WITHDRAW_ALGO_ROUTE_ID } from "@/services/xalgoConsensusAdapter";
 import type { PoolCollateralMarketRow } from "@/utils/poolCollateralMarketRows";
 import {
   buildLiquidationThresholdSummaryForDeposit,
@@ -52,6 +53,38 @@ import {
   folksFAssetHumanToUnderlyingHuman,
   folksUnderlyingHumanToFAssetHuman,
 } from "@/services/folksDepositAdapter";
+import { getExplorerTransactionUrl } from "@/utils/explorerLinks";
+import TransactionSignPreview from "./TransactionSignPreview";
+import { useToast } from "@/hooks/use-toast";
+
+/** Return value from {@link WithdrawModalProps.onSubmit} (portfolio supplies `txId` for allo.info). */
+export type WithdrawModalSubmitResult = {
+  txId?: string;
+  /** Parent closes the dialog (e.g. PreFi); skip embedded SupplyBorrowCongrats. */
+  skipSuccessModal?: boolean;
+};
+
+/** Options passed from the withdraw form into build / finalize (portfolio). */
+export type WithdrawSubmitOptions = {
+  isMaxWithdraw?: boolean;
+  withdrawAllConfirmed?: boolean;
+  unsafeHealthFactorOverrideConfirmed?: boolean;
+  withdrawAdapterId?: string;
+  xalgoConsensusWithdrawAppendBurn?: boolean;
+};
+
+/** Unsigned group + explorer metadata for the pre-sign review step. */
+export type WithdrawPhasedSignPayload = {
+  txnsB64: string[];
+  poolAppId: string;
+  marketContractId: string;
+  underlyingAssetId?: string | null;
+  networkId: NetworkId;
+  txSignPreviewVariant: "lending" | "xalgo-withdraw-burn-combined";
+  governanceConsensusAppId?: string;
+  assetDisplaySymbol: string;
+  amountHuman: string;
+};
 
 /** Require withdraw-all confirmation when MAX targets ≥ this share of deposited balance (or full balance). */
 const WITHDRAW_ALL_CONFIRM_MIN_SHARE = 0.95;
@@ -128,6 +161,8 @@ interface WithdrawModalProps {
     lastUpdateTime?: number | string;
     /** Percent 0–100, same as deposit modal / getAssetData */
     liquidationThreshold?: number;
+    /** Protocol reserve factor for sign preview (display; shape varies by data source). */
+    reserveFactor?: number;
   };
   /** Health-factor-safe max withdraw (from getMaxWithdrawable). When set, Max button and validation use this instead of full deposit. */
   maxWithdrawUnderlying?: number;
@@ -135,14 +170,25 @@ interface WithdrawModalProps {
   tokenDecimals?: number;
   onSubmit?: (
     amount: string,
-    options?: {
-      isMaxWithdraw?: boolean;
-      withdrawAllConfirmed?: boolean;
-      unsafeHealthFactorOverrideConfirmed?: boolean;
-      /** Folks withdraw-phase adapter id (see {@link tokenAdapterStableId}). */
-      withdrawAdapterId?: string;
-    }
-  ) => void;
+    options?: WithdrawSubmitOptions
+  ) =>
+    | void
+    | WithdrawModalSubmitResult
+    | Promise<void | WithdrawModalSubmitResult>;
+  /**
+   * Portfolio-style flow: build unsigned group → review (see {@link TransactionSignPreview}) →
+   * sign in wallet → {@link finalizeSignedGroup}. When set, takes precedence over one-shot `onSubmit`.
+   */
+  withdrawPhased?: {
+    buildUnsignedGroup: (
+      amount: string,
+      options?: WithdrawSubmitOptions
+    ) => Promise<WithdrawPhasedSignPayload>;
+    finalizeSignedGroup: (
+      signedStxns: Uint8Array[],
+      built: WithdrawPhasedSignPayload
+    ) => Promise<WithdrawModalSubmitResult>;
+  };
   isLoading?: boolean;
   showTooltip?: boolean;
   tooltipText?: string;
@@ -180,6 +226,11 @@ interface WithdrawModalProps {
   positionMarketTokenHuman?: number;
   /** Folks withdraw-phase adapters for this market (empty if none); mirrors deposit modal route UX. */
   folksWithdrawAdapters?: FolksTokenAdapterConfig[];
+  /**
+   * When true on Algorand mainnet Governance xALGO, show withdraw route: receive xALGO (default) vs
+   * receive ALGO (consensus burn after nt200 withdraw).
+   */
+  xalgoConsensusWithdrawAlgoOption?: boolean;
 }
 
 const WithdrawModal = ({
@@ -196,6 +247,7 @@ const WithdrawModal = ({
   maxWithdrawUnderlying,
   tokenDecimals = 8,
   onSubmit,
+  withdrawPhased,
   isLoading = false,
   showTooltip = false,
   tooltipText = "",
@@ -212,9 +264,17 @@ const WithdrawModal = ({
   positionBalanceForIndexStats,
   positionMarketTokenHuman,
   folksWithdrawAdapters = [],
+  xalgoConsensusWithdrawAlgoOption = false,
 }: WithdrawModalProps) => {
   const withdrawFolksAdapters = folksWithdrawAdapters;
-  const withdrawMultiRoute = withdrawFolksAdapters.length > 1;
+  const { currentNetwork } = useNetwork();
+  const { activeAccount, signTransactions, activeWallet } = useWallet();
+  const { toast } = useToast();
+  const networkToUse = (networkProp || currentNetwork) as NetworkId | undefined;
+  const withdrawMultiRoute =
+    withdrawFolksAdapters.length > 1 ||
+    (Boolean(xalgoConsensusWithdrawAlgoOption) &&
+      networkToUse === "algorand-mainnet");
   const displayDecimals = Math.min(Math.max(0, tokenDecimals), 8);
   const amountLabelSymbol = amountSymbol ?? tokenSymbol;
   const balanceForIndexMath =
@@ -234,6 +294,10 @@ const WithdrawModal = ({
   const [amount, setAmount] = useState<number | "">("");
   const [fiatValue, setFiatValue] = useState(0);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [successTxId, setSuccessTxId] = useState<string | null>(null);
+  const [pendingWithdrawReview, setPendingWithdrawReview] =
+    useState<WithdrawPhasedSignPayload | null>(null);
+  const [isSigningWithdrawPhase, setIsSigningWithdrawPhase] = useState(false);
   /** True when the current amount was set with MAX (cleared when the user edits the field). */
   const [withdrawViaMax, setWithdrawViaMax] = useState(false);
   const [withdrawFullPositionConfirmed, setWithdrawFullPositionConfirmed] =
@@ -248,9 +312,6 @@ const WithdrawModal = ({
   const [withdrawRoutePickerOpen, setWithdrawRoutePickerOpen] =
     useState(false);
   const prevWithdrawAdapterIdRef = useRef<string>("");
-  const { currentNetwork } = useNetwork();
-  const { activeAccount } = useWallet();
-  const networkToUse = (networkProp || currentNetwork) as NetworkId | undefined;
 
   useEffect(() => {
     if (!isOpen) setWithdrawRoutePickerOpen(false);
@@ -262,6 +323,19 @@ const WithdrawModal = ({
       return;
     }
     const list = withdrawFolksAdapters;
+    const onMainnet = networkToUse === "algorand-mainnet";
+    if (xalgoConsensusWithdrawAlgoOption && onMainnet) {
+      const folksIds = list.map((a) => tokenAdapterStableId(a));
+      const valid = new Set<string>([
+        "",
+        XALGO_CONSENSUS_WITHDRAW_ALGO_ROUTE_ID,
+        ...folksIds,
+      ]);
+      setSelectedWithdrawAdapterId((prev) =>
+        valid.has(prev) ? prev : ""
+      );
+      return;
+    }
     if (list.length === 0) {
       setSelectedWithdrawAdapterId("");
       return;
@@ -271,18 +345,24 @@ const WithdrawModal = ({
       if (prev && ids.includes(prev)) return prev;
       return ids[0] ?? "";
     });
-  }, [isOpen, withdrawFolksAdapters]);
+  }, [
+    isOpen,
+    withdrawFolksAdapters,
+    xalgoConsensusWithdrawAlgoOption,
+    networkToUse,
+  ]);
 
   useEffect(() => {
-    if (!isOpen || !selectedWithdrawAdapterId) return;
+    if (!isOpen) return;
     const prev = prevWithdrawAdapterIdRef.current;
-    const changed = prev !== "" && prev !== selectedWithdrawAdapterId;
+    const cur = selectedWithdrawAdapterId;
+    const changed = prev !== "" && prev !== cur;
     if (changed) {
       setAmount("");
       setWithdrawViaMax(false);
       setFiatValue(0);
     }
-    prevWithdrawAdapterIdRef.current = selectedWithdrawAdapterId;
+    prevWithdrawAdapterIdRef.current = cur;
   }, [isOpen, selectedWithdrawAdapterId]);
 
   const selectedWithdrawAdapter = useMemo(() => {
@@ -294,6 +374,31 @@ const WithdrawModal = ({
       ) ?? withdrawFolksAdapters[0]
     );
   }, [withdrawFolksAdapters, selectedWithdrawAdapterId]);
+
+  const withdrawRouteButtonLabel = useMemo(() => {
+    if (
+      xalgoConsensusWithdrawAlgoOption &&
+      networkToUse === "algorand-mainnet"
+    ) {
+      if (!selectedWithdrawAdapterId) return "xALGO";
+      if (
+        selectedWithdrawAdapterId === XALGO_CONSENSUS_WITHDRAW_ALGO_ROUTE_ID
+      ) {
+        return "ALGO";
+      }
+    }
+    return (
+      selectedWithdrawAdapter?.label ??
+      selectedWithdrawAdapter?.name ??
+      tokenSymbol
+    );
+  }, [
+    xalgoConsensusWithdrawAlgoOption,
+    networkToUse,
+    selectedWithdrawAdapterId,
+    selectedWithdrawAdapter,
+    tokenSymbol,
+  ]);
 
   const withdrawReceiveMarketToken = useMemo(
     () => selectedWithdrawAdapter?.withdrawReceiveBasis === "market_token",
@@ -401,6 +506,19 @@ const WithdrawModal = ({
     return tokenSymbol;
   }, [
     availableAssets,
+    tokenSymbol,
+    poolId,
+    networkProp,
+    selectedMarketId,
+    selectedConfigSymbol,
+  ]);
+
+  useEffect(() => {
+    setPendingWithdrawReview(null);
+  }, [
+    amount,
+    withdrawSelectRowKey,
+    selectedWithdrawAdapterId,
     tokenSymbol,
     poolId,
     networkProp,
@@ -648,6 +766,9 @@ const WithdrawModal = ({
   useEffect(() => {
     if (isOpen) {
       setShowSuccess(false);
+      setSuccessTxId(null);
+      setPendingWithdrawReview(null);
+      setIsSigningWithdrawPhase(false);
       setAmount("");
       setFiatValue(0);
       setInternalLoading(false);
@@ -679,7 +800,10 @@ const WithdrawModal = ({
   };
 
   const handleViewTransaction = () => {
-    window.open("https://testnet.algoexplorer.io/", "_blank");
+    const net = (networkProp || currentNetwork) as NetworkId | undefined;
+    if (successTxId && net) {
+      window.open(getExplorerTransactionUrl(net, successTxId), "_blank");
+    }
   };
 
   const handleGoToPortfolio = () => {
@@ -689,6 +813,8 @@ const WithdrawModal = ({
 
   const handleMakeAnother = () => {
     setShowSuccess(false);
+    setSuccessTxId(null);
+    setPendingWithdrawReview(null);
     setAmount("");
     setFiatValue(0);
     setWithdrawViaMax(false);
@@ -774,39 +900,180 @@ const WithdrawModal = ({
     isValidAmount &&
     (!needsWithdrawAllConfirmation || withdrawFullPositionConfirmed);
 
+  const withdrawSubmitOptions = (): WithdrawSubmitOptions => ({
+    isMaxWithdraw: withdrawViaMax,
+    withdrawAllConfirmed:
+      needsWithdrawAllConfirmation && withdrawFullPositionConfirmed,
+    unsafeHealthFactorOverrideConfirmed:
+      needsUnsafeHfConfirmation &&
+      unsafeOverrideAllowedByHfFloor &&
+      unsafeHfOverrideConfirmed,
+    withdrawAdapterId:
+      withdrawFolksAdapters.length > 0
+        ? selectedWithdrawAdapterId || undefined
+        : undefined,
+    xalgoConsensusWithdrawAppendBurn:
+      xalgoConsensusWithdrawAlgoOption &&
+      networkToUse === "algorand-mainnet" &&
+      selectedWithdrawAdapterId === XALGO_CONSENSUS_WITHDRAW_ALGO_ROUTE_ID,
+  });
+
   const handleSubmit = async () => {
     setInternalLoading(true);
     try {
-      if (onSubmit) {
-        const isMaxWithdraw = withdrawViaMax;
+      const amountStr =
+        amount !== "" && typeof amount === "number" ? String(amount) : "";
+
+      if (withdrawPhased) {
+        const opts = withdrawSubmitOptions();
         setWithdrawViaMax(false);
-        await onSubmit(
-          amount !== "" && typeof amount === "number" ? String(amount) : "",
-          {
-            isMaxWithdraw,
-            withdrawAllConfirmed:
-              needsWithdrawAllConfirmation && withdrawFullPositionConfirmed,
-            unsafeHealthFactorOverrideConfirmed:
-              needsUnsafeHfConfirmation &&
-              unsafeOverrideAllowedByHfFloor &&
-              unsafeHfOverrideConfirmed,
-            withdrawAdapterId:
-              withdrawFolksAdapters.length > 0
-                ? selectedWithdrawAdapterId || undefined
-                : undefined,
-          }
-        );
+        const built = await withdrawPhased.buildUnsignedGroup(amountStr, opts);
+        setPendingWithdrawReview(built);
+        return;
+      }
+
+      if (onSubmit) {
+        const opts = withdrawSubmitOptions();
+        setWithdrawViaMax(false);
+        const submitResult = await onSubmit(amountStr, opts);
+        const meta =
+          submitResult && typeof submitResult === "object"
+            ? (submitResult as WithdrawModalSubmitResult)
+            : undefined;
+        const skipCongrats = meta?.skipSuccessModal === true;
+        const tx =
+          meta?.txId != null && String(meta.txId).trim() !== ""
+            ? String(meta.txId).trim()
+            : null;
+        setSuccessTxId(tx);
+        if (!skipCongrats) {
+          setShowSuccess(true);
+        }
       } else {
         console.log(`Withdraw ${amount !== "" ? amount.toString() : ""} ${tokenSymbol}`);
 
         await new Promise((resolve) => setTimeout(resolve, 500));
+        setSuccessTxId(null);
         setShowSuccess(true);
       }
     } catch (error) {
       console.error("Withdraw failed:", error);
-      // Don't show success on error
+      const msg =
+        error instanceof Error ? error.message : "Could not prepare withdraw.";
+      toast({
+        title: "Withdraw",
+        description: msg,
+        variant: "destructive",
+        duration: 6000,
+      });
     } finally {
       setInternalLoading(false);
+    }
+  };
+
+  const handleConfirmWithdrawSign = async () => {
+    if (!pendingWithdrawReview || !activeAccount?.address || !withdrawPhased) {
+      toast({
+        title: "Withdraw",
+        description: "Nothing to sign. Go back and try again.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const pending = pendingWithdrawReview;
+    setIsSigningWithdrawPhase(true);
+    try {
+      if (activeWallet) {
+        const walletId = activeWallet.id?.toLowerCase() || "";
+        const walletName = activeWallet.metadata?.name?.toLowerCase() || "";
+        const networkId = pending.networkId as string;
+
+        const isUniversalWallet =
+          walletId === "lute" ||
+          walletId === "kibisis" ||
+          walletId === "vera" ||
+          walletId === "biatec";
+
+        const isVOIWallet = false;
+
+        const isAlgorandWallet =
+          walletId === "pera" ||
+          walletId === "defly" ||
+          walletName.includes("pera") ||
+          walletName.includes("defly");
+
+        const isWalletConnect = walletId === "walletconnect";
+        let isWalletConnectVOI = false;
+        let isWalletConnectAlgorand = false;
+
+        if (isWalletConnect) {
+          isWalletConnectVOI =
+            walletName.includes("vera") || walletName.includes("biatec");
+          isWalletConnectAlgorand =
+            walletName.includes("pera") || walletName.includes("defly");
+        }
+
+        const isSupported =
+          isUniversalWallet ||
+          (isVOIWallet && networkId === "voi-mainnet") ||
+          (isAlgorandWallet && networkId === "algorand-mainnet") ||
+          (isWalletConnect &&
+            ((isWalletConnectVOI && networkId === "voi-mainnet") ||
+              (isWalletConnectAlgorand && networkId === "algorand-mainnet") ||
+              (!isWalletConnectVOI &&
+                !isWalletConnectAlgorand &&
+                currentNetwork === "voi-mainnet" &&
+                networkId === "voi-mainnet") ||
+              (!isWalletConnectVOI && !isWalletConnectAlgorand))) ||
+          (!isVOIWallet && !isAlgorandWallet && !isWalletConnect);
+
+        if (!isSupported) {
+          const networkName =
+            networkId === "voi-mainnet" ? "VOI Mainnet" : "Algorand Mainnet";
+          throw new Error(
+            `Your wallet (${
+              activeWallet.metadata?.name || walletId
+            }) does not support ${networkName}. Please switch to a compatible wallet or network.`
+          );
+        }
+      }
+
+      const walletName = activeWallet?.metadata?.name || "your wallet";
+      toast({
+        title: "Please Sign Transaction",
+        description: `Please open ${walletName} and sign the transaction`,
+        duration: 10000,
+      });
+
+      const stxns = await signTransactions(
+        pending.txnsB64.map((txn: string) =>
+          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+        )
+      );
+
+      const out = await withdrawPhased.finalizeSignedGroup(stxns, pending);
+      const tx =
+        out?.txId != null && String(out.txId).trim() !== ""
+          ? String(out.txId).trim()
+          : null;
+      const skipCongrats = out?.skipSuccessModal === true;
+      setSuccessTxId(tx);
+      setPendingWithdrawReview(null);
+      if (!skipCongrats) {
+        setShowSuccess(true);
+      }
+    } catch (error) {
+      console.error("Withdraw sign failed:", error);
+      const msg =
+        error instanceof Error ? error.message : "Signing or submit failed.";
+      toast({
+        title: "Withdraw",
+        description: msg,
+        variant: "destructive",
+        duration: 6000,
+      });
+    } finally {
+      setIsSigningWithdrawPhase(false);
     }
   };
 
@@ -827,9 +1094,9 @@ const WithdrawModal = ({
   return (
     <>
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-white rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-[95vw] md:max-w-md h-[80vh] md:h-[70vh] max-h-[80vh] md:max-h-[70vh] overflow-hidden flex flex-col p-0">
+      <DialogContent className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-white rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-[95vw] md:max-w-md max-h-[min(90vh,90dvh)] min-h-0 overflow-x-hidden overflow-hidden flex flex-col p-0 overscroll-contain">
         {showSuccess ? (
-          <div className="p-6 overflow-y-auto">
+          <div className="max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain p-6">
             <SupplyBorrowCongrats
               transactionType="withdraw"
               asset={
@@ -843,10 +1110,14 @@ const WithdrawModal = ({
               onGoToPortfolio={handleGoToPortfolio}
               onMakeAnother={handleMakeAnother}
               onClose={onClose}
+              viewTransactionDisabled={
+                !successTxId ||
+                !((networkProp || currentNetwork) as NetworkId | undefined)
+              }
             />
           </div>
         ) : (
-          <div className="flex flex-col h-full">
+          <div className="flex min-h-0 flex-1 flex-col">
             <div className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 px-6 pt-4 pb-2 shrink-0 min-h-[7.5rem]">
               <DialogHeader className="pb-0">
                 <DialogTitle className="text-2xl font-bold text-center text-slate-800 dark:text-white">
@@ -994,9 +1265,7 @@ const WithdrawModal = ({
                         title="Choose withdraw route"
                       >
                         <span className="truncate text-sm font-medium">
-                          {selectedWithdrawAdapter?.label ??
-                            selectedWithdrawAdapter?.name ??
-                            tokenSymbol}
+                          {withdrawRouteButtonLabel}
                         </span>
                         <ChevronDown
                           className="h-4 w-4 shrink-0 opacity-80"
@@ -1543,6 +1812,37 @@ const WithdrawModal = ({
                 </CardContent>
               </Card>
 
+              {pendingWithdrawReview && (
+                <TransactionSignPreview
+                  mode="withdraw"
+                  asset={pendingWithdrawReview.assetDisplaySymbol}
+                  amount={pendingWithdrawReview.amountHuman}
+                  networkId={pendingWithdrawReview.networkId}
+                  poolAppId={pendingWithdrawReview.poolAppId}
+                  marketContractId={pendingWithdrawReview.marketContractId}
+                  underlyingAssetId={pendingWithdrawReview.underlyingAssetId}
+                  txnCount={pendingWithdrawReview.txnsB64.length}
+                  estimatedFeeAlgoDisplay={(
+                    (pendingWithdrawReview.txnsB64.length * 1000) /
+                    1e6
+                  ).toFixed(4)}
+                  reserveFactorPercent={
+                    marketStats.apyParameters?.reserveFactorBps != null
+                      ? marketStats.apyParameters.reserveFactorBps / 100
+                      : marketStats.reserveFactor != null &&
+                          Number.isFinite(marketStats.reserveFactor)
+                        ? marketStats.reserveFactor <= 1
+                          ? marketStats.reserveFactor * 100
+                          : marketStats.reserveFactor / 100
+                        : null
+                  }
+                  previewVariant={pendingWithdrawReview.txSignPreviewVariant}
+                  governanceConsensusAppId={
+                    pendingWithdrawReview.governanceConsensusAppId
+                  }
+                />
+              )}
+
               {needsWithdrawAllConfirmation && (
                 <div className="flex items-start gap-3 rounded-lg border border-amber-200/80 bg-amber-50/90 px-3 py-2.5 dark:border-amber-700/50 dark:bg-amber-950/40">
                   <Checkbox
@@ -1566,30 +1866,65 @@ const WithdrawModal = ({
             </div>
 
             {/* Action Buttons */}
-            <div className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 border-t border-gray-200 dark:border-slate-700 px-6 py-3 flex gap-3 shrink-0">
-              <Button
-                variant="outline"
-                onClick={onClose}
-                disabled={isLoading || internalLoading}
-                className="flex-1"
-              >
-                Cancel
-              </Button>
-              <DorkFiButton
-                variant="withdraw"
-                onClick={handleSubmit}
-                disabled={!canSubmitWithdraw || isLoading || internalLoading}
-                className="flex-1 min-w-0 h-11 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isLoading || internalLoading ? (
-                  <div className="flex items-center gap-2 justify-center">
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                    Processing...
-                  </div>
-                ) : (
-                  <span>Withdraw {effectiveAmountLabelSymbol}</span>
-                )}
-              </DorkFiButton>
+            <div className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 border-t border-gray-200 dark:border-slate-700 px-6 py-3 shrink-0 space-y-2">
+              {pendingWithdrawReview ? (
+                <div className="flex gap-3">
+                  <Button
+                    variant="outline"
+                    type="button"
+                    onClick={() => setPendingWithdrawReview(null)}
+                    disabled={isSigningWithdrawPhase}
+                    className="flex-1"
+                  >
+                    Back to edit
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => void handleConfirmWithdrawSign()}
+                    disabled={isSigningWithdrawPhase}
+                    className="flex-1 min-w-0 h-11 font-semibold bg-orange-500 text-white hover:bg-orange-600 dark:bg-orange-600 dark:hover:bg-orange-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isSigningWithdrawPhase ? (
+                      <div className="flex items-center gap-2 justify-center">
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        Signing…
+                      </div>
+                    ) : (
+                      "Sign in wallet"
+                    )}
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex gap-3">
+                  <Button
+                    variant="outline"
+                    onClick={onClose}
+                    disabled={isLoading || internalLoading}
+                    className="flex-1"
+                  >
+                    Cancel
+                  </Button>
+                  <DorkFiButton
+                    variant="withdraw"
+                    onClick={() => void handleSubmit()}
+                    disabled={
+                      !canSubmitWithdraw || isLoading || internalLoading
+                    }
+                    className="flex-1 min-w-0 h-11 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isLoading || internalLoading ? (
+                      <div className="flex items-center gap-2 justify-center">
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        {withdrawPhased ? "Building…" : "Processing..."}
+                      </div>
+                    ) : (
+                      <span>
+                        {`Withdraw ${effectiveAmountLabelSymbol}`}
+                      </span>
+                    )}
+                  </DorkFiButton>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1608,11 +1943,86 @@ const WithdrawModal = ({
             Withdraw route
           </DialogTitle>
           <DialogDescription>
-            Choose the Folks withdraw path for this market (same idea as deposit
-            route selection).
+            {xalgoConsensusWithdrawAlgoOption &&
+            networkToUse === "algorand-mainnet"
+              ? "Choose what you receive in your wallet after this withdraw."
+              : "Choose the Folks withdraw path for this market (same idea as deposit route selection)."}
           </DialogDescription>
         </DialogHeader>
         <div className="mt-4 grid gap-2">
+          {xalgoConsensusWithdrawAlgoOption &&
+            networkToUse === "algorand-mainnet" &&
+            withdrawFolksAdapters.length === 0 && (
+              <button
+                key="xalgo-withdraw-asa"
+                type="button"
+                onClick={() => {
+                  setSelectedWithdrawAdapterId("");
+                  setWithdrawRoutePickerOpen(false);
+                }}
+                className={cn(
+                  "flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors",
+                  selectedWithdrawAdapterId === ""
+                    ? "border-teal-500 bg-teal-50/90 dark:border-teal-500 dark:bg-teal-950/40"
+                    : "border-slate-200 bg-white/80 hover:border-teal-300 hover:bg-teal-50/50 dark:border-slate-600 dark:bg-slate-800/60 dark:hover:border-teal-700 dark:hover:bg-slate-800"
+                )}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    xALGO
+                  </div>
+                  <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                    Receive governance xALGO in your wallet after the pool
+                    withdraw (no consensus burn).
+                  </div>
+                </div>
+                {selectedWithdrawAdapterId === "" ? (
+                  <Check
+                    className="mt-0.5 h-5 w-5 shrink-0 text-teal-600 dark:text-teal-400"
+                    aria-hidden
+                  />
+                ) : null}
+              </button>
+            )}
+          {xalgoConsensusWithdrawAlgoOption &&
+            networkToUse === "algorand-mainnet" &&
+            withdrawFolksAdapters.length === 0 ? (
+            <button
+              key={XALGO_CONSENSUS_WITHDRAW_ALGO_ROUTE_ID}
+              type="button"
+              onClick={() => {
+                setSelectedWithdrawAdapterId(
+                  XALGO_CONSENSUS_WITHDRAW_ALGO_ROUTE_ID
+                );
+                setWithdrawRoutePickerOpen(false);
+              }}
+              className={cn(
+                "flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors",
+                selectedWithdrawAdapterId ===
+                  XALGO_CONSENSUS_WITHDRAW_ALGO_ROUTE_ID
+                  ? "border-teal-500 bg-teal-50/90 dark:border-teal-500 dark:bg-teal-950/40"
+                  : "border-slate-200 bg-white/80 hover:border-teal-300 hover:bg-teal-50/50 dark:border-slate-600 dark:bg-slate-800/60 dark:hover:border-teal-700 dark:hover:bg-slate-800"
+              )}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                  ALGO
+                </div>
+                <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                  Withdraw from the pool, then burn to native ALGO via governance
+                  consensus in one transaction (amount is xALGO you withdraw from
+                  supply).
+                </div>
+              </div>
+              {selectedWithdrawAdapterId ===
+              XALGO_CONSENSUS_WITHDRAW_ALGO_ROUTE_ID ? (
+                <Check
+                  className="mt-0.5 h-5 w-5 shrink-0 text-teal-600 dark:text-teal-400"
+                  aria-hidden
+                />
+              ) : null}
+            </button>
+          ) : null}
           {withdrawFolksAdapters.map((a) => {
             const sid = tokenAdapterStableId(a);
             const selected = sid === selectedWithdrawAdapterId;

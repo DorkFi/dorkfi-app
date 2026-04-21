@@ -181,6 +181,12 @@ export interface TokenConfig {
    * the maximum atomic group size (e.g. d-pool USDC / fUSDC).
    */
   requireStandaloneFAssetOptInBeforeDeposit?: boolean;
+  /**
+   * When true on Algorand mainnet, the deposit modal requires a standalone opt-in to this row’s
+   * {@link assetId} (the market / wrapper ASA, e.g. xALGO) before supply. Skipped when the user
+   * selects a route that does not spend that ASA from the wallet (e.g. xALGO consensus ALGO deposit).
+   */
+  requireStandaloneMarketAsaOptInBeforeDeposit?: boolean;
 }
 
 /** Which user flows an adapter participates in (omit = both, for backward compatibility). */
@@ -1872,6 +1878,20 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     intrinsicApyPercent: 4.51,
     intrinsicApyLiveSource: "tinyman_liquid_staking",
   },
+  /**
+   * Governance xALGO: nt200 / lending use the xALGO ASA (`assetId`) directly — no Folks f-xALGO leg.
+   * The supply modal still offers a synthetic “deposit ALGO” route (consensus `immediate_mint`) that
+   * mints xALGO then calls the same `deposit()` path; see `XALGO_CONSENSUS_DEPOSIT_ALGO_ROUTE_ID` in
+   * `SupplyBorrowModal` / `xalgoMintSupplySingleGroup` — not an entry in `adapters` (those are Folks-only).
+   * Borrow modal: synthetic “receive ALGO” route appends consensus `burn` after `borrow` + withdraw;
+   * see `XALGO_CONSENSUS_BORROW_ALGO_ROUTE_ID` and `xalgoBorrowBurnSingleGroup`.
+   * Withdraw modal (portfolio): synthetic “receive ALGO” route appends consensus `burn` after nt200
+   * withdraw; default route receives xALGO. See `XALGO_CONSENSUS_WITHDRAW_ALGO_ROUTE_ID` in
+   * `WithdrawModal` / `lendingService.withdraw`.
+   * Repay modal (portfolio): synthetic “repay with ALGO” route prepends consensus `immediate_mint`
+   * then nt200 deposit + repay; default repays with wallet xALGO. See `XALGO_CONSENSUS_REPAY_ALGO_ROUTE_ID`
+   * in `RepayModal` / `lendingService.repay`.
+   */
   xALGO: {
     assetId: "1134696561",
     poolId: "3333688282",
@@ -1882,6 +1902,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     symbol: "xALGO",
     logoPath: "/lovable-uploads/xALGO.webp",
     tokenStandard: "asa",
+    requireStandaloneMarketAsaOptInBeforeDeposit: true,
     dataAddedAt: "2026-03-23T00:00:00.000Z",
     intrinsicApyPercent: 4.49,
     intrinsicApyLiveSource: "xalgo_governance_lambda",
@@ -2412,6 +2433,7 @@ const algorandMainnetProdConfig: NetworkConfig = {
   name: "Algorand Mainnet",
   networkType: "avm",
   rpcUrl: "https://mainnet-api.algorand.dork.fi",
+  rpcPublicUrl: "https://mainnet-api.algorand.dork.fi",
   rpcPort: 443,
   rpcToken: undefined, // Public endpoint, no token required
   indexerUrl: "https://mainnet-idx.4160.nodely.dev",

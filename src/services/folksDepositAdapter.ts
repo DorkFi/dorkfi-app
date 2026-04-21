@@ -171,6 +171,35 @@ function mergePayWithFollowingAppl(
   };
 }
 
+/**
+ * True when `accountAssetInformation` failed because the account does not hold / is not opted into the ASA.
+ * Different Algod / proxy responses use different status codes and message text ("asset missing", etc.).
+ */
+function looksLikeAccountMissingASA(error: unknown): boolean {
+  const err = error as {
+    response?: { status?: number; data?: unknown };
+    message?: string;
+    cause?: { message?: string };
+  };
+  const status = err?.response?.status;
+  if (status === 404 || status === 400) return true;
+  const msg = `${err?.message ?? ""} ${err?.cause?.message ?? ""}`.toLowerCase();
+  return (
+    msg.includes("not found") ||
+    msg.includes("not opted") ||
+    msg.includes("does not exist") ||
+    msg.includes("asset missing") ||
+    msg.includes("missing asset") ||
+    msg.includes("asset not found") ||
+    msg.includes("account does not hold") ||
+    msg.includes("account does not have") ||
+    msg.includes("must opt-in") ||
+    msg.includes("must opt in") ||
+    msg.includes("not opted in") ||
+    msg.includes("no asset")
+  );
+}
+
 /** Self axfer amount 0 = ASA opt-in (must not match {@link mergeAxferWithFollowingAppl}). */
 function isStandaloneAsaOptInAxfer(t: algosdk.Transaction): boolean {
   if (t.type !== algosdk.TransactionType.axfer || !t.assetTransfer) {
@@ -329,23 +358,17 @@ export async function buildFolksDepositMintTxns(input: {
         .accountAssetInformation(input.userAddress, fAssetId)
         .do();
     } catch (error: unknown) {
-      const err = error as {
-        response?: { status?: number };
-        message?: string;
-      };
-      if (
-        err?.response?.status === 404 ||
-        err?.response?.status === 400 ||
-        err?.message?.includes("not found") ||
-        err?.message?.includes("not opted") ||
-        err?.message?.includes("does not exist")
-      ) {
+      if (looksLikeAccountMissingASA(error)) {
         const optInTxn = algosdk.makeAssetTransferTxnWithSuggestedParamsFromObject({
           sender: input.userAddress,
           receiver: input.userAddress,
           amount: 0,
           assetIndex: fAssetId,
-          suggestedParams: { ...suggestedParams, flatFee: true, fee: 0n },
+          suggestedParams: {
+            ...suggestedParams,
+            flatFee: true,
+            fee: 1000n,
+          },
           note: new TextEncoder().encode("dorkfi: Folks f-asset opt-in (mint preamble)"),
         });
         txns = [optInTxn, ...txns];

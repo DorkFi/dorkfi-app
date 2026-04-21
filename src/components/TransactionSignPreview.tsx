@@ -7,7 +7,7 @@ import {
 } from "@/utils/explorerLinks";
 
 export interface TransactionSignPreviewProps {
-  mode: "deposit" | "borrow";
+  mode: "deposit" | "borrow" | "withdraw";
   asset: string;
   amount: string;
   networkId: NetworkId;
@@ -18,6 +18,18 @@ export interface TransactionSignPreviewProps {
   /** Sum of min fees in ALGO (Algorand/AVM-style), for display only */
   estimatedFeeAlgoDisplay: string;
   reserveFactorPercent?: number | null;
+  /** Lending pool app (DorkFi) when previewing an xALGO consensus mint in the deposit modal. */
+  lendingPoolAppId?: string | null;
+  previewVariant?:
+    | "lending"
+    | "xalgo-consensus-mint"
+    | "xalgo-mint-supply-combined"
+    | "xalgo-borrow-burn-combined"
+    | "xalgo-withdraw-burn-combined";
+  /** Minimum xALGO (human) supplied after mint when `previewVariant` is combined. */
+  mintThenSupplyXalgoHumanMin?: string | null;
+  /** Folks governance consensus app id (combined flow); mint-only still passes consensus via `poolAppId`. */
+  governanceConsensusAppId?: string | null;
 }
 
 /**
@@ -34,16 +46,42 @@ const TransactionSignPreview: React.FC<TransactionSignPreviewProps> = ({
   txnCount,
   estimatedFeeAlgoDisplay,
   reserveFactorPercent,
+  lendingPoolAppId,
+  previewVariant = "lending",
+  mintThenSupplyXalgoHumanMin,
+  governanceConsensusAppId,
 }) => {
+  const isCombo = previewVariant === "xalgo-mint-supply-combined";
+  const isBorrowBurn = previewVariant === "xalgo-borrow-burn-combined";
+  const isWithdrawBurn = previewVariant === "xalgo-withdraw-burn-combined";
+  const isMintOnlyConsensus = previewVariant === "xalgo-consensus-mint";
   const poolUrl = getExplorerApplicationUrl(networkId, poolAppId);
   const marketUrl = getExplorerApplicationUrl(networkId, marketContractId);
+  const lendingPoolUrl =
+    lendingPoolAppId != null && String(lendingPoolAppId).trim() !== ""
+      ? getExplorerApplicationUrl(networkId, String(lendingPoolAppId).trim())
+      : null;
+  const consensusAppForUrl =
+    (isCombo || isBorrowBurn || isWithdrawBurn) && governanceConsensusAppId
+      ? String(governanceConsensusAppId).trim()
+      : isMintOnlyConsensus
+        ? poolAppId
+        : "";
+  const consensusUrl =
+    consensusAppForUrl !== ""
+      ? getExplorerApplicationUrl(networkId, consensusAppForUrl)
+      : null;
   const assetUrl =
     underlyingAssetId != null && String(underlyingAssetId).trim() !== ""
       ? getExplorerAssetUrl(networkId, String(underlyingAssetId).trim())
       : null;
 
   const methodLabel =
-    mode === "deposit" ? "supply / deposit" : "borrow";
+    mode === "deposit"
+      ? "supply / deposit"
+      : mode === "withdraw"
+        ? "withdraw"
+        : "borrow";
 
   return (
     <div className="rounded-lg border border-ocean-teal/30 bg-muted/40 dark:bg-slate-800/50 p-3 text-sm space-y-2">
@@ -54,7 +92,36 @@ const TransactionSignPreview: React.FC<TransactionSignPreviewProps> = ({
         <li>
           <span className="text-muted-foreground">Action:</span>{" "}
           <span className="font-medium">
-            {mode === "deposit" ? "Deposit" : "Borrow"} {amount} {asset}
+            {isWithdrawBurn ? (
+              <>
+                Withdraw {amount} {asset} from lending; nt200 releases xALGO, then
+                governance <code className="text-[11px]">burn</code> sends ALGO to
+                your wallet — one atomic wallet group.
+              </>
+            ) : isBorrowBurn && mintThenSupplyXalgoHumanMin ? (
+              <>
+                Borrow at least {mintThenSupplyXalgoHumanMin} xALGO from lending,
+                burn via Folks Governance consensus, receive at least {amount}{" "}
+                ALGO — one atomic wallet group.
+              </>
+            ) : isCombo && mintThenSupplyXalgoHumanMin ? (
+              <>
+                Mint xALGO (consensus) with {amount} ALGO, then supply at least{" "}
+                {mintThenSupplyXalgoHumanMin} {asset} to the lending pool — one
+                atomic wallet group.
+              </>
+            ) : isMintOnlyConsensus ? (
+              <>Mint xALGO (consensus) with {amount} ALGO</>
+            ) : (
+              <>
+                {mode === "deposit"
+                  ? "Deposit"
+                  : mode === "withdraw"
+                    ? "Withdraw"
+                    : "Borrow"}{" "}
+                {amount} {asset}
+              </>
+            )}
           </span>
         </li>
         <li>
@@ -63,22 +130,69 @@ const TransactionSignPreview: React.FC<TransactionSignPreviewProps> = ({
         </li>
         <li>
           <span className="text-muted-foreground">Contract call shape:</span>{" "}
-          lending pool application — <span className="font-medium">{methodLabel}</span> for this market
+          {isWithdrawBurn ? (
+            <span className="font-medium">
+              Atomic group: DorkFi lending withdraw, nt200 withdraw (xALGO), then
+              governance <code className="text-[11px]">burn</code> → ALGO
+            </span>
+          ) : isBorrowBurn ? (
+            <span className="font-medium">
+              Atomic group: DorkFi lending borrow, nt200 withdraw (xALGO), then
+              governance <code className="text-[11px]">burn</code> → ALGO
+            </span>
+          ) : isCombo ? (
+            <span className="font-medium">
+              Atomic group: governance <code className="text-[11px]">immediate_mint</code>
+              , Folks pool, nt200, and DorkFi lending deposit
+            </span>
+          ) : isMintOnlyConsensus ? (
+            <span className="font-medium">
+              Folks Governance xALGO — <code className="text-[11px]">immediate_mint</code>
+            </span>
+          ) : (
+            <>
+              lending pool application — <span className="font-medium">{methodLabel}</span> for this market
+            </>
+          )}
         </li>
+        {(isCombo || isBorrowBurn || isWithdrawBurn) &&
+          consensusUrl &&
+          consensusAppForUrl ? (
+          <li className="break-all">
+            <span className="text-muted-foreground">Governance consensus app:</span>{" "}
+            <a
+              href={consensusUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-ocean-teal hover:underline font-mono inline-flex items-center gap-0.5"
+            >
+              {consensusAppForUrl}
+              <ExternalLink className="h-3 w-3 shrink-0" aria-hidden />
+            </a>
+          </li>
+        ) : null}
         <li className="break-all">
-          <span className="text-muted-foreground">Pool (application) ID:</span>{" "}
+          <span className="text-muted-foreground">
+            {isMintOnlyConsensus && !isCombo
+              ? "Consensus application ID:"
+              : "Pool (application) ID:"}
+          </span>{" "}
           <a
-            href={poolUrl}
+            href={isMintOnlyConsensus && !isCombo ? (consensusUrl ?? poolUrl) : poolUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="text-ocean-teal hover:underline font-mono inline-flex items-center gap-0.5"
           >
-            {poolAppId}
+            {isMintOnlyConsensus && !isCombo ? consensusAppForUrl || poolAppId : poolAppId}
             <ExternalLink className="h-3 w-3 shrink-0" aria-hidden />
           </a>
         </li>
         <li className="break-all">
-          <span className="text-muted-foreground">Market / asset contract ID:</span>{" "}
+          <span className="text-muted-foreground">
+            {isMintOnlyConsensus && !isCombo
+              ? "Related lending market (supply step):"
+              : "Market / asset contract ID:"}
+          </span>{" "}
           <a
             href={marketUrl}
             target="_blank"
@@ -89,6 +203,20 @@ const TransactionSignPreview: React.FC<TransactionSignPreviewProps> = ({
             <ExternalLink className="h-3 w-3 shrink-0" aria-hidden />
           </a>
         </li>
+        {isMintOnlyConsensus && !isCombo && lendingPoolUrl && lendingPoolAppId && (
+          <li className="break-all">
+            <span className="text-muted-foreground">Lending pool (after mint):</span>{" "}
+            <a
+              href={lendingPoolUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-ocean-teal hover:underline font-mono inline-flex items-center gap-0.5"
+            >
+              {lendingPoolAppId}
+              <ExternalLink className="h-3 w-3 shrink-0" aria-hidden />
+            </a>
+          </li>
+        )}
         {assetUrl && (
           <li className="break-all">
             <span className="text-muted-foreground">Underlying asset ID:</span>{" "}
@@ -111,7 +239,9 @@ const TransactionSignPreview: React.FC<TransactionSignPreviewProps> = ({
           <span className="text-muted-foreground">Est. network fee:</span>{" "}
           ~{estimatedFeeAlgoDisplay} ALGO (minimum per transaction; actual fee may differ)
         </li>
-        {reserveFactorPercent != null && Number.isFinite(reserveFactorPercent) && (
+        {previewVariant === "lending" &&
+          reserveFactorPercent != null &&
+          Number.isFinite(reserveFactorPercent) && (
           <li>
             <span className="text-muted-foreground">Protocol reserve factor (from market data):</span>{" "}
             {reserveFactorPercent}%

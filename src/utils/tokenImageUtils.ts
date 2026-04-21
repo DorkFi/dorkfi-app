@@ -68,6 +68,7 @@ export const getTokenImagePath = (symbol: string): string => {
     xUSD: "/lovable-uploads/xUSD.webp",
     tALGO: "/lovable-uploads/tALGO.webp",
     xALGO: "/lovable-uploads/xALGO.webp",
+    fxALGO: "/lovable-uploads/xALGO.webp",
     fALGO: "/lovable-uploads/fALGO.webp",
     fUSDC: "/lovable-uploads/fUSDC.webp",
   };

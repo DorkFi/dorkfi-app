@@ -40,13 +40,14 @@ import {
   resolveBorrowFolksAdapter,
   type FolksTokenAdapterConfig,
   type TokenConfig,
+  type TokenStandard,
 } from "@/config";
 import {
   estimateFolksDepositMintedFAssetAmount,
   folksFAssetHumanToUnderlyingHuman,
   folksUnderlyingHumanToFAssetHuman,
 } from "@/services/folksDepositAdapter";
-import algorandService from "@/services/algorandService";
+import algorandService, { type AlgorandNetwork } from "@/services/algorandService";
 import algosdk, { waitForConfirmation } from "algosdk";
 import BigNumber from "bignumber.js";
 import {
@@ -74,6 +75,22 @@ import {
 import TransactionSignPreview from "./TransactionSignPreview";
 import { getExplorerTransactionUrl } from "@/utils/explorerLinks";
 import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
+import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
+import {
+  ALGORAND_MAINNET_NODELY_ALGOD_URL,
+  MainnetConsensusConfig,
+  XALGO_CONSENSUS_BORROW_ALGO_ROUTE_ID,
+  XALGO_CONSENSUS_DEPOSIT_ALGO_ROUTE_ID,
+  fetchXalgoMainnetConsensusState,
+  minAlgoOutBurnFloor,
+  xalgoAtomicNeededForMinAlgoOutFloor,
+} from "@/services/xalgoConsensusAdapter";
+import {
+  buildXalgoConsensusMintAndDepositSingleGroup,
+  formatXalgoAtomicAsHuman,
+} from "@/services/xalgoMintSupplySingleGroup";
+import { buildXalgoConsensusBorrowAndBurnSingleGroup } from "@/services/xalgoBorrowBurnSingleGroup";
+import type { ConsensusState } from "@folks-finance/algorand-sdk";
 
 /** Built transaction group ready for wallet signature (review step). */
 interface PendingSupplyBorrowSign {
@@ -89,6 +106,22 @@ interface PendingSupplyBorrowSign {
     tokenStandard: string;
     poolId?: string | number;
   };
+  /** Folks Governance xALGO `immediate_mint` only; `lending` includes atomic mint+supply when preview variant is combined. */
+  signKind?: "lending" | "xalgo-consensus-mint";
+  /** Overrides default sign-preview layout (e.g. single-group mint + lending supply). */
+  txSignPreviewVariant?:
+    | "lending"
+    | "xalgo-consensus-mint"
+    | "xalgo-mint-supply-combined"
+    | "xalgo-borrow-burn-combined";
+  /** Human ALGO amount for sign preview when `signKind` is `xalgo-consensus-mint`. */
+  consensusMintAlgoHuman?: string;
+  /** Human ALGO (minimum out) for borrow+burn sign preview. */
+  consensusBurnAlgoHuman?: string;
+  /** Consensus app id for the deposit sign preview (Folks Governance xALGO). */
+  consensusAppIdForPreview?: string;
+  /** Human amount for sign preview when it should not use the form field (e.g. combined supply min xALGO). */
+  previewAmountHuman?: string;
 }
 
 type SupplyBorrowTokenRow = {
@@ -330,7 +363,11 @@ const SupplyBorrowModal = ({
     null
   );
   const [isSigning, setIsSigning] = useState(false);
-  /** Folks f-asset ASA opt-in status when {@link TokenConfig.requireStandaloneFAssetOptInBeforeDeposit} applies. */
+  /**
+   * Pre-deposit standalone ASA opt-in status when
+   * {@link TokenConfig.requireStandaloneFAssetOptInBeforeDeposit} or
+   * {@link TokenConfig.requireStandaloneMarketAsaOptInBeforeDeposit} applies.
+   */
   const [fAssetPreOptInStatus, setFAssetPreOptInStatus] = useState<
     "idle" | "checking" | "in" | "out"
   >("idle");
@@ -339,6 +376,10 @@ const SupplyBorrowModal = ({
   /** Selected Folks deposit route; defaults to underlying when both f-asset and underlying routes exist. */
   const [selectedDepositAdapterId, setSelectedDepositAdapterId] =
     useState<string>("");
+  /** Spendable native ALGO (human) when xALGO “ALGO” consensus deposit route is selected. */
+  const [nativeAlgoSpendableHuman, setNativeAlgoSpendableHuman] = useState<
+    number | null
+  >(null);
   const [depositRoutePickerOpen, setDepositRoutePickerOpen] = useState(false);
   const [selectedBorrowAdapterId, setSelectedBorrowAdapterId] =
     useState<string>("");
@@ -377,6 +418,10 @@ const SupplyBorrowModal = ({
   }, [userGlobalData, borrowUserGlobalFallback]);
 
   const { price: tokenPrice } = useTokenPrice(asset, networkToUse);
+  const { price: algoUsdForXalgoRoute } = useTokenPrice(
+    "ALGO",
+    networkToUse as NetworkId
+  );
 
   const supplyBorrowSelectRowKey = useMemo(() => {
     if (!availableAssets?.length) return "";
@@ -492,13 +537,61 @@ const SupplyBorrowModal = ({
       : raw;
   }, [mode, networkToUse, asset, poolId, configSymbol, marketId]);
 
+  const depositOriginalSymbol = useMemo(() => {
+    if (mode !== "deposit") return null;
+    const tokens = getAllTokensWithDisplayInfo(networkToUse as NetworkId);
+    const tok = resolveSupplyBorrowToken(
+      tokens,
+      asset,
+      poolId,
+      configSymbol,
+      marketId
+    );
+    if (!tok) return null;
+    return (
+      (tok as { configKey?: string }).configKey ??
+      ("originalSymbol" in tok
+        ? (tok as { originalSymbol?: string }).originalSymbol
+        : asset)
+    );
+  }, [mode, networkToUse, asset, poolId, configSymbol, marketId]);
+
+  /** Governance xALGO lending row (config symbol or `tokens` map key via `depositOriginalSymbol`). */
+  const isXalgoGovernanceLendingMarket = useMemo(() => {
+    if (mode !== "deposit" || !resolvedDepositTokenConfig) return false;
+    return (
+      resolvedDepositTokenConfig.symbol === "xALGO" ||
+      depositOriginalSymbol === "xALGO"
+    );
+  }, [mode, resolvedDepositTokenConfig, depositOriginalSymbol]);
+
   const depositFolksAdapters = useMemo((): FolksTokenAdapterConfig[] => {
     if (!resolvedDepositTokenConfig) return [];
     return getFolksAdaptersForPhase(resolvedDepositTokenConfig, "deposit");
   }, [resolvedDepositTokenConfig]);
 
+  const xalgoDepositConsensusAlgoOption = useMemo(
+    () =>
+      mode === "deposit" &&
+      networkToUse === "algorand-mainnet" &&
+      isXalgoGovernanceLendingMarket,
+    [mode, networkToUse, isXalgoGovernanceLendingMarket]
+  );
+
   const depositMultiRoute =
-    mode === "deposit" && depositFolksAdapters.length > 1;
+    mode === "deposit" &&
+    (depositFolksAdapters.length > 1 ||
+      xalgoDepositConsensusAlgoOption);
+
+  /** Folks deposit adapter for xALGO ASA from wallet (used after governance mint). */
+  const xalgoUnderlyingDepositAdapterId = useMemo(() => {
+    if (mode !== "deposit") return null;
+    if (!isXalgoGovernanceLendingMarket) return null;
+    const a = depositFolksAdapters.find(
+      (x) => (x.depositWalletBasis ?? "underlying") === "underlying"
+    );
+    return a ? tokenAdapterStableId(a) : null;
+  }, [mode, isXalgoGovernanceLendingMarket, depositFolksAdapters]);
 
   const resolvedBorrowTokenConfig = useMemo((): TokenConfig | null => {
     if (mode !== "borrow") return null;
@@ -523,13 +616,60 @@ const SupplyBorrowModal = ({
       : raw;
   }, [mode, networkToUse, asset, poolId, configSymbol, marketId]);
 
+  const borrowOriginalSymbol = useMemo(() => {
+    if (mode !== "borrow") return null;
+    const tokens = getAllTokensWithDisplayInfo(networkToUse as NetworkId);
+    const tok = resolveSupplyBorrowToken(
+      tokens,
+      asset,
+      poolId,
+      configSymbol,
+      marketId
+    );
+    if (!tok) return null;
+    return (
+      (tok as { configKey?: string }).configKey ??
+      ("originalSymbol" in tok
+        ? (tok as { originalSymbol?: string }).originalSymbol
+        : asset)
+    );
+  }, [mode, networkToUse, asset, poolId, configSymbol, marketId]);
+
+  /** Governance xALGO lending row (borrow), same disambiguation as deposit. */
+  const isXalgoGovernanceBorrowMarket = useMemo(() => {
+    if (mode !== "borrow" || !resolvedBorrowTokenConfig) return false;
+    return (
+      resolvedBorrowTokenConfig.symbol === "xALGO" ||
+      borrowOriginalSymbol === "xALGO"
+    );
+  }, [mode, resolvedBorrowTokenConfig, borrowOriginalSymbol]);
+
+  const xalgoBorrowConsensusAlgoOption = useMemo(
+    () =>
+      mode === "borrow" &&
+      networkToUse === "algorand-mainnet" &&
+      isXalgoGovernanceBorrowMarket,
+    [mode, networkToUse, isXalgoGovernanceBorrowMarket]
+  );
+
   const borrowFolksAdapters = useMemo((): FolksTokenAdapterConfig[] => {
     if (!resolvedBorrowTokenConfig) return [];
     return getFolksAdaptersForPhase(resolvedBorrowTokenConfig, "borrow");
   }, [resolvedBorrowTokenConfig]);
 
   const borrowMultiRoute =
-    mode === "borrow" && borrowFolksAdapters.length > 1;
+    mode === "borrow" &&
+    (borrowFolksAdapters.length > 1 || xalgoBorrowConsensusAlgoOption);
+
+  const isXalgoConsensusBorrowAlgoRoute = useMemo(
+    () =>
+      mode === "borrow" &&
+      selectedBorrowAdapterId === XALGO_CONSENSUS_BORROW_ALGO_ROUTE_ID,
+    [mode, selectedBorrowAdapterId]
+  );
+
+  const [xalgoBorrowConsensusState, setXalgoBorrowConsensusState] =
+    useState<ConsensusState | null>(null);
 
   const selectedBorrowAdapter = useMemo(() => {
     if (!resolvedBorrowTokenConfig || !selectedBorrowAdapterId) {
@@ -661,38 +801,122 @@ const SupplyBorrowModal = ({
     if (!resolvedDepositTokenConfig || !selectedDepositAdapterId) {
       return undefined;
     }
+    if (selectedDepositAdapterId === XALGO_CONSENSUS_DEPOSIT_ALGO_ROUTE_ID) {
+      return undefined;
+    }
     return resolveDepositFolksAdapter(
       resolvedDepositTokenConfig,
       selectedDepositAdapterId
     );
   }, [resolvedDepositTokenConfig, selectedDepositAdapterId]);
 
+  const isXalgoConsensusDepositAlgoRoute = useMemo(
+    () =>
+      mode === "deposit" &&
+      selectedDepositAdapterId === XALGO_CONSENSUS_DEPOSIT_ALGO_ROUTE_ID,
+    [mode, selectedDepositAdapterId]
+  );
+
+  useEffect(() => {
+    if (
+      !isOpen ||
+      mode !== "deposit" ||
+      !isXalgoConsensusDepositAlgoRoute ||
+      !activeAccount?.address ||
+      networkToUse !== "algorand-mainnet"
+    ) {
+      setNativeAlgoSpendableHuman(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const aln = getAlgorandNetworkFromNetworkId("algorand-mainnet");
+        if (!aln) {
+          if (!cancelled) setNativeAlgoSpendableHuman(null);
+          return;
+        }
+        const { algod } = await algorandService.initializeClientsForReads(
+          aln,
+          { algodServer: ALGORAND_MAINNET_NODELY_ALGOD_URL }
+        );
+        const info = await algod
+          .accountInformation(activeAccount.address)
+          .do();
+        if (!cancelled) {
+          setNativeAlgoSpendableHuman(spendableAlgoHumanFromAccount(info));
+        }
+      } catch {
+        if (!cancelled) setNativeAlgoSpendableHuman(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isOpen,
+    mode,
+    isXalgoConsensusDepositAlgoRoute,
+    activeAccount?.address,
+    networkToUse,
+  ]);
+
   const preDepositFAssetAsaId = useMemo((): number | null => {
-    if (!resolvedDepositTokenConfig?.requireStandaloneFAssetOptInBeforeDeposit) {
+    const tc = resolvedDepositTokenConfig;
+    if (!tc) return null;
+    if (tc.requireStandaloneMarketAsaOptInBeforeDeposit) {
+      if (selectedDepositAdapter?.depositWalletBasis === "market_token") {
+        return null;
+      }
+      const raw = tc.assetId != null ? String(tc.assetId).trim() : "";
+      if (!raw) return null;
+      const n = Number(raw);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    }
+    if (!tc.requireStandaloneFAssetOptInBeforeDeposit) {
       return null;
     }
-    const folks = getAnyFolksAdapter(resolvedDepositTokenConfig);
+    const folks = getAnyFolksAdapter(tc);
     if (folks?.type !== "folks") return null;
     const n = Number(String(folks.folksParams.fAssetId ?? "").trim());
     return Number.isFinite(n) && n > 0 ? n : null;
-  }, [resolvedDepositTokenConfig]);
+  }, [resolvedDepositTokenConfig, selectedDepositAdapter]);
 
-  const depositRequiresStandaloneFAssetOptIn = useMemo(
-    () =>
-      mode === "deposit" &&
-      (networkToUse as string) === "algorand-mainnet" &&
-      preDepositFAssetAsaId != null,
-    [mode, networkToUse, preDepositFAssetAsaId]
-  );
+  const depositRequiresStandaloneFAssetOptIn = useMemo(() => {
+    if (
+      mode !== "deposit" ||
+      (networkToUse as string) !== "algorand-mainnet" ||
+      preDepositFAssetAsaId == null
+    ) {
+      return false;
+    }
+    if (
+      resolvedDepositTokenConfig?.requireStandaloneMarketAsaOptInBeforeDeposit &&
+      isXalgoConsensusDepositAlgoRoute
+    ) {
+      return false;
+    }
+    return true;
+  }, [
+    mode,
+    networkToUse,
+    preDepositFAssetAsaId,
+    resolvedDepositTokenConfig?.requireStandaloneMarketAsaOptInBeforeDeposit,
+    isXalgoConsensusDepositAlgoRoute,
+  ]);
 
   const preDepositFAssetDisplayLabel = useMemo(() => {
-    if (!resolvedDepositTokenConfig?.requireStandaloneFAssetOptInBeforeDeposit) {
+    const tc = resolvedDepositTokenConfig;
+    if (!tc) return "f-asset";
+    if (tc.requireStandaloneMarketAsaOptInBeforeDeposit) {
+      return tc.symbol || tc.name || "asset";
+    }
+    if (!tc.requireStandaloneFAssetOptInBeforeDeposit) {
       return "f-asset";
     }
-    const tok = getFolksAdaptersForPhase(
-      resolvedDepositTokenConfig,
-      "deposit"
-    ).find((a) => (a.depositWalletBasis ?? "underlying") === "market_token");
+    const tok = getFolksAdaptersForPhase(tc, "deposit").find(
+      (a) => (a.depositWalletBasis ?? "underlying") === "market_token"
+    );
     return tok?.label ?? tok?.name ?? "Folks f-asset";
   }, [resolvedDepositTokenConfig]);
 
@@ -739,6 +963,12 @@ const SupplyBorrowModal = ({
 
   const effectiveDepositWalletBalance = useMemo(() => {
     if (mode !== "deposit") return propWalletBalance;
+    if (isXalgoConsensusDepositAlgoRoute) {
+      return nativeAlgoSpendableHuman != null &&
+        Number.isFinite(nativeAlgoSpendableHuman)
+        ? nativeAlgoSpendableHuman
+        : 0;
+    }
     const basis =
       selectedDepositAdapter?.depositWalletBasis ?? "underlying";
     if (basis === "market_token") {
@@ -751,6 +981,8 @@ const SupplyBorrowModal = ({
     return propWalletBalance;
   }, [
     mode,
+    isXalgoConsensusDepositAlgoRoute,
+    nativeAlgoSpendableHuman,
     selectedDepositAdapterId,
     selectedDepositAdapter?.depositWalletBasis,
     propWalletBalance,
@@ -761,6 +993,19 @@ const SupplyBorrowModal = ({
   /** USD under wallet row: follows selected deposit route (underlying vs f-asset). */
   const effectiveDepositWalletBalanceUSD = useMemo(() => {
     if (mode !== "deposit") return propWalletBalanceUSD;
+    if (isXalgoConsensusDepositAlgoRoute) {
+      const b = nativeAlgoSpendableHuman;
+      const p = algoUsdForXalgoRoute;
+      if (
+        b != null &&
+        Number.isFinite(b) &&
+        p > 0 &&
+        Number.isFinite(p)
+      ) {
+        return b * p;
+      }
+      return 0;
+    }
     const basis =
       selectedDepositAdapter?.depositWalletBasis ?? "underlying";
     if (basis === "market_token") {
@@ -773,6 +1018,9 @@ const SupplyBorrowModal = ({
     return propWalletBalanceUSD;
   }, [
     mode,
+    isXalgoConsensusDepositAlgoRoute,
+    nativeAlgoSpendableHuman,
+    algoUsdForXalgoRoute,
     selectedDepositAdapterId,
     selectedDepositAdapter?.depositWalletBasis,
     propWalletBalanceUSD,
@@ -782,6 +1030,28 @@ const SupplyBorrowModal = ({
 
   useEffect(() => {
     if (!isOpen || mode !== "deposit") return;
+    if (xalgoDepositConsensusAlgoOption) {
+      const consensusId = XALGO_CONSENSUS_DEPOSIT_ALGO_ROUTE_ID;
+      if (depositFolksAdapters.length === 0) {
+        setSelectedDepositAdapterId((prev) => {
+          if (prev === consensusId) return consensusId;
+          return "";
+        });
+        return;
+      }
+      const folksIds = depositFolksAdapters.map((a) =>
+        tokenAdapterStableId(a)
+      );
+      const allIds = [consensusId, ...folksIds];
+      setSelectedDepositAdapterId((prev) => {
+        if (prev && allIds.includes(prev)) return prev;
+        const preferred = depositFolksAdapters.find(
+          (a) => (a.depositWalletBasis ?? "underlying") === "underlying"
+        );
+        return preferred ? tokenAdapterStableId(preferred) : consensusId;
+      });
+      return;
+    }
     const list = depositFolksAdapters;
     if (list.length === 0) {
       setSelectedDepositAdapterId("");
@@ -796,10 +1066,21 @@ const SupplyBorrowModal = ({
         ) ?? list[0];
       return preferred ? tokenAdapterStableId(preferred) : "";
     });
-  }, [isOpen, mode, depositFolksAdapters]);
+  }, [isOpen, mode, xalgoDepositConsensusAlgoOption, depositFolksAdapters]);
 
   useEffect(() => {
     if (!isOpen || mode !== "borrow") return;
+    if (xalgoBorrowConsensusAlgoOption) {
+      const consensusBorrowAlgoId = XALGO_CONSENSUS_BORROW_ALGO_ROUTE_ID;
+      const folksIds = borrowFolksAdapters.map((a) =>
+        tokenAdapterStableId(a)
+      );
+      const valid = new Set<string>(["", consensusBorrowAlgoId, ...folksIds]);
+      setSelectedBorrowAdapterId((prev) =>
+        valid.has(prev) ? prev : ""
+      );
+      return;
+    }
     const list = borrowFolksAdapters;
     if (list.length === 0) {
       setSelectedBorrowAdapterId("");
@@ -810,7 +1091,38 @@ const SupplyBorrowModal = ({
       if (prev && ids.includes(prev)) return prev;
       return ids[0] ?? "";
     });
-  }, [isOpen, mode, borrowFolksAdapters]);
+  }, [isOpen, mode, xalgoBorrowConsensusAlgoOption, borrowFolksAdapters]);
+
+  useEffect(() => {
+    if (
+      !isOpen ||
+      mode !== "borrow" ||
+      networkToUse !== "algorand-mainnet" ||
+      !isXalgoGovernanceBorrowMarket
+    ) {
+      setXalgoBorrowConsensusState(null);
+      return;
+    }
+    let cancelled = false;
+    setXalgoBorrowConsensusState(null);
+    (async () => {
+      try {
+        const aln = getAlgorandNetworkFromNetworkId(networkToUse as NetworkId);
+        if (!aln) return;
+        const { algod } = await algorandService.initializeClientsForReads(
+          aln as AlgorandNetwork,
+          { algodServer: ALGORAND_MAINNET_NODELY_ALGOD_URL }
+        );
+        const st = await fetchXalgoMainnetConsensusState(algod);
+        if (!cancelled) setXalgoBorrowConsensusState(st);
+      } catch {
+        if (!cancelled) setXalgoBorrowConsensusState(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, mode, networkToUse, isXalgoGovernanceBorrowMarket]);
 
   const prevDepositAdapterIdRef = useRef<string>("");
   const onDepositRouteChangeRef = useRef(onDepositRouteChange);
@@ -854,6 +1166,7 @@ const SupplyBorrowModal = ({
 
   const depositBlockedByLowEstimatedHealth = useMemo(() => {
     if (mode !== "deposit") return false;
+    if (isXalgoConsensusDepositAlgoRoute) return false;
     const summary = buildLiquidationThresholdSummaryForDeposit(
       assetData.liquidationThreshold,
       poolCollateralMarkets,
@@ -875,6 +1188,7 @@ const SupplyBorrowModal = ({
     poolGlobalUserData,
     amount,
     tokenPrice,
+    isXalgoConsensusDepositAlgoRoute,
   ]);
 
   const borrowTokenDecimals = useMemo(() => {
@@ -954,6 +1268,23 @@ const SupplyBorrowModal = ({
 
   const amountBorrowMarketTokenHuman = useMemo((): number | null => {
     if (mode !== "borrow") return 0;
+    if (isXalgoConsensusBorrowAlgoRoute) {
+      const parsed = parseFloat(amount) || 0;
+      if (parsed <= 0) return 0;
+      if (!xalgoBorrowConsensusState) return null;
+      const desiredAlgoMicro = BigInt(
+        new BigNumber(parsed)
+          .times(1e6)
+          .integerValue(BigNumber.ROUND_FLOOR)
+          .toFixed(0)
+      );
+      const xAtomic = xalgoAtomicNeededForMinAlgoOutFloor(
+        xalgoBorrowConsensusState,
+        desiredAlgoMicro,
+        150n
+      );
+      return Number(xAtomic) / 10 ** borrowTokenDecimals;
+    }
     return borrowInputToMarketTokenHuman(
       amount,
       borrowInputReceiveBasis,
@@ -963,6 +1294,8 @@ const SupplyBorrowModal = ({
   }, [
     mode,
     amount,
+    isXalgoConsensusBorrowAlgoRoute,
+    xalgoBorrowConsensusState,
     borrowInputReceiveBasis,
     folksMintedFAssetPerOneUnderlying,
     borrowTokenDecimals,
@@ -970,6 +1303,23 @@ const SupplyBorrowModal = ({
 
   const effectiveBorrowCapInInputUnits = useMemo(() => {
     if (mode !== "borrow" || effectiveBorrowCap == null) return null;
+    if (isXalgoConsensusBorrowAlgoRoute) {
+      if (!xalgoBorrowConsensusState) return null;
+      const d = Math.min(Math.max(0, borrowTokenDecimals), 18);
+      const capX = BigInt(
+        new BigNumber(effectiveBorrowCap)
+          .times(10 ** d)
+          .integerValue(BigNumber.ROUND_FLOOR)
+          .toFixed(0)
+      );
+      if (capX <= 0n) return 0;
+      const maxAlgoMicro = minAlgoOutBurnFloor(
+        xalgoBorrowConsensusState,
+        capX,
+        150n
+      );
+      return Number(maxAlgoMicro) / 1e6;
+    }
     if (borrowInputReceiveBasis !== "underlying") {
       return effectiveBorrowCap;
     }
@@ -988,47 +1338,71 @@ const SupplyBorrowModal = ({
   }, [
     mode,
     effectiveBorrowCap,
+    isXalgoConsensusBorrowAlgoRoute,
+    xalgoBorrowConsensusState,
+    borrowTokenDecimals,
     borrowInputReceiveBasis,
     folksMintRatioStatus,
     folksMintedFAssetPerOneUnderlying,
-    borrowTokenDecimals,
   ]);
 
   /** Human unit for max borrowable line: Folks underlying is USDC on some pools, ALGO on others — never hardcode ALGO. */
   const maxBorrowableUnitSymbol = useMemo(() => {
     if (mode !== "borrow") return undefined;
+    if (isXalgoConsensusBorrowAlgoRoute) return "ALGO";
     return (
       selectedBorrowAdapter?.label ??
       selectedBorrowAdapter?.name ??
       asset
     );
-  }, [mode, selectedBorrowAdapter, asset]);
+  }, [mode, isXalgoConsensusBorrowAlgoRoute, selectedBorrowAdapter, asset]);
 
   const borrowMaxLineLoading = useMemo(() => {
     if (mode !== "borrow") return false;
     return (
       isLoadingMaxBorrow ||
       (borrowInputReceiveBasis === "underlying" &&
-        folksMintRatioStatus === "loading")
+        folksMintRatioStatus === "loading") ||
+      (isXalgoConsensusBorrowAlgoRoute && xalgoBorrowConsensusState == null)
     );
-  }, [mode, isLoadingMaxBorrow, borrowInputReceiveBasis, folksMintRatioStatus]);
+  }, [
+    mode,
+    isLoadingMaxBorrow,
+    borrowInputReceiveBasis,
+    folksMintRatioStatus,
+    isXalgoConsensusBorrowAlgoRoute,
+    xalgoBorrowConsensusState,
+  ]);
 
   const borrowFolksRateUnavailable = useMemo(
     () =>
       mode === "borrow" &&
+      !isXalgoConsensusBorrowAlgoRoute &&
       borrowInputReceiveBasis === "underlying" &&
       folksMintRatioStatus === "failed",
-    [mode, borrowInputReceiveBasis, folksMintRatioStatus]
+    [
+      mode,
+      isXalgoConsensusBorrowAlgoRoute,
+      borrowInputReceiveBasis,
+      folksMintRatioStatus,
+    ]
   );
 
   /** Underlying-route borrow needs Folks mint ratio before submit. */
   const borrowFolksBlockingSubmit = useMemo(() => {
     if (mode !== "borrow") return false;
+    if (isXalgoConsensusBorrowAlgoRoute) return false;
     if (borrowInputReceiveBasis !== "underlying") return false;
     const a = parseFloat(amount) || 0;
     if (a <= 0) return false;
     return folksMintRatioStatus !== "ready";
-  }, [mode, borrowInputReceiveBasis, amount, folksMintRatioStatus]);
+  }, [
+    mode,
+    isXalgoConsensusBorrowAlgoRoute,
+    borrowInputReceiveBasis,
+    amount,
+    folksMintRatioStatus,
+  ]);
 
   /** Est. pool HF after borrowing `amount` (for submit / button guard). */
   const estimatedHealthFactorAfterBorrow = useMemo(() => {
@@ -1039,7 +1413,10 @@ const SupplyBorrowModal = ({
     ) {
       return null;
     }
-    const amt = parseFloat(amount) || 0;
+    const amt =
+      isXalgoConsensusBorrowAlgoRoute && amountBorrowMarketTokenHuman != null
+        ? amountBorrowMarketTokenHuman
+        : parseFloat(amount) || 0;
     if (amt <= 0) return null;
     const meta = estimatePoolHealthAfterBorrow(
       poolGlobalUserData,
@@ -1048,7 +1425,15 @@ const SupplyBorrowModal = ({
       tokenPrice
     );
     return meta?.value ?? null;
-  }, [mode, poolGlobalUserData, liquidationSummaryForBorrowCap, amount, tokenPrice]);
+  }, [
+    mode,
+    poolGlobalUserData,
+    liquidationSummaryForBorrowCap,
+    amount,
+    tokenPrice,
+    isXalgoConsensusBorrowAlgoRoute,
+    amountBorrowMarketTokenHuman,
+  ]);
 
   const borrowSubmitBlockedBelowHfTarget = useMemo(() => {
     if (mode !== "borrow") return false;
@@ -1377,6 +1762,55 @@ const SupplyBorrowModal = ({
     const algorandClients =
       await algorandService.initializeClientsForTransactions(algorandNetwork);
     await waitForConfirmation(algorandClients.algod, res.txid, 4);
+
+    if (pending.signKind === "xalgo-consensus-mint") {
+      setTransactionId(res.txid);
+
+      setPendingSign(null);
+      toast({
+        title: "xALGO mint submitted",
+        description:
+          "Confirming on-chain. Your xALGO balance updates shortly; then you can supply below.",
+      });
+      const apiNet = pending.actualNetwork;
+      if (activeAccount?.address) {
+        void Promise.all([
+          dorkfiAPIService.fetchFreshUserData(
+            activeAccount.address,
+            apiNet,
+            parseInt(pending.poolAppId, 10),
+            parseInt(pending.marketContractId, 10)
+          ),
+          fetchMarketInfoFromContract(
+            pending.poolAppId,
+            pending.marketContractId,
+            apiNet
+          ),
+          dorkfiAPIService.fetchFreshUserHealth(
+            apiNet,
+            parseInt(pending.poolAppId, 10),
+            activeAccount.address
+          ),
+        ])
+          .then(() => new Promise((resolve) => setTimeout(resolve, 2000)))
+          .then(() => {
+            if (onTransactionSuccess) {
+              onTransactionSuccess();
+            }
+          })
+          .catch((error) => {
+            console.error(
+              "Error calling fetchFreshUserData after xALGO mint:",
+              error
+            );
+            if (onTransactionSuccess) {
+              onTransactionSuccess();
+            }
+          });
+      }
+      void onRefreshWalletBalance?.();
+      return;
+    }
 
     const decodedStxns = stxns.map((txn: Uint8Array<ArrayBufferLike>) => {
       return algosdk.decodeSignedTransaction(txn);
@@ -1725,12 +2159,96 @@ const SupplyBorrowModal = ({
       return;
     }
 
-    // For deposits, check wallet balance (per selected deposit adapter basis)
-    if (
-      mode === "deposit" &&
-      parseFloat(amount) > effectiveDepositWalletBalance
-    ) {
-      setError("Insufficient wallet balance");
+    // For deposits, check wallet balance (per selected deposit adapter basis).
+    // xALGO consensus ALGO route: spendable ALGO loads async; until then effective balance is 0 — do not block.
+    if (mode === "deposit") {
+      const amt = parseFloat(amount);
+      if (isXalgoConsensusDepositAlgoRoute) {
+        if (
+          nativeAlgoSpendableHuman != null &&
+          Number.isFinite(nativeAlgoSpendableHuman) &&
+          amt > nativeAlgoSpendableHuman
+        ) {
+          setError("Insufficient wallet balance");
+          return;
+        }
+      } else if (amt > effectiveDepositWalletBalance) {
+        setError("Insufficient wallet balance");
+        return;
+      }
+    }
+
+    if (mode === "deposit" && isXalgoConsensusDepositAlgoRoute) {
+      if (
+        !resolvedDepositTokenConfig?.poolId ||
+        !resolvedDepositTokenConfig.contractId
+      ) {
+        setError("Market configuration is incomplete. Refresh and try again.");
+        return;
+      }
+      if (!depositOriginalSymbol) {
+        setError("Could not resolve token for deposit.");
+        return;
+      }
+      if (networkToUse !== "algorand-mainnet") {
+        setError("ALGO (consensus) deposit is only available on Algorand mainnet.");
+        return;
+      }
+      setIsLoading(true);
+      setError(null);
+      try {
+        const parsed = parseFloat(amount);
+        const algoMicroAlgos = BigInt(
+          new BigNumber(parsed)
+            .times(1e6)
+            .integerValue(BigNumber.ROUND_FLOOR)
+            .toFixed(0)
+        );
+        const { txnsB64, minXalgoAtomic } =
+          await buildXalgoConsensusMintAndDepositSingleGroup({
+            userAddress: activeAccount.address,
+            networkId: networkToUse as NetworkId,
+            algoMicroAlgos,
+            poolId: String(resolvedDepositTokenConfig.poolId),
+            marketId: String(resolvedDepositTokenConfig.contractId),
+            tokenStandard: String(
+              resolvedDepositTokenConfig.tokenStandard
+            ) as TokenStandard,
+            ...(xalgoUnderlyingDepositAdapterId != null &&
+            String(xalgoUnderlyingDepositAdapterId).trim() !== ""
+              ? {
+                  depositAdapterId:
+                    String(xalgoUnderlyingDepositAdapterId).trim(),
+                }
+              : {}),
+          });
+        const dec = resolvedDepositTokenConfig.decimals ?? 6;
+        setPendingSign({
+          txnsB64,
+          poolAppId: String(resolvedDepositTokenConfig.poolId),
+          marketContractId: String(resolvedDepositTokenConfig.contractId),
+          underlyingAssetId: String(MainnetConsensusConfig.xAlgoId),
+          actualNetwork: networkToUse as NetworkId,
+          tokenSymbol: "xALGO",
+          originalSymbol: depositOriginalSymbol,
+          originalTokenConfig: {
+            decimals: dec,
+            tokenStandard: String(resolvedDepositTokenConfig.tokenStandard),
+            poolId: resolvedDepositTokenConfig.poolId,
+          },
+          signKind: "lending",
+          txSignPreviewVariant: "xalgo-mint-supply-combined",
+          consensusMintAlgoHuman: String(parsed),
+          consensusAppIdForPreview: String(MainnetConsensusConfig.consensusAppId),
+          previewAmountHuman: formatXalgoAtomicAsHuman(minXalgoAtomic, dec),
+        });
+      } catch (e) {
+        setError(
+          e instanceof Error ? e.message : "Could not build mint and supply."
+        );
+      } finally {
+        setIsLoading(false);
+      }
       return;
     }
 
@@ -1759,6 +2277,81 @@ const SupplyBorrowModal = ({
         );
         return;
       }
+    }
+
+    if (
+      mode === "borrow" &&
+      isXalgoConsensusBorrowAlgoRoute &&
+      resolvedBorrowTokenConfig?.poolId &&
+      resolvedBorrowTokenConfig.contractId
+    ) {
+      if (!activeAccount?.address) {
+        setError("Please connect your wallet first");
+        return;
+      }
+      if (!borrowOriginalSymbol) {
+        setError("Could not resolve token for borrow.");
+        return;
+      }
+      if (networkToUse !== "algorand-mainnet") {
+        setError(
+          "Borrow with consensus burn is only available on Algorand mainnet."
+        );
+        return;
+      }
+      if (amountBorrowMarketTokenHuman === null) {
+        setError("Waiting for consensus rate. Try again in a moment.");
+        return;
+      }
+      setIsLoading(true);
+      setError(null);
+      try {
+        const parsed = parseFloat(amount);
+        const desiredMinAlgoMicros = BigInt(
+          new BigNumber(parsed)
+            .times(1e6)
+            .integerValue(BigNumber.ROUND_FLOOR)
+            .toFixed(0)
+        );
+        const { txnsB64, borrowedXalgoAtomic } =
+          await buildXalgoConsensusBorrowAndBurnSingleGroup({
+            userAddress: activeAccount.address,
+            networkId: networkToUse as NetworkId,
+            desiredMinAlgoMicros,
+            poolId: String(resolvedBorrowTokenConfig.poolId),
+            marketId: String(resolvedBorrowTokenConfig.contractId),
+            tokenStandard: String(
+              resolvedBorrowTokenConfig.tokenStandard
+            ) as TokenStandard,
+          });
+        const dec = resolvedBorrowTokenConfig.decimals ?? 6;
+        setPendingSign({
+          txnsB64,
+          poolAppId: String(resolvedBorrowTokenConfig.poolId),
+          marketContractId: String(resolvedBorrowTokenConfig.contractId),
+          underlyingAssetId: String(MainnetConsensusConfig.xAlgoId),
+          actualNetwork: networkToUse as NetworkId,
+          tokenSymbol: "xALGO",
+          originalSymbol: borrowOriginalSymbol,
+          originalTokenConfig: {
+            decimals: dec,
+            tokenStandard: String(resolvedBorrowTokenConfig.tokenStandard),
+            poolId: resolvedBorrowTokenConfig.poolId,
+          },
+          signKind: "lending",
+          txSignPreviewVariant: "xalgo-borrow-burn-combined",
+          consensusBurnAlgoHuman: String(parsed),
+          consensusAppIdForPreview: String(MainnetConsensusConfig.consensusAppId),
+          previewAmountHuman: formatXalgoAtomicAsHuman(borrowedXalgoAtomic, dec),
+        });
+      } catch (e) {
+        setError(
+          e instanceof Error ? e.message : "Could not build borrow and burn."
+        );
+      } finally {
+        setIsLoading(false);
+      }
+      return;
     }
 
     setIsLoading(true);
@@ -1889,16 +2482,36 @@ const SupplyBorrowModal = ({
         );
       }
 
+      const needsStandalonePreDepositOptIn =
+        originalTokenConfig.requireStandaloneFAssetOptInBeforeDeposit ||
+        originalTokenConfig.requireStandaloneMarketAsaOptInBeforeDeposit;
+      const skipPreDepositOptInForXalgoConsensus =
+        originalTokenConfig.requireStandaloneMarketAsaOptInBeforeDeposit &&
+        isXalgoConsensusDepositAlgoRoute;
+      const depositAdIdTrim = selectedDepositAdapterId.trim();
+      const skipPreDepositOptInForMarketTokenDeposit =
+        originalTokenConfig.requireStandaloneMarketAsaOptInBeforeDeposit &&
+        depositAdIdTrim !== "" &&
+        depositAdIdTrim !== XALGO_CONSENSUS_DEPOSIT_ALGO_ROUTE_ID &&
+        resolveDepositFolksAdapter(
+          originalTokenConfig,
+          depositAdIdTrim
+        )?.depositWalletBasis === "market_token";
       if (
         mode === "deposit" &&
         actualNetwork === "algorand-mainnet" &&
-        originalTokenConfig.requireStandaloneFAssetOptInBeforeDeposit &&
+        needsStandalonePreDepositOptIn &&
+        !skipPreDepositOptInForXalgoConsensus &&
+        !skipPreDepositOptInForMarketTokenDeposit &&
         fAssetPreOptInStatus !== "in"
       ) {
+        const optLabel = originalTokenConfig.requireStandaloneMarketAsaOptInBeforeDeposit
+          ? originalTokenConfig.symbol || originalTokenConfig.name || "this asset"
+          : "the Folks f-asset";
         setError(
           fAssetPreOptInStatus === "checking"
-            ? "Still checking f-asset opt-in status. Wait a moment and try again."
-            : "Opt in to the Folks f-asset first using the button above (one small transaction), then supply."
+            ? `Still checking ${optLabel} opt-in status. Wait a moment and try again.`
+            : `Opt in to ${optLabel} first using the button above (one small transaction), then supply.`
         );
         setIsLoading(false);
         return;
@@ -1973,6 +2586,7 @@ const SupplyBorrowModal = ({
 
       if (mode === "deposit") {
         // Call the lending service deposit method
+        const depositAdapterTrimmed = selectedDepositAdapterId.trim();
         result = await deposit(
           token.poolId,
           token.underlyingContractId,
@@ -1980,12 +2594,19 @@ const SupplyBorrowModal = ({
           amountInAtomicUnits,
           activeAccount.address,
           actualNetwork as NetworkId,
-          selectedDepositAdapterId.trim() !== ""
-            ? { depositAdapterId: selectedDepositAdapterId }
+          depositAdapterTrimmed !== "" &&
+            depositAdapterTrimmed !== XALGO_CONSENSUS_DEPOSIT_ALGO_ROUTE_ID
+            ? { depositAdapterId: depositAdapterTrimmed }
             : undefined
         );
       } else if (mode === "borrow") {
         // Call the lending service borrow method
+        const borrowAdTrim = selectedBorrowAdapterId.trim();
+        const borrowOpts =
+          borrowAdTrim !== "" &&
+          borrowAdTrim !== XALGO_CONSENSUS_BORROW_ALGO_ROUTE_ID
+            ? { borrowAdapterId: selectedBorrowAdapterId }
+            : undefined;
         result = await borrow(
           token.poolId,
           token.underlyingContractId,
@@ -1993,9 +2614,7 @@ const SupplyBorrowModal = ({
           amountInAtomicUnits,
           activeAccount.address,
           actualNetwork as NetworkId,
-          selectedBorrowAdapterId.trim() !== ""
-            ? { borrowAdapterId: selectedBorrowAdapterId }
-            : undefined
+          borrowOpts
         );
       } else {
         throw new Error(`Unsupported mode: ${mode}`);
@@ -2336,7 +2955,9 @@ const SupplyBorrowModal = ({
                   </div>
                 ))}
 
-              {mode === "deposit" && depositFolksAdapters.length === 1 && (
+              {mode === "deposit" &&
+                !depositMultiRoute &&
+                depositFolksAdapters.length === 1 && (
                 <div className="space-y-2 rounded-lg border border-slate-200/80 bg-white/60 p-3 dark:border-slate-600 dark:bg-slate-800/60">
                   <Label className="text-sm font-medium text-slate-700 dark:text-slate-200">
                     Deposit route
@@ -2389,19 +3010,27 @@ const SupplyBorrowModal = ({
                     : propWalletBalanceUSD
                 }
                 walletBalanceDisplaySymbol={
-                  mode === "deposit" && selectedDepositAdapter
-                    ? selectedDepositAdapter.label ??
-                      selectedDepositAdapter.name ??
-                      asset
+                  mode === "deposit"
+                    ? isXalgoConsensusDepositAlgoRoute
+                      ? "ALGO"
+                      : selectedDepositAdapter
+                        ? selectedDepositAdapter.label ??
+                          selectedDepositAdapter.name ??
+                          asset
+                        : undefined
                     : undefined
                 }
                 walletBalanceRowTitle={
-                  mode === "deposit" && selectedDepositAdapter
-                    ? `Wallet balance · ${
-                        selectedDepositAdapter.label ??
-                        selectedDepositAdapter.name ??
-                        asset
-                      }`
+                  mode === "deposit"
+                    ? isXalgoConsensusDepositAlgoRoute
+                      ? "Wallet balance · ALGO"
+                      : selectedDepositAdapter
+                        ? `Wallet balance · ${
+                            selectedDepositAdapter.label ??
+                            selectedDepositAdapter.name ??
+                            asset
+                          }`
+                        : undefined
                     : undefined
                 }
                 availableToSupplyOrBorrow={
@@ -2422,7 +3051,10 @@ const SupplyBorrowModal = ({
                   (mode === "borrow" && borrowExceedsEffectiveCap) ||
                   (mode === "borrow" && borrowSubmitBlockedBelowHfTarget) ||
                   (mode === "borrow" && borrowNoCapacityAtHfTarget) ||
-                  (mode === "borrow" && borrowFolksBlockingSubmit)
+                  (mode === "borrow" && borrowFolksBlockingSubmit) ||
+                  (mode === "borrow" &&
+                    isXalgoConsensusBorrowAlgoRoute &&
+                    amountBorrowMarketTokenHuman === null)
                 }
                 hideButton={true}
                 isLoadingMaxBorrow={borrowMaxLineLoading}
@@ -2432,6 +3064,10 @@ const SupplyBorrowModal = ({
                 network={networkToUse}
                 walletBalanceLastUpdated={walletBalanceLastUpdated}
                 onRefreshWalletBalance={onRefreshWalletBalance}
+                depositWalletBalancePending={
+                  isXalgoConsensusDepositAlgoRoute &&
+                  nativeAlgoSpendableHuman == null
+                }
                 amountFieldEndAdornment={
                   depositMultiRoute ? (
                     <Button
@@ -2443,9 +3079,14 @@ const SupplyBorrowModal = ({
                       title="Choose deposit route"
                     >
                       <span className="truncate text-sm font-medium">
-                        {selectedDepositAdapter?.label ??
-                          selectedDepositAdapter?.name ??
-                          asset}
+                        {isXalgoConsensusDepositAlgoRoute
+                          ? "ALGO"
+                          : xalgoDepositConsensusAlgoOption &&
+                              selectedDepositAdapterId === ""
+                            ? "xALGO"
+                            : selectedDepositAdapter?.label ??
+                              selectedDepositAdapter?.name ??
+                              asset}
                       </span>
                       <ChevronDown
                         className="h-4 w-4 shrink-0 opacity-80"
@@ -2462,9 +3103,14 @@ const SupplyBorrowModal = ({
                       title="Choose borrow route"
                     >
                       <span className="truncate text-sm font-medium">
-                        {selectedBorrowAdapter?.label ??
-                          selectedBorrowAdapter?.name ??
-                          asset}
+                        {isXalgoConsensusBorrowAlgoRoute
+                          ? "ALGO"
+                          : xalgoBorrowConsensusAlgoOption &&
+                              selectedBorrowAdapterId === ""
+                            ? "xALGO"
+                            : selectedBorrowAdapter?.label ??
+                              selectedBorrowAdapter?.name ??
+                              asset}
                       </span>
                       <ChevronDown
                         className="h-4 w-4 shrink-0 opacity-80"
@@ -2500,17 +3146,69 @@ const SupplyBorrowModal = ({
                 <TransactionSignPreview
                   mode={mode}
                   asset={pendingSign.tokenSymbol}
-                  amount={amount}
+                  amount={
+                    pendingSign.txSignPreviewVariant ===
+                    "xalgo-borrow-burn-combined"
+                      ? pendingSign.consensusBurnAlgoHuman ?? amount
+                      : pendingSign.txSignPreviewVariant ===
+                          "xalgo-mint-supply-combined"
+                        ? pendingSign.consensusMintAlgoHuman ?? amount
+                        : pendingSign.signKind === "xalgo-consensus-mint" &&
+                            pendingSign.consensusMintAlgoHuman
+                          ? pendingSign.consensusMintAlgoHuman
+                          : pendingSign.previewAmountHuman != null
+                            ? pendingSign.previewAmountHuman
+                            : amount
+                  }
                   networkId={pendingSign.actualNetwork}
-                  poolAppId={pendingSign.poolAppId}
+                  poolAppId={
+                    pendingSign.txSignPreviewVariant ===
+                      "xalgo-mint-supply-combined" ||
+                    pendingSign.txSignPreviewVariant ===
+                      "xalgo-borrow-burn-combined"
+                      ? pendingSign.poolAppId
+                      : pendingSign.signKind === "xalgo-consensus-mint" &&
+                          pendingSign.consensusAppIdForPreview
+                        ? pendingSign.consensusAppIdForPreview
+                        : pendingSign.poolAppId
+                  }
                   marketContractId={pendingSign.marketContractId}
                   underlyingAssetId={pendingSign.underlyingAssetId}
                   txnCount={pendingSign.txnsB64.length}
                   estimatedFeeAlgoDisplay={(
-                    (pendingSign.txnsB64.length * algosdk.MIN_TXN_FEE) /
+                    (pendingSign.txnsB64.length * 1000) /
                     1e6
                   ).toFixed(4)}
                   reserveFactorPercent={assetData.reserveFactor ?? null}
+                  lendingPoolAppId={
+                    pendingSign.signKind === "xalgo-consensus-mint" &&
+                    pendingSign.txSignPreviewVariant !==
+                      "xalgo-mint-supply-combined"
+                      ? pendingSign.poolAppId
+                      : null
+                  }
+                  previewVariant={
+                    pendingSign.txSignPreviewVariant ??
+                    (pendingSign.signKind === "xalgo-consensus-mint"
+                      ? "xalgo-consensus-mint"
+                      : "lending")
+                  }
+                  governanceConsensusAppId={
+                    pendingSign.txSignPreviewVariant ===
+                      "xalgo-mint-supply-combined" ||
+                    pendingSign.txSignPreviewVariant ===
+                      "xalgo-borrow-burn-combined"
+                      ? pendingSign.consensusAppIdForPreview ?? undefined
+                      : undefined
+                  }
+                  mintThenSupplyXalgoHumanMin={
+                    pendingSign.txSignPreviewVariant ===
+                      "xalgo-mint-supply-combined" ||
+                    pendingSign.txSignPreviewVariant ===
+                      "xalgo-borrow-burn-combined"
+                      ? pendingSign.previewAmountHuman ?? undefined
+                      : undefined
+                  }
                 />
               )}
             </div>
@@ -2601,6 +3299,9 @@ const SupplyBorrowModal = ({
                         (mode === "borrow" && borrowExceedsEffectiveCap) ||
                         (mode === "borrow" && borrowSubmitBlockedBelowHfTarget) ||
                         (mode === "borrow" && borrowFolksBlockingSubmit) ||
+                        (mode === "borrow" &&
+                          isXalgoConsensusBorrowAlgoRoute &&
+                          amountBorrowMarketTokenHuman === null) ||
                         (mode === "deposit" && depositBlockedByLowEstimatedHealth)
                       }
                       className={`flex-1 font-semibold h-11 ${mode === "deposit"
@@ -2643,6 +3344,75 @@ const SupplyBorrowModal = ({
           </DialogDescription>
         </DialogHeader>
         <div className="mt-4 grid gap-2">
+          {xalgoDepositConsensusAlgoOption &&
+            depositFolksAdapters.length === 0 && (
+              <button
+                key="xalgo-wallet-asa"
+                type="button"
+                onClick={() => {
+                  setSelectedDepositAdapterId("");
+                  setDepositRoutePickerOpen(false);
+                }}
+                className={cn(
+                  "flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors",
+                  selectedDepositAdapterId === ""
+                    ? "border-teal-500 bg-teal-50/90 dark:border-teal-500 dark:bg-teal-950/40"
+                    : "border-slate-200 bg-white/80 hover:border-teal-300 hover:bg-teal-50/50 dark:border-slate-600 dark:bg-slate-800/60 dark:hover:border-teal-700 dark:hover:bg-slate-800"
+                )}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    xALGO
+                  </div>
+                  <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                    Supply governance xALGO ASA you already hold (no consensus
+                    mint).
+                  </div>
+                </div>
+                {selectedDepositAdapterId === "" ? (
+                  <Check
+                    className="mt-0.5 h-5 w-5 shrink-0 text-teal-600 dark:text-teal-400"
+                    aria-hidden
+                  />
+                ) : null}
+              </button>
+            )}
+          {xalgoDepositConsensusAlgoOption ? (
+            <button
+              key={XALGO_CONSENSUS_DEPOSIT_ALGO_ROUTE_ID}
+              type="button"
+              onClick={() => {
+                setSelectedDepositAdapterId(
+                  XALGO_CONSENSUS_DEPOSIT_ALGO_ROUTE_ID
+                );
+                setDepositRoutePickerOpen(false);
+              }}
+              className={cn(
+                "flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors",
+                selectedDepositAdapterId ===
+                  XALGO_CONSENSUS_DEPOSIT_ALGO_ROUTE_ID
+                  ? "border-teal-500 bg-teal-50/90 dark:border-teal-500 dark:bg-teal-950/40"
+                  : "border-slate-200 bg-white/80 hover:border-teal-300 hover:bg-teal-50/50 dark:border-slate-600 dark:bg-slate-800/60 dark:hover:border-teal-700 dark:hover:bg-slate-800"
+              )}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                  ALGO
+                </div>
+                <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                  Mint xALGO from native ALGO via consensus, then supply to this
+                  market in one transaction (use Supply below).
+                </div>
+              </div>
+              {selectedDepositAdapterId ===
+              XALGO_CONSENSUS_DEPOSIT_ALGO_ROUTE_ID ? (
+                <Check
+                  className="mt-0.5 h-5 w-5 shrink-0 text-teal-600 dark:text-teal-400"
+                  aria-hidden
+                />
+              ) : null}
+            </button>
+          ) : null}
           {depositFolksAdapters.map((a) => {
             const sid = tokenAdapterStableId(a);
             const selected = sid === selectedDepositAdapterId;
@@ -2703,6 +3473,74 @@ const SupplyBorrowModal = ({
           </DialogDescription>
         </DialogHeader>
         <div className="mt-4 grid gap-2">
+          {xalgoBorrowConsensusAlgoOption &&
+            borrowFolksAdapters.length === 0 && (
+              <button
+                key="xalgo-borrow-asa"
+                type="button"
+                onClick={() => {
+                  setSelectedBorrowAdapterId("");
+                  setBorrowRoutePickerOpen(false);
+                }}
+                className={cn(
+                  "flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors",
+                  selectedBorrowAdapterId === ""
+                    ? "border-amber-500 bg-amber-50/90 dark:border-amber-500 dark:bg-amber-950/40"
+                    : "border-slate-200 bg-white/80 hover:border-amber-300 hover:bg-amber-50/50 dark:border-slate-600 dark:bg-slate-800/60 dark:hover:border-amber-700 dark:hover:bg-slate-800"
+                )}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    xALGO
+                  </div>
+                  <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                    Borrow governance xALGO ASA to your wallet (no consensus burn).
+                  </div>
+                </div>
+                {selectedBorrowAdapterId === "" ? (
+                  <Check
+                    className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400"
+                    aria-hidden
+                  />
+                ) : null}
+              </button>
+            )}
+          {xalgoBorrowConsensusAlgoOption ? (
+            <button
+              key={XALGO_CONSENSUS_BORROW_ALGO_ROUTE_ID}
+              type="button"
+              onClick={() => {
+                setSelectedBorrowAdapterId(
+                  XALGO_CONSENSUS_BORROW_ALGO_ROUTE_ID
+                );
+                setBorrowRoutePickerOpen(false);
+              }}
+              className={cn(
+                "flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors",
+                selectedBorrowAdapterId ===
+                  XALGO_CONSENSUS_BORROW_ALGO_ROUTE_ID
+                  ? "border-amber-500 bg-amber-50/90 dark:border-amber-500 dark:bg-amber-950/40"
+                  : "border-slate-200 bg-white/80 hover:border-amber-300 hover:bg-amber-50/50 dark:border-slate-600 dark:bg-slate-800/60 dark:hover:border-amber-700 dark:hover:bg-slate-800"
+              )}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                  ALGO
+                </div>
+                <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                  Borrow xALGO from the pool, burn to native ALGO via consensus in
+                  one transaction (amount is ALGO you expect to receive, min).
+                </div>
+              </div>
+              {selectedBorrowAdapterId ===
+              XALGO_CONSENSUS_BORROW_ALGO_ROUTE_ID ? (
+                <Check
+                  className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400"
+                  aria-hidden
+                />
+              ) : null}
+            </button>
+          ) : null}
           {borrowFolksAdapters.map((a) => {
             const sid = tokenAdapterStableId(a);
             const selected = sid === selectedBorrowAdapterId;

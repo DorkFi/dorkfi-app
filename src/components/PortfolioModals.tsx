@@ -1,7 +1,15 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- TODO: type modal state and API responses */
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import DepositModal from "./DepositModal";
-import WithdrawModal from "./WithdrawModal";
+import WithdrawModal, {
+  type WithdrawModalSubmitResult,
+  type WithdrawPhasedSignPayload,
+  type WithdrawSubmitOptions,
+} from "./WithdrawModal";
+import {
+  MainnetConsensusConfig,
+  XALGO_CONSENSUS_REPAY_ALGO_ROUTE_ID,
+} from "@/services/xalgoConsensusAdapter";
 import BorrowModal from "./BorrowModal";
 import RepayModal from "./RepayModal";
 import SupplyBorrowModal, {
@@ -1207,123 +1215,106 @@ const PortfolioModals = ({
     };
   };
 
-  const handleWithdrawSubmit = async (
-    amount: string,
-    options?: {
-      isMaxWithdraw?: boolean;
-      withdrawAllConfirmed?: boolean;
-      unsafeHealthFactorOverrideConfirmed?: boolean;
-      withdrawAdapterId?: string;
-    }
-  ) => {
+  const resolvePortfolioWithdrawContext = () => {
     if (!activeAccount?.address || !withdrawModal.asset) {
-      console.error("No active account or asset for withdrawal");
-      return;
+      throw new Error("Connect your wallet and select an asset to withdraw.");
     }
 
-    try {
-      console.log(`Withdrawing ${amount} ${withdrawModal.asset}`);
+    const deposit =
+      deposits.find(
+        (d) =>
+          d.asset === withdrawModal.asset &&
+          String(d.poolId ?? "") === String(withdrawModal.poolId ?? "") &&
+          (withdrawModal.marketId == null ||
+            withdrawModal.marketId === "" ||
+            String((d as Deposit).marketId ?? "") ===
+              String(withdrawModal.marketId)) &&
+          (withdrawModal.configSymbol == null ||
+            withdrawModal.configSymbol === "" ||
+            String((d as Deposit).configSymbol ?? "") ===
+              String(withdrawModal.configSymbol))
+      ) ??
+      (withdrawModal.poolId
+        ? (() => {
+            const candidates = deposits.filter(
+              (d) =>
+                d.asset === withdrawModal.asset &&
+                String(d.poolId ?? "") === String(withdrawModal.poolId)
+            );
+            return (
+              (withdrawModal.configSymbol
+                ? candidates.find(
+                    (c) =>
+                      String((c as Deposit).configSymbol ?? "") ===
+                      String(withdrawModal.configSymbol)
+                  )
+                : undefined) ?? candidates[0]
+            );
+          })()
+        : undefined) ??
+      deposits.find((d) => d.asset === withdrawModal.asset);
 
-      // Match deposit by market when symbol + pool collide (e.g. Algo + fALGO).
-      const deposit =
-        deposits.find(
-          (d) =>
-            d.asset === withdrawModal.asset &&
-            String(d.poolId ?? "") === String(withdrawModal.poolId ?? "") &&
-            (withdrawModal.marketId == null ||
-              withdrawModal.marketId === "" ||
-              String((d as Deposit).marketId ?? "") ===
-                String(withdrawModal.marketId)) &&
-            (withdrawModal.configSymbol == null ||
-              withdrawModal.configSymbol === "" ||
-              String((d as Deposit).configSymbol ?? "") ===
-                String(withdrawModal.configSymbol))
-        ) ??
-        (withdrawModal.poolId
-          ? (() => {
-              const candidates = deposits.filter(
-                (d) =>
-                  d.asset === withdrawModal.asset &&
-                  String(d.poolId ?? "") === String(withdrawModal.poolId)
-              );
-              return (
-                (withdrawModal.configSymbol
-                  ? candidates.find(
-                      (c) =>
-                        String((c as Deposit).configSymbol ?? "") ===
-                        String(withdrawModal.configSymbol)
-                    )
-                  : undefined) ?? candidates[0]
-              );
-            })()
-          : undefined) ??
-        deposits.find((d) => d.asset === withdrawModal.asset);
+    const networkToUse =
+      (withdrawModal.network ||
+        (deposit as any)?.network ||
+        currentNetwork) as NetworkId;
 
-      // Use the deposit's network if available, otherwise fall back to currentNetwork
-      const networkToUse =
-        withdrawModal.network || (deposit as any)?.network || currentNetwork;
+    const tokens = getAllTokensWithDisplayInfo(networkToUse);
+    const token = resolveSupplyBorrowToken(
+      tokens,
+      withdrawModal.asset ?? "",
+      withdrawModal.poolId,
+      (deposit as Deposit)?.configSymbol ?? withdrawModal.configSymbol,
+      withdrawModal.marketId ?? ""
+    );
 
-      // Get token configuration using the deposit's network
-      const tokens = getAllTokensWithDisplayInfo(networkToUse);
-      const token = resolveSupplyBorrowToken(
-        tokens,
-        withdrawModal.asset ?? "",
-        withdrawModal.poolId,
-        (deposit as Deposit)?.configSymbol ?? withdrawModal.configSymbol,
-        withdrawModal.marketId ?? ""
+    if (!token?.poolId || !token.underlyingContractId) {
+      throw new Error(
+        `Token not found for ${withdrawModal.asset}${
+          withdrawModal.poolId ? ` with poolId ${withdrawModal.poolId}` : ""
+        } on network ${networkToUse}`
       );
+    }
 
-      if (!token?.poolId || !token.underlyingContractId) {
-        throw new Error(
-          `Token not found for ${withdrawModal.asset}${
-            withdrawModal.poolId ? ` with poolId ${withdrawModal.poolId}` : ""
-          } on network ${networkToUse}`
-        );
-      }
-
-      const configLookupKey =
-        token.configKey ?? token.originalSymbol ?? withdrawModal.asset;
-      const originalTokenConfigRaw = getTokenConfig(
-        networkToUse,
-        configLookupKey
+    const configLookupKey =
+      token.configKey ?? token.originalSymbol ?? withdrawModal.asset;
+    const originalTokenConfigRaw = getTokenConfig(networkToUse, configLookupKey);
+    if (!originalTokenConfigRaw) {
+      throw new Error(
+        `Token config not found for ${withdrawModal.asset} (configLookupKey: ${configLookupKey}) on network ${networkToUse}`
       );
-      if (!originalTokenConfigRaw) {
-        throw new Error(
-          `Token config not found for ${withdrawModal.asset} (configLookupKey: ${configLookupKey}) on network ${networkToUse}`
-        );
-      }
+    }
 
-      // Handle case where tokenConfig might be an array (multiple markets)
-      // Compare poolIds as strings to ensure exact match
-      const originalTokenConfig = Array.isArray(originalTokenConfigRaw)
-        ? originalTokenConfigRaw.find(
-            (tc) => String(tc.poolId) === String(token.poolId)
-          ) || originalTokenConfigRaw[0]
-        : originalTokenConfigRaw;
+    const originalTokenConfig = Array.isArray(originalTokenConfigRaw)
+      ? originalTokenConfigRaw.find(
+          (tc) => String(tc.poolId) === String(token.poolId)
+        ) || originalTokenConfigRaw[0]
+      : originalTokenConfigRaw;
 
-      if (!originalTokenConfig) {
-        throw new Error(
-          `Token config not found for ${withdrawModal.asset} with poolId ${token.poolId} on network ${networkToUse}`
-        );
-      }
+    if (!originalTokenConfig) {
+      throw new Error(
+        `Token config not found for ${withdrawModal.asset} with poolId ${token.poolId} on network ${networkToUse}`
+      );
+    }
 
-      console.log("Withdraw parameters:", {
-        poolId: token.poolId,
-        marketId: token.underlyingContractId,
-        tokenStandard: originalTokenConfig.tokenStandard,
-        amount: amount,
-        userAddress: activeAccount.address,
-        networkId: networkToUse,
-      });
+    return { networkToUse, token, originalTokenConfig };
+  };
 
-      // withdrawAll / maxWithdrawScaled only when the user confirmed in the modal (withdraw-all checkbox).
+  const buildPortfolioWithdrawUnsigned = useCallback(
+    async (
+      amount: string,
+      options?: WithdrawSubmitOptions
+    ): Promise<WithdrawPhasedSignPayload> => {
+      const { networkToUse, token, originalTokenConfig } =
+        resolvePortfolioWithdrawContext();
+
       const withdrawAll = Boolean(options?.withdrawAllConfirmed);
       const result = await withdraw(
         token.poolId,
         token.underlyingContractId,
         originalTokenConfig.tokenStandard,
         amount,
-        activeAccount.address,
+        activeAccount!.address,
         networkToUse,
         {
           withdrawAll,
@@ -1334,233 +1325,216 @@ const PortfolioModals = ({
               ? BigInt(maxWithdrawData.maxWithdrawScaled)
               : undefined,
           withdrawAdapterId: options?.withdrawAdapterId,
+          xalgoConsensusWithdrawAppendBurn:
+            options?.xalgoConsensusWithdrawAppendBurn,
         }
       );
 
       if (!result.success) {
         if ((result as any).error) {
-          const message = (result as any).error.toLowerCase();
+          const message = String((result as any).error).toLowerCase();
           if (message.includes("insufficient liquidity for withdraw")) {
             throw new Error(message);
           }
           throw new Error((result as any).error || "Withdraw failed");
         }
+        throw new Error("Withdraw failed");
       }
 
-      console.log("Withdraw result:", result);
+      if (!("txns" in result) || !result.txns?.length) {
+        throw new Error("No transactions returned from protocol; nothing to sign.");
+      }
 
-      // Check if wallet is supported on the network for signing
-      if (activeWallet) {
-        const walletId = activeWallet.id?.toLowerCase() || "";
-        const walletName = activeWallet.metadata?.name?.toLowerCase() || "";
-        const networkId = networkToUse as string;
+      const underlyingId =
+        token && typeof token === "object" && "underlyingAssetId" in token
+          ? (token as { underlyingAssetId?: string }).underlyingAssetId
+          : undefined;
 
-        // Universal wallets support all AVM networks
-        const isUniversalWallet =
-          walletId === "lute" ||
-          walletId === "kibisis" ||
-          walletId === "vera" ||
-          walletId === "biatec";
+      const xBurn = Boolean(options?.xalgoConsensusWithdrawAppendBurn);
 
-        // VOI-specific wallets only support VOI Mainnet
-        const isVOIWallet = false;
+      return {
+        txnsB64: result.txns,
+        poolAppId: String(token.poolId),
+        marketContractId: String(token.underlyingContractId),
+        underlyingAssetId: underlyingId ?? null,
+        networkId: networkToUse,
+        txSignPreviewVariant: xBurn
+          ? "xalgo-withdraw-burn-combined"
+          : "lending",
+        governanceConsensusAppId: xBurn
+          ? String(MainnetConsensusConfig.consensusAppId)
+          : undefined,
+        assetDisplaySymbol: withdrawModal.asset ?? token.symbol,
+        amountHuman: amount,
+      };
+    },
+    [
+      activeAccount?.address,
+      withdrawModal.asset,
+      withdrawModal.poolId,
+      withdrawModal.marketId,
+      withdrawModal.configSymbol,
+      withdrawModal.network,
+      deposits,
+      currentNetwork,
+      maxWithdrawData?.maxWithdrawScaled,
+    ]
+  );
 
-        // Algorand-specific wallets only support Algorand Mainnet
-        const isAlgorandWallet =
-          walletId === "pera" ||
-          walletId === "defly" ||
-          walletName.includes("pera") ||
-          walletName.includes("defly");
+  const finalizePortfolioWithdrawSigned = useCallback(
+    async (
+      stxns: Uint8Array[],
+      built: WithdrawPhasedSignPayload
+    ): Promise<WithdrawModalSubmitResult> => {
+      try {
+        const { networkToUse, token } = resolvePortfolioWithdrawContext();
 
-        // WalletConnect - check wallet name for specific restrictions
-        const isWalletConnect = walletId === "walletconnect";
-        let isWalletConnectVOI = false;
-        let isWalletConnectAlgorand = false;
-
-        if (isWalletConnect) {
-          isWalletConnectVOI =
-            walletName.includes("vera") || walletName.includes("biatec");
-          isWalletConnectAlgorand =
-            walletName.includes("pera") || walletName.includes("defly");
+        const algorandNetwork = getAlgorandNetworkFromNetworkId(
+          built.networkId as NetworkId
+        );
+        if (!algorandNetwork) {
+          throw new Error(`Invalid network: ${built.networkId}`);
         }
-
-        // Check if wallet supports the network
-        const isSupported =
-          isUniversalWallet ||
-          (isVOIWallet && networkId === "voi-mainnet") ||
-          (isAlgorandWallet && networkId === "algorand-mainnet") ||
-          (isWalletConnect &&
-            ((isWalletConnectVOI && networkId === "voi-mainnet") ||
-              (isWalletConnectAlgorand && networkId === "algorand-mainnet") ||
-              (!isWalletConnectVOI &&
-                !isWalletConnectAlgorand &&
-                currentNetwork === "voi-mainnet" &&
-                networkId === "voi-mainnet") ||
-              (!isWalletConnectVOI && !isWalletConnectAlgorand))) ||
-          (!isVOIWallet && !isAlgorandWallet && !isWalletConnect); // Unknown wallet types allow all networks
-
-        if (!isSupported) {
-          const networkName =
-            networkId === "voi-mainnet" ? "VOI Mainnet" : "Algorand Mainnet";
-          throw new Error(
-            `Your wallet (${
-              activeWallet.metadata?.name || walletId
-            }) does not support ${networkName}. Please switch to a compatible wallet or network.`
+        const algorandClients =
+          await algorandService.initializeClientsForTransactions(
+            algorandNetwork
           );
-        }
-      }
+        const res = await algorandClients.algod.sendRawTransaction(stxns).do();
+        await waitForConfirmation(algorandClients.algod, res.txid, 4);
 
-      // Show toast notification to prompt user to open wallet
-      const walletName = activeWallet?.metadata?.name || "your wallet";
-      toast({
-        title: "Please Sign Transaction",
-        description: `Please open ${walletName} and sign the transaction`,
-        duration: 10000,
-      });
+        const decodedStxns = stxns.map((txn: Uint8Array) =>
+          algosdk.decodeSignedTransaction(txn)
+        );
+        const poolTxnID = decodedStxns
+          .slice()
+          .reverse()
+          .find(
+            (txn: any) =>
+              txn.txn.type === "appl" &&
+              Number(txn.txn.applicationCall.appIndex) ===
+                parseInt(built.poolAppId, 10)
+          )
+          ?.txn.txID();
 
-      // Sign and send transactions
-      const stxns = await signTransactions(
-        (result as any).txns.map((txn: string) =>
-          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
-        )
-      );
+        if (poolTxnID) {
+          await new Promise((resolve) => setTimeout(resolve, 5000));
+          let metadataUpdated = false;
+          let retryCount = 0;
+          const maxRetries = 10;
+          const apiBaseUrl =
+            import.meta.env.VITE_DORKFI_API_URL ||
+            "https://dorkfi-api.nautilus.sh";
+          const networkParam = networkToUse ? `?network=${networkToUse}` : "";
 
-      // Get the correct algod client for the deposit's network (not currentNetwork)
-      const algorandNetwork = getAlgorandNetworkFromNetworkId(
-        networkToUse as any
-      );
-      if (!algorandNetwork) {
-        throw new Error(`Invalid network: ${networkToUse}`);
-      }
-      const algorandClients =
-        await algorandService.initializeClientsForTransactions(algorandNetwork);
-      const res = await algorandClients.algod.sendRawTransaction(stxns).do();
-      await waitForConfirmation(algorandClients.algod, res.txid, 4);
+          while (!metadataUpdated && retryCount < maxRetries) {
+            try {
+              const response = await fetch(
+                `${apiBaseUrl}/transaction-metadata/${poolTxnID}${networkParam}`,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
+                }
+              );
 
-      // Decode transactions to find the pool transaction ID
-      const decodedStxns = stxns.map((txn: Uint8Array) => {
-        return algosdk.decodeSignedTransaction(txn);
-      });
-      const poolTxnID = decodedStxns
-        .reverse()
-        .find(
-          (txn: any) =>
-            txn.txn.type === "appl" &&
-            Number(txn.txn.applicationCall.appIndex) === parseInt(token.poolId)
-        )
-        ?.txn.txID();
-      if (poolTxnID) {
-        await new Promise((resolve) => setTimeout(resolve, 5000));
-        // Retry until metadata update succeeds
-        let metadataUpdated = false;
-        let retryCount = 0;
-        const maxRetries = 10;
-        const apiBaseUrl =
-          import.meta.env.VITE_DORKFI_API_URL ||
-          "https://dorkfi-api.nautilus.sh";
-        const networkParam = networkToUse ? `?network=${networkToUse}` : "";
-
-        while (!metadataUpdated && retryCount < maxRetries) {
-          try {
-            const response = await fetch(
-              `${apiBaseUrl}/transaction-metadata/${poolTxnID}${networkParam}`,
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                },
+              if (response.ok) {
+                const metaResult = await response.json();
+                console.log(
+                  "Transaction metadata successfully updated:",
+                  metaResult.data
+                );
+                metadataUpdated = true;
+              } else {
+                const error = await response.json();
+                throw new Error(
+                  error.error || "Failed to update transaction metadata"
+                );
               }
-            );
-
-            if (response.ok) {
-              const result = await response.json();
-              console.log(
-                "Transaction metadata successfully updated:",
-                result.data
-              );
-              metadataUpdated = true;
-            } else {
-              const error = await response.json();
-              throw new Error(
-                error.error || "Failed to update transaction metadata"
-              );
-            }
-          } catch (error) {
-            retryCount++;
-            if (retryCount < maxRetries) {
-              const delay = 1000 * Math.pow(2, retryCount - 1); // Exponential backoff
-              console.warn(
-                `Metadata update attempt ${retryCount} failed, retrying in ${delay}ms:`,
-                error
-              );
-              await new Promise((resolve) => setTimeout(resolve, delay));
-            } else {
-              console.error(
-                "Failed to update transaction metadata after all retries:",
-                error
-              );
+            } catch (error) {
+              retryCount++;
+              if (retryCount < maxRetries) {
+                const delay = 1000 * Math.pow(2, retryCount - 1);
+                console.warn(
+                  `Metadata update attempt ${retryCount} failed, retrying in ${delay}ms:`,
+                  error
+                );
+                await new Promise((resolve) => setTimeout(resolve, delay));
+              } else {
+                console.error(
+                  "Failed to update transaction metadata after all retries:",
+                  error
+                );
+              }
             }
           }
         }
+
+        if (onRefreshWalletBalance && withdrawModal.asset) {
+          onRefreshWalletBalance(withdrawModal.asset);
+        }
+
+        if (activeAccount?.address) {
+          Promise.all([
+            dorkfiAPIService.fetchFreshUserData(
+              activeAccount.address,
+              networkToUse,
+              parseInt(token.poolId, 10),
+              parseInt(token.underlyingContractId, 10)
+            ),
+            fetchMarketInfoFromContract(
+              token.poolId,
+              token.underlyingContractId,
+              networkToUse as NetworkId
+            ),
+            dorkfiAPIService.fetchFreshUserHealth(
+              networkToUse,
+              parseInt(token.poolId, 10),
+              activeAccount.address
+            ),
+          ])
+            .then(() => {
+              if (onRefreshMarket) {
+                setTimeout(() => {
+                  onRefreshMarket();
+                }, 1000);
+              }
+            })
+            .catch((error) => {
+              console.error(
+                "Error calling fetchFreshUserData after withdraw:",
+                error
+              );
+            });
+        }
+
+        return { txId: res.txid };
+      } catch (error) {
+        console.error("Withdraw error:", error);
+        throw error;
       }
+    },
+    [
+      activeAccount?.address,
+      withdrawModal.asset,
+      withdrawModal.poolId,
+      withdrawModal.marketId,
+      withdrawModal.configSymbol,
+      withdrawModal.network,
+      deposits,
+      currentNetwork,
+      onRefreshWalletBalance,
+      onRefreshMarket,
+    ]
+  );
 
-      console.log("Withdraw transaction confirmed:", res);
-
-      // Refresh wallet balance after successful withdrawal
-      if (onRefreshWalletBalance) {
-        onRefreshWalletBalance(withdrawModal.asset);
-      }
-
-      Promise.all([
-        dorkfiAPIService.fetchFreshUserData(
-          activeAccount.address,
-          networkToUse,
-          parseInt(token.poolId),
-          parseInt(token.underlyingContractId)
-        ),
-        fetchMarketInfoFromContract(
-          token.poolId,
-          token.underlyingContractId,
-          networkToUse as NetworkId
-        ),
-        dorkfiAPIService.fetchFreshUserHealth(
-          networkToUse,
-          parseInt(token.poolId),
-          activeAccount.address
-        ),
-      ])
-        .then(() => {
-          if (onRefreshMarket) {
-            setTimeout(() => {
-              onRefreshMarket();
-            }, 1000);
-          }
-        })
-        .catch((error) => {
-          console.error(
-            "Error calling fetchFreshUserData after withdraw:",
-            error
-          );
-        });
-
-      // Close the modal
-      onCloseWithdrawModal();
-    } catch (error) {
-      console.error("Withdraw error:", error);
-      const errorMessage = getUserFriendlyError(error);
-
-      // Show error toast to the user
-      toast({
-        title: "Withdraw Failed",
-        description: errorMessage,
-        variant: "destructive",
-        duration: 5000,
-      });
-
-      // Re-throw the error so WithdrawModal can catch it and not show success modal
-      throw error;
-    }
-  };
+  const portfolioWithdrawPhased = useMemo(
+    () => ({
+      buildUnsignedGroup: buildPortfolioWithdrawUnsigned,
+      finalizeSignedGroup: finalizePortfolioWithdrawSigned,
+    }),
+    [buildPortfolioWithdrawUnsigned, finalizePortfolioWithdrawSigned]
+  );
 
   // Track if we've already fetched balance for this modal open/asset combination
   const lastFetchedRef = useRef<{ isOpen: boolean; asset: string | null }>({
@@ -1735,8 +1709,21 @@ const PortfolioModals = ({
       });
 
       // Call the appropriate lending service method based on isRepayAll flag
-      const repayOpts =
-        opts?.repayAdapterId != null && String(opts.repayAdapterId).trim() !== ""
+      const isXalgoConsensusRepayAlgo =
+        opts?.repayAdapterId === XALGO_CONSENSUS_REPAY_ALGO_ROUTE_ID &&
+        networkToUse === "algorand-mainnet";
+
+      const repayOpts = isXalgoConsensusRepayAlgo
+        ? {
+            xalgoConsensusRepayAlgoMicros: BigInt(
+              new BigNumber(amount)
+                .times(1e6)
+                .integerValue(BigNumber.ROUND_FLOOR)
+                .toFixed(0)
+            ),
+          }
+        : opts?.repayAdapterId != null &&
+            String(opts.repayAdapterId).trim() !== ""
           ? { repayAdapterId: String(opts.repayAdapterId).trim() }
           : undefined;
 
@@ -2270,6 +2257,11 @@ const PortfolioModals = ({
             ? withdrawToken.originalSymbol ?? withdrawToken.symbol
             : undefined;
 
+          const xalgoConsensusWithdrawAlgoOption =
+            networkW === "algorand-mainnet" &&
+            withdrawModal.asset === "xALGO" &&
+            String(withdrawToken?.symbol ?? "") === "xALGO";
+
           return (
             <WithdrawModal
               isOpen={withdrawModal.isOpen}
@@ -2320,7 +2312,8 @@ const PortfolioModals = ({
               }
               marketPositionSymbol={marketPositionSym}
               folksWithdrawAdapters={folksWithdrawAdapters}
-              onSubmit={handleWithdrawSubmit}
+              xalgoConsensusWithdrawAlgoOption={xalgoConsensusWithdrawAlgoOption}
+              withdrawPhased={portfolioWithdrawPhased}
               onRefreshBalance={() => {
                 // Refresh market data
                 if (onRefreshMarket) {
@@ -2510,6 +2503,11 @@ const PortfolioModals = ({
             repayTokenRow.poolId ?? ""
           )}`;
 
+          const xalgoConsensusRepayAlgoOption =
+            networkRep === "algorand-mainnet" &&
+            repayModal.asset === "xALGO" &&
+            String(repayTokenRow?.symbol ?? "") === "xALGO";
+
           return (
             <RepayModal
               isOpen={repayModal.isOpen}
@@ -2570,6 +2568,7 @@ const PortfolioModals = ({
                 folksMintedOneUnderlyingByKey?.[repayMintKey]
               }
               repayTokenConfig={tcRepayModal ?? undefined}
+              xalgoConsensusRepayAlgoOption={xalgoConsensusRepayAlgoOption}
             />
           );
         })()}

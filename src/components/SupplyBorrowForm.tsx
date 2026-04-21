@@ -43,6 +43,11 @@ interface SupplyBorrowFormProps {
   maxBorrowableUnitSymbol?: string;
   /** Borrow: Folks mint ratio failed while ALGO receive route is selected. */
   borrowFolksRateUnavailable?: boolean;
+  /**
+   * Deposit: native spendable balance is still loading (e.g. xALGO “ALGO (consensus)” route).
+   * Skips amount-vs-wallet validation until the parent supplies a real balance.
+   */
+  depositWalletBalancePending?: boolean;
 }
 
 const SupplyBorrowForm = ({
@@ -71,6 +76,7 @@ const SupplyBorrowForm = ({
   walletBalanceRowTitle,
   maxBorrowableUnitSymbol,
   borrowFolksRateUnavailable = false,
+  depositWalletBalancePending = false,
 }: SupplyBorrowFormProps) => {
   const [amount, setAmount] = useState<number | "">("");
   const [fiatValue, setFiatValue] = useState(0);
@@ -106,7 +112,11 @@ const SupplyBorrowForm = ({
     const value = numValue;
 
     // Check wallet balance for deposits
-    if (mode === "deposit" && value > walletBalance) {
+    if (
+      mode === "deposit" &&
+      !depositWalletBalancePending &&
+      value > walletBalance
+    ) {
       return "Insufficient wallet balance";
     }
 
@@ -181,6 +191,7 @@ const SupplyBorrowForm = ({
     mode,
     asset,
     borrowFolksRateUnavailable,
+    depositWalletBalancePending,
   ]);
 
   // Calculate max borrowable amount based on market liquidity only
@@ -404,9 +415,11 @@ const SupplyBorrowForm = ({
                   }`}
               >
                 {mode === "deposit"
-                  ? `${walletBalance.toLocaleString(undefined, {
-                    maximumFractionDigits: 6,
-                  })} ${walletBalanceDisplaySymbol ?? asset}`
+                  ? depositWalletBalancePending
+                    ? `Loading… ${walletBalanceDisplaySymbol ?? asset}`
+                    : `${walletBalance.toLocaleString(undefined, {
+                        maximumFractionDigits: 6,
+                      })} ${walletBalanceDisplaySymbol ?? asset}`
                   : isLoadingMaxBorrow
                     ? "Calculating..."
                     : maxBorrowError
@@ -435,10 +448,12 @@ const SupplyBorrowForm = ({
               >
                 {mode === "deposit" ? (
                   <>
-                    {`≈ $${walletBalanceUSD.toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}`}
+                    {depositWalletBalancePending
+                      ? "—"
+                      : `≈ $${walletBalanceUSD.toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}`}
                     {walletBalanceLastUpdated && (
                       <span className="ml-2 text-[11px] opacity-80">
                         · Updated {formatRelativeTime(walletBalanceLastUpdated)}

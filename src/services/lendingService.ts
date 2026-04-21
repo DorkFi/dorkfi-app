@@ -60,6 +60,14 @@ import {
   estimateFolksDepositMintedFAssetAmount,
   folksMintTxnsToArccjsExtraTxns,
 } from "./folksDepositAdapter";
+import {
+  MainnetConsensusConfig,
+  buildGovernanceXalgoMintUnsignedWithOptionalOptIn,
+  minXalgoOutImmediateMintFloor,
+  buildXalgoBurnTxns,
+  fetchXalgoMainnetConsensusState,
+  minAlgoOutBurnFloor,
+} from "./xalgoConsensusAdapter";
 
 export interface MarketData {
   appId: string;
@@ -1134,7 +1142,7 @@ export const fetchUserGlobalData = async (
     const networkConfig = getNetworkConfig(networkId);
 
     if (isAlgorandCompatibleNetwork(networkId)) {
-      const clients = algorandService.initializeClients(
+      const clients = await algorandService.initializeClientsForReads(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
 
@@ -1287,7 +1295,7 @@ export const fetchUserGlobalDataForPool = async (
       return null;
     }
 
-    const clients = algorandService.initializeClients(
+    const clients = await algorandService.initializeClientsForReads(
       networkConfig.walletNetworkId as AlgorandNetwork
     );
 
@@ -1378,7 +1386,7 @@ export const fetchUserDataFromChain = async (
       }
 
       const networkConfig = getNetworkConfig(networkId);
-      const clients = algorandService.initializeClients(
+      const clients = await algorandService.initializeClientsForReads(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
 
@@ -1591,7 +1599,7 @@ export const fetchUserBorrowBalance = async (
     const networkConfig = getNetworkConfig(networkId);
 
     if (isAlgorandCompatibleNetwork(networkId)) {
-      const clients = algorandService.initializeClients(
+      const clients = await algorandService.initializeClientsForReads(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
 
@@ -1763,7 +1771,7 @@ export async function fetchBorrowPositionChainDebug(
     }
 
     const networkConfig = getNetworkConfig(networkId);
-    const clients = algorandService.initializeClients(
+    const clients = await algorandService.initializeClientsForReads(
       networkConfig.walletNetworkId as AlgorandNetwork
     );
 
@@ -1953,7 +1961,7 @@ export const fetchUserDepositBalance = async (
     const networkConfig = getNetworkConfig(networkId);
 
     if (isAlgorandCompatibleNetwork(networkId)) {
-      const clients = algorandService.initializeClients(
+      const clients = await algorandService.initializeClientsForReads(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
 
@@ -2095,7 +2103,7 @@ export const fetchUserWalletBalance = async (
     });
 
     if (isAlgorandCompatibleNetwork(networkId)) {
-      const clients = algorandService.initializeClients(
+      const clients = await algorandService.initializeClientsForReads(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
 
@@ -2519,6 +2527,8 @@ export const getMaxWithdrawableForMarket = async (
  * @param options.withdrawAll - When true (withdraw all / max): use full nToken balance or options.maxWithdrawScaled if provided
  * @param options.maxWithdrawScaled - When set with withdrawAll, use this scaled amount for the contract call (health-factor-safe max)
  * @param options.withdrawAdapterId - Folks withdraw-phase adapter id (see {@link resolveWithdrawFolksAdapter}); omit for first withdraw adapter.
+ * @param options.xalgoConsensusWithdrawAppendBurn - When true on mainnet Governance xALGO: after nt200
+ * `withdraw`, append governance `burn` so the wallet receives native ALGO (same atomic group).
  */
 export const withdraw = async (
   poolId: string,
@@ -2531,6 +2541,7 @@ export const withdraw = async (
     withdrawAll?: boolean;
     maxWithdrawScaled?: bigint;
     withdrawAdapterId?: string;
+    xalgoConsensusWithdrawAppendBurn?: boolean;
   }
 ): Promise<
   | { success: boolean; txId?: string; error?: string }
@@ -2543,13 +2554,15 @@ export const withdraw = async (
     userAddress,
     networkId,
     tokenStandard,
+    xalgoConsensusWithdrawAppendBurn:
+      options?.xalgoConsensusWithdrawAppendBurn,
   });
 
   try {
     const networkConfig = getNetworkConfig(networkId);
 
     if (isAlgorandCompatibleNetwork(networkId)) {
-      const clients = algorandService.initializeClients(
+      const clients = await algorandService.initializeClientsForReads(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
 
@@ -2597,6 +2610,16 @@ export const withdraw = async (
         !withdrawReceiveIsMarketToken &&
         networkConfig.networkId === "algorand-mainnet" &&
         tokenStandardUsesAsaStyleNt200Txns(tokenStandard);
+
+      if (
+        options?.withdrawAdapterId != null &&
+        String(options.withdrawAdapterId).trim() !== "" &&
+        options?.xalgoConsensusWithdrawAppendBurn === true
+      ) {
+        throw new Error(
+          "Governance xALGO withdraw+burn cannot be combined with a Folks withdraw adapter id."
+        );
+      }
 
       // Convert amount to proper units (considering decimals)
       const amountInSmallestUnit = BigInt(
@@ -3796,6 +3819,54 @@ export const withdraw = async (
             buildN.push(...folksMintTxnsToArccjsExtraTxns(folksRedeemTxns));
           }
         }
+
+        if (
+          networkConfig.networkId === "algorand-mainnet" &&
+          options?.xalgoConsensusWithdrawAppendBurn === true &&
+          underlying_amount > BigInt(0)
+        ) {
+          if (folksWithdrawUsesFolksRedeem) {
+            throw new Error(
+              "Governance xALGO withdraw+burn cannot be combined with Folks redeem on withdraw."
+            );
+          }
+          const underlyingId = Number(
+            String(token.underlyingAssetId ?? "").trim()
+          );
+          if (
+            underlyingId !== MainnetConsensusConfig.xAlgoId ||
+            token.symbol !== "xALGO"
+          ) {
+            throw new Error(
+              "xalgoConsensusWithdrawAppendBurn is only valid for the mainnet Governance xALGO market."
+            );
+          }
+          const consensusState = await fetchXalgoMainnetConsensusState(
+            clients.algod
+          );
+          const minAlgo = minAlgoOutBurnFloor(
+            consensusState,
+            underlying_amount,
+            150n
+          );
+          if (minAlgo <= 0n) {
+            throw new Error(
+              "Burn output would be zero at current rates; amount is too small."
+            );
+          }
+          const spBurn = await clients.algod.getTransactionParams().do();
+          const { txns: burnUnsigned } = await buildXalgoBurnTxns({
+            algod: clients.algod,
+            senderAddr: userAddress,
+            receiverAddr: userAddress,
+            xalgoAmount: underlying_amount,
+            minAlgoReceived: minAlgo,
+            suggestedParams: spBurn,
+          });
+          if (burnUnsigned.length > 0) {
+            buildN.push(...folksMintTxnsToArccjsExtraTxns(burnUnsigned));
+          }
+        }
       } else if (tokenStandard == "arc200-exchange") {
         const txnO = (
           await builder.arc200Exchange.arc200_swapBack(
@@ -3882,7 +3953,14 @@ export const deposit = async (
   amount: string,
   userAddress: string,
   networkId: NetworkId,
-  options?: { depositAdapterId?: string }
+  options?: {
+    depositAdapterId?: string;
+    /**
+     * When set on Algorand mainnet xALGO consensus+supply, prepend governance `immediate_mint`
+     * into `buildN` (same arccjs path as Folks f-asset mint) so `ci.custom()` simulation sees minted xALGO before nt200 axfer.
+     */
+    xalgoConsensusMintAlgoMicros?: bigint;
+  }
 ): Promise<
   | { success: boolean; txId?: string; error?: string }
   | { success: true; txns: string[] }
@@ -3896,6 +3974,7 @@ export const deposit = async (
     userAddress,
     networkId,
     depositAdapterId: options?.depositAdapterId,
+    xalgoConsensusMintAlgoMicros: options?.xalgoConsensusMintAlgoMicros?.toString(),
   });
 
   try {
@@ -3913,7 +3992,9 @@ export const deposit = async (
         );
       }
 
-      const clients = algorandService.initializeClients(algorandNetwork);
+      const clients = await algorandService.initializeClientsForReads(
+        algorandNetwork
+      );
       // Get token information
       const allTokens = getAllTokensWithDisplayInfo(networkId);
       console.log("=== TOKEN LOOKUP DEBUG ===");
@@ -4008,6 +4089,41 @@ export const deposit = async (
 
       console.log("bigAmount", { bigAmount });
 
+      const tokenConfigLookupSymbol =
+        token.configKey ?? token.originalSymbol ?? token.symbol;
+      const rawTokenConfigForDeposit = getTokenConfig(
+        networkId,
+        tokenConfigLookupSymbol
+      );
+      const tokenConfigForDeposit: TokenConfig | undefined = Array.isArray(
+        rawTokenConfigForDeposit
+      )
+        ? poolId != null && poolId !== ""
+          ? rawTokenConfigForDeposit.find(
+              (c) => String(c.poolId) === String(poolId)
+            ) ?? rawTokenConfigForDeposit[0]
+          : rawTokenConfigForDeposit[0]
+        : rawTokenConfigForDeposit;
+
+      const folksForDeposit = resolveDepositFolksAdapter(
+        tokenConfigForDeposit ?? {},
+        options?.depositAdapterId
+      );
+      const depositPhaseAdapters = tokenConfigForDeposit
+        ? getTokenAdaptersForPhase(tokenConfigForDeposit, "deposit")
+        : [];
+
+      /**
+       * `arc200_balanceOf` is f-ASA on nt200. For Folks `network-asa` / `asa-asa`, `bigAmount` is underlying
+       * (ALGO / xALGO / USDC …) except when the user chose deposit-from-f-wallet (`market_token`).
+       * Only compare / subtract when both sides are f-ASA (e.g. fUSDC supply from wallet), never for
+       * ALGO→xALGO consensus mint+supply or underlying xALGO→fxALGO mint.
+       */
+      const applyArc200DepositBalanceAdjustment =
+        tokenStandardUsesNt200Arc200Balance(tokenStandard) &&
+        (!tokenStandardIsFolksAsaBridge(tokenStandard) ||
+          folksForDeposit?.depositWalletBasis === "market_token");
+
       // Check if market is paused
       const marketPaused = await isMarketPaused(poolId, marketId, networkId);
       if (marketPaused) {
@@ -4079,28 +4195,28 @@ export const deposit = async (
         console.log("deposit:token_balanceR (user)", { token_balanceR });
         token_balance = BigInt(token_balanceR.returnValue);
 
-        // If user already has tokens, adjust deposit amount
-        if (token_balance > BigInt(0) && bigAmount > token_balance) {
-          adjustedDepositAmount = bigAmount - token_balance;
-          console.log(
-            "deposit:adjusted deposit amount based on user token balance",
-            {
-              requestedAmount: bigAmount.toString(),
-              userTokenBalance: token_balance.toString(),
-              adjustedDepositAmount: adjustedDepositAmount.toString(),
-              note: "User already has tokens, so we need to deposit less",
-            }
-          );
-        } else if (token_balance >= bigAmount) {
-          // User has enough tokens already, no deposit needed
-          adjustedDepositAmount = BigInt(0);
-          console.log(
-            "deposit:user has sufficient token balance, no deposit needed",
-            {
-              requestedAmount: bigAmount.toString(),
-              userTokenBalance: token_balance.toString(),
-            }
-          );
+        if (applyArc200DepositBalanceAdjustment) {
+          if (token_balance > BigInt(0) && bigAmount > token_balance) {
+            adjustedDepositAmount = bigAmount - token_balance;
+            console.log(
+              "deposit:adjusted deposit amount based on user token balance",
+              {
+                requestedAmount: bigAmount.toString(),
+                userTokenBalance: token_balance.toString(),
+                adjustedDepositAmount: adjustedDepositAmount.toString(),
+                note: "User already has tokens, so we need to deposit less",
+              }
+            );
+          } else if (token_balance >= bigAmount) {
+            adjustedDepositAmount = BigInt(0);
+            console.log(
+              "deposit:user has sufficient token balance, no deposit needed",
+              {
+                requestedAmount: bigAmount.toString(),
+                userTokenBalance: token_balance.toString(),
+              }
+            );
+          }
         }
       }
 
@@ -4193,29 +4309,7 @@ export const deposit = async (
 
       // `token.symbol` is often the display symbol when marketOverride exists (e.g. "Algo").
       // `configKey` / `originalSymbol` is the canonical `tokens` map key (e.g. "fALGO") for getTokenConfig + adapter.
-      const tokenConfigLookupSymbol =
-        token.configKey ?? token.originalSymbol ?? token.symbol;
-      const rawTokenConfigForDeposit = getTokenConfig(
-        networkId,
-        tokenConfigLookupSymbol
-      );
-      const tokenConfigForDeposit: TokenConfig | undefined = Array.isArray(
-        rawTokenConfigForDeposit
-      )
-        ? poolId != null && poolId !== ""
-          ? rawTokenConfigForDeposit.find(
-            (c) => String(c.poolId) === String(poolId)
-          ) ?? rawTokenConfigForDeposit[0]
-          : rawTokenConfigForDeposit[0]
-        : rawTokenConfigForDeposit;
-
-      const folksForDeposit = resolveDepositFolksAdapter(
-        tokenConfigForDeposit ?? {},
-        options?.depositAdapterId
-      );
-      const depositPhaseAdapters = tokenConfigForDeposit
-        ? getTokenAdaptersForPhase(tokenConfigForDeposit, "deposit")
-        : [];
+      // `tokenConfigForDeposit`, `folksForDeposit`, and `depositPhaseAdapters` are resolved earlier (before nt200 balance adjustment).
 
       if (tokenStandardIsFolksAsaBridge(tokenStandard) && !folksForDeposit) {
         throw new Error(
@@ -4350,6 +4444,49 @@ export const deposit = async (
       const nt200DepositNoteSymbol =
         token.originalSymbol === "fALGO" ? "fAlgo" : token.originalSymbol;
 
+      let consensusMintArccjsExtras: Record<string, unknown>[] | null = null;
+      if (
+        networkConfig.networkId === "algorand-mainnet" &&
+        options?.xalgoConsensusMintAlgoMicros != null &&
+        options.xalgoConsensusMintAlgoMicros > 0n
+      ) {
+        if (folksMintTxns != null && folksMintTxns.length > 0) {
+          throw new Error(
+            "Governance xALGO mint preamble cannot be combined with Folks mint transactions in one deposit."
+          );
+        }
+        const underlyingId = Number(String(token.underlyingAssetId ?? "").trim());
+        if (
+          underlyingId !== MainnetConsensusConfig.xAlgoId ||
+          token.symbol !== "xALGO"
+        ) {
+          throw new Error(
+            "xalgoConsensusMintAlgoMicros is only valid for the mainnet Governance xALGO market."
+          );
+        }
+        const algoMicro = options.xalgoConsensusMintAlgoMicros;
+        const spMint = await clients.algod.getTransactionParams().do();
+        const { unsigned: mintUnsigned, consensusState } =
+          await buildGovernanceXalgoMintUnsignedWithOptionalOptIn({
+            algod: clients.algod,
+            senderAddr: userAddress,
+            receiverAddr: userAddress,
+            algoMicroAlgos: algoMicro,
+            suggestedParams: spMint,
+          });
+        const minAtomic = minXalgoOutImmediateMintFloor(
+          consensusState,
+          algoMicro,
+          150n
+        );
+        if (minAtomic !== bigAmount) {
+          throw new Error(
+            `Governance mint min xALGO (${minAtomic.toString()}) must equal deposit amount (${bigAmount.toString()}). Refresh quote and retry.`
+          );
+        }
+        consensusMintArccjsExtras = folksMintTxnsToArccjsExtraTxns(mintUnsigned);
+      }
+
       let customTx: any;
 
       for (const p of [
@@ -4364,8 +4501,9 @@ export const deposit = async (
       ]) {
         const [p1, p2, p3] = p;
 
+        // `buildN`: pool `custom()` extras — governance xALGO mint (if `xalgoConsensusMintAlgoMicros`), then Folks mint,
+        // nt200 deposit / approve, lending deposit (same arccjs simulation path as fALGO preamble).
         const buildN = [];
-
 
         // create balance box for pool on setup
         if (false) {
@@ -4382,6 +4520,10 @@ export const deposit = async (
             payment: 28500,
             note: new TextEncoder().encode("nt200 createBalanceBox"),
           });
+        }
+
+        if (consensusMintArccjsExtras && consensusMintArccjsExtras.length > 0) {
+          buildN.push(...consensusMintArccjsExtras);
         }
 
         if (folksMintTxns && folksMintTxns.length > 0) {
@@ -4527,17 +4669,17 @@ export const deposit = async (
           // REM ensures that the pool can hold a balance prior to first
           //     first deposit
           // ------------------------------------------------------------
-          {
-            const receiver = algosdk.encodeAddress(
-              algosdk.getApplicationAddress(Number(poolId)).publicKey
-            );
-            const txnO = (await builder.token.arc200_transfer(receiver, 0)).obj;
-            buildN.push({
-              ...txnO,
-              payment: 28504,
-              note: new TextEncoder().encode(`arc200 transfer`),
-            });
-          }
+          // {
+          //   const receiver = algosdk.encodeAddress(
+          //     algosdk.getApplicationAddress(Number(poolId)).publicKey
+          //   );
+          //   const txnO = (await builder.token.arc200_transfer(receiver, 0)).obj;
+          //   buildN.push({
+          //     ...txnO,
+          //     payment: 28504,
+          //     note: new TextEncoder().encode(`arc200 transfer`),
+          //   });
+          // }
           // ------------------------------------------------------------
 
           // deposit to lending pool
@@ -4701,7 +4843,7 @@ export const migrate = async (
     const networkConfig = getCurrentNetworkConfig();
 
     if (isAlgorandCompatibleNetwork(networkId)) {
-      const clients = algorandService.initializeClients(
+      const clients = await algorandService.initializeClientsForReads(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
 
@@ -5017,7 +5159,14 @@ export const borrow = async (
   amount: string,
   userAddress: string,
   networkId: NetworkId,
-  options?: { borrowAdapterId?: string }
+  options?: {
+    borrowAdapterId?: string;
+    /**
+     * When true on Algorand mainnet Governance xALGO: after nt200 withdraw, append governance
+     * `burn` so the wallet receives native ALGO (same atomic group as `borrow` + `withdraw`).
+     */
+    xalgoConsensusBorrowAppendBurn?: boolean;
+  }
 ): Promise<
   | { success: boolean; txId?: string; error?: string }
   | { success: true; txns: string[] }
@@ -5029,6 +5178,7 @@ export const borrow = async (
     userAddress,
     networkId,
     borrowAdapterId: options?.borrowAdapterId,
+    xalgoConsensusBorrowAppendBurn: options?.xalgoConsensusBorrowAppendBurn,
   });
 
   try {
@@ -5036,7 +5186,7 @@ export const borrow = async (
 
     if (isAlgorandCompatibleNetwork(networkId)) {
       console.log({ networkConfig });
-      const clients = algorandService.initializeClients(
+      const clients = await algorandService.initializeClientsForReads(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
 
@@ -5283,6 +5433,16 @@ export const borrow = async (
         networkConfig.networkId === "algorand-mainnet" &&
         tokenStandardUsesAsaStyleNt200Txns(tokenStandard);
 
+      if (
+        options?.borrowAdapterId &&
+        String(options.borrowAdapterId).trim() !== "" &&
+        options?.xalgoConsensusBorrowAppendBurn === true
+      ) {
+        throw new Error(
+          "Governance xALGO borrow+burn cannot be combined with a Folks borrow adapter id."
+        );
+      }
+
       let folksBorrowExtraTxns: Record<string, unknown>[] = [];
       if (borrowUsesFolksRedeem && folksBorrowAdapter) {
         const amt = BigInt(amount);
@@ -5298,6 +5458,49 @@ export const borrow = async (
               folksMintTxnsToArccjsExtraTxns(folksRedeemTxns);
           }
         }
+      }
+
+      let consensusBurnBorrowArccjsExtras: Record<string, unknown>[] | null =
+        null;
+      if (
+        networkConfig.networkId === "algorand-mainnet" &&
+        options?.xalgoConsensusBorrowAppendBurn === true &&
+        bigAmount > BigInt(0)
+      ) {
+        if (folksBorrowExtraTxns.length > 0) {
+          throw new Error(
+            "Governance xALGO borrow+burn cannot be combined with Folks redeem borrow transactions."
+          );
+        }
+        const underlyingId = Number(
+          String(token.underlyingAssetId ?? "").trim()
+        );
+        if (
+          underlyingId !== MainnetConsensusConfig.xAlgoId ||
+          token.symbol !== "xALGO"
+        ) {
+          throw new Error(
+            "xalgoConsensusBorrowAppendBurn is only valid for the mainnet Governance xALGO market."
+          );
+        }
+        const consensusState = await fetchXalgoMainnetConsensusState(
+          clients.algod
+        );
+        const minAlgo = minAlgoOutBurnFloor(consensusState, bigAmount, 150n);
+        if (minAlgo <= 0n) {
+          throw new Error("Burn output would be zero at current rates; amount is too small.");
+        }
+        const spBurn = await clients.algod.getTransactionParams().do();
+        const { txns: burnUnsigned } = await buildXalgoBurnTxns({
+          algod: clients.algod,
+          senderAddr: userAddress,
+          receiverAddr: userAddress,
+          xalgoAmount: bigAmount,
+          minAlgoReceived: minAlgo,
+          suggestedParams: spBurn,
+        });
+        consensusBurnBorrowArccjsExtras =
+          folksMintTxnsToArccjsExtraTxns(burnUnsigned);
       }
 
       ciLending.setFee(5000);
@@ -5390,6 +5593,12 @@ export const borrow = async (
           });
           if (folksBorrowExtraTxns.length > 0) {
             buildN.push(...folksBorrowExtraTxns);
+          }
+          if (
+            consensusBurnBorrowArccjsExtras &&
+            consensusBurnBorrowArccjsExtras.length > 0
+          ) {
+            buildN.push(...consensusBurnBorrowArccjsExtras);
           }
         }
         // user withdraws from arc200-exchange
@@ -5487,7 +5696,14 @@ export const repay = async (
   amount: string,
   userAddress: string,
   networkId: NetworkId,
-  options?: { repayAdapterId?: string }
+  options?: {
+    repayAdapterId?: string;
+    /**
+     * When set on mainnet Governance xALGO: prepend governance `immediate_mint` (ALGO → xALGO) into
+     * `buildN` so the user repays with native ALGO in one atomic group (same arccjs path as deposit).
+     */
+    xalgoConsensusRepayAlgoMicros?: bigint;
+  }
 ): Promise<
   | { success: boolean; txId?: string; error?: string }
   | { success: true; txns: string[] }
@@ -5499,6 +5715,8 @@ export const repay = async (
     userAddress,
     networkId,
     repayAdapterId: options?.repayAdapterId,
+    xalgoConsensusRepayAlgoMicros:
+      options?.xalgoConsensusRepayAlgoMicros?.toString(),
   });
 
   try {
@@ -5506,7 +5724,7 @@ export const repay = async (
 
     if (isAlgorandCompatibleNetwork(networkId)) {
       console.log({ networkConfig });
-      const clients = algorandService.initializeClients(
+      const clients = await algorandService.initializeClientsForReads(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
 
@@ -5583,9 +5801,57 @@ export const repay = async (
           ? Number(token.underlyingAssetId)
           : NaN;
 
-      let repayArc200Units = BigInt(
-        new BigNumber(amount).multipliedBy(10 ** token.decimals).toFixed(0)
-      );
+      let consensusRepayMintExtras: Record<string, unknown>[] | null = null;
+      let repayArc200Units: bigint;
+      const xalgoRepayMicro = options?.xalgoConsensusRepayAlgoMicros;
+      if (xalgoRepayMicro != null && xalgoRepayMicro > 0n) {
+        if (
+          options?.repayAdapterId != null &&
+          String(options.repayAdapterId).trim() !== ""
+        ) {
+          throw new Error(
+            "Do not pass repayAdapterId together with xalgoConsensusRepayAlgoMicros."
+          );
+        }
+        if (repayPhaseAdapters.length > 0) {
+          throw new Error(
+            "Governance xALGO ALGO repay cannot be combined with Folks repay adapters on this token row."
+          );
+        }
+        if (networkId !== "algorand-mainnet") {
+          throw new Error(
+            "Governance xALGO consensus repay is only available on Algorand mainnet."
+          );
+        }
+        const underlyingId = Number(String(token.underlyingAssetId ?? "").trim());
+        if (
+          underlyingId !== MainnetConsensusConfig.xAlgoId ||
+          token.symbol !== "xALGO"
+        ) {
+          throw new Error(
+            "xalgoConsensusRepayAlgoMicros is only valid for the mainnet Governance xALGO market."
+          );
+        }
+        const spMint = await clients.algod.getTransactionParams().do();
+        const { unsigned: mintUnsigned, consensusState } =
+          await buildGovernanceXalgoMintUnsignedWithOptionalOptIn({
+            algod: clients.algod,
+            senderAddr: userAddress,
+            receiverAddr: userAddress,
+            algoMicroAlgos: xalgoRepayMicro,
+            suggestedParams: spMint,
+          });
+        repayArc200Units = minXalgoOutImmediateMintFloor(
+          consensusState,
+          xalgoRepayMicro,
+          150n
+        );
+        consensusRepayMintExtras = folksMintTxnsToArccjsExtraTxns(mintUnsigned);
+      } else {
+        repayArc200Units = BigInt(
+          new BigNumber(amount).multipliedBy(10 ** token.decimals).toFixed(0)
+        );
+      }
 
       let folksMintTxns: algosdk.Transaction[] | null = null;
 
@@ -5598,6 +5864,11 @@ export const repay = async (
       };
 
       if (repayPhaseAdapters.length > 0 && folksForRepay) {
+        if (consensusRepayMintExtras != null && consensusRepayMintExtras.length > 0) {
+          throw new Error(
+            "Governance xALGO mint preamble cannot be combined with Folks mint repay in one group."
+          );
+        }
         for (const a of repayPhaseAdapters) {
           if (a.type !== "folks") {
             throw new Error(`Unsupported repay adapter type: ${a.type}`);
@@ -5790,6 +6061,10 @@ export const repay = async (
       ]) {
         const buildN = [];
 
+        if (consensusRepayMintExtras && consensusRepayMintExtras.length > 0) {
+          buildN.push(...consensusRepayMintExtras);
+        }
+
         if (folksMintTxns && folksMintTxns.length > 0) {
           buildN.push(...folksMintTxnsToArccjsExtraTxns(folksMintTxns));
         }
@@ -5960,7 +6235,7 @@ export const repayOnBehalf = async (
 
     if (isAlgorandCompatibleNetwork(networkId)) {
       console.log({ networkConfig });
-      const clients = algorandService.initializeClients(
+      const clients = await algorandService.initializeClientsForReads(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
 
@@ -6315,7 +6590,7 @@ export const repayAll = async (
 
     if (isAlgorandCompatibleNetwork(networkId)) {
       console.log({ networkConfig });
-      const clients = algorandService.initializeClients(
+      const clients = await algorandService.initializeClientsForReads(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
 
@@ -6883,7 +7158,7 @@ export const liquidateCrossMarket = async (
   try {
     const networkConfig = getNetworkConfig(networkId);
     if (isAlgorandCompatibleNetwork(networkId)) {
-      const clients = algorandService.initializeClients(
+      const clients = await algorandService.initializeClientsForReads(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
       const builder = {

@@ -3509,15 +3509,14 @@ export default function PreFiDashboard() {
                 [selectedMarket.id]: false,
               }));
 
-              // Close modal and show success
+              // Close modal here; tell WithdrawModal not to show embedded success (PreFi flow).
               closeWithdrawModal();
-
-              // Refresh balances from blockchain to ensure accuracy (silent refresh)
               setTimeout(() => {
                 if (selectedMarket) {
                   loadMarket(selectedMarket, false); // false = no loading indicators
                 }
               }, 1000); // Small delay to ensure transaction is fully processed
+              return { skipSuccessModal: true };
             } catch (error) {
               console.error("Withdraw failed:", error);
               setLoadingMap((prev) => ({

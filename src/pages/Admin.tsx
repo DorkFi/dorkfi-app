@@ -109,6 +109,15 @@ import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClien
 import { APP_SPEC as UNITGovernanceAppSpec } from "@/clients/UNITGovernanceClient";
 import { APP_SPEC as PriceOracleAppSpec } from "@/clients/PriceOracleClient";
 import algorandService, { AlgorandNetwork } from "@/services/algorandService";
+import {
+  ALGORAND_MAINNET_NODELY_ALGOD_URL,
+  buildXalgoBurnTxns,
+  buildXalgoImmediateMintTxns,
+  fetchXalgoMainnetConsensusState,
+  minAlgoOutBurnFloor,
+  minXalgoOutImmediateMintFloor,
+  MainnetConsensusConfig,
+} from "@/services/xalgoConsensusAdapter";
 import { CONTRACT } from "ulujs";
 import {
   decodeMarket,
@@ -151,6 +160,10 @@ import WalletNetworkButton from "@/components/WalletNetworkButton";
 import { useWallet } from "@txnlab/use-wallet-react";
 import algosdk, { waitForConfirmation } from "algosdk";
 import BigNumber from "bignumber.js";
+import {
+  convertAlgoToXAlgoWhenImmediate,
+  convertXAlgoToAlgo,
+} from "@folks-finance/algorand-sdk";
 import envoiService, { type EnvoiNameResponse } from "@/services/envoiService";
 import { fromBase } from "@/utils/calculationUtils";
 import {
@@ -510,6 +523,213 @@ export default function AdminDashboard() {
       setBorrowDebugApiLoading(false);
     }
   }, [borrowDebugAddress, borrowDebugPoolId, borrowDebugMarketId, borrowDebugNetwork]);
+
+  /** Tools tab: governance xALGO consensus ALGO ↔ xALGO smoke test */
+  const [xalgoConvDirection, setXalgoConvDirection] = useState<"mint" | "burn">(
+    "mint"
+  );
+  const [xalgoConvAmountHuman, setXalgoConvAmountHuman] = useState("1");
+  const [xalgoConvQuoteLoading, setXalgoConvQuoteLoading] = useState(false);
+  const [xalgoConvSubmitting, setXalgoConvSubmitting] = useState(false);
+  const [xalgoConvQuoteError, setXalgoConvQuoteError] = useState<string | null>(
+    null
+  );
+  const [xalgoConvQuote, setXalgoConvQuote] = useState<{
+    spotOutHuman: string;
+    minOutHuman: string;
+    spotOutAtomic: string;
+    minOutAtomic: string;
+    canImmediateStake: boolean;
+  } | null>(null);
+  const [xalgoConvLastTxid, setXalgoConvLastTxid] = useState<string | null>(null);
+
+  const handleXalgoConsensusQuote = useCallback(async () => {
+    setXalgoConvQuoteError(null);
+    setXalgoConvQuote(null);
+    setXalgoConvLastTxid(null);
+    const raw = xalgoConvAmountHuman.trim();
+    const parsed = parseFloat(raw);
+    if (!raw || !Number.isFinite(parsed) || parsed <= 0) {
+      setXalgoConvQuoteError("Enter a positive amount.");
+      toast.error("Enter a positive amount.");
+      return;
+    }
+    const aln = getAlgorandNetworkFromNetworkId("algorand-mainnet");
+    if (!aln) {
+      setXalgoConvQuoteError("Invalid network.");
+      return;
+    }
+    setXalgoConvQuoteLoading(true);
+    try {
+      const { algod } = await algorandService.initializeClientsForReads(aln, {
+        algodServer: ALGORAND_MAINNET_NODELY_ALGOD_URL,
+      });
+      const state = await fetchXalgoMainnetConsensusState(algod);
+      const dec = 6;
+      const scale = 10 ** dec;
+      if (xalgoConvDirection === "mint") {
+        if (!state.canImmediateStake) {
+          throw new Error(
+            "Immediate mint is disabled on-chain right now. Try again later."
+          );
+        }
+        const algoMicro = BigInt(
+          new BigNumber(parsed)
+            .times(1e6)
+            .integerValue(BigNumber.ROUND_FLOOR)
+            .toFixed(0)
+        );
+        const spot = convertAlgoToXAlgoWhenImmediate(algoMicro, state);
+        const min = minXalgoOutImmediateMintFloor(state, algoMicro, 150n);
+        if (min <= 0n) {
+          throw new Error("Amount too small for a positive xALGO minimum at current rates.");
+        }
+        setXalgoConvQuote({
+          spotOutHuman: (Number(spot) / scale).toLocaleString(undefined, {
+            maximumFractionDigits: 6,
+          }),
+          minOutHuman: (Number(min) / scale).toLocaleString(undefined, {
+            maximumFractionDigits: 6,
+          }),
+          spotOutAtomic: spot.toString(),
+          minOutAtomic: min.toString(),
+          canImmediateStake: state.canImmediateStake,
+        });
+        toast.success("Quote loaded (spot vs 1.5% min received).");
+      } else {
+        const xAtomic = BigInt(
+          new BigNumber(parsed)
+            .times(1e6)
+            .integerValue(BigNumber.ROUND_FLOOR)
+            .toFixed(0)
+        );
+        const spot = convertXAlgoToAlgo(xAtomic, state);
+        const min = minAlgoOutBurnFloor(state, xAtomic, 150n);
+        if (min <= 0n) {
+          throw new Error("Amount too small for a positive ALGO minimum at current rates.");
+        }
+        setXalgoConvQuote({
+          spotOutHuman: (Number(spot) / 1e6).toLocaleString(undefined, {
+            maximumFractionDigits: 6,
+          }),
+          minOutHuman: (Number(min) / 1e6).toLocaleString(undefined, {
+            maximumFractionDigits: 6,
+          }),
+          spotOutAtomic: spot.toString(),
+          minOutAtomic: min.toString(),
+          canImmediateStake: state.canImmediateStake,
+        });
+        toast.success("Quote loaded (spot vs 1.5% min ALGO received).");
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setXalgoConvQuoteError(msg);
+      toast.error(msg);
+    } finally {
+      setXalgoConvQuoteLoading(false);
+    }
+  }, [xalgoConvAmountHuman, xalgoConvDirection]);
+
+  const handleXalgoConsensusSubmit = useCallback(async () => {
+    if (!activeAccount?.address) {
+      toast.error("Connect a wallet first.");
+      return;
+    }
+    if (!signTransactions) {
+      toast.error("Wallet cannot sign transactions.");
+      return;
+    }
+    const raw = xalgoConvAmountHuman.trim();
+    const parsed = parseFloat(raw);
+    if (!raw || !Number.isFinite(parsed) || parsed <= 0) {
+      toast.error("Enter a positive amount.");
+      return;
+    }
+    const aln = getAlgorandNetworkFromNetworkId("algorand-mainnet");
+    if (!aln) {
+      toast.error("Invalid Algorand network.");
+      return;
+    }
+    setXalgoConvSubmitting(true);
+    setXalgoConvQuoteError(null);
+    setXalgoConvLastTxid(null);
+    try {
+      const { algod } = await algorandService.initializeClientsForReads(aln, {
+        algodServer: ALGORAND_MAINNET_NODELY_ALGOD_URL,
+      });
+      const suggestedParams = await algod.getTransactionParams().do();
+      let txns: algosdk.Transaction[];
+      if (xalgoConvDirection === "mint") {
+        const algoMicroAlgos = BigInt(
+          new BigNumber(parsed)
+            .times(1e6)
+            .integerValue(BigNumber.ROUND_FLOOR)
+            .toFixed(0)
+        );
+        const built = await buildXalgoImmediateMintTxns({
+          algod,
+          senderAddr: activeAccount.address,
+          receiverAddr: activeAccount.address,
+          algoAmount: algoMicroAlgos,
+          suggestedParams,
+          minXalgoSlippageBps: 150n,
+        });
+        txns = built.txns;
+      } else {
+        const xalgoAtomic = BigInt(
+          new BigNumber(parsed)
+            .times(1e6)
+            .integerValue(BigNumber.ROUND_FLOOR)
+            .toFixed(0)
+        );
+        const state = await fetchXalgoMainnetConsensusState(algod);
+        const minAlgo = minAlgoOutBurnFloor(state, xalgoAtomic, 150n);
+        if (minAlgo <= 0n) {
+          throw new Error("Burn amount too small at current rates.");
+        }
+        const built = await buildXalgoBurnTxns({
+          algod,
+          senderAddr: activeAccount.address,
+          receiverAddr: activeAccount.address,
+          xalgoAmount: xalgoAtomic,
+          minAlgoReceived: minAlgo,
+          suggestedParams,
+        });
+        txns = built.txns;
+      }
+      const grouped = algosdk.assignGroupID(txns);
+      const unsignedB64 = grouped.map((t) =>
+        Buffer.from(algosdk.encodeUnsignedTransaction(t)).toString("base64")
+      );
+      toast.info("Sign the group in your wallet", { duration: 8000 });
+      const stxns = await signTransactions(
+        unsignedB64.map((txn) =>
+          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+        )
+      );
+      const clients =
+        await algorandService.initializeClientsForTransactions(aln);
+      const res = await clients.algod.sendRawTransaction(stxns).do();
+      await waitForConfirmation(clients.algod, res.txid, 4);
+      setXalgoConvLastTxid(res.txid);
+      toast.success(
+        xalgoConvDirection === "mint"
+          ? "Mint confirmed."
+          : "Burn (unstake) confirmed."
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setXalgoConvQuoteError(msg);
+      toast.error(msg);
+    } finally {
+      setXalgoConvSubmitting(false);
+    }
+  }, [
+    activeAccount?.address,
+    signTransactions,
+    xalgoConvAmountHuman,
+    xalgoConvDirection,
+  ]);
 
   const bulkSnapshotMarketCount = useMemo(
     () => collectDedupedLendingMarketKeys().length,
@@ -11774,6 +11994,143 @@ export default function AdminDashboard() {
                       read.
                     </p>
                   </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="border-teal-500/25 bg-teal-500/[0.03]">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Coins className="h-5 w-5 text-teal-600 dark:text-teal-400" />
+                  xALGO consensus (ALGO ↔ xALGO)
+                </CardTitle>
+                <CardDescription>
+                  Read quote from Folks governance consensus on{" "}
+                  <strong>Algorand mainnet</strong>, then build the same{" "}
+                  <code className="text-xs">immediate_mint</code> /{" "}
+                  <code className="text-xs">burn</code> groups used in the app.
+                  Uses Nodely Algod for reads; submits via your wallet RPC.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {currentNetwork !== "algorand-mainnet" && (
+                  <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100">
+                    Switch the app network to <strong>Algorand mainnet</strong>{" "}
+                    before signing (transactions are always mainnet).
+                  </div>
+                )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Direction</Label>
+                    <Select
+                      value={xalgoConvDirection}
+                      onValueChange={(v) => {
+                        setXalgoConvDirection(v as "mint" | "burn");
+                        setXalgoConvQuote(null);
+                        setXalgoConvQuoteError(null);
+                        setXalgoConvLastTxid(null);
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="mint">ALGO → xALGO (immediate_mint)</SelectItem>
+                        <SelectItem value="burn">xALGO → ALGO (burn / unstake)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>
+                      Amount ({xalgoConvDirection === "mint" ? "ALGO" : "xALGO"})
+                    </Label>
+                    <Input
+                      className="font-mono text-sm"
+                      inputMode="decimal"
+                      value={xalgoConvAmountHuman}
+                      onChange={(e) => {
+                        setXalgoConvAmountHuman(e.target.value);
+                        setXalgoConvQuote(null);
+                        setXalgoConvLastTxid(null);
+                      }}
+                      placeholder={xalgoConvDirection === "mint" ? "e.g. 5" : "e.g. 10"}
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground font-mono">
+                  Consensus app {MainnetConsensusConfig.consensusAppId} · xALGO ASA{" "}
+                  {MainnetConsensusConfig.xAlgoId}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => void handleXalgoConsensusQuote()}
+                    disabled={xalgoConvQuoteLoading}
+                  >
+                    {xalgoConvQuoteLoading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Quoting…
+                      </>
+                    ) : (
+                      <>
+                        <Calculator className="h-4 w-4 mr-2" />
+                        Refresh quote
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="default"
+                    onClick={() => void handleXalgoConsensusSubmit()}
+                    disabled={
+                      xalgoConvSubmitting ||
+                      currentNetwork !== "algorand-mainnet" ||
+                      !activeAccount?.address
+                    }
+                  >
+                    {xalgoConvSubmitting ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Signing…
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="h-4 w-4 mr-2" />
+                        Sign & send on-chain
+                      </>
+                    )}
+                  </Button>
+                </div>
+                {xalgoConvQuoteError && (
+                  <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                    {xalgoConvQuoteError}
+                  </div>
+                )}
+                {xalgoConvQuote && (
+                  <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-1 text-sm">
+                    <p className="font-semibold text-foreground">Quote (pool ratio)</p>
+                    <p className="text-muted-foreground">
+                      Spot ≈{" "}
+                      <span className="font-mono text-foreground">
+                        {xalgoConvQuote.spotOutHuman}{" "}
+                        {xalgoConvDirection === "mint" ? "xALGO" : "ALGO"}
+                      </span>
+                    </p>
+                    <p className="text-muted-foreground">
+                      Min out (1.5% slippage floor) ≈{" "}
+                      <span className="font-mono text-foreground">
+                        {xalgoConvQuote.minOutHuman}{" "}
+                        {xalgoConvDirection === "mint" ? "xALGO" : "ALGO"}
+                      </span>
+                    </p>
+                  </div>
+                )}
+                {xalgoConvLastTxid && (
+                  <p className="text-xs font-mono break-all text-teal-700 dark:text-teal-300">
+                    Last tx: {xalgoConvLastTxid}
+                  </p>
                 )}
               </CardContent>
             </Card>

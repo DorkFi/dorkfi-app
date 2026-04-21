@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
+import BigNumber from "bignumber.js";
+import type { ConsensusState } from "@folks-finance/algorand-sdk";
 import {
   Dialog,
   DialogContent,
@@ -41,7 +43,14 @@ import {
   tokenAdapterStableId,
 } from "@/config";
 import { useWallet } from "@txnlab/use-wallet-react";
-import algorandService from "@/services/algorandService";
+import algorandService, { type AlgorandNetwork } from "@/services/algorandService";
+import {
+  ALGORAND_MAINNET_NODELY_ALGOD_URL,
+  XALGO_CONSENSUS_REPAY_ALGO_ROUTE_ID,
+  algoMicroNeededForMinXalgoOutImmediateMintFloor,
+  fetchXalgoMainnetConsensusState,
+  minXalgoOutImmediateMintFloor,
+} from "@/services/xalgoConsensusAdapter";
 import {
   estimateFolksDepositMintedFAssetAmount,
   folksFAssetHumanToUnderlyingHuman,
@@ -138,6 +147,11 @@ interface RepayModalProps {
   poolCollateralMarkets?: PoolCollateralMarketRow[];
   /** Percent 0–100; used with pool collateral rows for min LT (borrow modal parity). */
   liquidationThresholdPercent?: number | null;
+  /**
+   * When true on Algorand mainnet Governance xALGO, offer repay from wallet xALGO (default) vs native ALGO
+   * (consensus `immediate_mint` then nt200 deposit + repay in one group).
+   */
+  xalgoConsensusRepayAlgoOption?: boolean;
 }
 
 const RepayModal = ({
@@ -163,6 +177,7 @@ const RepayModal = ({
   repayTokenDecimals = 6,
   folksMintOneUnderlyingAtomic,
   repayTokenConfig,
+  xalgoConsensusRepayAlgoOption = false,
 }: RepayModalProps) => {
   const { activeAccount } = useWallet();
   const [amount, setAmount] = useState<number | "">("");
@@ -194,17 +209,29 @@ const RepayModal = ({
   });
 
   const repayAdapterList = repayFolksAdapters ?? [];
+  /** Governance xALGO only: Folks-style repay adapters are absent; use synthetic xALGO vs ALGO routes. */
+  const xalgoRepayRoutesActive =
+    Boolean(xalgoConsensusRepayAlgoOption) &&
+    networkToUse === "algorand-mainnet" &&
+    tokenSymbol === "xALGO" &&
+    repayAdapterList.length === 0;
+
   /** Content-stable key so parent re-renders (new array ref from getFolksAdaptersForPhase) do not restart effects. */
-  const repayAdaptersSignature =
-    repayAdapterList.length === 0
+  const repayAdaptersSignature = xalgoRepayRoutesActive
+    ? "xalgo-mainnet-repay-routes"
+    : repayAdapterList.length === 0
       ? ""
       : [...repayAdapterList]
           .map((a) => tokenAdapterStableId(a))
           .sort()
           .join("|");
-  const repayMultiRoute = repayAdapterList.length > 1;
-  /** Full repay uses Folks routes; MAX is hidden (amount precision / repayAll semantics differ). */
-  const showMaxButton = repayAdapterList.length === 0;
+
+  const repayMultiRoute =
+    repayAdapterList.length > 1 || xalgoRepayRoutesActive;
+
+  /** Folks multi-route and xALGO consensus dual-route hide MAX (precision / repay-all semantics). */
+  const showMaxButton =
+    repayAdapterList.length === 0 && !xalgoRepayRoutesActive;
 
   const [selectedRepayAdapterId, setSelectedRepayAdapterId] =
     useState<string>("");
@@ -217,6 +244,8 @@ const RepayModal = ({
   const [nativeAlgoWalletHuman, setNativeAlgoWalletHuman] = useState<
     number | undefined
   >(undefined);
+  const [xalgoRepayConsensusState, setXalgoRepayConsensusState] =
+    useState<ConsensusState | null>(null);
 
   const selectedRepayAdapter = useMemo(() => {
     if (repayAdapterList.length === 0) return undefined;
@@ -230,15 +259,41 @@ const RepayModal = ({
     return repayAdapterList[0];
   }, [repayAdapterList, selectedRepayAdapterId]);
 
-  const repayWalletBasis =
-    selectedRepayAdapter?.repayWalletBasis ?? "market_token";
+  const isXalgoConsensusRepayAlgoRoute =
+    xalgoRepayRoutesActive &&
+    selectedRepayAdapterId === XALGO_CONSENSUS_REPAY_ALGO_ROUTE_ID;
 
-  const walletUnitSymbol =
-    repayAdapterList.length > 0
+  const repayWalletBasis = isXalgoConsensusRepayAlgoRoute
+    ? "underlying"
+    : (selectedRepayAdapter?.repayWalletBasis ?? "market_token");
+
+  const walletUnitSymbol = isXalgoConsensusRepayAlgoRoute
+    ? "ALGO"
+    : repayAdapterList.length > 0
       ? selectedRepayAdapter?.label ??
         selectedRepayAdapter?.name ??
         tokenSymbol
       : tokenSymbol;
+
+  const repayRouteButtonLabel = useMemo(() => {
+    if (xalgoRepayRoutesActive) {
+      if (!selectedRepayAdapterId) return "xALGO";
+      if (selectedRepayAdapterId === XALGO_CONSENSUS_REPAY_ALGO_ROUTE_ID) {
+        return "ALGO";
+      }
+    }
+    return (
+      selectedRepayAdapter?.label ??
+      selectedRepayAdapter?.name ??
+      tokenSymbol
+    );
+  }, [
+    xalgoRepayRoutesActive,
+    selectedRepayAdapterId,
+    selectedRepayAdapter?.label,
+    selectedRepayAdapter?.name,
+    tokenSymbol,
+  ]);
 
   // Get health factor label and color based on ranges
   const getHealthFactorLabel = (
@@ -280,6 +335,7 @@ const RepayModal = ({
       setFolksMintedFAssetPerOneUnderlying(null);
       setFolksMintRatioStatus("idle");
       setNativeAlgoWalletHuman(undefined);
+      setXalgoRepayConsensusState(null);
       setExpandedDetails({
         borrowAPY: false,
         accruedInterest: false,
@@ -296,7 +352,13 @@ const RepayModal = ({
   }, [isOpen]);
 
   useEffect(() => {
-    if (!isOpen || repayAdaptersSignature === "") {
+    if (!isOpen) return;
+    if (xalgoRepayRoutesActive) {
+      const valid = new Set<string>(["", XALGO_CONSENSUS_REPAY_ALGO_ROUTE_ID]);
+      setSelectedRepayAdapterId((prev) => (valid.has(prev) ? prev : ""));
+      return;
+    }
+    if (repayAdaptersSignature === "") {
       setSelectedRepayAdapterId("");
       return;
     }
@@ -305,10 +367,16 @@ const RepayModal = ({
       if (prev && ids.includes(prev)) return prev;
       return ids[0] ?? "";
     });
-  }, [isOpen, repayAdaptersSignature]);
+  }, [isOpen, repayAdaptersSignature, xalgoRepayRoutesActive, repayAdapterList]);
 
   useEffect(() => {
-    if (!isOpen || repayAdaptersSignature === "") {
+    if (!isOpen) return;
+    if (xalgoRepayRoutesActive) {
+      setFolksMintedFAssetPerOneUnderlying(null);
+      setFolksMintRatioStatus("idle");
+      return;
+    }
+    if (repayAdaptersSignature === "") {
       setFolksMintedFAssetPerOneUnderlying(null);
       setFolksMintRatioStatus("idle");
       return;
@@ -375,7 +443,33 @@ const RepayModal = ({
     repayTokenDecimals,
     folksMintOneUnderlyingAtomic,
     repayTokenConfig,
+    xalgoRepayRoutesActive,
   ]);
+
+  useEffect(() => {
+    if (!isOpen || !xalgoRepayRoutesActive) {
+      setXalgoRepayConsensusState(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const aln = getAlgorandNetworkFromNetworkId(networkToUse as NetworkId);
+        if (!aln) return;
+        const { algod } = await algorandService.initializeClientsForReads(
+          aln as AlgorandNetwork,
+          { algodServer: ALGORAND_MAINNET_NODELY_ALGOD_URL }
+        );
+        const st = await fetchXalgoMainnetConsensusState(algod);
+        if (!cancelled) setXalgoRepayConsensusState(st);
+      } catch {
+        if (!cancelled) setXalgoRepayConsensusState(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, xalgoRepayRoutesActive, networkToUse]);
 
   useEffect(() => {
     if (!isOpen || repayWalletBasis !== "underlying" || !activeAccount?.address) {
@@ -429,6 +523,25 @@ const RepayModal = ({
 
   const maxDebtInInputUnits = useMemo(() => {
     if (repayWalletBasis !== "underlying") return currentBorrow;
+    if (isXalgoConsensusRepayAlgoRoute) {
+      if (!xalgoRepayConsensusState) return 0;
+      const debtAtomic = BigInt(
+        new BigNumber(currentBorrow)
+          .multipliedBy(10 ** repayTokenDecimals)
+          .integerValue(BigNumber.ROUND_FLOOR)
+          .toFixed(0)
+      );
+      try {
+        const micro = algoMicroNeededForMinXalgoOutImmediateMintFloor(
+          xalgoRepayConsensusState,
+          debtAtomic,
+          150n
+        );
+        return Number(micro) / 1e6;
+      } catch {
+        return 0;
+      }
+    }
     if (
       folksMintRatioStatus !== "ready" ||
       folksMintedFAssetPerOneUnderlying == null ||
@@ -447,6 +560,8 @@ const RepayModal = ({
     folksMintRatioStatus,
     folksMintedFAssetPerOneUnderlying,
     repayTokenDecimals,
+    isXalgoConsensusRepayAlgoRoute,
+    xalgoRepayConsensusState,
   ]);
 
   const effectiveWalletBalance = useMemo(() => {
@@ -461,20 +576,55 @@ const RepayModal = ({
   const numAmountMarketTokenHuman = useMemo((): number | null => {
     const amountInputStr =
       amount === "" ? "0" : typeof amount === "number" ? String(amount) : "0";
+    if (isXalgoConsensusRepayAlgoRoute) {
+      const amt = parseFloat(amountInputStr) || 0;
+      if (amt <= 0) return 0;
+      if (!xalgoRepayConsensusState) return null;
+      const micro = BigInt(
+        new BigNumber(amt)
+          .times(1e6)
+          .integerValue(BigNumber.ROUND_FLOOR)
+          .toFixed(0)
+      );
+      if (micro <= 0n) return 0;
+      const xAtomic = minXalgoOutImmediateMintFloor(
+        xalgoRepayConsensusState,
+        micro,
+        150n
+      );
+      return Number(xAtomic) / 10 ** repayTokenDecimals;
+    }
     return repayInputToMarketTokenHuman(
       amountInputStr,
       repayWalletBasis,
       folksMintedFAssetPerOneUnderlying,
       repayTokenDecimals
     );
-  }, [amount, repayWalletBasis, folksMintedFAssetPerOneUnderlying, repayTokenDecimals]);
+  }, [
+    amount,
+    repayWalletBasis,
+    folksMintedFAssetPerOneUnderlying,
+    repayTokenDecimals,
+    isXalgoConsensusRepayAlgoRoute,
+    xalgoRepayConsensusState,
+  ]);
 
   const repayFolksBlockingSubmit = useMemo(() => {
-    if (repayAdapterList.length === 0) return false;
     if (repayWalletBasis !== "underlying") return false;
     if (numAmount <= 0) return false;
+    if (isXalgoConsensusRepayAlgoRoute) {
+      return xalgoRepayConsensusState == null;
+    }
+    if (repayAdapterList.length === 0) return false;
     return folksMintRatioStatus !== "ready";
-  }, [repayAdapterList.length, repayWalletBasis, numAmount, folksMintRatioStatus]);
+  }, [
+    repayAdapterList.length,
+    repayWalletBasis,
+    numAmount,
+    folksMintRatioStatus,
+    isXalgoConsensusRepayAlgoRoute,
+    xalgoRepayConsensusState,
+  ]);
 
   const handleMaxClick = () => {
     const roundedMax = Math.round(maxRepayAmount * 1000000) / 1000000;
@@ -486,7 +636,8 @@ const RepayModal = ({
   const handleConfirmRepay = async () => {
     const roundedAmount = Math.round(numAmount * 1000000) / 1000000;
     const roundedDebtCap = Math.round(maxDebtInInputUnits * 1000000) / 1000000;
-    const shouldUseRepayAll = roundedAmount === roundedDebtCap;
+    const shouldUseRepayAll =
+      !isXalgoConsensusRepayAlgoRoute && roundedAmount === roundedDebtCap;
 
     const amountStr = amount !== "" ? amount.toString() : "0";
     console.log(`Repay ${amountStr} ${tokenSymbol}${shouldUseRepayAll ? " (repayAll)" : ""}`);
@@ -495,9 +646,13 @@ const RepayModal = ({
       setIsLoading(true);
 
       const repayAdapterIdOpt =
-        selectedRepayAdapter != null
-          ? tokenAdapterStableId(selectedRepayAdapter)
-          : undefined;
+        xalgoRepayRoutesActive
+          ? selectedRepayAdapterId === XALGO_CONSENSUS_REPAY_ALGO_ROUTE_ID
+            ? XALGO_CONSENSUS_REPAY_ALGO_ROUTE_ID
+            : undefined
+          : selectedRepayAdapter != null
+            ? tokenAdapterStableId(selectedRepayAdapter)
+            : undefined;
       const txId = await onSubmit(amountStr, {
         isRepayAll: shouldUseRepayAll,
         repayAdapterId: repayAdapterIdOpt,
@@ -772,10 +927,17 @@ const RepayModal = ({
                           </div>
                         )}
                         {repayWalletBasis === "underlying" &&
+                          !isXalgoConsensusRepayAlgoRoute &&
                           folksMintRatioStatus === "failed" && (
                             <p className="text-xs text-amber-600 dark:text-amber-400">
                               Folks mint rate unavailable. Switch to the f-asset
                               route or try again later.
+                            </p>
+                          )}
+                        {isXalgoConsensusRepayAlgoRoute &&
+                          xalgoRepayConsensusState == null && (
+                            <p className="text-xs text-amber-600 dark:text-amber-400">
+                              Loading governance xALGO mint rate…
                             </p>
                           )}
                         <div className="relative">
@@ -812,8 +974,7 @@ const RepayModal = ({
                                   title="Choose repay route"
                                 >
                                   <span className="truncate text-xs font-medium">
-                                    {selectedRepayAdapter?.label ??
-                                      selectedRepayAdapter?.name}
+                                    {repayRouteButtonLabel}
                                   </span>
                                   <ChevronDown
                                     className="h-3 w-3 shrink-0 opacity-80"
@@ -1527,11 +1688,76 @@ const RepayModal = ({
             Repay route
           </DialogTitle>
           <DialogDescription>
-            Choose what you spend from your wallet to repay this borrow.
+            {xalgoRepayRoutesActive && repayAdapterList.length === 0
+              ? "Repay with xALGO you hold, or with native ALGO (governance mint then repay in one group)."
+              : "Choose what you spend from your wallet to repay this borrow."}
           </DialogDescription>
         </DialogHeader>
         <div className="mt-4 grid gap-2">
-          {repayAdapterList.map((a) => {
+          {xalgoRepayRoutesActive && repayAdapterList.length === 0 ? (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedRepayAdapterId("");
+                  setRepayRoutePickerOpen(false);
+                }}
+                className={cn(
+                  "flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors",
+                  selectedRepayAdapterId === ""
+                    ? "border-whale-gold bg-amber-50/90 dark:border-whale-gold dark:bg-amber-950/40"
+                    : "border-slate-200 bg-white/80 hover:border-amber-300 hover:bg-amber-50/50 dark:border-slate-600 dark:bg-slate-800/60 dark:hover:border-amber-700 dark:hover:bg-slate-800"
+                )}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    xALGO
+                  </div>
+                  <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                    Spend governance xALGO from your wallet (nt200 deposit +
+                    repay).
+                  </div>
+                </div>
+                {selectedRepayAdapterId === "" ? (
+                  <Check
+                    className="mt-0.5 h-5 w-5 shrink-0 text-whale-gold"
+                    aria-hidden
+                  />
+                ) : null}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedRepayAdapterId(XALGO_CONSENSUS_REPAY_ALGO_ROUTE_ID);
+                  setRepayRoutePickerOpen(false);
+                }}
+                className={cn(
+                  "flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors",
+                  selectedRepayAdapterId === XALGO_CONSENSUS_REPAY_ALGO_ROUTE_ID
+                    ? "border-whale-gold bg-amber-50/90 dark:border-whale-gold dark:bg-amber-950/40"
+                    : "border-slate-200 bg-white/80 hover:border-amber-300 hover:bg-amber-50/50 dark:border-slate-600 dark:bg-slate-800/60 dark:hover:border-amber-700 dark:hover:bg-slate-800"
+                )}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    ALGO
+                  </div>
+                  <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                    Mint xALGO from ALGO via governance, then repay — one atomic
+                    wallet group.
+                  </div>
+                </div>
+                {selectedRepayAdapterId ===
+                XALGO_CONSENSUS_REPAY_ALGO_ROUTE_ID ? (
+                  <Check
+                    className="mt-0.5 h-5 w-5 shrink-0 text-whale-gold"
+                    aria-hidden
+                  />
+                ) : null}
+              </button>
+            </>
+          ) : (
+            repayAdapterList.map((a) => {
             const sid = tokenAdapterStableId(a);
             const selected = sid === selectedRepayAdapterId;
             const basis = a.repayWalletBasis ?? "market_token";
@@ -1570,7 +1796,7 @@ const RepayModal = ({
                 ) : null}
               </button>
             );
-          })}
+          }))}
         </div>
       </DialogContent>
     </Dialog>
