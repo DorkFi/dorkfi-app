@@ -2578,8 +2578,8 @@ export const withdraw = async (
         rawTokenConfigWithdraw
       )
         ? rawTokenConfigWithdraw.find(
-            (c) => String(c.poolId) === String(poolId)
-          ) ?? rawTokenConfigWithdraw[0]
+          (c) => String(c.poolId) === String(poolId)
+        ) ?? rawTokenConfigWithdraw[0]
         : rawTokenConfigWithdraw;
 
       const folksWithdrawAdapter = resolveWithdrawFolksAdapter(
@@ -2810,17 +2810,17 @@ export const withdraw = async (
         const requestedUnderlyingAmount = BigInt(amountInSmallestUnit);
         const requestedPoolReturnUnits =
           folksWithdrawUsesFolksRedeem &&
-          folksDepositInterestIndex != null &&
-          folksDepositInterestIndex > BigInt(0)
+            folksDepositInterestIndex != null &&
+            folksDepositInterestIndex > BigInt(0)
             ? calcDepositReturn(
-                requestedUnderlyingAmount,
-                folksDepositInterestIndex
-              )
+              requestedUnderlyingAmount,
+              folksDepositInterestIndex
+            )
             : requestedUnderlyingAmount;
 
         const targetUnderlyingAmount =
           token_balance > BigInt(0) &&
-          requestedPoolReturnUnits > token_balance
+            requestedPoolReturnUnits > token_balance
             ? requestedPoolReturnUnits - token_balance
             : requestedPoolReturnUnits;
 
@@ -4226,7 +4226,7 @@ export const deposit = async (
       /** ASA index (`xaid`) for nt200 `deposit` axfer — f-ASA for Folks `network-asa`, else display `underlyingAssetId`. */
       let nt200DepositAxferAssetId =
         token.underlyingAssetId != null &&
-        String(token.underlyingAssetId).trim() !== ""
+          String(token.underlyingAssetId).trim() !== ""
           ? Number(token.underlyingAssetId)
           : NaN;
 
@@ -5269,8 +5269,8 @@ export const borrow = async (
         rawTokenConfigBorrow
       )
         ? rawTokenConfigBorrow.find(
-            (c) => String(c.poolId) === String(poolId)
-          ) ?? rawTokenConfigBorrow[0]
+          (c) => String(c.poolId) === String(poolId)
+        ) ?? rawTokenConfigBorrow[0]
         : rawTokenConfigBorrow;
 
       const folksBorrowAdapter = resolveBorrowFolksAdapter(
@@ -5553,8 +5553,8 @@ export const repay = async (
       )
         ? poolId != null && poolId !== ""
           ? rawTokenConfigForRepay.find(
-              (c) => String(c.poolId) === String(poolId)
-            ) ?? rawTokenConfigForRepay[0]
+            (c) => String(c.poolId) === String(poolId)
+          ) ?? rawTokenConfigForRepay[0]
           : rawTokenConfigForRepay[0]
         : rawTokenConfigForRepay;
 
@@ -5579,7 +5579,7 @@ export const repay = async (
       /** ASA index for nt200 `deposit` axfer before repay. */
       let nt200RepayAxferXaid =
         token.underlyingAssetId != null &&
-        String(token.underlyingAssetId).trim() !== ""
+          String(token.underlyingAssetId).trim() !== ""
           ? Number(token.underlyingAssetId)
           : NaN;
 
@@ -6362,8 +6362,8 @@ export const repayAll = async (
       )
         ? poolId != null && poolId !== ""
           ? rawTokenConfigForRepay.find(
-              (c) => String(c.poolId) === String(poolId)
-            ) ?? rawTokenConfigForRepay[0]
+            (c) => String(c.poolId) === String(poolId)
+          ) ?? rawTokenConfigForRepay[0]
           : rawTokenConfigForRepay[0]
         : rawTokenConfigForRepay;
 
@@ -6388,7 +6388,7 @@ export const repayAll = async (
       /** ASA index for nt200 `deposit` axfer before repay_all. */
       let nt200RepayAxferXaid =
         token.underlyingAssetId != null &&
-        String(token.underlyingAssetId).trim() !== ""
+          String(token.underlyingAssetId).trim() !== ""
           ? Number(token.underlyingAssetId)
           : NaN;
 

@@ -171,6 +171,43 @@ function mergePayWithFollowingAppl(
   };
 }
 
+/** Self axfer amount 0 = ASA opt-in (must not match {@link mergeAxferWithFollowingAppl}). */
+function isStandaloneAsaOptInAxfer(t: algosdk.Transaction): boolean {
+  if (t.type !== algosdk.TransactionType.axfer || !t.assetTransfer) {
+    return false;
+  }
+  const at = t.assetTransfer;
+  if (Number(at.assetIndex) <= 0) return false;
+  if (BigInt(at.amount) !== BigInt(0)) return false;
+  return addrStr(t.sender) === addrStr(at.receiver);
+}
+
+/**
+ * arccjs `extraTxns` row: ASA opt-in (see arccjs `contract.js` — `snd===arcv`, `!xamt`) plus a dummy
+ * app shape so `makeApplicationCallTxnFromObject` succeeds; `ignore: true` skips pushing the dummy appl.
+ */
+function fAssetOptInToArccjsExtraTxn(
+  axfer: algosdk.Transaction,
+  opup: { callerAppId: number; baseAppId: number }
+): Record<string, unknown> {
+  const at = axfer.assetTransfer!;
+  const user = addrStr(axfer.sender);
+  return {
+    sender: user,
+    appIndex: opup.callerAppId,
+    onComplete: algosdk.OnApplicationComplete.NoOpOC,
+    appArgs: [algosdk.encodeUint64(0)],
+    accounts: [],
+    foreignApps: [opup.baseAppId],
+    foreignAssets: [],
+    fee: 2000,
+    xaid: Number(at.assetIndex),
+    snd: user,
+    arcv: addrStr(at.receiver),
+    ignore: true,
+  };
+}
+
 function mergeAxferWithFollowingAppl(
   axfer: algosdk.Transaction,
   appl: algosdk.Transaction
@@ -214,6 +251,11 @@ export function folksMintTxnsToArccjsExtraTxns(
   for (let i = 0; i < txns.length; i++) {
     const t = txns[i];
     const next = txns[i + 1];
+
+    if (isStandaloneAsaOptInAxfer(t)) {
+      out.push(fAssetOptInToArccjsExtraTxn(t, MainnetOpUp));
+      continue;
+    }
 
     if (
       t.type === algosdk.TransactionType.pay &&
@@ -279,6 +321,40 @@ export async function buildFolksDepositMintTxns(input: {
     suggestedParams,
     new TextEncoder().encode("dorkfi: Folks mint (deposit preamble)")
   );
+
+  const fAssetId = Number(pool.fAssetId);
+  if (Number.isFinite(fAssetId) && fAssetId > 0) {
+    try {
+      await input.algod
+        .accountAssetInformation(input.userAddress, fAssetId)
+        .do();
+    } catch (error: unknown) {
+      const err = error as {
+        response?: { status?: number };
+        message?: string;
+      };
+      if (
+        err?.response?.status === 404 ||
+        err?.response?.status === 400 ||
+        err?.message?.includes("not found") ||
+        err?.message?.includes("not opted") ||
+        err?.message?.includes("does not exist")
+      ) {
+        const optInTxn = algosdk.makeAssetTransferTxnWithSuggestedParamsFromObject({
+          sender: input.userAddress,
+          receiver: input.userAddress,
+          amount: 0,
+          assetIndex: fAssetId,
+          suggestedParams: { ...suggestedParams, flatFee: true, fee: 0n },
+          note: new TextEncoder().encode("dorkfi: Folks f-asset opt-in (mint preamble)"),
+        });
+        txns = [optInTxn, ...txns];
+      } else {
+        throw error;
+      }
+    }
+  }
+
   txns = prefixWithOpUp(
     MainnetOpUp,
     input.userAddress,

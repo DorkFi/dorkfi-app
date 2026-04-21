@@ -330,6 +330,12 @@ const SupplyBorrowModal = ({
     null
   );
   const [isSigning, setIsSigning] = useState(false);
+  /** Folks f-asset ASA opt-in status when {@link TokenConfig.requireStandaloneFAssetOptInBeforeDeposit} applies. */
+  const [fAssetPreOptInStatus, setFAssetPreOptInStatus] = useState<
+    "idle" | "checking" | "in" | "out"
+  >("idle");
+  const [isPreDepositFAssetOptInSubmitting, setIsPreDepositFAssetOptInSubmitting] =
+    useState(false);
   /** Selected Folks deposit route; defaults to underlying when both f-asset and underlying routes exist. */
   const [selectedDepositAdapterId, setSelectedDepositAdapterId] =
     useState<string>("");
@@ -660,6 +666,76 @@ const SupplyBorrowModal = ({
       selectedDepositAdapterId
     );
   }, [resolvedDepositTokenConfig, selectedDepositAdapterId]);
+
+  const preDepositFAssetAsaId = useMemo((): number | null => {
+    if (!resolvedDepositTokenConfig?.requireStandaloneFAssetOptInBeforeDeposit) {
+      return null;
+    }
+    const folks = getAnyFolksAdapter(resolvedDepositTokenConfig);
+    if (folks?.type !== "folks") return null;
+    const n = Number(String(folks.folksParams.fAssetId ?? "").trim());
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }, [resolvedDepositTokenConfig]);
+
+  const depositRequiresStandaloneFAssetOptIn = useMemo(
+    () =>
+      mode === "deposit" &&
+      (networkToUse as string) === "algorand-mainnet" &&
+      preDepositFAssetAsaId != null,
+    [mode, networkToUse, preDepositFAssetAsaId]
+  );
+
+  const preDepositFAssetDisplayLabel = useMemo(() => {
+    if (!resolvedDepositTokenConfig?.requireStandaloneFAssetOptInBeforeDeposit) {
+      return "f-asset";
+    }
+    const tok = getFolksAdaptersForPhase(
+      resolvedDepositTokenConfig,
+      "deposit"
+    ).find((a) => (a.depositWalletBasis ?? "underlying") === "market_token");
+    return tok?.label ?? tok?.name ?? "Folks f-asset";
+  }, [resolvedDepositTokenConfig]);
+
+  useEffect(() => {
+    if (
+      !isOpen ||
+      mode !== "deposit" ||
+      !depositRequiresStandaloneFAssetOptIn ||
+      !activeAccount?.address ||
+      preDepositFAssetAsaId == null
+    ) {
+      setFAssetPreOptInStatus("idle");
+      return;
+    }
+    let cancelled = false;
+    setFAssetPreOptInStatus("checking");
+    void (async () => {
+      try {
+        const aln = getAlgorandNetworkFromNetworkId(networkToUse as NetworkId);
+        if (!aln) {
+          if (!cancelled) setFAssetPreOptInStatus("idle");
+          return;
+        }
+        const { algod } = algorandService.initializeClients(aln as any);
+        await algod
+          .accountAssetInformation(activeAccount.address, preDepositFAssetAsaId)
+          .do();
+        if (!cancelled) setFAssetPreOptInStatus("in");
+      } catch {
+        if (!cancelled) setFAssetPreOptInStatus("out");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isOpen,
+    mode,
+    depositRequiresStandaloneFAssetOptIn,
+    activeAccount?.address,
+    preDepositFAssetAsaId,
+    networkToUse,
+  ]);
 
   const effectiveDepositWalletBalance = useMemo(() => {
     if (mode !== "deposit") return propWalletBalance;
@@ -1512,6 +1588,133 @@ const SupplyBorrowModal = ({
     }
   };
 
+  const handlePreDepositFAssetOptIn = useCallback(async () => {
+    if (
+      !activeAccount?.address ||
+      preDepositFAssetAsaId == null ||
+      !depositRequiresStandaloneFAssetOptIn
+    ) {
+      return;
+    }
+    setIsPreDepositFAssetOptInSubmitting(true);
+    setError(null);
+    try {
+      const networkId = networkToUse as string;
+      if (activeWallet) {
+        const walletId = activeWallet.id?.toLowerCase() || "";
+        const walletName = activeWallet.metadata?.name?.toLowerCase() || "";
+        const isUniversalWallet =
+          walletId === "lute" ||
+          walletId === "kibisis" ||
+          walletId === "vera" ||
+          walletId === "biatec";
+        const isVOIWallet = false;
+        const isAlgorandWallet =
+          walletId === "pera" ||
+          walletId === "defly" ||
+          walletName.includes("pera") ||
+          walletName.includes("defly");
+        const isWalletConnect = walletId === "walletconnect";
+        let isWalletConnectVOI = false;
+        let isWalletConnectAlgorand = false;
+        if (isWalletConnect) {
+          isWalletConnectVOI =
+            walletName.includes("vera") || walletName.includes("biatec");
+          isWalletConnectAlgorand =
+            walletName.includes("pera") || walletName.includes("defly");
+        }
+        const isSupported =
+          isUniversalWallet ||
+          (isVOIWallet && networkId === "voi-mainnet") ||
+          (isAlgorandWallet && networkId === "algorand-mainnet") ||
+          (isWalletConnect &&
+            ((isWalletConnectVOI && networkId === "voi-mainnet") ||
+              (isWalletConnectAlgorand && networkId === "algorand-mainnet") ||
+              (!isWalletConnectVOI &&
+                !isWalletConnectAlgorand &&
+                currentNetwork === "voi-mainnet" &&
+                networkId === "voi-mainnet") ||
+              (!isWalletConnectVOI && !isWalletConnectAlgorand))) ||
+          (!isVOIWallet && !isAlgorandWallet && !isWalletConnect);
+        if (!isSupported) {
+          const networkName =
+            networkId === "voi-mainnet" ? "VOI Mainnet" : "Algorand Mainnet";
+          throw new Error(
+            `Your wallet (${activeWallet.metadata?.name || walletId
+            }) does not support ${networkName}. Please switch to a compatible wallet or network.`
+          );
+        }
+      }
+
+      const aln = getAlgorandNetworkFromNetworkId(networkToUse as NetworkId);
+      if (!aln) {
+        throw new Error("Invalid network");
+      }
+      const algod = (
+        await algorandService.initializeClientsForTransactions(aln)
+      ).algod;
+      const params = await algod.getTransactionParams().do();
+      const txn = algosdk.makeAssetTransferTxnWithSuggestedParamsFromObject({
+        sender: activeAccount.address,
+        receiver: activeAccount.address,
+        amount: 0,
+        assetIndex: preDepositFAssetAsaId,
+        suggestedParams: { ...params, flatFee: true, fee: 1000n },
+      });
+      const txnsB64 = algosdk
+        .assignGroupID([txn])
+        .map((t) =>
+          Buffer.from(algosdk.encodeUnsignedTransaction(t)).toString("base64")
+        );
+
+      toast({
+        title: "Sign opt-in",
+        description: `Approve holding ${preDepositFAssetDisplayLabel} in your wallet.`,
+        duration: 10000,
+      });
+
+      const stxns = await signTransactions(
+        txnsB64.map((b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)))
+      );
+      const res = await algod.sendRawTransaction(stxns).do();
+      await waitForConfirmation(algod, res.txid, 4);
+      setFAssetPreOptInStatus("in");
+      toast({
+        title: "Opt-in complete",
+        description: `You can supply ${asset} to this market now.`,
+      });
+      void onRefreshWalletBalance?.();
+    } catch (error) {
+      console.error("pre-deposit f-asset opt-in:", error);
+      let errorMessage = "Opt-in failed";
+      if (error instanceof Error) {
+        const message = error.message.toLowerCase();
+        if (message.includes("compatible wallet")) {
+          errorMessage = error.message;
+        } else if (message.includes("rejected") || message.includes("user")) {
+          errorMessage = "Transaction was rejected or cancelled by user.";
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      setError(errorMessage);
+    } finally {
+      setIsPreDepositFAssetOptInSubmitting(false);
+    }
+  }, [
+    activeAccount?.address,
+    activeWallet,
+    asset,
+    currentNetwork,
+    depositRequiresStandaloneFAssetOptIn,
+    networkToUse,
+    onRefreshWalletBalance,
+    preDepositFAssetAsaId,
+    preDepositFAssetDisplayLabel,
+    signTransactions,
+    toast,
+  ]);
+
   const handleBuildTransaction = async () => {
     if (!activeAccount?.address) {
       setError("Please connect your wallet first");
@@ -1685,6 +1888,21 @@ const SupplyBorrowModal = ({
         throw new Error(
           `Invalid decimals for token ${asset}: ${originalTokenConfig.decimals}`
         );
+      }
+
+      if (
+        mode === "deposit" &&
+        actualNetwork === "algorand-mainnet" &&
+        originalTokenConfig.requireStandaloneFAssetOptInBeforeDeposit &&
+        fAssetPreOptInStatus !== "in"
+      ) {
+        setError(
+          fAssetPreOptInStatus === "checking"
+            ? "Still checking f-asset opt-in status. Wait a moment and try again."
+            : "Opt in to the Folks f-asset first using the button above (one small transaction), then supply."
+        );
+        setIsLoading(false);
+        return;
       }
 
       // For borrows, check liquidity in market-token human (f-asset); input may be ALGO on underlying route
@@ -2299,7 +2517,18 @@ const SupplyBorrowModal = ({
             </div>
 
             {/* Action Buttons */}
-            <div className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 border-t border-gray-200 dark:border-slate-700 px-6 py-3 flex gap-3 shrink-0">
+            <div className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 border-t border-gray-200 dark:border-slate-700 px-6 py-3 shrink-0 space-y-2">
+              {!pendingSign &&
+                mode === "deposit" &&
+                depositRequiresStandaloneFAssetOptIn &&
+                fAssetPreOptInStatus !== "in" && (
+                  <p className="text-xs text-slate-600 dark:text-slate-400">
+                    {fAssetPreOptInStatus === "checking"
+                      ? `Checking ${preDepositFAssetDisplayLabel} opt-in…`
+                      : `Opt in to ${preDepositFAssetDisplayLabel} first (one transaction), then you can supply.`}
+                  </p>
+                )}
+              <div className="flex gap-3">
               {pendingSign ? (
                 <>
                   <Button
@@ -2333,40 +2562,66 @@ const SupplyBorrowModal = ({
                   <Button
                     variant="outline"
                     onClick={onClose}
-                    disabled={isLoading}
+                    disabled={isLoading || isPreDepositFAssetOptInSubmitting}
                     className="flex-1"
                   >
                     Cancel
                   </Button>
-                  <Button
-                    onClick={handleBuildTransaction}
-                    disabled={
-                      !amount ||
-                      parseFloat(amount) <= 0 ||
-                      isLoading ||
-                      (mode === "borrow" && !effectiveUserGlobalData) ||
-                      (mode === "borrow" && borrowNoCapacityAtHfTarget) ||
-                      (mode === "borrow" && borrowExceedsEffectiveCap) ||
-                      (mode === "borrow" && borrowSubmitBlockedBelowHfTarget) ||
-                      (mode === "borrow" && borrowFolksBlockingSubmit) ||
-                      (mode === "deposit" && depositBlockedByLowEstimatedHealth)
-                    }
-                    className={`flex-1 font-semibold h-11 ${mode === "deposit"
-                      ? "bg-teal-600 hover:bg-teal-700 text-white"
-                      : "bg-whale-gold hover:bg-whale-gold/90 text-black"
-                      } disabled:opacity-50 disabled:cursor-not-allowed`}
-                  >
-                    {isLoading ? (
-                      <div className="flex items-center gap-2 justify-center">
-                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                        Building transaction…
-                      </div>
-                    ) : (
-                      `${mode === "deposit" ? "Supply" : "Borrow"} ${asset}`
-                    )}
-                  </Button>
+                  {mode === "deposit" &&
+                  depositRequiresStandaloneFAssetOptIn &&
+                  fAssetPreOptInStatus !== "in" ? (
+                    <Button
+                      type="button"
+                      onClick={() => void handlePreDepositFAssetOptIn()}
+                      disabled={
+                        isPreDepositFAssetOptInSubmitting ||
+                        fAssetPreOptInStatus === "checking"
+                      }
+                      className="flex-1 font-semibold h-11 bg-amber-700 text-white hover:bg-amber-800 dark:bg-amber-600 dark:hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isPreDepositFAssetOptInSubmitting ? (
+                        <div className="flex items-center gap-2 justify-center">
+                          <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                          Signing…
+                        </div>
+                      ) : fAssetPreOptInStatus === "checking" ? (
+                        "Checking…"
+                      ) : (
+                        `Opt in to ${preDepositFAssetDisplayLabel}`
+                      )}
+                    </Button>
+                  ) : (
+                    <Button
+                      onClick={handleBuildTransaction}
+                      disabled={
+                        !amount ||
+                        parseFloat(amount) <= 0 ||
+                        isLoading ||
+                        (mode === "borrow" && !effectiveUserGlobalData) ||
+                        (mode === "borrow" && borrowNoCapacityAtHfTarget) ||
+                        (mode === "borrow" && borrowExceedsEffectiveCap) ||
+                        (mode === "borrow" && borrowSubmitBlockedBelowHfTarget) ||
+                        (mode === "borrow" && borrowFolksBlockingSubmit) ||
+                        (mode === "deposit" && depositBlockedByLowEstimatedHealth)
+                      }
+                      className={`flex-1 font-semibold h-11 ${mode === "deposit"
+                        ? "bg-teal-600 hover:bg-teal-700 text-white"
+                        : "bg-whale-gold hover:bg-whale-gold/90 text-black"
+                        } disabled:opacity-50 disabled:cursor-not-allowed`}
+                    >
+                      {isLoading ? (
+                        <div className="flex items-center gap-2 justify-center">
+                          <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                          Building transaction…
+                        </div>
+                      ) : (
+                        `${mode === "deposit" ? "Supply" : "Borrow"} ${asset}`
+                      )}
+                    </Button>
+                  )}
                 </>
               )}
+              </div>
             </div>
           </div>
         )}

@@ -174,6 +174,13 @@ export interface TokenConfig {
   adapters?: TokenAdapterConfig[];
   /** @deprecated Use {@link adapters} or set both — merged after `adapters` in {@link getTokenAdapterList}. */
   adapter?: TokenAdapterConfig;
+  /**
+   * When true on Algorand mainnet Folks-backed markets, the deposit modal requires a standalone
+   * ASA opt-in to this row’s Folks f-asset before building the main supply transaction group.
+   * Workaround for first-time deposits where bundling opt-in with Folks mint + nt200 would exceed
+   * the maximum atomic group size (e.g. d-pool USDC / fUSDC).
+   */
+  requireStandaloneFAssetOptInBeforeDeposit?: boolean;
 }
 
 /** Which user flows an adapter participates in (omit = both, for backward compatibility). */
@@ -1920,6 +1927,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     },
     logoPath: "/lovable-uploads/USDC.webp",
     tokenStandard: "asa-asa",
+    requireStandaloneFAssetOptInBeforeDeposit: true,
     adapters: [
       FOLKS_MAINNET_USDC_DEPOSIT_FUSDC_WALLET,
       FOLKS_MAINNET_USDC_DEPOSIT_UNDERLYING,
