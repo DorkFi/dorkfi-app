@@ -57,6 +57,7 @@ import {
   folksUnderlyingHumanToFAssetHuman,
 } from "@/services/folksDepositAdapter";
 import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
+import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
 import { getExplorerTransactionUrl } from "@/utils/explorerLinks";
 import {
   buildLiquidationThresholdSummaryForDeposit,
@@ -241,6 +242,7 @@ const RepayModal = ({
   const [folksMintRatioStatus, setFolksMintRatioStatus] = useState<
     "idle" | "loading" | "ready" | "failed"
   >("idle");
+  /** Human balance of the *underlying* spend asset (native ALGO or Folks pool ASA, e.g. USDC). */
   const [nativeAlgoWalletHuman, setNativeAlgoWalletHuman] = useState<
     number | undefined
   >(undefined);
@@ -485,10 +487,46 @@ const RepayModal = ({
     (async () => {
       try {
         const { algod } = algorandService.initializeClients(aln as any);
-        const accountInfo = await algod
-          .accountInformation(activeAccount.address)
-          .do();
-        const human = spendableAlgoHumanFromAccount(accountInfo);
+        let human = 0;
+
+        if (isXalgoConsensusRepayAlgoRoute) {
+          const accountInfo = await algod
+            .accountInformation(activeAccount.address)
+            .do();
+          human = spendableAlgoHumanFromAccount(accountInfo);
+        } else {
+          const folks = selectedRepayAdapter;
+          if (!folks || folks.type !== "folks") {
+            if (!cancelled) setNativeAlgoWalletHuman(undefined);
+            return;
+          }
+          const raw = String(folks.folksParams?.assetId ?? "").trim();
+          const underlyingIsNativeAlgo =
+            raw === "" || raw === "-" || raw === "0";
+          if (underlyingIsNativeAlgo) {
+            const accountInfo = await algod
+              .accountInformation(activeAccount.address)
+              .do();
+            human = spendableAlgoHumanFromAccount(accountInfo);
+          } else {
+            const assetIndex = Number(raw);
+            if (!Number.isFinite(assetIndex) || assetIndex <= 0) {
+              human = 0;
+            } else {
+              const holding = await algod
+                .accountAssetInformation(activeAccount.address, assetIndex)
+                .do();
+              const atomic = getAccountAssetHoldingAmountAtomic(holding);
+              human =
+                atomic != null
+                  ? new BigNumber(atomic.toString())
+                      .dividedBy(10 ** repayTokenDecimals)
+                      .toNumber()
+                  : 0;
+            }
+          }
+        }
+
         if (!cancelled) setNativeAlgoWalletHuman(human);
       } catch {
         if (!cancelled) setNativeAlgoWalletHuman(0);
@@ -502,6 +540,9 @@ const RepayModal = ({
     repayWalletBasis,
     activeAccount?.address,
     networkToUse,
+    isXalgoConsensusRepayAlgoRoute,
+    selectedRepayAdapter,
+    repayTokenDecimals,
   ]);
 
   const toggleDetail = (key: keyof typeof expandedDetails) => {
