@@ -77,6 +77,11 @@ export const APP_SPEC: AppSpec = {
         "no_op": "CALL"
       }
     },
+    "fund_price_feeder(uint64,address)void": {
+      "call_config": {
+        "no_op": "CALL"
+      }
+    },
     "get_price_with_timestamp(uint64)(uint256,uint64)": {
       "call_config": {
         "no_op": "CALL"
@@ -314,6 +319,23 @@ export const APP_SPEC: AppSpec = {
         "desc": "Resets the rate limit for a token by updating the timestamp to current time.\nThis allows immediate price updates (emergency use only). Only the owner can call this function."
       },
       {
+        "name": "fund_price_feeder",
+        "args": [
+          {
+            "type": "uint64",
+            "name": "token_id"
+          },
+          {
+            "type": "address",
+            "name": "feeder"
+          }
+        ],
+        "readonly": false,
+        "returns": {
+          "type": "void"
+        }
+      },
+      {
         "name": "get_price_with_timestamp",
         "args": [
           {
@@ -522,6 +544,14 @@ export type PriceOracle = {
         tokenId: bigint | number
       }
       argsTuple: [tokenId: bigint | number]
+      returns: void
+    }>
+    & Record<'fund_price_feeder(uint64,address)void' | 'fund_price_feeder', {
+      argsObj: {
+        tokenId: bigint | number
+        feeder: string
+      }
+      argsTuple: [tokenId: bigint | number, feeder: string]
       returns: void
     }>
     & Record<'get_price_with_timestamp(uint64)(uint256,uint64)' | 'get_price_with_timestamp', {
@@ -838,6 +868,20 @@ This allows immediate price updates (emergency use only). Only the owner can cal
     }
   }
   /**
+   * Constructs a no op call for the fund_price_feeder(uint64,address)void ABI method
+   *
+   * @param args Any args for the contract call
+   * @param params Any additional parameters for the call
+   * @returns A TypedCallParams object for the call
+   */
+  static fundPriceFeeder(args: MethodArgs<'fund_price_feeder(uint64,address)void'>, params: AppClientCallCoreParams & CoreAppCallArgs) {
+    return {
+      method: 'fund_price_feeder(uint64,address)void' as const,
+      methodArgs: Array.isArray(args) ? args : [args.tokenId, args.feeder],
+      ...params,
+    }
+  }
+  /**
    * Constructs a no op call for the get_price_with_timestamp(uint64)(uint256,uint64) ABI method
    *
    * @param args Any args for the contract call
@@ -1145,6 +1189,17 @@ This allows immediate price updates (emergency use only). Only the owner can cal
   }
 
   /**
+   * Calls the fund_price_feeder(uint64,address)void ABI method.
+   *
+   * @param args The arguments for the contract call
+   * @param params Any additional parameters for the call
+   * @returns The result of the call
+   */
+  public fundPriceFeeder(args: MethodArgs<'fund_price_feeder(uint64,address)void'>, params: AppClientCallCoreParams & CoreAppCallArgs = {}) {
+    return this.call(PriceOracleCallFactory.fundPriceFeeder(args, params))
+  }
+
+  /**
    * Calls the get_price_with_timestamp(uint64)(uint256,uint64) ABI method.
    *
    * @param args The arguments for the contract call
@@ -1320,6 +1375,11 @@ This allows immediate price updates (emergency use only). Only the owner can cal
         resultMappers.push(undefined)
         return this
       },
+      fundPriceFeeder(args: MethodArgs<'fund_price_feeder(uint64,address)void'>, params?: AppClientComposeCallCoreParams & CoreAppCallArgs) {
+        promiseChain = promiseChain.then(() => client.fundPriceFeeder(args, {...params, sendParams: {...params?.sendParams, skipSending: true, atc}}))
+        resultMappers.push(undefined)
+        return this
+      },
       getPriceWithTimestamp(args: MethodArgs<'get_price_with_timestamp(uint64)(uint256,uint64)'>, params?: AppClientComposeCallCoreParams & CoreAppCallArgs) {
         promiseChain = promiseChain.then(() => client.getPriceWithTimestamp(args, {...params, sendParams: {...params?.sendParams, skipSending: true, atc}}))
         resultMappers.push(PriceWithTimestamp)
@@ -1486,6 +1546,15 @@ This allows immediate price updates (emergency use only). Only the owner can cal
    * @returns The typed transaction composer so you can fluently chain multiple calls or call execute to execute all queued up transactions
    */
   resetRateLimit(args: MethodArgs<'reset_rate_limit(uint64)void'>, params?: AppClientComposeCallCoreParams & CoreAppCallArgs): PriceOracleComposer<[...TReturns, MethodReturn<'reset_rate_limit(uint64)void'>]>
+
+  /**
+   * Calls the fund_price_feeder(uint64,address)void ABI method.
+   *
+   * @param args The arguments for the contract call
+   * @param params Any additional parameters for the call
+   * @returns The typed transaction composer so you can fluently chain multiple calls or call execute to execute all queued up transactions
+   */
+  fundPriceFeeder(args: MethodArgs<'fund_price_feeder(uint64,address)void'>, params?: AppClientComposeCallCoreParams & CoreAppCallArgs): PriceOracleComposer<[...TReturns, MethodReturn<'fund_price_feeder(uint64,address)void'>]>
 
   /**
    * Calls the get_price_with_timestamp(uint64)(uint256,uint64) ABI method.

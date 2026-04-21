@@ -1853,6 +1853,94 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleFundPriceFeeder = async () => {
+    if (!oracleContractInfo.contractId || !oracleContractInfo.isDeployed) {
+      toast.error("Oracle contract not available", {
+        description: "Cannot fund feeder: Oracle contract is not deployed.",
+      });
+      return;
+    }
+
+    if (!fundFeederAddress.trim() || !selectedMarketIdForFundFeeder) {
+      toast.error("Missing information", {
+        description: "Please enter the feeder address for this asset.",
+      });
+      return;
+    }
+
+    try {
+      setFundFeederSubmitting(true);
+      const networkConfig = getNetworkConfig(currentNetwork);
+      const clients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      const ci = new CONTRACT(
+        Number(oracleContractInfo.contractId),
+        clients.algod,
+        undefined,
+        { ...PriceOracleAppSpec.contract, events: [] },
+        { addr: activeAccount?.address || "", sk: new Uint8Array() }
+      );
+      ci.setEnableRawBytes(true);
+
+      const markets = getMarketsFromConfig(currentNetwork);
+      const selectedMarket = markets.find(
+        (m) => m.id === selectedMarketIdForFundFeeder
+      );
+      const tokenId =
+        selectedMarket?.underlyingContractId ||
+        selectedMarket?.underlyingAssetId;
+
+      if (!tokenId) {
+        toast.error("Invalid token selection", {
+          description: "Could not find token ID for this market.",
+        });
+        return;
+      }
+
+      ci.setFee(2000);
+      const result = await ci.fund_price_feeder(
+        Number(tokenId),
+        fundFeederAddress
+      );
+
+      console.log("fund_price_feeder result", { result });
+
+      if (!result.success) {
+        toast.error("Failed to fund price feeder", {
+          description:
+            "Could not build the fund transaction. Check permissions and try again.",
+        });
+        return;
+      }
+
+      const stxns = await signTransactions(
+        result.txns.map((txn: string) =>
+          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+        )
+      );
+      const res = await clients.algod.sendRawTransaction(stxns).do();
+      await waitForConfirmation(clients.algod, res.txid, 4);
+
+      toast.success("Feeder funded", {
+        description: `fund_price_feeder submitted for ${selectedMarket?.symbol ?? "asset"}.`,
+      });
+
+      setFundFeederAddress("");
+      setSelectedMarketIdForFundFeeder("");
+      setIsFundFeederModalOpen(false);
+    } catch (error) {
+      console.error("Error funding price feeder:", error);
+      toast.error("Failed to fund price feeder", {
+        description:
+          error instanceof Error ? error.message : "An unexpected error occurred.",
+      });
+    } finally {
+      setFundFeederSubmitting(false);
+    }
+  };
+
   // Set price for a specific token
   const handleSetPrice = async () => {
     if (!oracleContractInfo.contractId || !oracleContractInfo.isDeployed) {
@@ -2990,6 +3078,13 @@ export default function AdminDashboard() {
     useState(false);
   const [selectedTokenForAttach, setSelectedTokenForAttach] =
     useState<string>("");
+
+  // Fund price feeder (per-asset row → modal)
+  const [isFundFeederModalOpen, setIsFundFeederModalOpen] = useState(false);
+  const [selectedMarketIdForFundFeeder, setSelectedMarketIdForFundFeeder] =
+    useState<string>("");
+  const [fundFeederAddress, setFundFeederAddress] = useState("");
+  const [fundFeederSubmitting, setFundFeederSubmitting] = useState(false);
 
   // State for selected lending pool
   const [selectedLendingPool, setSelectedLendingPool] = useState<string>("");
@@ -12354,6 +12449,23 @@ export default function AdminDashboard() {
                                   Fetch Feed
                                 </Button>
                               )}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setSelectedMarketIdForFundFeeder(market.id);
+                                  setFundFeederAddress("");
+                                  setIsFundFeederModalOpen(true);
+                                }}
+                                className="h-6 px-2 text-xs"
+                                disabled={
+                                  !oracleContractInfo.contractId ||
+                                  !oracleContractInfo.isDeployed
+                                }
+                              >
+                                <Coins className="h-3 w-3 mr-1" />
+                                Fund
+                              </Button>
                             </div>
                           </div>
 
@@ -12870,6 +12982,23 @@ export default function AdminDashboard() {
                             >
                               <DollarSign className="h-3 w-3 mr-1" />
                               Set Price
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setSelectedMarketIdForFundFeeder(market.id);
+                                setFundFeederAddress("");
+                                setIsFundFeederModalOpen(true);
+                              }}
+                              className="h-6 px-2 text-xs"
+                              disabled={
+                                !oracleContractInfo.contractId ||
+                                !oracleContractInfo.isDeployed
+                              }
+                            >
+                              <Coins className="h-3 w-3 mr-1" />
+                              Fund
                             </Button>
                           </div>
                         </div>
@@ -17827,6 +17956,92 @@ export default function AdminDashboard() {
             >
               <UserPlus className="h-4 w-4 mr-2" />
               {feederApproval ? "Approve" : "Revoke"} Feeder
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Fund price feeder (fund_price_feeder) */}
+      <Dialog
+        open={isFundFeederModalOpen}
+        onOpenChange={(open) => {
+          setIsFundFeederModalOpen(open);
+          if (!open) {
+            setFundFeederAddress("");
+            setSelectedMarketIdForFundFeeder("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-lg p-6">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Coins className="h-5 w-5" />
+              Fund price feeder
+            </DialogTitle>
+            <DialogDescription>
+              Calls{" "}
+              <span className="font-mono text-xs">
+                fund_price_feeder(uint64,address)
+              </span>{" "}
+              on the price oracle for the selected asset.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div>
+              <Label>Asset</Label>
+              <p className="text-sm font-medium mt-1">
+                {(() => {
+                  const m = getMarketsFromConfig(currentNetwork).find(
+                    (x) => x.id === selectedMarketIdForFundFeeder
+                  );
+                  return m
+                    ? `${m.symbol} — ${m.name}`
+                    : "—";
+                })()}
+              </p>
+            </div>
+            <div>
+              <Label htmlFor="fund-feeder-address">Feeder address</Label>
+              <Input
+                id="fund-feeder-address"
+                placeholder="Feeder account address"
+                value={fundFeederAddress}
+                onChange={(e) =>
+                  setFundFeederAddress(e.target.value.toUpperCase())
+                }
+                className="font-mono text-sm mt-2"
+              />
+              {fundFeederAddress.trim() &&
+                !envoiService.isValidAddressFormat(fundFeederAddress) && (
+                  <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                    Invalid address format.
+                  </p>
+                )}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsFundFeederModalOpen(false)}
+              disabled={fundFeederSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleFundPriceFeeder}
+              disabled={
+                fundFeederSubmitting ||
+                !fundFeederAddress.trim() ||
+                !envoiService.isValidAddressFormat(fundFeederAddress) ||
+                !selectedMarketIdForFundFeeder ||
+                !oracleContractInfo.contractId ||
+                !oracleContractInfo.isDeployed
+              }
+            >
+              <Coins className="h-4 w-4 mr-2" />
+              Fund feeder
             </Button>
           </DialogFooter>
         </DialogContent>
