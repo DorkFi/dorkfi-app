@@ -27,6 +27,7 @@ import {
   fetchMarketInfoFromContract,
   getMaxWithdrawableForMarket,
   fetchUserGlobalDataForPool,
+  fetchBorrowPositionChainDebug,
 } from "@/services/lendingService";
 import {
   estimateFolksDepositMintedFAssetAmount,
@@ -273,6 +274,15 @@ const PortfolioModals = ({
     | null
     | undefined
   >(undefined);
+
+  /**
+   * On-chain total debt + accrued (get_user + sync_market via fetchBorrowPositionChainDebug),
+   * same as admin borrow debug. When null, RepayModal falls back to portfolio API row.
+   */
+  const [repayChainOwed, setRepayChainOwed] = useState<{
+    totalDebt: number;
+    accruedInterest: number;
+  } | null>(null);
 
   const [userDepositIndexCache, setUserDepositIndexCache] = useState<
     Record<string, string>
@@ -1619,6 +1629,76 @@ const PortfolioModals = ({
     currentNetwork,
   ]);
 
+  useEffect(() => {
+    if (!repayModal.isOpen || !repayModal.asset || !activeAccount?.address) {
+      setRepayChainOwed(null);
+      return;
+    }
+    const networkToUse = (repayModal.network || currentNetwork) as NetworkId;
+    if (!isAlgorandCompatibleNetwork(networkToUse)) {
+      setRepayChainOwed(null);
+      return;
+    }
+    const tokensRep = getAllTokensWithDisplayInfo(networkToUse);
+    const repayTokenRow = resolveSupplyBorrowToken(
+      tokensRep,
+      repayModal.asset ?? "",
+      repayModal.poolId,
+      repayModal.configSymbol,
+      repayModal.marketId
+    );
+    const poolIdStr =
+      repayModal.poolId != null && String(repayModal.poolId).trim() !== ""
+        ? String(repayModal.poolId)
+        : repayTokenRow.poolId != null
+          ? String(repayTokenRow.poolId)
+          : "";
+    const marketIdStr =
+      repayModal.marketId != null && String(repayModal.marketId).trim() !== ""
+        ? String(repayModal.marketId)
+        : repayTokenRow.underlyingContractId != null
+          ? String(repayTokenRow.underlyingContractId)
+          : "";
+    if (!poolIdStr || !marketIdStr) {
+      setRepayChainOwed(null);
+      return;
+    }
+    let cancelled = false;
+    setRepayChainOwed(null);
+    fetchBorrowPositionChainDebug(
+      activeAccount.address,
+      poolIdStr,
+      marketIdStr,
+      networkToUse
+    )
+      .then((r) => {
+        if (cancelled) return;
+        if (r.ok) {
+          setRepayChainOwed({
+            totalDebt: r.data.totalDebtFromSyncMarket,
+            accruedInterest: r.data.accruedInterestFromSyncMarket,
+          });
+        } else {
+          setRepayChainOwed(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setRepayChainOwed(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    repayModal.isOpen,
+    repayModal.asset,
+    repayModal.poolId,
+    repayModal.marketId,
+    repayModal.configSymbol,
+    repayModal.network,
+    activeAccount?.address,
+    currentNetwork,
+  ]);
+
   const handleRepaySubmit = async (
     amount: string,
     opts?: { isRepayAll?: boolean; repayAdapterId?: string }
@@ -2518,8 +2598,12 @@ const PortfolioModals = ({
               network={
                 repayModal.network || (borrow as any)?.network || currentNetwork
               }
-              currentBorrow={borrow?.balance || 0}
-              accruedInterest={borrow?.interest || 0}
+              currentBorrow={
+                repayChainOwed?.totalDebt ?? borrow?.balance ?? 0
+              }
+              accruedInterest={
+                repayChainOwed?.accruedInterest ?? borrow?.interest ?? 0
+              }
               walletBalance={
                 repayModal.network
                   ? walletBalances[

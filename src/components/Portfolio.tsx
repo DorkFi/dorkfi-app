@@ -15,6 +15,7 @@ import { getCurrentNetworkConfig } from "@/config";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
 import { abi, CONTRACT } from "ulujs";
 import { updateTransactionMetadata } from "@/utils/transactionUtils";
+import { signAndSendSyncUserMarketsForPriceChangeTx } from "@/utils/syncUserMarketsForPriceChange";
 import {
   fetchUserGlobalData,
   fetchAllMarkets,
@@ -2559,181 +2560,20 @@ const Portfolio = () => {
       }
 
       try {
-        // Find which network this poolId belongs to
-        const enabledNetworks = getEnabledNetworks();
-        let marketNetworkId: NetworkId | null = null;
-
-        for (const networkId of enabledNetworks) {
-          const networkConfig = getNetworkConfig(networkId);
-          const lendingPools = networkConfig?.contracts?.lendingPools || [];
-          if (lendingPools.includes(poolId)) {
-            marketNetworkId = networkId;
-            break;
-          }
-        }
-
-        if (!marketNetworkId) {
-          console.error(
-            `[Portfolio] Could not find network for poolId ${poolId}`
-          );
-          return;
-        }
-
-        // Use the market's network config, not the active network
-        const networkConfig = getNetworkConfig(marketNetworkId);
-        const algorandNetwork =
-          getAlgorandNetworkFromNetworkId(marketNetworkId);
-        if (!algorandNetwork) {
-          console.error(
-            `[Portfolio] Network ${marketNetworkId} is not Algorand-compatible`
-          );
-          return;
-        }
-        const clients = algorandService.initializeClients(algorandNetwork);
-
-        // If marketId is provided, sync only that specific market
-        // Otherwise, sync all markets for the provided poolId
-        let marketsToSync: Array<{ poolId: string; marketId: string }> = [];
-
-        if (marketId) {
-          // Sync only the specific market
-          marketsToSync = [{ poolId, marketId }];
-        } else {
-          // Get all markets for this poolId from the market's network
-          const tokens = getAllTokensWithDisplayInfo(marketNetworkId);
-          const matchingTokens = tokens.filter((t) => t.poolId === poolId);
-
-          for (const token of matchingTokens) {
-            if (token.underlyingContractId) {
-              marketsToSync.push({
-                poolId,
-                marketId: token.underlyingContractId,
-              });
-            }
-          }
-        }
-
-        if (marketsToSync.length === 0) {
-          console.log("[Portfolio] No markets to sync");
-          return;
-        }
-
-        console.log(
-          "[Portfolio] Syncing markets:",
-          marketsToSync,
-          "on network:",
-          marketNetworkId
+        await signAndSendSyncUserMarketsForPriceChangeTx(
+          userAddress,
+          poolId,
+          marketId,
+          activeAccount.address,
+          signTransactions
         );
-
-        // Create contract instance for this specific poolId
-        const ci = new CONTRACT(
-          Number(poolId),
-          clients.algod,
-          clients.indexer,
-          abi.custom,
-          {
-            addr: activeAccount.address,
-            sk: new Uint8Array(),
-          }
-        );
-
-        const builder = {
-          lending: new CONTRACT(
-            Number(poolId),
-            clients.algod,
-            clients.indexer,
-            { ...LendingPoolAppSpec.contract, events: [] },
-            {
-              addr: activeAccount.address,
-              sk: new Uint8Array(),
-            },
-            true,
-            false,
-            true
-          ),
-        };
-
-        // Build sync transactions for each market
-        const buildN = [];
-        for (const { marketId: syncMarketId } of marketsToSync) {
-          console.log("[Portfolio] Syncing market:", {
-            poolId,
-            marketId: syncMarketId,
-            userAddress,
-          });
-          try {
-            const txnO = (
-              await builder.lending.sync_user_market_for_price_change(
-                userAddress,
-                Number(syncMarketId)
-              )
-            ).obj;
-            buildN.push({
-              ...txnO,
-              note: new TextEncoder().encode(
-                `lending sync_market ${syncMarketId}`
-              ),
-              payment: 1e5,
-            });
-          } catch (error) {
-            console.warn(
-              `[Portfolio] Failed to sync market ${syncMarketId} in pool ${poolId}:`,
-              error
-            );
-          }
-        }
-
-        if (buildN.length === 0) {
-          console.log(`[Portfolio] No sync transactions for pool ${poolId}`);
-          return;
-        }
-
-        ci.setFee(10000);
-        ci.setEnableGroupResourceSharing(true);
-        ci.setExtraTxns(buildN);
-        // Set beacon ID for algorand-mainnet (using market's network, not active network)
-        if (marketNetworkId === "algorand-mainnet") {
-          ci.setBeaconId(3209233839);
-        }
-        const customR = await ci.custom();
-
-        console.log(
-          `[Portfolio] Sync transactions for pool ${poolId}:`,
-          customR
-        );
-
-        // Use clients for the market's network
-        const algorandClients =
-          await algorandService.initializeClientsForTransactions(
-            algorandNetwork
-          );
-
-        const stxns = await signTransactions(
-          customR.txns.map((txn: string) =>
-            Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
-          )
-        );
-
-        const res = await algorandClients.algod.sendRawTransaction(stxns).do();
-        await algosdk.waitForConfirmation(algorandClients.algod, res.txid, 4);
-
-        // Update transaction metadata (using market's network, not active network)
-        await updateTransactionMetadata(res.txid, marketNetworkId);
-
         console.log("[Portfolio] Markets synced successfully");
       } catch (error) {
         console.error("[Portfolio] Error syncing markets:", error);
         throw error;
       }
     },
-     
-    [
-      signTransactions,
-      activeAccount?.address,
-      currentNetwork,
-      deposits,
-      borrows,
-    ]
+    [signTransactions, activeAccount?.address]
   );
 
   // Function to refresh positions data
