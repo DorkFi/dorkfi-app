@@ -479,7 +479,7 @@ const Portfolio = () => {
   const [borrowedAssetsSort, setBorrowedAssetsSort] = useState<{
     column: string | null;
     direction: "asc" | "desc";
-  }>({ column: "apy", direction: "asc" });
+  }>({ column: "apy", direction: "desc" });
   const [accruedInterestSearchTerm, setAccruedInterestSearchTerm] =
     useState<string>("");
   const [showAllAccruedInterest, setShowAllAccruedInterest] =
@@ -6964,7 +6964,7 @@ const Portfolio = () => {
                                   <TableCell>
                                     {formatNumber(deposit.balance, {
                                       minimumFractionDigits: 2,
-                                      maximumFractionDigits: 2,
+                                      maximumFractionDigits: 6,
                                     })}
                                   </TableCell>
                                   <TableCell>
@@ -8287,7 +8287,7 @@ const Portfolio = () => {
                                   } else {
                                     setBorrowedAssetsSort({
                                       column: "apy",
-                                      direction: "asc",
+                                      direction: "desc",
                                     });
                                   }
                                 }}
@@ -8373,7 +8373,9 @@ const Portfolio = () => {
                                 </div>
                               </TableHead>
                             )}
-                            <TableHead>Actions</TableHead>
+                            <TableHead className="whitespace-nowrap w-[1%]">
+                              Actions
+                            </TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -8666,15 +8668,20 @@ const Portfolio = () => {
                                     {borrowMarketLabel || "-"}
                                   </TableCell>
                                   <TableCell>
-                                    {formatNumber(borrow.balance, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}
+                                    {formatNumber(borrow.balance, {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 6,
+                                    })}
                                   </TableCell>
                                   <TableCell>
                                     {formatCurrency(borrow.value, "USD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </TableCell>
                                   <TableCell className="text-right tabular-nums">
-                                    <span className="text-red-600 dark:text-red-400">
-                                      {formatPercent(borrow.apy / 100, { maximumFractionDigits: 2 })}
-                                    </span>
+                                    <div className="flex flex-col gap-0.5 items-end">
+                                      <span className="text-red-600 dark:text-red-400">
+                                        {formatPercent(borrow.apy / 100, { maximumFractionDigits: 2 })}
+                                      </span>
+                                    </div>
                                   </TableCell>
                                   <TableCell className="text-right tabular-nums">
                                     {borrow.accruedInterest > 0 ? (
@@ -8712,8 +8719,8 @@ const Portfolio = () => {
                                         </span>
                                       </TableCell>
                                     )}
-                                  <TableCell>
-                                    <div className="flex items-center gap-2 flex-wrap">
+                                  <TableCell className="whitespace-nowrap w-[1%]">
+                                    <div className="flex items-center gap-2">
                                       {!isViewOnly && (
                                         <>
                                           {!market?.isPaused && (
@@ -8738,7 +8745,7 @@ const Portfolio = () => {
                                                   : "Borrow more of this asset against your collateral"
                                               }
                                               aria-label="Borrow"
-                                              className="min-w-[92px] h-8 px-2 gap-1"
+                                              className="min-w-[92px] h-8 shrink-0 px-2 gap-1"
                                             >
                                               <span className="text-base leading-none">+</span>
                                               <span className="hidden lg:inline text-xs">Borrow</span>
@@ -8759,7 +8766,7 @@ const Portfolio = () => {
                                             }}
                                             title="Repay this debt to improve health factor"
                                             aria-label="Repay"
-                                            className="min-w-[92px] h-8 px-2 gap-1"
+                                            className="min-w-[92px] h-8 shrink-0 px-2 gap-1"
                                           >
                                             <span className="text-base leading-none">−</span>
                                             <span className="hidden lg:inline text-xs">Repay</span>
