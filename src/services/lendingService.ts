@@ -1037,7 +1037,7 @@ export const fetchAllMarkets = async (
             `Fetching market data for ${token.symbol} (marketId: ${marketId}, poolId: ${poolId})`
           );
 
-          const marketInfo = await fetchMarketInfo(poolId, marketId, networkId); // uses API by default
+          const marketInfo = await fetchMarketInfo(poolId, marketId, networkId); // fetch from api
 
           if (marketInfo) {
             console.log(
@@ -1747,19 +1747,31 @@ export type BorrowPositionChainDebug = {
   scaledDeposits: string;
   userBorrowIndex: string;
   userDepositIndex: string;
+  /** From `sync_market` (accrue path; used for debt math). */
   marketBorrowIndex: string;
   marketDepositIndex: string;
+  /** From `get_market` (storage read; may differ from `sync_market` on indices until accrual). */
+  getMarketBorrowIndex: string;
+  getMarketDepositIndex: string;
+  getMarketChainLastUpdateIso: string;
+  syncMarketChainLastUpdateIso: string;
+  /** `true` when get_market and sync_market return the same deposit/borrow indices. */
+  getSyncMarketIndexMatch: boolean;
   userLastUpdateTime: string;
-  totalDebtUnderlying: number;
-  accruedInterestUnderlying: number;
+  /** `scaledBorrows × I_market ÷ SCALE` with `I_market` from `sync_market`. */
+  totalDebtFromSyncMarket: number;
+  /** Same formula with `I_market` from `get_market` (storage; may differ from sync). */
+  totalDebtFromGetMarket: number;
+  accruedInterestFromSyncMarket: number;
+  accruedInterestFromGetMarket: number;
   actualBorrowsRaw: string;
   interestRaw: string;
 };
 
 /**
  * Read `get_user` + market state from contracts and compute total debt / index-delta interest.
- * Uses `sync_market` for current indices so accrued-interest / debt math matches on-chain accrual
- * (same as {@link fetchUserBorrowBalance}).
+ * Fetches both `sync_market` and `get_market` for comparison; **debt math** uses
+ * `sync_market` indices (same as {@link fetchUserBorrowBalance}).
  * Use this as the source of truth when comparing Portfolio/API display issues.
  */
 export async function fetchBorrowPositionChainDebug(
@@ -1819,7 +1831,7 @@ export async function fetchBorrowPositionChainDebug(
       };
     }
 
-    const [marketInfo, borrowAmountR] = await Promise.all([
+    const [marketInfoSync, marketInfoGet, borrowAmountR] = await Promise.all([
       fetchMarketInfo(
         poolId,
         marketId,
@@ -1827,27 +1839,50 @@ export async function fetchBorrowPositionChainDebug(
         "contract",
         "sync_market"
       ),
+      fetchMarketInfo(
+        poolId,
+        marketId,
+        networkId,
+        "contract",
+        "get_market"
+      ),
       ci.get_user_borrow_amount(userAddress, Number(marketId)),
     ]);
-    if (!marketInfo) {
+    if (!marketInfoSync) {
       return {
         ok: false,
         error: "fetchMarketInfo (contract, sync_market) failed",
       };
     }
+    if (!marketInfoGet) {
+      return {
+        ok: false,
+        error: "fetchMarketInfo (contract, get_market) failed",
+      };
+    }
+
+    const getSyncMarketIndexMatch =
+      String(marketInfoGet.borrowIndex) === String(marketInfoSync.borrowIndex) &&
+      String(marketInfoGet.depositIndex) === String(marketInfoSync.depositIndex);
 
     const scaledBorrows = userData.scaledBorrows.toString();
     const scaledDeposits = userData.scaledDeposits.toString();
     const userBorrowIndex = userData.borrowIndex.toString();
     const userDepositIndex = userData.depositIndex.toString();
-    const currentBorrowIndex = marketInfo.borrowIndex;
-    const marketDepositIndex = marketInfo.depositIndex;
+    const currentBorrowIndex = marketInfoSync.borrowIndex;
+    const marketDepositIndex = marketInfoSync.depositIndex;
     const decimals = token.decimals;
 
-    const debt = borrowDebtFromScaledAndIndices(
+    const debtSync = borrowDebtFromScaledAndIndices(
       scaledBorrows,
       userBorrowIndex,
       String(currentBorrowIndex),
+      decimals
+    );
+    const debtGet = borrowDebtFromScaledAndIndices(
+      scaledBorrows,
+      userBorrowIndex,
+      String(marketInfoGet.borrowIndex),
       decimals
     );
     const SCALE = BORROW_INDEX_SCALE;
@@ -1882,9 +1917,16 @@ export async function fetchBorrowPositionChainDebug(
         userDepositIndex,
         marketBorrowIndex: String(currentBorrowIndex),
         marketDepositIndex: String(marketDepositIndex),
+        getMarketBorrowIndex: String(marketInfoGet.borrowIndex),
+        getMarketDepositIndex: String(marketInfoGet.depositIndex),
+        getMarketChainLastUpdateIso: marketInfoGet.chainLastUpdateIso ?? "",
+        syncMarketChainLastUpdateIso: marketInfoSync.chainLastUpdateIso ?? "",
+        getSyncMarketIndexMatch,
         userLastUpdateTime: userData.lastUpdateTime.toString(),
-        totalDebtUnderlying: debt.totalDebt,
-        accruedInterestUnderlying: debt.indexIncrementAccrued,
+        totalDebtFromSyncMarket: debtSync.totalDebt,
+        totalDebtFromGetMarket: debtGet.totalDebt,
+        accruedInterestFromSyncMarket: debtSync.indexIncrementAccrued,
+        accruedInterestFromGetMarket: debtGet.indexIncrementAccrued,
         actualBorrowsRaw: actualBorrowsRaw.toString(),
         interestRaw: interestRaw.toString(),
       },
@@ -4111,8 +4153,8 @@ export const deposit = async (
       )
         ? poolId != null && poolId !== ""
           ? rawTokenConfigForDeposit.find(
-              (c) => String(c.poolId) === String(poolId)
-            ) ?? rawTokenConfigForDeposit[0]
+            (c) => String(c.poolId) === String(poolId)
+          ) ?? rawTokenConfigForDeposit[0]
           : rawTokenConfigForDeposit[0]
         : rawTokenConfigForDeposit;
 
@@ -6212,6 +6254,17 @@ export const repay = async (
             payment: p2 > 0 ? 28502 : 0,
           });
         }
+        // sync user market for price change
+        // {
+        //   const txnO = (
+        //     await builder.lending.sync_user_market_for_price_change(userAddress, Number(marketId))
+        //   ).obj as any;
+        //   buildN.push({
+        //     ...txnO,
+        //     payment: 1e5 + 0,
+        //     note: new TextEncoder().encode("lending sync_user_market_for_price_change"),
+        //   });
+        // }
         // repay tp lending pool
         {
           const txnO = (

@@ -102,6 +102,7 @@ import {
   GovernanceConfig,
   isCurrentNetworkAVM,
   getAlgorandNetworkFromNetworkId,
+  isAlgorandCompatibleNetwork,
   type TokenStandard,
 } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
@@ -171,6 +172,7 @@ import {
   refreshAllLendingBackendSnapshots,
   type RefreshAllSnapshotsResult,
 } from "@/utils/refreshAllLendingBackendSnapshots";
+import { signAndSendSyncUserMarketsForPriceChangeTx } from "@/utils/syncUserMarketsForPriceChange";
 import { ARC200Service } from "@/services/arc200Service";
 import { TokenContractModal } from "@/components/ui/TokenContractModal";
 import {
@@ -439,6 +441,84 @@ export default function AdminDashboard() {
   const [borrowDebugLoading, setBorrowDebugLoading] = useState(false);
   const [borrowDebugApiLoading, setBorrowDebugApiLoading] = useState(false);
   const [borrowDebugQuickPick, setBorrowDebugQuickPick] = useState("__manual__");
+
+  /** Tools: on-chain sync_user_market_for_price_change (after oracle / price updates) */
+  const [pcSyncNetwork, setPcSyncNetwork] = useState<NetworkId>(
+    () => currentNetwork as NetworkId
+  );
+  const [pcSyncUserAddress, setPcSyncUserAddress] = useState("");
+  const [pcSyncPoolId, setPcSyncPoolId] = useState("");
+  const [pcSyncMarketId, setPcSyncMarketId] = useState("");
+  const [pcSyncLoading, setPcSyncLoading] = useState(false);
+  const [pcSyncLastResult, setPcSyncLastResult] = useState<string | null>(null);
+  const [pcSyncError, setPcSyncError] = useState<string | null>(null);
+  const [pcSyncQuickPick, setPcSyncQuickPick] = useState("__manual__");
+
+  const pcSyncTokenOptions = useMemo(() => {
+    return getAllTokensWithDisplayInfo(pcSyncNetwork).filter(
+      (t) => t.underlyingContractId && t.poolId
+    );
+  }, [pcSyncNetwork]);
+
+  useEffect(() => {
+    if (activeAccount?.address && !pcSyncUserAddress) {
+      setPcSyncUserAddress(activeAccount.address);
+    }
+  }, [activeAccount?.address, pcSyncUserAddress]);
+
+  useEffect(() => {
+    setPcSyncQuickPick("__manual__");
+  }, [pcSyncNetwork]);
+
+  const handleSyncUserForPriceChange = useCallback(async () => {
+    const u = pcSyncUserAddress.trim();
+    const p = pcSyncPoolId.trim();
+    const m = pcSyncMarketId.trim();
+    if (!activeAccount?.address) {
+      toast.error("Connect a wallet to sign.");
+      return;
+    }
+    if (!u || !p) {
+      toast.error("User address and pool (lending app) ID are required.");
+      return;
+    }
+    if (!signTransactions) {
+      toast.error("Wallet does not support signing transaction groups.");
+      return;
+    }
+    if (!isAlgorandCompatibleNetwork(pcSyncNetwork)) {
+      toast.error("This tool only supports Algorand-compatible networks.");
+      return;
+    }
+    setPcSyncLoading(true);
+    setPcSyncError(null);
+    setPcSyncLastResult(null);
+    try {
+      const r = await signAndSendSyncUserMarketsForPriceChangeTx(
+        u,
+        p,
+        m || undefined,
+        activeAccount.address,
+        signTransactions
+      );
+      const line = `Synced ${r.marketsSynced} market(s) in pool ${r.poolId} · tx ${r.txid} · ${r.networkId}`;
+      setPcSyncLastResult(line);
+      toast.success("sync_user_market_for_price_change confirmed.");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setPcSyncError(msg);
+      toast.error(msg);
+    } finally {
+      setPcSyncLoading(false);
+    }
+  }, [
+    activeAccount?.address,
+    pcSyncUserAddress,
+    pcSyncPoolId,
+    pcSyncMarketId,
+    pcSyncNetwork,
+    signTransactions,
+  ]);
 
   useEffect(() => {
     if (activeAccount?.address && !borrowDebugAddress) {
@@ -11749,11 +11829,12 @@ export default function AdminDashboard() {
                   Borrow position debugger (authoritative)
                 </CardTitle>
                 <CardDescription>
-                  Reads <code className="text-xs">get_user</code> and{" "}
-                  <code className="text-xs">sync_market</code> for market indices
-                  (accrued interest / debt uses the same index path as{" "}
-                  <code className="text-xs">fetchUserBorrowBalance</code>). Use this to
-                  compare against indexer/API rows after{" "}
+                  Reads <code className="text-xs">get_user</code>,{" "}
+                  <code className="text-xs">sync_market</code>, and{" "}
+                  <code className="text-xs">get_market</code> (indices and last update; debt
+                  math uses <code className="text-xs">sync_market</code>, same as{" "}
+                  <code className="text-xs">fetchUserBorrowBalance</code>). Compare
+                  against indexer/API rows after{" "}
                   <code className="text-xs">fetchFreshUserData</code>.
                 </CardDescription>
               </CardHeader>
@@ -11900,20 +11981,83 @@ export default function AdminDashboard() {
                       <span className="break-all">{borrowDebugChain.scaledBorrows}</span>
                       <span className="text-muted-foreground">user borrowIndex</span>
                       <span className="break-all">{borrowDebugChain.userBorrowIndex}</span>
-                      <span className="text-muted-foreground">market borrowIndex</span>
+                      <span className="text-muted-foreground">
+                        sync_market · borrowIndex
+                      </span>
                       <span className="break-all">{borrowDebugChain.marketBorrowIndex}</span>
-                      <span className="text-muted-foreground">total debt (underlying)</span>
+                      <span className="text-muted-foreground">
+                        sync_market · depositIndex
+                      </span>
+                      <span className="break-all">
+                        {borrowDebugChain.marketDepositIndex}
+                      </span>
+                      <span className="text-muted-foreground">sync_market · last update</span>
+                      <span className="break-all">
+                        {borrowDebugChain.syncMarketChainLastUpdateIso || "—"}
+                      </span>
+                      <span className="text-muted-foreground">
+                        get_market · borrowIndex
+                      </span>
+                      <span className="break-all">
+                        {borrowDebugChain.getMarketBorrowIndex}
+                      </span>
+                      <span className="text-muted-foreground">
+                        get_market · depositIndex
+                      </span>
+                      <span className="break-all">
+                        {borrowDebugChain.getMarketDepositIndex}
+                      </span>
+                      <span className="text-muted-foreground">get_market · last update</span>
+                      <span className="break-all">
+                        {borrowDebugChain.getMarketChainLastUpdateIso || "—"}
+                      </span>
+                      <span className="text-muted-foreground">
+                        get vs sync (indices match)
+                      </span>
+                      <span
+                        className={
+                          borrowDebugChain.getSyncMarketIndexMatch
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : "text-amber-700 dark:text-amber-300"
+                        }
+                      >
+                        {borrowDebugChain.getSyncMarketIndexMatch ? "yes" : "no (diverged)"}
+                      </span>
+                      <span className="text-muted-foreground">
+                        total_debt (sync_market I_mkt)
+                      </span>
                       <span>
-                        {borrowDebugChain.totalDebtUnderlying.toLocaleString(undefined, {
-                          maximumFractionDigits: 8,
-                        })}{" "}
+                        {borrowDebugChain.totalDebtFromSyncMarket.toLocaleString(
+                          undefined,
+                          { maximumFractionDigits: 8 }
+                        )}{" "}
                         {borrowDebugChain.tokenSymbol}
                       </span>
                       <span className="text-muted-foreground">
-                        accrued (index delta)
+                        total_debt (get_market I_mkt)
                       </span>
                       <span>
-                        {borrowDebugChain.accruedInterestUnderlying.toLocaleString(
+                        {borrowDebugChain.totalDebtFromGetMarket.toLocaleString(
+                          undefined,
+                          { maximumFractionDigits: 8 }
+                        )}{" "}
+                        {borrowDebugChain.tokenSymbol}
+                      </span>
+                      <span className="text-muted-foreground">
+                        accrued (index delta, sync I_mkt)
+                      </span>
+                      <span>
+                        {borrowDebugChain.accruedInterestFromSyncMarket.toLocaleString(
+                          undefined,
+                          { maximumFractionDigits: 8 }
+                        )}{" "}
+                        {borrowDebugChain.tokenSymbol}
+                      </span>
+                      <span className="text-muted-foreground">
+                        accrued (index delta, get I_mkt)
+                      </span>
+                      <span>
+                        {borrowDebugChain.accruedInterestFromGetMarket.toLocaleString(
                           undefined,
                           { maximumFractionDigits: 8 }
                         )}{" "}
@@ -11994,6 +12138,140 @@ export default function AdminDashboard() {
                       read.
                     </p>
                   </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="border-teal-500/25 bg-teal-500/[0.03]">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <RefreshCcw className="h-5 w-5 text-teal-600 dark:text-teal-400" />
+                  Sync user for price change
+                </CardTitle>
+                <CardDescription>
+                  Submits the lending app{" "}
+                  <code className="text-xs">sync_user_market_for_price_change</code> for a
+                  user and pool (and optionally one market). Use after oracle / asset
+                  price updates so a user’s stored <code className="text-xs">lastPrice</code>{" "}
+                  and health reflect the new price. If market ID is left empty, all
+                  markets configured for that pool in token config are synced. Same
+                  build path as{" "}
+                  <span className="text-muted-foreground">Portfolio (view-only)</span>.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div className="space-y-2">
+                    <Label>Network (config lookup)</Label>
+                    <Select
+                      value={pcSyncNetwork}
+                      onValueChange={(v) => setPcSyncNetwork(v as NetworkId)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Network" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {getEnabledNetworks().map((nid) => (
+                          <SelectItem key={nid} value={nid}>
+                            {nid}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <Label>User to sync (Algorand address)</Label>
+                    <Input
+                      className="font-mono text-xs"
+                      placeholder="Account whose user row is updated"
+                      value={pcSyncUserAddress}
+                      onChange={(e) => setPcSyncUserAddress(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Quick fill (token)</Label>
+                    <Select
+                      value={pcSyncQuickPick}
+                      onValueChange={(v) => {
+                        setPcSyncQuickPick(v);
+                        if (v === "__manual__") return;
+                        const t = pcSyncTokenOptions.find(
+                          (x) =>
+                            `${x.symbol}|${x.poolId}|${x.underlyingContractId}` ===
+                            v
+                        );
+                        if (t?.poolId && t.underlyingContractId) {
+                          setPcSyncPoolId(String(t.poolId));
+                          setPcSyncMarketId(String(t.underlyingContractId));
+                        }
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Pick market" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__manual__">— manual —</SelectItem>
+                        {pcSyncTokenOptions.map((t) => (
+                          <SelectItem
+                            key={`pcsync-${t.symbol}-${t.poolId}-${t.underlyingContractId}`}
+                            value={`${t.symbol}|${t.poolId}|${t.underlyingContractId}`}
+                          >
+                            {t.symbol} · pool {t.poolId} · mkt {t.underlyingContractId}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Pool (lending app ID)</Label>
+                    <Input
+                      className="font-mono text-xs"
+                      value={pcSyncPoolId}
+                      onChange={(e) => setPcSyncPoolId(e.target.value)}
+                      placeholder="e.g. 3345940978"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Market (optional — underlying ASA / app id)</Label>
+                    <Input
+                      className="font-mono text-xs"
+                      value={pcSyncMarketId}
+                      onChange={(e) => setPcSyncMarketId(e.target.value)}
+                      placeholder="Empty = sync all markets in pool (from config)"
+                    />
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="default"
+                    onClick={() => void handleSyncUserForPriceChange()}
+                    disabled={pcSyncLoading || !activeAccount?.address}
+                  >
+                    {pcSyncLoading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Signing…
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCcw className="h-4 w-4 mr-2" />
+                        Sign &amp; send sync
+                      </>
+                    )}
+                  </Button>
+                </div>
+                {pcSyncError && (
+                  <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                    {pcSyncError}
+                  </div>
+                )}
+                {pcSyncLastResult && (
+                  <p className="text-xs font-mono text-muted-foreground break-all">
+                    {pcSyncLastResult}
+                  </p>
                 )}
               </CardContent>
             </Card>

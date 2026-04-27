@@ -270,7 +270,8 @@ type FetchMode = "api" | "chain";
 
 /**
  * After API-backed portfolio load, track visible rows:
- * - **api** — `POST /user-data/user/...` (indexer), with direct reads as fallback
+ * - **api** — for each visible group, `POST /market-data/...` then
+ *   `POST /user-data/user/...` (indexer), with direct reads as fallback
  * - **chain** — direct contract reads only (interval polling)
  */
 export function usePortfolioVisibleChainLive(opts: {
@@ -467,6 +468,32 @@ export function usePortfolioVisibleChainLive(opts: {
     }
 
     for (const group of groups.values()) {
+      // POST `/market-data/...` so the API refreshes its chain snapshot for this
+      // visible position before we load fresh user data (indexer) for the same group.
+      try {
+        const marketPostRes = await dorkfiAPIService.fetchFreshMarketData(
+          group.network,
+          group.appId,
+          group.marketId
+        );
+        if (marketPostRes?.success && marketPostRes.data && group.market) {
+          const d = marketPostRes.data;
+          if (d.price != null) {
+            group.market = { ...group.market, price: String(d.price) };
+          }
+        }
+      } catch (e) {
+        console.warn(
+          "[usePortfolioVisibleChainLive] fetchFreshMarketData (POST) failed",
+          {
+            network: group.network,
+            appId: group.appId,
+            marketId: group.marketId,
+          },
+          e
+        );
+      }
+
       const tokenPrice = group.market?.price
         ? formatPriceFromContract(
             group.market.price as string | number,

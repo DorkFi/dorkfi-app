@@ -1,4 +1,11 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+  type RefObject,
+} from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { useNetwork } from "@/contexts/NetworkContext";
@@ -15,6 +22,7 @@ import { getCurrentNetworkConfig } from "@/config";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
 import { abi, CONTRACT } from "ulujs";
 import { updateTransactionMetadata } from "@/utils/transactionUtils";
+import { signAndSendSyncUserMarketsForPriceChangeTx } from "@/utils/syncUserMarketsForPriceChange";
 import {
   fetchUserGlobalData,
   fetchAllMarkets,
@@ -22,11 +30,10 @@ import {
   fetchUserDepositBalance,
   enhanceAVMMarketInfo,
   fetchMarketInfo,
-  collectPositionMarketKeys,
-  postRefreshMarketDataSnapshot,
   repayOnBehalf,
   liquidateCrossMarket,
   fetchUserDataFromChain,
+  postRefreshMarketDataSnapshot,
 } from "@/services/lendingService";
 import {
   estimateFolksDepositMintedFAssetAmount,
@@ -166,6 +173,16 @@ interface ItemWithNetwork {
   accruedInterest?: number;
   interest?: number;
   accruedInterestValue?: number;
+  tokenPrice?: number;
+}
+
+/** For sorting Accrued Interest columns: prefer stored USD, else token amount × price. */
+function accruedInterestUsdForSort(
+  item: ItemWithNetwork
+): number {
+  const v = item.accruedInterestValue;
+  if (v != null && Number.isFinite(v)) return v;
+  return (item.accruedInterest ?? 0) * (item.tokenPrice || 1);
 }
 
 /** Folks f-asset rows show underlying balance; if their market row has no usable price, use native ALGO same pool. */
@@ -198,6 +215,93 @@ const SHOW_ACCRUED_INTEREST_SECTION = false;
 
 /** Liquidation Price column in Borrowed Assets (desktop + mobile card). */
 const SHOW_LIQUIDATION_PRICE_IN_BORROWED = false;
+
+/** Supplied / borrowed asset lists: rows per page. */
+const ASSET_LIST_PAGE_SIZE = 10;
+
+function sliceAssetListPage<T>(
+  items: T[],
+  currentPage: number,
+  pageSize: number
+): T[] {
+  if (items.length === 0) return [];
+  const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
+  const lastPage = pageCount - 1;
+  const page = Math.min(currentPage, lastPage);
+  const start = page * pageSize;
+  return items.slice(start, start + pageSize);
+}
+
+function PortfolioAssetListPagination({
+  currentPage,
+  onPageChange,
+  totalItems,
+  pageSize,
+  scrollToRef,
+}: {
+  currentPage: number;
+  onPageChange: (page: number) => void;
+  totalItems: number;
+  pageSize: number;
+  scrollToRef: RefObject<HTMLDivElement | null> | null;
+}) {
+  if (totalItems <= pageSize) return null;
+  const pageCount = Math.ceil(totalItems / pageSize);
+  const lastPage = pageCount - 1;
+  const current = Math.min(currentPage, lastPage);
+  const from = current * pageSize + 1;
+  const to = Math.min((current + 1) * pageSize, totalItems);
+
+  const go = (page: number) => {
+    onPageChange(Math.max(0, Math.min(page, lastPage)));
+    if (scrollToRef?.current) {
+      setTimeout(() => {
+        scrollToRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }, 0);
+    }
+  };
+
+  return (
+    <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between w-full min-w-0">
+      <p
+        className="text-sm text-muted-foreground text-center sm:text-left"
+        aria-live="polite"
+      >
+        Showing {from}–{to} of {totalItems}
+      </p>
+      <div className="flex items-center justify-center gap-2 w-full sm:w-auto min-w-0">
+        <DorkFiButton
+          type="button"
+          variant="secondary"
+          onClick={() => go(current - 1)}
+          disabled={current === 0}
+          className="min-w-0 flex-1 sm:flex-initial"
+        >
+          <span className="sm:hidden">Prev</span>
+          <span className="hidden sm:inline">Previous</span>
+        </DorkFiButton>
+        <span
+          className="text-sm text-muted-foreground tabular-nums shrink-0 min-w-[4.5rem] text-center"
+          aria-label={`Page ${current + 1} of ${pageCount}`}
+        >
+          {current + 1} / {pageCount}
+        </span>
+        <DorkFiButton
+          type="button"
+          variant="secondary"
+          onClick={() => go(current + 1)}
+          disabled={current >= lastPage}
+          className="min-w-0 flex-1 sm:flex-initial"
+        >
+          Next
+        </DorkFiButton>
+      </div>
+    </div>
+  );
+}
 
 const Portfolio = () => {
   const { address: routeAddress } = useParams<{ address: string }>();
@@ -373,21 +477,19 @@ const Portfolio = () => {
   }>({ column: "apy", direction: "desc" });
   const [suppliedAssetsSearchTerm, setSuppliedAssetsSearchTerm] =
     useState<string>("");
-  const [showAllSuppliedAssets, setShowAllSuppliedAssets] =
-    useState<boolean>(false);
+  const [suppliedAssetsPage, setSuppliedAssetsPage] = useState(0);
   const suppliedAssetsTableRef = useRef<HTMLDivElement>(null);
   const [borrowedAssetsSearchTerm, setBorrowedAssetsSearchTerm] =
     useState<string>("");
   const [portfolioPositionsTab, setPortfolioPositionsTab] = useState<
     "supplied" | "borrowed"
   >("supplied");
-  const [showAllBorrowedAssets, setShowAllBorrowedAssets] =
-    useState<boolean>(false);
+  const [borrowedAssetsPage, setBorrowedAssetsPage] = useState(0);
   const borrowedAssetsTableRef = useRef<HTMLDivElement>(null);
   const [borrowedAssetsSort, setBorrowedAssetsSort] = useState<{
     column: string | null;
     direction: "asc" | "desc";
-  }>({ column: "apy", direction: "asc" });
+  }>({ column: "apy", direction: "desc" });
   const [accruedInterestSearchTerm, setAccruedInterestSearchTerm] =
     useState<string>("");
   const [showAllAccruedInterest, setShowAllAccruedInterest] =
@@ -436,6 +538,65 @@ const Portfolio = () => {
       marketData,
       formatPriceFromContract,
     });
+
+  // POST `/market-data/...` when a supply/borrow position modal opens (fresh API snapshot for that market).
+  useEffect(() => {
+    const pick = depositModal.isOpen
+      ? depositModal
+      : withdrawModal.isOpen
+        ? withdrawModal
+        : borrowModal.isOpen
+          ? borrowModal
+          : repayModal.isOpen
+            ? repayModal
+            : null;
+    if (!pick?.isOpen || !pick.asset) {
+      return;
+    }
+    const networkId = (pick.network || currentNetwork) as NetworkId;
+    const poolId = pick.poolId;
+    if (!poolId) {
+      return;
+    }
+    const configSymbol = pick.configSymbol;
+    const marketId = pick.marketId;
+
+    const tokens = getAllTokensWithDisplayInfo(networkId);
+    const token = resolveSupplyBorrowToken(
+      tokens,
+      pick.asset,
+      poolId,
+      configSymbol,
+      marketId
+    );
+    const appId = token?.poolId != null ? String(token.poolId) : poolId;
+    const uMid = token?.underlyingContractId
+      ? String(token.underlyingContractId)
+      : marketId != null && String(marketId) !== ""
+        ? String(marketId)
+        : "";
+    if (!uMid) {
+      return;
+    }
+
+    void (async () => {
+      try {
+        await postRefreshMarketDataSnapshot(networkId, appId, uMid);
+      } catch (e) {
+        console.warn(
+          "[Portfolio] postRefreshMarketDataSnapshot on modal open failed",
+          { networkId, appId, marketId: uMid },
+          e
+        );
+      }
+    })();
+  }, [
+    depositModal,
+    withdrawModal,
+    borrowModal,
+    repayModal,
+    currentNetwork,
+  ]);
 
   // Function to fetch ntoken balance for a specific token
   const fetchNTokenBalance = async (
@@ -1337,36 +1498,6 @@ const Portfolio = () => {
       ? Number(user.computed.globalBorrowValue)
       : userGlobalData?.totalBorrowValue ||
       borrows.reduce((sum, borrow) => sum + borrow.value, 0);
-
-  /** Per pool collateral USD for LTV in Borrowed Assets (contract global user; deposit sum fallback). */
-  const collateralUsdByPoolId = useMemo(() => {
-    const map: Record<string, number> = {};
-    if (user?.globalUserData && Array.isArray(user.globalUserData)) {
-      for (const item of user.globalUserData) {
-        const rec = item as Record<string, unknown>;
-        const appId = String(rec.appId ?? rec.poolId ?? "");
-        if (!appId) continue;
-        try {
-          const v = Number(
-            BigInt(String(rec.totalCollateralValue ?? 0)) / BigInt(1e12)
-          );
-          if (!Number.isNaN(v)) map[appId] = v;
-        } catch {
-          /* ignore */
-        }
-      }
-    }
-    const depositSumByPool: Record<string, number> = {};
-    for (const d of deposits) {
-      if (d.poolId == null || d.poolId === "") continue;
-      const pid = String(d.poolId);
-      depositSumByPool[pid] = (depositSumByPool[pid] ?? 0) + d.value;
-    }
-    for (const [pid, sum] of Object.entries(depositSumByPool)) {
-      if (map[pid] === undefined) map[pid] = sum;
-    }
-    return map;
-  }, [user?.globalUserData, deposits]);
 
   // Calculate weighted liquidation threshold based on borrowed assets only
   // This is more accurate because liquidation risk only applies to markets with active debt
@@ -2559,181 +2690,20 @@ const Portfolio = () => {
       }
 
       try {
-        // Find which network this poolId belongs to
-        const enabledNetworks = getEnabledNetworks();
-        let marketNetworkId: NetworkId | null = null;
-
-        for (const networkId of enabledNetworks) {
-          const networkConfig = getNetworkConfig(networkId);
-          const lendingPools = networkConfig?.contracts?.lendingPools || [];
-          if (lendingPools.includes(poolId)) {
-            marketNetworkId = networkId;
-            break;
-          }
-        }
-
-        if (!marketNetworkId) {
-          console.error(
-            `[Portfolio] Could not find network for poolId ${poolId}`
-          );
-          return;
-        }
-
-        // Use the market's network config, not the active network
-        const networkConfig = getNetworkConfig(marketNetworkId);
-        const algorandNetwork =
-          getAlgorandNetworkFromNetworkId(marketNetworkId);
-        if (!algorandNetwork) {
-          console.error(
-            `[Portfolio] Network ${marketNetworkId} is not Algorand-compatible`
-          );
-          return;
-        }
-        const clients = algorandService.initializeClients(algorandNetwork);
-
-        // If marketId is provided, sync only that specific market
-        // Otherwise, sync all markets for the provided poolId
-        let marketsToSync: Array<{ poolId: string; marketId: string }> = [];
-
-        if (marketId) {
-          // Sync only the specific market
-          marketsToSync = [{ poolId, marketId }];
-        } else {
-          // Get all markets for this poolId from the market's network
-          const tokens = getAllTokensWithDisplayInfo(marketNetworkId);
-          const matchingTokens = tokens.filter((t) => t.poolId === poolId);
-
-          for (const token of matchingTokens) {
-            if (token.underlyingContractId) {
-              marketsToSync.push({
-                poolId,
-                marketId: token.underlyingContractId,
-              });
-            }
-          }
-        }
-
-        if (marketsToSync.length === 0) {
-          console.log("[Portfolio] No markets to sync");
-          return;
-        }
-
-        console.log(
-          "[Portfolio] Syncing markets:",
-          marketsToSync,
-          "on network:",
-          marketNetworkId
+        await signAndSendSyncUserMarketsForPriceChangeTx(
+          userAddress,
+          poolId,
+          marketId,
+          activeAccount.address,
+          signTransactions
         );
-
-        // Create contract instance for this specific poolId
-        const ci = new CONTRACT(
-          Number(poolId),
-          clients.algod,
-          clients.indexer,
-          abi.custom,
-          {
-            addr: activeAccount.address,
-            sk: new Uint8Array(),
-          }
-        );
-
-        const builder = {
-          lending: new CONTRACT(
-            Number(poolId),
-            clients.algod,
-            clients.indexer,
-            { ...LendingPoolAppSpec.contract, events: [] },
-            {
-              addr: activeAccount.address,
-              sk: new Uint8Array(),
-            },
-            true,
-            false,
-            true
-          ),
-        };
-
-        // Build sync transactions for each market
-        const buildN = [];
-        for (const { marketId: syncMarketId } of marketsToSync) {
-          console.log("[Portfolio] Syncing market:", {
-            poolId,
-            marketId: syncMarketId,
-            userAddress,
-          });
-          try {
-            const txnO = (
-              await builder.lending.sync_user_market_for_price_change(
-                userAddress,
-                Number(syncMarketId)
-              )
-            ).obj;
-            buildN.push({
-              ...txnO,
-              note: new TextEncoder().encode(
-                `lending sync_market ${syncMarketId}`
-              ),
-              payment: 1e5,
-            });
-          } catch (error) {
-            console.warn(
-              `[Portfolio] Failed to sync market ${syncMarketId} in pool ${poolId}:`,
-              error
-            );
-          }
-        }
-
-        if (buildN.length === 0) {
-          console.log(`[Portfolio] No sync transactions for pool ${poolId}`);
-          return;
-        }
-
-        ci.setFee(10000);
-        ci.setEnableGroupResourceSharing(true);
-        ci.setExtraTxns(buildN);
-        // Set beacon ID for algorand-mainnet (using market's network, not active network)
-        if (marketNetworkId === "algorand-mainnet") {
-          ci.setBeaconId(3209233839);
-        }
-        const customR = await ci.custom();
-
-        console.log(
-          `[Portfolio] Sync transactions for pool ${poolId}:`,
-          customR
-        );
-
-        // Use clients for the market's network
-        const algorandClients =
-          await algorandService.initializeClientsForTransactions(
-            algorandNetwork
-          );
-
-        const stxns = await signTransactions(
-          customR.txns.map((txn: string) =>
-            Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
-          )
-        );
-
-        const res = await algorandClients.algod.sendRawTransaction(stxns).do();
-        await algosdk.waitForConfirmation(algorandClients.algod, res.txid, 4);
-
-        // Update transaction metadata (using market's network, not active network)
-        await updateTransactionMetadata(res.txid, marketNetworkId);
-
         console.log("[Portfolio] Markets synced successfully");
       } catch (error) {
         console.error("[Portfolio] Error syncing markets:", error);
         throw error;
       }
     },
-     
-    [
-      signTransactions,
-      activeAccount?.address,
-      currentNetwork,
-      deposits,
-      borrows,
-    ]
+    [signTransactions, activeAccount?.address]
   );
 
   // Function to refresh positions data
@@ -3746,43 +3716,10 @@ const Portfolio = () => {
       try {
         const enabledNetworks = getEnabledNetworks();
 
-        // POST /market-data/... for user-position markets first (backend refreshes chain snapshot)
-        const computed = user?.computed as
-          | Record<string, unknown>
-          | undefined;
-        const positionKeys = [
-          ...collectPositionMarketKeys(
-            Array.isArray(computed?.deposits)
-              ? (computed.deposits as Record<string, unknown>[])
-              : undefined
-          ),
-          ...collectPositionMarketKeys(
-            Array.isArray(computed?.borrows)
-              ? (computed.borrows as Record<string, unknown>[])
-              : undefined
-          ),
-        ];
-        const seenPost = new Set<string>();
-        for (const { networkId, poolId, marketId } of positionKeys) {
-          const k = `${networkId}|${poolId}|${marketId}`;
-          if (seenPost.has(k)) continue;
-          seenPost.add(k);
-          try {
-            await postRefreshMarketDataSnapshot(
-              networkId,
-              poolId,
-              marketId
-            );
-          } catch (e) {
-            console.error(
-              "[Portfolio] postRefreshMarketDataSnapshot failed",
-              { networkId, poolId, marketId },
-              e
-            );
-          }
-        }
+        // Market POST `/market-data/...` for visible table rows is handled in
+        // `usePortfolioVisibleChainLive` (intersection) before user-data fetch.
 
-        // Single display path: GET-backed fetchAllMarkets after POSTs
+        // GET-backed `fetchAllMarkets` for portfolio display
         const allMarketData: unknown[] = [];
         for (const networkId of enabledNetworks) {
           try {
@@ -3959,14 +3896,14 @@ const Portfolio = () => {
   //   fetchData();
   // }, [activeAccount?.address, currentNetwork]);
 
-  // Reset showAllSuppliedAssets when filters change
+  // Reset supplied list page when filters change
   useEffect(() => {
-    setShowAllSuppliedAssets(false);
+    setSuppliedAssetsPage(0);
   }, [suppliedAssetsSearchTerm, suppliedAssetsNetworkFilter]);
 
-  // Reset showAllBorrowedAssets when filters change
+  // Reset borrowed list page when filters change
   useEffect(() => {
-    setShowAllBorrowedAssets(false);
+    setBorrowedAssetsPage(0);
   }, [borrowedAssetsSearchTerm, borrowedAssetsNetworkFilter]);
 
   // Section filter modals are mobile-only; close when viewport shows inline filters
@@ -6095,11 +6032,13 @@ const Portfolio = () => {
                                 comparison = a.apy - b.apy;
                                 break;
                               case "accruedInterest": {
-                                const accruedInterestA =
-                                  (a as ItemWithNetwork).accruedInterest || 0;
-                                const accruedInterestB =
-                                  (b as ItemWithNetwork).accruedInterest || 0;
-                                comparison = accruedInterestA - accruedInterestB;
+                                comparison =
+                                  accruedInterestUsdForSort(
+                                    a as ItemWithNetwork
+                                  ) -
+                                  accruedInterestUsdForSort(
+                                    b as ItemWithNetwork
+                                  );
                                 break;
                               }
                               case "collateralFactor": {
@@ -6248,10 +6187,11 @@ const Portfolio = () => {
                               : -comparison;
                           });
 
-                        const displayDeposits = showAllSuppliedAssets
-                          ? filteredAndSorted
-                          : filteredAndSorted.slice(0, 5);
-                        const hasMore = filteredAndSorted.length > 5;
+                        const displayDeposits = sliceAssetListPage(
+                          filteredAndSorted,
+                          suppliedAssetsPage,
+                          ASSET_LIST_PAGE_SIZE
+                        );
 
                         if (displayDeposits.length === 0) {
                           return (
@@ -6392,21 +6332,13 @@ const Portfolio = () => {
                                 </div>
                               );
                             })}
-                            {hasMore && (
-                              <DorkFiButton
-                                variant="secondary"
-                                onClick={() =>
-                                  setShowAllSuppliedAssets(
-                                    !showAllSuppliedAssets
-                                  )
-                                }
-                                className="w-full min-w-0"
-                              >
-                                {showAllSuppliedAssets
-                                  ? "Show Less"
-                                  : "Show More"}
-                              </DorkFiButton>
-                            )}
+                            <PortfolioAssetListPagination
+                              currentPage={suppliedAssetsPage}
+                              onPageChange={setSuppliedAssetsPage}
+                              totalItems={filteredAndSorted.length}
+                              pageSize={ASSET_LIST_PAGE_SIZE}
+                              scrollToRef={suppliedAssetsTableRef}
+                            />
                           </>
                         );
                       })()}
@@ -6699,12 +6631,13 @@ const Portfolio = () => {
                                     comparison = a.apy - b.apy;
                                     break;
                                   case "accruedInterest": {
-                                    const accruedInterestA =
-                                      (a as ItemWithNetwork).accruedInterest || 0;
-                                    const accruedInterestB =
-                                      (b as ItemWithNetwork).accruedInterest || 0;
                                     comparison =
-                                      accruedInterestA - accruedInterestB;
+                                      accruedInterestUsdForSort(
+                                        a as ItemWithNetwork
+                                      ) -
+                                      accruedInterestUsdForSort(
+                                        b as ItemWithNetwork
+                                      );
                                     break;
                                   }
                                   case "collateralFactor": {
@@ -6864,10 +6797,11 @@ const Portfolio = () => {
                                   : -comparison;
                               });
 
-                            const displayDeposits = showAllSuppliedAssets
-                              ? filteredAndSorted
-                              : filteredAndSorted.slice(0, 5);
-                            const hasMore = filteredAndSorted.length > 5;
+                            const displayDeposits = sliceAssetListPage(
+                              filteredAndSorted,
+                              suppliedAssetsPage,
+                              ASSET_LIST_PAGE_SIZE
+                            );
 
                             return displayDeposits.map((depositRaw, index) => {
                               const deposit = mergeDeposit(
@@ -7043,7 +6977,7 @@ const Portfolio = () => {
                                   <TableCell>
                                     {formatNumber(deposit.balance, {
                                       minimumFractionDigits: 2,
-                                      maximumFractionDigits: 2,
+                                      maximumFractionDigits: 6,
                                     })}
                                   </TableCell>
                                   <TableCell>
@@ -7242,11 +7176,13 @@ const Portfolio = () => {
                               comparison = a.apy - b.apy;
                               break;
                             case "accruedInterest":
-                              const accruedInterestA =
-                                (a as ItemWithNetwork).accruedInterest || 0;
-                              const accruedInterestB =
-                                (b as ItemWithNetwork).accruedInterest || 0;
-                              comparison = accruedInterestA - accruedInterestB;
+                              comparison =
+                                accruedInterestUsdForSort(
+                                  a as ItemWithNetwork
+                                ) -
+                                accruedInterestUsdForSort(
+                                  b as ItemWithNetwork
+                                );
                               break;
                             default:
                               comparison = a.apy - b.apy;
@@ -7258,36 +7194,15 @@ const Portfolio = () => {
                             : -comparison;
                         });
 
-                      const hasMore = filteredAndSorted.length > 5;
-
-                      return hasMore ? (
-                        <div className="mt-4 text-center">
-                          <DorkFiButton
-                            variant="secondary"
-                            onClick={() => {
-                              const wasExpanded = showAllSuppliedAssets;
-                              setShowAllSuppliedAssets(!showAllSuppliedAssets);
-                              // Scroll to top when collapsing
-                              if (
-                                wasExpanded &&
-                                suppliedAssetsTableRef.current
-                              ) {
-                                setTimeout(() => {
-                                  suppliedAssetsTableRef.current?.scrollIntoView(
-                                    {
-                                      behavior: "smooth",
-                                      block: "start",
-                                    }
-                                  );
-                                }, 0);
-                              }
-                            }}
-                            className="w-full min-w-0"
-                          >
-                            {showAllSuppliedAssets ? "Show Less" : "Show More"}
-                          </DorkFiButton>
-                        </div>
-                      ) : null;
+                      return (
+                        <PortfolioAssetListPagination
+                          currentPage={suppliedAssetsPage}
+                          onPageChange={setSuppliedAssetsPage}
+                          totalItems={filteredAndSorted.length}
+                          pageSize={ASSET_LIST_PAGE_SIZE}
+                          scrollToRef={suppliedAssetsTableRef}
+                        />
+                      );
                     })()}
                 </DorkFiCard>
               )}
@@ -8116,10 +8031,11 @@ const Portfolio = () => {
                               : -comparison;
                           });
 
-                        const displayBorrows = showAllBorrowedAssets
-                          ? filteredAndSorted
-                          : filteredAndSorted.slice(0, 5);
-                        const hasMore = filteredAndSorted.length > 5;
+                        const displayBorrows = sliceAssetListPage(
+                          filteredAndSorted,
+                          borrowedAssetsPage,
+                          ASSET_LIST_PAGE_SIZE
+                        );
 
                         if (displayBorrows.length === 0) {
                           return (
@@ -8177,19 +8093,6 @@ const Portfolio = () => {
                                     ? liquidationThresholdNum / 10000
                                     : liquidationThresholdNum;
 
-                              // Calculate LTV Usage (per pool collateral, not portfolio aggregate)
-                              const poolCollateralUsd =
-                                borrow.poolId != null && borrow.poolId !== ""
-                                  ? collateralUsdByPoolId[String(borrow.poolId)] ??
-                                    0
-                                  : totalCollateral;
-                              const ltvUsage =
-                                poolCollateralUsd > 0
-                                  ? (borrow.value / poolCollateralUsd) * 100
-                                  : borrow.value > 0
-                                    ? 100
-                                    : 0;
-
                               const liquidationPrice =
                                 SHOW_LIQUIDATION_PRICE_IN_BORROWED
                                   ? (() => {
@@ -8232,7 +8135,6 @@ const Portfolio = () => {
                                   accruedInterestValue={
                                     (borrow as ItemWithNetwork).accruedInterestValue
                                   }
-                                  ltvUsage={ltvUsage}
                                   liquidationPrice={liquidationPrice}
                                   network={(borrow as ItemWithNetwork).network}
                                   poolId={borrow.poolId}
@@ -8266,21 +8168,13 @@ const Portfolio = () => {
                                 </div>
                               );
                             })}
-                            {hasMore && (
-                              <DorkFiButton
-                                variant="secondary"
-                                onClick={() =>
-                                  setShowAllBorrowedAssets(
-                                    !showAllBorrowedAssets
-                                  )
-                                }
-                                className="w-full min-w-0"
-                              >
-                                {showAllBorrowedAssets
-                                  ? "Show Less"
-                                  : "Show More"}
-                              </DorkFiButton>
-                            )}
+                            <PortfolioAssetListPagination
+                              currentPage={borrowedAssetsPage}
+                              onPageChange={setBorrowedAssetsPage}
+                              totalItems={filteredAndSorted.length}
+                              pageSize={ASSET_LIST_PAGE_SIZE}
+                              scrollToRef={borrowedAssetsTableRef}
+                            />
                           </>
                         );
                       })()}
@@ -8408,7 +8302,7 @@ const Portfolio = () => {
                                   } else {
                                     setBorrowedAssetsSort({
                                       column: "apy",
-                                      direction: "asc",
+                                      direction: "desc",
                                     });
                                   }
                                 }}
@@ -8462,27 +8356,6 @@ const Portfolio = () => {
                                 )}
                               </button>
                             </TableHead>
-                            <TableHead className="text-right">
-                              <div className="flex items-center justify-end gap-1">
-                                LTV Usage
-                                <UITooltip>
-                                  <TooltipTrigger asChild>
-                                    <Info className="w-4 h-4 text-muted-foreground cursor-help" />
-                                  </TooltipTrigger>
-                                  <TooltipContent className="max-w-xs">
-                                    <p className="text-sm">
-                                      Your borrow&apos;s value in USD, compared
-                                      to this lending pool&apos;s total
-                                      collateral (from on-chain data).
-                                    </p>
-                                    <p className="text-xs text-muted-foreground mt-2">
-                                      If this row isn&apos;t linked to a pool, we
-                                      use your portfolio-wide collateral instead.
-                                    </p>
-                                  </TooltipContent>
-                                </UITooltip>
-                              </div>
-                            </TableHead>
                             {SHOW_LIQUIDATION_PRICE_IN_BORROWED && (
                               <TableHead className="text-right">
                                 <div className="flex items-center justify-end gap-1">
@@ -8515,7 +8388,9 @@ const Portfolio = () => {
                                 </div>
                               </TableHead>
                             )}
-                            <TableHead>Actions</TableHead>
+                            <TableHead className="whitespace-nowrap w-[1%]">
+                              Actions
+                            </TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -8620,12 +8495,13 @@ const Portfolio = () => {
                                     comparison = a.apy - b.apy;
                                     break;
                                   case "accruedInterest":
-                                    const accruedInterestA =
-                                      (a as ItemWithNetwork).accruedInterest || 0;
-                                    const accruedInterestB =
-                                      (b as ItemWithNetwork).accruedInterest || 0;
                                     comparison =
-                                      accruedInterestA - accruedInterestB;
+                                      accruedInterestUsdForSort(
+                                        a as ItemWithNetwork
+                                      ) -
+                                      accruedInterestUsdForSort(
+                                        b as ItemWithNetwork
+                                      );
                                     break;
                                   default:
                                     comparison = a.apy - b.apy;
@@ -8637,9 +8513,11 @@ const Portfolio = () => {
                                   : -comparison;
                               });
 
-                            const displayBorrows = showAllBorrowedAssets
-                              ? filteredAndSorted
-                              : filteredAndSorted.slice(0, 5);
+                            const displayBorrows = sliceAssetListPage(
+                              filteredAndSorted,
+                              borrowedAssetsPage,
+                              ASSET_LIST_PAGE_SIZE
+                            );
 
                             return displayBorrows.map((borrowRaw, index) => {
                               const borrow = mergeBorrow(
@@ -8669,19 +8547,6 @@ const Portfolio = () => {
                                 borrowNetwork,
                                 borrow.poolId
                               );
-
-                              // Calculate LTV Usage (per pool collateral, not portfolio aggregate)
-                              const poolCollateralUsd =
-                                borrow.poolId != null && borrow.poolId !== ""
-                                  ? collateralUsdByPoolId[String(borrow.poolId)] ??
-                                    0
-                                  : totalCollateral;
-                              const ltvUsage =
-                                poolCollateralUsd > 0
-                                  ? (borrow.value / poolCollateralUsd) * 100
-                                  : borrow.value > 0
-                                    ? 100
-                                    : 0;
 
                               const liquidationPrice =
                                 SHOW_LIQUIDATION_PRICE_IN_BORROWED
@@ -8757,14 +8622,6 @@ const Portfolio = () => {
                                 }
                               }
 
-                              // Color code LTV usage
-                              const getLTVColor = (ltv: number) => {
-                                if (ltv >= 80) return "bg-red-500";
-                                if (ltv >= 60) return "bg-orange-500";
-                                if (ltv >= 40) return "bg-yellow-500";
-                                return "bg-green-500";
-                              };
-
                               const borrowDesktopChainKey =
                                 portfolioPositionChainKey(
                                   "borrow",
@@ -8827,15 +8684,20 @@ const Portfolio = () => {
                                     {borrowMarketLabel || "-"}
                                   </TableCell>
                                   <TableCell>
-                                    {formatNumber(borrow.balance, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}
+                                    {formatNumber(borrow.balance, {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 6,
+                                    })}
                                   </TableCell>
                                   <TableCell>
                                     {formatCurrency(borrow.value, "USD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </TableCell>
                                   <TableCell className="text-right tabular-nums">
-                                    <span className="text-red-600 dark:text-red-400">
-                                      {formatPercent(borrow.apy / 100, { maximumFractionDigits: 2 })}
-                                    </span>
+                                    <div className="flex flex-col gap-0.5 items-end">
+                                      <span className="text-red-600 dark:text-red-400">
+                                        {formatPercent(borrow.apy / 100, { maximumFractionDigits: 2 })}
+                                      </span>
+                                    </div>
                                   </TableCell>
                                   <TableCell className="text-right tabular-nums">
                                     {borrow.accruedInterest > 0 ? (
@@ -8862,26 +8724,6 @@ const Portfolio = () => {
                                       </span>
                                     )}
                                   </TableCell>
-                                  <TableCell className="text-right">
-                                    <div className="flex items-center justify-end gap-2">
-                                      <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2 max-w-[100px]">
-                                        <div
-                                          className={`h-2 rounded-full ${getLTVColor(
-                                            ltvUsage
-                                          )}`}
-                                          style={{
-                                            width: `${Math.min(
-                                              ltvUsage,
-                                              100
-                                            )}%`,
-                                          }}
-                                        />
-                                      </div>
-                                      <span className="text-sm font-medium min-w-[50px] tabular-nums text-right">
-                                        {formatPercent(ltvUsage / 100, { maximumFractionDigits: 1 })}
-                                      </span>
-                                    </div>
-                                  </TableCell>
                                   {SHOW_LIQUIDATION_PRICE_IN_BORROWED &&
                                     liquidationPrice !== undefined && (
                                       <TableCell className="text-right tabular-nums">
@@ -8893,8 +8735,8 @@ const Portfolio = () => {
                                         </span>
                                       </TableCell>
                                     )}
-                                  <TableCell>
-                                    <div className="flex items-center gap-2 flex-wrap">
+                                  <TableCell className="whitespace-nowrap w-[1%]">
+                                    <div className="flex items-center gap-2">
                                       {!isViewOnly && (
                                         <>
                                           {!market?.isPaused && (
@@ -8919,7 +8761,7 @@ const Portfolio = () => {
                                                   : "Borrow more of this asset against your collateral"
                                               }
                                               aria-label="Borrow"
-                                              className="min-w-[92px] h-8 px-2 gap-1"
+                                              className="min-w-[92px] h-8 shrink-0 px-2 gap-1"
                                             >
                                               <span className="text-base leading-none">+</span>
                                               <span className="hidden lg:inline text-xs">Borrow</span>
@@ -8940,7 +8782,7 @@ const Portfolio = () => {
                                             }}
                                             title="Repay this debt to improve health factor"
                                             aria-label="Repay"
-                                            className="min-w-[92px] h-8 px-2 gap-1"
+                                            className="min-w-[92px] h-8 shrink-0 px-2 gap-1"
                                           >
                                             <span className="text-base leading-none">−</span>
                                             <span className="hidden lg:inline text-xs">Repay</span>
@@ -8956,7 +8798,9 @@ const Portfolio = () => {
                           {borrows.length === 0 && (
                             <TableRow>
                               <TableCell
-                                colSpan={9}
+                                colSpan={
+                                  SHOW_LIQUIDATION_PRICE_IN_BORROWED ? 9 : 8
+                                }
                                 className="text-center text-muted-foreground py-8"
                               >
                                 No borrowed assets
@@ -9039,11 +8883,13 @@ const Portfolio = () => {
                               comparison = a.apy - b.apy;
                               break;
                             case "accruedInterest":
-                              const accruedInterestA =
-                                (a as ItemWithNetwork).accruedInterest || 0;
-                              const accruedInterestB =
-                                (b as ItemWithNetwork).accruedInterest || 0;
-                              comparison = accruedInterestA - accruedInterestB;
+                              comparison =
+                                accruedInterestUsdForSort(
+                                  a as ItemWithNetwork
+                                ) -
+                                accruedInterestUsdForSort(
+                                  b as ItemWithNetwork
+                                );
                               break;
                             default:
                               comparison = a.apy - b.apy;
@@ -9055,36 +8901,15 @@ const Portfolio = () => {
                             : -comparison;
                         });
 
-                      const hasMore = filteredAndSorted.length > 5;
-
-                      return hasMore ? (
-                        <div className="mt-4 text-center">
-                          <DorkFiButton
-                            variant="secondary"
-                            onClick={() => {
-                              const wasExpanded = showAllBorrowedAssets;
-                              setShowAllBorrowedAssets(!showAllBorrowedAssets);
-                              // Scroll to top when collapsing
-                              if (
-                                wasExpanded &&
-                                borrowedAssetsTableRef.current
-                              ) {
-                                setTimeout(() => {
-                                  borrowedAssetsTableRef.current?.scrollIntoView(
-                                    {
-                                      behavior: "smooth",
-                                      block: "start",
-                                    }
-                                  );
-                                }, 0);
-                              }
-                            }}
-                            className="w-full min-w-0"
-                          >
-                            {showAllBorrowedAssets ? "Show Less" : "Show More"}
-                          </DorkFiButton>
-                        </div>
-                      ) : null;
+                      return (
+                        <PortfolioAssetListPagination
+                          currentPage={borrowedAssetsPage}
+                          onPageChange={setBorrowedAssetsPage}
+                          totalItems={filteredAndSorted.length}
+                          pageSize={ASSET_LIST_PAGE_SIZE}
+                          scrollToRef={borrowedAssetsTableRef}
+                        />
+                      );
                     })()}
                 </DorkFiCard>
               )}
@@ -9178,7 +9003,8 @@ const Portfolio = () => {
                             switch (accruedInterestSort.column) {
                               case "interest":
                                 comparison =
-                                  (a.netInterest || 0) - (b.netInterest || 0);
+                                  (a.netInterestValue || 0) -
+                                  (b.netInterestValue || 0);
                                 break;
                               case "value":
                                 comparison =
@@ -9464,8 +9290,8 @@ const Portfolio = () => {
                                     break;
                                   case "interest":
                                     comparison =
-                                      (a.netInterest || 0) -
-                                      (b.netInterest || 0);
+                                      (a.netInterestValue || 0) -
+                                      (b.netInterestValue || 0);
                                     break;
                                   case "value":
                                   default:
@@ -9710,7 +9536,8 @@ const Portfolio = () => {
                               break;
                             case "interest":
                               comparison =
-                                (a.netInterest || 0) - (b.netInterest || 0);
+                                (a.netInterestValue || 0) -
+                                (b.netInterestValue || 0);
                               break;
                             case "value":
                             default:
