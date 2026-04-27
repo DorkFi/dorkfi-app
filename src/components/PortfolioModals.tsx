@@ -23,6 +23,7 @@ import {
   withdraw,
   repay,
   repayAll,
+  postRefreshMarketDataSnapshot,
   fetchUserWalletBalance,
   fetchMarketInfoFromContract,
   getMaxWithdrawableForMarket,
@@ -1935,27 +1936,39 @@ const PortfolioModals = ({
         onRefreshWalletBalance(repayModal.asset, networkToUse);
       }
 
-      Promise.all([
-        dorkfiAPIService.fetchFreshUserData(
-          activeAccount.address,
-          networkToUse,
-          parseInt(token.poolId),
-          parseInt(token.underlyingContractId)
-        ),
-        dorkfiAPIService.fetchFreshUserHealth(
-          networkToUse,
-          parseInt(token.poolId),
-          activeAccount.address
-        ),
-      ])
-        .then(() => {
-          setTimeout(() => {
-            onRefreshMarket();
-          }, 1000);
-        })
-        .catch((error) => {
-          console.error("Error calling fetchFreshUserData after repay:", error);
-        });
+      // Wait for chain/indexer + API to catch up, then market + user; another beat before full portfolio fetch
+      // (so Borrowed + marketData reflect the repay; does not block returning txid below)
+      const REPAY_SETTLE_BEFORE_API_MS = 2_000;
+      const REPAY_WAIT_AFTER_API_BEFORE_USER_FETCH_MS = 2_500;
+      setTimeout(() => {
+        void Promise.all([
+          postRefreshMarketDataSnapshot(
+            networkToUse as NetworkId,
+            String(token.poolId),
+            String(token.underlyingContractId)
+          ),
+          dorkfiAPIService.fetchFreshUserData(
+            activeAccount.address,
+            networkToUse,
+            parseInt(token.poolId, 10),
+            parseInt(token.underlyingContractId, 10)
+          ),
+          dorkfiAPIService.fetchFreshUserHealth(
+            networkToUse,
+            parseInt(token.poolId, 10),
+            activeAccount.address
+          ),
+        ])
+          .then(() => {
+            setTimeout(() => {
+              onRefreshMarket();
+            }, REPAY_WAIT_AFTER_API_BEFORE_USER_FETCH_MS);
+          })
+          .catch((error) => {
+            console.error("Error calling fetchFreshUserData after repay:", error);
+            setTimeout(() => onRefreshMarket(), REPAY_WAIT_AFTER_API_BEFORE_USER_FETCH_MS);
+          });
+      }, REPAY_SETTLE_BEFORE_API_MS);
 
       // Return the transaction ID so RepayModal can use it
       return res.txid;

@@ -173,6 +173,16 @@ interface ItemWithNetwork {
   accruedInterest?: number;
   interest?: number;
   accruedInterestValue?: number;
+  tokenPrice?: number;
+}
+
+/** For sorting Accrued Interest columns: prefer stored USD, else token amount × price. */
+function accruedInterestUsdForSort(
+  item: ItemWithNetwork
+): number {
+  const v = item.accruedInterestValue;
+  if (v != null && Number.isFinite(v)) return v;
+  return (item.accruedInterest ?? 0) * (item.tokenPrice || 1);
 }
 
 /** Folks f-asset rows show underlying balance; if their market row has no usable price, use native ALGO same pool. */
@@ -6022,11 +6032,13 @@ const Portfolio = () => {
                                 comparison = a.apy - b.apy;
                                 break;
                               case "accruedInterest": {
-                                const accruedInterestA =
-                                  (a as ItemWithNetwork).accruedInterest || 0;
-                                const accruedInterestB =
-                                  (b as ItemWithNetwork).accruedInterest || 0;
-                                comparison = accruedInterestA - accruedInterestB;
+                                comparison =
+                                  accruedInterestUsdForSort(
+                                    a as ItemWithNetwork
+                                  ) -
+                                  accruedInterestUsdForSort(
+                                    b as ItemWithNetwork
+                                  );
                                 break;
                               }
                               case "collateralFactor": {
@@ -6619,12 +6631,13 @@ const Portfolio = () => {
                                     comparison = a.apy - b.apy;
                                     break;
                                   case "accruedInterest": {
-                                    const accruedInterestA =
-                                      (a as ItemWithNetwork).accruedInterest || 0;
-                                    const accruedInterestB =
-                                      (b as ItemWithNetwork).accruedInterest || 0;
                                     comparison =
-                                      accruedInterestA - accruedInterestB;
+                                      accruedInterestUsdForSort(
+                                        a as ItemWithNetwork
+                                      ) -
+                                      accruedInterestUsdForSort(
+                                        b as ItemWithNetwork
+                                      );
                                     break;
                                   }
                                   case "collateralFactor": {
@@ -7163,11 +7176,13 @@ const Portfolio = () => {
                               comparison = a.apy - b.apy;
                               break;
                             case "accruedInterest":
-                              const accruedInterestA =
-                                (a as ItemWithNetwork).accruedInterest || 0;
-                              const accruedInterestB =
-                                (b as ItemWithNetwork).accruedInterest || 0;
-                              comparison = accruedInterestA - accruedInterestB;
+                              comparison =
+                                accruedInterestUsdForSort(
+                                  a as ItemWithNetwork
+                                ) -
+                                accruedInterestUsdForSort(
+                                  b as ItemWithNetwork
+                                );
                               break;
                             default:
                               comparison = a.apy - b.apy;
@@ -8480,12 +8495,13 @@ const Portfolio = () => {
                                     comparison = a.apy - b.apy;
                                     break;
                                   case "accruedInterest":
-                                    const accruedInterestA =
-                                      (a as ItemWithNetwork).accruedInterest || 0;
-                                    const accruedInterestB =
-                                      (b as ItemWithNetwork).accruedInterest || 0;
                                     comparison =
-                                      accruedInterestA - accruedInterestB;
+                                      accruedInterestUsdForSort(
+                                        a as ItemWithNetwork
+                                      ) -
+                                      accruedInterestUsdForSort(
+                                        b as ItemWithNetwork
+                                      );
                                     break;
                                   default:
                                     comparison = a.apy - b.apy;
@@ -8867,11 +8883,13 @@ const Portfolio = () => {
                               comparison = a.apy - b.apy;
                               break;
                             case "accruedInterest":
-                              const accruedInterestA =
-                                (a as ItemWithNetwork).accruedInterest || 0;
-                              const accruedInterestB =
-                                (b as ItemWithNetwork).accruedInterest || 0;
-                              comparison = accruedInterestA - accruedInterestB;
+                              comparison =
+                                accruedInterestUsdForSort(
+                                  a as ItemWithNetwork
+                                ) -
+                                accruedInterestUsdForSort(
+                                  b as ItemWithNetwork
+                                );
                               break;
                             default:
                               comparison = a.apy - b.apy;
@@ -8985,7 +9003,8 @@ const Portfolio = () => {
                             switch (accruedInterestSort.column) {
                               case "interest":
                                 comparison =
-                                  (a.netInterest || 0) - (b.netInterest || 0);
+                                  (a.netInterestValue || 0) -
+                                  (b.netInterestValue || 0);
                                 break;
                               case "value":
                                 comparison =
@@ -9271,8 +9290,8 @@ const Portfolio = () => {
                                     break;
                                   case "interest":
                                     comparison =
-                                      (a.netInterest || 0) -
-                                      (b.netInterest || 0);
+                                      (a.netInterestValue || 0) -
+                                      (b.netInterestValue || 0);
                                     break;
                                   case "value":
                                   default:
@@ -9517,7 +9536,8 @@ const Portfolio = () => {
                               break;
                             case "interest":
                               comparison =
-                                (a.netInterest || 0) - (b.netInterest || 0);
+                                (a.netInterestValue || 0) -
+                                (b.netInterestValue || 0);
                               break;
                             case "value":
                             default:
