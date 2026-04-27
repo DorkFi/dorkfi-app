@@ -614,6 +614,52 @@ const RepayModal = ({
 
   const maxRepayAmount = Math.min(maxDebtInInputUnits, effectiveWalletBalance);
 
+  /**
+   * Repay amount in **input field units** that covers accrued interest (capped by wallet + total debt).
+   * Hidden for xALGO consensus ALGO route (non-linear mint) until we have a dedicated conversion.
+   */
+  const interestOnlyInInputUnits = useMemo(() => {
+    if (!(accruedInterest > 0) || !(currentBorrow > 0)) return null;
+    const interestMarketHuman = Math.min(accruedInterest, currentBorrow);
+
+    let rawInInputUnits: number;
+    if (repayWalletBasis === "underlying") {
+      if (isXalgoConsensusRepayAlgoRoute) return null;
+      if (
+        folksMintRatioStatus !== "ready" ||
+        folksMintedFAssetPerOneUnderlying == null ||
+        folksMintedFAssetPerOneUnderlying <= BigInt(0)
+      ) {
+        return null;
+      }
+      rawInInputUnits = folksFAssetHumanToUnderlyingHuman(
+        interestMarketHuman,
+        folksMintedFAssetPerOneUnderlying,
+        repayTokenDecimals
+      );
+    } else {
+      rawInInputUnits = interestMarketHuman;
+    }
+
+    const capped = Math.min(
+      rawInInputUnits,
+      maxDebtInInputUnits,
+      effectiveWalletBalance
+    );
+    if (!Number.isFinite(capped) || capped <= 0) return null;
+    return capped;
+  }, [
+    accruedInterest,
+    currentBorrow,
+    repayWalletBasis,
+    isXalgoConsensusRepayAlgoRoute,
+    folksMintRatioStatus,
+    folksMintedFAssetPerOneUnderlying,
+    repayTokenDecimals,
+    maxDebtInInputUnits,
+    effectiveWalletBalance,
+  ]);
+
   const numAmountMarketTokenHuman = useMemo((): number | null => {
     const amountInputStr =
       amount === "" ? "0" : typeof amount === "number" ? String(amount) : "0";
@@ -672,6 +718,15 @@ const RepayModal = ({
     setAmount(roundedMax);
     const roundedDebtCap = Math.round(maxDebtInInputUnits * 1000000) / 1000000;
     setIsRepayAll(roundedMax === roundedDebtCap);
+  };
+
+  const handleInterestOnlyClick = () => {
+    if (interestOnlyInInputUnits == null || !(interestOnlyInInputUnits > 0)) {
+      return;
+    }
+    const rounded = Math.round(interestOnlyInInputUnits * 1e6) / 1e6;
+    setAmount(rounded);
+    setIsRepayAll(false);
   };
 
   const handleConfirmRepay = async () => {
@@ -1104,6 +1159,29 @@ const RepayModal = ({
                                     )
                                   </span>
                                 </p>
+                                {interestOnlyInInputUnits != null &&
+                                  interestOnlyInInputUnits > 0 && (
+                                    <div className="mt-2">
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={handleInterestOnlyClick}
+                                        className="h-8 w-full sm:w-auto border-amber-400/70 bg-white/90 text-amber-900 hover:bg-amber-100 dark:border-amber-600/50 dark:bg-amber-950/50 dark:text-amber-100 dark:hover:bg-amber-900/60"
+                                      >
+                                        Repay this interest (~
+                                        {interestOnlyInInputUnits.toLocaleString(
+                                          undefined,
+                                          { maximumFractionDigits: 6 }
+                                        )}{" "}
+                                        {walletUnitSymbol})
+                                      </Button>
+                                      <p className="text-[11px] text-amber-700/85 dark:text-amber-400/90 mt-1.5">
+                                        Sets the amount field (capped by wallet).
+                                        Use MAX to repay principal + all interest.
+                                      </p>
+                                    </div>
+                                  )}
                                 <p className="text-xs text-amber-600 dark:text-amber-500 mt-1">
                                   Included in total owed above. You&apos;ll see a
                                   full breakdown on the next step before signing.

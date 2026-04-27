@@ -1,4 +1,11 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+  type RefObject,
+} from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { useNetwork } from "@/contexts/NetworkContext";
@@ -23,11 +30,10 @@ import {
   fetchUserDepositBalance,
   enhanceAVMMarketInfo,
   fetchMarketInfo,
-  collectPositionMarketKeys,
-  postRefreshMarketDataSnapshot,
   repayOnBehalf,
   liquidateCrossMarket,
   fetchUserDataFromChain,
+  postRefreshMarketDataSnapshot,
 } from "@/services/lendingService";
 import {
   estimateFolksDepositMintedFAssetAmount,
@@ -199,6 +205,93 @@ const SHOW_ACCRUED_INTEREST_SECTION = false;
 
 /** Liquidation Price column in Borrowed Assets (desktop + mobile card). */
 const SHOW_LIQUIDATION_PRICE_IN_BORROWED = false;
+
+/** Supplied / borrowed asset lists: rows per page. */
+const ASSET_LIST_PAGE_SIZE = 10;
+
+function sliceAssetListPage<T>(
+  items: T[],
+  currentPage: number,
+  pageSize: number
+): T[] {
+  if (items.length === 0) return [];
+  const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
+  const lastPage = pageCount - 1;
+  const page = Math.min(currentPage, lastPage);
+  const start = page * pageSize;
+  return items.slice(start, start + pageSize);
+}
+
+function PortfolioAssetListPagination({
+  currentPage,
+  onPageChange,
+  totalItems,
+  pageSize,
+  scrollToRef,
+}: {
+  currentPage: number;
+  onPageChange: (page: number) => void;
+  totalItems: number;
+  pageSize: number;
+  scrollToRef: RefObject<HTMLDivElement | null> | null;
+}) {
+  if (totalItems <= pageSize) return null;
+  const pageCount = Math.ceil(totalItems / pageSize);
+  const lastPage = pageCount - 1;
+  const current = Math.min(currentPage, lastPage);
+  const from = current * pageSize + 1;
+  const to = Math.min((current + 1) * pageSize, totalItems);
+
+  const go = (page: number) => {
+    onPageChange(Math.max(0, Math.min(page, lastPage)));
+    if (scrollToRef?.current) {
+      setTimeout(() => {
+        scrollToRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }, 0);
+    }
+  };
+
+  return (
+    <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between w-full min-w-0">
+      <p
+        className="text-sm text-muted-foreground text-center sm:text-left"
+        aria-live="polite"
+      >
+        Showing {from}–{to} of {totalItems}
+      </p>
+      <div className="flex items-center justify-center gap-2 w-full sm:w-auto min-w-0">
+        <DorkFiButton
+          type="button"
+          variant="secondary"
+          onClick={() => go(current - 1)}
+          disabled={current === 0}
+          className="min-w-0 flex-1 sm:flex-initial"
+        >
+          <span className="sm:hidden">Prev</span>
+          <span className="hidden sm:inline">Previous</span>
+        </DorkFiButton>
+        <span
+          className="text-sm text-muted-foreground tabular-nums shrink-0 min-w-[4.5rem] text-center"
+          aria-label={`Page ${current + 1} of ${pageCount}`}
+        >
+          {current + 1} / {pageCount}
+        </span>
+        <DorkFiButton
+          type="button"
+          variant="secondary"
+          onClick={() => go(current + 1)}
+          disabled={current >= lastPage}
+          className="min-w-0 flex-1 sm:flex-initial"
+        >
+          Next
+        </DorkFiButton>
+      </div>
+    </div>
+  );
+}
 
 const Portfolio = () => {
   const { address: routeAddress } = useParams<{ address: string }>();
@@ -374,16 +467,14 @@ const Portfolio = () => {
   }>({ column: "apy", direction: "desc" });
   const [suppliedAssetsSearchTerm, setSuppliedAssetsSearchTerm] =
     useState<string>("");
-  const [showAllSuppliedAssets, setShowAllSuppliedAssets] =
-    useState<boolean>(false);
+  const [suppliedAssetsPage, setSuppliedAssetsPage] = useState(0);
   const suppliedAssetsTableRef = useRef<HTMLDivElement>(null);
   const [borrowedAssetsSearchTerm, setBorrowedAssetsSearchTerm] =
     useState<string>("");
   const [portfolioPositionsTab, setPortfolioPositionsTab] = useState<
     "supplied" | "borrowed"
   >("supplied");
-  const [showAllBorrowedAssets, setShowAllBorrowedAssets] =
-    useState<boolean>(false);
+  const [borrowedAssetsPage, setBorrowedAssetsPage] = useState(0);
   const borrowedAssetsTableRef = useRef<HTMLDivElement>(null);
   const [borrowedAssetsSort, setBorrowedAssetsSort] = useState<{
     column: string | null;
@@ -437,6 +528,65 @@ const Portfolio = () => {
       marketData,
       formatPriceFromContract,
     });
+
+  // POST `/market-data/...` when a supply/borrow position modal opens (fresh API snapshot for that market).
+  useEffect(() => {
+    const pick = depositModal.isOpen
+      ? depositModal
+      : withdrawModal.isOpen
+        ? withdrawModal
+        : borrowModal.isOpen
+          ? borrowModal
+          : repayModal.isOpen
+            ? repayModal
+            : null;
+    if (!pick?.isOpen || !pick.asset) {
+      return;
+    }
+    const networkId = (pick.network || currentNetwork) as NetworkId;
+    const poolId = pick.poolId;
+    if (!poolId) {
+      return;
+    }
+    const configSymbol = pick.configSymbol;
+    const marketId = pick.marketId;
+
+    const tokens = getAllTokensWithDisplayInfo(networkId);
+    const token = resolveSupplyBorrowToken(
+      tokens,
+      pick.asset,
+      poolId,
+      configSymbol,
+      marketId
+    );
+    const appId = token?.poolId != null ? String(token.poolId) : poolId;
+    const uMid = token?.underlyingContractId
+      ? String(token.underlyingContractId)
+      : marketId != null && String(marketId) !== ""
+        ? String(marketId)
+        : "";
+    if (!uMid) {
+      return;
+    }
+
+    void (async () => {
+      try {
+        await postRefreshMarketDataSnapshot(networkId, appId, uMid);
+      } catch (e) {
+        console.warn(
+          "[Portfolio] postRefreshMarketDataSnapshot on modal open failed",
+          { networkId, appId, marketId: uMid },
+          e
+        );
+      }
+    })();
+  }, [
+    depositModal,
+    withdrawModal,
+    borrowModal,
+    repayModal,
+    currentNetwork,
+  ]);
 
   // Function to fetch ntoken balance for a specific token
   const fetchNTokenBalance = async (
@@ -3586,43 +3736,10 @@ const Portfolio = () => {
       try {
         const enabledNetworks = getEnabledNetworks();
 
-        // POST /market-data/... for user-position markets first (backend refreshes chain snapshot)
-        const computed = user?.computed as
-          | Record<string, unknown>
-          | undefined;
-        const positionKeys = [
-          ...collectPositionMarketKeys(
-            Array.isArray(computed?.deposits)
-              ? (computed.deposits as Record<string, unknown>[])
-              : undefined
-          ),
-          ...collectPositionMarketKeys(
-            Array.isArray(computed?.borrows)
-              ? (computed.borrows as Record<string, unknown>[])
-              : undefined
-          ),
-        ];
-        const seenPost = new Set<string>();
-        for (const { networkId, poolId, marketId } of positionKeys) {
-          const k = `${networkId}|${poolId}|${marketId}`;
-          if (seenPost.has(k)) continue;
-          seenPost.add(k);
-          try {
-            await postRefreshMarketDataSnapshot(
-              networkId,
-              poolId,
-              marketId
-            );
-          } catch (e) {
-            console.error(
-              "[Portfolio] postRefreshMarketDataSnapshot failed",
-              { networkId, poolId, marketId },
-              e
-            );
-          }
-        }
+        // Market POST `/market-data/...` for visible table rows is handled in
+        // `usePortfolioVisibleChainLive` (intersection) before user-data fetch.
 
-        // Single display path: GET-backed fetchAllMarkets after POSTs
+        // GET-backed `fetchAllMarkets` for portfolio display
         const allMarketData: unknown[] = [];
         for (const networkId of enabledNetworks) {
           try {
@@ -3799,14 +3916,14 @@ const Portfolio = () => {
   //   fetchData();
   // }, [activeAccount?.address, currentNetwork]);
 
-  // Reset showAllSuppliedAssets when filters change
+  // Reset supplied list page when filters change
   useEffect(() => {
-    setShowAllSuppliedAssets(false);
+    setSuppliedAssetsPage(0);
   }, [suppliedAssetsSearchTerm, suppliedAssetsNetworkFilter]);
 
-  // Reset showAllBorrowedAssets when filters change
+  // Reset borrowed list page when filters change
   useEffect(() => {
-    setShowAllBorrowedAssets(false);
+    setBorrowedAssetsPage(0);
   }, [borrowedAssetsSearchTerm, borrowedAssetsNetworkFilter]);
 
   // Section filter modals are mobile-only; close when viewport shows inline filters
@@ -6088,10 +6205,11 @@ const Portfolio = () => {
                               : -comparison;
                           });
 
-                        const displayDeposits = showAllSuppliedAssets
-                          ? filteredAndSorted
-                          : filteredAndSorted.slice(0, 5);
-                        const hasMore = filteredAndSorted.length > 5;
+                        const displayDeposits = sliceAssetListPage(
+                          filteredAndSorted,
+                          suppliedAssetsPage,
+                          ASSET_LIST_PAGE_SIZE
+                        );
 
                         if (displayDeposits.length === 0) {
                           return (
@@ -6232,21 +6350,13 @@ const Portfolio = () => {
                                 </div>
                               );
                             })}
-                            {hasMore && (
-                              <DorkFiButton
-                                variant="secondary"
-                                onClick={() =>
-                                  setShowAllSuppliedAssets(
-                                    !showAllSuppliedAssets
-                                  )
-                                }
-                                className="w-full min-w-0"
-                              >
-                                {showAllSuppliedAssets
-                                  ? "Show Less"
-                                  : "Show More"}
-                              </DorkFiButton>
-                            )}
+                            <PortfolioAssetListPagination
+                              currentPage={suppliedAssetsPage}
+                              onPageChange={setSuppliedAssetsPage}
+                              totalItems={filteredAndSorted.length}
+                              pageSize={ASSET_LIST_PAGE_SIZE}
+                              scrollToRef={suppliedAssetsTableRef}
+                            />
                           </>
                         );
                       })()}
@@ -6704,10 +6814,11 @@ const Portfolio = () => {
                                   : -comparison;
                               });
 
-                            const displayDeposits = showAllSuppliedAssets
-                              ? filteredAndSorted
-                              : filteredAndSorted.slice(0, 5);
-                            const hasMore = filteredAndSorted.length > 5;
+                            const displayDeposits = sliceAssetListPage(
+                              filteredAndSorted,
+                              suppliedAssetsPage,
+                              ASSET_LIST_PAGE_SIZE
+                            );
 
                             return displayDeposits.map((depositRaw, index) => {
                               const deposit = mergeDeposit(
@@ -7098,36 +7209,15 @@ const Portfolio = () => {
                             : -comparison;
                         });
 
-                      const hasMore = filteredAndSorted.length > 5;
-
-                      return hasMore ? (
-                        <div className="mt-4 text-center">
-                          <DorkFiButton
-                            variant="secondary"
-                            onClick={() => {
-                              const wasExpanded = showAllSuppliedAssets;
-                              setShowAllSuppliedAssets(!showAllSuppliedAssets);
-                              // Scroll to top when collapsing
-                              if (
-                                wasExpanded &&
-                                suppliedAssetsTableRef.current
-                              ) {
-                                setTimeout(() => {
-                                  suppliedAssetsTableRef.current?.scrollIntoView(
-                                    {
-                                      behavior: "smooth",
-                                      block: "start",
-                                    }
-                                  );
-                                }, 0);
-                              }
-                            }}
-                            className="w-full min-w-0"
-                          >
-                            {showAllSuppliedAssets ? "Show Less" : "Show More"}
-                          </DorkFiButton>
-                        </div>
-                      ) : null;
+                      return (
+                        <PortfolioAssetListPagination
+                          currentPage={suppliedAssetsPage}
+                          onPageChange={setSuppliedAssetsPage}
+                          totalItems={filteredAndSorted.length}
+                          pageSize={ASSET_LIST_PAGE_SIZE}
+                          scrollToRef={suppliedAssetsTableRef}
+                        />
+                      );
                     })()}
                 </DorkFiCard>
               )}
@@ -7956,10 +8046,11 @@ const Portfolio = () => {
                               : -comparison;
                           });
 
-                        const displayBorrows = showAllBorrowedAssets
-                          ? filteredAndSorted
-                          : filteredAndSorted.slice(0, 5);
-                        const hasMore = filteredAndSorted.length > 5;
+                        const displayBorrows = sliceAssetListPage(
+                          filteredAndSorted,
+                          borrowedAssetsPage,
+                          ASSET_LIST_PAGE_SIZE
+                        );
 
                         if (displayBorrows.length === 0) {
                           return (
@@ -8106,21 +8197,13 @@ const Portfolio = () => {
                                 </div>
                               );
                             })}
-                            {hasMore && (
-                              <DorkFiButton
-                                variant="secondary"
-                                onClick={() =>
-                                  setShowAllBorrowedAssets(
-                                    !showAllBorrowedAssets
-                                  )
-                                }
-                                className="w-full min-w-0"
-                              >
-                                {showAllBorrowedAssets
-                                  ? "Show Less"
-                                  : "Show More"}
-                              </DorkFiButton>
-                            )}
+                            <PortfolioAssetListPagination
+                              currentPage={borrowedAssetsPage}
+                              onPageChange={setBorrowedAssetsPage}
+                              totalItems={filteredAndSorted.length}
+                              pageSize={ASSET_LIST_PAGE_SIZE}
+                              scrollToRef={borrowedAssetsTableRef}
+                            />
                           </>
                         );
                       })()}
@@ -8477,9 +8560,11 @@ const Portfolio = () => {
                                   : -comparison;
                               });
 
-                            const displayBorrows = showAllBorrowedAssets
-                              ? filteredAndSorted
-                              : filteredAndSorted.slice(0, 5);
+                            const displayBorrows = sliceAssetListPage(
+                              filteredAndSorted,
+                              borrowedAssetsPage,
+                              ASSET_LIST_PAGE_SIZE
+                            );
 
                             return displayBorrows.map((borrowRaw, index) => {
                               const borrow = mergeBorrow(
@@ -8895,36 +8980,15 @@ const Portfolio = () => {
                             : -comparison;
                         });
 
-                      const hasMore = filteredAndSorted.length > 5;
-
-                      return hasMore ? (
-                        <div className="mt-4 text-center">
-                          <DorkFiButton
-                            variant="secondary"
-                            onClick={() => {
-                              const wasExpanded = showAllBorrowedAssets;
-                              setShowAllBorrowedAssets(!showAllBorrowedAssets);
-                              // Scroll to top when collapsing
-                              if (
-                                wasExpanded &&
-                                borrowedAssetsTableRef.current
-                              ) {
-                                setTimeout(() => {
-                                  borrowedAssetsTableRef.current?.scrollIntoView(
-                                    {
-                                      behavior: "smooth",
-                                      block: "start",
-                                    }
-                                  );
-                                }, 0);
-                              }
-                            }}
-                            className="w-full min-w-0"
-                          >
-                            {showAllBorrowedAssets ? "Show Less" : "Show More"}
-                          </DorkFiButton>
-                        </div>
-                      ) : null;
+                      return (
+                        <PortfolioAssetListPagination
+                          currentPage={borrowedAssetsPage}
+                          onPageChange={setBorrowedAssetsPage}
+                          totalItems={filteredAndSorted.length}
+                          pageSize={ASSET_LIST_PAGE_SIZE}
+                          scrollToRef={borrowedAssetsTableRef}
+                        />
+                      );
                     })()}
                 </DorkFiCard>
               )}

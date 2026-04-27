@@ -1037,7 +1037,7 @@ export const fetchAllMarkets = async (
             `Fetching market data for ${token.symbol} (marketId: ${marketId}, poolId: ${poolId})`
           );
 
-          const marketInfo = await fetchMarketInfo(poolId, marketId, networkId, "contract", "sync_market"); // uses API by default
+          const marketInfo = await fetchMarketInfo(poolId, marketId, networkId); // fetch from api
 
           if (marketInfo) {
             console.log(
