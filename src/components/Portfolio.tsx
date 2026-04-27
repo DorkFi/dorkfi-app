@@ -1489,36 +1489,6 @@ const Portfolio = () => {
       : userGlobalData?.totalBorrowValue ||
       borrows.reduce((sum, borrow) => sum + borrow.value, 0);
 
-  /** Per pool collateral USD for LTV in Borrowed Assets (contract global user; deposit sum fallback). */
-  const collateralUsdByPoolId = useMemo(() => {
-    const map: Record<string, number> = {};
-    if (user?.globalUserData && Array.isArray(user.globalUserData)) {
-      for (const item of user.globalUserData) {
-        const rec = item as Record<string, unknown>;
-        const appId = String(rec.appId ?? rec.poolId ?? "");
-        if (!appId) continue;
-        try {
-          const v = Number(
-            BigInt(String(rec.totalCollateralValue ?? 0)) / BigInt(1e12)
-          );
-          if (!Number.isNaN(v)) map[appId] = v;
-        } catch {
-          /* ignore */
-        }
-      }
-    }
-    const depositSumByPool: Record<string, number> = {};
-    for (const d of deposits) {
-      if (d.poolId == null || d.poolId === "") continue;
-      const pid = String(d.poolId);
-      depositSumByPool[pid] = (depositSumByPool[pid] ?? 0) + d.value;
-    }
-    for (const [pid, sum] of Object.entries(depositSumByPool)) {
-      if (map[pid] === undefined) map[pid] = sum;
-    }
-    return map;
-  }, [user?.globalUserData, deposits]);
-
   // Calculate weighted liquidation threshold based on borrowed assets only
   // This is more accurate because liquidation risk only applies to markets with active debt
   const calculateWeightedLiquidationThreshold = () => {
@@ -8108,19 +8078,6 @@ const Portfolio = () => {
                                     ? liquidationThresholdNum / 10000
                                     : liquidationThresholdNum;
 
-                              // Calculate LTV Usage (per pool collateral, not portfolio aggregate)
-                              const poolCollateralUsd =
-                                borrow.poolId != null && borrow.poolId !== ""
-                                  ? collateralUsdByPoolId[String(borrow.poolId)] ??
-                                    0
-                                  : totalCollateral;
-                              const ltvUsage =
-                                poolCollateralUsd > 0
-                                  ? (borrow.value / poolCollateralUsd) * 100
-                                  : borrow.value > 0
-                                    ? 100
-                                    : 0;
-
                               const liquidationPrice =
                                 SHOW_LIQUIDATION_PRICE_IN_BORROWED
                                   ? (() => {
@@ -8163,7 +8120,6 @@ const Portfolio = () => {
                                   accruedInterestValue={
                                     (borrow as ItemWithNetwork).accruedInterestValue
                                   }
-                                  ltvUsage={ltvUsage}
                                   liquidationPrice={liquidationPrice}
                                   network={(borrow as ItemWithNetwork).network}
                                   poolId={borrow.poolId}
@@ -8385,27 +8341,6 @@ const Portfolio = () => {
                                 )}
                               </button>
                             </TableHead>
-                            <TableHead className="text-right">
-                              <div className="flex items-center justify-end gap-1">
-                                LTV Usage
-                                <UITooltip>
-                                  <TooltipTrigger asChild>
-                                    <Info className="w-4 h-4 text-muted-foreground cursor-help" />
-                                  </TooltipTrigger>
-                                  <TooltipContent className="max-w-xs">
-                                    <p className="text-sm">
-                                      Your borrow&apos;s value in USD, compared
-                                      to this lending pool&apos;s total
-                                      collateral (from on-chain data).
-                                    </p>
-                                    <p className="text-xs text-muted-foreground mt-2">
-                                      If this row isn&apos;t linked to a pool, we
-                                      use your portfolio-wide collateral instead.
-                                    </p>
-                                  </TooltipContent>
-                                </UITooltip>
-                              </div>
-                            </TableHead>
                             {SHOW_LIQUIDATION_PRICE_IN_BORROWED && (
                               <TableHead className="text-right">
                                 <div className="flex items-center justify-end gap-1">
@@ -8595,19 +8530,6 @@ const Portfolio = () => {
                                 borrow.poolId
                               );
 
-                              // Calculate LTV Usage (per pool collateral, not portfolio aggregate)
-                              const poolCollateralUsd =
-                                borrow.poolId != null && borrow.poolId !== ""
-                                  ? collateralUsdByPoolId[String(borrow.poolId)] ??
-                                    0
-                                  : totalCollateral;
-                              const ltvUsage =
-                                poolCollateralUsd > 0
-                                  ? (borrow.value / poolCollateralUsd) * 100
-                                  : borrow.value > 0
-                                    ? 100
-                                    : 0;
-
                               const liquidationPrice =
                                 SHOW_LIQUIDATION_PRICE_IN_BORROWED
                                   ? (() => {
@@ -8681,14 +8603,6 @@ const Portfolio = () => {
                                   }
                                 }
                               }
-
-                              // Color code LTV usage
-                              const getLTVColor = (ltv: number) => {
-                                if (ltv >= 80) return "bg-red-500";
-                                if (ltv >= 60) return "bg-orange-500";
-                                if (ltv >= 40) return "bg-yellow-500";
-                                return "bg-green-500";
-                              };
 
                               const borrowDesktopChainKey =
                                 portfolioPositionChainKey(
@@ -8787,26 +8701,6 @@ const Portfolio = () => {
                                       </span>
                                     )}
                                   </TableCell>
-                                  <TableCell className="text-right">
-                                    <div className="flex items-center justify-end gap-2">
-                                      <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2 max-w-[100px]">
-                                        <div
-                                          className={`h-2 rounded-full ${getLTVColor(
-                                            ltvUsage
-                                          )}`}
-                                          style={{
-                                            width: `${Math.min(
-                                              ltvUsage,
-                                              100
-                                            )}%`,
-                                          }}
-                                        />
-                                      </div>
-                                      <span className="text-sm font-medium min-w-[50px] tabular-nums text-right">
-                                        {formatPercent(ltvUsage / 100, { maximumFractionDigits: 1 })}
-                                      </span>
-                                    </div>
-                                  </TableCell>
                                   {SHOW_LIQUIDATION_PRICE_IN_BORROWED &&
                                     liquidationPrice !== undefined && (
                                       <TableCell className="text-right tabular-nums">
@@ -8881,7 +8775,9 @@ const Portfolio = () => {
                           {borrows.length === 0 && (
                             <TableRow>
                               <TableCell
-                                colSpan={9}
+                                colSpan={
+                                  SHOW_LIQUIDATION_PRICE_IN_BORROWED ? 9 : 8
+                                }
                                 className="text-center text-muted-foreground py-8"
                               >
                                 No borrowed assets

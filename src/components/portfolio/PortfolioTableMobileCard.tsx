@@ -21,7 +21,6 @@ interface PortfolioTableMobileCardProps {
   rewardBonusAprPercent?: number;
   accruedInterest?: number;
   accruedInterestValue?: number;
-  ltvUsage?: number;
   liquidationPrice?: number;
   network?: string;
   poolId?: string;
@@ -47,7 +46,6 @@ const PortfolioTableMobileCard = ({
   rewardBonusAprPercent,
   accruedInterest,
   accruedInterestValue,
-  ltvUsage,
   liquidationPrice,
   network,
   poolId,
@@ -219,75 +217,29 @@ const PortfolioTableMobileCard = ({
           </div>
         )}
 
-        {/* Additional Info Grid (borrow positions only) */}
-        {!isDeposit && (
-        <div className="grid grid-cols-2 gap-3 pt-2 border-t border-border">
-              {ltvUsage !== undefined && (
-                <div>
-                  <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                    LTV Usage
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Info className="w-3 h-3 cursor-help" />
-                      </TooltipTrigger>
-                      <TooltipContent className="max-w-xs">
-                        <p className="text-sm">
-                          Your borrow&apos;s value in USD, compared to this
-                          lending pool&apos;s total collateral (from on-chain
-                          data).
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-2">
-                          If this row isn&apos;t linked to a pool, we use your
-                          portfolio-wide collateral instead.
-                        </p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2 max-w-[60px]">
-                      <div
-                        className={`h-2 rounded-full ${
-                          ltvUsage >= 80
-                            ? "bg-red-500"
-                            : ltvUsage >= 60
-                            ? "bg-orange-500"
-                            : ltvUsage >= 40
-                            ? "bg-yellow-500"
-                            : "bg-green-500"
-                        }`}
-                        style={{
-                          width: `${Math.min(ltvUsage, 100)}%`,
-                        }}
-                      />
-                    </div>
-                    <span className="text-sm font-semibold">
-                      {ltvUsage.toFixed(1)}%
-                    </span>
-                  </div>
-                </div>
-              )}
-              {liquidationPrice !== undefined && (
-                <div>
-                  <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                    Liquidation Price
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Info className="w-3 h-3 cursor-help" />
-                      </TooltipTrigger>
-                      <TooltipContent className="max-w-xs">
-                        <p>Estimated price at which liquidation could occur</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                  <div className="text-sm font-semibold">
-                    ${liquidationPrice.toLocaleString("en-US", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 4,
-                    })}
-                  </div>
-                </div>
-              )}
-        </div>
+        {/* Liquidation price (borrow, when enabled) */}
+        {!isDeposit && liquidationPrice !== undefined && (
+          <div className="pt-2 border-t border-border">
+            <div>
+              <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                Liquidation Price
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="w-3 h-3 cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs">
+                    <p>Estimated price at which liquidation could occur</p>
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <div className="text-sm font-semibold">
+                ${liquidationPrice.toLocaleString("en-US", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 4,
+                })}
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Action Buttons */}
