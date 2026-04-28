@@ -2700,7 +2700,7 @@ export const withdraw = async (
             "Folks redeem step requires a numeric f-asset amount from withdraw step 1."
           );
         }
-        let fAmt = BigInt(String(atomicRaw).trim());
+        const fAmt = BigInt(String(atomicRaw).trim());
         if (fAmt <= BigInt(0)) {
           return {
             success: false,

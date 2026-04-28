@@ -1329,7 +1329,6 @@ const PortfolioModals = ({
       const withdrawAdapterTrimmed = String(options?.withdrawAdapterId ?? "").trim();
       const useFolksWithdrawTwoStepStep1 =
         !step2FolksRedeem &&
-        !Boolean(options?.xalgoConsensusWithdrawAppendBurn) &&
         isFolksAlgoWithdrawTwoStepEnabled() &&
         networkToUse === "algorand-mainnet" &&
         withdrawAdapterTrimmed === FOLKS_MAINNET_ALGO_WITHDRAW.id;
