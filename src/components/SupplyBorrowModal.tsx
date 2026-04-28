@@ -38,6 +38,9 @@ import {
   tokenAdapterStableId,
   resolveDepositFolksAdapter,
   resolveBorrowFolksAdapter,
+  FOLKS_MAINNET_ALGO_DEPOSIT_FALGO_WALLET,
+  FOLKS_MAINNET_ALGO_DEPOSIT_UNDERLYING,
+  isFolksAlgoDepositTwoStepEnabled,
   type FolksTokenAdapterConfig,
   type TokenConfig,
   type TokenStandard,
@@ -57,7 +60,7 @@ import {
   SelectTrigger,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useTokenPrice } from "@/hooks/useTokenPrice";
@@ -131,6 +134,10 @@ interface PendingSupplyBorrowSign {
   consensusAppIdForPreview?: string;
   /** Human amount for sign preview when it should not use the form field (e.g. combined supply min xALGO). */
   previewAmountHuman?: string;
+  /** Step 1 of `VITE_FOLKS_ALGO_DEPOSIT_TWO_STEP`: Folks mint only; step 2 is f-ALGO supply. */
+  folksTwoStepPhase?: "folks_mint_only";
+  /** f-ALGO ASA id for prefilling amount after step 1. */
+  fAssetIdForFolksStep2?: string;
 }
 
 type SupplyBorrowTokenRow = {
@@ -372,6 +379,9 @@ const SupplyBorrowModal = ({
     null
   );
   const [isSigning, setIsSigning] = useState(false);
+  /** Set after two-step (Folks) step 1 mint is confirmed; reset when modal opens. */
+  const [folksTwoStepMintConfirmed, setFolksTwoStepMintConfirmed] =
+    useState(false);
   /**
    * Pre-deposit standalone ASA opt-in status when
    * {@link TokenConfig.requireStandaloneFAssetOptInBeforeDeposit} or
@@ -1801,6 +1811,7 @@ const SupplyBorrowModal = ({
       setRetryCount(0);
       setPendingSign(null);
       setIsSigning(false);
+      setFolksTwoStepMintConfirmed(false);
       if (mode !== "borrow") {
         setCalculatedMaxBorrow(null);
         setMaxBorrowError(null);
@@ -1832,6 +1843,133 @@ const SupplyBorrowModal = ({
     const algorandClients =
       await algorandService.initializeClientsForTransactions(algorandNetwork);
     await waitForConfirmation(algorandClients.algod, res.txid, 4);
+
+    if (pending.folksTwoStepPhase === "folks_mint_only") {
+      setTransactionId(res.txid);
+      setPendingSign(null);
+      setFolksTwoStepMintConfirmed(true);
+      setSelectedDepositAdapterId(FOLKS_MAINNET_ALGO_DEPOSIT_FALGO_WALLET.id);
+      const d = pending.originalTokenConfig.decimals;
+      let supplyHumanStr: string | null = null;
+      const fAssetIdStr = pending.fAssetIdForFolksStep2?.trim() ?? "";
+      if (
+        activeAccount?.address &&
+        fAssetIdStr !== "" &&
+        fAssetIdStr !== "0" &&
+        fAssetIdStr !== "-"
+      ) {
+        const fAssetId = parseInt(fAssetIdStr, 10);
+        if (Number.isFinite(fAssetId) && fAssetId > 0) {
+          try {
+            const { algod } = await algorandService.initializeClientsForReads(
+              algorandNetwork
+            );
+            const acc = await algod
+              .accountAssetInformation(activeAccount.address, fAssetId)
+              .do();
+            const atomic = getAccountAssetHoldingAmountAtomic(acc);
+            if (atomic != null && atomic > 0n) {
+              const human = new BigNumber(atomic.toString())
+                .dividedBy(10 ** d)
+                .decimalPlaces(
+                  Math.min(8, Math.max(0, d)),
+                  BigNumber.ROUND_DOWN
+                );
+              supplyHumanStr = human.isZero() ? null : human.toFixed();
+              setAmount(supplyHumanStr ?? "");
+            }
+          } catch (e) {
+            console.warn("f-ALGO balance read after Folks mint step:", e);
+          }
+        }
+      }
+      void onRefreshWalletBalance?.();
+
+      const tryDepositTwoStepChain =
+        isFolksAlgoDepositTwoStepEnabled() &&
+        String(finalNetwork) === "algorand-mainnet" &&
+        activeAccount?.address &&
+        supplyHumanStr != null &&
+        supplyHumanStr !== "";
+
+      if (tryDepositTwoStepChain) {
+        try {
+          const amountInAtomicUnits = new BigNumber(supplyHumanStr)
+            .multipliedBy(10 ** d)
+            .toFixed(0);
+          const depositResult = await deposit(
+            pending.poolAppId,
+            pending.marketContractId,
+            pending.originalTokenConfig.tokenStandard as TokenStandard,
+            amountInAtomicUnits,
+            activeAccount.address,
+            finalNetwork as NetworkId,
+            { depositAdapterId: FOLKS_MAINNET_ALGO_DEPOSIT_FALGO_WALLET.id }
+          );
+          if (!depositResult.success) {
+            throw new Error(
+              "error" in depositResult && depositResult.error
+                ? String(depositResult.error)
+                : "Supply step failed to build."
+            );
+          }
+          if (!("txns" in depositResult) || !depositResult.txns?.length) {
+            throw new Error("No transactions returned for supply step.");
+          }
+          const pending2: PendingSupplyBorrowSign = {
+            txnsB64: depositResult.txns,
+            poolAppId: pending.poolAppId,
+            marketContractId: pending.marketContractId,
+            underlyingAssetId: pending.underlyingAssetId ?? null,
+            actualNetwork: pending.actualNetwork,
+            tokenSymbol: pending.tokenSymbol,
+            originalSymbol: pending.originalSymbol,
+            originalTokenConfig: pending.originalTokenConfig,
+            signKind: "lending",
+            txSignPreviewVariant: "lending",
+          };
+          const walletName = activeWallet?.metadata?.name || "your wallet";
+          toast({
+            title: "Please Sign Transaction",
+            description: `Step 2 of 2 — supply f-ALGO to the market in ${walletName}`,
+            duration: 10000,
+          });
+          const stxns2 = await signTransactions(
+            pending2.txnsB64.map((txn: string) =>
+              Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+            )
+          );
+          const res2 = await algorandClients.algod.sendRawTransaction(stxns2).do();
+          await finalizeAfterSign(stxns2, pending2, res2);
+        } catch (chainErr) {
+          console.error("Deposit two-step chain:", chainErr);
+          toast({
+            variant: "destructive",
+            title: "Supply step",
+            description:
+              chainErr instanceof Error
+                ? `${chainErr.message} You can tap Supply again to finish.`
+                : "Step 2 did not continue. Tap Supply again to finish from your f-ALGO balance.",
+            duration: 12_000,
+          });
+          toast({
+            title: "Folks mint confirmed",
+            description:
+              "Your f-ALGO balance was updated. Use Supply again if needed.",
+            duration: 10_000,
+          });
+        }
+        return;
+      }
+
+      toast({
+        title: "Folks mint confirmed",
+        description:
+          "Amount set to your f-ALGO balance. Review and build again to supply to the market (step 2).",
+        duration: 12_000,
+      });
+      return;
+    }
 
     if (pending.signKind === "xalgo-consensus-mint") {
       setTransactionId(res.txid);
@@ -2725,6 +2863,16 @@ const SupplyBorrowModal = ({
       if (mode === "deposit") {
         // Call the lending service deposit method
         const depositAdapterTrimmed = selectedDepositAdapterId.trim();
+        const useFolksTwoStep =
+          isFolksAlgoDepositTwoStepEnabled() &&
+          (actualNetwork as string) === "algorand-mainnet" &&
+          depositAdapterTrimmed === FOLKS_MAINNET_ALGO_DEPOSIT_UNDERLYING.id;
+        const depositBaseOpts =
+          depositAdapterTrimmed !== "" &&
+          depositAdapterTrimmed !== XALGO_CONSENSUS_DEPOSIT_ALGO_ROUTE_ID &&
+          depositAdapterTrimmed !== TALGO_TINYMAN_DEPOSIT_ALGO_ROUTE_ID
+            ? { depositAdapterId: depositAdapterTrimmed }
+            : undefined;
         result = await deposit(
           token.poolId,
           token.underlyingContractId,
@@ -2732,11 +2880,9 @@ const SupplyBorrowModal = ({
           amountInAtomicUnits,
           activeAccount.address,
           actualNetwork as NetworkId,
-          depositAdapterTrimmed !== "" &&
-            depositAdapterTrimmed !== XALGO_CONSENSUS_DEPOSIT_ALGO_ROUTE_ID &&
-            depositAdapterTrimmed !== TALGO_TINYMAN_DEPOSIT_ALGO_ROUTE_ID
-            ? { depositAdapterId: depositAdapterTrimmed }
-            : undefined
+          useFolksTwoStep
+            ? { ...depositBaseOpts, folksTwoStep: "folks_mint_only" as const }
+            : depositBaseOpts
         );
       } else if (mode === "borrow") {
         // Call the lending service borrow method
@@ -2764,6 +2910,39 @@ const SupplyBorrowModal = ({
       }
 
       console.log(`${mode} result:`, result);
+
+      if (
+        mode === "deposit" &&
+        "depositMeta" in result &&
+        result.depositMeta?.folksTwoStep === "folks_mint_only" &&
+        result.txns.length > 0
+      ) {
+        const underlyingAssetId =
+          token && typeof token === "object" && "underlyingAssetId" in token
+            ? (token as { underlyingAssetId?: string }).underlyingAssetId
+            : undefined;
+        setPendingSign({
+          txnsB64: result.txns,
+          poolAppId: token.poolId,
+          marketContractId: token.underlyingContractId,
+          underlyingAssetId: underlyingAssetId ?? null,
+          actualNetwork: actualNetwork as NetworkId,
+          tokenSymbol: asset,
+          originalSymbol,
+          originalTokenConfig: {
+            decimals: originalTokenConfig.decimals,
+            tokenStandard: String(originalTokenConfig.tokenStandard),
+            poolId: originalTokenConfig.poolId,
+          },
+          signKind: "lending",
+          txSignPreviewVariant: "lending",
+          folksTwoStepPhase: "folks_mint_only",
+          fAssetIdForFolksStep2: String(
+            (originalTokenConfig as { assetId?: string | number }).assetId ?? ""
+          ),
+        });
+        return;
+      }
 
       if (activeWallet) {
         const walletId = activeWallet.id?.toLowerCase() || "";
@@ -2924,6 +3103,50 @@ const SupplyBorrowModal = ({
     handleBuildTransaction();
   };
 
+  const showFolksTwoStepDepositStepper = useMemo(() => {
+    if (mode !== "deposit" || !isFolksAlgoDepositTwoStepEnabled()) {
+      return false;
+    }
+    if (String(networkToUse) !== "algorand-mainnet") return false;
+    const ad = String(selectedDepositAdapterId ?? "").trim();
+    if (ad === "") return false;
+    return (
+      ad === FOLKS_MAINNET_ALGO_DEPOSIT_UNDERLYING.id ||
+      ad === FOLKS_MAINNET_ALGO_DEPOSIT_FALGO_WALLET.id
+    );
+  }, [mode, networkToUse, selectedDepositAdapterId]);
+
+  const folksTwoStepSignLabelStep1 = useMemo(() => {
+    if (pendingSign?.folksTwoStepPhase !== "folks_mint_only") {
+      return null;
+    }
+    if (isSigning) return "Signing in wallet…";
+    return "Review & sign in wallet";
+  }, [pendingSign?.folksTwoStepPhase, isSigning]);
+
+  const folksTwoStepSignLabelStep2 = useMemo(() => {
+    if (!folksTwoStepMintConfirmed) return null;
+    if (pendingSign?.folksTwoStepPhase === "folks_mint_only") return null;
+    if (!pendingSign) return null;
+    if (selectedDepositAdapterId !== FOLKS_MAINNET_ALGO_DEPOSIT_FALGO_WALLET.id) {
+      return null;
+    }
+    if (isSigning) return "Signing in wallet…";
+    return "Review & sign in wallet";
+  }, [
+    folksTwoStepMintConfirmed,
+    pendingSign,
+    selectedDepositAdapterId,
+    isSigning,
+  ]);
+  /** After mint, step2 is the active supply step. */
+  const folksTwoStepStep2Current = useMemo(
+    () =>
+      folksTwoStepMintConfirmed &&
+      selectedDepositAdapterId === FOLKS_MAINNET_ALGO_DEPOSIT_FALGO_WALLET.id,
+    [folksTwoStepMintConfirmed, selectedDepositAdapterId]
+  );
+
   return (
     <>
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -3064,6 +3287,134 @@ const SupplyBorrowModal = ({
                       </Button>
                     )}
                   </div>
+                </div>
+              )}
+
+              {showFolksTwoStepDepositStepper && !showSuccess && (
+                <div
+                  className="mb-1 rounded-lg border border-teal-200/80 bg-white/90 px-3 py-2.5 shadow-sm dark:border-teal-800/40 dark:bg-slate-800/60"
+                  role="navigation"
+                  aria-label="Two-step Folks deposit progress"
+                >
+                  <p className="mb-2.5 text-center text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Two-step deposit
+                  </p>
+                  <ol className="flex w-full items-start gap-1 sm:gap-2">
+                    <li className="flex min-w-0 flex-1 flex-col items-center gap-1.5 sm:flex-row sm:items-stretch">
+                      <div className="flex w-full min-w-0 sm:items-center sm:gap-2">
+                        <span
+                          className={cn(
+                            "mx-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold sm:mx-0",
+                            folksTwoStepMintConfirmed
+                              ? "bg-teal-600 text-white dark:bg-teal-500"
+                              : isSigning &&
+                                  pendingSign?.folksTwoStepPhase ===
+                                    "folks_mint_only"
+                                ? "bg-teal-100 text-teal-900 dark:bg-teal-900/50 dark:text-teal-100"
+                                : (selectedDepositAdapterId ===
+                                      FOLKS_MAINNET_ALGO_DEPOSIT_UNDERLYING.id ||
+                                    pendingSign?.folksTwoStepPhase ===
+                                      "folks_mint_only")
+                                  ? "ring-2 ring-teal-500 ring-offset-1 ring-offset-white bg-teal-100 text-teal-900 dark:ring-offset-slate-900 dark:bg-teal-900/40 dark:text-teal-100"
+                                  : "bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300"
+                          )}
+                          aria-current={
+                            !folksTwoStepMintConfirmed
+                              ? "step"
+                              : undefined
+                          }
+                        >
+                          {folksTwoStepMintConfirmed ? (
+                            <Check className="h-3.5 w-3.5" aria-hidden />
+                          ) : (
+                            "1"
+                          )}
+                        </span>
+                        <div className="min-w-0 flex-1 text-center sm:text-left">
+                          <p className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                            Mint f-ALGO
+                          </p>
+                          {folksTwoStepSignLabelStep1 != null && (
+                            <p className="mt-0.5 flex items-center justify-center gap-1 text-[10px] text-teal-600 dark:text-teal-400 sm:justify-start">
+                              {isSigning && pendingSign?.folksTwoStepPhase ===
+                                "folks_mint_only" && (
+                                <Loader2
+                                  className="h-3 w-3 shrink-0 animate-spin"
+                                  aria-hidden
+                                />
+                              )}
+                              {folksTwoStepSignLabelStep1}
+                            </p>
+                          )}
+                          {selectedDepositAdapterId ===
+                            FOLKS_MAINNET_ALGO_DEPOSIT_UNDERLYING.id &&
+                            !pendingSign &&
+                            !folksTwoStepMintConfirmed && (
+                              <p className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400 sm:text-left">
+                                Use ALGO · Build transaction
+                              </p>
+                            )}
+                        </div>
+                      </div>
+                    </li>
+                    <li
+                      className="mt-3 flex h-px w-4 shrink-0 self-center border-t-2 border-dotted border-slate-300 sm:mt-0 sm:w-5 dark:border-slate-600"
+                      aria-hidden
+                    />
+                    <li className="flex min-w-0 flex-1 flex-col items-center gap-1.5 sm:flex-row sm:items-stretch">
+                      <div className="flex w-full min-w-0 sm:items-center sm:gap-2">
+                        <span
+                          className={cn(
+                            "mx-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold sm:mx-0",
+                            isSigning &&
+                              pendingSign &&
+                              pendingSign.folksTwoStepPhase !==
+                                "folks_mint_only" &&
+                              selectedDepositAdapterId ===
+                                FOLKS_MAINNET_ALGO_DEPOSIT_FALGO_WALLET.id
+                              ? "bg-teal-100 text-teal-900 dark:bg-teal-900/50"
+                              : selectedDepositAdapterId ===
+                                    FOLKS_MAINNET_ALGO_DEPOSIT_FALGO_WALLET.id &&
+                                  folksTwoStepMintConfirmed
+                                ? "ring-2 ring-teal-500 ring-offset-1 ring-offset-white dark:ring-offset-slate-900"
+                                : "bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300"
+                          )}
+                        >
+                          2
+                        </span>
+                        <div
+                          className="min-w-0 flex-1 text-center sm:text-left"
+                          aria-current={
+                            folksTwoStepStep2Current ? "step" : undefined
+                          }
+                        >
+                          <p className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                            Supply f-ALGO
+                          </p>
+                          {folksTwoStepSignLabelStep2 != null && (
+                            <p className="mt-0.5 flex items-center justify-center gap-1 text-[10px] text-teal-600 dark:text-teal-400 sm:justify-start">
+                              {isSigning && (
+                                <Loader2
+                                  className="h-3 w-3 shrink-0 animate-spin"
+                                  aria-hidden
+                                />
+                              )}
+                              {folksTwoStepSignLabelStep2}
+                            </p>
+                          )}
+                          {folksTwoStepMintConfirmed &&
+                            selectedDepositAdapterId ===
+                              FOLKS_MAINNET_ALGO_DEPOSIT_FALGO_WALLET.id &&
+                            !pendingSign &&
+                            !showSuccess && (
+                              <p className="mt-0.5 text-center text-[10px] text-slate-500 dark:text-slate-400 sm:text-left">
+                                Tap Supply to retry if step 2 did not run
+                              </p>
+                            )}
+                        </div>
+                      </div>
+                    </li>
+                  </ol>
                 </div>
               )}
 

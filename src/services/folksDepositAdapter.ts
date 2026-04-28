@@ -430,7 +430,7 @@ export async function buildFolksWithdrawFromPoolTxns(input: {
     input.userAddress,
     recv,
     input.fAssetAmount,
-    receivedAssetAmount,
+    0, //receivedAssetAmount,
     suggestedParams
   );
   txns = prefixWithOpUp(

@@ -45,6 +45,8 @@ import {
   tokenConfigHasNonFolksAdapter,
   tokenConfigHasAdapters,
   tokenStandardIsFolksAsaBridge,
+  FOLKS_MAINNET_ALGO_WITHDRAW,
+  isFolksAlgoWithdrawTwoStepEnabled,
 } from "@/config";
 import algorandService, { AlgorandNetwork } from "@/services/algorandService";
 import algosdk, { waitForConfirmation } from "algosdk";
@@ -1319,18 +1321,31 @@ const PortfolioModals = ({
       const { networkToUse, token, originalTokenConfig } =
         resolvePortfolioWithdrawContext();
 
-      const withdrawAll = Boolean(options?.withdrawAllConfirmed);
+      const withdrawAllConfirmed = Boolean(options?.withdrawAllConfirmed);
+      const step2FolksRedeem =
+        Boolean(options?.folksTwoStepFolksRedeem) &&
+        options?.folksRedeemFAssetAtomic != null &&
+        String(options.folksRedeemFAssetAtomic).trim() !== "";
+      const withdrawAdapterTrimmed = String(options?.withdrawAdapterId ?? "").trim();
+      const useFolksWithdrawTwoStepStep1 =
+        !step2FolksRedeem &&
+        !Boolean(options?.xalgoConsensusWithdrawAppendBurn) &&
+        isFolksAlgoWithdrawTwoStepEnabled() &&
+        networkToUse === "algorand-mainnet" &&
+        withdrawAdapterTrimmed === FOLKS_MAINNET_ALGO_WITHDRAW.id;
+
       const result = await withdraw(
         token.poolId,
         token.underlyingContractId,
         originalTokenConfig.tokenStandard,
-        amount,
+        step2FolksRedeem ? "0" : amount,
         activeAccount!.address,
         networkToUse,
         {
-          withdrawAll,
+          withdrawAll: step2FolksRedeem ? false : withdrawAllConfirmed,
           maxWithdrawScaled:
-            withdrawAll &&
+            !step2FolksRedeem &&
+            withdrawAllConfirmed &&
             options?.isMaxWithdraw &&
             maxWithdrawData?.maxWithdrawScaled
               ? BigInt(maxWithdrawData.maxWithdrawScaled)
@@ -1338,6 +1353,14 @@ const PortfolioModals = ({
           withdrawAdapterId: options?.withdrawAdapterId,
           xalgoConsensusWithdrawAppendBurn:
             options?.xalgoConsensusWithdrawAppendBurn,
+          ...(step2FolksRedeem
+            ? {
+                folksTwoStep: "folks_redeem_only" as const,
+                folksRedeemFAssetAtomic: String(options!.folksRedeemFAssetAtomic!).trim(),
+              }
+            : useFolksWithdrawTwoStepStep1
+              ? { folksTwoStep: "lending_to_wallet" as const }
+              : {}),
         }
       );
 
@@ -1363,6 +1386,13 @@ const PortfolioModals = ({
 
       const xBurn = Boolean(options?.xalgoConsensusWithdrawAppendBurn);
 
+      const wm = (result as { withdrawMeta?: unknown }).withdrawMeta as
+        | {
+            folksTwoStep: string;
+            fAssetToRedeemAtomic?: string;
+          }
+        | undefined;
+
       return {
         txnsB64: result.txns,
         poolAppId: String(token.poolId),
@@ -1377,6 +1407,19 @@ const PortfolioModals = ({
           : undefined,
         assetDisplaySymbol: withdrawModal.asset ?? token.symbol,
         amountHuman: amount,
+        folksTwoStepLendingToWallet:
+          wm?.folksTwoStep === "lending_to_wallet" &&
+          wm?.fAssetToRedeemAtomic != null &&
+          String(wm.fAssetToRedeemAtomic).trim() !== "",
+        fAssetToRedeemAtomic:
+          wm?.folksTwoStep === "lending_to_wallet"
+            ? String(wm?.fAssetToRedeemAtomic ?? "")
+            : undefined,
+        folksTwoStepPhase: step2FolksRedeem
+          ? ("folks_redeem_only" as const)
+          : useFolksWithdrawTwoStepStep1
+            ? ("lending_to_wallet" as const)
+            : undefined,
       };
     },
     [
@@ -1519,7 +1562,15 @@ const PortfolioModals = ({
             });
         }
 
-        return { txId: res.txid };
+        return {
+          txId: res.txid,
+          skipSuccessModal: Boolean(
+            built.folksTwoStepLendingToWallet && built.fAssetToRedeemAtomic
+          ),
+          fAssetToRedeemAtomic: built.folksTwoStepLendingToWallet
+            ? built.fAssetToRedeemAtomic
+            : undefined,
+        };
       } catch (error) {
         console.error("Withdraw error:", error);
         throw error;

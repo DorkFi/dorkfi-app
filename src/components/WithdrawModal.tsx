@@ -20,7 +20,13 @@ import {
 import { LocaleNumberInput } from "@/components/ui/LocaleNumberInput";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { InfoIcon, ChevronDown, ChevronUp, Check } from "lucide-react";
+import {
+  InfoIcon,
+  ChevronDown,
+  ChevronUp,
+  Check,
+  Loader2,
+} from "lucide-react";
 import { formatRelativeTime, formatRelativeTimeFromISO } from "@/utils/timeUtils";
 import {
   Tooltip,
@@ -40,6 +46,8 @@ import {
   tokenAdapterStableId,
   type FolksTokenAdapterConfig,
   type NetworkId,
+  FOLKS_MAINNET_ALGO_WITHDRAW,
+  isFolksAlgoWithdrawTwoStepEnabled,
 } from "@/config";
 import { XALGO_CONSENSUS_WITHDRAW_ALGO_ROUTE_ID } from "@/services/xalgoConsensusAdapter";
 import type { PoolCollateralMarketRow } from "@/utils/poolCollateralMarketRows";
@@ -62,6 +70,8 @@ export type WithdrawModalSubmitResult = {
   txId?: string;
   /** Parent closes the dialog (e.g. PreFi); skip embedded SupplyBorrowCongrats. */
   skipSuccessModal?: boolean;
+  /** Step 1 of two-step Folks withdraw: f-atomic to redeem in step 2 (portfolio phased flow). */
+  fAssetToRedeemAtomic?: string;
 };
 
 /** Options passed from the withdraw form into build / finalize (portfolio). */
@@ -71,6 +81,10 @@ export type WithdrawSubmitOptions = {
   unsafeHealthFactorOverrideConfirmed?: boolean;
   withdrawAdapterId?: string;
   xalgoConsensusWithdrawAppendBurn?: boolean;
+  /** Step 2 of `VITE_FOLKS_ALGO_WITHDRAW_TWO_STEP`: Folks redeem only. */
+  folksTwoStepFolksRedeem?: boolean;
+  /** Atomic f-ASA amount from step 1 (`withdrawMeta.fAssetToRedeemAtomic`). */
+  folksRedeemFAssetAtomic?: string;
 };
 
 /** Unsigned group + explorer metadata for the pre-sign review step. */
@@ -84,6 +98,11 @@ export type WithdrawPhasedSignPayload = {
   governanceConsensusAppId?: string;
   assetDisplaySymbol: string;
   amountHuman: string;
+  /** Step 1 completed: user should run step 2 (Folks redeem) with `fAssetToRedeemAtomic`. */
+  folksTwoStepLendingToWallet?: boolean;
+  fAssetToRedeemAtomic?: string;
+  /** Which leg of two-step withdraw this unsigned group represents (sign-preview / stepper). */
+  folksTwoStepPhase?: "lending_to_wallet" | "folks_redeem_only";
 };
 
 /** Require withdraw-all confirmation when MAX targets ≥ this share of deposited balance (or full balance). */
@@ -298,6 +317,9 @@ const WithdrawModal = ({
   const [pendingWithdrawReview, setPendingWithdrawReview] =
     useState<WithdrawPhasedSignPayload | null>(null);
   const [isSigningWithdrawPhase, setIsSigningWithdrawPhase] = useState(false);
+  /** After step 1 confirms; step 2 builds Folks redeem using stored atomic f-amount. */
+  const [folksWithdrawTwoStepAwaitRedeem, setFolksWithdrawTwoStepAwaitRedeem] =
+    useState<{ atomic: string; amountSnapshot: string } | null>(null);
   /** True when the current amount was set with MAX (cleared when the user edits the field). */
   const [withdrawViaMax, setWithdrawViaMax] = useState(false);
   const [withdrawFullPositionConfirmed, setWithdrawFullPositionConfirmed] =
@@ -481,6 +503,39 @@ const WithdrawModal = ({
     );
   }, [useUnderlyingIndexConversion, folksMintOneBi, amount, tokenDecimals]);
 
+  const showFolksTwoStepWithdrawStepper = useMemo(
+    () =>
+      isFolksAlgoWithdrawTwoStepEnabled() &&
+      networkToUse === "algorand-mainnet" &&
+      selectedWithdrawAdapterId === FOLKS_MAINNET_ALGO_WITHDRAW.id,
+    [networkToUse, selectedWithdrawAdapterId]
+  );
+
+  const folksWithdrawTwoStepSignLabelStep1 = useMemo(() => {
+    if (pendingWithdrawReview?.folksTwoStepPhase !== "lending_to_wallet") {
+      return null;
+    }
+    return "Pool withdraw → f-ALGO in wallet";
+  }, [pendingWithdrawReview?.folksTwoStepPhase]);
+
+  const folksWithdrawTwoStepSignLabelStep2 = useMemo(() => {
+    if (pendingWithdrawReview?.folksTwoStepPhase !== "folks_redeem_only") {
+      return null;
+    }
+    return "Folks redeem → ALGO";
+  }, [pendingWithdrawReview?.folksTwoStepPhase]);
+
+  const withdrawPrimaryButtonLabel = useMemo(() => {
+    if (folksWithdrawTwoStepAwaitRedeem) {
+      return `Redeem ${amountLabelSymbol}`;
+    }
+    return `Withdraw ${effectiveAmountLabelSymbol}`;
+  }, [
+    folksWithdrawTwoStepAwaitRedeem,
+    amountLabelSymbol,
+    effectiveAmountLabelSymbol,
+  ]);
+
   const withdrawSelectRowKey = useMemo(() => {
     if (!availableAssets?.length) return tokenSymbol;
     const idx = availableAssets.findIndex(
@@ -525,6 +580,10 @@ const WithdrawModal = ({
     selectedMarketId,
     selectedConfigSymbol,
   ]);
+
+  useEffect(() => {
+    setFolksWithdrawTwoStepAwaitRedeem(null);
+  }, [selectedWithdrawAdapterId]);
 
   const [poolGlobalUserData, setPoolGlobalUserData] = useState<
     | {
@@ -775,8 +834,18 @@ const WithdrawModal = ({
       setWithdrawViaMax(false);
       setWithdrawFullPositionConfirmed(false);
       setUnsafeHfOverrideConfirmed(false);
+      setFolksWithdrawTwoStepAwaitRedeem(null);
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!folksWithdrawTwoStepAwaitRedeem) return;
+    const cur =
+      amount !== "" && typeof amount === "number" ? String(amount) : "";
+    if (cur !== folksWithdrawTwoStepAwaitRedeem.amountSnapshot) {
+      setFolksWithdrawTwoStepAwaitRedeem(null);
+    }
+  }, [amount, folksWithdrawTwoStepAwaitRedeem]);
 
   useEffect(() => {
     if (amount !== "" && typeof amount === "number") {
@@ -820,6 +889,7 @@ const WithdrawModal = ({
     setWithdrawViaMax(false);
     setWithdrawFullPositionConfirmed(false);
     setUnsafeHfOverrideConfirmed(false);
+    setFolksWithdrawTwoStepAwaitRedeem(null);
   };
 
   // Use same precision as display decimals for comparison to avoid floating point failures
@@ -900,23 +970,30 @@ const WithdrawModal = ({
     isValidAmount &&
     (!needsWithdrawAllConfirmation || withdrawFullPositionConfirmed);
 
-  const withdrawSubmitOptions = (): WithdrawSubmitOptions => ({
-    isMaxWithdraw: withdrawViaMax,
-    withdrawAllConfirmed:
-      needsWithdrawAllConfirmation && withdrawFullPositionConfirmed,
-    unsafeHealthFactorOverrideConfirmed:
-      needsUnsafeHfConfirmation &&
-      unsafeOverrideAllowedByHfFloor &&
-      unsafeHfOverrideConfirmed,
-    withdrawAdapterId:
-      withdrawFolksAdapters.length > 0
-        ? selectedWithdrawAdapterId || undefined
-        : undefined,
-    xalgoConsensusWithdrawAppendBurn:
-      xalgoConsensusWithdrawAlgoOption &&
-      networkToUse === "algorand-mainnet" &&
-      selectedWithdrawAdapterId === XALGO_CONSENSUS_WITHDRAW_ALGO_ROUTE_ID,
-  });
+  const withdrawSubmitOptions = (): WithdrawSubmitOptions => {
+    const base: WithdrawSubmitOptions = {
+      isMaxWithdraw: withdrawViaMax,
+      withdrawAllConfirmed:
+        needsWithdrawAllConfirmation && withdrawFullPositionConfirmed,
+      unsafeHealthFactorOverrideConfirmed:
+        needsUnsafeHfConfirmation &&
+        unsafeOverrideAllowedByHfFloor &&
+        unsafeHfOverrideConfirmed,
+      withdrawAdapterId:
+        withdrawFolksAdapters.length > 0
+          ? selectedWithdrawAdapterId || undefined
+          : undefined,
+      xalgoConsensusWithdrawAppendBurn:
+        xalgoConsensusWithdrawAlgoOption &&
+        networkToUse === "algorand-mainnet" &&
+        selectedWithdrawAdapterId === XALGO_CONSENSUS_WITHDRAW_ALGO_ROUTE_ID,
+    };
+    if (folksWithdrawTwoStepAwaitRedeem) {
+      base.folksTwoStepFolksRedeem = true;
+      base.folksRedeemFAssetAtomic = folksWithdrawTwoStepAwaitRedeem.atomic;
+    }
+    return base;
+  };
 
   const handleSubmit = async () => {
     setInternalLoading(true);
@@ -1039,28 +1116,92 @@ const WithdrawModal = ({
       }
 
       const walletName = activeWallet?.metadata?.name || "your wallet";
+      const signAndFinalize = async (
+        payload: WithdrawPhasedSignPayload
+      ): Promise<WithdrawModalSubmitResult | undefined> => {
+        const stxns = await signTransactions(
+          payload.txnsB64.map((txn: string) =>
+            Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+          )
+        );
+        const out = await withdrawPhased.finalizeSignedGroup(stxns, payload);
+        return out as WithdrawModalSubmitResult | undefined;
+      };
+
       toast({
         title: "Please Sign Transaction",
-        description: `Please open ${walletName} and sign the transaction`,
+        description: pending.folksTwoStepLendingToWallet
+          ? `Step 1 of 2 — open ${walletName} and sign`
+          : `Please open ${walletName} and sign the transaction`,
         duration: 10000,
       });
 
-      const stxns = await signTransactions(
-        pending.txnsB64.map((txn: string) =>
-          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
-        )
-      );
-
-      const out = await withdrawPhased.finalizeSignedGroup(stxns, pending);
+      const pendingStep1 = pending;
+      const meta = await signAndFinalize(pendingStep1);
       const tx =
-        out?.txId != null && String(out.txId).trim() !== ""
-          ? String(out.txId).trim()
+        meta?.txId != null && String(meta.txId).trim() !== ""
+          ? String(meta.txId).trim()
           : null;
-      const skipCongrats = out?.skipSuccessModal === true;
+      const atomic = meta?.fAssetToRedeemAtomic?.trim();
       setSuccessTxId(tx);
       setPendingWithdrawReview(null);
-      if (!skipCongrats) {
-        setShowSuccess(true);
+
+      if (
+        atomic &&
+        pendingStep1.folksTwoStepLendingToWallet &&
+        withdrawPhased
+      ) {
+        try {
+          const step2Opts: WithdrawSubmitOptions = {
+            ...withdrawSubmitOptions(),
+            folksTwoStepFolksRedeem: true,
+            folksRedeemFAssetAtomic: atomic,
+          };
+          const step2Built = await withdrawPhased.buildUnsignedGroup(
+            pendingStep1.amountHuman,
+            step2Opts
+          );
+          setPendingWithdrawReview(step2Built);
+          toast({
+            title: "Please Sign Transaction",
+            description: `Step 2 of 2 — redeem f-ALGO to ALGO in ${walletName}`,
+            duration: 10000,
+          });
+          const meta2 = await signAndFinalize(step2Built);
+          setPendingWithdrawReview(null);
+          setFolksWithdrawTwoStepAwaitRedeem(null);
+          const tx2 =
+            meta2?.txId != null && String(meta2.txId).trim() !== ""
+              ? String(meta2.txId).trim()
+              : null;
+          setSuccessTxId(tx2);
+          if (!meta2?.skipSuccessModal) {
+            setShowSuccess(true);
+          }
+        } catch (chainErr) {
+          console.error("Withdraw two-step chain:", chainErr);
+          setFolksWithdrawTwoStepAwaitRedeem({
+            atomic,
+            amountSnapshot: pendingStep1.amountHuman,
+          });
+          setPendingWithdrawReview(null);
+          const msg =
+            chainErr instanceof Error
+              ? chainErr.message
+              : "Step 2 did not complete.";
+          toast({
+            title: "Withdraw",
+            description: `${msg} Tap Withdraw again to retry redeem.`,
+            variant: "destructive",
+            duration: 9000,
+          });
+        }
+      } else {
+        const skipCongrats = meta?.skipSuccessModal === true;
+        if (!skipCongrats) {
+          setFolksWithdrawTwoStepAwaitRedeem(null);
+          setShowSuccess(true);
+        }
       }
     } catch (error) {
       console.error("Withdraw sign failed:", error);
@@ -1812,6 +1953,132 @@ const WithdrawModal = ({
                 </CardContent>
               </Card>
 
+              {showFolksTwoStepWithdrawStepper && !showSuccess && (
+                <div
+                  className="mx-6 mb-2 rounded-lg border border-teal-200/80 bg-white/90 px-3 py-2.5 shadow-sm dark:border-teal-800/40 dark:bg-slate-800/60"
+                  role="navigation"
+                  aria-label="Two-step Folks withdraw progress"
+                >
+                  <p className="mb-2.5 text-center text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Two-step withdraw
+                  </p>
+                  <ol className="flex w-full items-start gap-1 sm:gap-2">
+                    <li className="flex min-w-0 flex-1 flex-col items-center gap-1.5 sm:flex-row sm:items-stretch">
+                      <div className="flex w-full min-w-0 sm:items-center sm:gap-2">
+                        <span
+                          className={cn(
+                            "mx-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold sm:mx-0",
+                            folksWithdrawTwoStepAwaitRedeem
+                              ? "bg-teal-600 text-white dark:bg-teal-500"
+                              : isSigningWithdrawPhase &&
+                                  pendingWithdrawReview?.folksTwoStepPhase ===
+                                    "lending_to_wallet"
+                                ? "bg-teal-100 text-teal-900 dark:bg-teal-900/50 dark:text-teal-100"
+                                : pendingWithdrawReview?.folksTwoStepPhase ===
+                                      "lending_to_wallet" ||
+                                    (!pendingWithdrawReview &&
+                                      !folksWithdrawTwoStepAwaitRedeem)
+                                  ? "ring-2 ring-teal-500 ring-offset-1 ring-offset-white bg-teal-100 text-teal-900 dark:ring-offset-slate-900 dark:bg-teal-900/40 dark:text-teal-100"
+                                  : "bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300"
+                          )}
+                          aria-current={
+                            !folksWithdrawTwoStepAwaitRedeem
+                              ? "step"
+                              : undefined
+                          }
+                        >
+                          {folksWithdrawTwoStepAwaitRedeem ? (
+                            <Check className="h-3.5 w-3.5" aria-hidden />
+                          ) : (
+                            "1"
+                          )}
+                        </span>
+                        <div className="min-w-0 flex-1 text-center sm:text-left">
+                          <p className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                            Withdraw to f-ALGO
+                          </p>
+                          {folksWithdrawTwoStepSignLabelStep1 != null && (
+                            <p className="mt-0.5 flex items-center justify-center gap-1 text-[10px] text-teal-600 dark:text-teal-400 sm:justify-start">
+                              {isSigningWithdrawPhase &&
+                                pendingWithdrawReview?.folksTwoStepPhase ===
+                                  "lending_to_wallet" && (
+                                  <Loader2
+                                    className="h-3 w-3 shrink-0 animate-spin"
+                                    aria-hidden
+                                  />
+                                )}
+                              {folksWithdrawTwoStepSignLabelStep1}
+                            </p>
+                          )}
+                          {!pendingWithdrawReview &&
+                            !folksWithdrawTwoStepAwaitRedeem && (
+                              <p className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400 sm:text-left">
+                                Lending pool only · Build first
+                              </p>
+                            )}
+                        </div>
+                      </div>
+                    </li>
+                    <li
+                      className="mt-3 flex h-px w-4 shrink-0 self-center border-t-2 border-dotted border-slate-300 sm:mt-0 sm:w-5 dark:border-slate-600"
+                      aria-hidden
+                    />
+                    <li className="flex min-w-0 flex-1 flex-col items-center gap-1.5 sm:flex-row sm:items-stretch">
+                      <div className="flex w-full min-w-0 sm:items-center sm:gap-2">
+                        <span
+                          className={cn(
+                            "mx-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold sm:mx-0",
+                            isSigningWithdrawPhase &&
+                              pendingWithdrawReview?.folksTwoStepPhase ===
+                                "folks_redeem_only"
+                              ? "bg-teal-100 text-teal-900 dark:bg-teal-900/50"
+                              : folksWithdrawTwoStepAwaitRedeem &&
+                                  pendingWithdrawReview?.folksTwoStepPhase ===
+                                    "folks_redeem_only"
+                                ? "ring-2 ring-teal-500 ring-offset-1 ring-offset-white dark:ring-offset-slate-900"
+                                : "bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300"
+                          )}
+                          aria-current={
+                            folksWithdrawTwoStepAwaitRedeem &&
+                            pendingWithdrawReview?.folksTwoStepPhase ===
+                              "folks_redeem_only"
+                              ? "step"
+                              : undefined
+                          }
+                        >
+                          2
+                        </span>
+                        <div className="min-w-0 flex-1 text-center sm:text-left">
+                          <p className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                            Redeem to ALGO
+                          </p>
+                          {folksWithdrawTwoStepSignLabelStep2 != null && (
+                            <p className="mt-0.5 flex items-center justify-center gap-1 text-[10px] text-teal-600 dark:text-teal-400 sm:justify-start">
+                              {isSigningWithdrawPhase &&
+                                pendingWithdrawReview?.folksTwoStepPhase ===
+                                  "folks_redeem_only" && (
+                                  <Loader2
+                                    className="h-3 w-3 shrink-0 animate-spin"
+                                    aria-hidden
+                                  />
+                                )}
+                              {folksWithdrawTwoStepSignLabelStep2}
+                            </p>
+                          )}
+                          {folksWithdrawTwoStepAwaitRedeem &&
+                            !pendingWithdrawReview &&
+                            !showSuccess && (
+                              <p className="mt-0.5 text-center text-[10px] text-slate-500 dark:text-slate-400 sm:text-left">
+                                Tap Withdraw to retry step 2 (redeem)
+                              </p>
+                            )}
+                        </div>
+                      </div>
+                    </li>
+                  </ol>
+                </div>
+              )}
+
               {pendingWithdrawReview && (
                 <TransactionSignPreview
                   mode="withdraw"
@@ -1918,9 +2185,7 @@ const WithdrawModal = ({
                         {withdrawPhased ? "Building…" : "Processing..."}
                       </div>
                     ) : (
-                      <span>
-                        {`Withdraw ${effectiveAmountLabelSymbol}`}
-                      </span>
+                      <span>{withdrawPrimaryButtonLabel}</span>
                     )}
                   </DorkFiButton>
                 </div>

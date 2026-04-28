@@ -268,6 +268,28 @@ export const FOLKS_MAINNET_ALGO_DEPOSIT_UNDERLYING = {
   folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.ALGO,
 } satisfies TokenAdapterConfig;
 
+/**
+ * When true, mainnet fALGO “Deposit ALGO” is split: sign Folks mint only, then sign supply using
+ * the f-ALGO wallet route (avoids one-group estimate mismatch). Set `VITE_FOLKS_ALGO_DEPOSIT_TWO_STEP=1`.
+ */
+export function isFolksAlgoDepositTwoStepEnabled(): boolean {
+  return (
+    import.meta.env.VITE_FOLKS_ALGO_DEPOSIT_TWO_STEP === "true" ||
+    import.meta.env.VITE_FOLKS_ALGO_DEPOSIT_TWO_STEP === "1"
+  );
+}
+
+/**
+ * When true, mainnet “Withdraw ALGO” (Folks underlying route) is split: sign lending withdraw to
+ * f-ALGO only, then sign Folks redeem (`VITE_FOLKS_ALGO_WITHDRAW_TWO_STEP=1`).
+ */
+export function isFolksAlgoWithdrawTwoStepEnabled(): boolean {
+  return (
+    import.meta.env.VITE_FOLKS_ALGO_WITHDRAW_TWO_STEP === "true" ||
+    import.meta.env.VITE_FOLKS_ALGO_WITHDRAW_TWO_STEP === "1"
+  );
+}
+
 /** Folks: nt200 withdraw → token, then redeem f-ASA to native ALGO. */
 export const FOLKS_MAINNET_ALGO_WITHDRAW = {
   id: "folks-mainnet-algo-withdraw",

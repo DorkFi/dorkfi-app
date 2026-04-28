@@ -2576,6 +2576,8 @@ export const getMaxWithdrawableForMarket = async (
  * @param options.withdrawAdapterId - Folks withdraw-phase adapter id (see {@link resolveWithdrawFolksAdapter}); omit for first withdraw adapter.
  * @param options.xalgoConsensusWithdrawAppendBurn - When true on mainnet Governance xALGO: after nt200
  * `withdraw`, append governance `burn` so the wallet receives native ALGO (same atomic group).
+ * @param options.folksTwoStep - `lending_to_wallet`: nt200 + f-ASA to wallet only (see `VITE_FOLKS_ALGO_WITHDRAW_TWO_STEP`).
+ *   `folks_redeem_only`: standalone Folks redeem using `folksRedeemFAssetAtomic` (step 2).
  */
 export const withdraw = async (
   poolId: string,
@@ -2589,10 +2591,23 @@ export const withdraw = async (
     maxWithdrawScaled?: bigint;
     withdrawAdapterId?: string;
     xalgoConsensusWithdrawAppendBurn?: boolean;
+    /** Split Folks ALGO withdraw: step 1 omits Folks redeem; step 2 passes `folks_redeem_only` + atomic f-amount. */
+    folksTwoStep?: "lending_to_wallet" | "folks_redeem_only";
+    /** Step 2: f-ASA amount (smallest units) to redeem after step 1 left f-ALGO in the wallet. */
+    folksRedeemFAssetAtomic?: string;
   }
 ): Promise<
   | { success: boolean; txId?: string; error?: string }
-  | { success: true; txns: string[] }
+  | {
+    success: true;
+    txns: string[];
+    withdrawMeta?:
+    | {
+      folksTwoStep: "lending_to_wallet";
+      fAssetToRedeemAtomic: string;
+    }
+    | { folksTwoStep: "folks_redeem_only" };
+  }
 > => {
   console.log("withdraw", {
     poolId,
@@ -2603,6 +2618,7 @@ export const withdraw = async (
     tokenStandard,
     xalgoConsensusWithdrawAppendBurn:
       options?.xalgoConsensusWithdrawAppendBurn,
+    folksTwoStep: options?.folksTwoStep,
   });
 
   try {
@@ -2666,6 +2682,71 @@ export const withdraw = async (
         throw new Error(
           "Governance xALGO withdraw+burn cannot be combined with a Folks withdraw adapter id."
         );
+      }
+
+      if (options?.folksTwoStep === "folks_redeem_only") {
+        if (options?.xalgoConsensusWithdrawAppendBurn) {
+          throw new Error(
+            "Governance xALGO withdraw+burn cannot be combined with Folks redeem-only step."
+          );
+        }
+        const atomicRaw = options?.folksRedeemFAssetAtomic;
+        if (
+          atomicRaw == null ||
+          String(atomicRaw).trim() === "" ||
+          !/^\d+$/.test(String(atomicRaw).trim())
+        ) {
+          throw new Error(
+            "Folks redeem step requires a numeric f-asset amount from withdraw step 1."
+          );
+        }
+        let fAmt = BigInt(String(atomicRaw).trim());
+        if (fAmt <= BigInt(0)) {
+          return {
+            success: false,
+            error: "Folks redeem amount must be positive.",
+          };
+        }
+        if (!folksWithdrawUsesFolksRedeem || folksWithdrawAdapter == null) {
+          throw new Error(
+            "Folks redeem step is only available for the mainnet Folks ALGO → underlying withdraw route."
+          );
+        }
+        /**
+         * Same conservative haircut as deposit f-asset → nt200 (estimate vs on-chain).
+         */
+        const fAssetForRedeem =
+          fAmt > BigInt(100) ? fAmt - BigInt(100) : fAmt;
+        const folksRedeemTxns = await buildFolksWithdrawFromPoolTxns({
+          poolName: folksWithdrawAdapter.folksParams.pool,
+          userAddress,
+          fAssetAmount: fAssetForRedeem,
+          algod: clients.algod,
+        });
+        if (folksRedeemTxns.length === 0) {
+          throw new Error("Folks redeem built no transactions.");
+        }
+        const txnsB64 = folksRedeemTxns.map((t) =>
+          Buffer.from(algosdk.encodeUnsignedTransaction(t)).toString("base64")
+        );
+        return {
+          success: true,
+          txns: txnsB64,
+          withdrawMeta: { folksTwoStep: "folks_redeem_only" },
+        };
+      }
+
+      if (options?.folksTwoStep === "lending_to_wallet") {
+        if (options?.xalgoConsensusWithdrawAppendBurn) {
+          throw new Error(
+            "Governance xALGO withdraw+burn cannot be combined with two-step Folks withdraw."
+          );
+        }
+        if (!folksWithdrawUsesFolksRedeem || folksWithdrawAdapter == null) {
+          throw new Error(
+            "Two-step withdraw requires the mainnet Folks ALGO route (receive f-ALGO, then redeem)."
+          );
+        }
       }
 
       // Convert amount to proper units (considering decimals)
@@ -2840,6 +2921,8 @@ export const withdraw = async (
         folksDepositInterestIndex = depositInterestIndex;
       }
 
+
+
       // Withdraw all: use maxWithdrawScaled (health-factor-safe) when provided, else full nToken balance
       let underlying_amount = BigInt(0);
       const maxWithdrawAmount =
@@ -2887,6 +2970,8 @@ export const withdraw = async (
               folksDepositInterestIndex
             )
             : requestedUnderlyingAmount;
+
+        console.log({ requestedPoolReturnUnits })
 
         const targetUnderlyingAmount =
           token_balance > BigInt(0) &&
@@ -2941,7 +3026,7 @@ export const withdraw = async (
         let bestAboveUnderlying: bigint | null = null;
         let bestAboveDiff: bigint | null = null;
 
-        const maxIterations = 15; // Increased to ensure we find exact match
+        const maxIterations = 20; // Increased to ensure we find exact match
         const tolerance = BigInt(0); // Must be exact - no tolerance
 
         // First, check if we need to adjust at all
@@ -2990,7 +3075,7 @@ export const withdraw = async (
 
           // Phase 1: Large steps using ratio interpolation (first 3-4 iterations)
           for (
-            let iteration = 0;
+            let iteration = 4;
             iteration < Math.min(4, maxIterations);
             iteration++
           ) {
@@ -3031,6 +3116,9 @@ export const withdraw = async (
               Number(marketId),
               testNTokenAmount
             );
+            if (!underlying_amountR.success) {
+              continue;
+            }
             const newUnderlyingAmount = BigInt(underlying_amountR.returnValue);
 
             // Check for exact match first
@@ -3133,7 +3221,7 @@ export const withdraw = async (
           }
 
           // Phase 2: Binary search for final refinement (remaining iterations)
-          for (let iteration = 4; iteration < maxIterations; iteration++) {
+          for (let iteration = 0; iteration < maxIterations; iteration++) {
             // If we found exact match, stop searching
             if (exactMatchNToken !== null) {
               break;
@@ -3162,6 +3250,9 @@ export const withdraw = async (
                   Number(marketId),
                   checkAmount
                 );
+                if (!checkR.success) {
+                  continue;
+                }
                 const checkUnderlying = BigInt(checkR.returnValue);
 
                 if (checkUnderlying === targetUnderlyingAmount) {
@@ -3243,6 +3334,13 @@ export const withdraw = async (
               Number(marketId),
               testNTokenAmount
             );
+            if (!underlying_amountR.success) {
+              console.warn("withdraw:binary search probe failed", {
+                marketId,
+                testNTokenAmount: testNTokenAmount.toString(),
+              });
+              continue;
+            }
             const newUnderlyingAmount = BigInt(underlying_amountR.returnValue);
 
             // Check for exact match first
@@ -3417,6 +3515,9 @@ export const withdraw = async (
                   Number(marketId),
                   testAmount
                 );
+                if (!aboveR.success) {
+                  throw new Error("Withdraw failed: try again with lower amount");
+                }
                 const testUnderlying = BigInt(aboveR.returnValue);
 
                 // Check for exact match
@@ -3814,6 +3915,7 @@ export const withdraw = async (
       const buildN = [];
 
       // Withdraw from lending pool
+      let withdrawSim: any = BigInt(0);
       {
         const withdrawAmount = adjustedAmount;
         const formattedWithdrawAmount = new BigNumber(withdrawAmount)
@@ -3825,6 +3927,11 @@ export const withdraw = async (
         const txnO = (
           await builder.lending.withdraw(Number(marketId), withdrawAmount)
         ).obj as any;
+        const withdrawR = await ciPool.withdraw(Number(marketId), withdrawAmount);
+        if (!withdrawR.success) {
+          throw new Error("Failed to withdraw from lending pool");
+        }
+        withdrawSim = withdrawR.returnValue;
         const note = `lending withdraw ${formattedWithdrawAmount} n${token.symbol} (underlying: ${formattedUnderlyingAmount} ${token.symbol})`;
         buildN.push({
           ...txnO,
@@ -3840,10 +3947,10 @@ export const withdraw = async (
         tokenStandard == "network" ||
         tokenStandardUsesAsaStyleNt200Txns(tokenStandard)
       ) {
-        const formmatedWithdrawAmount = new BigNumber(underlying_amount)
+        const formmatedWithdrawAmount = new BigNumber(withdrawSim.toString())
           .dividedBy(10 ** token.decimals)
           .toFixed(token.decimals);
-        const txnO = (await builder.token.withdraw(underlying_amount)).obj;
+        const txnO = (await builder.token.withdraw(withdrawSim)).obj;
         const note = `atoken withdraw ${formmatedWithdrawAmount}`;
         buildN.push({
           ...txnO,
@@ -3851,17 +3958,26 @@ export const withdraw = async (
           desc: note,
         });
 
+
         if (
           folksWithdrawUsesFolksRedeem &&
           folksWithdrawAdapter != null &&
-          underlying_amount > BigInt(0)
+          withdrawSim > 0n &&
+          options?.folksTwoStep !== "lending_to_wallet"
         ) {
-          const folksRedeemTxns = await buildFolksWithdrawFromPoolTxns({
+          /** Same ~100 base-unit slack as deposit mint / `folks_redeem_only` (sim vs wallet). */
+          const fAssetForRedeem =
+            withdrawSim > 100n ? withdrawSim - 100n : withdrawSim;
+          const buildFolksWithdrawFromPoolTxnsParams = {
             poolName: folksWithdrawAdapter.folksParams.pool,
             userAddress,
-            fAssetAmount: underlying_amount,
+            fAssetAmount: fAssetForRedeem,
             algod: clients.algod,
-          });
+          }
+          console.log("buildFolksWithdrawFromPoolTxnsParams", { buildFolksWithdrawFromPoolTxnsParams });
+          const folksRedeemTxns = await buildFolksWithdrawFromPoolTxns(
+            buildFolksWithdrawFromPoolTxnsParams
+          );
           if (folksRedeemTxns.length > 0) {
             buildN.push(...folksMintTxnsToArccjsExtraTxns(folksRedeemTxns));
           }
@@ -3870,7 +3986,7 @@ export const withdraw = async (
         if (
           networkConfig.networkId === "algorand-mainnet" &&
           options?.xalgoConsensusWithdrawAppendBurn === true &&
-          underlying_amount > BigInt(0)
+          withdrawSim > 0n
         ) {
           if (folksWithdrawUsesFolksRedeem) {
             throw new Error(
@@ -3893,7 +4009,7 @@ export const withdraw = async (
           );
           const minAlgo = minAlgoOutBurnFloor(
             consensusState,
-            underlying_amount,
+            withdrawSim,
             150n
           );
           if (minAlgo <= 0n) {
@@ -3906,7 +4022,7 @@ export const withdraw = async (
             algod: clients.algod,
             senderAddr: userAddress,
             receiverAddr: userAddress,
-            xalgoAmount: underlying_amount,
+            xalgoAmount: withdrawSim,
             minAlgoReceived: minAlgo,
             suggestedParams: spBurn,
           });
@@ -3917,7 +4033,7 @@ export const withdraw = async (
       } else if (tokenStandard == "arc200-exchange") {
         const txnO = (
           await builder.arc200Exchange.arc200_swapBack(
-            underlying_amount
+            withdrawSim
           )
         ).obj;
         const note = "arc200_swapBack";
@@ -3968,6 +4084,17 @@ export const withdraw = async (
         throw new Error("Withdraw transaction failed");
       }
 
+      if (options?.folksTwoStep === "lending_to_wallet") {
+        return {
+          success: true,
+          txns: customTx.txns,
+          withdrawMeta: {
+            folksTwoStep: "lending_to_wallet",
+            fAssetToRedeemAtomic: underlying_amount.toString(),
+          },
+        };
+      }
+
       return {
         success: true,
         txns: customTx.txns,
@@ -4012,10 +4139,16 @@ export const deposit = async (
      * into `buildN` (same arccjs path as Folks f-asset / xALGO mint preamble).
      */
     tinymanTalgoMintAlgoMicros?: bigint;
+    /** Return only the Folks mint transaction group; user supplies f-ALGO in a follow-up (see `VITE_FOLKS_ALGO_DEPOSIT_TWO_STEP`). */
+    folksTwoStep?: "folks_mint_only";
   }
 ): Promise<
   | { success: boolean; txId?: string; error?: string }
-  | { success: true; txns: string[] }
+  | {
+    success: true;
+    txns: string[];
+    depositMeta?: { folksTwoStep: "folks_mint_only" };
+  }
 > => {
   console.log("=== DEPOSIT DEBUG START ===");
   console.log("deposit called with:", {
@@ -4028,6 +4161,7 @@ export const deposit = async (
     depositAdapterId: options?.depositAdapterId,
     xalgoConsensusMintAlgoMicros: options?.xalgoConsensusMintAlgoMicros?.toString(),
     tinymanTalgoMintAlgoMicros: options?.tinymanTalgoMintAlgoMicros?.toString(),
+    folksTwoStep: options?.folksTwoStep,
   });
 
   try {
@@ -4463,6 +4597,25 @@ export const deposit = async (
         networkId: networkConfig.networkId,
       });
 
+      if (options?.folksTwoStep === "folks_mint_only") {
+        if (options.xalgoConsensusMintAlgoMicros != null || options.tinymanTalgoMintAlgoMicros != null) {
+          throw new Error("Two-step Folks mint cannot be combined with consensus or Tinyman mint preambles.");
+        }
+        if (!folksMintTxns || folksMintTxns.length === 0) {
+          throw new Error(
+            "Two-step deposit (Folks mint only) needs a positive ALGO amount and the Folks “Deposit ALGO” route."
+          );
+        }
+        const txnsB64 = folksMintTxns.map((t) =>
+          Buffer.from(algosdk.encodeUnsignedTransaction(t)).toString("base64")
+        );
+        return {
+          success: true,
+          txns: txnsB64,
+          depositMeta: { folksTwoStep: "folks_mint_only" },
+        };
+      }
+
       /** Units of the nt200 / ARC200 market token (e.g. fALGO) to move after Folks mint. */
       let depositIntoNt200Amount = adjustedDepositAmount;
       /** Folks-estimated f-asset minted for this deposit (0 when no Folks mint). */
@@ -4475,11 +4628,23 @@ export const deposit = async (
             underlyingAmount: adjustedDepositAmount,
             algod: clients.algod,
           });
-        depositIntoNt200Amount = mintedFAsset;
-        mintedFAssetForArc200 = mintedFAsset;
+        /**
+         * SDK / client f-asset mint *estimates* (see `calcDepositReturn`, `retrievePoolInfo`) can
+         * overshoot what `pool.deposit` actually credits (index timing, on-chain floor vs client
+         * math). That must be adjusted to a *conservative* f-amount before nt200 axfer, or Algod
+         * fails (e.g. "underflow on subtracting … from sender amount" when the axfer requests
+         * more f-ASA than the wallet just received). The haircut below implements that; keep tiny
+         * deposits viable (no subtract that would drive the minted leg to 0 at small size).
+         */
+        // TODO: fix in Folks SDK
+        const mintedFAssetForLending =
+          mintedFAsset > 100n ? mintedFAsset - 100n : mintedFAsset;
+        depositIntoNt200Amount = mintedFAssetForLending;
+        mintedFAssetForArc200 = mintedFAssetForLending;
         console.log("folksMint: underlying → f-asset (nt200 deposit units)", {
           underlyingForFolks: adjustedDepositAmount.toString(),
           mintedFAsset: mintedFAsset.toString(),
+          mintedFAssetForLending: mintedFAssetForLending.toString(),
           depositInterestIndex: depositInterestIndex.toString(),
         });
       }
