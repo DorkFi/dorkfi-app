@@ -77,6 +77,10 @@ import {
 } from "@/utils/depositModalPoolHealthEstimate";
 import TransactionSignPreview from "./TransactionSignPreview";
 import { getExplorerTransactionUrl } from "@/utils/explorerLinks";
+import {
+  isRainbowkitXchainWallet,
+  withRainbowkitHostDialogDismissed,
+} from "@/wallet/xchainSignUi";
 import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
 import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
 import {
@@ -379,6 +383,9 @@ const SupplyBorrowModal = ({
     null
   );
   const [isSigning, setIsSigning] = useState(false);
+  /** Hide Radix dialog while xChain (RainbowKit) wallet UI signs (overlay blocks MetaMask). */
+  const [rainbowkitSignDialogSuppressed, setRainbowkitSignDialogSuppressed] =
+    useState(false);
   /** Set after two-step (Folks) step 1 mint is confirmed; reset when modal opens. */
   const [folksTwoStepMintConfirmed, setFolksTwoStepMintConfirmed] =
     useState(false);
@@ -765,6 +772,12 @@ const SupplyBorrowModal = ({
 
   useEffect(() => {
     if (!isOpen) setBorrowRoutePickerOpen(false);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (isOpen) {
+      setRainbowkitSignDialogSuppressed(false);
+    }
   }, [isOpen]);
 
   /** f-ASA wallet balance (human) when config exposes a `market_token` deposit route; fills in if parent omits `walletBalanceMarketToken`. */
@@ -1934,14 +1947,32 @@ const SupplyBorrowModal = ({
             description: `Step 2 of 2 — supply f-ALGO to the market in ${walletName}`,
             duration: 10000,
           });
-          const stxns2 = await signTransactions(
-            pending2.txnsB64.map((txn: string) =>
-              Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
-            )
-          );
+          const stxns2 = await withRainbowkitHostDialogDismissed({
+            wallet: activeWallet,
+            setSuppressed: setRainbowkitSignDialogSuppressed,
+            leaveOverlayDismissedOnSuccess: true,
+            run: () =>
+              signTransactions(
+                pending2.txnsB64.map((txn: string) =>
+                  Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+                )
+              ),
+          });
           const res2 = await algorandClients.algod.sendRawTransaction(stxns2).do();
           await finalizeAfterSign(stxns2, pending2, res2);
+          if (isRainbowkitXchainWallet(activeWallet)) {
+            setShowSuccess(false);
+            toast({
+              title: "Supply confirmed",
+              description:
+                "Your transaction was submitted. The portfolio will update shortly.",
+            });
+            onClose();
+          }
         } catch (chainErr) {
+          if (isRainbowkitXchainWallet(activeWallet)) {
+            setRainbowkitSignDialogSuppressed(false);
+          }
           console.error("Deposit two-step chain:", chainErr);
           toast({
             variant: "destructive",
@@ -2158,7 +2189,11 @@ const SupplyBorrowModal = ({
             walletName.includes("pera") || walletName.includes("defly");
         }
 
+        const isXchainRainbowkit =
+          walletId === "rainbowkit" && networkId === "algorand-mainnet";
+
         const isSupported =
+          isXchainRainbowkit ||
           isUniversalWallet ||
           (isVOIWallet && networkId === "voi-mainnet") ||
           (isAlgorandWallet && networkId === "algorand-mainnet") ||
@@ -2189,11 +2224,17 @@ const SupplyBorrowModal = ({
         duration: 10000,
       });
 
-      const stxns = await signTransactions(
-        pending.txnsB64.map((txn: string) =>
-          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
-        )
-      );
+      const stxns = await withRainbowkitHostDialogDismissed({
+        wallet: activeWallet,
+        setSuppressed: setRainbowkitSignDialogSuppressed,
+        leaveOverlayDismissedOnSuccess: true,
+        run: () =>
+          signTransactions(
+            pending.txnsB64.map((txn: string) =>
+              Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+            )
+          ),
+      });
 
       const finalNetwork = pending.actualNetwork;
       const algorandNetwork = getAlgorandNetworkFromNetworkId(
@@ -2207,7 +2248,19 @@ const SupplyBorrowModal = ({
       const res = await algorandClients.algod.sendRawTransaction(stxns).do();
 
       await finalizeAfterSign(stxns, pending, res);
+      if (isRainbowkitXchainWallet(activeWallet)) {
+        setShowSuccess(false);
+        toast({
+          title: mode === "deposit" ? "Supply confirmed" : "Borrow confirmed",
+          description:
+            "Your transaction was submitted. The portfolio will update shortly.",
+        });
+        onClose();
+      }
     } catch (error) {
+      if (isRainbowkitXchainWallet(activeWallet)) {
+        setRainbowkitSignDialogSuppressed(false);
+      }
       console.error(`${mode} sign error:`, error);
       let errorMessage = `${mode} failed`;
       if (error instanceof Error) {
@@ -2264,7 +2317,11 @@ const SupplyBorrowModal = ({
           isWalletConnectAlgorand =
             walletName.includes("pera") || walletName.includes("defly");
         }
+        const isXchainRainbowkit =
+          walletId === "rainbowkit" && networkId === "algorand-mainnet";
+
         const isSupported =
+          isXchainRainbowkit ||
           isUniversalWallet ||
           (isVOIWallet && networkId === "voi-mainnet") ||
           (isAlgorandWallet && networkId === "algorand-mainnet") ||
@@ -2314,9 +2371,16 @@ const SupplyBorrowModal = ({
         duration: 10000,
       });
 
-      const stxns = await signTransactions(
-        txnsB64.map((b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)))
-      );
+      const stxns = await withRainbowkitHostDialogDismissed({
+        wallet: activeWallet,
+        setSuppressed: setRainbowkitSignDialogSuppressed,
+        run: () =>
+          signTransactions(
+            txnsB64.map((b64) =>
+              Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
+            )
+          ),
+      });
       const res = await algod.sendRawTransaction(stxns).do();
       await waitForConfirmation(algod, res.txid, 4);
       setFAssetPreOptInStatus("in");
@@ -3149,7 +3213,10 @@ const SupplyBorrowModal = ({
 
   return (
     <>
-    <Dialog open={isOpen} onOpenChange={onClose}>
+    <Dialog
+      open={isOpen && !rainbowkitSignDialogSuppressed}
+      onOpenChange={onClose}
+    >
       <DialogContent className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-white rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-[95vw] md:max-w-md max-h-[min(90vh,90dvh)] overflow-y-auto overflow-x-hidden flex flex-col p-0 overscroll-contain">
         {showSuccess ? (
           <div className="p-6">

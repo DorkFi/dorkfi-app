@@ -75,6 +75,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import { useRewardsAprBonusMap } from "@/hooks/useRewardsAprBonusMap";
+import { XchainUsdcBridgeControls } from "@/components/xchain/XchainUsdcBridgeControls";
 
 const MAX_CLAIMS_PER_TX = 3;
 
@@ -351,6 +352,7 @@ const MarketsTable = () => {
   const { activeAccount, signTransactions, activeWallet } = useWallet();
 
   const { currentNetwork, switchNetwork } = useNetwork();
+
   const enabledNetworks = getEnabledNetworks();
   const { toast } = useToast();
 
@@ -3044,7 +3046,7 @@ const MarketsTable = () => {
         {/* Network selector */}
         {enabledNetworks.length > 0 && (
           <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-3">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/30 dark:bg-muted/20 px-3 py-2 cursor-pointer hover:bg-muted/50 transition-colors w-fit">
@@ -3111,6 +3113,7 @@ const MarketsTable = () => {
                   Swap
                 </Button>
               )}
+              <XchainUsdcBridgeControls />
             </div>
           </div>
         )}
