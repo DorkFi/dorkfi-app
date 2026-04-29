@@ -1,7 +1,7 @@
 {
   "name": "vite_react_shadcn_ts",
   "private": true,
-  "version": "0.1.658",
+  "version": "0.1.669",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -17,6 +17,7 @@
   "dependencies": {
     "@agoralabs-sh/avm-web-provider": "^1.7.0",
     "@algorandfoundation/algokit-utils": "^9.1.2",
+    "@d13co/algo-x-evm-ui": "^0.0.15",
     "@folks-finance/algorand-sdk": "^0.2.4",
     "@hookform/resolvers": "^3.9.0",
     "@noble/hashes": "^2.0.1",
@@ -48,11 +49,15 @@
     "@radix-ui/react-toggle": "^1.1.0",
     "@radix-ui/react-toggle-group": "^1.1.0",
     "@radix-ui/react-tooltip": "^1.1.4",
+    "@rainbow-me/rainbowkit": "^2.2.10",
     "@tanstack/react-query": "^5.56.2",
-    "@txnlab/use-wallet-react": "^4.3.1",
+    "@txnlab/use-wallet": "npm:@d13co/use-wallet@^4.5.15",
+    "@txnlab/use-wallet-react": "npm:@d13co/use-wallet-react@^4.5.7",
+    "@txnlab/use-wallet-ui-react": "npm:@d13co/use-wallet-ui-react@^1.0.27",
     "@types/canvas-confetti": "^1.9.0",
     "@walletconnect/modal": "^2.7.0",
     "@walletconnect/sign-client": "^2.23.0",
+    "algo-x-evm-sdk": "^0.1.2",
     "algosdk": "^3.5.2",
     "apexcharts": "^4.7.0",
     "bignumber.js": "^9.3.1",
@@ -82,6 +87,8 @@
     "tailwindcss-animate": "^1.0.7",
     "ulujs": "^3.0.2",
     "vaul": "^0.9.3",
+    "viem": "^2.48.4",
+    "wagmi": "^2.19.5",
     "zod": "^3.23.8"
   },
   "devDependencies": {

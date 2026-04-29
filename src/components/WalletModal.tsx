@@ -87,6 +87,15 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
       if (currentNetwork === "algorand-mainnet") {
         baseWallets.push(
           {
+            id: "rainbowkit",
+            name: "MetaMask (xChain)",
+            icon:
+              wallets.find((w) => w.id === "rainbowkit")?.metadata.icon || "🔗",
+            description:
+              "Ethereum wallet → Algorand xChain account (beta). EIP-712 signing.",
+            isInstalled: true,
+          },
+          {
             id: "pera",
             name: "Pera Wallet",
             icon: wallets.find((w) => w.id === "pera")?.metadata.icon || "🔗",

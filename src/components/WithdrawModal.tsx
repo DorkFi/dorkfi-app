@@ -37,6 +37,10 @@ import SupplyBorrowCongrats from "./SupplyBorrowCongrats";
 import { calculateDepositAPY } from "@/utils/apyCalculations";
 import { useTokenPrice } from "@/hooks/useTokenPrice";
 import { useNetwork } from "@/contexts/NetworkContext";
+import {
+  isRainbowkitXchainWallet,
+  withRainbowkitHostDialogDismissed,
+} from "@/wallet/xchainSignUi";
 import { useWallet } from "@txnlab/use-wallet-react";
 import {
   fetchUserGlobalDataForPool,
@@ -317,6 +321,9 @@ const WithdrawModal = ({
   const [pendingWithdrawReview, setPendingWithdrawReview] =
     useState<WithdrawPhasedSignPayload | null>(null);
   const [isSigningWithdrawPhase, setIsSigningWithdrawPhase] = useState(false);
+  /** Hide Radix dialog while xChain (RainbowKit) signs so wallet UI is not blocked. */
+  const [rainbowkitSignDialogSuppressed, setRainbowkitSignDialogSuppressed] =
+    useState(false);
   /** After step 1 confirms; step 2 builds Folks redeem using stored atomic f-amount. */
   const [folksWithdrawTwoStepAwaitRedeem, setFolksWithdrawTwoStepAwaitRedeem] =
     useState<{ atomic: string; amountSnapshot: string } | null>(null);
@@ -337,6 +344,12 @@ const WithdrawModal = ({
 
   useEffect(() => {
     if (!isOpen) setWithdrawRoutePickerOpen(false);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (isOpen) {
+      setRainbowkitSignDialogSuppressed(false);
+    }
   }, [isOpen]);
 
   useEffect(() => {
@@ -1059,6 +1072,7 @@ const WithdrawModal = ({
     }
     const pending = pendingWithdrawReview;
     setIsSigningWithdrawPhase(true);
+    let withdrawTwoStepChainFailed = false;
     try {
       if (activeWallet) {
         const walletId = activeWallet.id?.toLowerCase() || "";
@@ -1090,7 +1104,11 @@ const WithdrawModal = ({
             walletName.includes("pera") || walletName.includes("defly");
         }
 
+        const isXchainRainbowkit =
+          walletId === "rainbowkit" && networkId === "algorand-mainnet";
+
         const isSupported =
+          isXchainRainbowkit ||
           isUniversalWallet ||
           (isVOIWallet && networkId === "voi-mainnet") ||
           (isAlgorandWallet && networkId === "algorand-mainnet") ||
@@ -1119,11 +1137,17 @@ const WithdrawModal = ({
       const signAndFinalize = async (
         payload: WithdrawPhasedSignPayload
       ): Promise<WithdrawModalSubmitResult | undefined> => {
-        const stxns = await signTransactions(
-          payload.txnsB64.map((txn: string) =>
-            Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
-          )
-        );
+        const stxns = await withRainbowkitHostDialogDismissed({
+          wallet: activeWallet,
+          setSuppressed: setRainbowkitSignDialogSuppressed,
+          leaveOverlayDismissedOnSuccess: true,
+          run: () =>
+            signTransactions(
+              payload.txnsB64.map((txn: string) =>
+                Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+              )
+            ),
+        });
         const out = await withdrawPhased.finalizeSignedGroup(stxns, payload);
         return out as WithdrawModalSubmitResult | undefined;
       };
@@ -1179,6 +1203,7 @@ const WithdrawModal = ({
             setShowSuccess(true);
           }
         } catch (chainErr) {
+          withdrawTwoStepChainFailed = true;
           console.error("Withdraw two-step chain:", chainErr);
           setFolksWithdrawTwoStepAwaitRedeem({
             atomic,
@@ -1203,7 +1228,23 @@ const WithdrawModal = ({
           setShowSuccess(true);
         }
       }
+
+      if (
+        isRainbowkitXchainWallet(activeWallet) &&
+        !withdrawTwoStepChainFailed
+      ) {
+        setShowSuccess(false);
+        toast({
+          title: "Withdraw confirmed",
+          description:
+            "Your transaction was submitted. The portfolio will update shortly.",
+        });
+        onClose();
+      }
     } catch (error) {
+      if (isRainbowkitXchainWallet(activeWallet)) {
+        setRainbowkitSignDialogSuppressed(false);
+      }
       console.error("Withdraw sign failed:", error);
       const msg =
         error instanceof Error ? error.message : "Signing or submit failed.";
@@ -1234,7 +1275,10 @@ const WithdrawModal = ({
 
   return (
     <>
-    <Dialog open={isOpen} onOpenChange={onClose}>
+    <Dialog
+      open={isOpen && !rainbowkitSignDialogSuppressed}
+      onOpenChange={onClose}
+    >
       <DialogContent className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-white rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-[95vw] md:max-w-md max-h-[min(90vh,90dvh)] min-h-0 overflow-x-hidden overflow-hidden flex flex-col p-0 overscroll-contain">
         {showSuccess ? (
           <div className="max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain p-6">

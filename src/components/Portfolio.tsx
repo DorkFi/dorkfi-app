@@ -80,6 +80,7 @@ import DepositsList from "./DepositsList";
 import BorrowsList from "./BorrowsList";
 import PortfolioModals from "./PortfolioModals";
 import { resolveSupplyBorrowToken } from "./SupplyBorrowModal";
+import { XchainUsdcBridgeControls } from "@/components/xchain/XchainUsdcBridgeControls";
 import PortfolioTableMobileCard from "./portfolio/PortfolioTableMobileCard";
 import AccruedInterestMobileCard from "./portfolio/AccruedInterestMobileCard";
 import NFTSelectionModal from "./liquidation/NFTSelectionModal";
@@ -5107,7 +5108,7 @@ const Portfolio = () => {
           </Body>
 
           {/* Data Source Indicator */}
-          <div className="mt-4 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground">
             <div
               className={`w-2 h-2 rounded-full ${user?.computed || userGlobalData
                 ? "bg-green-500"
@@ -5128,11 +5129,14 @@ const Portfolio = () => {
                 )}...${activeAccount?.address.slice(-8)}`}
             </span>
             {user?.computed?.globalNetPortfolioValue !== undefined && (
-              <span className="ml-2">
+              <span className="ml-2 shrink-0">
                 • Net Value:{" "}
                 {formatCurrency(Number(user.computed.globalNetPortfolioValue), "USD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
             )}
+            <div className="mt-2 flex w-full basis-full shrink-0 justify-center px-2 empty:hidden lg:mt-0 lg:ml-2 lg:w-auto lg:basis-auto lg:px-0">
+              <XchainUsdcBridgeControls className="justify-center lg:justify-start" />
+            </div>
             {marketData.length > 0 && totalBorrowed > 0 && (
               <span className="ml-2">
                 • Collateral Factor:{" "}
