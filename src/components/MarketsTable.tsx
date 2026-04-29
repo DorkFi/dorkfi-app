@@ -74,6 +74,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import { useRewardsAprBonusMap } from "@/hooks/useRewardsAprBonusMap";
+import { XchainUsdcBridgeControls } from "@/components/xchain/XchainUsdcBridgeControls";
 
 const MAX_CLAIMS_PER_TX = 3;
 
@@ -349,6 +350,7 @@ const MarketsTable = () => {
   const { activeAccount, signTransactions, activeWallet } = useWallet();
 
   const { currentNetwork, switchNetwork } = useNetwork();
+
   const enabledNetworks = getEnabledNetworks();
   const { toast } = useToast();
 
@@ -3042,58 +3044,61 @@ const MarketsTable = () => {
         {/* Network selector */}
         {enabledNetworks.length > 0 && (
           <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/30 dark:bg-muted/20 px-3 py-2 cursor-pointer hover:bg-muted/50 transition-colors w-fit">
-                  <img
-                    src={getNetworkLogoPath(currentNetwork)}
-                    alt=""
-                    className="h-5 w-5 rounded-full"
-                    onError={(e) => {
-                      const target = e.target as HTMLImageElement;
-                      target.src = "/placeholder.svg";
-                    }}
-                  />
-                  <span className="text-sm font-medium">
-                    {getNetworkConfig(currentNetwork).name}
-                  </span>
-                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                </div>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-56">
-                <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                  Network
-                </div>
-                <DropdownMenuSeparator />
-                {enabledNetworks.map((networkId) => {
-                  const networkConfig = getNetworkConfig(networkId);
-                  const isCurrent = currentNetwork === networkId;
-                  return (
-                    <DropdownMenuItem
-                      key={networkId}
-                      onClick={() => switchNetwork(networkId)}
-                      className="cursor-pointer flex items-center justify-between"
-                    >
-                      <div className="flex items-center gap-2">
-                        <img
-                          src={getNetworkLogoPath(networkId)}
-                          alt=""
-                          className="h-5 w-5 rounded-full"
-                          onError={(e) => {
-                            const target = e.target as HTMLImageElement;
-                            target.src = "/placeholder.svg";
-                          }}
-                        />
-                        <span className="text-sm">{networkConfig.name}</span>
-                      </div>
-                      {isCurrent && (
-                        <span className="w-2 h-2 rounded-full bg-green-500" />
-                      )}
-                    </DropdownMenuItem>
-                  );
-                })}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <div className="flex flex-wrap items-center gap-3">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/30 dark:bg-muted/20 px-3 py-2 cursor-pointer hover:bg-muted/50 transition-colors w-fit">
+                    <img
+                      src={getNetworkLogoPath(currentNetwork)}
+                      alt=""
+                      className="h-5 w-5 rounded-full"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.src = "/placeholder.svg";
+                      }}
+                    />
+                    <span className="text-sm font-medium">
+                      {getNetworkConfig(currentNetwork).name}
+                    </span>
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-56">
+                  <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                    Network
+                  </div>
+                  <DropdownMenuSeparator />
+                  {enabledNetworks.map((networkId) => {
+                    const networkConfig = getNetworkConfig(networkId);
+                    const isCurrent = currentNetwork === networkId;
+                    return (
+                      <DropdownMenuItem
+                        key={networkId}
+                        onClick={() => switchNetwork(networkId)}
+                        className="cursor-pointer flex items-center justify-between"
+                      >
+                        <div className="flex items-center gap-2">
+                          <img
+                            src={getNetworkLogoPath(networkId)}
+                            alt=""
+                            className="h-5 w-5 rounded-full"
+                            onError={(e) => {
+                              const target = e.target as HTMLImageElement;
+                              target.src = "/placeholder.svg";
+                            }}
+                          />
+                          <span className="text-sm">{networkConfig.name}</span>
+                        </div>
+                        {isCurrent && (
+                          <span className="w-2 h-2 rounded-full bg-green-500" />
+                        )}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <XchainUsdcBridgeControls />
+            </div>
           </div>
         )}
 

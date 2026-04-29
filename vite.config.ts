@@ -29,6 +29,15 @@ export default defineConfig(({ mode }) => ({
       "@": path.resolve(__dirname, "./src"),
       buffer: "buffer",
     },
+    dedupe: [
+      "react",
+      "react-dom",
+      "@tanstack/react-query",
+      "@txnlab/use-wallet-react",
+      "wagmi",
+      "@wagmi/core",
+      "@rainbow-me/rainbowkit",
+    ],
   },
   define: {
     global: 'globalThis',

@@ -76,6 +76,11 @@ const WalletNetworkButton = ({
       fullWallet: activeWallet,
     });
 
+    // xChain (RainbowKit): Algorand Mainnet only
+    if (walletId === "rainbowkit") {
+      return ["algorand-mainnet"];
+    }
+
     // Universal wallets that work on both VOI and Algorand
     if (
       walletId === "lute" ||

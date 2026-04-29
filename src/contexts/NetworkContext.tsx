@@ -2,9 +2,9 @@ import React, {
   createContext,
   useContext,
   useState,
-  useEffect,
   ReactNode,
 } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   WalletManager,
   NetworkId,
@@ -12,6 +12,11 @@ import {
   WalletProvider,
   NetworkConfigBuilder,
 } from "@txnlab/use-wallet-react";
+import {
+  WalletUIProvider,
+  type NoticesConfig,
+} from "@txnlab/use-wallet-ui-react";
+import { xchainWagmiConfig } from "@/wallet/xchainWagmiConfig";
 import {
   getCurrentNetworkConfig,
   NetworkId as ConfigNetworkId,
@@ -31,6 +36,35 @@ interface NetworkContextType {
 }
 
 const NetworkContext = createContext<NetworkContextType | undefined>(undefined);
+
+const xchainWalletNotices: NoticesConfig = {
+  "evm-connect": {
+    kind: "disclaimer",
+    text: (
+      <>
+        xChain Accounts are beta. Connecting an EVM wallet creates an Algorand
+        account you control via EIP-712 signatures, not a seed phrase. Only use
+        funds you accept risking, and confirm the app network is Algorand
+        Mainnet when using this option.
+      </>
+    ),
+  },
+};
+
+/** Wraps children with WalletUIProvider so RainbowKit / xChain can open connect modals. */
+function PrefiWalletUI({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
+  return (
+    <WalletUIProvider
+      theme="dark"
+      wagmiConfig={xchainWagmiConfig}
+      queryClient={queryClient}
+      notices={xchainWalletNotices}
+    >
+      {children}
+    </WalletUIProvider>
+  );
+}
 
 interface NetworkProviderProps {
   children: ReactNode;
@@ -120,7 +154,7 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
     if (networkConfig.networkType === "avm") {
       // Include ALL AVM wallets for ALL AVM networks to prevent disconnection
       // This allows switching to any network without disconnecting the wallet
-      return [
+      const avmWallets: unknown[] = [
         WalletId.KIBISIS,
         {
           id: WalletId.LUTE,
@@ -157,7 +191,15 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
             themeMode: "light",
           },
         },
-      ] as any[];
+      ];
+      // xChain (RainbowKit / EVM) — Algorand Mainnet only until Voi LogicSig support is confirmed
+      if (networkId === "algorand-mainnet") {
+        avmWallets.unshift({
+          id: WalletId.RAINBOWKIT,
+          options: { wagmiConfig: xchainWagmiConfig },
+        });
+      }
+      return avmWallets as any[];
     } else if (networkConfig.networkType === "evm") {
       // EVM networks (Ethereum/Base) - for now return empty array
       // EVM wallet integration would be implemented here
@@ -176,6 +218,11 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
 
     const walletIdLower = walletId.toLowerCase();
     const walletNameLower = (walletName || "").toLowerCase();
+
+    // xChain (RainbowKit): Algorand Mainnet only (see XCHAIN_ACCOUNTS_INTEGRATION_PLAN.md)
+    if (walletIdLower === "rainbowkit") {
+      return networkId === "algorand-mainnet";
+    }
 
     // Universal wallets support all AVM networks
     if (walletIdLower === "lute" || walletIdLower === "kibisis") {
@@ -287,7 +334,9 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
         isSwitchingNetwork,
       }}
     >
-      <WalletProvider manager={walletManager}>{children}</WalletProvider>
+      <WalletProvider manager={walletManager}>
+        <PrefiWalletUI>{children}</PrefiWalletUI>
+      </WalletProvider>
     </NetworkContext.Provider>
   );
 };
