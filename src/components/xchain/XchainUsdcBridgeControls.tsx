@@ -18,6 +18,17 @@ export interface XchainUsdcBridgeControlsProps {
   className?: string;
 }
 
+/** When true, xChain bridge controls (direction + Bridge USDC) are shown. */
+export function shouldShowXchainUsdcBridgeControls(
+  currentNetwork: string,
+  activeWalletId: string | undefined
+): boolean {
+  return (
+    currentNetwork === "algorand-mainnet" &&
+    (activeWalletId ?? "").toLowerCase() === "rainbowkit"
+  );
+}
+
 /**
  * Direction toggle + Bridge USDC for xChain (RainbowKit) on Algorand Mainnet.
  * Renders nothing when network or wallet does not qualify.
@@ -63,20 +74,23 @@ export function XchainUsdcBridgeControls({
     bridge.setDestinationToken,
   ]);
 
-  if (
-    currentNetwork !== "algorand-mainnet" ||
-    activeWallet?.id?.toLowerCase() !== "rainbowkit"
-  ) {
+  if (!shouldShowXchainUsdcBridgeControls(currentNetwork, activeWallet?.id)) {
     return null;
   }
 
   return (
-    <div className={cn("flex flex-wrap items-center gap-2", className)}>
+    <div
+      className={cn(
+        "flex min-w-0 w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:flex-nowrap sm:items-center sm:gap-2",
+        className
+      )}
+    >
       <Tabs
         value={direction}
         onValueChange={(v) => setDirection(v as XchainUsdcBridgeDirection)}
+        className="w-full min-w-0 sm:w-[280px] sm:shrink-0"
       >
-        <TabsList className="h-9 grid w-full max-w-[300px] grid-cols-2 rounded-xl border border-border bg-muted/30 p-1 dark:bg-muted/20 sm:w-[280px] sm:max-w-none">
+        <TabsList className="grid h-9 w-full min-w-0 grid-cols-2 rounded-xl border border-border bg-muted/40 p-1 dark:bg-muted/25 sm:max-w-none">
           <TabsTrigger
             value="algo-to-base"
             className="rounded-lg text-xs px-2 data-[state=active]:shadow-sm"
@@ -95,14 +109,14 @@ export function XchainUsdcBridgeControls({
         type="button"
         variant="outline"
         size="sm"
-        className="rounded-xl border-border bg-muted/30 dark:bg-muted/20 hover:bg-muted/50"
+        className="h-9 w-full shrink-0 justify-center rounded-xl border-border bg-muted/40 dark:bg-muted/25 hover:bg-muted/60 dark:hover:bg-muted/35 sm:w-auto"
         onClick={() => {
           presetPendingRef.current = true;
           setPresetNonce((n) => n + 1);
           openBridge();
         }}
       >
-        <ArrowRightLeft className="h-4 w-4 mr-2" />
+        <ArrowRightLeft className="h-4 w-4 shrink-0" />
         Bridge USDC
       </Button>
     </div>
