@@ -400,6 +400,10 @@ const MarketsTable = () => {
   const showMarketsLiquidityToolbar =
     currentNetwork === "algorand-mainnet" ||
     currentNetwork === "algorand-testnet";
+  /** Tighter spendable-ALGO strip when Xchain bridge controls share the row. */
+  const marketsToolbarSpendableExtraTight =
+    showMarketsLiquidityToolbar &&
+    shouldShowXchainUsdcBridgeControls(currentNetwork, activeWallet?.id);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -3156,7 +3160,11 @@ const MarketsTable = () => {
                 className={cn(
                   "flex flex-col gap-3",
                   showMarketsLiquidityToolbar &&
-                    "sm:flex-row sm:items-center sm:gap-4 md:gap-5 lg:items-start lg:gap-6 xl:gap-8"
+                    cn(
+                      "sm:flex-row sm:items-center sm:gap-4 md:gap-5 lg:items-start lg:gap-5 xl:gap-6",
+                      marketsToolbarSpendableExtraTight &&
+                        "lg:gap-3 xl:gap-4"
+                    )
                 )}
               >
                 <div className="flex min-w-0 flex-col gap-1.5 self-start sm:shrink-0">
@@ -3265,9 +3273,24 @@ const MarketsTable = () => {
                       className="pointer-events-none hidden h-7 w-px shrink-0 self-center bg-muted-foreground/25 dark:bg-muted-foreground/35 sm:block"
                       aria-hidden
                     />
-                    <div className="flex min-w-0 flex-1 flex-col gap-2 sm:min-w-[200px] sm:max-w-md lg:max-w-none lg:min-w-[min(100%,280px)] lg:flex-[1.15]">
+                    <div
+                      className={cn(
+                        "flex min-w-0 flex-1 flex-col gap-1.5 sm:min-w-0 sm:max-w-md",
+                        "lg:flex-none lg:shrink",
+                        marketsToolbarSpendableExtraTight
+                          ? "lg:max-w-[min(200px,46vw)] xl:max-w-[220px]"
+                          : "lg:max-w-[min(280px,34vw)] xl:max-w-[min(300px,32vw)]"
+                      )}
+                    >
                       {/* Below lg: stacked; lg+: amount block | meter | Gas Up in one row */}
-                      <div className="flex min-w-0 flex-col gap-2 lg:flex-row lg:items-center lg:gap-5">
+                      <div
+                        className={cn(
+                          "flex min-w-0 flex-col gap-2 lg:flex-row lg:items-center",
+                          marketsToolbarSpendableExtraTight
+                            ? "lg:gap-1.5"
+                            : "lg:gap-2.5"
+                        )}
+                      >
                         {/* Mobile: order puts meter between caption and balance; lg: caption+amount left, meter right */}
                         <span className="order-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground lg:hidden">
                           <Fuel
@@ -3276,13 +3299,21 @@ const MarketsTable = () => {
                           />
                           Spendable
                         </span>
-                        <div className="order-2 flex w-full min-w-0 flex-col gap-2 sm:flex-1 sm:flex-row sm:items-center sm:gap-3 lg:order-2 lg:flex-1 lg:gap-4">
+                        <div
+                          className={cn(
+                            "order-2 flex w-full min-w-0 flex-col gap-2 sm:flex-1 sm:flex-row sm:items-center sm:gap-3",
+                            "lg:order-2 lg:min-w-0 lg:flex-1 lg:gap-2"
+                          )}
+                        >
                           <div
                             className={cn(
                               "relative isolate min-w-0 w-full overflow-hidden rounded-full sm:flex-1",
                               "h-3 min-h-[12px] ring-1 ring-border/60 bg-muted/90 dark:bg-muted/70 dark:ring-border/50",
                               "sm:h-2 sm:min-h-[8px] sm:ring-0 sm:bg-muted/70 dark:sm:bg-muted/50",
-                              "lg:h-2.5 lg:min-h-[10px] lg:max-w-none"
+                              "lg:h-2 lg:min-h-[8px]",
+                              marketsToolbarSpendableExtraTight
+                                ? "lg:max-w-[5.5rem] xl:max-w-[6.5rem]"
+                                : "lg:max-w-[9rem] xl:max-w-[11rem]"
                             )}
                           >
                             {marketsToolbarSpendableAlgoLoading ? (
@@ -3317,7 +3348,7 @@ const MarketsTable = () => {
                               type="button"
                               variant="outline"
                               size="sm"
-                              className="h-8 w-fit shrink-0 gap-1.5 self-start rounded-xl border-border bg-muted/40 px-2.5 text-xs font-medium dark:bg-muted/25 hover:bg-muted/60 dark:hover:bg-muted/35 sm:self-center lg:h-9 lg:px-3"
+                              className="h-8 w-fit shrink-0 gap-1 self-start rounded-lg border-border bg-muted/40 px-2 text-[11px] font-medium dark:bg-muted/25 hover:bg-muted/60 dark:hover:bg-muted/35 sm:self-center sm:gap-1.5 sm:rounded-xl sm:px-2.5 sm:text-xs lg:h-8 lg:px-2 lg:py-0"
                               onClick={() => {
                                 setTinymanSwapOpenForGasUp(true);
                                 setIsTinymanSwapModalOpen(true);
@@ -3329,22 +3360,23 @@ const MarketsTable = () => {
                             </Button>
                           )}
                         </div>
-                        <div className="order-3 flex min-w-0 flex-col gap-1.5 lg:order-1 lg:w-[min(11rem,28vw)] lg:shrink-0">
-                          <span className="hidden items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground lg:flex">
+                        <div className="order-3 flex min-w-0 flex-col gap-1.5 lg:order-1 lg:min-w-0 lg:shrink-0 lg:flex-row lg:items-center lg:gap-2">
+                          <span className="hidden items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground lg:inline-flex lg:shrink-0">
                             <Fuel
-                              className="h-3.5 w-3.5 shrink-0 text-muted-foreground/90"
+                              className="h-3 w-3 shrink-0 text-muted-foreground/90"
                               aria-hidden
                             />
                             Spendable
                           </span>
                           <div
-                            className="flex min-h-[1.75rem] min-w-0 items-baseline gap-1.5"
+                            className="flex min-h-[1.75rem] min-w-0 items-baseline gap-1 lg:min-h-0 lg:gap-1"
                             role="group"
                             aria-label="Spendable ALGO for transaction fees"
                           >
                             <span
                               className={cn(
-                                "min-w-0 truncate text-lg font-semibold tabular-nums leading-none tracking-tight text-foreground sm:text-xl lg:text-2xl",
+                                "min-w-0 truncate text-lg font-semibold tabular-nums leading-none tracking-tight text-foreground sm:text-xl",
+                                "lg:text-sm lg:font-semibold xl:text-base",
                                 marketsToolbarSpendableAlgoLoading &&
                                   "text-muted-foreground animate-pulse"
                               )}
@@ -3369,7 +3401,7 @@ const MarketsTable = () => {
                             </span>
                             {!marketsToolbarSpendableAlgoLoading &&
                               marketsToolbarSpendableAlgo != null && (
-                                <span className="shrink-0 text-xs font-medium tabular-nums text-muted-foreground sm:text-sm">
+                                <span className="shrink-0 text-xs font-medium tabular-nums text-muted-foreground lg:text-[10px] xl:text-xs">
                                   ALGO
                                 </span>
                               )}
