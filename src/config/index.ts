@@ -8,6 +8,7 @@
 import {
   FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY,
   FOLKS_FINANCE_FIUSDC_ADAPTER_POOL_PARAMS,
+  FOLKS_FINANCE_FITINY_ADAPTER_POOL_PARAMS,
   type FolksFinancePoolParams,
 } from "@/constants/folksFinance";
 
@@ -153,7 +154,8 @@ export interface TokenConfig {
   | "xalgo_governance_lambda"
   | "folks_mainnet_algo_pool_deposit"
   | "folks_mainnet_usdc_pool_deposit"
-  | "folks_mainnet_fiusdc_ecosystem_pool_deposit";
+  | "folks_mainnet_fiusdc_ecosystem_pool_deposit"
+  | "folks_mainnet_fitiny_ecosystem_pool_deposit";
   /**
    * Optional intrinsic borrow APY in percentage points (e.g. 1.5 for 1.5%), added to displayed
    * borrow APY for this listing (e.g. wrapped-asset borrow uplift).
@@ -168,7 +170,8 @@ export interface TokenConfig {
   | "xalgo_governance_lambda"
   | "folks_mainnet_algo_pool_deposit"
   | "folks_mainnet_usdc_pool_borrow"
-  | "folks_mainnet_fiusdc_ecosystem_pool_borrow";
+  | "folks_mainnet_fiusdc_ecosystem_pool_deposit"
+  | "folks_mainnet_fitiny_ecosystem_pool_deposit";
   /**
    * Optional wrapped-asset / bridge adapters (e.g. Folks mint/redeem), in order.
    * Use {@link TokenAdapterConfig.phases} to split deposit vs withdraw legs, and `id` + `label`
@@ -528,6 +531,87 @@ export const FOLKS_MAINNET_FIUSDC_REPAY_UNDERLYING = {
   repayWalletBasis: "underlying" as const,
   phases: ["repay"] as const,
   folksParams: FOLKS_FINANCE_FIUSDC_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+/** Folks Algorand Ecosystem TINY (fiTINY) — same phase split as {@link FOLKS_MAINNET_FIUSDC_DEPOSIT_FIUSDC_WALLET}. */
+export const FOLKS_MAINNET_FITINY_DEPOSIT_FITINY_WALLET = {
+  id: "folks-mainnet-fitiny-deposit-fitiny",
+  name: "fiTINY",
+  type: "folks" as const,
+  label: "fiTINY",
+  depositWalletBasis: "market_token" as const,
+  phases: ["deposit"] as const,
+  folksParams: FOLKS_FINANCE_FITINY_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_FITINY_DEPOSIT_UNDERLYING = {
+  id: "folks-mainnet-fitiny-deposit-tiny",
+  name: "TINY",
+  type: "folks" as const,
+  label: "TINY",
+  depositWalletBasis: "underlying" as const,
+  phases: ["deposit"] as const,
+  folksParams: FOLKS_FINANCE_FITINY_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_FITINY_WITHDRAW = {
+  id: "folks-mainnet-fitiny-withdraw-tiny",
+  name: "TINY",
+  type: "folks" as const,
+  label: "TINY",
+  withdrawReceiveBasis: "underlying" as const,
+  phases: ["withdraw"] as const,
+  folksParams: FOLKS_FINANCE_FITINY_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_FITINY_WITHDRAW_FASSET_WALLET = {
+  id: "folks-mainnet-fitiny-withdraw-fitiny",
+  name: "fiTINY",
+  type: "folks" as const,
+  label: "fiTINY",
+  withdrawReceiveBasis: "market_token" as const,
+  phases: ["withdraw"] as const,
+  folksParams: FOLKS_FINANCE_FITINY_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_FITINY_BORROW_FITINY_WALLET = {
+  id: "folks-mainnet-fitiny-borrow-fitiny",
+  name: "fiTINY",
+  type: "folks" as const,
+  label: "fiTINY",
+  borrowReceiveBasis: "market_token" as const,
+  phases: ["borrow"] as const,
+  folksParams: FOLKS_FINANCE_FITINY_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_FITINY_BORROW_UNDERLYING = {
+  id: "folks-mainnet-fitiny-borrow-tiny",
+  name: "TINY",
+  type: "folks" as const,
+  label: "TINY",
+  borrowReceiveBasis: "underlying" as const,
+  phases: ["borrow"] as const,
+  folksParams: FOLKS_FINANCE_FITINY_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_FITINY_REPAY_FITINY_WALLET = {
+  id: "folks-mainnet-fitiny-repay-fitiny",
+  name: "fiTINY",
+  type: "folks" as const,
+  label: "fiTINY",
+  repayWalletBasis: "market_token" as const,
+  phases: ["repay"] as const,
+  folksParams: FOLKS_FINANCE_FITINY_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_FITINY_REPAY_UNDERLYING = {
+  id: "folks-mainnet-fitiny-repay-tiny",
+  name: "TINY",
+  type: "folks" as const,
+  label: "TINY",
+  repayWalletBasis: "underlying" as const,
+  phases: ["repay"] as const,
+  folksParams: FOLKS_FINANCE_FITINY_ADAPTER_POOL_PARAMS,
 } satisfies TokenAdapterConfig;
 
 export type FolksTokenAdapterConfig = Extract<
@@ -2220,7 +2304,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     intrinsicApyPercent: 7.78,
     intrinsicBorrowApyPercent: 7.78,
     intrinsicApyLiveSource: "folks_mainnet_fiusdc_ecosystem_pool_deposit",
-    intrinsicBorrowApyLiveSource: "folks_mainnet_fiusdc_ecosystem_pool_borrow",
+    intrinsicBorrowApyLiveSource: "folks_mainnet_fiusdc_ecosystem_pool_deposit",
     iconBadgeFromSymbol: "FOLKS",
   },
   UNIT: {
@@ -2286,6 +2370,39 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     symbol: "TINY",
     logoPath: "/lovable-uploads/TINY.webp",
     tokenStandard: "asa",
+  },
+  fiTINY: {
+    assetId: "3184331789",
+    poolId: "3345940978",
+    contractId: "3540827780",
+    nTokenId: "3540842561",
+    decimals: 6,
+    name: "Folks V2 Isolated TINY",
+    symbol: "fiTINY",
+    marketOverride: {
+      displayName: "TINY",
+      displaySymbol: "TINY",
+      isSmartContract: true,
+    },
+    logoPath: "/lovable-uploads/TINY.webp",
+    tokenStandard: "asa",
+    requireStandaloneFAssetOptInBeforeDeposit: true,
+    adapters: [
+      FOLKS_MAINNET_FITINY_DEPOSIT_FITINY_WALLET,
+      FOLKS_MAINNET_FITINY_DEPOSIT_UNDERLYING,
+      FOLKS_MAINNET_FITINY_WITHDRAW,
+      FOLKS_MAINNET_FITINY_WITHDRAW_FASSET_WALLET,
+      FOLKS_MAINNET_FITINY_BORROW_FITINY_WALLET,
+      FOLKS_MAINNET_FITINY_BORROW_UNDERLYING,
+      FOLKS_MAINNET_FITINY_REPAY_FITINY_WALLET,
+      FOLKS_MAINNET_FITINY_REPAY_UNDERLYING,
+    ],
+    intrinsicApyPercent: 4.66,
+    intrinsicBorrowApyPercent: 4.66,
+    intrinsicApyLiveSource: "folks_mainnet_fitiny_ecosystem_pool_deposit",
+    intrinsicBorrowApyLiveSource: "folks_mainnet_fitiny_ecosystem_pool_deposit",
+    iconBadgeFromSymbol: "FOLKS",
+    dataAddedAt: "2026-04-29T00:00:00.000Z",
   },
   FINITE: [{
     assetId: "400593267",
@@ -3424,6 +3541,10 @@ export type LiveIntrinsicSupplyApySnapshot = {
   folksMainnetFiUsdcEcosystemDepositPercent?: number | null;
   /** Folks Algorand Ecosystem USDC pool variable borrow yield, percentage points. */
   folksMainnetFiUsdcEcosystemBorrowPercent?: number | null;
+  /** Folks Algorand Ecosystem TINY pool (fiTINY) deposit yield, percentage points. */
+  folksMainnetFiTinyEcosystemDepositPercent?: number | null;
+  /** Folks Algorand Ecosystem TINY pool variable borrow yield, percentage points. */
+  folksMainnetFiTinyEcosystemBorrowPercent?: number | null;
 };
 
 /**
@@ -3480,6 +3601,13 @@ export const resolveIntrinsicSupplyApyPercent = (
     }
     return base;
   }
+  if (source === "folks_mainnet_fitiny_ecosystem_pool_deposit") {
+    const v = live?.folksMainnetFiTinyEcosystemDepositPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+      return v;
+    }
+    return base;
+  }
   return base;
 };
 
@@ -3501,7 +3629,8 @@ export const tokenRowUsesLiveIntrinsicApy = (
     s === "xalgo_governance_lambda" ||
     s === "folks_mainnet_algo_pool_deposit" ||
     s === "folks_mainnet_usdc_pool_deposit" ||
-    s === "folks_mainnet_fiusdc_ecosystem_pool_deposit"
+    s === "folks_mainnet_fiusdc_ecosystem_pool_deposit" ||
+    s === "folks_mainnet_fitiny_ecosystem_pool_deposit"
   );
 };
 
@@ -3523,7 +3652,8 @@ export const tokenRowUsesLiveIntrinsicBorrowApy = (
     s === "xalgo_governance_lambda" ||
     s === "folks_mainnet_algo_pool_deposit" ||
     s === "folks_mainnet_usdc_pool_borrow" ||
-    s === "folks_mainnet_fiusdc_ecosystem_pool_borrow"
+    s === "folks_mainnet_fiusdc_ecosystem_pool_borrow" ||
+    s === "folks_mainnet_fitiny_ecosystem_pool_borrow"
   );
 };
 
@@ -3593,6 +3723,13 @@ export const resolveIntrinsicBorrowApyPercent = (
   }
   if (source === "folks_mainnet_fiusdc_ecosystem_pool_borrow") {
     const v = live?.folksMainnetFiUsdcEcosystemBorrowPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+      return v;
+    }
+    return base;
+  }
+  if (source === "folks_mainnet_fitiny_ecosystem_pool_borrow") {
+    const v = live?.folksMainnetFiTinyEcosystemBorrowPercent;
     if (typeof v === "number" && Number.isFinite(v) && v > 0) {
       return v;
     }

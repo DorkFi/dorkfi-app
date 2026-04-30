@@ -86,3 +86,22 @@ export async function fetchFolksMainnetFiUsdcEcosystemPoolApySnapshot(
     ),
   };
 }
+
+/**
+ * Folks Algorand Ecosystem TINY pool (fiTINY) deposit + variable borrow yields — same
+ * `retrievePoolInfo` shape as {@link fetchFolksMainnetFiUsdcEcosystemPoolApySnapshot}, using
+ * {@link MainnetPools.ISOLATED_TINY}.
+ */
+export async function fetchFolksMainnetFiTinyEcosystemPoolApySnapshot(
+  algod: Algodv2
+): Promise<FolksMainnetUsdcPoolApySnapshot> {
+  const info = await retrievePoolInfo(algod, MainnetPools.ISOLATED_TINY);
+  return {
+    depositPercent: yieldFixed16ToApyPercentPoints(
+      info.interest.depositInterestYield
+    ),
+    borrowPercent: yieldFixed16ToApyPercentPoints(
+      info.variableBorrow.variableBorrowInterestYield
+    ),
+  };
+}
