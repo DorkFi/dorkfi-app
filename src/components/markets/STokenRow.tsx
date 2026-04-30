@@ -16,8 +16,8 @@ import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import {
   borrowApyBadgeClassName,
   BORROW_APY_BADGE_STOKEN,
-  marketPoolBadgeBgClassName,
 } from "@/constants/marketUi";
+import { MarketRowTokenIcon } from "./MarketRowTokenIcon";
 
 interface STokenRowProps {
   market: OnDemandMarketData;
@@ -66,29 +66,13 @@ const STokenRow = ({
     >
       <TableCell className="text-center">
         <div className="flex items-center justify-center gap-3">
-          <div className="relative flex-shrink-0">
-            <img
-              src={market.icon}
-              alt={market.asset}
-              className="w-10 h-10 rounded-full object-contain flex-shrink-0" // Updated size to match MarketsDesktopTable
-            />
-            {(() => {
+          <MarketRowTokenIcon
+            market={market}
+            poolLetterLabel={(() => {
               const poolId = market.marketInfo?.poolId || market.poolId;
-              const marketLabel = poolId
-                ? getMarketLabel(currentNetwork, poolId)
-                : null;
-
-              if (marketLabel) {
-                const bgColor = marketPoolBadgeBgClassName(marketLabel);
-                return (
-                  <div className={`absolute -top-1 -right-1 w-5 h-5 rounded-full ${bgColor} border-2 border-white dark:border-slate-800 flex items-center justify-center`}>
-                    <span className="text-xs font-bold text-white">{marketLabel}</span>
-                  </div>
-                );
-              }
-              return null;
+              return poolId ? getMarketLabel(currentNetwork, poolId) : null;
             })()}
-          </div>
+          />
           <div className="flex flex-col items-center justify-center gap-1 text-center whitespace-nowrap">
             <div className="font-extrabold text-lg leading-tight">{market.asset}</div>
             <Badge variant="outline" className="text-xs px-2.5 py-0.5 h-5 mt-1 text-muted-foreground flex items-center justify-center whitespace-nowrap min-w-fit">CF {Math.round(market.collateralFactor)}%</Badge>

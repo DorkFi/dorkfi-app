@@ -268,6 +268,20 @@ export const FOLKS_FINANCE_ALGORAND_ECOSYSTEM_POOLS_BY_KEY: Record<
   },
 };
 
+/**
+ * Stable `FolksFinancePoolParams.pool` / Folks SDK lookup key for the Algorand Ecosystem USDC
+ * deposit app (fiUSDC f-ASA). Distinct from mainnet `"USDC"` so {@link MainnetPools} resolution
+ * stays unambiguous in `folksDepositAdapter`.
+ */
+export const FOLKS_ALGORAND_ECOSYSTEM_USDC_SDK_POOL_NAME =
+  "USDC_ALGORAND_ECOSYSTEM" as const;
+
+/** Adapter + SDK mint/withdraw params for fiUSDC (same chain ids as `USDC` in ecosystem table). */
+export const FOLKS_FINANCE_FIUSDC_ADAPTER_POOL_PARAMS: FolksFinancePoolParams = {
+  ...FOLKS_FINANCE_ALGORAND_ECOSYSTEM_POOLS_BY_KEY.USDC,
+  pool: FOLKS_ALGORAND_ECOSYSTEM_USDC_SDK_POOL_NAME,
+};
+
 /** Resolve a mainnet pool row by `Pool` name from the docs (e.g. `ALGO`, `WBTC (old)`). */
 export function lookupFolksAlgorandMainnetPool(
   pool: string
