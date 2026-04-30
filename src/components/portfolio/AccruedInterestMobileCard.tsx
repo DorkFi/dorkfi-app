@@ -2,12 +2,14 @@ import { Button } from "@/components/ui/button";
 import { RefreshCw } from "lucide-react";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { getTokenConfig, getMarketLabel } from "@/config";
-import { marketPoolBadgeBgClassName } from "@/constants/marketUi";
+import { getTokenConfig, getMarketLabel, type NetworkId } from "@/config";
+import { MarketRowTokenIcon } from "@/components/markets/MarketRowTokenIcon";
+import { resolveTokenIconBadgeUrl } from "@/utils/tokenImageUtils";
 
 interface AccruedInterestMobileCardProps {
   asset: string;
   icon: string;
+  iconBadgeUrl?: string;
   netInterest: number;
   netInterestValue: number;
   earnedInterest?: number;
@@ -24,6 +26,7 @@ interface AccruedInterestMobileCardProps {
 const AccruedInterestMobileCard = ({
   asset,
   icon,
+  iconBadgeUrl,
   netInterest,
   netInterestValue,
   earnedInterest,
@@ -37,13 +40,20 @@ const AccruedInterestMobileCard = ({
   isRefreshing,
 }: AccruedInterestMobileCardProps) => {
   const { currentNetwork } = useNetwork();
-  const tokenConfigRaw = getTokenConfig(currentNetwork, asset);
+  const rowNetwork = (network || currentNetwork) as NetworkId;
+  const tokenConfigRaw = getTokenConfig(rowNetwork, asset);
   const tokenConfig = Array.isArray(tokenConfigRaw)
     ? poolId ? tokenConfigRaw.find((c: { poolId?: string }) => String(c.poolId) === String(poolId)) ?? tokenConfigRaw[0] : tokenConfigRaw[0]
     : tokenConfigRaw;
   const displayDecimals = Math.min((tokenConfig as { decimals?: number } | undefined)?.decimals ?? 6, 8);
 
-  const marketLabel = getMarketLabel(network || currentNetwork, poolId);
+  const marketLabel = getMarketLabel(rowNetwork, poolId);
+  const resolvedBadgeUrl =
+    iconBadgeUrl ??
+    resolveTokenIconBadgeUrl(
+      (tokenConfig as { iconBadgeFromSymbol?: string } | undefined)
+        ?.iconBadgeFromSymbol
+    );
 
   const isNetPositive = netInterest > 0;
   const hasDeposits = (earnedInterest || 0) > 0;
@@ -59,24 +69,15 @@ const AccruedInterestMobileCard = ({
         {/* Header: Asset Icon + Name + Actions */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="relative flex-shrink-0">
-              <img
-                src={icon}
-                alt={asset}
-                className="w-12 h-12 rounded-full flex-shrink-0"
-              />
-              {marketLabel && (
-                <div
-                  className={`absolute -top-0.5 -right-0.5 w-5 h-5 rounded-full ${marketPoolBadgeBgClassName(
-                    marketLabel
-                  )} border-2 border-white dark:border-slate-800 flex items-center justify-center z-10`}
-                >
-                  <span className="text-[10px] font-bold text-white leading-none">
-                    {marketLabel}
-                  </span>
-                </div>
-              )}
-            </div>
+            <MarketRowTokenIcon
+              market={{
+                icon,
+                asset,
+                iconBadgeUrl: resolvedBadgeUrl,
+              }}
+              poolLetterLabel={marketLabel}
+              imgClassName="h-12 w-12 flex-shrink-0 rounded-full object-contain"
+            />
             <div>
               <div className="font-semibold text-base text-slate-800 dark:text-white">
                 {asset}

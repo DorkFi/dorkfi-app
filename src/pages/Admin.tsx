@@ -154,6 +154,7 @@ import {
   calculateMaxBorrowAmount,
   withdrawReserves,
   toggleMarketPause,
+  buildNt200LendingPoolBalanceBoxTxns,
 } from "@/services/adminService";
 import dorkfiAPIService from "@/services/dorkfiAPIService";
 import { useOnDemandMarketData } from "@/hooks/useOnDemandMarketData";
@@ -454,6 +455,23 @@ export default function AdminDashboard() {
   const [pcSyncError, setPcSyncError] = useState<string | null>(null);
   const [pcSyncQuickPick, setPcSyncQuickPick] = useState("__manual__");
 
+  /** Tools: nt200 create_balance_box for lending pool app (one-time per pool+market). */
+  const [poolBoxNetwork, setPoolBoxNetwork] = useState<NetworkId>(
+    () => currentNetwork as NetworkId
+  );
+  const [poolBoxPoolId, setPoolBoxPoolId] = useState("");
+  const [poolBoxMarketId, setPoolBoxMarketId] = useState("");
+  const [poolBoxLoading, setPoolBoxLoading] = useState(false);
+  const [poolBoxLastTxid, setPoolBoxLastTxid] = useState<string | null>(null);
+  const [poolBoxError, setPoolBoxError] = useState<string | null>(null);
+  const [poolBoxQuickPick, setPoolBoxQuickPick] = useState("__manual__");
+
+  const poolBoxTokenOptions = useMemo(() => {
+    return getAllTokensWithDisplayInfo(poolBoxNetwork).filter(
+      (t) => t.underlyingContractId && t.poolId
+    );
+  }, [poolBoxNetwork]);
+
   const pcSyncTokenOptions = useMemo(() => {
     return getAllTokensWithDisplayInfo(pcSyncNetwork).filter(
       (t) => t.underlyingContractId && t.poolId
@@ -469,6 +487,10 @@ export default function AdminDashboard() {
   useEffect(() => {
     setPcSyncQuickPick("__manual__");
   }, [pcSyncNetwork]);
+
+  useEffect(() => {
+    setPoolBoxQuickPick("__manual__");
+  }, [poolBoxNetwork]);
 
   const handleSyncUserForPriceChange = useCallback(async () => {
     const u = pcSyncUserAddress.trim();
@@ -517,6 +539,69 @@ export default function AdminDashboard() {
     pcSyncPoolId,
     pcSyncMarketId,
     pcSyncNetwork,
+    signTransactions,
+  ]);
+
+  const handleNt200PoolBalanceBox = useCallback(async () => {
+    const p = poolBoxPoolId.trim();
+    const m = poolBoxMarketId.trim();
+    if (!activeAccount?.address) {
+      toast.error("Connect a wallet to sign.");
+      return;
+    }
+    if (!p || !m) {
+      toast.error("Pool (lending app) ID and market (nt200) ID are required.");
+      return;
+    }
+    if (!signTransactions) {
+      toast.error("Wallet does not support signing transaction groups.");
+      return;
+    }
+    if (!isAlgorandCompatibleNetwork(poolBoxNetwork)) {
+      toast.error("This tool only supports Algorand-compatible networks.");
+      return;
+    }
+    setPoolBoxLoading(true);
+    setPoolBoxError(null);
+    setPoolBoxLastTxid(null);
+    try {
+      const result = await buildNt200LendingPoolBalanceBoxTxns(
+        p,
+        m,
+        activeAccount.address,
+        poolBoxNetwork
+      );
+      if (!result.success) {
+        const err = result.error;
+        setPoolBoxError(err);
+        toast.error(err);
+        return;
+      }
+      const networkConfig = getNetworkConfig(poolBoxNetwork);
+      const algorandClients = algorandService.initializeClients(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+      const stxns = await signTransactions(
+        result.txns.map((txn) =>
+          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+        )
+      );
+      const res = await algorandClients.algod.sendRawTransaction(stxns).do();
+      await waitForConfirmation(algorandClients.algod, res.txid, 4);
+      setPoolBoxLastTxid(res.txid);
+      toast.success(`nt200 pool balance box confirmed · ${res.txid}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setPoolBoxError(msg);
+      toast.error(msg);
+    } finally {
+      setPoolBoxLoading(false);
+    }
+  }, [
+    activeAccount?.address,
+    poolBoxPoolId,
+    poolBoxMarketId,
+    poolBoxNetwork,
     signTransactions,
   ]);
 
@@ -11821,6 +11906,135 @@ export default function AdminDashboard() {
             <div className="flex justify-between items-center">
               <H2>Admin Tools</H2>
             </div>
+
+            <Card className="border-slate-200/80 dark:border-slate-600">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Wrench className="h-5 w-5 text-slate-600 dark:text-slate-300" />
+                  nt200: lending pool balance box
+                </CardTitle>
+                <CardDescription>
+                  Runs nt200 <code className="text-xs">create_balance_box</code> for the{" "}
+                  <strong>lending pool app account</strong> (not the user). One-time per pool +
+                  market; required before <code className="text-xs">network</code> standard deposits
+                  can credit the pool. Previously embedded in every user deposit — now operators run
+                  it here when onboarding a market.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Network</Label>
+                    <Select
+                      value={poolBoxNetwork}
+                      onValueChange={(v) => setPoolBoxNetwork(v as NetworkId)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Network" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {getEnabledNetworks().map((nid) => (
+                          <SelectItem key={nid} value={nid}>
+                            {nid}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Market (from config)</Label>
+                    <Select
+                      value={poolBoxQuickPick}
+                      onValueChange={(v) => {
+                        setPoolBoxQuickPick(v);
+                        if (v === "__manual__") return;
+                        const t = poolBoxTokenOptions.find(
+                          (x) =>
+                            `${x.symbol}|${x.poolId}|${x.underlyingContractId}` ===
+                            v
+                        );
+                        if (t?.poolId && t.underlyingContractId) {
+                          setPoolBoxPoolId(String(t.poolId));
+                          setPoolBoxMarketId(String(t.underlyingContractId));
+                        }
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Pick a market" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__manual__">
+                          — manual pool / market IDs —
+                        </SelectItem>
+                        {poolBoxTokenOptions.map((t) => (
+                          <SelectItem
+                            key={`${t.symbol}-${t.poolId}-${t.underlyingContractId}`}
+                            value={`${t.symbol}|${t.poolId}|${t.underlyingContractId}`}
+                          >
+                            {t.symbol} · pool {t.poolId} · nt200{" "}
+                            {t.underlyingContractId}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Pool (lending pool app ID)</Label>
+                    <Input
+                      className="font-mono text-xs"
+                      placeholder="e.g. 3333688282"
+                      value={poolBoxPoolId}
+                      onChange={(e) => {
+                        setPoolBoxQuickPick("__manual__");
+                        setPoolBoxPoolId(e.target.value);
+                      }}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Market (nt200 / token app ID)</Label>
+                    <Input
+                      className="font-mono text-xs"
+                      placeholder="e.g. 3540156071"
+                      value={poolBoxMarketId}
+                      onChange={(e) => {
+                        setPoolBoxQuickPick("__manual__");
+                        setPoolBoxMarketId(e.target.value);
+                      }}
+                    />
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="default"
+                  onClick={() => void handleNt200PoolBalanceBox()}
+                  disabled={poolBoxLoading}
+                >
+                  {poolBoxLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Building &amp; signing…
+                    </>
+                  ) : (
+                    <>
+                      <Wrench className="h-4 w-4 mr-2" />
+                      Build &amp; submit
+                    </>
+                  )}
+                </Button>
+                {poolBoxError && (
+                  <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                    {poolBoxError}
+                  </div>
+                )}
+                {poolBoxLastTxid && (
+                  <p className="text-sm font-mono text-muted-foreground">
+                    Last txid: {poolBoxLastTxid}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
 
             <Card className="border-teal-500/25 bg-teal-500/[0.03]">
               <CardHeader>

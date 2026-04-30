@@ -12,6 +12,35 @@ import {
   prefixWithOpUp,
   retrievePoolInfo,
 } from "@folks-finance/algorand-sdk";
+import {
+  FOLKS_ALGORAND_ECOSYSTEM_USDC_SDK_POOL_NAME,
+  FOLKS_FINANCE_ALGORAND_ECOSYSTEM_POOLS_BY_KEY,
+} from "@/constants/folksFinance";
+
+/** Ecosystem USDC pool shape for Folks SDK calls (not yet in {@link MainnetPools}). */
+function folksSdkPoolUsdcAlgorandEcosystem(): (typeof MainnetPools)["USDC"] {
+  const p = FOLKS_FINANCE_ALGORAND_ECOSYSTEM_POOLS_BY_KEY.USDC;
+  return {
+    appId: Number(p.appId),
+    assetId: Number(p.assetId),
+    fAssetId: Number(p.fAssetId),
+    frAssetId: Number(p.frAssetId),
+    assetDecimals: 6,
+    poolManagerIndex: 0,
+    loans: {},
+  } as (typeof MainnetPools)["USDC"];
+}
+
+function resolveFolksMainnetPoolForSdk(
+  poolName: string
+): (typeof MainnetPools)[keyof typeof MainnetPools] | undefined {
+  const fromSdk = MainnetPools[poolName as keyof typeof MainnetPools];
+  if (fromSdk) return fromSdk;
+  if (poolName === FOLKS_ALGORAND_ECOSYSTEM_USDC_SDK_POOL_NAME) {
+    return folksSdkPoolUsdcAlgorandEcosystem();
+  }
+  return undefined;
+}
 
 /**
  * Human-readable f-asset amount → human-readable underlying equivalent,
@@ -62,7 +91,7 @@ export async function estimateFolksDepositMintedFAssetAmount(input: {
   if (input.underlyingAmount <= BigInt(0)) {
     return { mintedFAsset: BigInt(0), depositInterestIndex: BigInt(0) };
   }
-  const pool = MainnetPools[input.poolName as keyof typeof MainnetPools];
+  const pool = resolveFolksMainnetPoolForSdk(input.poolName);
   if (!pool) {
     throw new Error(
       `Unknown Folks mainnet pool "${input.poolName}" for mint estimate.`
@@ -324,7 +353,7 @@ export async function buildFolksDepositMintTxns(input: {
   amount: bigint;
   algod: Algodv2;
 }): Promise<algosdk.Transaction[]> {
-  const pool = MainnetPools[input.poolName as keyof typeof MainnetPools];
+  const pool = resolveFolksMainnetPoolForSdk(input.poolName);
   if (!pool) {
     throw new Error(
       `Unknown Folks mainnet pool "${input.poolName}". Extend MainnetPools or adapter config.`
@@ -399,7 +428,7 @@ export async function buildFolksWithdrawFromPoolTxns(input: {
   fAssetAmount: bigint;
   algod: Algodv2;
 }): Promise<algosdk.Transaction[]> {
-  const pool = MainnetPools[input.poolName as keyof typeof MainnetPools];
+  const pool = resolveFolksMainnetPoolForSdk(input.poolName);
   if (!pool) {
     throw new Error(
       `Unknown Folks mainnet pool "${input.poolName}" for withdraw-from-pool.`

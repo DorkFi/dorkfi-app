@@ -64,7 +64,11 @@ import {
   getFolksAdapterForPhase,
 } from "@/config";
 import { getAllTokensWithDisplayInfo } from "@/config";
-import { getTokenImagePath } from "@/utils/tokenImageUtils";
+import {
+  getTokenImagePath,
+  resolveTokenIconBadgeUrl,
+} from "@/utils/tokenImageUtils";
+import { MarketRowTokenIcon } from "@/components/markets/MarketRowTokenIcon";
 import { marketRowForPortfolioPosition } from "@/utils/marketRowForPortfolioPosition";
 import { usdPerTokenFromMarketInfoPrice } from "@/utils/assetDecimals";
 import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
@@ -146,6 +150,8 @@ import {
 import { useTinymanLiquidStakingLiveApyPercent } from "@/hooks/useTinymanLiquidStakingLiveApyPercent";
 import { useXalgoGovernanceLiveApyPercent } from "@/hooks/useXalgoGovernanceLiveApyPercent";
 import { useFolksMainnetAlgoDepositLiveApyPercent } from "@/hooks/useFolksMainnetAlgoDepositLiveApyPercent";
+import { useFolksMainnetUsdcPoolLiveApyPercent } from "@/hooks/useFolksMainnetUsdcPoolLiveApyPercent";
+import { useFolksMainnetFiUsdcEcosystemPoolLiveApyPercent } from "@/hooks/useFolksMainnetFiUsdcEcosystemPoolLiveApyPercent";
 
 /* eslint-disable no-case-declarations -- many sort switch blocks use const in cases */
 /* eslint-disable react-hooks/exhaustive-deps -- many callbacks intentionally use stable deps subset */
@@ -329,16 +335,30 @@ const Portfolio = () => {
   const folksAlgoDepositLiveApyPct = useFolksMainnetAlgoDepositLiveApyPercent(
     liveIntrinsicApyFetchEnabled
   );
+  const folksUsdcPoolLiveApy = useFolksMainnetUsdcPoolLiveApyPercent(
+    liveIntrinsicApyFetchEnabled
+  );
+  const folksFiUsdcEcosystemLiveApy = useFolksMainnetFiUsdcEcosystemPoolLiveApyPercent(
+    liveIntrinsicApyFetchEnabled
+  );
   const liveIntrinsicSupplyApy = useMemo<LiveIntrinsicSupplyApySnapshot>(
     () => ({
       tinymanLiquidStakingPercent: tinymanLiveIntrinsicApyPct,
       xalgoGovernanceLambdaPercent: xalgoLiveIntrinsicApyPct,
       folksMainnetAlgoDepositPercent: folksAlgoDepositLiveApyPct,
+      folksMainnetUsdcDepositPercent: folksUsdcPoolLiveApy?.depositPercent ?? null,
+      folksMainnetUsdcBorrowPercent: folksUsdcPoolLiveApy?.borrowPercent ?? null,
+      folksMainnetFiUsdcEcosystemDepositPercent:
+        folksFiUsdcEcosystemLiveApy?.depositPercent ?? null,
+      folksMainnetFiUsdcEcosystemBorrowPercent:
+        folksFiUsdcEcosystemLiveApy?.borrowPercent ?? null,
     }),
     [
       tinymanLiveIntrinsicApyPct,
       xalgoLiveIntrinsicApyPct,
       folksAlgoDepositLiveApyPct,
+      folksUsdcPoolLiveApy,
+      folksFiUsdcEcosystemLiveApy,
     ]
   );
 
@@ -654,6 +674,19 @@ const Portfolio = () => {
 
       for (const token of tokens) {
         if (token.underlyingContractId && token.poolId) {
+          const rowTokenConfigRaw = getTokenConfig(
+            networkId as NetworkId,
+            token.configKey ?? token.originalSymbol ?? token.symbol
+          );
+          const rowTokenConfig = Array.isArray(rowTokenConfigRaw)
+            ? rowTokenConfigRaw.find(
+                (tc) => String(tc.poolId) === String(token.poolId)
+              ) ?? rowTokenConfigRaw[0]
+            : rowTokenConfigRaw;
+          const positionIconBadgeUrl = resolveTokenIconBadgeUrl(
+            rowTokenConfig?.iconBadgeFromSymbol
+          );
+
           // Match by market id + pool (display symbol can collide, e.g. ALGO vs fALGO both "Algo")
           let market = marketRowForPortfolioPosition(markets, {
             marketId: token.underlyingContractId,
@@ -700,25 +733,10 @@ const Portfolio = () => {
 
           // Add deposit position if user has deposits
           if (depositBalance && depositBalance > 0) {
-            // Get the original token config to access nTokenId
-            // For multi-market tokens (array), find the one matching the token's poolId
-            const originalTokenConfigRaw = getTokenConfig(
-              networkId as NetworkId,
-              token.configKey ?? token.originalSymbol ?? token.symbol
-            );
-
-            // Handle array of token configs (multiple markets)
-            // Compare poolIds as strings to ensure exact match
-            const originalTokenConfig = Array.isArray(originalTokenConfigRaw)
-              ? originalTokenConfigRaw.find(
-                (tc) => String(tc.poolId) === String(token.poolId)
-              ) || originalTokenConfigRaw[0]
-              : originalTokenConfigRaw;
-
             // Fetch ntoken balance for this deposit
             const nTokenBalance = await fetchNTokenBalance(
               userAddress,
-              originalTokenConfig?.nTokenId || "",
+              rowTokenConfig?.nTokenId || "",
               networkId
             );
 
@@ -762,6 +780,7 @@ const Portfolio = () => {
               configSymbol: token.configKey,
               marketId: token.underlyingContractId,
               icon: token.logoPath,
+              iconBadgeUrl: positionIconBadgeUrl,
               balance: depositBalance,
               nTokenBalance: nTokenBalance,
               value: depositBalance * tokenPrice,
@@ -816,6 +835,7 @@ const Portfolio = () => {
               configSymbol: token.configKey,
               marketId: token.underlyingContractId,
               icon: token.logoPath,
+              iconBadgeUrl: positionIconBadgeUrl,
               balance: borrowBalance,
               value: borrowBalance * tokenPrice,
               apy:
@@ -1138,11 +1158,24 @@ const Portfolio = () => {
             }
           }
 
+          const depositBadgeCfgRaw = getTokenConfig(
+            networkId as NetworkId,
+            token.configKey ?? token.originalSymbol ?? ""
+          );
+          const depositBadgeCfg = Array.isArray(depositBadgeCfgRaw)
+            ? depositBadgeCfgRaw.find(
+                (c) => String(c.poolId) === String(appId)
+              ) ?? depositBadgeCfgRaw[0]
+            : depositBadgeCfgRaw;
+
           transformedDeposits.push({
             asset: token.symbol,
             originalSymbol: token.originalSymbol ?? token.symbol,
             configSymbol: token.configKey ?? token.originalSymbol,
             icon: token.logoPath,
+            iconBadgeUrl: resolveTokenIconBadgeUrl(
+              depositBadgeCfg?.iconBadgeFromSymbol
+            ),
             balance: balanceForDisplay,
             value: balanceForDisplay * tokenPrice,
             apy: apy,
@@ -1334,10 +1367,23 @@ const Portfolio = () => {
             }
           }
 
+          const borrowBadgeCfgRaw = getTokenConfig(
+            networkId as NetworkId,
+            token.configKey ?? token.originalSymbol ?? ""
+          );
+          const borrowBadgeCfg = Array.isArray(borrowBadgeCfgRaw)
+            ? borrowBadgeCfgRaw.find(
+                (c) => String(c.poolId) === String(appId)
+              ) ?? borrowBadgeCfgRaw[0]
+            : borrowBadgeCfgRaw;
+
           transformedBorrows.push({
             asset: token.symbol,
             configSymbol: token.configKey ?? token.originalSymbol,
             icon: token.logoPath,
+            iconBadgeUrl: resolveTokenIconBadgeUrl(
+              borrowBadgeCfg?.iconBadgeFromSymbol
+            ),
             balance: actualBalance,
             value: actualBalance * tokenPrice,
             apy: apy,
@@ -1397,10 +1443,19 @@ const Portfolio = () => {
           existing.earnedInterestValue +=
             deposit.accruedInterestValue ||
             accruedInterest * (deposit.tokenPrice || 1);
+          if (
+            !(existing as { iconBadgeUrl?: string }).iconBadgeUrl &&
+            (deposit as { iconBadgeUrl?: string }).iconBadgeUrl
+          ) {
+            (existing as { iconBadgeUrl?: string }).iconBadgeUrl = (
+              deposit as { iconBadgeUrl?: string }
+            ).iconBadgeUrl;
+          }
         } else {
           marketMap.set(marketKey, {
             asset: deposit.asset,
             icon: deposit.icon,
+            iconBadgeUrl: (deposit as { iconBadgeUrl?: string }).iconBadgeUrl,
             network: (deposit as ItemWithNetwork).network,
             poolId: deposit.poolId,
             tokenPrice: deposit.tokenPrice || 1,
@@ -1429,10 +1484,19 @@ const Portfolio = () => {
           existing.owedInterestValue +=
             borrow.accruedInterestValue ||
             accruedInterest * (borrow.tokenPrice || 1);
+          if (
+            !(existing as { iconBadgeUrl?: string }).iconBadgeUrl &&
+            (borrow as { iconBadgeUrl?: string }).iconBadgeUrl
+          ) {
+            (existing as { iconBadgeUrl?: string }).iconBadgeUrl = (
+              borrow as { iconBadgeUrl?: string }
+            ).iconBadgeUrl;
+          }
         } else {
           marketMap.set(marketKey, {
             asset: borrow.asset,
             icon: borrow.icon,
+            iconBadgeUrl: (borrow as { iconBadgeUrl?: string }).iconBadgeUrl,
             network: (borrow as ItemWithNetwork).network,
             poolId: borrow.poolId,
             tokenPrice: borrow.tokenPrice || 1,
@@ -2224,6 +2288,7 @@ const Portfolio = () => {
       .map((deposit) => ({
         asset: deposit.asset,
         icon: deposit.icon,
+        iconBadgeUrl: (deposit as { iconBadgeUrl?: string }).iconBadgeUrl,
         value: deposit.value,
         apy:
           deposit.apy +
@@ -2244,6 +2309,7 @@ const Portfolio = () => {
       .map((borrow) => ({
         asset: borrow.asset,
         icon: borrow.icon,
+        iconBadgeUrl: (borrow as { iconBadgeUrl?: string }).iconBadgeUrl,
         value: borrow.value,
         apy: borrow.apy,
       }));
@@ -4190,9 +4256,23 @@ const Portfolio = () => {
           : typeof m.borrowRateCurrent === "number"
             ? (m.borrowRateCurrent as number) * 100
             : undefined;
+      const cfgKey =
+        typeof m.configSymbol === "string" && m.configSymbol.trim() !== ""
+          ? m.configSymbol
+          : symbol;
+      const cfgRaw = getTokenConfig(currentNetwork, cfgKey);
+      const cfgOne = Array.isArray(cfgRaw)
+        ? poolId
+          ? cfgRaw.find((c: { poolId?: string }) => String(c.poolId) === poolId) ??
+            cfgRaw[0]
+          : cfgRaw[0]
+        : cfgRaw;
       return {
         asset: symbol,
         icon: getTokenImagePath(symbol),
+        iconBadgeUrl: resolveTokenIconBadgeUrl(
+          (cfgOne as TokenConfig | undefined)?.iconBadgeFromSymbol
+        ),
         value: borrowApy,
         poolId: poolId || undefined,
         network: currentNetwork,
@@ -6281,6 +6361,10 @@ const Portfolio = () => {
                                     (deposit as ItemWithNetwork).configSymbol
                                   }
                                   icon={deposit.icon}
+                                  iconBadgeUrl={
+                                    (deposit as { iconBadgeUrl?: string })
+                                      .iconBadgeUrl
+                                  }
                                   value={deposit.value}
                                   balance={deposit.balance}
                                   apy={deposit.apy}
@@ -6934,24 +7018,19 @@ const Portfolio = () => {
                                 >
                                   <TableCell className="min-w-0">
                                     <div className="flex flex-col items-center gap-1 min-w-0">
-                                      <div className="relative shrink-0">
-                                        <img
-                                          src={deposit.icon}
-                                          alt={deposit.asset}
-                                          className="w-8 h-8 rounded-full shrink-0"
-                                        />
-                                        {depositMarketLabel && (
-                                          <div
-                                            className={`absolute -top-1 -right-1 w-4 h-4 rounded-full ${marketPoolBadgeBgClassName(
-                                              depositMarketLabel
-                                            )} border-2 border-white dark:border-slate-800 flex items-center justify-center z-10`}
-                                          >
-                                            <span className="text-[9px] font-bold text-white leading-none">
-                                              {depositMarketLabel}
-                                            </span>
-                                          </div>
-                                        )}
-                                      </div>
+                                      <MarketRowTokenIcon
+                                        market={{
+                                          icon: deposit.icon,
+                                          asset: deposit.asset,
+                                          iconBadgeUrl: (
+                                            deposit as { iconBadgeUrl?: string }
+                                          ).iconBadgeUrl,
+                                        }}
+                                        poolLetterLabel={
+                                          depositMarketLabel ?? null
+                                        }
+                                        imgClassName="w-8 h-8 shrink-0 rounded-full object-contain"
+                                      />
                                       <span className="font-medium truncate text-center">
                                         {deposit.asset}
                                       </span>
@@ -7658,24 +7737,17 @@ const Portfolio = () => {
                                     >
                                       <TableCell>
                                         <div className="flex items-center gap-2">
-                                          <div className="relative">
-                                            <img
-                                              src={asset.icon}
-                                              alt={asset.asset}
-                                              className="w-6 h-6 rounded-full"
-                                            />
-                                            {marketLabel && (
-                                              <div
-                                                className={`absolute -top-1 -right-1 w-4 h-4 rounded-full ${marketPoolBadgeBgClassName(
-                                                  marketLabel
-                                                )} border-2 border-white dark:border-slate-800 flex items-center justify-center`}
-                                              >
-                                                <span className="text-xs font-bold text-white">
-                                                  {marketLabel}
-                                                </span>
-                                              </div>
-                                            )}
-                                          </div>
+                                          <MarketRowTokenIcon
+                                            market={{
+                                              icon: asset.icon,
+                                              asset: asset.asset,
+                                              iconBadgeUrl: (
+                                                asset as { iconBadgeUrl?: string }
+                                              ).iconBadgeUrl,
+                                            }}
+                                            poolLetterLabel={marketLabel}
+                                            imgClassName="h-6 w-6 shrink-0 rounded-full object-contain"
+                                          />
                                           <span className="font-medium">
                                             {asset.asset}
                                           </span>
@@ -8125,6 +8197,10 @@ const Portfolio = () => {
                                     (borrow as ItemWithNetwork).configSymbol
                                   }
                                   icon={borrow.icon}
+                                  iconBadgeUrl={
+                                    (borrow as { iconBadgeUrl?: string })
+                                      .iconBadgeUrl
+                                  }
                                   value={borrow.value}
                                   balance={borrow.balance}
                                   apy={borrow.apy}
@@ -8643,24 +8719,19 @@ const Portfolio = () => {
                                 >
                                   <TableCell className="min-w-0">
                                     <div className="flex flex-col items-center gap-1 min-w-0">
-                                      <div className="relative shrink-0">
-                                        <img
-                                          src={borrow.icon}
-                                          alt={borrow.asset}
-                                          className="w-8 h-8 rounded-full shrink-0"
-                                        />
-                                        {borrowMarketLabel && (
-                                          <div
-                                            className={`absolute -top-1 -right-1 w-4 h-4 rounded-full ${marketPoolBadgeBgClassName(
-                                              borrowMarketLabel
-                                            )} border-2 border-white dark:border-slate-800 flex items-center justify-center z-10`}
-                                          >
-                                            <span className="text-[9px] font-bold text-white leading-none">
-                                              {borrowMarketLabel}
-                                            </span>
-                                          </div>
-                                        )}
-                                      </div>
+                                      <MarketRowTokenIcon
+                                        market={{
+                                          icon: borrow.icon,
+                                          asset: borrow.asset,
+                                          iconBadgeUrl: (
+                                            borrow as { iconBadgeUrl?: string }
+                                          ).iconBadgeUrl,
+                                        }}
+                                        poolLetterLabel={
+                                          borrowMarketLabel ?? null
+                                        }
+                                        imgClassName="w-8 h-8 shrink-0 rounded-full object-contain"
+                                      />
                                       <span className="font-medium truncate text-center">
                                         {borrow.asset}
                                       </span>
@@ -9047,6 +9118,9 @@ const Portfolio = () => {
                                     }-${(item as ItemWithNetwork).network || "unknown"}`}
                                   asset={item.asset}
                                   icon={item.icon}
+                                  iconBadgeUrl={
+                                    (item as { iconBadgeUrl?: string }).iconBadgeUrl
+                                  }
                                   netInterest={item.netInterest || 0}
                                   netInterestValue={item.netInterestValue || 0}
                                   earnedInterest={item.earnedInterest}
@@ -9382,24 +9456,19 @@ const Portfolio = () => {
                                 >
                                   <TableCell className="min-w-0">
                                     <div className="flex flex-col items-center gap-1 min-w-0">
-                                      <div className="relative shrink-0">
-                                        <img
-                                          src={item.icon}
-                                          alt={item.asset}
-                                          className="w-8 h-8 rounded-full shrink-0"
-                                        />
-                                        {accruedMarketLabel && (
-                                          <div
-                                            className={`absolute -top-1 -right-1 w-4 h-4 rounded-full ${marketPoolBadgeBgClassName(
-                                              accruedMarketLabel
-                                            )} border-2 border-white dark:border-slate-800 flex items-center justify-center z-10`}
-                                          >
-                                            <span className="text-[9px] font-bold text-white leading-none">
-                                              {accruedMarketLabel}
-                                            </span>
-                                          </div>
-                                        )}
-                                      </div>
+                                      <MarketRowTokenIcon
+                                        market={{
+                                          icon: item.icon as string,
+                                          asset: item.asset as string,
+                                          iconBadgeUrl: (
+                                            item as { iconBadgeUrl?: string }
+                                          ).iconBadgeUrl,
+                                        }}
+                                        poolLetterLabel={
+                                          accruedMarketLabel ?? null
+                                        }
+                                        imgClassName="w-8 h-8 shrink-0 rounded-full object-contain"
+                                      />
                                       <span className="font-medium truncate text-center">
                                         {item.asset}
                                       </span>
@@ -9659,10 +9728,15 @@ const Portfolio = () => {
                       className="flex items-center justify-between p-3 rounded-lg bg-red-500/10 border border-red-500/20"
                     >
                       <div className="flex items-center gap-3">
-                        <img
-                          src={borrow.icon}
-                          alt={borrow.asset}
-                          className="w-6 h-6 rounded-full"
+                        <MarketRowTokenIcon
+                          market={{
+                            icon: borrow.icon,
+                            asset: borrow.asset,
+                            iconBadgeUrl: (borrow as { iconBadgeUrl?: string })
+                              .iconBadgeUrl,
+                          }}
+                          poolLetterLabel={null}
+                          imgClassName="h-6 w-6 shrink-0 rounded-full object-contain"
                         />
                         <div>
                           <div className="text-sm font-medium text-red-400">

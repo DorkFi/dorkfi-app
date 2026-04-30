@@ -14,6 +14,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import SupplyBorrowCongrats from "./SupplyBorrowCongrats";
+import { MarketRowTokenIcon } from "@/components/markets/MarketRowTokenIcon";
 import SupplyBorrowHeader from "./SupplyBorrowHeader";
 import SupplyBorrowForm from "./SupplyBorrowForm";
 import SupplyBorrowStats from "./SupplyBorrowStats";
@@ -150,6 +151,44 @@ type SupplyBorrowTokenRow = {
   originalContractId?: string;
 };
 
+/**
+ * `getAllTokensWithDisplayInfo` sets `configKey` to the `tokens` map key (e.g. `USDC` for every
+ * `tokens.USDC[]` row). Prefer `originalSymbol` (`fiUSDC`, `fUSDC`) so {@link getTokenConfig} hits
+ * the correct row or standalone key.
+ */
+function supplyBorrowTokenConfigLookupKey(
+  tok: SupplyBorrowTokenRow | null | undefined,
+  fallbackAsset: string
+): string {
+  if (!tok) return fallbackAsset;
+  const orig = String(tok.originalSymbol ?? "").trim();
+  if (orig !== "") return orig;
+  const ck = String(tok.configKey ?? "").trim();
+  if (ck !== "") return ck;
+  return fallbackAsset;
+}
+
+/** Pick one `TokenConfig` from `getTokenConfig` when the symbol maps to an array (e.g. several USDC pools). */
+function pickTokenConfigForSupplyBorrowRow(
+  raw: TokenConfig | TokenConfig[] | undefined,
+  tok: SupplyBorrowTokenRow
+): TokenConfig | null {
+  if (!raw) return null;
+  if (!Array.isArray(raw)) return raw;
+  const poolStr = String(tok.poolId ?? "").trim();
+  const contractStr = String(tok.underlyingContractId ?? "").trim();
+  const poolOk = (tc: TokenConfig) =>
+    poolStr === "" || String(tc.poolId ?? "") === poolStr;
+  if (contractStr !== "") {
+    const byContract = raw.find(
+      (tc) =>
+        poolOk(tc) && String(tc.contractId ?? "").trim() === contractStr
+    );
+    if (byContract) return byContract;
+  }
+  return raw.find(poolOk) ?? raw[0] ?? null;
+}
+
 /** When display `asset` + `poolId` match multiple config rows (e.g. Algo vs fALGO), pass the tokens map key from the market row (`configSymbol`). */
 export function resolveSupplyBorrowToken<T extends SupplyBorrowTokenRow>(
   tokens: T[],
@@ -190,7 +229,20 @@ export function resolveSupplyBorrowToken<T extends SupplyBorrowTokenRow>(
   }
 
   if (poolId != null && poolId !== "") {
-    return tokens.find((t) => t.symbol === asset && poolOk(t));
+    const poolHits = tokens.filter((t) => t.symbol === asset && poolOk(t));
+    if (poolHits.length <= 1) return poolHits[0];
+    if (marketId != null && String(marketId) !== "") {
+      const mid = String(marketId);
+      const byMid = poolHits.find(
+        (t) => String(t.underlyingContractId ?? "") === mid
+      );
+      if (byMid) return byMid;
+      const byOrig = poolHits.find(
+        (t) => String(t.originalContractId ?? "") === mid
+      );
+      if (byOrig) return byOrig;
+    }
+    return poolHits[0];
   }
   return tokens.find((t) => t.symbol === asset);
 }
@@ -199,6 +251,7 @@ export function resolveSupplyBorrowToken<T extends SupplyBorrowTokenRow>(
 export type SupplyBorrowAvailableAsset = {
   asset: string;
   icon: string;
+  iconBadgeUrl?: string;
   value?: number;
   poolId?: string;
   network?: string;
@@ -544,16 +597,9 @@ const SupplyBorrowModal = ({
       marketId
     );
     if (!tok?.underlyingContractId) return null;
-    const originalSymbol =
-      (tok as { configKey?: string }).configKey ??
-      ("originalSymbol" in tok
-        ? (tok as { originalSymbol?: string }).originalSymbol
-        : asset);
-    const raw = getTokenConfig(networkToUse as NetworkId, originalSymbol);
-    if (!raw) return null;
-    return Array.isArray(raw)
-      ? raw.find((tc) => String(tc.poolId) === String(tok.poolId)) ?? raw[0]
-      : raw;
+    const lookupKey = supplyBorrowTokenConfigLookupKey(tok, asset);
+    const raw = getTokenConfig(networkToUse as NetworkId, lookupKey);
+    return pickTokenConfigForSupplyBorrowRow(raw, tok);
   }, [mode, networkToUse, asset, poolId, configSymbol, marketId]);
 
   const depositOriginalSymbol = useMemo(() => {
@@ -567,12 +613,7 @@ const SupplyBorrowModal = ({
       marketId
     );
     if (!tok) return null;
-    return (
-      (tok as { configKey?: string }).configKey ??
-      ("originalSymbol" in tok
-        ? (tok as { originalSymbol?: string }).originalSymbol
-        : asset)
-    );
+    return supplyBorrowTokenConfigLookupKey(tok, asset);
   }, [mode, networkToUse, asset, poolId, configSymbol, marketId]);
 
   /** Governance xALGO lending row (config symbol or `tokens` map key via `depositOriginalSymbol`). */
@@ -641,16 +682,9 @@ const SupplyBorrowModal = ({
       marketId
     );
     if (!tok?.underlyingContractId) return null;
-    const originalSymbol =
-      (tok as { configKey?: string }).configKey ??
-      ("originalSymbol" in tok
-        ? (tok as { originalSymbol?: string }).originalSymbol
-        : asset);
-    const raw = getTokenConfig(networkToUse as NetworkId, originalSymbol);
-    if (!raw) return null;
-    return Array.isArray(raw)
-      ? raw.find((tc) => String(tc.poolId) === String(tok.poolId)) ?? raw[0]
-      : raw;
+    const lookupKey = supplyBorrowTokenConfigLookupKey(tok, asset);
+    const raw = getTokenConfig(networkToUse as NetworkId, lookupKey);
+    return pickTokenConfigForSupplyBorrowRow(raw, tok);
   }, [mode, networkToUse, asset, poolId, configSymbol, marketId]);
 
   const borrowOriginalSymbol = useMemo(() => {
@@ -664,12 +698,7 @@ const SupplyBorrowModal = ({
       marketId
     );
     if (!tok) return null;
-    return (
-      (tok as { configKey?: string }).configKey ??
-      ("originalSymbol" in tok
-        ? (tok as { originalSymbol?: string }).originalSymbol
-        : asset)
-    );
+    return supplyBorrowTokenConfigLookupKey(tok, asset);
   }, [mode, networkToUse, asset, poolId, configSymbol, marketId]);
 
   /** Governance xALGO lending row (borrow), same disambiguation as deposit. */
@@ -3203,11 +3232,26 @@ const SupplyBorrowModal = ({
                       >
                         <SelectTrigger className="w-auto min-w-0 h-auto bg-transparent border-none p-0 hover:bg-transparent focus:ring-0 focus:ring-offset-0 justify-center [&>svg:last-child]:!hidden">
                           <div className="flex items-center gap-2 shrink-0">
-                            <img
-                              src={assetData.icon}
-                              alt={asset}
-                              className="w-12 h-12 rounded-full shadow"
-                            />
+                            {(() => {
+                              const idx = availableAssets.findIndex(
+                                (a, i) =>
+                                  supplyBorrowAssetRowKey(a, i) ===
+                                  supplyBorrowSelectRowKey
+                              );
+                              const sel =
+                                idx >= 0 ? availableAssets[idx] : undefined;
+                              return (
+                                <MarketRowTokenIcon
+                                  market={{
+                                    icon: sel?.icon ?? assetData.icon,
+                                    asset,
+                                    iconBadgeUrl: sel?.iconBadgeUrl,
+                                  }}
+                                  poolLetterLabel={null}
+                                  imgClassName="h-12 w-12 rounded-full object-contain shadow"
+                                />
+                              );
+                            })()}
                             <span className="flex items-center gap-1 text-xl font-semibold text-slate-800 dark:text-white">
                               {asset}
                               <ChevronDown className="h-4 w-4 text-slate-800 dark:text-white" />
@@ -3221,10 +3265,14 @@ const SupplyBorrowModal = ({
                               value={supplyBorrowAssetRowKey(a, i)}
                             >
                               <span className="flex items-center gap-2">
-                                <img
-                                  src={a.icon}
-                                  alt={a.asset}
-                                  className="h-5 w-5 rounded-full"
+                                <MarketRowTokenIcon
+                                  market={{
+                                    icon: a.icon,
+                                    asset: a.asset,
+                                    iconBadgeUrl: a.iconBadgeUrl,
+                                  }}
+                                  poolLetterLabel={null}
+                                  imgClassName="h-8 w-8 shrink-0 rounded-full object-contain"
                                 />
                                 <span>{a.asset}</span>
                                 {a.value != null && (

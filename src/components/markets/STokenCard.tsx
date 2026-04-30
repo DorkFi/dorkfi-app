@@ -10,8 +10,8 @@ import { useNetwork } from "@/contexts/NetworkContext";
 import {
   borrowApyBadgeClassName,
   BORROW_APY_BADGE_STOKEN,
-  marketPoolBadgeBgClassName,
 } from "@/constants/marketUi";
+import { MarketRowTokenIcon } from "./MarketRowTokenIcon";
 
 interface STokenCardProps {
   market: OnDemandMarketData;
@@ -44,18 +44,11 @@ const STokenCard = ({
       {/* Header with logo, asset info, and info button */}
       <div className="flex flex-col items-center text-center md:flex-col-reverse md:items-start md:text-left md:justify-normal">
         <div className="flex items-center gap-3 flex-1">
-          <div className="relative flex-shrink-0">
-            <img src={market.icon} alt={market.asset} className="w-10 h-10 md:w-8 md:h-8 rounded-full object-contain flex-shrink-0" />
-            {marketLabel && (
-              <div
-                className={`absolute -top-1 -right-1 w-5 h-5 rounded-full ${marketPoolBadgeBgClassName(
-                  marketLabel
-                )} border-2 border-white dark:border-slate-800 flex items-center justify-center z-10`}
-              >
-                <span className="text-xs font-bold text-white">{marketLabel}</span>
-              </div>
-            )}
-          </div>
+          <MarketRowTokenIcon
+            market={market}
+            poolLetterLabel={marketLabel ?? null}
+            imgClassName="w-10 h-10 md:w-8 md:h-8 flex-shrink-0 rounded-full object-contain"
+          />
           <div className="flex flex-col items-center justify-center gap-1 text-center flex-1">
             <div className="font-semibold text-lg leading-tight">{market.asset}</div>
             <Badge variant="outline" className="text-xs px-2 py-0.5 h-4 flex items-center justify-center whitespace-nowrap">
