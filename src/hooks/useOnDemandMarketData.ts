@@ -30,6 +30,7 @@ import { useXalgoGovernanceLiveApyPercent } from "@/hooks/useXalgoGovernanceLive
 import { useFolksMainnetAlgoDepositLiveApyPercent } from "@/hooks/useFolksMainnetAlgoDepositLiveApyPercent";
 import { useFolksMainnetUsdcPoolLiveApyPercent } from "@/hooks/useFolksMainnetUsdcPoolLiveApyPercent";
 import { useFolksMainnetFiUsdcEcosystemPoolLiveApyPercent } from "@/hooks/useFolksMainnetFiUsdcEcosystemPoolLiveApyPercent";
+import { useFolksMainnetFiTinyEcosystemPoolLiveApyPercent } from "@/hooks/useFolksMainnetFiTinyEcosystemPoolLiveApyPercent";
 import { resolveTokenIconBadgeUrl } from "@/utils/tokenImageUtils";
 
 export interface OnDemandMarketData {
@@ -263,6 +264,9 @@ export const useOnDemandMarketData = ({
   const folksFiUsdcEcosystemLiveApy = useFolksMainnetFiUsdcEcosystemPoolLiveApyPercent(
     algorandMainnetMarkets
   );
+  const folksFiTinyEcosystemLiveApy = useFolksMainnetFiTinyEcosystemPoolLiveApyPercent(
+    algorandMainnetMarkets
+  );
   const liveIntrinsicSupplyApy = useMemo<LiveIntrinsicSupplyApySnapshot>(
     () => ({
       tinymanLiquidStakingPercent: tinymanLiveIntrinsicApyPct,
@@ -274,6 +278,10 @@ export const useOnDemandMarketData = ({
         folksFiUsdcEcosystemLiveApy?.depositPercent ?? null,
       folksMainnetFiUsdcEcosystemBorrowPercent:
         folksFiUsdcEcosystemLiveApy?.borrowPercent ?? null,
+      folksMainnetFiTinyEcosystemDepositPercent:
+        folksFiTinyEcosystemLiveApy?.depositPercent ?? null,
+      folksMainnetFiTinyEcosystemBorrowPercent:
+        folksFiTinyEcosystemLiveApy?.borrowPercent ?? null,
     }),
     [
       tinymanLiveIntrinsicApyPct,
@@ -281,6 +289,7 @@ export const useOnDemandMarketData = ({
       folksAlgoDepositLiveApyPct,
       folksUsdcPoolLiveApy,
       folksFiUsdcEcosystemLiveApy,
+      folksFiTinyEcosystemLiveApy,
     ]
   );
 

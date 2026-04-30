@@ -282,6 +282,15 @@ export const FOLKS_FINANCE_FIUSDC_ADAPTER_POOL_PARAMS: FolksFinancePoolParams = 
   pool: FOLKS_ALGORAND_ECOSYSTEM_USDC_SDK_POOL_NAME,
 };
 
+/**
+ * Adapter + SDK mint/withdraw params for fiTINY (same app/asset ids as `TINY` in ecosystem table).
+ * `pool` is the Folks SDK mainnet key `ISOLATED_TINY` (not the docs display name `"TINY"`).
+ */
+export const FOLKS_FINANCE_FITINY_ADAPTER_POOL_PARAMS: FolksFinancePoolParams = {
+  ...FOLKS_FINANCE_ALGORAND_ECOSYSTEM_POOLS_BY_KEY.TINY,
+  pool: "ISOLATED_TINY",
+};
+
 /** Resolve a mainnet pool row by `Pool` name from the docs (e.g. `ALGO`, `WBTC (old)`). */
 export function lookupFolksAlgorandMainnetPool(
   pool: string
