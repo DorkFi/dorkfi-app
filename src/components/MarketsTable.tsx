@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ExternalLink, RefreshCw, ChevronDown } from "lucide-react";
+import { ArrowDownUp, ExternalLink, RefreshCw, ChevronDown } from "lucide-react";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import {
@@ -30,6 +30,7 @@ import { PremiumMarketModal } from "@/components/market-modal/PremiumMarketModal
 import MintModal from "@/components/MintModal";
 import MarketsHeroSection from "@/components/markets/MarketsHeroSection";
 import MarketsTableContent from "@/components/markets/MarketsTableContent";
+import TinymanSwapModal from "@/components/TinymanSwapModal";
 import {
   fetchUserGlobalData,
   fetchUserBorrowBalance,
@@ -41,7 +42,7 @@ import {
   isMarketPaused,
 } from "@/services/lendingService";
 import type { UserPosition as MarketDetailUserPosition } from "@/components/market-modal/types";
-import { normalizeWadUsdPerToken, roundUsdToCents } from "@/lib/utils";
+import { normalizeWadUsdPerToken, roundUsdToCents, cn } from "@/lib/utils";
 import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
 import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
 import { useToast } from "@/hooks/use-toast";
@@ -74,6 +75,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import { useRewardsAprBonusMap } from "@/hooks/useRewardsAprBonusMap";
+import {
+  XchainUsdcBridgeControls,
+  shouldShowXchainUsdcBridgeControls,
+} from "@/components/xchain/XchainUsdcBridgeControls";
 
 const MAX_CLAIMS_PER_TX = 3;
 
@@ -345,11 +350,16 @@ const MarketsTable = () => {
     rewardNames?: string[]; // Track reward names for sharing
   } | null>(null);
   const [shareButtonClicked, setShareButtonClicked] = useState(false);
+  const [isTinymanSwapModalOpen, setIsTinymanSwapModalOpen] = useState(false);
 
   const { activeAccount, signTransactions, activeWallet } = useWallet();
 
   const { currentNetwork, switchNetwork } = useNetwork();
+
   const enabledNetworks = getEnabledNetworks();
+  const showMarketsLiquidityToolbar =
+    currentNetwork === "algorand-mainnet" ||
+    currentNetwork === "algorand-testnet";
   const { toast } = useToast();
 
   // Helper function to get clients for reads using the active network
@@ -3039,62 +3049,126 @@ const MarketsTable = () => {
   return (
     <div className="max-w-[1200px] mx-auto px-4">
       <div className="space-y-4">
-        {/* Network selector */}
+        {/* Network + liquidity toolbar */}
         {enabledNetworks.length > 0 && (
-          <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/30 dark:bg-muted/20 px-3 py-2 cursor-pointer hover:bg-muted/50 transition-colors w-fit">
-                  <img
-                    src={getNetworkLogoPath(currentNetwork)}
-                    alt=""
-                    className="h-5 w-5 rounded-full"
-                    onError={(e) => {
-                      const target = e.target as HTMLImageElement;
-                      target.src = "/placeholder.svg";
-                    }}
-                  />
-                  <span className="text-sm font-medium">
-                    {getNetworkConfig(currentNetwork).name}
+          <section
+            aria-labelledby="markets-toolbar-heading"
+            className="mb-4"
+          >
+            <h2 id="markets-toolbar-heading" className="sr-only">
+              Network and liquidity tools
+            </h2>
+            <div className="rounded-2xl border border-border/80 bg-muted/25 px-3 py-3 shadow-sm dark:bg-muted/10 sm:px-4 sm:py-3">
+              <div
+                className={cn(
+                  "flex flex-col gap-3",
+                  showMarketsLiquidityToolbar &&
+                    "sm:flex-row sm:items-center sm:gap-4 md:gap-5"
+                )}
+              >
+                <div className="flex min-w-0 flex-col gap-1.5 self-start sm:shrink-0">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Network
                   </span>
-                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                </div>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-56">
-                <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                  Network
-                </div>
-                <DropdownMenuSeparator />
-                {enabledNetworks.map((networkId) => {
-                  const networkConfig = getNetworkConfig(networkId);
-                  const isCurrent = currentNetwork === networkId;
-                  return (
-                    <DropdownMenuItem
-                      key={networkId}
-                      onClick={() => switchNetwork(networkId)}
-                      className="cursor-pointer flex items-center justify-between"
-                    >
-                      <div className="flex items-center gap-2">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-9 gap-2 rounded-xl border-border bg-muted/40 px-3 dark:bg-muted/25 hover:bg-muted/60 dark:hover:bg-muted/35"
+                        aria-label={`Network: ${getNetworkConfig(currentNetwork).name}. Change network.`}
+                      >
                         <img
-                          src={getNetworkLogoPath(networkId)}
+                          src={getNetworkLogoPath(currentNetwork)}
                           alt=""
-                          className="h-5 w-5 rounded-full"
+                          className="h-5 w-5 shrink-0 rounded-full"
                           onError={(e) => {
                             const target = e.target as HTMLImageElement;
                             target.src = "/placeholder.svg";
                           }}
                         />
-                        <span className="text-sm">{networkConfig.name}</span>
+                        <span className="text-sm font-medium">
+                          {getNetworkConfig(currentNetwork).name}
+                        </span>
+                        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-56">
+                      <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                        Network
                       </div>
-                      {isCurrent && (
-                        <span className="w-2 h-2 rounded-full bg-green-500" />
-                      )}
-                    </DropdownMenuItem>
-                  );
-                })}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+                      <DropdownMenuSeparator />
+                      {enabledNetworks.map((networkId) => {
+                        const networkConfig = getNetworkConfig(networkId);
+                        const isCurrent = currentNetwork === networkId;
+                        return (
+                          <DropdownMenuItem
+                            key={networkId}
+                            onClick={() => switchNetwork(networkId)}
+                            className="cursor-pointer flex items-center justify-between"
+                          >
+                            <div className="flex items-center gap-2">
+                              <img
+                                src={getNetworkLogoPath(networkId)}
+                                alt=""
+                                className="h-5 w-5 rounded-full"
+                                onError={(e) => {
+                                  const target = e.target as HTMLImageElement;
+                                  target.src = "/placeholder.svg";
+                                }}
+                              />
+                              <span className="text-sm">{networkConfig.name}</span>
+                            </div>
+                            {isCurrent && (
+                              <span className="w-2 h-2 rounded-full bg-green-500" />
+                            )}
+                          </DropdownMenuItem>
+                        );
+                      })}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+
+                {showMarketsLiquidityToolbar && (
+                  <>
+                    <div
+                      className="pointer-events-none hidden h-7 w-px shrink-0 self-center bg-muted-foreground/25 dark:bg-muted-foreground/35 sm:block"
+                      aria-hidden
+                    />
+                    <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        Liquidity
+                      </span>
+                      <div className="flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:flex-nowrap sm:items-center sm:gap-3 sm:w-auto">
+                        <XchainUsdcBridgeControls />
+                        {shouldShowXchainUsdcBridgeControls(
+                          currentNetwork,
+                          activeWallet?.id
+                        ) && (
+                          <div
+                            className="pointer-events-none hidden h-5 w-px shrink-0 self-center bg-muted-foreground/50 dark:bg-muted-foreground/60 sm:block"
+                            aria-hidden
+                          />
+                        )}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="flex h-9 w-fit shrink-0 items-center gap-2 self-start rounded-xl border-border bg-muted/40 dark:bg-muted/25 hover:bg-muted/60 dark:hover:bg-muted/35 sm:self-center"
+                          onClick={() => setIsTinymanSwapModalOpen(true)}
+                          aria-label="Open Tinyman swap"
+                        >
+                          <ArrowDownUp className="h-4 w-4 shrink-0" />
+                          Swap
+                        </Button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </section>
         )}
 
         {/* Hero Section */}
@@ -3524,6 +3598,12 @@ const MarketsTable = () => {
               }}
             />
           )}
+
+        <TinymanSwapModal
+          isOpen={isTinymanSwapModalOpen}
+          onClose={() => setIsTinymanSwapModalOpen(false)}
+          networkId={currentNetwork as NetworkId}
+        />
 
         {/* Claim Rewards Modal */}
         {showClaimModal && (

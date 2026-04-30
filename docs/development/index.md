@@ -5,3 +5,4 @@ Deep dives for **frontend features and architecture** in this repository: pages,
 | Document | Summary |
 |----------|---------|
 | [Gas Station](GAS_STATION.md) | Gas Station page and `GasStationService`: minting network, ARC200, and ASA tokens across Voi/Algorand networks; UI, validation, and architecture. |
+| [xChain Accounts integration plan](../XCHAIN_ACCOUNTS_INTEGRATION_PLAN.md) | Planning EVM/xChain wallet support alongside native AVM wallets on Voi Mainnet and Algorand Mainnet; phases, preconditions, and QA matrix. |

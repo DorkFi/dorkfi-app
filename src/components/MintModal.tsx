@@ -17,6 +17,10 @@ import SupplyBorrowForm from "./SupplyBorrowForm";
 import SupplyBorrowStats from "./SupplyBorrowStats";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { useNetwork } from "@/contexts/NetworkContext";
+import {
+  isRainbowkitXchainWallet,
+  withRainbowkitHostDialogDismissed,
+} from "@/wallet/xchainSignUi";
 import { borrow, fetchUserGlobalData } from "@/services/lendingService";
 import { getTokenConfig, getAllTokensWithDisplayInfo, getAlgorandNetworkFromNetworkId, getNetworkConfig, NetworkId } from "@/config";
 import algorandService from "@/services/algorandService";
@@ -78,10 +82,18 @@ const MintModal = ({
   const [calculatedMaxBorrow, setCalculatedMaxBorrow] = useState<number | null>(null);
   const [isLoadingMaxBorrow, setIsLoadingMaxBorrow] = useState(false);
   const [maxBorrowError, setMaxBorrowError] = useState<string | null>(null);
+  const [rainbowkitSignDialogSuppressed, setRainbowkitSignDialogSuppressed] =
+    useState(false);
 
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
   const { toast } = useToast();
+
+  useEffect(() => {
+    if (isOpen) {
+      setRainbowkitSignDialogSuppressed(false);
+    }
+  }, [isOpen]);
 
   // Calculate max borrow amount when modal opens
   useEffect(() => {
@@ -351,8 +363,12 @@ const MintModal = ({
             walletName.includes("pera") || walletName.includes("defly");
         }
 
+        const isXchainRainbowkit =
+          walletId === "rainbowkit" && networkId === "algorand-mainnet";
+
         // Check if wallet supports the network
         const isSupported =
+          isXchainRainbowkit ||
           isUniversalWallet ||
           (isVOIWallet && networkId === "voi-mainnet") ||
           (isAlgorandWallet && networkId === "algorand-mainnet") ||
@@ -385,11 +401,17 @@ const MintModal = ({
           duration: 10000,
         });
 
-        const stxns = await signTransactions(
-          result.txns.map((txn: string) =>
-            Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
-          )
-        );
+        const stxns = await withRainbowkitHostDialogDismissed({
+          wallet: activeWallet,
+          setSuppressed: setRainbowkitSignDialogSuppressed,
+          leaveOverlayDismissedOnSuccess: true,
+          run: () =>
+            signTransactions(
+              result.txns.map((txn: string) =>
+                Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+              )
+            ),
+        });
         // Get the correct algod client for the asset's network (not currentNetwork)
         const algorandNetwork = getAlgorandNetworkFromNetworkId(networkToUse);
         if (!algorandNetwork) {
@@ -450,18 +472,31 @@ const MintModal = ({
         }
 
         setTransactionId(res.txid || "Unknown");
-        setIsLoading(false); // Set loading to false before showing success modal
-        setShowSuccess(true);
-        // Call onTransactionSuccess after a brief delay to ensure success modal is displayed
-        setTimeout(() => {
-          onTransactionSuccess();
-        }, 100);
+        setIsLoading(false);
+        if (isRainbowkitXchainWallet(activeWallet)) {
+          toast({
+            title: "Mint successful",
+            description: `Transaction ${(res.txid || "").slice(0, 10)}… submitted.`,
+          });
+          setTimeout(() => {
+            onTransactionSuccess?.();
+          }, 100);
+          onClose();
+        } else {
+          setShowSuccess(true);
+          setTimeout(() => {
+            onTransactionSuccess?.();
+          }, 100);
+        }
       } else {
         const errorMsg =
           "error" in result ? result.error : "Transaction failed";
         throw new Error(errorMsg || "Minting failed");
       }
     } catch (err: unknown) {
+      if (isRainbowkitXchainWallet(activeWallet)) {
+        setRainbowkitSignDialogSuppressed(false);
+      }
       console.error("Minting error:", err);
       setError(err instanceof Error ? err.message : "An error occurred during minting");
     } finally {
@@ -483,7 +518,10 @@ const MintModal = ({
 
   if (showSuccess) {
     return (
-      <Dialog open={isOpen} onOpenChange={handleClose}>
+      <Dialog
+        open={isOpen && !rainbowkitSignDialogSuppressed}
+        onOpenChange={handleClose}
+      >
         <DialogContent className="sm:max-w-md">
           <div className="flex flex-col items-center justify-center gap-4 animate-fade-in p-6">
             {/* Success Icon */}
@@ -541,7 +579,10 @@ const MintModal = ({
   }
 
   return (
-    <Dialog open={isOpen} onOpenChange={handleClose}>
+    <Dialog
+      open={isOpen && !rainbowkitSignDialogSuppressed}
+      onOpenChange={handleClose}
+    >
       <DialogContent className="max-w-[95vw] md:max-w-md h-[90vh] md:h-auto max-h-[90vh] md:max-h-[85vh] overflow-hidden flex flex-col p-0">
         <div className="flex flex-col h-full">
           <div className="bg-card dark:bg-slate-900 px-6 pt-4 pb-2 shrink-0">

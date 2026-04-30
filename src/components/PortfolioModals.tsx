@@ -68,6 +68,7 @@ import {
 } from "@/utils/poolCollateralMarketRows";
 import { marketRowForPortfolioPosition } from "@/utils/marketRowForPortfolioPosition";
 import { portfolioWalletBalanceCacheKey } from "@/utils/portfolioWalletBalanceCacheKey";
+import { withRainbowkitHostDialogDismissed } from "@/wallet/xchainSignUi";
 
 /**
  * `buildPoolCollateralMarketRows` yields `liquidationThresholdPercent` as 0–100 (e.g. 85) or rarely
@@ -223,6 +224,14 @@ const PortfolioModals = ({
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
   const { toast } = useToast();
+  const [repayRainbowkitOverlaySuppressed, setRepayRainbowkitOverlaySuppressed] =
+    useState(false);
+
+  useEffect(() => {
+    if (repayModal.isOpen) {
+      setRepayRainbowkitOverlaySuppressed(false);
+    }
+  }, [repayModal.isOpen]);
   const depositPoolCollateralMarkets = useMemo(
     () =>
       buildPoolCollateralMarketRows(
@@ -1893,11 +1902,17 @@ const PortfolioModals = ({
       });
 
       // Sign and send transactions
-      const stxns = await signTransactions(
-        (result as any).txns.map((txn: string) =>
-          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
-        )
-      );
+      const stxns = await withRainbowkitHostDialogDismissed({
+        wallet: activeWallet,
+        setSuppressed: setRepayRainbowkitOverlaySuppressed,
+        leaveOverlayDismissedOnSuccess: true,
+        run: () =>
+          signTransactions(
+            (result as any).txns.map((txn: string) =>
+              Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+            )
+          ),
+      });
 
       // Get the correct algod client for the borrow's network (not currentNetwork)
       const algorandNetwork = getAlgorandNetworkFromNetworkId(
@@ -2023,6 +2038,7 @@ const PortfolioModals = ({
       // Return the transaction ID so RepayModal can use it
       return res.txid;
     } catch (error) {
+      setRepayRainbowkitOverlaySuppressed(false);
       console.error("Repay error:", error);
       const errorMessage = getUserFriendlyError(error);
 
@@ -2716,6 +2732,7 @@ const PortfolioModals = ({
               }
               repayTokenConfig={tcRepayModal ?? undefined}
               xalgoConsensusRepayAlgoOption={xalgoConsensusRepayAlgoOption}
+              rainbowkitHostOverlaySuppressed={repayRainbowkitOverlaySuppressed}
             />
           );
         })()}
