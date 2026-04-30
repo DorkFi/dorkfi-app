@@ -41,6 +41,11 @@ export type TinymanSwapModalProps = {
   /** Must be an Algorand network supported by Tinyman swap router (mainnet / testnet). */
   networkId: NetworkId;
   onSwapSuccess?: (txId: string) => void;
+  /**
+   * When the modal opens, pick a route *into* native ALGO (e.g. USDC → ALGO on mainnet)
+   * so users can top up fee currency. Falls back to the default pair if no suitable asset in.
+   */
+  initialReceiveAlgo?: boolean;
 };
 
 type SwapAssetRow = {
@@ -126,6 +131,7 @@ const TinymanSwapModal: React.FC<TinymanSwapModalProps> = ({
   onClose,
   networkId,
   onSwapSuccess,
+  initialReceiveAlgo = false,
 }) => {
   const tinymanNet = tinymanSupportedNetwork(networkId);
   const { activeAccount, signTransactions, activeWallet } = useWallet();
@@ -150,6 +156,14 @@ const TinymanSwapModal: React.FC<TinymanSwapModalProps> = ({
     };
   }, [assetRows]);
 
+  /** Asset to swap from when topping up ALGO (USDC on mainnet when present, else first non-ALGO). */
+  const gasUpAssetInId = useMemo(() => {
+    const usdc = assetRows.find((r) => r.tinymanAssetId === 31_566_704);
+    const firstNonAlgo = assetRows.find((r) => r.tinymanAssetId !== 0);
+    const id = usdc?.tinymanAssetId ?? firstNonAlgo?.tinymanAssetId ?? null;
+    return id != null && id !== 0 ? id : null;
+  }, [assetRows]);
+
   const [assetInId, setAssetInId] = useState(0);
   const [assetOutId, setAssetOutId] = useState(0);
   const [amountIn, setAmountIn] = useState("");
@@ -165,12 +179,25 @@ const TinymanSwapModal: React.FC<TinymanSwapModalProps> = ({
 
   useEffect(() => {
     if (!isOpen || !tinymanNet) return;
-    setAssetInId(defaultPair.assetInId);
-    setAssetOutId(defaultPair.assetOutId);
+    if (initialReceiveAlgo && gasUpAssetInId != null) {
+      setAssetInId(gasUpAssetInId);
+      setAssetOutId(0);
+    } else {
+      setAssetInId(defaultPair.assetInId);
+      setAssetOutId(defaultPair.assetOutId);
+    }
     setAmountIn("");
     setRoute(null);
     setQuoteError(null);
-  }, [isOpen, tinymanNet, networkId, defaultPair.assetInId, defaultPair.assetOutId]);
+  }, [
+    isOpen,
+    tinymanNet,
+    networkId,
+    defaultPair.assetInId,
+    defaultPair.assetOutId,
+    initialReceiveAlgo,
+    gasUpAssetInId,
+  ]);
 
   const decimalsIn = useMemo(
     () => assetRows.find((r) => r.tinymanAssetId === assetInId)?.decimals ?? 6,

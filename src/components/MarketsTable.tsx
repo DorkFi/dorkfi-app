@@ -1,7 +1,14 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowDownUp, ExternalLink, RefreshCw, ChevronDown } from "lucide-react";
+import {
+  ArrowDownUp,
+  ExternalLink,
+  RefreshCw,
+  ChevronDown,
+  Fuel,
+  CircleArrowUp,
+} from "lucide-react";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import {
@@ -256,8 +263,31 @@ function marketsTableWalletBalanceCacheKey(
   return `${asset}|p=${poolId ?? ""}|rk=${marketRowKey ?? ""}`;
 }
 
+/** Toolbar gas-style meter: fill hits 100% at this many spendable ALGO. */
+const MARKETS_TOOLBAR_ALGO_METER_CAP = 10;
+
+function marketsToolbarAlgoMeterFillPercent(balance: number): number {
+  if (!Number.isFinite(balance) || balance <= 0) return 0;
+  return Math.min(100, (balance / MARKETS_TOOLBAR_ALGO_METER_CAP) * 100);
+}
+
+function marketsToolbarAlgoMeterBarClass(balance: number): string {
+  if (!Number.isFinite(balance) || balance < 1) return "bg-red-500";
+  if (balance <= 5) return "bg-yellow-500 dark:bg-yellow-400";
+  if (balance < MARKETS_TOOLBAR_ALGO_METER_CAP) return "bg-emerald-500";
+  return "bg-green-500";
+}
+
+function marketsToolbarSpendableAlgoIsMeterGreen(balance: number | null): boolean {
+  return (
+    balance != null &&
+    Number.isFinite(balance) &&
+    balance >= MARKETS_TOOLBAR_ALGO_METER_CAP
+  );
+}
+
 const MarketsTable = () => {
-  const { formatPercent } = useNumberI18n();
+  const { formatPercent, formatNumber } = useNumberI18n();
   const [searchTerm, setSearchTerm] = useState("");
   const [sortField, setSortField] = useState<SortField>("default");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
@@ -351,6 +381,16 @@ const MarketsTable = () => {
   } | null>(null);
   const [shareButtonClicked, setShareButtonClicked] = useState(false);
   const [isTinymanSwapModalOpen, setIsTinymanSwapModalOpen] = useState(false);
+  /** Open Tinyman with assets biased toward receiving ALGO (fee top-up). */
+  const [tinymanSwapOpenForGasUp, setTinymanSwapOpenForGasUp] =
+    useState(false);
+  /** Spendable ALGO (human) for markets toolbar meter; `null` when not applicable. */
+  const [marketsToolbarSpendableAlgo, setMarketsToolbarSpendableAlgo] =
+    useState<number | null>(null);
+  const [marketsToolbarSpendableAlgoLoading, setMarketsToolbarSpendableAlgoLoading] =
+    useState(false);
+  const [marketsToolbarAlgoRefreshNonce, setMarketsToolbarAlgoRefreshNonce] =
+    useState(0);
 
   const { activeAccount, signTransactions, activeWallet } = useWallet();
 
@@ -361,6 +401,58 @@ const MarketsTable = () => {
     currentNetwork === "algorand-mainnet" ||
     currentNetwork === "algorand-testnet";
   const { toast } = useToast();
+
+  useEffect(() => {
+    if (!showMarketsLiquidityToolbar) {
+      setMarketsToolbarSpendableAlgo(null);
+      setMarketsToolbarSpendableAlgoLoading(false);
+      return;
+    }
+    if (!activeAccount?.address) {
+      setMarketsToolbarSpendableAlgo(null);
+      setMarketsToolbarSpendableAlgoLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setMarketsToolbarSpendableAlgoLoading(true);
+    void (async () => {
+      try {
+        const algorandNetwork = getAlgorandNetworkFromNetworkId(
+          currentNetwork as NetworkId
+        );
+        if (!algorandNetwork) {
+          if (!cancelled) {
+            setMarketsToolbarSpendableAlgo(null);
+            setMarketsToolbarSpendableAlgoLoading(false);
+          }
+          return;
+        }
+        await algorandService.initializeClientsForReads(algorandNetwork);
+        const accountInfo = await algorandService
+          .getAlgodClient()
+          .accountInformation(activeAccount.address)
+          .do();
+        if (!cancelled) {
+          setMarketsToolbarSpendableAlgo(
+            spendableAlgoHumanFromAccount(accountInfo)
+          );
+        }
+      } catch (e) {
+        console.error("[MarketsTable] toolbar spendable ALGO:", e);
+        if (!cancelled) setMarketsToolbarSpendableAlgo(0);
+      } finally {
+        if (!cancelled) setMarketsToolbarSpendableAlgoLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    showMarketsLiquidityToolbar,
+    activeAccount?.address,
+    currentNetwork,
+    marketsToolbarAlgoRefreshNonce,
+  ]);
 
   // Helper function to get clients for reads using the active network
   const getSyncedClientsForReads = async () => {
@@ -2356,6 +2448,7 @@ const MarketsTable = () => {
   // Handle refresh button click
   const handleRefresh = () => {
     loadAllMarkets();
+    setMarketsToolbarAlgoRefreshNonce((n) => n + 1);
   };
 
   // Refresh wallet balance for a specific asset (clears cache and refetches)
@@ -3056,14 +3149,14 @@ const MarketsTable = () => {
             className="mb-4"
           >
             <h2 id="markets-toolbar-heading" className="sr-only">
-              Network and liquidity tools
+              Network, liquidity, and spendable ALGO
             </h2>
             <div className="rounded-2xl border border-border/80 bg-muted/25 px-3 py-3 shadow-sm dark:bg-muted/10 sm:px-4 sm:py-3">
               <div
                 className={cn(
                   "flex flex-col gap-3",
                   showMarketsLiquidityToolbar &&
-                    "sm:flex-row sm:items-center sm:gap-4 md:gap-5"
+                    "sm:flex-row sm:items-center sm:gap-4 md:gap-5 lg:items-start lg:gap-6 xl:gap-8"
                 )}
               >
                 <div className="flex min-w-0 flex-col gap-1.5 self-start sm:shrink-0">
@@ -3156,12 +3249,132 @@ const MarketsTable = () => {
                           variant="outline"
                           size="sm"
                           className="flex h-9 w-fit shrink-0 items-center gap-2 self-start rounded-xl border-border bg-muted/40 dark:bg-muted/25 hover:bg-muted/60 dark:hover:bg-muted/35 sm:self-center"
-                          onClick={() => setIsTinymanSwapModalOpen(true)}
+                          onClick={() => {
+                            setTinymanSwapOpenForGasUp(false);
+                            setIsTinymanSwapModalOpen(true);
+                          }}
                           aria-label="Open Tinyman swap"
                         >
                           <ArrowDownUp className="h-4 w-4 shrink-0" />
                           Swap
                         </Button>
+                      </div>
+                    </div>
+
+                    <div
+                      className="pointer-events-none hidden h-7 w-px shrink-0 self-center bg-muted-foreground/25 dark:bg-muted-foreground/35 sm:block"
+                      aria-hidden
+                    />
+                    <div className="flex min-w-0 flex-1 flex-col gap-2 sm:min-w-[200px] sm:max-w-md lg:max-w-none lg:min-w-[min(100%,280px)] lg:flex-[1.15]">
+                      {/* Below lg: stacked; lg+: amount block | meter | Gas Up in one row */}
+                      <div className="flex min-w-0 flex-col gap-2 lg:flex-row lg:items-center lg:gap-5">
+                        {/* Mobile: order puts meter between caption and balance; lg: caption+amount left, meter right */}
+                        <span className="order-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground lg:hidden">
+                          <Fuel
+                            className="h-3.5 w-3.5 shrink-0 text-muted-foreground/90"
+                            aria-hidden
+                          />
+                          Spendable
+                        </span>
+                        <div className="order-2 flex w-full min-w-0 flex-col gap-2 sm:flex-1 sm:flex-row sm:items-center sm:gap-3 lg:order-2 lg:flex-1 lg:gap-4">
+                          <div
+                            className={cn(
+                              "relative isolate min-w-0 w-full overflow-hidden rounded-full sm:flex-1",
+                              "h-3 min-h-[12px] ring-1 ring-border/60 bg-muted/90 dark:bg-muted/70 dark:ring-border/50",
+                              "sm:h-2 sm:min-h-[8px] sm:ring-0 sm:bg-muted/70 dark:sm:bg-muted/50",
+                              "lg:h-2.5 lg:min-h-[10px] lg:max-w-none"
+                            )}
+                          >
+                            {marketsToolbarSpendableAlgoLoading ? (
+                              <div
+                                className="absolute left-0 top-0 z-[1] h-full w-1/3 animate-pulse rounded-full bg-muted-foreground/35"
+                                aria-hidden
+                              />
+                            ) : (
+                              <div
+                                className={cn(
+                                  "absolute left-0 top-0 z-[1] h-full min-w-0 rounded-full transition-[width] duration-300 ease-out",
+                                  marketsToolbarSpendableAlgo == null
+                                    ? "w-0 bg-transparent"
+                                    : marketsToolbarAlgoMeterBarClass(
+                                        marketsToolbarSpendableAlgo
+                                      )
+                                )}
+                                style={
+                                  marketsToolbarSpendableAlgo != null
+                                    ? {
+                                        width: `${marketsToolbarAlgoMeterFillPercent(marketsToolbarSpendableAlgo)}%`,
+                                      }
+                                    : undefined
+                                }
+                              />
+                            )}
+                          </div>
+                          {!marketsToolbarSpendableAlgoIsMeterGreen(
+                            marketsToolbarSpendableAlgo
+                          ) && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 w-fit shrink-0 gap-1.5 self-start rounded-xl border-border bg-muted/40 px-2.5 text-xs font-medium dark:bg-muted/25 hover:bg-muted/60 dark:hover:bg-muted/35 sm:self-center lg:h-9 lg:px-3"
+                              onClick={() => {
+                                setTinymanSwapOpenForGasUp(true);
+                                setIsTinymanSwapModalOpen(true);
+                              }}
+                              aria-label="Open swap to receive ALGO for fees"
+                            >
+                              <CircleArrowUp className="h-3.5 w-3.5 shrink-0" />
+                              Gas Up
+                            </Button>
+                          )}
+                        </div>
+                        <div className="order-3 flex min-w-0 flex-col gap-1.5 lg:order-1 lg:w-[min(11rem,28vw)] lg:shrink-0">
+                          <span className="hidden items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground lg:flex">
+                            <Fuel
+                              className="h-3.5 w-3.5 shrink-0 text-muted-foreground/90"
+                              aria-hidden
+                            />
+                            Spendable
+                          </span>
+                          <div
+                            className="flex min-h-[1.75rem] min-w-0 items-baseline gap-1.5"
+                            role="group"
+                            aria-label="Spendable ALGO for transaction fees"
+                          >
+                            <span
+                              className={cn(
+                                "min-w-0 truncate text-lg font-semibold tabular-nums leading-none tracking-tight text-foreground sm:text-xl lg:text-2xl",
+                                marketsToolbarSpendableAlgoLoading &&
+                                  "text-muted-foreground animate-pulse"
+                              )}
+                              title={
+                                marketsToolbarSpendableAlgo != null &&
+                                !marketsToolbarSpendableAlgoLoading
+                                  ? `${formatNumber(marketsToolbarSpendableAlgo, {
+                                      maximumFractionDigits: 6,
+                                      minimumFractionDigits: 0,
+                                    })} ALGO`
+                                  : undefined
+                              }
+                            >
+                              {marketsToolbarSpendableAlgoLoading
+                                ? "…"
+                                : marketsToolbarSpendableAlgo == null
+                                  ? "—"
+                                  : formatNumber(marketsToolbarSpendableAlgo, {
+                                      maximumFractionDigits: 4,
+                                      minimumFractionDigits: 0,
+                                    })}
+                            </span>
+                            {!marketsToolbarSpendableAlgoLoading &&
+                              marketsToolbarSpendableAlgo != null && (
+                                <span className="shrink-0 text-xs font-medium tabular-nums text-muted-foreground sm:text-sm">
+                                  ALGO
+                                </span>
+                              )}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </>
@@ -3601,8 +3814,15 @@ const MarketsTable = () => {
 
         <TinymanSwapModal
           isOpen={isTinymanSwapModalOpen}
-          onClose={() => setIsTinymanSwapModalOpen(false)}
+          onClose={() => {
+            setIsTinymanSwapModalOpen(false);
+            setTinymanSwapOpenForGasUp(false);
+          }}
           networkId={currentNetwork as NetworkId}
+          initialReceiveAlgo={tinymanSwapOpenForGasUp}
+          onSwapSuccess={() =>
+            setMarketsToolbarAlgoRefreshNonce((n) => n + 1)
+          }
         />
 
         {/* Claim Rewards Modal */}
