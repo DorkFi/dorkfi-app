@@ -71,6 +71,7 @@ export const getTokenImagePath = (symbol: string): string => {
     fxALGO: "/lovable-uploads/xALGO.webp",
     fALGO: "/lovable-uploads/fALGO.webp",
     fUSDC: "/lovable-uploads/fUSDC.webp",
+    fiUSDC: "/lovable-uploads/fUSDC.webp",
   };
 
   // Normalize symbol for case-insensitive lookup
@@ -89,3 +90,12 @@ export const getTokenImagePath = (symbol: string): string => {
   const cleanUpper = cleanSymbol.toUpperCase();
   return tokenImageMap[cleanSymbol] || tokenImageMap[cleanUpper] || "/placeholder.svg";
 };
+
+/** Resolve token-config `iconBadgeFromSymbol` to an image URL via {@link getTokenImagePath}. */
+export function resolveTokenIconBadgeUrl(
+  iconBadgeFromSymbol?: string
+): string | undefined {
+  const s = iconBadgeFromSymbol?.trim();
+  if (!s) return undefined;
+  return getTokenImagePath(s);
+}

@@ -8,6 +8,7 @@ import MarketsTableActions from "./MarketsTableActions";
 import APYDisplay from "@/components/APYDisplay";
 import BorrowAPYDisplay from "@/components/BorrowAPYDisplay";
 import STokenTabletRow from "./STokenTabletRow";
+import { MarketRowTokenIcon } from "./MarketRowTokenIcon";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { useWallet } from "@txnlab/use-wallet-react";
 import {
@@ -22,7 +23,6 @@ import {
   BORROW_APY_BADGE_DEFAULT,
   depositApyBadgeClassName,
   isIntrinsicDepositApyBadge,
-  marketPoolBadgeBgClassName,
 } from "@/constants/marketUi";
 import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
@@ -358,52 +358,32 @@ const MarketsTabletTable = ({
         <TableCell className="text-center">
           <div className="flex items-center justify-center gap-2">
             {isNested && <div className="w-4" />}
-            <div className="relative flex-shrink-0">
-              <img
-                src={market.icon}
-                alt={market.asset}
-                className="w-10 h-10 rounded-full object-contain"
-              />
-              {(() => {
-                // A/B from pool id only — not row index (e.g. two markets on pool A under same display name).
-                // For non-nested rows, try to determine label from poolId
-                const networkConfig = getNetworkConfig(currentNetwork);
-                const lendingPools = networkConfig.contracts.lendingPools;
-                
-                let marketLabel: string | null = null;
-                
-                // Try to get poolId
-                let poolId: string | null = market.marketInfo?.poolId || market.poolId || null;
-                
-                if (!poolId) {
-                  poolId = getPoolIdForSorting(market, marketIndex);
+            {(() => {
+              const networkConfig = getNetworkConfig(currentNetwork);
+              const lendingPools = networkConfig.contracts.lendingPools;
+              let marketLabel: string | null = null;
+              let poolId: string | null =
+                market.marketInfo?.poolId || market.poolId || null;
+              if (!poolId) {
+                poolId = getPoolIdForSorting(market, marketIndex);
+              }
+              if (poolId && lendingPools.length >= 2) {
+                if (String(poolId) === String(lendingPools[0])) {
+                  marketLabel = "A";
+                } else if (String(poolId) === String(lendingPools[1])) {
+                  marketLabel = "B";
                 }
-                
-                // Determine label from poolId
-                if (poolId && lendingPools.length >= 2) {
-                  if (String(poolId) === String(lendingPools[0])) {
-                    marketLabel = "A";
-                  } else if (String(poolId) === String(lendingPools[1])) {
-                    marketLabel = "B";
-                  }
-                }
-                
-                // Fallback: try getMarketLabel
-                if (!marketLabel) {
-                  marketLabel = getMarketLabel(market, marketIndex);
-                }
-                
-                if (marketLabel) {
-                  const bgColor = marketPoolBadgeBgClassName(marketLabel);
-                  return (
-                    <div className={`absolute -top-1 -right-1 w-5 h-5 rounded-full ${bgColor} border-2 border-white dark:border-slate-800 flex items-center justify-center`}>
-                      <span className="text-xs font-bold text-white">{marketLabel}</span>
-                    </div>
-                  );
-                }
-                return null;
-              })()}
-            </div>
+              }
+              if (!marketLabel) {
+                marketLabel = getMarketLabel(market, marketIndex);
+              }
+              return (
+                <MarketRowTokenIcon
+                  market={market}
+                  poolLetterLabel={marketLabel}
+                />
+              );
+            })()}
             <div className="flex flex-col items-start gap-0.5 whitespace-nowrap">
               <span className="font-semibold text-sm leading-tight">{market.asset}</span>
               <Badge variant="outline" className="text-xs px-2.5 py-0.5 h-5 flex items-center justify-center whitespace-nowrap min-w-fit">CF {Math.round(market.collateralFactor)}%</Badge>
@@ -630,71 +610,68 @@ const MarketsTabletTable = ({
                 <TableRow className="hover:bg-ocean-teal/5 transition-colors">
                   <TableCell className="text-center">
                     <div className="flex items-center justify-center gap-2">
-                      {/* Asset icon with market label badge (only when collapsed) */}
-                      <div className="relative flex-shrink-0">
-                        <img
-                          src={mainMarket.icon}
-                          alt={mainMarket.asset}
-                          className="w-10 h-10 rounded-full object-contain"
-                        />
-                        {!isExpanded && (() => {
-                          // For collapsed header, show badge for the main market (A market)
-                          let marketLabel: string | null = null;
-                          const networkConfig = getNetworkConfig(currentNetwork);
-                          const lendingPools = networkConfig.contracts.lendingPools;
-                          
-                          // Get poolId from main market (A market)
-                          let poolId: string | null = 
-                            mainMarket.marketInfo?.poolId || 
-                            mainMarket.poolId || 
+                      {(() => {
+                        let poolLetter: string | null = null;
+                        if (!isExpanded) {
+                          const networkConfig =
+                            getNetworkConfig(currentNetwork);
+                          const lendingPools =
+                            networkConfig.contracts.lendingPools;
+                          let poolId: string | null =
+                            mainMarket.marketInfo?.poolId ||
+                            mainMarket.poolId ||
                             null;
-                          
-                          // If poolId not on market, get from token config
                           if (!poolId) {
-                            const tokenConfigRaw = networkConfig.tokens[mainMarket.asset];
-                            if (Array.isArray(tokenConfigRaw) && tokenConfigRaw.length > 0) {
-                              // Find matching config by comparing with main market
-                              const matchingConfig = tokenConfigRaw.find(tc => {
-                                const marketPoolId = mainMarket.marketInfo?.poolId || mainMarket.poolId;
-                                return tc.poolId === marketPoolId;
-                              });
-                              poolId = matchingConfig?.poolId || tokenConfigRaw[0]?.poolId || null;
-                            } else if (tokenConfigRaw && !Array.isArray(tokenConfigRaw)) {
+                            const tokenKey =
+                              mainMarket.configSymbol ?? mainMarket.asset;
+                            const tokenConfigRaw =
+                              networkConfig.tokens[tokenKey];
+                            if (
+                              Array.isArray(tokenConfigRaw) &&
+                              tokenConfigRaw.length > 0
+                            ) {
+                              const matchingConfig = tokenConfigRaw.find(
+                                (tc) => {
+                                  const marketPoolId =
+                                    mainMarket.marketInfo?.poolId ||
+                                    mainMarket.poolId;
+                                  return tc.poolId === marketPoolId;
+                                }
+                              );
+                              poolId =
+                                matchingConfig?.poolId ||
+                                tokenConfigRaw[0]?.poolId ||
+                                null;
+                            } else if (
+                              tokenConfigRaw &&
+                              !Array.isArray(tokenConfigRaw)
+                            ) {
                               poolId = tokenConfigRaw.poolId || null;
                             }
                           }
-                          
-                          // Determine label from poolId
                           if (poolId && lendingPools.length >= 2) {
                             if (String(poolId) === String(lendingPools[0])) {
-                              marketLabel = "A";
-                            } else if (String(poolId) === String(lendingPools[1])) {
-                              marketLabel = "B";
+                              poolLetter = "A";
+                            } else if (
+                              String(poolId) === String(lendingPools[1])
+                            ) {
+                              poolLetter = "B";
                             }
                           }
-                          
-                          // If still no label, try getMarketLabel as fallback
-                          if (!marketLabel) {
-                            marketLabel = getMarketLabel(mainMarket, 0);
+                          if (!poolLetter) {
+                            poolLetter = getMarketLabel(mainMarket, 0);
                           }
-                          
-                          // Always show badge when collapsed if we have multiple markets
-                          if (!marketLabel && hasMultipleMarkets) {
-                            marketLabel = "A";
+                          if (!poolLetter && hasMultipleMarkets) {
+                            poolLetter = "A";
                           }
-                          
-                          if (marketLabel) {
-                            const bgColor =
-                              marketPoolBadgeBgClassName(marketLabel);
-                            return (
-                              <div className={`absolute -top-1 -right-1 w-5 h-5 rounded-full ${bgColor} border-2 border-white dark:border-slate-800 flex items-center justify-center`}>
-                                <span className="text-xs font-bold text-white">{marketLabel}</span>
-                              </div>
-                            );
-                          }
-                          return null;
-                        })()}
-                      </div>
+                        }
+                        return (
+                          <MarketRowTokenIcon
+                            market={mainMarket}
+                            poolLetterLabel={poolLetter}
+                          />
+                        );
+                      })()}
                       <div className="flex flex-col items-start gap-0.5 whitespace-nowrap">
                         <span className="font-semibold text-sm leading-tight">{mainMarket.asset}</span>
                         <Badge variant="outline" className="text-xs px-2 py-0.5 h-4 flex items-center justify-center">CF {Math.round(mainMarket.collateralFactor)}%</Badge>
