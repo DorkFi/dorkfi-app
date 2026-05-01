@@ -16,6 +16,8 @@ import {
   NetworkId,
   getAllTokensWithDisplayInfo,
   getTokenConfig,
+  resolveTokenConfigFromDisplayToken,
+  tokenConfigLookupKeyFromDisplayToken,
   getLendingPools,
   getPreFiParameters,
   TokenConfig,
@@ -2644,19 +2646,10 @@ export const withdraw = async (
 
       console.log("withdraw:token", { token });
 
-      const tokenConfigLookupForWithdraw =
-        token.configKey ?? token.originalSymbol ?? token.symbol;
-      const rawTokenConfigWithdraw = getTokenConfig(
+      const tokenConfigForWithdraw = resolveTokenConfigFromDisplayToken(
         networkId,
-        tokenConfigLookupForWithdraw
+        token
       );
-      const tokenConfigForWithdraw: TokenConfig | undefined = Array.isArray(
-        rawTokenConfigWithdraw
-      )
-        ? rawTokenConfigWithdraw.find(
-          (c) => String(c.poolId) === String(poolId)
-        ) ?? rawTokenConfigWithdraw[0]
-        : rawTokenConfigWithdraw;
 
       const folksWithdrawAdapter = resolveWithdrawFolksAdapter(
         tokenConfigForWithdraw ?? {},
@@ -4276,21 +4269,12 @@ export const deposit = async (
 
       console.log("bigAmount", { bigAmount });
 
-      const tokenConfigLookupSymbol =
-        token.configKey ?? token.originalSymbol ?? token.symbol;
-      const rawTokenConfigForDeposit = getTokenConfig(
+      const tokenConfigForDeposit = resolveTokenConfigFromDisplayToken(
         networkId,
-        tokenConfigLookupSymbol
+        token
       );
-      const tokenConfigForDeposit: TokenConfig | undefined = Array.isArray(
-        rawTokenConfigForDeposit
-      )
-        ? poolId != null && poolId !== ""
-          ? rawTokenConfigForDeposit.find(
-            (c) => String(c.poolId) === String(poolId)
-          ) ?? rawTokenConfigForDeposit[0]
-          : rawTokenConfigForDeposit[0]
-        : rawTokenConfigForDeposit;
+      const tokenConfigLookupSymbol =
+        tokenConfigLookupKeyFromDisplayToken(token);
 
       const folksForDeposit = resolveDepositFolksAdapter(
         tokenConfigForDeposit ?? {},
@@ -4792,25 +4776,6 @@ export const deposit = async (
           // Skip deposit if adjusted amount is 0 (user already has enough tokens)
           if (adjustedDepositAmount > BigInt(0)) {
             if (tokenStandard == "network") {
-              // ------------------------------------------------------------
-              // TODO move this to setup market workflow
-              // ------------------------------------------------------------
-              // {
-              //   const txnO = (
-              //     await builder.token.createBalanceBox(
-              //       algosdk.encodeAddress(
-              //         algosdk.getApplicationAddress(Number(poolId)).publicKey
-              //       )
-              //     )
-              //   ).obj;
-              //   console.log("createBalanceBox", { txnO });
-              //   buildN.push({
-              //     ...txnO,
-              //     payment: 28500,
-              //     note: new TextEncoder().encode("nt200 createBalanceBox"),
-              //   });
-              // }
-              // ------------------------------------------------------------
               if (p1 > 0) {
                 const txnO = (await builder.token.createBalanceBox(userAddress))
                   .obj;
@@ -5662,21 +5627,10 @@ export const borrow = async (
         ),
       };
 
-      const tokenConfigLookupBorrow =
-        (token as { configKey?: string }).configKey ??
-        (token as { originalSymbol?: string }).originalSymbol ??
-        token.symbol;
-      const rawTokenConfigBorrow = getTokenConfig(
+      const tokenConfigForBorrow = resolveTokenConfigFromDisplayToken(
         networkId,
-        tokenConfigLookupBorrow as never
+        token
       );
-      const tokenConfigForBorrow: TokenConfig | undefined = Array.isArray(
-        rawTokenConfigBorrow
-      )
-        ? rawTokenConfigBorrow.find(
-          (c) => String(c.poolId) === String(poolId)
-        ) ?? rawTokenConfigBorrow[0]
-        : rawTokenConfigBorrow;
 
       const folksBorrowAdapter = resolveBorrowFolksAdapter(
         tokenConfigForBorrow ?? {},
@@ -6015,21 +5969,10 @@ export const repay = async (
         throw new Error("Token not found");
       }
 
-      const tokenConfigLookupSymbol =
-        token.configKey ?? token.originalSymbol ?? token.symbol;
-      const rawTokenConfigForRepay = getTokenConfig(
+      const tokenConfigForRepay = resolveTokenConfigFromDisplayToken(
         networkId,
-        tokenConfigLookupSymbol
+        token
       );
-      const tokenConfigForRepay: TokenConfig | undefined = Array.isArray(
-        rawTokenConfigForRepay
-      )
-        ? poolId != null && poolId !== ""
-          ? rawTokenConfigForRepay.find(
-            (c) => String(c.poolId) === String(poolId)
-          ) ?? rawTokenConfigForRepay[0]
-          : rawTokenConfigForRepay[0]
-        : rawTokenConfigForRepay;
 
       const repayPhaseAdapters = tokenConfigForRepay
         ? getTokenAdaptersForPhase(tokenConfigForRepay, "repay")
@@ -6892,21 +6835,10 @@ export const repayAll = async (
         throw new Error("Token not found");
       }
 
-      const tokenConfigLookupSymbol =
-        token.configKey ?? token.originalSymbol ?? token.symbol;
-      const rawTokenConfigForRepay = getTokenConfig(
+      const tokenConfigForRepay = resolveTokenConfigFromDisplayToken(
         networkId,
-        tokenConfigLookupSymbol
+        token
       );
-      const tokenConfigForRepay: TokenConfig | undefined = Array.isArray(
-        rawTokenConfigForRepay
-      )
-        ? poolId != null && poolId !== ""
-          ? rawTokenConfigForRepay.find(
-            (c) => String(c.poolId) === String(poolId)
-          ) ?? rawTokenConfigForRepay[0]
-          : rawTokenConfigForRepay[0]
-        : rawTokenConfigForRepay;
 
       const repayPhaseAdapters = tokenConfigForRepay
         ? getTokenAdaptersForPhase(tokenConfigForRepay, "repay")
@@ -7335,10 +7267,12 @@ export const mint = async (
           originalContractId: t.originalContractId,
         }))
       );
-      console.log("Looking for marketId:", marketId);
+      console.log("Looking for marketId:", marketId, "poolId:", poolId);
 
-      const token = allTokens.find(
-        (token) => token.underlyingContractId === marketId
+      const token = resolveDisplayTokenForPoolMarket(
+        networkId,
+        poolId,
+        marketId
       );
 
       console.log("Token found:", token);
@@ -7352,23 +7286,14 @@ export const mint = async (
         throw new Error("Token not found");
       }
 
-      // Get the original token config to access tokenStandard (use canonical config key)
-      const originalTokenConfigRaw = getTokenConfig(
+      const originalTokenConfig = resolveTokenConfigFromDisplayToken(
         networkId,
-        token.configKey ?? token.originalSymbol ?? token.symbol
+        token
       );
-      if (!originalTokenConfigRaw) {
-        throw new Error(
-          `Token config not found for ${token.configKey ?? token.originalSymbol ?? token.symbol}`
-        );
-      }
-
-      const originalTokenConfig = Array.isArray(originalTokenConfigRaw)
-        ? originalTokenConfigRaw[0]
-        : originalTokenConfigRaw;
-
       if (!originalTokenConfig) {
-        throw new Error(`Token config not found for ${token.symbol}`);
+        throw new Error(
+          `Token config not found for ${tokenConfigLookupKeyFromDisplayToken(token)}`
+        );
       }
 
       console.log("Original token config:", originalTokenConfig);

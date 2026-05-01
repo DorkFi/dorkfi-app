@@ -14,6 +14,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import SupplyBorrowCongrats from "./SupplyBorrowCongrats";
+import { MarketRowTokenIcon } from "@/components/markets/MarketRowTokenIcon";
 import SupplyBorrowHeader from "./SupplyBorrowHeader";
 import SupplyBorrowForm from "./SupplyBorrowForm";
 import SupplyBorrowStats from "./SupplyBorrowStats";
@@ -77,6 +78,10 @@ import {
 } from "@/utils/depositModalPoolHealthEstimate";
 import TransactionSignPreview from "./TransactionSignPreview";
 import { getExplorerTransactionUrl } from "@/utils/explorerLinks";
+import {
+  isRainbowkitXchainWallet,
+  withRainbowkitHostDialogDismissed,
+} from "@/wallet/xchainSignUi";
 import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
 import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
 import {
@@ -150,6 +155,44 @@ type SupplyBorrowTokenRow = {
   originalContractId?: string;
 };
 
+/**
+ * `getAllTokensWithDisplayInfo` sets `configKey` to the `tokens` map key (e.g. `USDC` for every
+ * `tokens.USDC[]` row). Prefer `originalSymbol` (`fiUSDC`, `fUSDC`) so {@link getTokenConfig} hits
+ * the correct row or standalone key.
+ */
+function supplyBorrowTokenConfigLookupKey(
+  tok: SupplyBorrowTokenRow | null | undefined,
+  fallbackAsset: string
+): string {
+  if (!tok) return fallbackAsset;
+  const orig = String(tok.originalSymbol ?? "").trim();
+  if (orig !== "") return orig;
+  const ck = String(tok.configKey ?? "").trim();
+  if (ck !== "") return ck;
+  return fallbackAsset;
+}
+
+/** Pick one `TokenConfig` from `getTokenConfig` when the symbol maps to an array (e.g. several USDC pools). */
+function pickTokenConfigForSupplyBorrowRow(
+  raw: TokenConfig | TokenConfig[] | undefined,
+  tok: SupplyBorrowTokenRow
+): TokenConfig | null {
+  if (!raw) return null;
+  if (!Array.isArray(raw)) return raw;
+  const poolStr = String(tok.poolId ?? "").trim();
+  const contractStr = String(tok.underlyingContractId ?? "").trim();
+  const poolOk = (tc: TokenConfig) =>
+    poolStr === "" || String(tc.poolId ?? "") === poolStr;
+  if (contractStr !== "") {
+    const byContract = raw.find(
+      (tc) =>
+        poolOk(tc) && String(tc.contractId ?? "").trim() === contractStr
+    );
+    if (byContract) return byContract;
+  }
+  return raw.find(poolOk) ?? raw[0] ?? null;
+}
+
 /** When display `asset` + `poolId` match multiple config rows (e.g. Algo vs fALGO), pass the tokens map key from the market row (`configSymbol`). */
 export function resolveSupplyBorrowToken<T extends SupplyBorrowTokenRow>(
   tokens: T[],
@@ -190,7 +233,20 @@ export function resolveSupplyBorrowToken<T extends SupplyBorrowTokenRow>(
   }
 
   if (poolId != null && poolId !== "") {
-    return tokens.find((t) => t.symbol === asset && poolOk(t));
+    const poolHits = tokens.filter((t) => t.symbol === asset && poolOk(t));
+    if (poolHits.length <= 1) return poolHits[0];
+    if (marketId != null && String(marketId) !== "") {
+      const mid = String(marketId);
+      const byMid = poolHits.find(
+        (t) => String(t.underlyingContractId ?? "") === mid
+      );
+      if (byMid) return byMid;
+      const byOrig = poolHits.find(
+        (t) => String(t.originalContractId ?? "") === mid
+      );
+      if (byOrig) return byOrig;
+    }
+    return poolHits[0];
   }
   return tokens.find((t) => t.symbol === asset);
 }
@@ -199,6 +255,7 @@ export function resolveSupplyBorrowToken<T extends SupplyBorrowTokenRow>(
 export type SupplyBorrowAvailableAsset = {
   asset: string;
   icon: string;
+  iconBadgeUrl?: string;
   value?: number;
   poolId?: string;
   network?: string;
@@ -379,6 +436,9 @@ const SupplyBorrowModal = ({
     null
   );
   const [isSigning, setIsSigning] = useState(false);
+  /** Hide Radix dialog while xChain (RainbowKit) wallet UI signs (overlay blocks MetaMask). */
+  const [rainbowkitSignDialogSuppressed, setRainbowkitSignDialogSuppressed] =
+    useState(false);
   /** Set after two-step (Folks) step 1 mint is confirmed; reset when modal opens. */
   const [folksTwoStepMintConfirmed, setFolksTwoStepMintConfirmed] =
     useState(false);
@@ -544,16 +604,9 @@ const SupplyBorrowModal = ({
       marketId
     );
     if (!tok?.underlyingContractId) return null;
-    const originalSymbol =
-      (tok as { configKey?: string }).configKey ??
-      ("originalSymbol" in tok
-        ? (tok as { originalSymbol?: string }).originalSymbol
-        : asset);
-    const raw = getTokenConfig(networkToUse as NetworkId, originalSymbol);
-    if (!raw) return null;
-    return Array.isArray(raw)
-      ? raw.find((tc) => String(tc.poolId) === String(tok.poolId)) ?? raw[0]
-      : raw;
+    const lookupKey = supplyBorrowTokenConfigLookupKey(tok, asset);
+    const raw = getTokenConfig(networkToUse as NetworkId, lookupKey);
+    return pickTokenConfigForSupplyBorrowRow(raw, tok);
   }, [mode, networkToUse, asset, poolId, configSymbol, marketId]);
 
   const depositOriginalSymbol = useMemo(() => {
@@ -567,12 +620,7 @@ const SupplyBorrowModal = ({
       marketId
     );
     if (!tok) return null;
-    return (
-      (tok as { configKey?: string }).configKey ??
-      ("originalSymbol" in tok
-        ? (tok as { originalSymbol?: string }).originalSymbol
-        : asset)
-    );
+    return supplyBorrowTokenConfigLookupKey(tok, asset);
   }, [mode, networkToUse, asset, poolId, configSymbol, marketId]);
 
   /** Governance xALGO lending row (config symbol or `tokens` map key via `depositOriginalSymbol`). */
@@ -641,16 +689,9 @@ const SupplyBorrowModal = ({
       marketId
     );
     if (!tok?.underlyingContractId) return null;
-    const originalSymbol =
-      (tok as { configKey?: string }).configKey ??
-      ("originalSymbol" in tok
-        ? (tok as { originalSymbol?: string }).originalSymbol
-        : asset);
-    const raw = getTokenConfig(networkToUse as NetworkId, originalSymbol);
-    if (!raw) return null;
-    return Array.isArray(raw)
-      ? raw.find((tc) => String(tc.poolId) === String(tok.poolId)) ?? raw[0]
-      : raw;
+    const lookupKey = supplyBorrowTokenConfigLookupKey(tok, asset);
+    const raw = getTokenConfig(networkToUse as NetworkId, lookupKey);
+    return pickTokenConfigForSupplyBorrowRow(raw, tok);
   }, [mode, networkToUse, asset, poolId, configSymbol, marketId]);
 
   const borrowOriginalSymbol = useMemo(() => {
@@ -664,12 +705,7 @@ const SupplyBorrowModal = ({
       marketId
     );
     if (!tok) return null;
-    return (
-      (tok as { configKey?: string }).configKey ??
-      ("originalSymbol" in tok
-        ? (tok as { originalSymbol?: string }).originalSymbol
-        : asset)
-    );
+    return supplyBorrowTokenConfigLookupKey(tok, asset);
   }, [mode, networkToUse, asset, poolId, configSymbol, marketId]);
 
   /** Governance xALGO lending row (borrow), same disambiguation as deposit. */
@@ -765,6 +801,12 @@ const SupplyBorrowModal = ({
 
   useEffect(() => {
     if (!isOpen) setBorrowRoutePickerOpen(false);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (isOpen) {
+      setRainbowkitSignDialogSuppressed(false);
+    }
   }, [isOpen]);
 
   /** f-ASA wallet balance (human) when config exposes a `market_token` deposit route; fills in if parent omits `walletBalanceMarketToken`. */
@@ -1934,14 +1976,32 @@ const SupplyBorrowModal = ({
             description: `Step 2 of 2 — supply f-ALGO to the market in ${walletName}`,
             duration: 10000,
           });
-          const stxns2 = await signTransactions(
-            pending2.txnsB64.map((txn: string) =>
-              Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
-            )
-          );
+          const stxns2 = await withRainbowkitHostDialogDismissed({
+            wallet: activeWallet,
+            setSuppressed: setRainbowkitSignDialogSuppressed,
+            leaveOverlayDismissedOnSuccess: true,
+            run: () =>
+              signTransactions(
+                pending2.txnsB64.map((txn: string) =>
+                  Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+                )
+              ),
+          });
           const res2 = await algorandClients.algod.sendRawTransaction(stxns2).do();
           await finalizeAfterSign(stxns2, pending2, res2);
+          if (isRainbowkitXchainWallet(activeWallet)) {
+            setShowSuccess(false);
+            toast({
+              title: "Supply confirmed",
+              description:
+                "Your transaction was submitted. The portfolio will update shortly.",
+            });
+            onClose();
+          }
         } catch (chainErr) {
+          if (isRainbowkitXchainWallet(activeWallet)) {
+            setRainbowkitSignDialogSuppressed(false);
+          }
           console.error("Deposit two-step chain:", chainErr);
           toast({
             variant: "destructive",
@@ -2158,7 +2218,11 @@ const SupplyBorrowModal = ({
             walletName.includes("pera") || walletName.includes("defly");
         }
 
+        const isXchainRainbowkit =
+          walletId === "rainbowkit" && networkId === "algorand-mainnet";
+
         const isSupported =
+          isXchainRainbowkit ||
           isUniversalWallet ||
           (isVOIWallet && networkId === "voi-mainnet") ||
           (isAlgorandWallet && networkId === "algorand-mainnet") ||
@@ -2189,11 +2253,17 @@ const SupplyBorrowModal = ({
         duration: 10000,
       });
 
-      const stxns = await signTransactions(
-        pending.txnsB64.map((txn: string) =>
-          Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
-        )
-      );
+      const stxns = await withRainbowkitHostDialogDismissed({
+        wallet: activeWallet,
+        setSuppressed: setRainbowkitSignDialogSuppressed,
+        leaveOverlayDismissedOnSuccess: true,
+        run: () =>
+          signTransactions(
+            pending.txnsB64.map((txn: string) =>
+              Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+            )
+          ),
+      });
 
       const finalNetwork = pending.actualNetwork;
       const algorandNetwork = getAlgorandNetworkFromNetworkId(
@@ -2207,7 +2277,19 @@ const SupplyBorrowModal = ({
       const res = await algorandClients.algod.sendRawTransaction(stxns).do();
 
       await finalizeAfterSign(stxns, pending, res);
+      if (isRainbowkitXchainWallet(activeWallet)) {
+        setShowSuccess(false);
+        toast({
+          title: mode === "deposit" ? "Supply confirmed" : "Borrow confirmed",
+          description:
+            "Your transaction was submitted. The portfolio will update shortly.",
+        });
+        onClose();
+      }
     } catch (error) {
+      if (isRainbowkitXchainWallet(activeWallet)) {
+        setRainbowkitSignDialogSuppressed(false);
+      }
       console.error(`${mode} sign error:`, error);
       let errorMessage = `${mode} failed`;
       if (error instanceof Error) {
@@ -2264,7 +2346,11 @@ const SupplyBorrowModal = ({
           isWalletConnectAlgorand =
             walletName.includes("pera") || walletName.includes("defly");
         }
+        const isXchainRainbowkit =
+          walletId === "rainbowkit" && networkId === "algorand-mainnet";
+
         const isSupported =
+          isXchainRainbowkit ||
           isUniversalWallet ||
           (isVOIWallet && networkId === "voi-mainnet") ||
           (isAlgorandWallet && networkId === "algorand-mainnet") ||
@@ -2314,9 +2400,16 @@ const SupplyBorrowModal = ({
         duration: 10000,
       });
 
-      const stxns = await signTransactions(
-        txnsB64.map((b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)))
-      );
+      const stxns = await withRainbowkitHostDialogDismissed({
+        wallet: activeWallet,
+        setSuppressed: setRainbowkitSignDialogSuppressed,
+        run: () =>
+          signTransactions(
+            txnsB64.map((b64) =>
+              Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
+            )
+          ),
+      });
       const res = await algod.sendRawTransaction(stxns).do();
       await waitForConfirmation(algod, res.txid, 4);
       setFAssetPreOptInStatus("in");
@@ -3149,7 +3242,10 @@ const SupplyBorrowModal = ({
 
   return (
     <>
-    <Dialog open={isOpen} onOpenChange={onClose}>
+    <Dialog
+      open={isOpen && !rainbowkitSignDialogSuppressed}
+      onOpenChange={onClose}
+    >
       <DialogContent className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-white rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-[95vw] md:max-w-md max-h-[min(90vh,90dvh)] overflow-y-auto overflow-x-hidden flex flex-col p-0 overscroll-contain">
         {showSuccess ? (
           <div className="p-6">
@@ -3203,11 +3299,26 @@ const SupplyBorrowModal = ({
                       >
                         <SelectTrigger className="w-auto min-w-0 h-auto bg-transparent border-none p-0 hover:bg-transparent focus:ring-0 focus:ring-offset-0 justify-center [&>svg:last-child]:!hidden">
                           <div className="flex items-center gap-2 shrink-0">
-                            <img
-                              src={assetData.icon}
-                              alt={asset}
-                              className="w-12 h-12 rounded-full shadow"
-                            />
+                            {(() => {
+                              const idx = availableAssets.findIndex(
+                                (a, i) =>
+                                  supplyBorrowAssetRowKey(a, i) ===
+                                  supplyBorrowSelectRowKey
+                              );
+                              const sel =
+                                idx >= 0 ? availableAssets[idx] : undefined;
+                              return (
+                                <MarketRowTokenIcon
+                                  market={{
+                                    icon: sel?.icon ?? assetData.icon,
+                                    asset,
+                                    iconBadgeUrl: sel?.iconBadgeUrl,
+                                  }}
+                                  poolLetterLabel={null}
+                                  imgClassName="h-12 w-12 rounded-full object-contain shadow"
+                                />
+                              );
+                            })()}
                             <span className="flex items-center gap-1 text-xl font-semibold text-slate-800 dark:text-white">
                               {asset}
                               <ChevronDown className="h-4 w-4 text-slate-800 dark:text-white" />
@@ -3221,10 +3332,14 @@ const SupplyBorrowModal = ({
                               value={supplyBorrowAssetRowKey(a, i)}
                             >
                               <span className="flex items-center gap-2">
-                                <img
-                                  src={a.icon}
-                                  alt={a.asset}
-                                  className="h-5 w-5 rounded-full"
+                                <MarketRowTokenIcon
+                                  market={{
+                                    icon: a.icon,
+                                    asset: a.asset,
+                                    iconBadgeUrl: a.iconBadgeUrl,
+                                  }}
+                                  poolLetterLabel={null}
+                                  imgClassName="h-8 w-8 shrink-0 rounded-full object-contain"
                                 />
                                 <span>{a.asset}</span>
                                 {a.value != null && (

@@ -24,6 +24,7 @@ import { formatRelativeTime } from "@/utils/timeUtils";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { calculateBorrowAPY } from "@/utils/apyCalculations";
 import { useTokenPrice } from "@/hooks/useTokenPrice";
+import { useToast } from "@/hooks/use-toast";
 import {
   Tooltip,
   TooltipContent,
@@ -43,6 +44,7 @@ import {
   tokenAdapterStableId,
 } from "@/config";
 import { useWallet } from "@txnlab/use-wallet-react";
+import { isRainbowkitXchainWallet } from "@/wallet/xchainSignUi";
 import algorandService, { type AlgorandNetwork } from "@/services/algorandService";
 import {
   ALGORAND_MAINNET_NODELY_ALGOD_URL,
@@ -153,6 +155,11 @@ interface RepayModalProps {
    * (consensus `immediate_mint` then nt200 deposit + repay in one group).
    */
   xalgoConsensusRepayAlgoOption?: boolean;
+  /**
+   * When true, the dialog is not presented so a parent can hide the Radix overlay
+   * while xChain (RainbowKit) wallet signing UI appears.
+   */
+  rainbowkitHostOverlaySuppressed?: boolean;
 }
 
 const RepayModal = ({
@@ -179,8 +186,10 @@ const RepayModal = ({
   folksMintOneUnderlyingAtomic,
   repayTokenConfig,
   xalgoConsensusRepayAlgoOption = false,
+  rainbowkitHostOverlaySuppressed = false,
 }: RepayModalProps) => {
-  const { activeAccount } = useWallet();
+  const { activeAccount, activeWallet } = useWallet();
+  const { toast } = useToast();
   const [amount, setAmount] = useState<number | "">("");
   const [fiatValue, setFiatValue] = useState(0);
   const { currentNetwork } = useNetwork();
@@ -755,8 +764,16 @@ const RepayModal = ({
       });
       setTransactionId(txId);
 
-      // Only show success modal after transaction is actually completed
-      setShowSuccess(true);
+      if (isRainbowkitXchainWallet(activeWallet)) {
+        toast({
+          title: "Repay confirmed",
+          description:
+            "Your transaction was submitted. The portfolio will update shortly.",
+        });
+        onClose();
+      } else {
+        setShowSuccess(true);
+      }
     } catch (error) {
       console.error("Repay transaction failed:", error);
       // You might want to show an error message to the user here
@@ -878,7 +895,10 @@ const RepayModal = ({
 
   return (
     <>
-    <Dialog open={isOpen} onOpenChange={onClose}>
+    <Dialog
+      open={isOpen && !rainbowkitHostOverlaySuppressed}
+      onOpenChange={onClose}
+    >
       <DialogContent className="bg-card dark:bg-slate-900 rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-[95vw] md:max-w-lg lg:max-w-4xl h-[90vh] md:h-auto md:max-h-[85vh] overflow-hidden flex flex-col px-0 py-0">
         {showSuccess ? (
           <div className="p-6 overflow-y-auto">

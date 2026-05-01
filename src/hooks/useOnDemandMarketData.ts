@@ -28,12 +28,18 @@ import BigNumber from "bignumber.js";
 import { useTinymanLiquidStakingLiveApyPercent } from "@/hooks/useTinymanLiquidStakingLiveApyPercent";
 import { useXalgoGovernanceLiveApyPercent } from "@/hooks/useXalgoGovernanceLiveApyPercent";
 import { useFolksMainnetAlgoDepositLiveApyPercent } from "@/hooks/useFolksMainnetAlgoDepositLiveApyPercent";
+import { useFolksMainnetUsdcPoolLiveApyPercent } from "@/hooks/useFolksMainnetUsdcPoolLiveApyPercent";
+import { useFolksMainnetFiUsdcEcosystemPoolLiveApyPercent } from "@/hooks/useFolksMainnetFiUsdcEcosystemPoolLiveApyPercent";
+import { useFolksMainnetFiTinyEcosystemPoolLiveApyPercent } from "@/hooks/useFolksMainnetFiTinyEcosystemPoolLiveApyPercent";
+import { resolveTokenIconBadgeUrl } from "@/utils/tokenImageUtils";
 
 export interface OnDemandMarketData {
   asset: string;
   /** Canonical key in `network.tokens` (e.g. `ALGO` when {@link asset} is display `Algo`). */
   configSymbol?: string;
   icon: string;
+  /** Bottom-right badge on market icon (from token config `iconBadgeFromSymbol`). */
+  iconBadgeUrl?: string;
   totalSupply: number;
   totalSupplyUSD: number;
   supplyAPY: number;
@@ -110,6 +116,44 @@ function tokenConfigObjectKey(token: {
   symbol: string;
 }): string {
   return token.configKey ?? token.originalSymbol ?? token.symbol;
+}
+
+/** Several `tokens.USDC[]` rows can share the same `poolId`; match `contractId` when available. */
+function resolveTokenConfigFromMapEntry(
+  tokenConfigRaw: TokenConfig | TokenConfig[] | undefined,
+  token: {
+    poolId?: string | null;
+    underlyingContractId?: string;
+    originalContractId?: string;
+  },
+  tokenPoolIdOverride?: string
+): TokenConfig | undefined {
+  if (!tokenConfigRaw) return undefined;
+  if (!Array.isArray(tokenConfigRaw)) return tokenConfigRaw;
+  const poolStr =
+    tokenPoolIdOverride != null && String(tokenPoolIdOverride) !== ""
+      ? String(tokenPoolIdOverride)
+      : token.poolId != null && String(token.poolId) !== ""
+        ? String(token.poolId)
+        : "";
+  const contractStr = String(
+    token.originalContractId ?? token.underlyingContractId ?? ""
+  ).trim();
+  if (poolStr !== "" && contractStr !== "") {
+    const byBoth = tokenConfigRaw.find(
+      (tc) =>
+        String(tc.poolId) === poolStr &&
+        String(tc.contractId ?? "").trim() === contractStr
+    );
+    if (byBoth) return byBoth;
+  }
+  if (poolStr !== "") {
+    return (
+      tokenConfigRaw.find((tc) => String(tc.poolId) === poolStr) ??
+      tokenConfigRaw[0]
+    );
+  }
+  return tokenConfigRaw[0];
 }
 
 /** Pool app id for filters (skeleton rows may only have `marketInfo.poolId` after load). */
@@ -214,16 +258,38 @@ export const useOnDemandMarketData = ({
   const folksAlgoDepositLiveApyPct = useFolksMainnetAlgoDepositLiveApyPercent(
     algorandMainnetMarkets
   );
+  const folksUsdcPoolLiveApy = useFolksMainnetUsdcPoolLiveApyPercent(
+    algorandMainnetMarkets
+  );
+  const folksFiUsdcEcosystemLiveApy = useFolksMainnetFiUsdcEcosystemPoolLiveApyPercent(
+    algorandMainnetMarkets
+  );
+  const folksFiTinyEcosystemLiveApy = useFolksMainnetFiTinyEcosystemPoolLiveApyPercent(
+    algorandMainnetMarkets
+  );
   const liveIntrinsicSupplyApy = useMemo<LiveIntrinsicSupplyApySnapshot>(
     () => ({
       tinymanLiquidStakingPercent: tinymanLiveIntrinsicApyPct,
       xalgoGovernanceLambdaPercent: xalgoLiveIntrinsicApyPct,
       folksMainnetAlgoDepositPercent: folksAlgoDepositLiveApyPct,
+      folksMainnetUsdcDepositPercent: folksUsdcPoolLiveApy?.depositPercent ?? null,
+      folksMainnetUsdcBorrowPercent: folksUsdcPoolLiveApy?.borrowPercent ?? null,
+      folksMainnetFiUsdcEcosystemDepositPercent:
+        folksFiUsdcEcosystemLiveApy?.depositPercent ?? null,
+      folksMainnetFiUsdcEcosystemBorrowPercent:
+        folksFiUsdcEcosystemLiveApy?.borrowPercent ?? null,
+      folksMainnetFiTinyEcosystemDepositPercent:
+        folksFiTinyEcosystemLiveApy?.depositPercent ?? null,
+      folksMainnetFiTinyEcosystemBorrowPercent:
+        folksFiTinyEcosystemLiveApy?.borrowPercent ?? null,
     }),
     [
       tinymanLiveIntrinsicApyPct,
       xalgoLiveIntrinsicApyPct,
       folksAlgoDepositLiveApyPct,
+      folksUsdcPoolLiveApy,
+      folksFiUsdcEcosystemLiveApy,
+      folksFiTinyEcosystemLiveApy,
     ]
   );
 
@@ -254,10 +320,11 @@ export const useOnDemandMarketData = ({
       // Get the original token config to access isStoken property
       const networkConfig = getNetworkConfig(currentNetwork);
       const tokenConfigRaw = networkConfig.tokens[tokensMapKey];
-      // Compare poolIds as strings to ensure exact match
-      const tokenConfig = Array.isArray(tokenConfigRaw)
-        ? tokenConfigRaw.find((tc) => String(tc.poolId) === String(token.poolId)) || tokenConfigRaw[0]
-        : tokenConfigRaw;
+      const tokenConfig = resolveTokenConfigFromMapEntry(
+        tokenConfigRaw,
+        token,
+        undefined
+      );
 
       const rewardsMeta = getRewardsMetaForTokenRow(
         currentNetwork,
@@ -285,6 +352,9 @@ export const useOnDemandMarketData = ({
         asset: token.symbol,
         configSymbol,
         icon: token.logoPath,
+        iconBadgeUrl: resolveTokenIconBadgeUrl(
+          tokenConfig?.iconBadgeFromSymbol
+        ),
         totalSupply: 0,
         totalSupplyUSD: 0,
         supplyAPY: 0,
@@ -479,11 +549,11 @@ export const useOnDemandMarketData = ({
             const configSymbol = token.originalSymbol ?? token.symbol;
             const tokensMapKey = tokenConfigObjectKey(token);
             const tokenConfigRaw = networkConfig.tokens[tokensMapKey];
-            const tokenConfig = Array.isArray(tokenConfigRaw)
-              ? tokenConfigRaw.find(
-                (tc) => String(tc.poolId) === String(tokenPoolId)
-              ) || tokenConfigRaw[0]
-              : tokenConfigRaw;
+            const tokenConfig = resolveTokenConfigFromMapEntry(
+              tokenConfigRaw,
+              token,
+              tokenPoolId
+            );
 
             /** On-chain totals are f-asset; for Folks markets show underlying-equivalent using minted f-asset for 1.0 underlying. */
             let totalSupplyDisplay = totalSupplyAmount;
@@ -608,6 +678,9 @@ export const useOnDemandMarketData = ({
               asset: token.symbol,
               configSymbol,
               icon: token.logoPath,
+              iconBadgeUrl: resolveTokenIconBadgeUrl(
+                tokenConfig?.iconBadgeFromSymbol
+              ),
               totalSupply: totalSupplyDisplay,
               totalSupplyUSD,
               supplyAPY: supplyAPYValue,

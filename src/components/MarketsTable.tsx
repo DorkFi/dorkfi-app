@@ -1,7 +1,14 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ExternalLink, RefreshCw, ChevronDown } from "lucide-react";
+import {
+  ArrowDownUp,
+  ExternalLink,
+  RefreshCw,
+  ChevronDown,
+  Fuel,
+  CircleArrowUp,
+} from "lucide-react";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import {
@@ -30,6 +37,7 @@ import { PremiumMarketModal } from "@/components/market-modal/PremiumMarketModal
 import MintModal from "@/components/MintModal";
 import MarketsHeroSection from "@/components/markets/MarketsHeroSection";
 import MarketsTableContent from "@/components/markets/MarketsTableContent";
+import TinymanSwapModal from "@/components/TinymanSwapModal";
 import {
   fetchUserGlobalData,
   fetchUserBorrowBalance,
@@ -41,7 +49,7 @@ import {
   isMarketPaused,
 } from "@/services/lendingService";
 import type { UserPosition as MarketDetailUserPosition } from "@/components/market-modal/types";
-import { normalizeWadUsdPerToken, roundUsdToCents } from "@/lib/utils";
+import { normalizeWadUsdPerToken, roundUsdToCents, cn } from "@/lib/utils";
 import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
 import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
 import { useToast } from "@/hooks/use-toast";
@@ -74,6 +82,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import { useRewardsAprBonusMap } from "@/hooks/useRewardsAprBonusMap";
+import {
+  XchainUsdcBridgeControls,
+  shouldShowXchainUsdcBridgeControls,
+} from "@/components/xchain/XchainUsdcBridgeControls";
 
 const MAX_CLAIMS_PER_TX = 3;
 
@@ -251,8 +263,31 @@ function marketsTableWalletBalanceCacheKey(
   return `${asset}|p=${poolId ?? ""}|rk=${marketRowKey ?? ""}`;
 }
 
+/** Toolbar gas-style meter: fill hits 100% at this many spendable ALGO. */
+const MARKETS_TOOLBAR_ALGO_METER_CAP = 10;
+
+function marketsToolbarAlgoMeterFillPercent(balance: number): number {
+  if (!Number.isFinite(balance) || balance <= 0) return 0;
+  return Math.min(100, (balance / MARKETS_TOOLBAR_ALGO_METER_CAP) * 100);
+}
+
+function marketsToolbarAlgoMeterBarClass(balance: number): string {
+  if (!Number.isFinite(balance) || balance < 1) return "bg-red-500";
+  if (balance <= 5) return "bg-yellow-500 dark:bg-yellow-400";
+  if (balance < MARKETS_TOOLBAR_ALGO_METER_CAP) return "bg-emerald-500";
+  return "bg-green-500";
+}
+
+function marketsToolbarSpendableAlgoIsMeterGreen(balance: number | null): boolean {
+  return (
+    balance != null &&
+    Number.isFinite(balance) &&
+    balance >= MARKETS_TOOLBAR_ALGO_METER_CAP
+  );
+}
+
 const MarketsTable = () => {
-  const { formatPercent } = useNumberI18n();
+  const { formatPercent, formatNumber } = useNumberI18n();
   const [searchTerm, setSearchTerm] = useState("");
   const [sortField, setSortField] = useState<SortField>("default");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
@@ -345,12 +380,83 @@ const MarketsTable = () => {
     rewardNames?: string[]; // Track reward names for sharing
   } | null>(null);
   const [shareButtonClicked, setShareButtonClicked] = useState(false);
+  const [isTinymanSwapModalOpen, setIsTinymanSwapModalOpen] = useState(false);
+  /** Open Tinyman with assets biased toward receiving ALGO (fee top-up). */
+  const [tinymanSwapOpenForGasUp, setTinymanSwapOpenForGasUp] =
+    useState(false);
+  /** Spendable ALGO (human) for markets toolbar meter; `null` when not applicable. */
+  const [marketsToolbarSpendableAlgo, setMarketsToolbarSpendableAlgo] =
+    useState<number | null>(null);
+  const [marketsToolbarSpendableAlgoLoading, setMarketsToolbarSpendableAlgoLoading] =
+    useState(false);
+  const [marketsToolbarAlgoRefreshNonce, setMarketsToolbarAlgoRefreshNonce] =
+    useState(0);
 
   const { activeAccount, signTransactions, activeWallet } = useWallet();
 
   const { currentNetwork, switchNetwork } = useNetwork();
+
   const enabledNetworks = getEnabledNetworks();
+  const showMarketsLiquidityToolbar =
+    currentNetwork === "algorand-mainnet" ||
+    currentNetwork === "algorand-testnet";
+  /** Tighter spendable-ALGO strip when Xchain bridge controls share the row. */
+  const marketsToolbarSpendableExtraTight =
+    showMarketsLiquidityToolbar &&
+    shouldShowXchainUsdcBridgeControls(currentNetwork, activeWallet?.id);
   const { toast } = useToast();
+
+  useEffect(() => {
+    if (!showMarketsLiquidityToolbar) {
+      setMarketsToolbarSpendableAlgo(null);
+      setMarketsToolbarSpendableAlgoLoading(false);
+      return;
+    }
+    if (!activeAccount?.address) {
+      setMarketsToolbarSpendableAlgo(null);
+      setMarketsToolbarSpendableAlgoLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setMarketsToolbarSpendableAlgoLoading(true);
+    void (async () => {
+      try {
+        const algorandNetwork = getAlgorandNetworkFromNetworkId(
+          currentNetwork as NetworkId
+        );
+        if (!algorandNetwork) {
+          if (!cancelled) {
+            setMarketsToolbarSpendableAlgo(null);
+            setMarketsToolbarSpendableAlgoLoading(false);
+          }
+          return;
+        }
+        await algorandService.initializeClientsForReads(algorandNetwork);
+        const accountInfo = await algorandService
+          .getAlgodClient()
+          .accountInformation(activeAccount.address)
+          .do();
+        if (!cancelled) {
+          setMarketsToolbarSpendableAlgo(
+            spendableAlgoHumanFromAccount(accountInfo)
+          );
+        }
+      } catch (e) {
+        console.error("[MarketsTable] toolbar spendable ALGO:", e);
+        if (!cancelled) setMarketsToolbarSpendableAlgo(0);
+      } finally {
+        if (!cancelled) setMarketsToolbarSpendableAlgoLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    showMarketsLiquidityToolbar,
+    activeAccount?.address,
+    currentNetwork,
+    marketsToolbarAlgoRefreshNonce,
+  ]);
 
   // Helper function to get clients for reads using the active network
   const getSyncedClientsForReads = async () => {
@@ -2346,6 +2452,7 @@ const MarketsTable = () => {
   // Handle refresh button click
   const handleRefresh = () => {
     loadAllMarkets();
+    setMarketsToolbarAlgoRefreshNonce((n) => n + 1);
   };
 
   // Refresh wallet balance for a specific asset (clears cache and refetches)
@@ -3039,62 +3146,274 @@ const MarketsTable = () => {
   return (
     <div className="max-w-[1200px] mx-auto px-4">
       <div className="space-y-4">
-        {/* Network selector */}
+        {/* Network + liquidity toolbar */}
         {enabledNetworks.length > 0 && (
-          <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/30 dark:bg-muted/20 px-3 py-2 cursor-pointer hover:bg-muted/50 transition-colors w-fit">
-                  <img
-                    src={getNetworkLogoPath(currentNetwork)}
-                    alt=""
-                    className="h-5 w-5 rounded-full"
-                    onError={(e) => {
-                      const target = e.target as HTMLImageElement;
-                      target.src = "/placeholder.svg";
-                    }}
-                  />
-                  <span className="text-sm font-medium">
-                    {getNetworkConfig(currentNetwork).name}
+          <section
+            aria-labelledby="markets-toolbar-heading"
+            className="mb-4"
+          >
+            <h2 id="markets-toolbar-heading" className="sr-only">
+              Network, liquidity, and spendable ALGO
+            </h2>
+            <div className="rounded-2xl border border-border/80 bg-muted/25 px-3 py-3 shadow-sm dark:bg-muted/10 sm:px-4 sm:py-3">
+              <div
+                className={cn(
+                  "flex flex-col gap-3",
+                  showMarketsLiquidityToolbar &&
+                    cn(
+                      "sm:flex-row sm:items-center sm:gap-4 md:gap-5 lg:items-start lg:gap-5 xl:gap-6",
+                      marketsToolbarSpendableExtraTight &&
+                        "lg:gap-3 xl:gap-4"
+                    )
+                )}
+              >
+                <div className="flex min-w-0 flex-col gap-1.5 self-start sm:shrink-0">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Network
                   </span>
-                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                </div>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-56">
-                <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                  Network
-                </div>
-                <DropdownMenuSeparator />
-                {enabledNetworks.map((networkId) => {
-                  const networkConfig = getNetworkConfig(networkId);
-                  const isCurrent = currentNetwork === networkId;
-                  return (
-                    <DropdownMenuItem
-                      key={networkId}
-                      onClick={() => switchNetwork(networkId)}
-                      className="cursor-pointer flex items-center justify-between"
-                    >
-                      <div className="flex items-center gap-2">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-9 gap-2 rounded-xl border-border bg-muted/40 px-3 dark:bg-muted/25 hover:bg-muted/60 dark:hover:bg-muted/35"
+                        aria-label={`Network: ${getNetworkConfig(currentNetwork).name}. Change network.`}
+                      >
                         <img
-                          src={getNetworkLogoPath(networkId)}
+                          src={getNetworkLogoPath(currentNetwork)}
                           alt=""
-                          className="h-5 w-5 rounded-full"
+                          className="h-5 w-5 shrink-0 rounded-full"
                           onError={(e) => {
                             const target = e.target as HTMLImageElement;
                             target.src = "/placeholder.svg";
                           }}
                         />
-                        <span className="text-sm">{networkConfig.name}</span>
+                        <span className="text-sm font-medium">
+                          {getNetworkConfig(currentNetwork).name}
+                        </span>
+                        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-56">
+                      <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                        Network
                       </div>
-                      {isCurrent && (
-                        <span className="w-2 h-2 rounded-full bg-green-500" />
+                      <DropdownMenuSeparator />
+                      {enabledNetworks.map((networkId) => {
+                        const networkConfig = getNetworkConfig(networkId);
+                        const isCurrent = currentNetwork === networkId;
+                        return (
+                          <DropdownMenuItem
+                            key={networkId}
+                            onClick={() => switchNetwork(networkId)}
+                            className="cursor-pointer flex items-center justify-between"
+                          >
+                            <div className="flex items-center gap-2">
+                              <img
+                                src={getNetworkLogoPath(networkId)}
+                                alt=""
+                                className="h-5 w-5 rounded-full"
+                                onError={(e) => {
+                                  const target = e.target as HTMLImageElement;
+                                  target.src = "/placeholder.svg";
+                                }}
+                              />
+                              <span className="text-sm">{networkConfig.name}</span>
+                            </div>
+                            {isCurrent && (
+                              <span className="w-2 h-2 rounded-full bg-green-500" />
+                            )}
+                          </DropdownMenuItem>
+                        );
+                      })}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+
+                {showMarketsLiquidityToolbar && (
+                  <>
+                    <div
+                      className="pointer-events-none hidden h-7 w-px shrink-0 self-center bg-muted-foreground/25 dark:bg-muted-foreground/35 sm:block"
+                      aria-hidden
+                    />
+                    <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        Liquidity
+                      </span>
+                      <div className="flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:flex-nowrap sm:items-center sm:gap-3 sm:w-auto">
+                        <XchainUsdcBridgeControls />
+                        {shouldShowXchainUsdcBridgeControls(
+                          currentNetwork,
+                          activeWallet?.id
+                        ) && (
+                          <div
+                            className="pointer-events-none hidden h-5 w-px shrink-0 self-center bg-muted-foreground/50 dark:bg-muted-foreground/60 sm:block"
+                            aria-hidden
+                          />
+                        )}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="flex h-9 w-fit shrink-0 items-center gap-2 self-start rounded-xl border-border bg-muted/40 dark:bg-muted/25 hover:bg-muted/60 dark:hover:bg-muted/35 sm:self-center"
+                          onClick={() => {
+                            setTinymanSwapOpenForGasUp(false);
+                            setIsTinymanSwapModalOpen(true);
+                          }}
+                          aria-label="Open Tinyman swap"
+                        >
+                          <ArrowDownUp className="h-4 w-4 shrink-0" />
+                          Swap
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div
+                      className="pointer-events-none hidden h-7 w-px shrink-0 self-center bg-muted-foreground/25 dark:bg-muted-foreground/35 sm:block"
+                      aria-hidden
+                    />
+                    <div
+                      className={cn(
+                        "flex min-w-0 flex-1 flex-col gap-1.5 sm:min-w-0 sm:max-w-md",
+                        "lg:flex-none lg:shrink",
+                        marketsToolbarSpendableExtraTight
+                          ? "lg:max-w-[min(200px,46vw)] xl:max-w-[220px]"
+                          : "lg:max-w-[min(280px,34vw)] xl:max-w-[min(300px,32vw)]"
                       )}
-                    </DropdownMenuItem>
-                  );
-                })}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+                    >
+                      {/* Below lg: stacked; lg+: amount block | meter | Gas Up in one row */}
+                      <div
+                        className={cn(
+                          "flex min-w-0 flex-col gap-2 lg:flex-row lg:items-center",
+                          marketsToolbarSpendableExtraTight
+                            ? "lg:gap-1.5"
+                            : "lg:gap-2.5"
+                        )}
+                      >
+                        {/* Mobile: order puts meter between caption and balance; lg: caption+amount left, meter right */}
+                        <span className="order-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground lg:hidden">
+                          <Fuel
+                            className="h-3.5 w-3.5 shrink-0 text-muted-foreground/90"
+                            aria-hidden
+                          />
+                          Spendable
+                        </span>
+                        <div
+                          className={cn(
+                            "order-2 flex w-full min-w-0 flex-col gap-2 sm:flex-1 sm:flex-row sm:items-center sm:gap-3",
+                            "lg:order-2 lg:min-w-0 lg:flex-1 lg:gap-2"
+                          )}
+                        >
+                          <div
+                            className={cn(
+                              "relative isolate min-w-0 w-full overflow-hidden rounded-full sm:flex-1",
+                              "h-3 min-h-[12px] ring-1 ring-border/60 bg-muted/90 dark:bg-muted/70 dark:ring-border/50",
+                              "sm:h-2 sm:min-h-[8px] sm:ring-0 sm:bg-muted/70 dark:sm:bg-muted/50",
+                              "lg:h-2 lg:min-h-[8px]",
+                              marketsToolbarSpendableExtraTight
+                                ? "lg:max-w-[5.5rem] xl:max-w-[6.5rem]"
+                                : "lg:max-w-[9rem] xl:max-w-[11rem]"
+                            )}
+                          >
+                            {marketsToolbarSpendableAlgoLoading ? (
+                              <div
+                                className="absolute left-0 top-0 z-[1] h-full w-1/3 animate-pulse rounded-full bg-muted-foreground/35"
+                                aria-hidden
+                              />
+                            ) : (
+                              <div
+                                className={cn(
+                                  "absolute left-0 top-0 z-[1] h-full min-w-0 rounded-full transition-[width] duration-300 ease-out",
+                                  marketsToolbarSpendableAlgo == null
+                                    ? "w-0 bg-transparent"
+                                    : marketsToolbarAlgoMeterBarClass(
+                                        marketsToolbarSpendableAlgo
+                                      )
+                                )}
+                                style={
+                                  marketsToolbarSpendableAlgo != null
+                                    ? {
+                                        width: `${marketsToolbarAlgoMeterFillPercent(marketsToolbarSpendableAlgo)}%`,
+                                      }
+                                    : undefined
+                                }
+                              />
+                            )}
+                          </div>
+                          {!marketsToolbarSpendableAlgoIsMeterGreen(
+                            marketsToolbarSpendableAlgo
+                          ) && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 w-fit shrink-0 gap-1 self-start rounded-lg border-border bg-muted/40 px-2 text-[11px] font-medium dark:bg-muted/25 hover:bg-muted/60 dark:hover:bg-muted/35 sm:self-center sm:gap-1.5 sm:rounded-xl sm:px-2.5 sm:text-xs lg:h-8 lg:px-2 lg:py-0"
+                              onClick={() => {
+                                setTinymanSwapOpenForGasUp(true);
+                                setIsTinymanSwapModalOpen(true);
+                              }}
+                              aria-label="Open swap to receive ALGO for fees"
+                            >
+                              <CircleArrowUp className="h-3.5 w-3.5 shrink-0" />
+                              Gas Up
+                            </Button>
+                          )}
+                        </div>
+                        <div className="order-3 flex min-w-0 flex-col gap-1.5 lg:order-1 lg:min-w-0 lg:shrink-0 lg:flex-row lg:items-center lg:gap-2">
+                          <span className="hidden items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground lg:inline-flex lg:shrink-0">
+                            <Fuel
+                              className="h-3 w-3 shrink-0 text-muted-foreground/90"
+                              aria-hidden
+                            />
+                            Spendable
+                          </span>
+                          <div
+                            className="flex min-h-[1.75rem] min-w-0 items-baseline gap-1 lg:min-h-0 lg:gap-1"
+                            role="group"
+                            aria-label="Spendable ALGO for transaction fees"
+                          >
+                            <span
+                              className={cn(
+                                "min-w-0 truncate text-lg font-semibold tabular-nums leading-none tracking-tight text-foreground sm:text-xl",
+                                "lg:text-sm lg:font-semibold xl:text-base",
+                                marketsToolbarSpendableAlgoLoading &&
+                                  "text-muted-foreground animate-pulse"
+                              )}
+                              title={
+                                marketsToolbarSpendableAlgo != null &&
+                                !marketsToolbarSpendableAlgoLoading
+                                  ? `${formatNumber(marketsToolbarSpendableAlgo, {
+                                      maximumFractionDigits: 6,
+                                      minimumFractionDigits: 0,
+                                    })} ALGO`
+                                  : undefined
+                              }
+                            >
+                              {marketsToolbarSpendableAlgoLoading
+                                ? "…"
+                                : marketsToolbarSpendableAlgo == null
+                                  ? "—"
+                                  : formatNumber(marketsToolbarSpendableAlgo, {
+                                      maximumFractionDigits: 4,
+                                      minimumFractionDigits: 0,
+                                    })}
+                            </span>
+                            {!marketsToolbarSpendableAlgoLoading &&
+                              marketsToolbarSpendableAlgo != null && (
+                                <span className="shrink-0 text-xs font-medium tabular-nums text-muted-foreground lg:text-[10px] xl:text-xs">
+                                  ALGO
+                                </span>
+                              )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </section>
         )}
 
         {/* Hero Section */}
@@ -3524,6 +3843,19 @@ const MarketsTable = () => {
               }}
             />
           )}
+
+        <TinymanSwapModal
+          isOpen={isTinymanSwapModalOpen}
+          onClose={() => {
+            setIsTinymanSwapModalOpen(false);
+            setTinymanSwapOpenForGasUp(false);
+          }}
+          networkId={currentNetwork as NetworkId}
+          initialReceiveAlgo={tinymanSwapOpenForGasUp}
+          onSwapSuccess={() =>
+            setMarketsToolbarAlgoRefreshNonce((n) => n + 1)
+          }
+        />
 
         {/* Claim Rewards Modal */}
         {showClaimModal && (

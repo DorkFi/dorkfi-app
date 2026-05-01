@@ -14,6 +14,7 @@ import {
   isCurrentNetworkVOI,
   isCurrentNetworkAlgorand,
   NetworkId,
+  isAlgorandCompatibleNetwork,
   getAllTokens,
   tokenStandardUsesAsaStyleNt200Txns,
 } from "@/config";
@@ -1357,6 +1358,112 @@ export const withdrawReserves = async (
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error occurred",
+    };
+  }
+};
+
+/**
+ * Unsigned txn group: lending pool `custom()` with nt200 `create_balance_box` for the **lending
+ * pool application address** on the market (nt200) contract. One-time setup per pool+market;
+ * run from Admin → Tools (removed from user `deposit()` for `network` token standard).
+ */
+export const buildNt200LendingPoolBalanceBoxTxns = async (
+  poolId: string,
+  marketId: string,
+  userAddress: string,
+  networkId: NetworkId
+): Promise<
+  | { success: true; txns: string[] }
+  | { success: false; error: string }
+> => {
+  try {
+    if (!isAlgorandCompatibleNetwork(networkId)) {
+      return {
+        success: false,
+        error: "Only Algorand-compatible networks support this tool.",
+      };
+    }
+    const networkConfig = getNetworkConfig(networkId);
+    const clients = await algorandService.initializeClients(
+      networkConfig.walletNetworkId as AlgorandNetwork
+    );
+
+    const builder = {
+      lending: new CONTRACT(
+        Number(poolId),
+        clients.algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        {
+          addr: userAddress,
+          sk: new Uint8Array(),
+        },
+        true,
+        false,
+        true
+      ),
+      token: new CONTRACT(
+        Number(marketId),
+        clients.algod,
+        undefined,
+        abi.nt200,
+        {
+          addr: userAddress,
+          sk: new Uint8Array(),
+        },
+        true,
+        false,
+        true
+      ),
+    };
+
+    const poolAppAddr = algosdk.encodeAddress(
+      algosdk.getApplicationAddress(Number(poolId)).publicKey
+    );
+    const txnO = (await builder.token.createBalanceBox(poolAppAddr))
+      .obj as Record<string, unknown>;
+    const buildN = [
+      {
+        ...txnO,
+        payment: 28500,
+        note: new TextEncoder().encode(
+          "admin: nt200 createBalanceBox (lending pool app)"
+        ),
+      },
+    ];
+
+    const ci = new CONTRACT(
+      Number(poolId),
+      clients.algod,
+      undefined,
+      abi.custom,
+      {
+        addr: userAddress,
+        sk: new Uint8Array(),
+      }
+    );
+    ci.setFee(20000);
+    ci.setEnableGroupResourceSharing(true);
+    ci.setExtraTxns(buildN);
+    if (networkConfig.networkId === "algorand-mainnet") {
+      ci.setBeaconId(3209233839);
+    }
+    const result = await ci.custom();
+    if (!result.success) {
+      return {
+        success: false,
+        error: String(
+          (result as { error?: string }).error ?? "custom() simulation failed"
+        ),
+      };
+    }
+    return { success: true, txns: result.txns as string[] };
+  } catch (error) {
+    console.error("buildNt200LendingPoolBalanceBoxTxns:", error);
+    return {
+      success: false,
+      error:
+        error instanceof Error ? error.message : "Unknown error occurred",
     };
   }
 };

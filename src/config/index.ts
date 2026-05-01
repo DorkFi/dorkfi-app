@@ -7,6 +7,8 @@
 
 import {
   FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY,
+  FOLKS_FINANCE_FIUSDC_ADAPTER_POOL_PARAMS,
+  FOLKS_FINANCE_FITINY_ADAPTER_POOL_PARAMS,
   type FolksFinancePoolParams,
 } from "@/constants/folksFinance";
 
@@ -148,9 +150,12 @@ export interface TokenConfig {
    * over {@link intrinsicApyPercent} when the corresponding fetch succeeds.
    */
   intrinsicApyLiveSource?:
-    | "tinyman_liquid_staking"
-    | "xalgo_governance_lambda"
-    | "folks_mainnet_algo_pool_deposit";
+  | "tinyman_liquid_staking"
+  | "xalgo_governance_lambda"
+  | "folks_mainnet_algo_pool_deposit"
+  | "folks_mainnet_usdc_pool_deposit"
+  | "folks_mainnet_fiusdc_ecosystem_pool_deposit"
+  | "folks_mainnet_fitiny_ecosystem_pool_deposit";
   /**
    * Optional intrinsic borrow APY in percentage points (e.g. 1.5 for 1.5%), added to displayed
    * borrow APY for this listing (e.g. wrapped-asset borrow uplift).
@@ -161,9 +166,12 @@ export interface TokenConfig {
    * over {@link intrinsicBorrowApyPercent} when the corresponding fetch succeeds.
    */
   intrinsicBorrowApyLiveSource?:
-    | "tinyman_liquid_staking"
-    | "xalgo_governance_lambda"
-    | "folks_mainnet_algo_pool_deposit";
+  | "tinyman_liquid_staking"
+  | "xalgo_governance_lambda"
+  | "folks_mainnet_algo_pool_deposit"
+  | "folks_mainnet_usdc_pool_borrow"
+  | "folks_mainnet_fiusdc_ecosystem_pool_deposit"
+  | "folks_mainnet_fitiny_ecosystem_pool_deposit";
   /**
    * Optional wrapped-asset / bridge adapters (e.g. Folks mint/redeem), in order.
    * Use {@link TokenAdapterConfig.phases} to split deposit vs withdraw legs, and `id` + `label`
@@ -187,6 +195,12 @@ export interface TokenConfig {
    * selects a route that does not spend that ASA from the wallet (e.g. xALGO consensus ALGO deposit).
    */
   requireStandaloneMarketAsaOptInBeforeDeposit?: boolean;
+  /**
+   * Optional bottom-right badge on the market token icon: same symbol→URL map as
+   * `getTokenImagePath` in `tokenImageUtils` (e.g. `"FOLKS"`). Shown in markets table / cards next
+   * to the pool letter badge (top-right).
+   */
+  iconBadgeFromSymbol?: string;
 }
 
 /** Which user flows an adapter participates in (omit = both, for backward compatibility). */
@@ -436,6 +450,168 @@ export const FOLKS_MAINNET_USDC_REPAY_UNDERLYING = {
   repayWalletBasis: "underlying" as const,
   phases: ["repay"] as const,
   folksParams: FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.USDC,
+} satisfies TokenAdapterConfig;
+
+/** Folks Algorand Ecosystem USDC (fiUSDC) — same phase split as {@link FOLKS_MAINNET_USDC_DEPOSIT_FUSDC_WALLET}. */
+export const FOLKS_MAINNET_FIUSDC_DEPOSIT_FIUSDC_WALLET = {
+  id: "folks-mainnet-fiusdc-deposit-fiusdc",
+  name: "fiUSDC",
+  type: "folks" as const,
+  label: "fiUSDC",
+  depositWalletBasis: "market_token" as const,
+  phases: ["deposit"] as const,
+  folksParams: FOLKS_FINANCE_FIUSDC_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_FIUSDC_DEPOSIT_UNDERLYING = {
+  id: "folks-mainnet-fiusdc-deposit-usdc",
+  name: "USDC",
+  type: "folks" as const,
+  label: "USDC",
+  depositWalletBasis: "underlying" as const,
+  phases: ["deposit"] as const,
+  folksParams: FOLKS_FINANCE_FIUSDC_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_FIUSDC_WITHDRAW = {
+  id: "folks-mainnet-fiusdc-withdraw-usdc",
+  name: "USDC",
+  type: "folks" as const,
+  label: "USDC",
+  withdrawReceiveBasis: "underlying" as const,
+  phases: ["withdraw"] as const,
+  folksParams: FOLKS_FINANCE_FIUSDC_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_FIUSDC_WITHDRAW_FASSET_WALLET = {
+  id: "folks-mainnet-fiusdc-withdraw-fiusdc",
+  name: "fiUSDC",
+  type: "folks" as const,
+  label: "fiUSDC",
+  withdrawReceiveBasis: "market_token" as const,
+  phases: ["withdraw"] as const,
+  folksParams: FOLKS_FINANCE_FIUSDC_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_FIUSDC_BORROW_FIUSDC_WALLET = {
+  id: "folks-mainnet-fiusdc-borrow-fiusdc",
+  name: "fiUSDC",
+  type: "folks" as const,
+  label: "fiUSDC",
+  borrowReceiveBasis: "market_token" as const,
+  phases: ["borrow"] as const,
+  folksParams: FOLKS_FINANCE_FIUSDC_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_FIUSDC_BORROW_UNDERLYING = {
+  id: "folks-mainnet-fiusdc-borrow-usdc",
+  name: "USDC",
+  type: "folks" as const,
+  label: "USDC",
+  borrowReceiveBasis: "underlying" as const,
+  phases: ["borrow"] as const,
+  folksParams: FOLKS_FINANCE_FIUSDC_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_FIUSDC_REPAY_FIUSDC_WALLET = {
+  id: "folks-mainnet-fiusdc-repay-fiusdc",
+  name: "fiUSDC",
+  type: "folks" as const,
+  label: "fiUSDC",
+  repayWalletBasis: "market_token" as const,
+  phases: ["repay"] as const,
+  folksParams: FOLKS_FINANCE_FIUSDC_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_FIUSDC_REPAY_UNDERLYING = {
+  id: "folks-mainnet-fiusdc-repay-usdc",
+  name: "USDC",
+  type: "folks" as const,
+  label: "USDC",
+  repayWalletBasis: "underlying" as const,
+  phases: ["repay"] as const,
+  folksParams: FOLKS_FINANCE_FIUSDC_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+/** Folks Algorand Ecosystem TINY (fiTINY) — same phase split as {@link FOLKS_MAINNET_FIUSDC_DEPOSIT_FIUSDC_WALLET}. */
+export const FOLKS_MAINNET_FITINY_DEPOSIT_FITINY_WALLET = {
+  id: "folks-mainnet-fitiny-deposit-fitiny",
+  name: "fiTINY",
+  type: "folks" as const,
+  label: "fiTINY",
+  depositWalletBasis: "market_token" as const,
+  phases: ["deposit"] as const,
+  folksParams: FOLKS_FINANCE_FITINY_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_FITINY_DEPOSIT_UNDERLYING = {
+  id: "folks-mainnet-fitiny-deposit-tiny",
+  name: "TINY",
+  type: "folks" as const,
+  label: "TINY",
+  depositWalletBasis: "underlying" as const,
+  phases: ["deposit"] as const,
+  folksParams: FOLKS_FINANCE_FITINY_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_FITINY_WITHDRAW = {
+  id: "folks-mainnet-fitiny-withdraw-tiny",
+  name: "TINY",
+  type: "folks" as const,
+  label: "TINY",
+  withdrawReceiveBasis: "underlying" as const,
+  phases: ["withdraw"] as const,
+  folksParams: FOLKS_FINANCE_FITINY_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_FITINY_WITHDRAW_FASSET_WALLET = {
+  id: "folks-mainnet-fitiny-withdraw-fitiny",
+  name: "fiTINY",
+  type: "folks" as const,
+  label: "fiTINY",
+  withdrawReceiveBasis: "market_token" as const,
+  phases: ["withdraw"] as const,
+  folksParams: FOLKS_FINANCE_FITINY_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_FITINY_BORROW_FITINY_WALLET = {
+  id: "folks-mainnet-fitiny-borrow-fitiny",
+  name: "fiTINY",
+  type: "folks" as const,
+  label: "fiTINY",
+  borrowReceiveBasis: "market_token" as const,
+  phases: ["borrow"] as const,
+  folksParams: FOLKS_FINANCE_FITINY_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_FITINY_BORROW_UNDERLYING = {
+  id: "folks-mainnet-fitiny-borrow-tiny",
+  name: "TINY",
+  type: "folks" as const,
+  label: "TINY",
+  borrowReceiveBasis: "underlying" as const,
+  phases: ["borrow"] as const,
+  folksParams: FOLKS_FINANCE_FITINY_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_FITINY_REPAY_FITINY_WALLET = {
+  id: "folks-mainnet-fitiny-repay-fitiny",
+  name: "fiTINY",
+  type: "folks" as const,
+  label: "fiTINY",
+  repayWalletBasis: "market_token" as const,
+  phases: ["repay"] as const,
+  folksParams: FOLKS_FINANCE_FITINY_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_FITINY_REPAY_UNDERLYING = {
+  id: "folks-mainnet-fitiny-repay-tiny",
+  name: "TINY",
+  type: "folks" as const,
+  label: "TINY",
+  repayWalletBasis: "underlying" as const,
+  phases: ["repay"] as const,
+  folksParams: FOLKS_FINANCE_FITINY_ADAPTER_POOL_PARAMS,
 } satisfies TokenAdapterConfig;
 
 export type FolksTokenAdapterConfig = Extract<
@@ -1860,6 +2036,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     intrinsicApyLiveSource: "folks_mainnet_algo_pool_deposit",
     intrinsicBorrowApyPercent: 2.14,
     intrinsicBorrowApyLiveSource: "folks_mainnet_algo_pool_deposit",
+    iconBadgeFromSymbol: "FOLKS",
   }],
   fALGO: {
     assetId: "971381860",
@@ -1869,7 +2046,12 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     decimals: 6,
     name: "Folks V2 ALGO",
     symbol: "fALGO",
-    logoPath: "/lovable-uploads/fALGO.webp",
+    logoPath: "/lovable-uploads/Algo.webp",
+    marketOverride: {
+      displayName: "Algorand",
+      displaySymbol: "Algo",
+      isSmartContract: true,
+    },
     tokenStandard: "asa",
     /**
      * Same Folks leg as the `network-asa` row under `tokens.ALGO[]` for this pool, so anything
@@ -1889,7 +2071,10 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     ],
     dataAddedAt: "2026-04-17T00:00:00.000Z",
     intrinsicApyPercent: 2.14,
+    intrinsicBorrowApyPercent: 2.14,
+    intrinsicBorrowApyLiveSource: "folks_mainnet_algo_pool_deposit",
     intrinsicApyLiveSource: "folks_mainnet_algo_pool_deposit",
+    iconBadgeFromSymbol: "FOLKS",
   },
   /**
    * Tinyman tALGO: nt200 / lending use the tALGO ASA (`assetId`) directly — no Folks f-tALGO leg.
@@ -1906,11 +2091,19 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     decimals: 6,
     name: "TALGO",
     symbol: "tALGO",
-    logoPath: "/lovable-uploads/tALGO.webp",
+    marketOverride: {
+      displayName: "Algorand",
+      displaySymbol: "Algo",
+      isSmartContract: true,
+    },
+    logoPath: "/lovable-uploads/Algo.webp",
     tokenStandard: "asa",
     dataAddedAt: "2026-03-23T00:00:00.000Z",
     intrinsicApyPercent: 4.51,
+    intrinsicBorrowApyPercent: 4.51,
+    intrinsicBorrowApyLiveSource: "tinyman_liquid_staking",
     intrinsicApyLiveSource: "tinyman_liquid_staking",
+    iconBadgeFromSymbol: "tALGO",
   },
   /**
    * Governance xALGO: nt200 / lending use the xALGO ASA (`assetId`) directly — no Folks f-xALGO leg.
@@ -1934,11 +2127,18 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     decimals: 6,
     name: "Governance xALGO",
     symbol: "xALGO",
-    logoPath: "/lovable-uploads/xALGO.webp",
+    marketOverride: {
+      displayName: "Algorand",
+      displaySymbol: "Algo",
+      isSmartContract: true,
+    },
+    logoPath: "/lovable-uploads/Algo.webp",
     tokenStandard: "asa",
     requireStandaloneMarketAsaOptInBeforeDeposit: true,
     dataAddedAt: "2026-03-23T00:00:00.000Z",
     intrinsicApyPercent: 4.49,
+    intrinsicBorrowApyPercent: 4.49,
+    intrinsicBorrowApyLiveSource: "xalgo_governance_lambda",
     intrinsicApyLiveSource: "xalgo_governance_lambda",
   },
   USDC: [{
@@ -1967,7 +2167,44 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     logoPath: "/lovable-uploads/USDC.webp",
     tokenStandard: "asa",
     dataAddedAt: "2026-03-26T00:00:00.000Z",
-  }, {
+  }],
+  fUSDC: [{
+    assetId: "971384592",
+    poolId: "3333688282",
+    contractId: "3527735223",
+    nTokenId: "3527764569",
+    decimals: 6,
+    name: "Folks V2 USDC",
+    symbol: "fUSDC",
+    logoPath: "/lovable-uploads/USDC.webp",
+    marketOverride: {
+      displayName: "USD Coin",
+      displaySymbol: "USDC",
+      isSmartContract: true,
+    },
+    tokenStandard: "asa",
+    /**
+     * Same Folks leg as the `asa-asa` row under `tokens.USDC[]` for this pool, so
+     * `getTokenConfig("fUSDC")` resolves adapter metadata for mint-ratio / route pickers.
+     */
+    adapters: [
+      FOLKS_MAINNET_USDC_DEPOSIT_FUSDC_WALLET,
+      FOLKS_MAINNET_USDC_DEPOSIT_UNDERLYING,
+      FOLKS_MAINNET_USDC_WITHDRAW,
+      FOLKS_MAINNET_USDC_WITHDRAW_FASSET_WALLET,
+      FOLKS_MAINNET_USDC_BORROW_FUSDC_WALLET,
+      FOLKS_MAINNET_USDC_BORROW_UNDERLYING,
+      FOLKS_MAINNET_USDC_REPAY_FUSDC_WALLET,
+      FOLKS_MAINNET_USDC_REPAY_UNDERLYING,
+    ],
+    dataAddedAt: "2026-04-19T00:00:00.000Z",
+    intrinsicApyPercent: 3.48,
+    intrinsicBorrowApyPercent: 3.48,
+    intrinsicApyLiveSource: "folks_mainnet_usdc_pool_deposit",
+    intrinsicBorrowApyLiveSource: "folks_mainnet_usdc_pool_borrow",
+    iconBadgeFromSymbol: "FOLKS",
+  },
+  {
     assetId: "31566704",
     poolId: "3526240577",
     contractId: "3527735223",
@@ -1994,35 +2231,81 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
       FOLKS_MAINNET_USDC_REPAY_UNDERLYING,
     ],
     dataAddedAt: "2026-04-19T00:00:00.000Z",
-    intrinsicApyPercent: 3.68, // TODO fetch from source
-    intrinsicBorrowApyPercent: 3.68, // TODO fetch from source
-  }],
-  fUSDC: {
-    assetId: "971384592",
+    intrinsicApyPercent: 3.48,
+    intrinsicBorrowApyPercent: 3.48,
+    intrinsicApyLiveSource: "folks_mainnet_usdc_pool_deposit",
+    intrinsicBorrowApyLiveSource: "folks_mainnet_usdc_pool_borrow",
+    iconBadgeFromSymbol: "FOLKS",
+  }, {
+    assetId: "31566704",
     poolId: "3333688282",
     contractId: "3527735223",
     nTokenId: "3527764569",
     decimals: 6,
     name: "Folks V2 USDC",
     symbol: "fUSDC",
-    logoPath: "/lovable-uploads/fUSDC.webp",
+    marketOverride: {
+      displayName: "USD Coin",
+      displaySymbol: "USDC",
+      isSmartContract: true,
+    },
+    logoPath: "/lovable-uploads/USDC.webp",
+    tokenStandard: "asa-asa",
+    requireStandaloneFAssetOptInBeforeDeposit: true,
+    adapters: [
+      FOLKS_MAINNET_FIUSDC_DEPOSIT_FIUSDC_WALLET,
+      FOLKS_MAINNET_FIUSDC_DEPOSIT_UNDERLYING,
+      FOLKS_MAINNET_FIUSDC_WITHDRAW,
+      FOLKS_MAINNET_FIUSDC_WITHDRAW_FASSET_WALLET,
+      FOLKS_MAINNET_FIUSDC_BORROW_FIUSDC_WALLET,
+      FOLKS_MAINNET_FIUSDC_BORROW_UNDERLYING,
+      FOLKS_MAINNET_FIUSDC_REPAY_FIUSDC_WALLET,
+      FOLKS_MAINNET_FIUSDC_REPAY_UNDERLYING,
+    ],
+    dataAddedAt: "2026-04-29T00:00:00.000Z",
+    intrinsicApyPercent: 7.78,
+    intrinsicBorrowApyPercent: 7.78,
+    intrinsicApyLiveSource: "folks_mainnet_fiusdc_ecosystem_pool_deposit",
+    intrinsicBorrowApyLiveSource: "folks_mainnet_fiusdc_ecosystem_pool_borrow",
+    iconBadgeFromSymbol: "FOLKS",
+  }
+  ],
+  fiUSDC: {
+    assetId: "3184331239",
+    poolId: "3333688282",
+    contractId: "3540156071",
+    nTokenId: "3540213205",
+    decimals: 6,
+    name: "Folks V2 Isolated USDC",
+    symbol: "fiUSDC",
+    logoPath: "/lovable-uploads/USDC.webp",
+    marketOverride: {
+      displayName: "USD Coin",
+      displaySymbol: "USDC",
+      isSmartContract: true,
+    },
     tokenStandard: "asa",
+    requireStandaloneFAssetOptInBeforeDeposit: true,
     /**
-     * Same Folks leg as the `asa-asa` row under `tokens.USDC[]` for this pool, so
-     * `getTokenConfig("fUSDC")` resolves adapter metadata for mint-ratio / route pickers.
+     * Same Folks leg as the `asa-asa` row under `tokens.USDC[]` for this pool, using
+     * Folks Algorand Ecosystem USDC deposit ids (fiUSDC f-ASA).
      */
     adapters: [
-      FOLKS_MAINNET_USDC_DEPOSIT_FUSDC_WALLET,
-      FOLKS_MAINNET_USDC_DEPOSIT_UNDERLYING,
-      FOLKS_MAINNET_USDC_WITHDRAW,
-      FOLKS_MAINNET_USDC_WITHDRAW_FASSET_WALLET,
-      FOLKS_MAINNET_USDC_BORROW_FUSDC_WALLET,
-      FOLKS_MAINNET_USDC_BORROW_UNDERLYING,
-      FOLKS_MAINNET_USDC_REPAY_FUSDC_WALLET,
-      FOLKS_MAINNET_USDC_REPAY_UNDERLYING,
+      FOLKS_MAINNET_FIUSDC_DEPOSIT_FIUSDC_WALLET,
+      FOLKS_MAINNET_FIUSDC_DEPOSIT_UNDERLYING,
+      FOLKS_MAINNET_FIUSDC_WITHDRAW,
+      FOLKS_MAINNET_FIUSDC_WITHDRAW_FASSET_WALLET,
+      FOLKS_MAINNET_FIUSDC_BORROW_FIUSDC_WALLET,
+      FOLKS_MAINNET_FIUSDC_BORROW_UNDERLYING,
+      FOLKS_MAINNET_FIUSDC_REPAY_FIUSDC_WALLET,
+      FOLKS_MAINNET_FIUSDC_REPAY_UNDERLYING,
     ],
-    dataAddedAt: "2026-04-19T00:00:00.000Z",
-    intrinsicApyPercent: 3.68, // TODO fetch from source
+    dataAddedAt: "2026-04-29T00:00:00.000Z",
+    intrinsicApyPercent: 7.78,
+    intrinsicBorrowApyPercent: 7.78,
+    intrinsicApyLiveSource: "folks_mainnet_fiusdc_ecosystem_pool_deposit",
+    intrinsicBorrowApyLiveSource: "folks_mainnet_fiusdc_ecosystem_pool_deposit",
+    iconBadgeFromSymbol: "FOLKS",
   },
   UNIT: {
     assetId: "3121954282",
@@ -2087,6 +2370,39 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     symbol: "TINY",
     logoPath: "/lovable-uploads/TINY.webp",
     tokenStandard: "asa",
+  },
+  fiTINY: {
+    assetId: "3184331789",
+    poolId: "3345940978",
+    contractId: "3540827780",
+    nTokenId: "3540842561",
+    decimals: 6,
+    name: "Folks V2 Isolated TINY",
+    symbol: "fiTINY",
+    marketOverride: {
+      displayName: "TINY",
+      displaySymbol: "TINY",
+      isSmartContract: true,
+    },
+    logoPath: "/lovable-uploads/TINY.webp",
+    tokenStandard: "asa",
+    requireStandaloneFAssetOptInBeforeDeposit: true,
+    adapters: [
+      FOLKS_MAINNET_FITINY_DEPOSIT_FITINY_WALLET,
+      FOLKS_MAINNET_FITINY_DEPOSIT_UNDERLYING,
+      FOLKS_MAINNET_FITINY_WITHDRAW,
+      FOLKS_MAINNET_FITINY_WITHDRAW_FASSET_WALLET,
+      FOLKS_MAINNET_FITINY_BORROW_FITINY_WALLET,
+      FOLKS_MAINNET_FITINY_BORROW_UNDERLYING,
+      FOLKS_MAINNET_FITINY_REPAY_FITINY_WALLET,
+      FOLKS_MAINNET_FITINY_REPAY_UNDERLYING,
+    ],
+    intrinsicApyPercent: 4.66,
+    intrinsicBorrowApyPercent: 4.66,
+    intrinsicApyLiveSource: "folks_mainnet_fitiny_ecosystem_pool_deposit",
+    intrinsicBorrowApyLiveSource: "folks_mainnet_fitiny_ecosystem_pool_deposit",
+    iconBadgeFromSymbol: "FOLKS",
+    dataAddedAt: "2026-04-29T00:00:00.000Z",
   },
   FINITE: [{
     assetId: "400593267",
@@ -3118,6 +3434,53 @@ export const getTokenConfig = (
 };
 
 /**
+ * Map key for {@link getTokenConfig} from a {@link getAllTokensWithDisplayInfo} row.
+ * Prefer `originalSymbol` (`fiUSDC`, `fUSDC`) over `configKey` (`USDC` for every `tokens.USDC[]` entry).
+ */
+export function tokenConfigLookupKeyFromDisplayToken(token: {
+  configKey?: string;
+  originalSymbol?: string;
+  symbol: string;
+}): string {
+  const orig = String(token.originalSymbol ?? "").trim();
+  if (orig !== "") return orig;
+  const ck = String(token.configKey ?? "").trim();
+  if (ck !== "") return ck;
+  return String(token.symbol ?? "").trim();
+}
+
+/**
+ * Full `TokenConfig` for a display token row when the map entry is an array (disambiguate by pool + market contract).
+ */
+export function resolveTokenConfigFromDisplayToken(
+  networkId: NetworkId,
+  token: {
+    configKey?: string;
+    originalSymbol?: string;
+    symbol: string;
+    poolId?: string | null;
+    underlyingContractId?: string;
+  }
+): TokenConfig | undefined {
+  const key = tokenConfigLookupKeyFromDisplayToken(token);
+  const raw = getTokenConfig(networkId, key);
+  if (!raw) return undefined;
+  if (!Array.isArray(raw)) return raw;
+  const poolStr = token.poolId != null ? String(token.poolId).trim() : "";
+  const contractStr = String(token.underlyingContractId ?? "").trim();
+  const poolOk = (tc: TokenConfig) =>
+    poolStr === "" || String(tc.poolId ?? "") === poolStr;
+  if (contractStr !== "") {
+    const hit = raw.find(
+      (tc) =>
+        poolOk(tc) && String(tc.contractId ?? "").trim() === contractStr
+    );
+    if (hit) return hit;
+  }
+  return raw.find(poolOk) ?? raw[0];
+}
+
+/**
  * Single `TokenConfig` row for `symbol` + optional `poolId`, or any row matching `poolId` when
  * `getTokenConfig(symbol)` misses (e.g. fALGO row stored under `tokens.ALGO[]`).
  */
@@ -3170,6 +3533,18 @@ export type LiveIntrinsicSupplyApySnapshot = {
   xalgoGovernanceLambdaPercent?: number | null;
   /** Folks mainnet ALGO lending pool deposit APY (fALGO), percentage points. */
   folksMainnetAlgoDepositPercent?: number | null;
+  /** Folks mainnet USDC lending pool deposit APY (fUSDC supply yield), percentage points. */
+  folksMainnetUsdcDepositPercent?: number | null;
+  /** Folks mainnet USDC pool variable borrow yield, percentage points. */
+  folksMainnetUsdcBorrowPercent?: number | null;
+  /** Folks Algorand Ecosystem USDC pool (fiUSDC) deposit yield, percentage points. */
+  folksMainnetFiUsdcEcosystemDepositPercent?: number | null;
+  /** Folks Algorand Ecosystem USDC pool variable borrow yield, percentage points. */
+  folksMainnetFiUsdcEcosystemBorrowPercent?: number | null;
+  /** Folks Algorand Ecosystem TINY pool (fiTINY) deposit yield, percentage points. */
+  folksMainnetFiTinyEcosystemDepositPercent?: number | null;
+  /** Folks Algorand Ecosystem TINY pool variable borrow yield, percentage points. */
+  folksMainnetFiTinyEcosystemBorrowPercent?: number | null;
 };
 
 /**
@@ -3212,6 +3587,27 @@ export const resolveIntrinsicSupplyApyPercent = (
     }
     return base;
   }
+  if (source === "folks_mainnet_usdc_pool_deposit") {
+    const v = live?.folksMainnetUsdcDepositPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+      return v;
+    }
+    return base;
+  }
+  if (source === "folks_mainnet_fiusdc_ecosystem_pool_deposit") {
+    const v = live?.folksMainnetFiUsdcEcosystemDepositPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+      return v;
+    }
+    return base;
+  }
+  if (source === "folks_mainnet_fitiny_ecosystem_pool_deposit") {
+    const v = live?.folksMainnetFiTinyEcosystemDepositPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+      return v;
+    }
+    return base;
+  }
   return base;
 };
 
@@ -3231,7 +3627,10 @@ export const tokenRowUsesLiveIntrinsicApy = (
   return (
     s === "tinyman_liquid_staking" ||
     s === "xalgo_governance_lambda" ||
-    s === "folks_mainnet_algo_pool_deposit"
+    s === "folks_mainnet_algo_pool_deposit" ||
+    s === "folks_mainnet_usdc_pool_deposit" ||
+    s === "folks_mainnet_fiusdc_ecosystem_pool_deposit" ||
+    s === "folks_mainnet_fitiny_ecosystem_pool_deposit"
   );
 };
 
@@ -3251,7 +3650,10 @@ export const tokenRowUsesLiveIntrinsicBorrowApy = (
   return (
     s === "tinyman_liquid_staking" ||
     s === "xalgo_governance_lambda" ||
-    s === "folks_mainnet_algo_pool_deposit"
+    s === "folks_mainnet_algo_pool_deposit" ||
+    s === "folks_mainnet_usdc_pool_borrow" ||
+    s === "folks_mainnet_fiusdc_ecosystem_pool_borrow" ||
+    s === "folks_mainnet_fitiny_ecosystem_pool_borrow"
   );
 };
 
@@ -3307,6 +3709,27 @@ export const resolveIntrinsicBorrowApyPercent = (
   }
   if (source === "folks_mainnet_algo_pool_deposit") {
     const v = live?.folksMainnetAlgoDepositPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+      return v;
+    }
+    return base;
+  }
+  if (source === "folks_mainnet_usdc_pool_borrow") {
+    const v = live?.folksMainnetUsdcBorrowPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+      return v;
+    }
+    return base;
+  }
+  if (source === "folks_mainnet_fiusdc_ecosystem_pool_borrow") {
+    const v = live?.folksMainnetFiUsdcEcosystemBorrowPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+      return v;
+    }
+    return base;
+  }
+  if (source === "folks_mainnet_fitiny_ecosystem_pool_borrow") {
+    const v = live?.folksMainnetFiTinyEcosystemBorrowPercent;
     if (typeof v === "number" && Number.isFinite(v) && v > 0) {
       return v;
     }

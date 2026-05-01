@@ -70,6 +70,7 @@ Indexed guides for repeatable processes:
 
 Indexed implementation references (pages, services, cross-network behavior):
 - [Gas Station](development/GAS_STATION.md): minting flow, `GasStationService`, ARC200/ASA/network tokens on Voi and Algorand
+- [xChain Accounts integration plan](XCHAIN_ACCOUNTS_INTEGRATION_PLAN.md): EVM/xChain wallet integration planning for Voi and Algorand (phases, preconditions, QA)
 
 **Perfect for:** Developers extending the Gas Station, multi-network minting, or similar app features
 
