@@ -34,6 +34,10 @@ import {
   type SwapRouterResponse,
 } from "@tinymanorg/tinyman-js-sdk";
 import { ArrowDownUp, Loader2 } from "lucide-react";
+import {
+  isRainbowkitXchainWallet,
+  withRainbowkitHostDialogDismissed,
+} from "@/wallet/xchainSignUi";
 
 export type TinymanSwapModalProps = {
   isOpen: boolean;
@@ -172,10 +176,19 @@ const TinymanSwapModal: React.FC<TinymanSwapModalProps> = ({
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quoteError, setQuoteError] = useState<string | null>(null);
   const [swapLoading, setSwapLoading] = useState(false);
+  /** Hide Radix dialog while xChain (RainbowKit) signs so wallet UI is not blocked. */
+  const [rainbowkitSignDialogSuppressed, setRainbowkitSignDialogSuppressed] =
+    useState(false);
 
   useEffect(() => {
     tinymanJSSDKConfig.setClientName("DorkFi-PreFi");
   }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      setRainbowkitSignDialogSuppressed(false);
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen || !tinymanNet) return;
@@ -316,7 +329,12 @@ const TinymanSwapModal: React.FC<TinymanSwapModalProps> = ({
         description: `Approve the swap in ${walletName}.`,
         duration: 12_000,
       });
-      const signed = await signTransactions(unsigned);
+      const signed = await withRainbowkitHostDialogDismissed({
+        wallet: activeWallet,
+        setSuppressed: setRainbowkitSignDialogSuppressed,
+        leaveOverlayDismissedOnSuccess: true,
+        run: () => signTransactions(unsigned),
+      });
       const res = await algod.sendRawTransaction(signed).do();
       await waitForConfirmation(algod, res.txid, 4);
       toast({
@@ -326,6 +344,9 @@ const TinymanSwapModal: React.FC<TinymanSwapModalProps> = ({
       onSwapSuccess?.(res.txid);
       onClose();
     } catch (e: unknown) {
+      if (isRainbowkitXchainWallet(activeWallet)) {
+        setRainbowkitSignDialogSuppressed(false);
+      }
       const msg = e instanceof Error ? e.message : "Swap failed.";
       toast({ title: "Swap failed", description: msg, variant: "destructive" });
     } finally {
@@ -335,7 +356,10 @@ const TinymanSwapModal: React.FC<TinymanSwapModalProps> = ({
 
   if (!tinymanNet) {
     return (
-      <Dialog open={isOpen} onOpenChange={(o) => !o && onClose()}>
+      <Dialog
+        open={isOpen && !rainbowkitSignDialogSuppressed}
+        onOpenChange={(o) => !o && onClose()}
+      >
         <DialogContent className={MARKETS_MODAL_SHELL}>
           <div className="max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain px-6 pt-10 pb-6 sm:px-8 sm:pb-8">
             <DialogHeader className="space-y-2 text-center sm:text-left pr-8">
@@ -358,7 +382,10 @@ const TinymanSwapModal: React.FC<TinymanSwapModalProps> = ({
   }
 
   return (
-    <Dialog open={isOpen} onOpenChange={(o) => !o && onClose()}>
+    <Dialog
+      open={isOpen && !rainbowkitSignDialogSuppressed}
+      onOpenChange={(o) => !o && onClose()}
+    >
       <DialogContent className={MARKETS_MODAL_SHELL}>
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 px-6 pt-4 pb-2 shrink-0">
