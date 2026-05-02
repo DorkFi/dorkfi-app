@@ -3042,7 +3042,7 @@ export const config: GlobalConfig = {
     "ethereum-testnet": ethereumTestnetConfig,
     localnet: localnetConfig,
   },
-  defaultNetwork: "voi-mainnet",
+  defaultNetwork: "algorand-mainnet",
   enabledNetworks: [...enabledNetworks] as NetworkId[],
   version: "1.0.0",
   features: {
@@ -3998,7 +3998,7 @@ export const getEnvironmentConfig = (): Partial<GlobalConfig> => {
 
   if (env === "development") {
     return {
-      defaultNetwork: "voi-mainnet",
+      defaultNetwork: "algorand-mainnet",
       features: {
         ...config.features,
         enableGovernance: true, // Enable governance in development for testing
@@ -4009,7 +4009,7 @@ export const getEnvironmentConfig = (): Partial<GlobalConfig> => {
 
   if (env === "test") {
     return {
-      defaultNetwork: "voi-mainnet",
+      defaultNetwork: "algorand-mainnet",
       features: {
         ...config.features,
         enablePreFi: false, // Disable PreFi in tests

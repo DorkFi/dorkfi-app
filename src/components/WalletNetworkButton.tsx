@@ -37,7 +37,7 @@ interface WalletNetworkButtonProps {
 }
 
 const WalletNetworkButton = ({
-  currentNetwork = "voi-mainnet",
+  currentNetwork = "algorand-mainnet",
   onNetworkChange,
 }: WalletNetworkButtonProps) => {
   const {
@@ -116,7 +116,7 @@ const WalletNetworkButton = ({
 
       // Fallback: If WalletConnect on VOI Mainnet, assume it's a VOI-specific wallet
       // This handles cases where wallet name doesn't contain the specific wallet name
-      if (currentNetwork === "voi-mainnet") {
+      if (contextNetwork === "voi-mainnet") {
         return ["voi-mainnet"]; // Assume VOI-specific wallet
       }
 

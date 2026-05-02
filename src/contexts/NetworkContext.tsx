@@ -51,13 +51,22 @@ const xchainWalletNotices: NoticesConfig = {
   },
 };
 
-/** Wraps children with WalletUIProvider so RainbowKit / xChain can open connect modals. */
-function PrefiWalletUI({ children }: { children: ReactNode }) {
+/**
+ * Wraps children with WalletUIProvider. Wagmi / RainbowKit (xChain WalletConnect) is mounted
+ * only on Algorand Mainnet so VOI sessions do not run a second WC stack on the same project id.
+ */
+function PrefiWalletUI({
+  children,
+  enableXchainWagmi,
+}: {
+  children: ReactNode;
+  enableXchainWagmi: boolean;
+}) {
   const queryClient = useQueryClient();
   return (
     <WalletUIProvider
       theme="dark"
-      wagmiConfig={xchainWagmiConfig}
+      {...(enableXchainWagmi ? { wagmiConfig: xchainWagmiConfig } : {})}
       queryClient={queryClient}
       notices={xchainWalletNotices}
     >
@@ -73,11 +82,11 @@ interface NetworkProviderProps {
 export const NetworkProvider: React.FC<NetworkProviderProps> = ({
   children,
 }) => {
-  // Initialize with saved network or default to voi-mainnet
+  // Initialize with saved network or default to algorand-mainnet
   const [currentNetwork, setCurrentNetworkState] = useState<ConfigNetworkId>(
     () => {
       const savedNetwork = getSavedNetwork();
-      return savedNetwork || "voi-mainnet";
+      return savedNetwork || "algorand-mainnet";
     }
   );
   const [isSwitchingNetwork, setIsSwitchingNetwork] = useState(false);
@@ -335,7 +344,9 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
       }}
     >
       <WalletProvider manager={walletManager}>
-        <PrefiWalletUI>{children}</PrefiWalletUI>
+        <PrefiWalletUI enableXchainWagmi={currentNetwork === "algorand-mainnet"}>
+          {children}
+        </PrefiWalletUI>
       </WalletProvider>
     </NetworkContext.Provider>
   );

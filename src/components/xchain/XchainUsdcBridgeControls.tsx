@@ -29,15 +29,7 @@ export function shouldShowXchainUsdcBridgeControls(
   );
 }
 
-/**
- * Direction toggle + Bridge USDC for xChain (RainbowKit) on Algorand Mainnet.
- * Renders nothing when network or wallet does not qualify.
- */
-export function XchainUsdcBridgeControls({
-  className,
-}: XchainUsdcBridgeControlsProps) {
-  const { activeWallet } = useWallet();
-  const { currentNetwork } = useNetwork();
+function XchainUsdcBridgeControlsInner({ className }: XchainUsdcBridgeControlsProps) {
   const { openBridge, bridge, isOpen: bridgeDialogOpen } = useBridgeDialog();
   const [direction, setDirection] = useState<XchainUsdcBridgeDirection>(
     "algo-to-base"
@@ -73,10 +65,6 @@ export function XchainUsdcBridgeControls({
     bridge.setSourceToken,
     bridge.setDestinationToken,
   ]);
-
-  if (!shouldShowXchainUsdcBridgeControls(currentNetwork, activeWallet?.id)) {
-    return null;
-  }
 
   return (
     <div
@@ -121,4 +109,24 @@ export function XchainUsdcBridgeControls({
       </Button>
     </div>
   );
+}
+
+/**
+ * Direction toggle + Bridge USDC for xChain (RainbowKit) on Algorand Mainnet.
+ * Renders nothing when network or wallet does not qualify.
+ *
+ * `useBridgeDialog` lives only on the inner branch so it is not invoked when wagmi
+ * is omitted from WalletUIProvider (e.g. on VOI mainnet).
+ */
+export function XchainUsdcBridgeControls({
+  className,
+}: XchainUsdcBridgeControlsProps) {
+  const { activeWallet } = useWallet();
+  const { currentNetwork } = useNetwork();
+
+  if (!shouldShowXchainUsdcBridgeControls(currentNetwork, activeWallet?.id)) {
+    return null;
+  }
+
+  return <XchainUsdcBridgeControlsInner className={className} />;
 }
