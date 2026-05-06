@@ -5,31 +5,24 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Proposal } from "@/types/governanceTypes";
 import { PROPOSAL_CATEGORY_DISPLAY_NAMES } from "@/constants/governanceConstants";
-import { 
-  Clock, 
-  TrendingUp, 
-  TrendingDown, 
-  CheckCircle2, 
-  XCircle, 
+import {
+  Clock,
+  TrendingUp,
+  TrendingDown,
+  CheckCircle2,
+  XCircle,
   HourglassIcon,
-  User,
-  Hash,
   Calendar,
   Network,
-  Copy,
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import { getNetworkConfig } from "@/config";
 import { getNetworkLogoPath } from "@/utils/tokenImageUtils";
 import type { NetworkId } from "@/config";
-import { useState } from "react";
-import { toast } from "@/hooks/use-toast";
-
 interface ProposalDetailsModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -60,8 +53,6 @@ export const ProposalDetailsModal = ({
   proposal,
 }: ProposalDetailsModalProps) => {
   const { formatNumber, formatPercent } = useNumberI18n();
-  const [copiedId, setCopiedId] = useState(false);
-  const [copiedProposer, setCopiedProposer] = useState(false);
 
   const StatusIcon = statusConfig[proposal.status].icon;
   const votesForPercent = (proposal.votesFor / Math.max(proposal.totalVotes, 1)) * 100;
@@ -74,36 +65,17 @@ export const ProposalDetailsModal = ({
       ? [proposal.networkId]
       : [];
 
-  const copyToClipboard = async (text: string, type: "id" | "proposer") => {
-    try {
-      await navigator.clipboard.writeText(text);
-      if (type === "id") {
-        setCopiedId(true);
-        setTimeout(() => setCopiedId(false), 2000);
-      } else {
-        setCopiedProposer(true);
-        setTimeout(() => setCopiedProposer(false), 2000);
-      }
-      toast({
-        title: "Copied to clipboard",
-        description: `${type === "id" ? "Proposal ID" : "Proposer address"} copied`,
-      });
-    } catch (err) {
-      console.error("Failed to copy:", err);
-    }
-  };
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto p-6 sm:p-8">
-        <DialogHeader className="pb-4">
+      <DialogContent className="w-full max-w-lg sm:max-w-xl max-h-[90vh] overflow-y-auto p-8 sm:p-10 sm:pt-12">
+        <DialogHeader className="pb-6">
           <DialogTitle className="text-xl sm:text-2xl">{proposal.title}</DialogTitle>
           <DialogDescription className="text-sm sm:text-base mt-2">
             {proposal.description}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-6">
+        <div className="space-y-8">
           {/* Badges */}
           <div className="flex flex-wrap items-center gap-2">
             {networkIdsList.length > 0 && (
@@ -140,44 +112,6 @@ export const ProposalDetailsModal = ({
                 {proposal.status.toUpperCase()}
               </span>
             </Badge>
-          </div>
-
-          {/* Proposal ID */}
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <Hash className="h-4 w-4" />
-              <span>Proposal ID</span>
-            </div>
-            <div className="flex items-center gap-2 p-2 bg-muted rounded-md">
-              <code className="text-xs flex-1 break-all font-mono">{proposal.id}</code>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 w-8 p-0 shrink-0"
-                onClick={() => copyToClipboard(proposal.id, "id")}
-              >
-                <Copy className={`h-4 w-4 ${copiedId ? "text-green-500" : ""}`} />
-              </Button>
-            </div>
-          </div>
-
-          {/* Proposer */}
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <User className="h-4 w-4" />
-              <span>Proposer</span>
-            </div>
-            <div className="flex items-center gap-2 p-2 bg-muted rounded-md">
-              <code className="text-xs flex-1 break-all font-mono">{proposal.proposer}</code>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 w-8 p-0 shrink-0"
-                onClick={() => copyToClipboard(proposal.proposer, "proposer")}
-              >
-                <Copy className={`h-4 w-4 ${copiedProposer ? "text-green-500" : ""}`} />
-              </Button>
-            </div>
           </div>
 
           {/* Timestamps */}
@@ -291,18 +225,6 @@ export const ProposalDetailsModal = ({
               </div>
             </div>
           </div>
-
-          {/* Proposal Details (if available) */}
-          {proposal.details && Object.keys(proposal.details).length > 1 && (
-            <div className="space-y-2">
-              <div className="text-sm font-medium">Additional Details</div>
-              <div className="p-3 bg-muted rounded-md">
-                <pre className="text-xs font-mono overflow-x-auto whitespace-pre-wrap break-words">
-                  {JSON.stringify(proposal.details, null, 2)}
-                </pre>
-              </div>
-            </div>
-          )}
         </div>
       </DialogContent>
     </Dialog>
