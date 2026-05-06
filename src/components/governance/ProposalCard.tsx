@@ -29,6 +29,8 @@ interface ProposalCardProps {
   voteNetworkId?: string;
   batchMode?: boolean;
   isSelectionDisabled?: boolean;
+  /** When true, hides voting and batch UI (e.g. governance HTTP node list). */
+  readOnly?: boolean;
 }
 
 const categoryColors: Record<ProposalCategory, string> = {
@@ -61,6 +63,7 @@ export const ProposalCard = ({
   voteNetworkId,
   batchMode = false,
   isSelectionDisabled = false,
+  readOnly = false,
 }: ProposalCardProps) => {
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -138,7 +141,7 @@ export const ProposalCard = ({
         <div className="flex items-start justify-between gap-3 sm:gap-4 flex-wrap">
           <div className="space-y-2 flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              {batchMode && isActive && canVote && userVote === undefined && (
+              {!readOnly && batchMode && isActive && canVote && userVote === undefined && (
                 <Checkbox
                   checked={isSelected}
                   onCheckedChange={handleSelectChange}
@@ -256,7 +259,7 @@ export const ProposalCard = ({
             </Caption>
           )}
 
-          {isActive && (
+          {!readOnly && isActive && (
             <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
               {userVote === undefined ? (
                 batchMode && isSelected ? (

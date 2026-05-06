@@ -1,10 +1,20 @@
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
 
+const GOVERNANCE_RAILWAY =
+  "https://dorkfi-governance-node-production.up.railway.app";
+
 // https://vitejs.dev/config/
-export default defineConfig(({ mode }) => ({
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), "");
+  const governanceLocalTarget =
+    env.VITE_GOVERNANCE_LOCAL_TARGET || "http://127.0.0.1:8787";
+  const governanceNgrokTarget =
+    env.VITE_GOVERNANCE_NGROK_TARGET || "http://127.0.0.1:8787";
+
+  return {
   server: {
     host: "::",
     port: 8080,
@@ -16,6 +26,26 @@ export default defineConfig(({ mode }) => ({
         target: 'https://orca-api.nautilus.sh',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/orca/, '/api'),
+      },
+      "/api/local": {
+        target: governanceLocalTarget,
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/api\/local/, "") || "/",
+      },
+      "/api/railway": {
+        target: GOVERNANCE_RAILWAY,
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/api\/railway/, "") || "/",
+      },
+      "/api/ngrok": {
+        target: governanceNgrokTarget,
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/api\/ngrok/, "") || "/",
+        configure: (proxy) => {
+          proxy.on("proxyReq", (proxyReq) => {
+            proxyReq.setHeader("ngrok-skip-browser-warning", "true");
+          });
+        },
       },
     },
   },
@@ -55,4 +85,5 @@ export default defineConfig(({ mode }) => ({
     ],
     force: true, // Force re-optimization on next dev server start
   },
-}));
+};
+});

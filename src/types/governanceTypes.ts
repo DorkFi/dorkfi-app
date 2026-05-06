@@ -28,6 +28,11 @@ export interface Proposal {
   networkId?: string;
   /** When proposals are merged across networks, all source network IDs. */
   networkIds?: string[];
+  /**
+   * When true (e.g. governance node with power fields), `votesFor` is yes voting power
+   * and `totalVotes` is total voting power cast — use their ratio for pass % and bars.
+   */
+  usesVotingPowerTally?: boolean;
 }
 
 export type ProposalDetails = 

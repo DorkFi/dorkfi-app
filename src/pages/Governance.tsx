@@ -8,7 +8,7 @@ import { ProposalCard } from "@/components/governance/ProposalCard";
 import { BatchVoteConfirmationModal } from "@/components/governance/BatchVoteConfirmationModal";
 import { useGovernanceData } from "@/hooks/useGovernanceData";
 import { ProposalStatus, Proposal } from "@/types/governanceTypes";
-import { Loader2, ChevronDown } from "lucide-react";
+import { Loader2, ChevronDown, Search } from "lucide-react";
 import { H2 } from "@/components/ui/Typography";
 import { Button } from "@/components/ui/button";
 import { calculateNFTMultiplier } from "@/components/governance/NFTMultiplierDropdown";
@@ -31,10 +31,15 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { getNetworkLogoPath } from "@/utils/tokenImageUtils";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { GovernanceApiProposalsPanel } from "@/components/governance/GovernanceApiProposalsPanel";
+import { Input } from "@/components/ui/input";
+import { proposalMatchesSearch } from "@/utils/proposalSearchMatch";
 
 const MAX_SELECTION_LIMIT = 8;
 
 const Governance = () => {
+  const [sourceTab, setSourceTab] = useState<"onchain" | "api">("onchain");
   const { currentNetwork, switchNetwork } = useNetwork();
   const governanceNetworks = useMemo(() => getNetworksWithGovernance(), []);
   const networkSelectorNetworks = useMemo(
@@ -52,6 +57,7 @@ const Governance = () => {
   const { proposals, stats, loading, error, userVotes, vote, batchVote, userVoterInfo, getVoteKey } =
     useGovernanceData(effectiveGovernanceNetwork);
   const [selectedStatus, setSelectedStatus] = useState<ProposalStatus | "all">("all");
+  const [proposalSearch, setProposalSearch] = useState("");
   const [batchMode, setBatchMode] = useState(false);
   const [selectedProposals, setSelectedProposals] = useState<Set<string>>(new Set());
   const [selectedVotes, setSelectedVotes] = useState<Map<string, boolean>>(new Map());
@@ -191,9 +197,22 @@ const Governance = () => {
     }
   };
 
-  const filteredProposals = proposals
-    .filter((proposal) => selectedStatus === "all" || proposal.status === selectedStatus)
-    .sort((a, b) => b.startTime.getTime() - a.startTime.getTime());
+  const proposalsMatchingStatus = useMemo(
+    () =>
+      proposals.filter(
+        (proposal) => selectedStatus === "all" || proposal.status === selectedStatus
+      ),
+    [proposals, selectedStatus]
+  );
+
+  const searchTrimmed = proposalSearch.trim();
+  const filteredProposals = useMemo(
+    () =>
+      proposalsMatchingStatus
+        .filter((proposal) => proposalMatchesSearch(proposal, searchTrimmed))
+        .sort((a, b) => b.startTime.getTime() - a.startTime.getTime()),
+    [proposalsMatchingStatus, searchTrimmed]
+  );
 
   const activeProposals = filteredProposals.filter(
     (p) =>
@@ -203,7 +222,11 @@ const Governance = () => {
   // Validate that all selected proposals have a vote direction
   const allSelectedHaveVotes = selectedProposals.size > 0 && 
     Array.from(selectedProposals).every((id) => selectedVotes.has(id));
-  const canBatchVote = batchMode && selectedProposals.size > 0 && allSelectedHaveVotes;
+  const canBatchVote =
+    sourceTab === "onchain" &&
+    batchMode &&
+    selectedProposals.size > 0 &&
+    allSelectedHaveVotes;
   
   const allActiveSelected = batchMode && activeProposals.length > 0 && 
     activeProposals.every((p) => selectedProposals.has(p.id));
@@ -342,150 +365,187 @@ const Governance = () => {
           </div>
         )}
 
-        {/* Hero - Full Width when viewing a governance network */}
-        {effectiveGovernanceNetwork && <GovernanceHero stats={stats} />}
+        <Tabs
+          value={sourceTab}
+          onValueChange={(v) => setSourceTab(v as "onchain" | "api")}
+          className="mt-2"
+        >
+          <TabsList className="grid w-full grid-cols-2 sm:inline-flex sm:w-auto h-auto min-h-10 p-1 gap-1">
+            <TabsTrigger value="onchain" className="text-xs sm:text-sm px-2 sm:px-3">
+              Live
+            </TabsTrigger>
+            <TabsTrigger value="api" className="text-xs sm:text-sm px-2 sm:px-3">
+              Archives
+            </TabsTrigger>
+          </TabsList>
 
-        {!effectiveGovernanceNetwork ? (
-          <div className="flex flex-col items-center justify-center py-20 gap-4 text-muted-foreground">
-            <p>Switch to a governance-enabled network above to view proposals.</p>
-          </div>
-        ) : loading ? (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          </div>
-        ) : (
-          <>
-            {/* Governance Voting Info Card */}
-            <div className="mt-6">
-              <GovernanceVotingInfoCard />
-            </div>
+          <TabsContent value="onchain" className="mt-4">
+            {effectiveGovernanceNetwork && <GovernanceHero stats={stats} />}
 
-            {/* Unified Dashboard Card */}
-            <div className="mt-6">
-              <GovernanceDashboardCard
-                stats={stats}
-                selectedStatus={selectedStatus}
-                onStatusChange={setSelectedStatus}
-                userVoterInfo={userVoterInfo}
-              />
-            </div>
+            {!effectiveGovernanceNetwork ? (
+              <div className="flex flex-col items-center justify-center py-20 gap-4 text-muted-foreground">
+                <p>Switch to a governance-enabled network above to view proposals.</p>
+              </div>
+            ) : loading ? (
+              <div className="flex items-center justify-center py-20">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : (
+              <>
+                <div className="mt-6">
+                  <GovernanceVotingInfoCard />
+                </div>
 
-            {/* Proposals List - Full Width Below */}
-            <div className="mt-6 space-y-4">
-              <div className="space-y-4">
-                <H2 className="text-xl sm:text-2xl">
-                  {selectedStatus === "all" ? "All" : selectedStatus.charAt(0).toUpperCase() + selectedStatus.slice(1)} Proposals
-                </H2>
-                {activeProposals.length > 0 && (
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        id="batch-mode"
-                        checked={batchMode}
-                        onCheckedChange={(checked) => {
-                          setBatchMode(checked);
-                          if (!checked) {
-                            setSelectedProposals(new Set());
-                            setSelectedVotes(new Map());
-                          }
-                        }}
-                      />
-                      <Label htmlFor="batch-mode" className="cursor-pointer text-sm sm:text-base">
-                        Batch Vote Mode
-                      </Label>
+                <div className="mt-6">
+                  <GovernanceDashboardCard
+                    stats={stats}
+                    selectedStatus={selectedStatus}
+                    onStatusChange={setSelectedStatus}
+                    userVoterInfo={userVoterInfo}
+                  />
+                </div>
+
+                <div className="mt-6 space-y-4">
+                  <div className="space-y-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
+                      <H2 className="text-xl sm:text-2xl m-0 shrink-0">
+                        {selectedStatus === "all" ? "All" : selectedStatus.charAt(0).toUpperCase() + selectedStatus.slice(1)} Proposals
+                      </H2>
+                      <div className="relative w-full sm:max-w-md">
+                        <Search
+                          className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                          aria-hidden
+                        />
+                        <Input
+                          type="search"
+                          value={proposalSearch}
+                          onChange={(e) => setProposalSearch(e.target.value)}
+                          placeholder="Search title, description, ID, proposer…"
+                          className="pl-9"
+                          aria-label="Search proposals"
+                        />
+                      </div>
                     </div>
-                    {batchMode && activeProposals.length > 0 && (
-                      <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 flex-1">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleSelectAll}
-                          className="text-sm w-full sm:w-auto"
-                        >
-                          {allActiveSelected 
-                            ? "Deselect All" 
-                            : `Select All (${Math.min(activeProposals.length, MAX_SELECTION_LIMIT)})`}
-                        </Button>
-                        {selectedProposals.size > 0 && (
-                          <span className="text-sm text-muted-foreground text-center sm:text-left">
-                            {selectedProposals.size}/{MAX_SELECTION_LIMIT} selected
-                          </span>
+                    {activeProposals.length > 0 && (
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            id="batch-mode"
+                            checked={batchMode}
+                            onCheckedChange={(checked) => {
+                              setBatchMode(checked);
+                              if (!checked) {
+                                setSelectedProposals(new Set());
+                                setSelectedVotes(new Map());
+                              }
+                            }}
+                          />
+                          <Label htmlFor="batch-mode" className="cursor-pointer text-sm sm:text-base">
+                            Batch Vote Mode
+                          </Label>
+                        </div>
+                        {batchMode && activeProposals.length > 0 && (
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 flex-1">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleSelectAll}
+                              className="text-sm w-full sm:w-auto"
+                            >
+                              {allActiveSelected 
+                                ? "Deselect All" 
+                                : `Select All (${Math.min(activeProposals.length, MAX_SELECTION_LIMIT)})`}
+                            </Button>
+                            {selectedProposals.size > 0 && (
+                              <span className="text-sm text-muted-foreground text-center sm:text-left">
+                                {selectedProposals.size}/{MAX_SELECTION_LIMIT} selected
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {canBatchVote && (
+                          <Button
+                            onClick={handleBatchVoteClick}
+                            disabled={isBatchVoting}
+                            className="bg-primary hover:bg-primary/90 w-full sm:w-auto min-h-[44px]"
+                          >
+                            {isBatchVoting ? (
+                              <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                Voting...
+                              </>
+                            ) : (
+                              `Vote on ${selectedProposals.size} Proposal${selectedProposals.size > 1 ? 's' : ''}`
+                            )}
+                          </Button>
                         )}
                       </div>
                     )}
-                    {canBatchVote && (
-                      <Button
-                        onClick={handleBatchVoteClick}
-                        disabled={isBatchVoting}
-                        className="bg-primary hover:bg-primary/90 w-full sm:w-auto min-h-[44px]"
-                      >
-                        {isBatchVoting ? (
-                          <>
-                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                            Voting...
-                          </>
-                        ) : (
-                          `Vote on ${selectedProposals.size} Proposal${selectedProposals.size > 1 ? 's' : ''}`
-                        )}
-                      </Button>
-                    )}
                   </div>
-                )}
-              </div>
-              
-              {filteredProposals.length === 0 ? (
-                <div className="text-center py-12 px-4 space-y-2">
-                  {error ? (
-                    <>
-                      <p className="text-destructive font-medium">
-                        Could not load proposals
-                      </p>
-                      <p className="text-sm text-muted-foreground">{error}</p>
-                    </>
-                  ) : proposals.length === 0 ? (
-                    <p className="text-muted-foreground">
-                      No on-chain proposals yet. When the indexer has indexed proposal events, they
-                      will appear here.
-                    </p>
+                  
+                  {filteredProposals.length === 0 ? (
+                    <div className="text-center py-12 px-4 space-y-2">
+                      {error ? (
+                        <>
+                          <p className="text-destructive font-medium">
+                            Could not load proposals
+                          </p>
+                          <p className="text-sm text-muted-foreground">{error}</p>
+                        </>
+                      ) : proposals.length === 0 ? (
+                        <p className="text-muted-foreground">
+                          No on-chain proposals yet. When the indexer has indexed proposal events, they
+                          will appear here.
+                        </p>
+                      ) : proposalsMatchingStatus.length === 0 ? (
+                        <p className="text-muted-foreground">
+                          No proposals match the selected status filter. Try &quot;All&quot; to see every
+                          proposal.
+                        </p>
+                      ) : (
+                        <p className="text-muted-foreground">
+                          No proposals match your search. Try different keywords or clear the search field.
+                        </p>
+                      )}
+                    </div>
                   ) : (
-                    <p className="text-muted-foreground">
-                      No proposals match the selected status filter. Try &quot;All&quot; to see every
-                      proposal.
-                    </p>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 lg:gap-6">
+                      {filteredProposals.map((proposal) => {
+                        const isSelected = selectedProposals.has(proposal.id);
+                        const isLimitReached = selectedProposals.size >= MAX_SELECTION_LIMIT && !isSelected;
+                        const voteKeyForUser = getVoteKey(proposal, effectiveGovernanceNetwork ?? undefined);
+                        const voteNetworkId =
+                          effectiveGovernanceNetwork && proposal.networkIds?.includes(effectiveGovernanceNetwork)
+                            ? effectiveGovernanceNetwork
+                            : proposal.networkId;
+                        return (
+                          <ProposalCard
+                            key={proposal.id}
+                            proposal={proposal}
+                            onVote={handleVote}
+                            userVote={userVotes.get(voteKeyForUser)}
+                            votingPower={effectiveVotingPower}
+                            isSelected={isSelected}
+                            selectedVote={selectedVotes.get(proposal.id) ?? null}
+                            onSelect={handleSelectProposal}
+                            onSelectVote={handleSelectVote}
+                            voteNetworkId={voteNetworkId}
+                            batchMode={batchMode}
+                            isSelectionDisabled={isLimitReached}
+                          />
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
-              ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 lg:gap-6">
-                  {filteredProposals.map((proposal) => {
-                    const isSelected = selectedProposals.has(proposal.id);
-                    const isLimitReached = selectedProposals.size >= MAX_SELECTION_LIMIT && !isSelected;
-                    const voteKeyForUser = getVoteKey(proposal, effectiveGovernanceNetwork ?? undefined);
-                    const voteNetworkId =
-                      effectiveGovernanceNetwork && proposal.networkIds?.includes(effectiveGovernanceNetwork)
-                        ? effectiveGovernanceNetwork
-                        : proposal.networkId;
-                    return (
-                      <ProposalCard
-                        key={proposal.id}
-                        proposal={proposal}
-                        onVote={handleVote}
-                        userVote={userVotes.get(voteKeyForUser)}
-                        votingPower={effectiveVotingPower}
-                        isSelected={isSelected}
-                        selectedVote={selectedVotes.get(proposal.id) ?? null}
-                        onSelect={handleSelectProposal}
-                        onSelectVote={handleSelectVote}
-                        voteNetworkId={voteNetworkId}
-                        batchMode={batchMode}
-                        isSelectionDisabled={isLimitReached}
-                      />
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </>
-        )}
+              </>
+            )}
+          </TabsContent>
+
+          <TabsContent value="api" className="mt-4">
+            <GovernanceApiProposalsPanel queriesEnabled={sourceTab === "api"} />
+          </TabsContent>
+        </Tabs>
 
         {/* Batch Vote Confirmation Modal */}
         {canBatchVote && (
