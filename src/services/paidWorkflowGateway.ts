@@ -9,9 +9,12 @@ const CLAIMLAYER_WORKFLOW_ID = "claimlayer-paid-claimall";
 const DEFAULT_NFT_CLAIM_AGENT_BASE =
   "https://claim-agent-production.up.railway.app/claim";
 
+/** Same-origin path when `VITE_USE_CLAIM_AGENT_PROXY` is true; must match Vite proxy and production ingress. */
+const DEFAULT_CLAIM_AGENT_PROXY_PATH = "/api/claim-agent";
+
 /**
- * NFT claim status agent must be fetched from a real origin (CORS on the agent),
- * not via a Vite dev proxy path like `/api/...`.
+ * When not using the same-origin proxy, the claim status URL must be a real `https` origin (CORS).
+ * With `VITE_USE_CLAIM_AGENT_PROXY`, the browser hits the proxy instead (no CORS to upstream).
  */
 function isLocalClaimAgentPort3001(url: string): boolean {
   try {
@@ -23,6 +26,14 @@ function isLocalClaimAgentPort3001(url: string): boolean {
 }
 
 export function getNftHolderClaimAgentBase(): string {
+  const useProxy = (import.meta.env.VITE_USE_CLAIM_AGENT_PROXY as string | undefined)?.trim() === "true";
+  if (useProxy) {
+    const p =
+      (import.meta.env.VITE_CLAIM_AGENT_PROXY_PATH as string | undefined)?.trim() ||
+      DEFAULT_CLAIM_AGENT_PROXY_PATH;
+    return p.replace(/\/+$/, "") || DEFAULT_CLAIM_AGENT_PROXY_PATH;
+  }
+
   const raw = (import.meta.env.VITE_NFT_CLAIM_AGENT_BASE as string | undefined)?.trim();
   if (raw && isLocalClaimAgentPort3001(raw)) {
     console.warn(
@@ -34,7 +45,7 @@ export function getNftHolderClaimAgentBase(): string {
     raw && isLocalClaimAgentPort3001(raw) ? DEFAULT_NFT_CLAIM_AGENT_BASE : raw || DEFAULT_NFT_CLAIM_AGENT_BASE;
   if (candidate.startsWith("/")) {
     console.warn(
-      "[DorkFi] VITE_NFT_CLAIM_AGENT_BASE must be an absolute https:// URL, not a proxy path. Using default claim agent."
+      "[DorkFi] VITE_NFT_CLAIM_AGENT_BASE must be an absolute https:// URL when VITE_USE_CLAIM_AGENT_PROXY is off, not a path. Using default claim agent."
     );
     return DEFAULT_NFT_CLAIM_AGENT_BASE;
   }
@@ -143,86 +154,15 @@ function parseUnsignedClaimJson(json: unknown): NftHolderUnsignedClaimResponse {
   return { address: addr, claimable, slot, transactions, errors };
 }
 
-/** Temporary stub until `GET …/claim/:address/unsigned` is wired in production. */
-const HARDCODED_NFT_HOLDER_UNSIGNED_CLAIM: NftHolderUnsignedClaimResponse = {
-  address: "VDEVK22RGTKEE4EVKRTWVBPBPBB3IOFGO25RQCKDZCLZMRBKFBNNECRDLI",
-  claimable: true,
-  slot: {
-    campaignId: "dork",
-    campaignName: "Dorks Drip",
-    owner: "VDEVK22RGTKEE4EVKRTWVBPBPBB3IOFGO25RQCKDZCLZMRBKFBNNECRDLI",
-    collectionId: 313597,
-    tokenId: "5",
-    dripContractId: 49016540,
-    rewardTokenContractId: 420069,
-    rewardSymbol: "UNIT",
-    claimableRaw: "2400000000",
-    claimableDisplay: "24",
-  },
-  transactions: [
-    {
-      groupIndex: 0,
-      txnBase64:
-        "jaRhcGFhkcQEWHWfoqRhcGF0kcQgMHAKs8HmYq2OIhFCbTzdpY0jU7jsiNj8lp8SnJY143OkYXBmYZLOAATI/c4ABmjlpGFwaWTOAAW9HKNmZWXNA+iiZnbOARtjJ6NnZW6sdm9pbWFpbi12MS4womdoxCCvbR9JAjyBZ7+QVnOI2idI8JcvBxCYf+fFE6+ee55Y6aNncnDEIMK0z+yDEhTmWLskMsK7OK43Ee5GKTJOeNTfrEE+86fIomx2zgEbZw+kbm90ZcRZYXJjY2pzLXYyLjEwLjY6dSBjdXN0b20gR3JvdXAgcmVzb3VyY2Ugc2hhcmluZyB0cmFuc2FjdGlvbi4gQWNjb3VudHM6IDEgQXNzZXRzOiAwIEFwcHM6IDKjc25kxCCoyVVrUTTUQnCVVGdqheF4Q7Q4pna7GAlDyJeWRCooWqR0eXBlpGFwcGw=",
-      kind: "application",
-      feeMicros: "1000",
-      summary:
-        "appl: app 376092 method_selector=0x58759fa2; accounts=1 foreign_apps=2 boxes=0",
-    },
-    {
-      groupIndex: 1,
-      txnBase64:
-        "jaRhcGFhkcQEWHWfoqRhcGJ4kYKhaQGhbsQxZHJpcF9kYXRhAAAAAAAEyP0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABaRhcGZhkc4C6+7cpGFwaWTOAAW9HKNmZWXNA+iiZnbOARtjJ6NnZW6sdm9pbWFpbi12MS4womdoxCCvbR9JAjyBZ7+QVnOI2idI8JcvBxCYf+fFE6+ee55Y6aNncnDEIMK0z+yDEhTmWLskMsK7OK43Ee5GKTJOeNTfrEE+86fIomx2zgEbZw+kbm90ZcRXYXJjY2pzLXYyLjEwLjY6dSBjdXN0b20gR3JvdXAgcmVzb3VyY2Ugc2hhcmluZyB0cmFuc2FjdGlvbi4gQm94ZXM6IDEgQXBwczogMSAoNDkwMTY1NDApo3NuZMQgqMlVa1E01EJwlVRnaoXheEO0OKZ2uxgJQ8iXlkQqKFqkdHlwZaRhcHBs",
-      kind: "application",
-      feeMicros: "1000",
-      summary:
-        "appl: app 376092 method_selector=0x58759fa2; accounts=0 foreign_apps=1 boxes=1",
-    },
-    {
-      groupIndex: 2,
-      txnBase64:
-        "jaRhcGFhkcQEWHWfoqRhcGJ4k4KhaQGhbsQpYXBwcm92YWxzVA2gpPYeYqvY7xXBdD06kjTTGx1yhkMFXJdpScd7gJmCoWkBoW7EKGJhbGFuY2VzG6Kgp9URA8LHPTC+mxQt2cisxRS+2qbrDDEJdy0fm2iCoWkBoW7EKGJhbGFuY2VzqMlVa1E01EJwlVRnaoXheEO0OKZ2uxgJQ8iXlkQqKFqkYXBmYZHOAAZo5aRhcGlkzgAFvRyjZmVlzQPoomZ2zgEbYyejZ2VurHZvaW1haW4tdjEuMKJnaMQgr20fSQI8gWe/kFZziNonSPCXLwcQmH/nxROvnnueWOmjZ3JwxCDCtM/sgxIU5li7JDLCuziuNxHuRikyTnjU36xBPvOnyKJsds4BG2cPpG5vdGXEVWFyY2Nqcy12Mi4xMC42OnUgY3VzdG9tIEdyb3VwIHJlc291cmNlIHNoYXJpbmcgdHJhbnNhY3Rpb24uIEJveGVzOiAzIEFwcHM6IDEgKDQyMDA2OSmjc25kxCCoyVVrUTTUQnCVVGdqheF4Q7Q4pna7GAlDyJeWRCooWqR0eXBlpGFwcGw=",
-      kind: "application",
-      feeMicros: "1000",
-      summary:
-        "appl: app 376092 method_selector=0x58759fa2; accounts=0 foreign_apps=1 boxes=3",
-    },
-    {
-      groupIndex: 3,
-      txnBase64:
-        "jaRhcGFhkcQEWHWfoqRhcGJ4kYKhaQGhbsQhbgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFpGFwZmGRzgAEyP2kYXBpZM4ABb0co2ZlZc0D6KJmds4BG2Mno2dlbqx2b2ltYWluLXYxLjCiZ2jEIK9tH0kCPIFnv5BWc4jaJ0jwly8HEJh/58UTr557nljpo2dycMQgwrTP7IMSFOZYuyQywrs4rjcR7kYpMk541N+sQT7zp8iibHbOARtnD6Rub3RlxFVhcmNjanMtdjIuMTAuNjp1IGN1c3RvbSBHcm91cCByZXNvdXJjZSBzaGFyaW5nIHRyYW5zYWN0aW9uLiBCb3hlczogMSBBcHBzOiAxICgzMTM1OTcpo3NuZMQgqMlVa1E01EJwlVRnaoXheEO0OKZ2uxgJQ8iXlkQqKFqkdHlwZaRhcHBs",
-      kind: "application",
-      feeMicros: "1000",
-      summary:
-        "appl: app 376092 method_selector=0x58759fa2; accounts=0 foreign_apps=1 boxes=1",
-    },
-    {
-      groupIndex: 4,
-      txnBase64:
-        "i6NhbXTOAAEFVKNmZWXNA+iiZnbOARtjJ6NnZW6sdm9pbWFpbi12MS4womdoxCCvbR9JAjyBZ7+QVnOI2idI8JcvBxCYf+fFE6+ee55Y6aNncnDEIMK0z+yDEhTmWLskMsK7OK43Ee5GKTJOeNTfrEE+86fIomx2zgEbZw+kbm90ZcQuYXJjY2pzLXYyLjEwLjY6dSBjdXN0b20gUGF5bWVudCB0byBhcHBsaWNhdGlvbqNyY3bEIFzB94q91MpT+4ssW4fyo9E5ls9ITfZWVKd0kIy2BI2Qo3NuZMQgqMlVa1E01EJwlVRnaoXheEO0OKZ2uxgJQ8iXlkQqKFqkdHlwZaNwYXk=",
-      kind: "payment",
-      feeMicros: "1000",
-      summary:
-        "pay: sender VDEVK22RGTKEE4EVKRTWVBPBPBB3IOFGO25RQCKDZCLZMRBKFBNNECRDLI → receiver LTA7PCV52TFFH64LFRNYP4VD2E4ZNT2IJX3FMVFHOSIIZNQERWIMFGYY24 (drip app escrow); amount 66900 micro-units",
-    },
-    {
-      groupIndex: 5,
-      txnBase64:
-        "i6RhcGFhlMQEPZAw98QgqMlVa1E01EJwlVRnaoXheEO0OKZ2uxgJQ8iXlkQqKFrECAAAAAAABMj9xCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABaRhcGlkzgLr7tyjZmVlzQ+gomZ2zgEbYyejZ2VurHZvaW1haW4tdjEuMKJnaMQgr20fSQI8gWe/kFZziNonSPCXLwcQmH/nxROvnnueWOmjZ3JwxCDCtM/sgxIU5li7JDLCuziuNxHuRikyTnjU36xBPvOnyKJsds4BG2cPpG5vdGXEKWFyY2Nqcy12Mi4xMC42OnUgY3VzdG9tIGV4dHJhIHRyYW5zYWN0aW9uo3NuZMQgqMlVa1E01EJwlVRnaoXheEO0OKZ2uxgJQ8iXlkQqKFqkdHlwZaRhcHBs",
-      kind: "application",
-      feeMicros: "4000",
-      summary:
-        "appl: app 49016540 method_selector=0x3d9030f7; accounts=0 foreign_apps=0 boxes=0",
-    },
-  ],
-  errors: [],
-};
+function unsignedClaimErrorSnippet(body: string, maxLen = 400): string {
+  const t = body.trim();
+  if (!t) return "";
+  return t.length <= maxLen ? t : `${t.slice(0, maxLen)}…`;
+}
 
 /**
  * Manual claim: unsigned transaction group from the same host as {@link getNftHolderClaimAgentBase}
  * (`GET /claim/:address/unsigned?relayer=…`).
- *
- * **Stub:** returns {@link HARDCODED_NFT_HOLDER_UNSIGNED_CLAIM} until the network path is restored.
  */
 export async function fetchNftHolderUnsignedClaim(params: {
   beneficiaryAddress: string;
@@ -236,8 +176,53 @@ export async function fetchNftHolderUnsignedClaim(params: {
   if (!relayer) {
     throw new Error("Missing relayer address for unsigned claim");
   }
-  await Promise.resolve();
-  return parseUnsignedClaimJson(HARDCODED_NFT_HOLDER_UNSIGNED_CLAIM as unknown);
+
+  const base = getNftHolderClaimAgentBase();
+  const qs = new URLSearchParams({ relayer }).toString();
+  const url = `${base}/${encodeURIComponent(beneficiary)}/unsigned?${qs}`;
+
+  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  const text = await res.text();
+
+  let json: unknown;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    throw new Error(
+      res.ok
+        ? "Claim agent returned invalid JSON for unsigned transactions."
+        : `Unsigned claim failed (HTTP ${res.status}): ${unsignedClaimErrorSnippet(text)}`
+    );
+  }
+
+  if (!res.ok) {
+    let detail = "";
+    if (json && typeof json === "object" && json !== null) {
+      const o = json as Record<string, unknown>;
+      const msg =
+        typeof o.message === "string"
+          ? o.message
+          : typeof o.error === "string"
+            ? o.error
+            : "";
+      if (msg) detail = msg;
+      else if (Array.isArray(o.errors) && o.errors.length) {
+        try {
+          detail = JSON.stringify(o.errors);
+        } catch {
+          detail = String(o.errors);
+        }
+      }
+    }
+    if (!detail) detail = unsignedClaimErrorSnippet(text);
+    throw new Error(
+      detail
+        ? `Unsigned claim failed (HTTP ${res.status}): ${detail}`
+        : `Unsigned claim failed (HTTP ${res.status})`
+    );
+  }
+
+  return parseUnsignedClaimJson(json);
 }
 
 const DEFAULT_NFT_CLAIM_MANUAL_URL = "https://docs.dork.fi";

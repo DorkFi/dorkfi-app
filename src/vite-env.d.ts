@@ -9,8 +9,15 @@ interface ImportMetaEnv {
   readonly VITE_PAID_WORKFLOW_GATEWAY_URL?: string;
   /** Optional Bearer token for gateway `Authorization` when required. */
   readonly VITE_PAID_WORKFLOW_GATEWAY_API_KEY?: string;
-  /** NFT claim-agent base URL: absolute `https://…/claim` (defaults to Railway production if unset/invalid). */
+  /** NFT claim-agent base URL: absolute `https://…/claim` when not using the proxy (defaults to Railway if unset/invalid). */
   readonly VITE_NFT_CLAIM_AGENT_BASE?: string;
+  /**
+   * When `"true"`, claim-agent requests use same-origin `VITE_CLAIM_AGENT_PROXY_PATH` so auth stays on the server
+   * (Vite dev proxy or production reverse proxy injects `NFT_CLAIM_AGENT_API_KEY`). Never put API keys in `VITE_*` vars.
+   */
+  readonly VITE_USE_CLAIM_AGENT_PROXY?: string;
+  /** Same-origin prefix for the claim-agent proxy; must match `CLAIM_AGENT_PROXY_PATH` in Vite config / production ingress (default `/api/claim-agent`). */
+  readonly VITE_CLAIM_AGENT_PROXY_PATH?: string;
   /** Optional 58-char relayer for `GET …/claim/:addr/unsigned?relayer=`; defaults to the beneficiary address. */
   readonly VITE_NFT_CLAIM_RELAYER_ADDRESS?: string;
   /** Optional absolute URL for “claim manually” in the NFT rewards modal (defaults to docs). */

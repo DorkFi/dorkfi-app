@@ -6,6 +6,17 @@ import { componentTagger } from "lovable-tagger";
 const GOVERNANCE_RAILWAY =
   "https://dorkfi-governance-node-production.up.railway.app";
 
+const DEFAULT_CLAIM_AGENT_UPSTREAM =
+  "https://claim-agent-production.up.railway.app";
+
+/**
+ * Dev-only proxy for the NFT claim agent (secrets stay here — never use `VITE_*` for API keys):
+ * - `NFT_CLAIM_AGENT_API_KEY` — optional Bearer token forwarded to the upstream.
+ * - `CLAIM_AGENT_UPSTREAM_URL` — optional; default Railway host above.
+ * - `CLAIM_AGENT_PROXY_PATH` — optional; default `/api/claim-agent` (must match `VITE_CLAIM_AGENT_PROXY_PATH` when using the proxy in the app).
+ * Production static hosts must mirror this route (reverse proxy or edge) + the same env as server-side secrets.
+ */
+
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
@@ -13,6 +24,10 @@ export default defineConfig(({ mode }) => {
     env.VITE_GOVERNANCE_LOCAL_TARGET || "http://127.0.0.1:8787";
   const governanceNgrokTarget =
     env.VITE_GOVERNANCE_NGROK_TARGET || "http://127.0.0.1:8787";
+  const claimAgentProxyPath =
+    env.CLAIM_AGENT_PROXY_PATH?.trim() || "/api/claim-agent";
+  const claimAgentUpstream =
+    env.CLAIM_AGENT_UPSTREAM_URL?.trim() || DEFAULT_CLAIM_AGENT_UPSTREAM;
 
   return {
   server: {
@@ -44,6 +59,20 @@ export default defineConfig(({ mode }) => {
         configure: (proxy) => {
           proxy.on("proxyReq", (proxyReq) => {
             proxyReq.setHeader("ngrok-skip-browser-warning", "true");
+          });
+        },
+      },
+      [claimAgentProxyPath]: {
+        target: claimAgentUpstream,
+        changeOrigin: true,
+        rewrite: (reqPath) => {
+          if (!reqPath.startsWith(claimAgentProxyPath)) return reqPath;
+          return "/claim" + reqPath.slice(claimAgentProxyPath.length);
+        },
+        configure: (proxy) => {
+          proxy.on("proxyReq", (proxyReq) => {
+            const key = env.NFT_CLAIM_AGENT_API_KEY?.trim();
+            if (key) proxyReq.setHeader("Authorization", `Bearer ${key}`);
           });
         },
       },
