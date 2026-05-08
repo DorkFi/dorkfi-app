@@ -165,8 +165,8 @@ export function NftHolderClaimManualModal({
         <div className="border-b border-slate-800">
           <div className="relative w-full overflow-hidden bg-slate-950">
             <img
-              src="/nft-manual-claim-hero.png"
-              alt="Manual claim ready — review rewards and sign when you choose"
+              src="/nft-reward-agent-hero.png"
+              alt="Manual claim ready — whale AI agent illustration; review rewards and sign when you choose"
               className="block h-auto w-full max-w-none align-middle"
               loading="eager"
               decoding="async"

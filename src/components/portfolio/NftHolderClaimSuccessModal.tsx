@@ -109,8 +109,8 @@ export function NftHolderClaimSuccessModal({
       <DialogContent className="max-h-[min(92vh,880px)] w-full max-w-[min(100vw-1.5rem,44rem)] overflow-y-auto overflow-x-hidden border-slate-800 bg-slate-950 p-0 text-slate-100 shadow-2xl z-[110] sm:max-w-2xl">
         <div className="relative w-full border-b border-slate-800 bg-slate-950">
           <img
-            src="/nft-claim-success-hero.png"
-            alt=""
+            src="/nft-reward-agent-hero.png"
+            alt="NFT holder rewards claimed — whale AI agent illustration with protocol dashboards"
             className="mx-auto block h-auto w-full max-w-full object-contain object-center"
             loading="eager"
             decoding="async"
