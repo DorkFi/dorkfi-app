@@ -208,7 +208,7 @@ export function NftHolderRewardsModalBody({
         <div className="relative w-full overflow-hidden bg-slate-950">
           <img
             src="/nft-reward-agent-hero.png"
-            alt="Let the agent handle it — automate eligibility checks and claim NFT holder rewards"
+            alt="AI agent whale at a desk with laptop and holographic protocol dashboards — automate eligibility checks and claim NFT holder rewards"
             className="block h-auto w-full max-w-none align-middle"
             loading="lazy"
             decoding="async"
