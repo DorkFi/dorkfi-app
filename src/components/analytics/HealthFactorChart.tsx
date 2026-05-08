@@ -20,12 +20,8 @@ const HealthFactorChart = () => {
     const fetchHealthFactorData = async () => {
       setLoading(true);
       try {
-        // Fetch opportunities from Orca API
-        // Use proxy in development, direct URL in production
-        const isDev = import.meta.env.DEV;
-        const orcaApiUrl = isDev 
-          ? '/api/orca/opportunities'
-          : 'https://orca-api.nautilus.sh/api/opportunities';
+        // Orca API — always call the origin directly (no Vite dev proxy).
+        const orcaApiUrl = "https://orca-api.nautilus.sh/api/opportunities";
         const limit = 1000; // Try to get more in one request
         const response = await fetch(`${orcaApiUrl}?limit=${limit}`, {
           method: 'GET',

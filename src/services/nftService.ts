@@ -44,6 +44,45 @@ const NFT_CONTRACT_MULTIPLIERS: Record<number, number> = {
 
 const NFT_INDEXER_BASE_URL = "https://voi-mainnet-mimirapi.nftnavigator.xyz/nft-indexer/v1";
 
+/** Normalize metadata `image` URLs for `<img src>`. */
+export function normalizeNftMetadataImageUrl(
+  url: string | undefined | null
+): string | null {
+  if (!url?.trim()) return null;
+  const u = url.trim();
+  if (u.startsWith("ipfs://")) {
+    return `https://ipfs.io/ipfs/${u.replace("ipfs://", "")}`;
+  }
+  return u;
+}
+
+/**
+ * Resolve display image for an ARC-72 style NFT via NFT Navigator indexer.
+ * `GET /tokens?contractId=&tokenId=&limit=1`
+ */
+export async function fetchArc72NftImageUrl(
+  contractId: number,
+  tokenId: string
+): Promise<string | null> {
+  const params = new URLSearchParams({
+    contractId: String(contractId),
+    tokenId: String(tokenId),
+    limit: "1",
+  });
+  const response = await fetch(`${NFT_INDEXER_BASE_URL}/tokens?${params.toString()}`);
+  if (!response.ok) {
+    return null;
+  }
+  const data: NFTIndexerResponse = await response.json();
+  const token = data.tokens?.[0];
+  if (!token) return null;
+  const meta = parseNFTMetadata(token.metadata);
+  return (
+    normalizeNftMetadataImageUrl(meta.image) ??
+    normalizeNftMetadataImageUrl((token as { image?: string }).image)
+  );
+}
+
 /**
  * Fetches NFTs for a given owner address from the NFT Navigator API
  * @param ownerAddress The wallet address to fetch NFTs for

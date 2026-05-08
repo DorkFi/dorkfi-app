@@ -7,6 +7,7 @@ import {
   type RefObject,
 } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { useAddressName } from "@/hooks/useAddressName";
@@ -71,6 +72,7 @@ import {
 import { MarketRowTokenIcon } from "@/components/markets/MarketRowTokenIcon";
 import { marketRowForPortfolioPosition } from "@/utils/marketRowForPortfolioPosition";
 import { usdPerTokenFromMarketInfoPrice } from "@/utils/assetDecimals";
+import { formatNftHolderClaimableDisplayFromAgent } from "@/utils/nftHolderClaimAgentDisplay";
 import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
 import { portfolioWalletBalanceCacheKey } from "@/utils/portfolioWalletBalanceCacheKey";
 import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
@@ -87,6 +89,19 @@ import { resolveSupplyBorrowToken } from "./SupplyBorrowModal";
 import { XchainUsdcBridgeControls } from "@/components/xchain/XchainUsdcBridgeControls";
 import PortfolioTableMobileCard from "./portfolio/PortfolioTableMobileCard";
 import AccruedInterestMobileCard from "./portfolio/AccruedInterestMobileCard";
+import { NftHolderClaimManualModal } from "@/components/portfolio/NftHolderClaimManualModal";
+import {
+  NftHolderClaimSuccessModal,
+  type NftHolderClaimSuccessDetails,
+} from "@/components/portfolio/NftHolderClaimSuccessModal";
+import {
+  NftHolderRewardsModalBody,
+  type NftHolderEligibilitySnapshot,
+} from "@/components/portfolio/NftHolderRewardsModalBody";
+import {
+  getClaimlayerUsdAmount,
+  getNftHolderClaimAgentBase,
+} from "@/services/paidWorkflowGateway";
 import NFTSelectionModal from "./liquidation/NFTSelectionModal";
 import ProfileUpdateSuccessModal from "./liquidation/ProfileUpdateSuccessModal";
 import { UserNFT } from "@/hooks/useUserNFTs";
@@ -106,6 +121,9 @@ import {
   Filter,
   ChevronDown,
   ChevronUp,
+  Gift,
+  ChevronRight,
+  Loader2,
 } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -114,6 +132,8 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -134,6 +154,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import DorkFiButton from "@/components/ui/DorkFiButton";
+import { isPortaledWalletPickerUi } from "@/lib/isPortaledWalletPickerUi";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
@@ -317,6 +338,7 @@ const Portfolio = () => {
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
   const { formatNumber, formatCurrency, formatPercent } = useNumberI18n();
+  const queryClient = useQueryClient();
 
   const rewardsAprNetworks = useMemo(
     () => getEnabledNetworks() as NetworkId[],
@@ -483,6 +505,107 @@ const Portfolio = () => {
     return userProfileAvatar || avatarImage || undefined;
   }, [userProfileAvatar, avatarImage]);
 
+  const {
+    data: nftHolderClaimAgent,
+    isSuccess: nftHolderClaimAgentSuccess,
+    isPending: nftHolderClaimAgentPending,
+    isFetching: nftHolderClaimAgentFetching,
+    isError: nftHolderClaimAgentIsError,
+    error: nftHolderClaimAgentFetchError,
+  } = useQuery({
+    queryKey: ["nft-holder-claim-agent", displayAddress],
+    queryFn: async () => {
+      const url = `${getNftHolderClaimAgentBase()}/${encodeURIComponent(displayAddress!)}`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        throw new Error(`Claim agent HTTP ${res.status}`);
+      }
+      return res.json() as {
+        address: string;
+        claimable: boolean;
+        transactionCount: number;
+        totalClaimableRaw: string;
+        totalClaimableDisplay: string;
+        batches: Array<{ slots?: Array<{ rewardSymbol?: string }> }>;
+        errors: unknown[];
+        /** Optional server field; falls back to `claimable` when absent. */
+        eligible?: boolean;
+      };
+    },
+    enabled: Boolean(displayAddress && !isViewOnly),
+    /** Always stale so `invalidateQueries` and modal-open refetch actually hit the claim agent. */
+    staleTime: 0,
+  });
+
+  const nftHolderClaimableDisplayWithSymbol = useMemo(
+    () => formatNftHolderClaimableDisplayFromAgent(nftHolderClaimAgent),
+    [nftHolderClaimAgent]
+  );
+
+  const submitManualNftHolderClaim = useCallback(
+    async (unsignedTxns: Uint8Array[]) => {
+      if (!signTransactions || !displayAddress) {
+        throw new Error("Connect a wallet to sign this claim.");
+      }
+      const walletName = activeWallet?.metadata?.name || "your wallet";
+      toast({
+        title: "Sign in your wallet",
+        description: `Approve the manual NFT reward claim in ${walletName}.`,
+        duration: 10000,
+      });
+      const stxns = await signTransactions(unsignedTxns);
+      const algorandNetwork = getAlgorandNetworkFromNetworkId(currentNetwork as NetworkId);
+      if (!algorandNetwork) {
+        throw new Error(`Invalid network: ${currentNetwork}`);
+      }
+      const algorandClients =
+        await algorandService.initializeClientsForTransactions(algorandNetwork);
+      const res = await algorandClients.algod.sendRawTransaction(stxns).do();
+      await waitForConfirmation(algorandClients.algod, res.txid, 4);
+      void queryClient.invalidateQueries({
+        queryKey: ["nft-holder-claim-agent", displayAddress],
+      });
+      toast({
+        title: "Manual claim submitted",
+        description: `Transaction confirmed: ${res.txid}`,
+      });
+    },
+    [
+      signTransactions,
+      displayAddress,
+      activeWallet,
+      toast,
+      currentNetwork,
+      queryClient,
+    ]
+  );
+
+  const nftHolderClaimableDisplayAmount = nftHolderClaimAgent
+    ? Number.parseFloat(nftHolderClaimAgent.totalClaimableDisplay)
+    : NaN;
+  const nftHolderClaimParsedOk =
+    nftHolderClaimAgent != null &&
+    Number.isFinite(nftHolderClaimableDisplayAmount);
+  const showPortfolioRewardsClaim =
+    !isViewOnly &&
+    nftHolderClaimAgentSuccess &&
+    nftHolderClaimParsedOk &&
+    nftHolderClaimableDisplayAmount > 0;
+  const showPortfolioNftHolderRewardsNoBalance =
+    !isViewOnly &&
+    nftHolderClaimAgentSuccess &&
+    nftHolderClaimParsedOk &&
+    nftHolderClaimableDisplayAmount <= 0;
+
+  /** Placeholder card until claim agent returns (initial load or refetch without a resolved outcome yet). */
+  const showPortfolioNftHolderRewardsFetching =
+    !isViewOnly &&
+    Boolean(displayAddress) &&
+    !nftHolderClaimAgentIsError &&
+    (nftHolderClaimAgentPending || nftHolderClaimAgentFetching) &&
+    !showPortfolioRewardsClaim &&
+    !showPortfolioNftHolderRewardsNoBalance;
+
   const [selectedNetworkFilter, setSelectedNetworkFilter] =
     useState<string>("all");
   const [suppliedAssetsNetworkFilter, setSuppliedAssetsNetworkFilter] =
@@ -552,6 +675,20 @@ const Portfolio = () => {
   // NFT selection state
   const [nftModalOpen, setNftModalOpen] = useState(false);
   const [successModalOpen, setSuccessModalOpen] = useState(false);
+  const [nftHolderRewardsClaimModalOpen, setNftHolderRewardsClaimModalOpen] =
+    useState(false);
+  const [nftClaimSuccessOpen, setNftClaimSuccessOpen] = useState(false);
+  const [nftClaimSuccessDetails, setNftClaimSuccessDetails] =
+    useState<NftHolderClaimSuccessDetails | null>(null);
+  const [nftClaimManualModalOpen, setNftClaimManualModalOpen] = useState(false);
+
+  /** Fresh claim-agent snapshot whenever the rewards modal opens. */
+  useEffect(() => {
+    if (!nftHolderRewardsClaimModalOpen || !displayAddress || isViewOnly) return;
+    void queryClient.invalidateQueries({
+      queryKey: ["nft-holder-claim-agent", displayAddress],
+    });
+  }, [nftHolderRewardsClaimModalOpen, displayAddress, isViewOnly, queryClient]);
 
   console.log("marketData", marketData);
 
@@ -2158,6 +2295,23 @@ const Portfolio = () => {
       : healthFactor;
 
   const displayHealthFactor = saturateHealthFactor(healthFactorToDisplay);
+
+  const nftHolderModalEligibilitySnapshot = useMemo((): NftHolderEligibilitySnapshot | null => {
+    if (!displayAddress || isViewOnly) return null;
+    return {
+      collateralUsd: totalCollateral,
+      borrowedUsd: totalBorrowed,
+      healthFactor: displayHealthFactor,
+      hasProfileAvatar: Boolean(userProfileAvatar?.trim()),
+    };
+  }, [
+    displayAddress,
+    isViewOnly,
+    totalCollateral,
+    totalBorrowed,
+    displayHealthFactor,
+    userProfileAvatar,
+  ]);
 
   /** Which lending market the headline HF refers to (worst pool or tightest at-risk deposit). */
   const positionOverviewMarketLine = useMemo(() => {
@@ -5314,6 +5468,123 @@ const Portfolio = () => {
                 onRefreshMarkets={handleRefreshMarkets}
                 isRefreshingMarkets={isRefreshingMarkets}
               />
+              {showPortfolioNftHolderRewardsFetching && (
+                <div className="mx-auto mt-4 w-full max-w-7xl animate-fade-in">
+                  <div
+                    role="status"
+                    aria-busy="true"
+                    aria-live="polite"
+                    aria-label="Loading NFT holder rewards"
+                    className="flex w-full flex-col gap-4 rounded-xl border border-yellow-400/30 bg-gradient-to-r from-yellow-400/10 via-amber-950/20 to-slate-900/50 px-4 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-6 sm:py-5 dark:border-yellow-500/25"
+                  >
+                    <div className="flex min-w-0 flex-1 items-start gap-3">
+                      <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-yellow-400/75 text-slate-900 dark:bg-yellow-400/60">
+                        <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+                      </div>
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <p className="text-base font-semibold text-slate-900 dark:text-yellow-100">
+                          NFT holder rewards
+                        </p>
+                        <p className="text-sm leading-snug text-slate-700 dark:text-slate-300">
+                          Fetching your claim agent snapshot—claimable amount and next steps will
+                          show here in a moment.
+                        </p>
+                        <div className="flex flex-col gap-1.5 pt-0.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
+                          <Skeleton className="h-4 w-36 bg-slate-600/35 dark:bg-slate-700/70" />
+                          <Skeleton className="h-4 w-48 bg-slate-600/35 dark:bg-slate-700/70" />
+                        </div>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      disabled
+                      variant="outline"
+                      className="h-auto w-full shrink-0 cursor-wait border-yellow-500/30 px-5 py-3 opacity-70 sm:w-auto"
+                      aria-disabled
+                    >
+                      <span className="flex items-center justify-center gap-2">
+                        <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                        Loading…
+                      </span>
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {showPortfolioRewardsClaim && (
+                <div className="w-full max-w-7xl mx-auto mt-4 animate-fade-in">
+                  <div
+                    role="region"
+                    aria-label="Dork NFT holder rewards"
+                    className="w-full flex flex-col gap-4 rounded-xl border-2 border-yellow-400/60 bg-gradient-to-r from-yellow-400/20 via-amber-100/80 to-yellow-400/15 px-4 py-4 shadow-md sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-6 sm:py-5 dark:border-yellow-400/35 dark:from-yellow-400/12 dark:via-amber-950/40 dark:to-yellow-500/10"
+                  >
+                    <div className="flex min-w-0 flex-1 items-start gap-3">
+                      <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-yellow-400 text-slate-900 shadow-sm dark:bg-yellow-400/90">
+                        <Gift className="h-5 w-5" aria-hidden="true" />
+                      </div>
+                      <div className="min-w-0 space-y-1">
+                        <p className="text-base font-semibold text-slate-900 dark:text-yellow-100">
+                          NFT holder rewards
+                        </p>
+                        <p className="text-sm leading-snug text-slate-700 dark:text-slate-300">
+                          Weekly distributions for Dork and Dork V2 holders. Claimable now:{" "}
+                          <span className="font-semibold text-slate-900 dark:text-yellow-50 tabular-nums">
+                            {nftHolderClaimableDisplayWithSymbol}
+                          </span>
+                          . Continue below to choose settlement.
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      onClick={() => setNftHolderRewardsClaimModalOpen(true)}
+                      className="h-auto w-full shrink-0 border-2 border-yellow-500 bg-yellow-400 px-5 py-3 text-base font-bold text-slate-900 shadow hover:bg-yellow-300 focus-visible:ring-yellow-500 sm:w-auto sm:py-3"
+                      aria-label={`Claim UNIT — Dork NFT holder rewards (${nftHolderClaimableDisplayWithSymbol} claimable)`}
+                    >
+                      <span className="flex items-center justify-center gap-2">
+                        Claim UNIT
+                        <ChevronRight className="h-5 w-5 shrink-0" aria-hidden="true" />
+                      </span>
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {showPortfolioNftHolderRewardsNoBalance && (
+                <div className="w-full max-w-7xl mx-auto mt-4 animate-fade-in">
+                  <div
+                    role="region"
+                    aria-label="Dork NFT holder rewards status"
+                    className="w-full flex flex-col gap-4 rounded-xl border border-ocean-teal/25 bg-muted/40 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-6 sm:py-5 dark:border-ocean-teal/20 dark:bg-slate-900/50"
+                  >
+                    <div className="flex min-w-0 flex-1 items-start gap-3">
+                      <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-ocean-teal/30 bg-background text-ocean-teal dark:text-cyan-400">
+                        <Info className="h-5 w-5" aria-hidden="true" />
+                      </div>
+                      <div className="min-w-0 space-y-1">
+                        <p className="text-base font-semibold text-foreground">
+                          NFT holder rewards
+                        </p>
+                        <p className="text-sm leading-snug text-muted-foreground">
+                          No claimable balance right now for this wallet. Dork and Dork V2
+                          holders receive weekly distributions—check back after the next drop,
+                          or open Markets anytime.
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => navigate("/market")}
+                      className="h-auto w-full shrink-0 border-ocean-teal/40 px-5 py-3 sm:w-auto"
+                      aria-label="Open Markets"
+                    >
+                      <span className="flex items-center justify-center gap-2">
+                        View Markets
+                        <ChevronRight className="h-5 w-5 shrink-0" aria-hidden="true" />
+                      </span>
+                    </Button>
+                  </div>
+                </div>
+              )}
             </>
           );
         })()}
@@ -9933,6 +10204,96 @@ const Portfolio = () => {
         }
         onRefreshWalletBalance={refreshWalletBalance}
         onRefreshMarket={() => displayAddress && fetchUser(displayAddress)}
+      />
+
+      <Dialog
+        modal={false}
+        open={nftHolderRewardsClaimModalOpen}
+        onOpenChange={setNftHolderRewardsClaimModalOpen}
+      >
+        <DialogContent
+          className="max-h-[min(90vh,880px)] w-full max-w-[min(100vw-1.5rem,42rem)] overflow-y-auto overflow-x-hidden border-slate-800 bg-slate-950 p-0 text-slate-100 shadow-2xl sm:max-w-3xl z-[100]"
+          onOpenAutoFocus={(e) => {
+            e.preventDefault();
+            window.requestAnimationFrame(() => {
+              document.getElementById("nft-reward-primary-pay")?.focus();
+            });
+          }}
+          onInteractOutside={(e) => {
+            if (isPortaledWalletPickerUi(e.target)) e.preventDefault();
+          }}
+          onPointerDownOutside={(e) => {
+            if (isPortaledWalletPickerUi(e.target)) e.preventDefault();
+          }}
+        >
+          <DialogHeader className="space-y-1 border-b border-slate-800 px-8 py-5 text-left sm:px-10">
+            <DialogTitle className="text-base font-semibold tracking-tight text-emerald-400/95">
+              NFT holder rewards
+            </DialogTitle>
+            <DialogDescription className="text-xs leading-relaxed text-slate-500">
+              Pay an agent on Base with USDC (x402) to verify eligibility and run your claim.
+              Claimable now {nftHolderClaimableDisplayWithSymbol}.
+            </DialogDescription>
+          </DialogHeader>
+          <NftHolderRewardsModalBody
+            claimableDisplay={nftHolderClaimableDisplayWithSymbol}
+            feeUsd={getClaimlayerUsdAmount()}
+            displayAddress={displayAddress}
+            activeAvmAddress={activeAccount?.address}
+            isViewOnly={isViewOnly}
+            claimAgent={nftHolderClaimAgent ?? null}
+            claimAgentPending={nftHolderClaimAgentPending}
+            claimAgentFetching={nftHolderClaimAgentFetching}
+            claimAgentIsError={nftHolderClaimAgentIsError}
+            claimAgentFetchError={nftHolderClaimAgentFetchError}
+            eligibilitySnapshot={nftHolderModalEligibilitySnapshot}
+            appQueryClient={queryClient}
+            onPayClose={() => setNftHolderRewardsClaimModalOpen(false)}
+            onRequestOpenManualClaim={() => {
+              setNftHolderRewardsClaimModalOpen(false);
+              window.requestAnimationFrame(() => {
+                setNftClaimManualModalOpen(true);
+              });
+            }}
+            onClaimSuccessShare={(details) => {
+              setNftClaimSuccessDetails(details);
+              window.requestAnimationFrame(() => {
+                setNftClaimSuccessOpen(true);
+              });
+            }}
+          />
+          <DialogFooter className="border-t border-slate-800 bg-slate-950/95 px-8 py-5 sm:justify-center sm:px-10">
+            <Button
+              type="button"
+              variant="ghost"
+              className="w-full text-slate-400 hover:bg-slate-900 hover:text-slate-100"
+              onClick={() => setNftHolderRewardsClaimModalOpen(false)}
+            >
+              Not now
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <NftHolderClaimManualModal
+        open={nftClaimManualModalOpen}
+        onOpenChange={setNftClaimManualModalOpen}
+        beneficiaryAddress={displayAddress ?? ""}
+        submitManualNftClaim={
+          !isViewOnly && displayAddress && signTransactions
+            ? submitManualNftHolderClaim
+            : undefined
+        }
+      />
+
+      <NftHolderClaimSuccessModal
+        open={nftClaimSuccessOpen}
+        onOpenChange={(open) => {
+          setNftClaimSuccessOpen(open);
+          if (!open) setNftClaimSuccessDetails(null);
+        }}
+        details={nftClaimSuccessDetails}
+        claimableSummary={nftHolderClaimableDisplayWithSymbol}
       />
 
       {/* NFT Selection Modal */}

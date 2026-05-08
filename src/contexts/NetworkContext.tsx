@@ -134,6 +134,22 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
   };
 
   const getNetworks = () => {
+    // Voi chain config for @txnlab/use-wallet. Register both IDs: the stack historically
+    // used "voimain" (matches app `walletNetworkId`), while persisted wallet state may use
+    // the app chain id "voi-mainnet" as activeNetwork — without both, WalletManager throws
+    // `Network "voi-mainnet" not found in network configuration`.
+    const voiMainnetWalletConfig = {
+      algod: {
+        token: "",
+        baseServer: "https://mainnet-api.voi.dork.fi",
+        port: "443",
+      },
+      isTestnet: false,
+      genesisHash: "r20fSQI8gWe/kFZziNonSPCXLwcQmH/nxROvnnueWOk=",
+      genesisId: "voimain-v1.0",
+      caipChainId: "algorand:r20fSQI8gWe_kFZziNonSPCXLwcQmH_n",
+    } as const;
+
     return new NetworkConfigBuilder()
       .mainnet({
         algod: {
@@ -142,17 +158,8 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
           token: "",
         },
       })
-      .addNetwork("voimain", {
-        algod: {
-          token: "",
-          baseServer: "https://mainnet-api.voi.dork.fi",
-          port: "443",
-        },
-        isTestnet: false,
-        genesisHash: "r20fSQI8gWe/kFZziNonSPCXLwcQmH/nxROvnnueWOk=",
-        genesisId: "voimain-v1.0",
-        caipChainId: "algorand:r20fSQI8gWe_kFZziNonSPCXLwcQmH_n",
-      })
+      .addNetwork("voimain", { ...voiMainnetWalletConfig })
+      .addNetwork("voi-mainnet", { ...voiMainnetWalletConfig })
       .build();
   };
 

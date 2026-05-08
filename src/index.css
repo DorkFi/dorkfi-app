@@ -634,3 +634,13 @@
 .focus-whale {
   @apply focus:outline-none focus:ring-4 focus:ring-highlight-aqua/30 focus:ring-offset-2 focus:ring-offset-deep-navy;
 }
+
+/*
+ * Radix Dialog (modal) can leave `pointer-events: none` on the page so clicks pass through
+ * RainbowKit / WalletConnect layers. Explicit `auto` keeps portaled wallet rows clickable
+ * when a shadcn dialog is open (see rainbow-me/rainbowkit#1547).
+ */
+[data-rk],
+[aria-labelledby="rk_connect_title"] {
+  pointer-events: auto;
+}
