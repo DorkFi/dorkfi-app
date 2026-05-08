@@ -189,7 +189,7 @@ export function NftHolderClaimManualModal({
           {loading ? (
             <div className="flex items-center justify-center gap-2 py-8 text-sm text-slate-400">
               <Loader2 className="h-5 w-5 animate-spin shrink-0" aria-hidden />
-              Loading unsigned transactions…
+              Loading claim info
             </div>
           ) : error ? (
             <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-red-200">
