@@ -2302,7 +2302,7 @@ const Portfolio = () => {
       collateralUsd: totalCollateral,
       borrowedUsd: totalBorrowed,
       healthFactor: displayHealthFactor,
-      hasProfileAvatar: Boolean(userProfileAvatar?.trim()),
+      hasProfileAvatar: Boolean(displayAvatar?.trim()),
     };
   }, [
     displayAddress,
@@ -2310,7 +2310,7 @@ const Portfolio = () => {
     totalCollateral,
     totalBorrowed,
     displayHealthFactor,
-    userProfileAvatar,
+    displayAvatar,
   ]);
 
   /** Which lending market the headline HF refers to (worst pool or tightest at-risk deposit). */
