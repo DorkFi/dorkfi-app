@@ -678,6 +678,7 @@ export const useOnDemandMarketData = ({
               asset: token.symbol,
               configSymbol,
               icon: token.logoPath,
+              price: tokenPrice,
               iconBadgeUrl: resolveTokenIconBadgeUrl(
                 tokenConfig?.iconBadgeFromSymbol
               ),
