@@ -59,8 +59,8 @@ export const useTokenPrice = (tokenSymbol: string, networkId?: string): UseToken
               );
               
               if (marketInfo && marketInfo.price) {
-                const scaledPrice = parseFloat(marketInfo.price);
-                const marketPrice = scaledPrice / Math.pow(10, 6);
+                // Already human-readable USD price from lendingService formatPrice
+                const marketPrice = parseFloat(marketInfo.price);
                 console.log(`Market price for ${tokenSymbol} on ${network}: $${marketPrice}`);
                 setPrice(marketPrice);
                 setIsLoading(false);
@@ -81,11 +81,11 @@ export const useTokenPrice = (tokenSymbol: string, networkId?: string): UseToken
       );
 
       if (marketInfo && marketInfo.price) {
-        // Market prices are scaled by 10^6, so we need to divide by 10^6 to get USD price
-        const scaledPrice = parseFloat(marketInfo.price);
-        const marketPrice = scaledPrice / Math.pow(10, 6);
+        // marketInfo.price is already a human-readable USD price (formatted in lendingService
+        // by dividing raw oracle value by 10^18). No additional scaling needed.
+        const marketPrice = parseFloat(marketInfo.price);
         
-        console.log(`Market price for ${tokenSymbol}: $${marketPrice} (scaled by 10^6)`);
+        console.log(`Market price for ${tokenSymbol}: $${marketPrice}`);
         setPrice(marketPrice);
       } else {
         throw new Error(`No market price data available for ${tokenSymbol}`);

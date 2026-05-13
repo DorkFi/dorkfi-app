@@ -243,7 +243,10 @@ export const useOnDemandMarketData = ({
             console.log(
               `Setting market data for ${token.symbol} with pool ID: ${tokenPoolId}`
             );
-            // Calculate USD values using the market price
+            // Calculate USD values using the market price.
+            // marketInfo.price is already a human-readable USD price (divided by 10^18
+            // in lendingService formatPrice). totalDeposits/totalBorrows are already
+            // divided by token.decimals in formatDeposit. So USD = amount * price directly.
             const tokenPrice = parseFloat(marketInfo.price) || 0;
             const totalSupplyAmount = parseFloat(marketInfo.totalDeposits) || 0;
             const totalBorrowAmount = parseFloat(marketInfo.totalBorrows) || 0;
@@ -252,9 +255,9 @@ export const useOnDemandMarketData = ({
             console.log(`USD calculations for ${token.symbol}:`, {
               tokenPrice,
               totalSupplyAmount,
-              totalSupplyUSD: totalSupplyAmount * tokenPrice * Math.pow(10, token.decimals + 6) / Math.pow(10, 12),
+              totalSupplyUSD: totalSupplyAmount * tokenPrice,
               totalBorrowAmount,
-              totalBorrowUSD: totalBorrowAmount * tokenPrice * Math.pow(10, token.decimals + 6) / Math.pow(10, 12),
+              totalBorrowUSD: totalBorrowAmount * tokenPrice,
             });
 
             // Get the original token config to access isStoken property
@@ -287,11 +290,12 @@ export const useOnDemandMarketData = ({
             const marketData: OnDemandMarketData = {
               asset: token.symbol,
               icon: token.logoPath,
+              price: tokenPrice,
               totalSupply: totalSupplyAmount,
-              totalSupplyUSD: Number(totalSupplyAmount * tokenPrice * Math.pow(10, token.decimals + 6) / Math.pow(10, 12)),
+              totalSupplyUSD: Number(totalSupplyAmount * tokenPrice),
               supplyAPY: supplyAPYValue,
               totalBorrow: totalBorrowAmount,
-              totalBorrowUSD: totalBorrowAmount * tokenPrice * Math.pow(10, token.decimals + 6) / Math.pow(10, 12),
+              totalBorrowUSD: totalBorrowAmount * tokenPrice,
               borrowAPY: borrowAPYValue,
               utilization: tokenConfig?.isStoken
                 ? 100.0
