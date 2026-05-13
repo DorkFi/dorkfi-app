@@ -103,35 +103,34 @@ function normalizeMarketData(md: Record<string, unknown>) {
   const isWad = assetSym === "WAD";
 
   let price = 1;
-  if (isWad) {
-    // WAD-only: oracle is often micro-USD per token; TVL from hook is micro-USD.
+  // Prefer the pre-computed price field from useOnDemandMarketData (already correctly
+  // converted via usdPerTokenFromMarketInfoPrice with proper decimal handling).
+  const directPrice = typeof md.price === "number" && Number.isFinite(md.price) && md.price > 0
+    ? md.price as number
+    : null;
+
+  if (directPrice != null) {
+    price = isWad ? normalizeWadUsdPerToken(directPrice) : directPrice;
+  } else if (isWad) {
+    // WAD fallback: oracle is often micro-USD per token.
     const oracleStr =
       mi?.price != null ? String(mi.price).replace(/,/g, "").trim() : "";
     const oracleUsd =
       oracleStr !== "" ? Number.parseFloat(oracleStr) : Number.NaN;
     if (Number.isFinite(oracleUsd) && oracleUsd > 0) {
       price = normalizeWadUsdPerToken(oracleUsd);
-    } else if (
-      supplyTokensHuman > 0 &&
-      Number.isFinite(totalSupplyUSD) &&
-      totalSupplyUSD > 0
-    ) {
+    } else if (supplyTokensHuman > 0 && Number.isFinite(totalSupplyUSD) && totalSupplyUSD > 0) {
       price = totalSupplyUSD / 1_000_000 / supplyTokensHuman;
     }
   } else {
-    // All other markets: original TVL + scaled oracle fallback (unchanged).
-    if (
-      supplyTokensHuman > 0 &&
-      Number.isFinite(totalSupplyUSD) &&
-      totalSupplyUSD > 0
-    ) {
+    // Fallback for non-WAD: derive from TVL or scaled oracle.
+    if (supplyTokensHuman > 0 && Number.isFinite(totalSupplyUSD) && totalSupplyUSD > 0) {
       price = totalSupplyUSD / 1_000_000 / supplyTokensHuman;
     } else if (mi?.price != null) {
       const tokenPrice = parseFloat(String(mi.price)) || 0;
       const decimals = Number(mi.decimals ?? 6);
       if (tokenPrice > 0 && Number.isFinite(decimals)) {
-        price =
-          (tokenPrice * Math.pow(10, decimals + 6)) / Math.pow(10, 12);
+        price = (tokenPrice * Math.pow(10, decimals + 6)) / Math.pow(10, 12);
       }
     }
   }
@@ -2808,9 +2807,11 @@ const MarketsTable = () => {
             (m) => (m as { _sortKey?: string })._sortKey === marketRowKey
           )
         : markets.find((m) => m.asset === asset);
+      // Use pre-computed price field; fall back to TVL-derived price for legacy data
       const tokenPrice = marketForPrice
-        ? (marketForPrice.totalSupplyUSD / marketForPrice.totalSupply || 1) /
-          10 ** 6
+        ? (typeof (marketForPrice as {price?: number}).price === "number" && (marketForPrice as {price?: number}).price! > 0
+            ? (marketForPrice as {price?: number}).price!
+            : (marketForPrice.totalSupplyUSD / marketForPrice.totalSupply || 1) / 10 ** 6)
         : 1;
       const balanceUSD = balance * tokenPrice;
 
@@ -3746,12 +3747,12 @@ const MarketsTable = () => {
                   utilization: assetData.utilization,
                   collateralFactor: assetData.collateralFactor,
                   tokenPrice:
-                    assetData.totalSupply > 0
-                      ? (assetData.totalSupplyUSD / assetData.totalSupply) /
-                        (withdrawModal.asset?.toUpperCase() === "WAD"
-                          ? 1_000_000
-                          : 1)
-                      : 1.0,
+                    typeof (assetData as {price?: number}).price === "number" && (assetData as {price?: number}).price! > 0
+                      ? (assetData as {price?: number}).price!
+                      : assetData.totalSupply > 0
+                        ? (assetData.totalSupplyUSD / assetData.totalSupply) /
+                          (withdrawModal.asset?.toUpperCase() === "WAD" ? 1_000_000 : 1)
+                        : 1.0,
                   totalDeposits: assetData.totalSupply,
                   totalBorrows: assetData.totalBorrow,
                   apyParameters: assetData.apyParameters,

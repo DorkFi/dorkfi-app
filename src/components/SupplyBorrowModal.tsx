@@ -1794,7 +1794,9 @@ const SupplyBorrowModal = ({
           const maxBorrowUSD = collateralForBorrow * (assetData.collateralFactor / 100);
           const calculatedMaxBorrow = capByBorrowCap(
             tokenPrice != null && tokenPrice > 0
-              ? (maxBorrowUSD / tokenPrice) * Math.pow(10, 6) / Math.pow(10, decimals)
+              // maxBorrowUSD / tokenPrice → human token amount (no unit conversion needed;
+              // tokenPrice is USD per human token, result is human tokens like assetData.liquidity)
+              ? maxBorrowUSD / tokenPrice
               : 0
           );
           setCalculatedMaxBorrow(calculatedMaxBorrow);
