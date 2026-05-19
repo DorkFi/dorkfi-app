@@ -36,3 +36,5 @@ export interface UserPosition {
   earnings: number;
 }
 
+export type UserPositionLoadState = 'idle' | 'loading' | 'ready' | 'error';
+
