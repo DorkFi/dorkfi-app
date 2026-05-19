@@ -3526,24 +3526,26 @@ const MarketsTable = () => {
               className="w-full mt-4"
             >
               <TabsList
-                className={`grid w-full gap-1 ${
-                  hasDMarketTab
-                    ? "max-w-3xl grid-cols-2 sm:grid-cols-4"
-                    : "max-w-md grid-cols-3"
-                }`}
+                className={cn(
+                  "grid w-full h-auto min-h-10 gap-1 p-1",
+                  hasDMarketTab ? "max-w-3xl grid-cols-4" : "max-w-md grid-cols-3"
+                )}
               >
-                <TabsTrigger value="all" className="text-sm">
+                <TabsTrigger value="all" className="text-xs md:text-sm px-2">
                   All Markets
                 </TabsTrigger>
-                <TabsTrigger value="A" className="text-sm">
-                  A Markets
+                <TabsTrigger value="A" className="text-xs md:text-sm px-2">
+                  <span className="md:hidden">A</span>
+                  <span className="hidden md:inline">A Markets</span>
                 </TabsTrigger>
-                <TabsTrigger value="B" className="text-sm">
-                  B Markets
+                <TabsTrigger value="B" className="text-xs md:text-sm px-2">
+                  <span className="md:hidden">B</span>
+                  <span className="hidden md:inline">B Markets</span>
                 </TabsTrigger>
                 {hasDMarketTab && (
-                  <TabsTrigger value="D" className="text-sm">
-                    D Markets
+                  <TabsTrigger value="D" className="text-xs md:text-sm px-2">
+                    <span className="md:hidden">D</span>
+                    <span className="hidden md:inline">D Markets</span>
                   </TabsTrigger>
                 )}
               </TabsList>
