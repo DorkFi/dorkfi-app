@@ -45,6 +45,7 @@ import {
 } from "@/clients/DorkFiLendingPoolClient";
 import algosdk from "algosdk";
 import BigNumber from "bignumber.js";
+import { withRpcReadCache } from "@/utils/rpcReadCache";
 import { calcDepositReturn } from "@folks-finance/algorand-sdk";
 import {
   calculateDepositAPY,
@@ -1145,6 +1146,21 @@ export const fetchUserGlobalData = async (
   lastUpdateTime: number;
   healthFactorIndex?: number;
 } | null> => {
+  return withRpcReadCache(
+    `userGlobal:${networkId}:${userAddress}`,
+    () => fetchUserGlobalDataUncached(userAddress, networkId)
+  );
+};
+
+const fetchUserGlobalDataUncached = async (
+  userAddress: string,
+  networkId: NetworkId
+): Promise<{
+  totalCollateralValue: number;
+  totalBorrowValue: number;
+  lastUpdateTime: number;
+  healthFactorIndex?: number;
+} | null> => {
   try {
     const networkConfig = getNetworkConfig(networkId);
 
@@ -1153,75 +1169,61 @@ export const fetchUserGlobalData = async (
         networkConfig.walletNetworkId as AlgorandNetwork
       );
 
-      // Initialize aggregate values
       let totalCollateralValueUSD = 0;
       let totalBorrowValueUSD = 0;
       let lastUpdateTime = 0;
 
-      const lendingPools = networkConfig.contracts?.lendingPools ?? [];
-      for (const poolId of lendingPools) {
-        const poolIdNum = Number(poolId);
-        if (!Number.isFinite(poolIdNum) || poolIdNum <= 0) {
-          console.warn(
-            `fetchUserGlobalData: skipping invalid lending pool id: ${String(poolId)}`
-          );
-          continue;
-        }
-        try {
-          const ci = new CONTRACT(
-            poolIdNum,
-            clients.algod,
-            undefined,
-            { ...LendingPoolAppSpec.contract, events: [] },
-            {
-              addr: algosdk.encodeAddress(
-                algosdk.getApplicationAddress(poolIdNum).publicKey
-              ),
-              sk: new Uint8Array(),
-            }
-          );
-          ci.setFee(2000);
+      const lendingPools = (networkConfig.contracts?.lendingPools ?? [])
+        .map((poolId) => Number(poolId))
+        .filter((poolIdNum) => Number.isFinite(poolIdNum) && poolIdNum > 0);
 
-          const globalUserR = await ci.get_global_user(userAddress);
-          if (globalUserR.success) {
-            const globalUser = GlobalUserData(globalUserR.returnValue);
-            console.log(`Global user data for pool ${poolId}:`, globalUser);
-
-            // Contract stores totalCollateralValue with scaling: (deposit_amount * price) // SCALE
-            // Where SCALE = 1e18, so we need to divide by 1e18 to get USD value
-            const poolCollateralValueUSD = new BigNumber(
-              globalUser.totalCollateralValue.toString()
-            )
-              .div(1e12) // Correct scaling factor for collateral value
-              .toNumber();
-            const poolBorrowValueUSD = new BigNumber(
-              globalUser.totalBorrowValue.toString()
-            )
-              .div(1e12) // Correct scaling factor for borrow value
-              .toNumber();
-
-            console.log(`Pool ${poolId} values:`, {
-              collateralValueUSD: poolCollateralValueUSD,
-              borrowValueUSD: poolBorrowValueUSD,
-            });
-
-            // Aggregate values from all pools
-            totalCollateralValueUSD += poolCollateralValueUSD;
-            totalBorrowValueUSD += poolBorrowValueUSD;
-            // Use the latest update time from all pools
-            lastUpdateTime = Math.max(
-              lastUpdateTime,
-              Number(globalUser.lastUpdateTime)
+      const poolResults = await Promise.all(
+        lendingPools.map(async (poolIdNum) => {
+          try {
+            const ci = new CONTRACT(
+              poolIdNum,
+              clients.algod,
+              undefined,
+              { ...LendingPoolAppSpec.contract, events: [] },
+              {
+                addr: algosdk.encodeAddress(
+                  algosdk.getApplicationAddress(poolIdNum).publicKey
+                ),
+                sk: new Uint8Array(),
+              }
             );
-          } else {
-            console.warn(`Failed to get global user data for pool ${poolId}`);
+            ci.setFee(2000);
+            const globalUserR = await ci.get_global_user(userAddress);
+            if (!globalUserR.success) return null;
+            const globalUser = GlobalUserData(globalUserR.returnValue);
+            return {
+              poolCollateralValueUSD: new BigNumber(
+                globalUser.totalCollateralValue.toString()
+              )
+                .div(1e12)
+                .toNumber(),
+              poolBorrowValueUSD: new BigNumber(
+                globalUser.totalBorrowValue.toString()
+              )
+                .div(1e12)
+                .toNumber(),
+              lastUpdateTime: Number(globalUser.lastUpdateTime),
+            };
+          } catch (poolError) {
+            console.warn(
+              `fetchUserGlobalData: pool ${poolIdNum} read failed:`,
+              poolError
+            );
+            return null;
           }
-        } catch (poolError) {
-          console.warn(
-            `fetchUserGlobalData: pool ${poolId} read failed (continuing other pools):`,
-            poolError
-          );
-        }
+        })
+      );
+
+      for (const row of poolResults) {
+        if (!row) continue;
+        totalCollateralValueUSD += row.poolCollateralValueUSD;
+        totalBorrowValueUSD += row.poolBorrowValueUSD;
+        lastUpdateTime = Math.max(lastUpdateTime, row.lastUpdateTime);
       }
 
       // Same ratio as on-chain _calculate_user_health(collateral, borrow, liquidation_threshold);
@@ -1287,6 +1289,21 @@ export const fetchUserGlobalData = async (
  * Use this when computing max borrow for a specific pool so borrowing power is based on collateral in that pool only.
  */
 export const fetchUserGlobalDataForPool = async (
+  userAddress: string,
+  networkId: NetworkId,
+  poolId: string | number
+): Promise<{
+  totalCollateralValue: number;
+  totalBorrowValue: number;
+  lastUpdateTime: number;
+} | null> => {
+  return withRpcReadCache(
+    `userGlobalPool:${networkId}:${poolId}:${userAddress}`,
+    () => fetchUserGlobalDataForPoolUncached(userAddress, networkId, poolId)
+  );
+};
+
+const fetchUserGlobalDataForPoolUncached = async (
   userAddress: string,
   networkId: NetworkId,
   poolId: string | number
@@ -2491,6 +2508,30 @@ export function getMaxWithdrawable(
  * Returns human-readable underlying amount and scaled amount for contract call.
  */
 export const getMaxWithdrawableForMarket = async (
+  poolId: string,
+  marketId: string,
+  userAddress: string,
+  networkId: NetworkId,
+  tokenDecimals: number,
+  options?: GetMaxWithdrawableOptions
+): Promise<{ maxWithdrawUnderlying: number; maxWithdrawScaled: bigint } | null> => {
+  const optionsKey = options?.minLiquidationThresholdBps?.toString() ?? "";
+  return withRpcReadCache(
+    `maxWithdraw:${networkId}:${poolId}:${marketId}:${userAddress}:${tokenDecimals}:${optionsKey}`,
+    () =>
+      getMaxWithdrawableForMarketUncached(
+        poolId,
+        marketId,
+        userAddress,
+        networkId,
+        tokenDecimals,
+        options
+      ),
+    15_000
+  );
+};
+
+const getMaxWithdrawableForMarketUncached = async (
   poolId: string,
   marketId: string,
   userAddress: string,

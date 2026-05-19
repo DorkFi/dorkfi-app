@@ -25,6 +25,7 @@ import { APP_SPEC as STokenAppSpec } from "@/clients/STokenClient";
 import { abi, CONTRACT } from "ulujs";
 import algorandService, { AlgorandNetwork } from "./algorandService";
 import algosdk, { TransactionSigner } from "algosdk";
+import { withRpcReadCache } from "@/utils/rpcReadCache";
 
 export interface PausedState {
   isPaused: boolean;
@@ -1067,6 +1068,26 @@ export const updateMarketMaxBorrows = async (
  * @returns The maximum borrow amount as a bigint, or null if the call fails
  */
 export const calculateMaxBorrowAmount = async (
+  poolId: number | string,
+  userId: string,
+  marketId: number | string,
+  storageContractAppId?: number | string
+): Promise<bigint | null> => {
+  const storageKey = storageContractAppId ?? poolId;
+  return withRpcReadCache(
+    `maxBorrow:${poolId}:${userId}:${marketId}:${storageKey}`,
+    () =>
+      calculateMaxBorrowAmountUncached(
+        poolId,
+        userId,
+        marketId,
+        storageContractAppId
+      ),
+    15_000
+  );
+};
+
+const calculateMaxBorrowAmountUncached = async (
   poolId: number | string,
   userId: string,
   marketId: number | string,

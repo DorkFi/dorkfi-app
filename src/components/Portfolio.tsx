@@ -4184,80 +4184,69 @@ const Portfolio = () => {
       }
     }
 
+    setDepositModal({
+      isOpen: true,
+      asset,
+      poolId,
+      network: networkId,
+      configSymbol,
+      marketId,
+    });
+
     setIsLoadingWalletBalance(true);
-
-    try {
-      // Fetch wallet balance before opening modal using the deposit's network
-      const balanceResult = await fetchWalletBalance(asset, networkId, true, {
-        poolId,
-        marketId,
-        configSymbol,
-      });
-
-      // In the background, prefetch wallet balances for other deposit assets
-      if (deposits.length > 0) {
-        const otherDeposits = deposits.filter((d) => {
-          const dn = d as ItemWithNetwork;
-          if (marketId != null && dn.marketId != null) {
-            return (
-              String(dn.marketId) !== String(marketId) ||
-              String(d.poolId ?? "") !== String(poolId ?? "")
-            );
-          }
-          return d.asset !== asset || d.poolId !== poolId;
+    void (async () => {
+      try {
+        await fetchWalletBalance(asset, networkId, true, {
+          poolId,
+          marketId,
+          configSymbol,
         });
-        if (otherDeposits.length > 0) {
-          Promise.all(
-            otherDeposits.map((d) =>
-              fetchWalletBalance(
-                d.asset,
-                (d as ItemWithNetwork).network || networkId,
-                true,
-                {
-                  poolId: d.poolId,
-                  marketId: (d as ItemWithNetwork).marketId,
-                  configSymbol: (d as ItemWithNetwork).configSymbol,
-                }
-              ).catch((error) =>
-                console.error(
-                  "[Portfolio] Error prefetching wallet balance for deposit asset",
+
+        if (deposits.length > 0) {
+          const otherDeposits = deposits.filter((d) => {
+            const dn = d as ItemWithNetwork;
+            if (marketId != null && dn.marketId != null) {
+              return (
+                String(dn.marketId) !== String(marketId) ||
+                String(d.poolId ?? "") !== String(poolId ?? "")
+              );
+            }
+            return d.asset !== asset || d.poolId !== poolId;
+          });
+          if (otherDeposits.length > 0) {
+            Promise.all(
+              otherDeposits.map((d) =>
+                fetchWalletBalance(
                   d.asset,
-                  error
+                  (d as ItemWithNetwork).network || networkId,
+                  true,
+                  {
+                    poolId: d.poolId,
+                    marketId: (d as ItemWithNetwork).marketId,
+                    configSymbol: (d as ItemWithNetwork).configSymbol,
+                  }
+                ).catch((error) =>
+                  console.error(
+                    "[Portfolio] Error prefetching wallet balance for deposit asset",
+                    d.asset,
+                    error
+                  )
                 )
               )
-            )
-          ).catch((error) =>
-            console.error(
-              "[Portfolio] Error in prefetch wallet balances Promise.all",
-              error
-            )
-          );
+            ).catch((error) =>
+              console.error(
+                "[Portfolio] Error in prefetch wallet balances Promise.all",
+                error
+              )
+            );
+          }
         }
+      } catch (error) {
+        console.error("Error fetching wallet balance for deposit:", error);
+      } finally {
+        setIsLoadingWalletBalance(false);
       }
-
-      // Open modal after balance is fetched
-      setDepositModal({
-        isOpen: true,
-        asset,
-        poolId,
-        network: networkId,
-        configSymbol,
-        marketId,
-      });
-    } catch (error) {
-      console.error("Error fetching wallet balance for deposit:", error);
-      // Still open modal even if balance fetch fails
-      setDepositModal({
-        isOpen: true,
-        asset,
-        poolId,
-        network: networkId,
-        configSymbol,
-        marketId,
-      });
-    } finally {
-      setIsLoadingWalletBalance(false);
-    }
+    })();
   };
 
   const prefetchWithdrawIndicesRef = useRef<
@@ -4269,6 +4258,20 @@ const Portfolio = () => {
       ) => Promise<void>)
     | null
   >(null);
+
+  const prefetchWithdrawModalData = (
+    asset: string,
+    poolId?: string,
+    networkId?: string,
+    marketId?: string
+  ) => {
+    void prefetchWithdrawIndicesRef.current?.(
+      asset,
+      poolId,
+      marketId,
+      networkId
+    );
+  };
 
   const handleWithdrawClick = (
     asset: string,
@@ -4325,80 +4328,57 @@ const Portfolio = () => {
       }
     }
 
+    const networkToUse = (networkId || currentNetwork) as NetworkId;
+
+    setBorrowModal({
+      isOpen: true,
+      asset,
+      poolId,
+      network: networkToUse,
+      configSymbol,
+      marketId,
+    });
+
     setIsLoadingBorrowData(true);
-
-    try {
-      // Use the asset's network if provided, otherwise fall back to currentNetwork
-      const networkToUse = (networkId || currentNetwork) as NetworkId;
-
-      // Fetch user global data before opening modal (only if wallet is connected)
-      if (activeAccount?.address) {
-        // fetch markets from node api for accurate healthFactorIndex calculation
-        // Fetch markets to pass for healthFactorIndex calculation
-        const markets = await fetchAllMarkets(networkToUse);
-        // const marketDataResponse =
-        //   await dorkfiAPIService.getAllMarketDataByNetwork(networkToUse);
-        // const markets = marketDataResponse.success
-        //   ? marketDataResponse.data
-        //   : [];
-        const globalData = await fetchUserGlobalData(
-          activeAccount.address,
-          networkToUse,
-          markets
-        );
-        setUserGlobalData(globalData);
-
-        // Fetch user's current borrow balance for this specific asset
-        const tokens = getAllTokensWithDisplayInfo(networkToUse);
-        const token = resolveSupplyBorrowToken(
-          tokens,
-          asset,
-          poolId,
-          configSymbol,
-          marketId
-        );
-
-        if (token && token.poolId && token.underlyingContractId) {
-          const borrowData = await fetchUserBorrowBalance(
+    void (async () => {
+      try {
+        if (activeAccount?.address) {
+          const globalData = await fetchUserGlobalData(
             activeAccount.address,
-            token.poolId,
-            token.underlyingContractId,
             networkToUse
           );
-          const borrowBalance = borrowData?.balance || 0;
-          setUserBorrowBalance(borrowBalance || 0);
+          setUserGlobalData(globalData);
+
+          const tokens = getAllTokensWithDisplayInfo(networkToUse);
+          const token = resolveSupplyBorrowToken(
+            tokens,
+            asset,
+            poolId,
+            configSymbol,
+            marketId
+          );
+
+          if (token && token.poolId && token.underlyingContractId) {
+            const borrowData = await fetchUserBorrowBalance(
+              activeAccount.address,
+              token.poolId,
+              token.underlyingContractId,
+              networkToUse
+            );
+            setUserBorrowBalance(borrowData?.balance || 0);
+          } else {
+            setUserBorrowBalance(0);
+          }
         } else {
+          setUserGlobalData(null);
           setUserBorrowBalance(0);
         }
-      } else {
-        // Not connected, set empty data
-        setUserGlobalData(null);
-        setUserBorrowBalance(0);
+      } catch (error) {
+        console.error("Error fetching user data for borrow:", error);
+      } finally {
+        setIsLoadingBorrowData(false);
       }
-
-      // Open modal regardless of connection status
-      setBorrowModal({
-        isOpen: true,
-        asset,
-        poolId,
-        network: networkToUse,
-        configSymbol,
-        marketId,
-      });
-    } catch (error) {
-      console.error("Error fetching user data for borrow:", error);
-      // Still open modal even if data fetch fails
-      setBorrowModal({
-        isOpen: true,
-        asset,
-        poolId,
-        network: networkId || currentNetwork,
-        configSymbol,
-        marketId,
-      });
-    } finally {
-      setIsLoadingBorrowData(false);
-    }
+    })();
   };
 
   const borrowModalMarketPickerRows = useMemo(() => {
@@ -7428,6 +7408,14 @@ const Portfolio = () => {
                                           <DorkFiButton
                                             size="sm"
                                             variant="withdraw"
+                                            onMouseEnter={() =>
+                                              prefetchWithdrawModalData(
+                                                deposit.asset,
+                                                deposit.poolId,
+                                                (deposit as ItemWithNetwork).network,
+                                                (deposit as ItemWithNetwork).marketId
+                                              )
+                                            }
                                             onClick={(e) => {
                                               e.stopPropagation();
                                               handleWithdrawClick(
@@ -10084,6 +10072,8 @@ const Portfolio = () => {
         userBorrowBalance={userBorrowBalance}
         folksMintedOneUnderlyingByKey={folksMintedOneUnderlyingByKey}
         prefetchWithdrawIndicesRef={prefetchWithdrawIndicesRef}
+        isLoadingWalletBalance={isLoadingWalletBalance}
+        isLoadingBorrowGlobalData={isLoadingBorrowData}
         onCloseDepositModal={() =>
           setDepositModal({
             isOpen: false,

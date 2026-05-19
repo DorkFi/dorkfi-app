@@ -194,6 +194,8 @@ interface PortfolioModalsProps {
   >;
   /** Same Folks mint ratio as supplied table (`network|configSymbol|poolId` → minted f for 1 underlying atomic). */
   folksMintedOneUnderlyingByKey?: Record<string, string>;
+  isLoadingWalletBalance?: boolean;
+  isLoadingBorrowGlobalData?: boolean;
 }
 
 const PortfolioModals = ({
@@ -220,6 +222,8 @@ const PortfolioModals = ({
   onRefreshMarket,
   prefetchWithdrawIndicesRef,
   folksMintedOneUnderlyingByKey,
+  isLoadingWalletBalance = false,
+  isLoadingBorrowGlobalData = false,
 }: PortfolioModalsProps) => {
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
@@ -2163,6 +2167,7 @@ const PortfolioModals = ({
                   walletBalances[depositModal.asset]?.lastUpdated
                 : walletBalances[depositModal.asset]?.lastUpdated
             }
+            isLoadingWalletBalance={isLoadingWalletBalance}
             onRefreshWalletBalance={
               depositModal.asset && onRefreshWalletBalance
                 ? () =>
@@ -2508,6 +2513,7 @@ const PortfolioModals = ({
             )}
             userGlobalData={userGlobalData}
             userBorrowBalance={userBorrowBalance || 0}
+            isLoadingBorrowGlobalData={isLoadingBorrowGlobalData}
             onTransactionSuccess={() => {
               if (onRefreshMarket) {
                 setTimeout(() => {
@@ -2538,6 +2544,7 @@ const PortfolioModals = ({
             onSelectAsset={onSelectBorrowMarket}
             userGlobalData={userGlobalData}
             userBorrowBalance={userBorrowBalance || 0}
+            isLoadingBorrowGlobalData={isLoadingBorrowGlobalData}
             poolCollateralMarkets={borrowPoolCollateralMarkets}
             onTransactionSuccess={() => {
               if (onRefreshMarket) {

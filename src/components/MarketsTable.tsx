@@ -973,58 +973,42 @@ const MarketsTable = () => {
       }
     }
 
+    const configSymbol = configSymbolFromMarketRowKey(marketRowKey);
+    setDepositModal({
+      isOpen: true,
+      asset,
+      poolId,
+      marketRowKey,
+      configSymbol,
+    });
+
     setIsLoadingBalance(true);
+    void (async () => {
+      try {
+        await fetchWalletBalance(asset, poolId, marketRowKey);
 
-    try {
-      // Fetch wallet balance before opening modal
-      await fetchWalletBalance(asset, poolId, marketRowKey, {
-        bypassCache: true,
-      });
-
-      let poolCollateralRows: PoolCollateralMarketRow[] = [];
-      if (activeAccount?.address && poolId != null && poolId !== "") {
-        try {
-          poolCollateralRows = await fetchPoolCollateralMarketRowsForDeposit(
-            activeAccount.address,
-            currentNetwork as NetworkId,
-            poolId
-          );
-        } catch (e) {
-          console.error("Error loading pool collateral markets for deposit:", e);
+        if (activeAccount?.address && poolId != null && poolId !== "") {
+          try {
+            const poolCollateralRows =
+              await fetchPoolCollateralMarketRowsForDeposit(
+                activeAccount.address,
+                currentNetwork as NetworkId,
+                poolId
+              );
+            setDepositPoolCollateralMarkets(poolCollateralRows);
+          } catch (e) {
+            console.error(
+              "Error loading pool collateral markets for deposit:",
+              e
+            );
+          }
         }
+      } catch (error) {
+        console.error("Error fetching wallet balance for deposit:", error);
+      } finally {
+        setIsLoadingBalance(false);
       }
-      setDepositPoolCollateralMarkets(poolCollateralRows);
-
-      // Open modal after balance is fetched
-      const configSymbol = configSymbolFromMarketRowKey(marketRowKey);
-      console.log("Opening deposit modal with:", {
-        asset,
-        poolId,
-        marketRowKey,
-        configSymbol,
-      });
-      setDepositModal({
-        isOpen: true,
-        asset,
-        poolId,
-        marketRowKey,
-        configSymbol,
-      });
-    } catch (error) {
-      console.error("Error fetching wallet balance for deposit:", error);
-      setDepositPoolCollateralMarkets([]);
-      // Still open modal even if balance fetch fails
-      const configSymbol = configSymbolFromMarketRowKey(marketRowKey);
-      setDepositModal({
-        isOpen: true,
-        asset,
-        poolId,
-        marketRowKey,
-        configSymbol,
-      });
-    } finally {
-      setIsLoadingBalance(false);
-    }
+    })();
   };
 
   const handleWithdrawClick = (asset: string) => {
@@ -1052,77 +1036,69 @@ const MarketsTable = () => {
       }
     }
 
+    const configSymbol = configSymbolFromMarketRowKey(marketRowKey);
+    setBorrowModal({
+      isOpen: true,
+      asset,
+      poolId,
+      marketRowKey,
+      configSymbol,
+    });
+
     setIsLoadingGlobalData(true);
-
-    try {
-      // Fetch user global data before opening modal (only if wallet is connected)
-      if (activeAccount?.address) {
-        const globalData = await fetchUserGlobalData(
-          activeAccount.address,
-          currentNetwork
-        );
-        setUserGlobalData(globalData);
-
-        // Fetch user's current borrow balance for this specific asset
-        const token = resolveTokenForDisplayedAsset(asset, poolId, marketRowKey);
-
-        if (token && token.poolId && token.underlyingContractId) {
-          const borrowData = await fetchUserBorrowBalance(
+    void (async () => {
+      try {
+        if (activeAccount?.address) {
+          const globalData = await fetchUserGlobalData(
             activeAccount.address,
-            token.poolId,
-            token.underlyingContractId,
             currentNetwork
           );
-          setUserBorrowBalance(borrowData?.balance || 0);
+          setUserGlobalData(globalData);
+
+          const token = resolveTokenForDisplayedAsset(
+            asset,
+            poolId,
+            marketRowKey
+          );
+
+          if (token && token.poolId && token.underlyingContractId) {
+            const borrowData = await fetchUserBorrowBalance(
+              activeAccount.address,
+              token.poolId,
+              token.underlyingContractId,
+              currentNetwork
+            );
+            setUserBorrowBalance(borrowData?.balance || 0);
+          } else {
+            setUserBorrowBalance(0);
+          }
+
+          if (poolId != null && poolId !== "") {
+            try {
+              const poolCollateralRows =
+                await fetchPoolCollateralMarketRowsForDeposit(
+                  activeAccount.address,
+                  currentNetwork as NetworkId,
+                  poolId
+                );
+              setDepositPoolCollateralMarkets(poolCollateralRows);
+            } catch (e) {
+              console.error(
+                "Error loading pool collateral markets for borrow:",
+                e
+              );
+            }
+          }
         } else {
+          setUserGlobalData(null);
           setUserBorrowBalance(0);
         }
-      } else {
-        // Not connected, set empty data
-        setUserGlobalData(null);
-        setUserBorrowBalance(0);
+      } catch (error) {
+        console.error("Error fetching user data for borrow:", error);
+      } finally {
+        setIsLoadingGlobalData(false);
       }
-
-      let poolCollateralRows: PoolCollateralMarketRow[] = [];
-      if (activeAccount?.address && poolId != null && poolId !== "") {
-        try {
-          poolCollateralRows = await fetchPoolCollateralMarketRowsForDeposit(
-            activeAccount.address,
-            currentNetwork as NetworkId,
-            poolId
-          );
-        } catch (e) {
-          console.error(
-            "Error loading pool collateral markets for borrow:",
-            e
-          );
-        }
-      }
-      setDepositPoolCollateralMarkets(poolCollateralRows);
-
-      // Open modal regardless of connection status
-      const configSymbol = configSymbolFromMarketRowKey(marketRowKey);
-      setBorrowModal({
-        isOpen: true,
-        asset,
-        poolId,
-        marketRowKey,
-        configSymbol,
-      });
-    } catch (error) {
-      console.error("Error fetching user data for borrow:", error);
-      setDepositPoolCollateralMarkets([]);
-      const configSymbol = configSymbolFromMarketRowKey(marketRowKey);
-      setBorrowModal({
-        isOpen: true,
-        asset,
-        poolId,
-        marketRowKey,
-        configSymbol,
-      });
-    } finally {
-      setIsLoadingGlobalData(false);
-    }
+    })();
   };
 
   const handleMintClick = async (
@@ -3680,6 +3656,7 @@ const MarketsTable = () => {
                 ]?.balanceUSD || 0
               }
               poolCollateralMarkets={depositPoolCollateralMarkets}
+              isLoadingWalletBalance={isLoadingBalance}
               onRefreshWalletBalance={
                 depositModal.asset
                   ? () => {
@@ -3791,6 +3768,7 @@ const MarketsTable = () => {
               onSelectAsset={handleSelectBorrowMarket}
               userGlobalData={userGlobalData}
               userBorrowBalance={userBorrowBalance}
+              isLoadingBorrowGlobalData={isLoadingGlobalData}
               poolCollateralMarkets={depositPoolCollateralMarkets}
               onTransactionSuccess={() => {
                 // Refresh market data after successful borrow
