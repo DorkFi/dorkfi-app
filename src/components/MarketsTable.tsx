@@ -15,6 +15,7 @@ import {
   getAllTokensWithDisplayInfo,
   getFolksAdaptersForPhase,
   getTokenConfig,
+  resolveTokenForMarketPosition,
   getAlgorandNetworkFromNetworkId,
   tokenStandardUsesNativeWalletBalance,
 } from "@/config";
@@ -50,13 +51,19 @@ import {
   fetchUserGlobalData,
   fetchUserBorrowBalance,
   fetchUserDepositBalance,
+  fetchGlobalUserRowsFromChain,
   getMaxWithdrawableForMarket,
   migrate,
   deposit,
   fetchMarketInfo,
   isMarketPaused,
 } from "@/services/lendingService";
-import type { UserPosition as MarketDetailUserPosition } from "@/components/market-modal/types";
+import { withRpcReadCache } from "@/utils/rpcReadCache";
+import { computePortfolioDisplayHealthFactor } from "@/utils/portfolioDisplayHealthFactor";
+import type {
+  UserPosition as MarketDetailUserPosition,
+  UserPositionLoadState,
+} from "@/components/market-modal/types";
 import { normalizeWadUsdPerToken, roundUsdToCents, cn } from "@/lib/utils";
 import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
 import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
@@ -373,6 +380,8 @@ const MarketsTable = () => {
   /** Live position for PremiumMarketModal (on-chain + pool caps). */
   const [detailModalUserPosition, setDetailModalUserPosition] =
     useState<MarketDetailUserPosition | null>(null);
+  const [detailModalUserPositionLoad, setDetailModalUserPositionLoad] =
+    useState<UserPositionLoadState>("idle");
 
   // Mock user deposits - in real app, this would come from user's wallet/backend
   const [userDeposits] = useState<Record<string, number>>({});
@@ -848,31 +857,16 @@ const MarketsTable = () => {
       poolId: string | undefined,
       marketRowKey: string | undefined
     ) => {
-      const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-      if (marketRowKey) {
-        const row = markets.find(
-          (m) => (m as { _sortKey?: string })._sortKey === marketRowKey
-        );
-        const cs = row?.configSymbol;
-        if (cs) {
-          const t = tokens.find(
-            (x) =>
-              (x.originalSymbol ?? x.symbol) === cs &&
-              (poolId == null ||
-                poolId === "" ||
-                String(x.poolId) === String(poolId))
-          );
-          if (t) return t;
-        }
-      }
-      if (poolId != null && poolId !== "") {
-        return tokens.find(
-          (t) => t.symbol === asset && String(t.poolId) === String(poolId)
-        );
-      }
-      return tokens.find((t) => t.symbol === asset);
+      const configSymbol = marketRowKey
+        ? configSymbolFromMarketRowKey(marketRowKey)
+        : undefined;
+      return resolveTokenForMarketPosition(currentNetwork, {
+        asset,
+        poolId,
+        configSymbol,
+      });
     },
-    [markets, currentNetwork]
+    [currentNetwork, configSymbolFromMarketRowKey]
   );
 
   const borrowModalAvailableAssets = useMemo(() => {
@@ -1532,6 +1526,17 @@ const MarketsTable = () => {
     void loadMarketDataWithBypass(
       marketKeyForOnDemandLoad(poolId, configSymbol, asset)
     );
+    if (activeAccount?.address) {
+      const addr = activeAccount.address;
+      void fetchUserGlobalData(addr, currentNetwork).then((data) => {
+        if (data) setUserGlobalData(data);
+      });
+      void withRpcReadCache(
+        `globalUserRows:${addr}`,
+        () => fetchGlobalUserRowsFromChain(addr),
+        30_000
+      );
+    }
   };
 
   const handleRowClick = (market: Record<string, unknown>) => {
@@ -2982,9 +2987,12 @@ const MarketsTable = () => {
     };
   };
 
+  const detailPositionLoadIdRef = useRef(0);
+
   useEffect(() => {
     if (!detailModal.isOpen) {
       setDetailModalUserPosition(null);
+      setDetailModalUserPositionLoad("idle");
       return;
     }
 
@@ -2992,180 +3000,209 @@ const MarketsTable = () => {
     const asset = detailModal.asset;
     if (!row || !asset) {
       setDetailModalUserPosition(null);
+      setDetailModalUserPositionLoad("idle");
       return;
     }
 
     if (!activeAccount?.address) {
       setDetailModalUserPosition(null);
+      setDetailModalUserPositionLoad("idle");
       return;
     }
 
     const poolId = detailModal.poolId;
-    const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-    const token =
-      resolveTokenForDisplayedAsset(
-        asset,
-        poolId,
-        detailModal.marketRowKey
-      ) ??
-      (poolId != null && poolId !== ""
-        ? tokens.find(
-            (t) => t.symbol === asset && String(t.poolId) === String(poolId)
-          )
-        : tokens.find((t) => t.symbol === asset));
+    const configSymbol =
+      typeof (row as { configSymbol?: string }).configSymbol === "string"
+        ? (row as { configSymbol?: string }).configSymbol
+        : undefined;
+    const token = resolveTokenForMarketPosition(currentNetwork, {
+      asset,
+      poolId,
+      configSymbol,
+    });
 
     if (!token?.poolId || !token.underlyingContractId) {
       setDetailModalUserPosition(null);
+      setDetailModalUserPositionLoad("idle");
       return;
     }
 
-    let cancelled = false;
+    const loadId = ++detailPositionLoadIdRef.current;
+    const userAddress = activeAccount.address;
+    const rpcPoolId = token.poolId;
+    const rpcMarketId = token.underlyingContractId;
+    const tokenDecimals = token.decimals;
 
-    const load = async () => {
+    setDetailModalUserPosition(null);
+    setDetailModalUserPositionLoad("loading");
+
+    const buildPosition = (
+      depositBal: number | null,
+      borrowData: { balance: number; interest: number } | null,
+      globalData: Awaited<ReturnType<typeof fetchUserGlobalData>>,
+      portfolioHealthFactor: number | null,
+      maxWithdrawUnderlying: number | null
+    ): MarketDetailUserPosition => {
       const norm = normalizeMarketData(row);
       const price =
         norm.price > 0 && Number.isFinite(norm.price) ? norm.price : 0;
       const assetData = getAssetData(asset, poolId, detailModal.marketRowKey);
 
-      setDetailModalUserPosition({
-        supplied: 0,
-        borrowed: 0,
-        withdrawable: 0,
-        borrowable: 0,
-        healthFactor: 0,
-        earnings: 0,
-      });
+      const dep = depositBal ?? 0;
+      const bor = borrowData?.balance ?? 0;
+      const effectivePrice = price > 0 ? price : dep > 0 || bor > 0 ? 1 : 0;
+      const suppliedUsdRaw = dep * effectivePrice;
+      const suppliedUsd = roundUsdToCents(suppliedUsdRaw);
+      const borrowedUsd = roundUsdToCents(bor * effectivePrice);
+      const withdrawableTokens = maxWithdrawUnderlying ?? dep;
+      const withdrawableUsd = roundUsdToCents(
+        withdrawableTokens * effectivePrice
+      );
 
+      const collateralFactor =
+        assetData?.collateralFactor ?? norm.maxLTV ?? 0;
+      let borrowableUsd = 0;
+      if (globalData) {
+        const cfDec = collateralFactor / 100;
+        borrowableUsd = Math.max(
+          0,
+          globalData.totalCollateralValue * cfDec - globalData.totalBorrowValue
+        );
+        const totalBorrow =
+          assetData?.totalBorrow ?? Number(row.totalBorrow ?? 0);
+        const borrowCap = assetData?.maxTotalBorrows ?? 0;
+        if (borrowCap > 0 && effectivePrice > 0) {
+          const remainingBorrowCapTokens = Math.max(0, borrowCap - totalBorrow);
+          const remainingBorrowCapUsd = remainingBorrowCapTokens * effectivePrice;
+          borrowableUsd = Math.min(borrowableUsd, remainingBorrowCapUsd);
+        }
+      }
+      borrowableUsd = roundUsdToCents(borrowableUsd);
+
+      const healthFactor = portfolioHealthFactor ?? 0;
+
+      const supplyAPY = norm.supplyAPY;
+      const earnings =
+        supplyAPY > 0 && suppliedUsdRaw > 0
+          ? roundUsdToCents(suppliedUsdRaw * (supplyAPY / 100))
+          : 0;
+
+      return {
+        supplied: suppliedUsd,
+        borrowed: borrowedUsd,
+        withdrawable: withdrawableUsd,
+        borrowable: borrowableUsd,
+        healthFactor,
+        earnings,
+      };
+    };
+
+    const load = async () => {
       try {
-        const [
-          depositBal,
-          borrowData,
-          globalData,
-          maxWithdrawResult,
-        ] = await Promise.all([
+        const [depositBal, borrowData, globalData] = await Promise.all([
           fetchUserDepositBalance(
-            activeAccount.address,
-            token.poolId!,
-            token.underlyingContractId!,
+            userAddress,
+            rpcPoolId,
+            rpcMarketId,
             currentNetwork
           ),
           fetchUserBorrowBalance(
-            activeAccount.address,
-            token.poolId!,
-            token.underlyingContractId!,
+            userAddress,
+            rpcPoolId,
+            rpcMarketId,
             currentNetwork
           ),
-          fetchUserGlobalData(activeAccount.address, currentNetwork),
-          getMaxWithdrawableForMarket(
-            token.poolId!,
-            token.underlyingContractId!,
-            activeAccount.address,
-            currentNetwork,
-            token.decimals
-          ),
+          fetchUserGlobalData(userAddress, currentNetwork),
         ]);
 
-        if (cancelled) return;
+        if (loadId !== detailPositionLoadIdRef.current) return;
 
-        const dep = depositBal ?? 0;
-        const bor = borrowData?.balance ?? 0;
-        const suppliedUsdRaw = dep * price;
-        const suppliedUsd = roundUsdToCents(suppliedUsdRaw);
-        const borrowedUsd = roundUsdToCents(bor * price);
-        const withdrawableTokens =
-          maxWithdrawResult?.maxWithdrawUnderlying ?? dep;
-        const withdrawableUsd = roundUsdToCents(withdrawableTokens * price);
+        const position = buildPosition(
+          depositBal,
+          borrowData,
+          globalData,
+          null,
+          null
+        );
+        setDetailModalUserPosition(position);
+        setDetailModalUserPositionLoad("ready");
 
-        const collateralFactor =
-          assetData?.collateralFactor ?? norm.maxLTV ?? 0;
-        let borrowableUsd = 0;
-        if (globalData) {
-          const cfDec = collateralFactor / 100;
-          borrowableUsd = Math.max(
-            0,
-            globalData.totalCollateralValue * cfDec -
-              globalData.totalBorrowValue
-          );
-          const totalBorrow =
-            assetData?.totalBorrow ?? Number(row.totalBorrow ?? 0);
-          const borrowCap = assetData?.maxTotalBorrows ?? 0;
-          if (borrowCap > 0 && price > 0) {
-            const remainingBorrowCapTokens = Math.max(
-              0,
-              borrowCap - totalBorrow
+        void withRpcReadCache(
+          `globalUserRows:${userAddress}`,
+          () => fetchGlobalUserRowsFromChain(userAddress),
+          30_000
+        )
+          .then((globalUserRows) => {
+            if (loadId !== detailPositionLoadIdRef.current) return;
+            const portfolioHealthFactor = computePortfolioDisplayHealthFactor({
+              globalUserData: globalUserRows,
+              deposits: [],
+              marketData: markets,
+              useMarketRowsForPoolLt: true,
+            });
+            if (portfolioHealthFactor == null) return;
+            setDetailModalUserPosition((prev) =>
+              prev
+                ? { ...prev, healthFactor: portfolioHealthFactor }
+                : prev
             );
-            const remainingBorrowCapUsd = remainingBorrowCapTokens * price;
-            borrowableUsd = Math.min(borrowableUsd, remainingBorrowCapUsd);
-          }
-        }
-        borrowableUsd = roundUsdToCents(borrowableUsd);
+          })
+          .catch((e) => {
+            console.warn("Market detail: portfolio health factor refresh failed:", e);
+          });
 
-        let healthFactor = 0;
-        if (globalData) {
-          if (globalData.healthFactorIndex != null) {
-            healthFactor = globalData.healthFactorIndex;
-          } else if (
-            globalData.totalBorrowValue <= 0 &&
-            globalData.totalCollateralValue > 0
-          ) {
-            healthFactor = 3;
-          } else if (
-            globalData.totalBorrowValue > 0 &&
-            globalData.totalCollateralValue > 0
-          ) {
-            healthFactor = Math.min(
-              globalData.totalCollateralValue / globalData.totalBorrowValue,
-              3
+        void getMaxWithdrawableForMarket(
+          rpcPoolId,
+          rpcMarketId,
+          userAddress,
+          currentNetwork,
+          tokenDecimals
+        )
+          .then((maxWithdrawResult) => {
+            if (loadId !== detailPositionLoadIdRef.current) return;
+            if (maxWithdrawResult?.maxWithdrawUnderlying == null) return;
+            setDetailModalUserPosition((prev) => {
+              if (!prev) return prev;
+              const norm = normalizeMarketData(row);
+              const price =
+                norm.price > 0 && Number.isFinite(norm.price) ? norm.price : 0;
+              const dep =
+                maxWithdrawResult.maxWithdrawUnderlying > 0
+                  ? maxWithdrawResult.maxWithdrawUnderlying
+                  : 0;
+              const effectivePrice =
+                price > 0 ? price : dep > 0 ? 1 : 0;
+              return {
+                ...prev,
+                withdrawable: roundUsdToCents(
+                  maxWithdrawResult.maxWithdrawUnderlying * effectivePrice
+                ),
+              };
+            });
+          })
+          .catch((e) => {
+            console.warn(
+              "Market detail: max withdrawable refresh failed (position still shown):",
+              e
             );
-          }
-        }
-
-        const supplyAPY = norm.supplyAPY;
-        const earnings =
-          supplyAPY > 0 && suppliedUsdRaw > 0
-            ? roundUsdToCents(suppliedUsdRaw * (supplyAPY / 100))
-            : 0;
-
-        setDetailModalUserPosition({
-          supplied: suppliedUsd,
-          borrowed: borrowedUsd,
-          withdrawable: withdrawableUsd,
-          borrowable: borrowableUsd,
-          healthFactor,
-          earnings,
-        });
+          });
       } catch (e) {
         console.error("Failed to load market detail user position:", e);
-        if (!cancelled) {
-          setDetailModalUserPosition({
-            supplied: 0,
-            borrowed: 0,
-            withdrawable: 0,
-            borrowable: 0,
-            healthFactor: 0,
-            earnings: 0,
-          });
+        if (loadId === detailPositionLoadIdRef.current) {
+          setDetailModalUserPosition(null);
+          setDetailModalUserPositionLoad("error");
         }
       }
     };
 
     void load();
-
-    return () => {
-      cancelled = true;
-    };
   }, [
     detailModal.isOpen,
     detailModal.asset,
     detailModal.poolId,
     detailModal.marketRowKey,
-    detailModal.marketData,
     activeAccount?.address,
     currentNetwork,
-    resolveTokenForDisplayedAsset,
-    // Not `markets`: that list is rebuilt on every row/rewards update and caused a full
-    // Promise.all per tick while the modal stayed open. `detailModal.marketData` is enough;
-    // the sync effect updates it when the selected row’s `lastFetched` advances.
   ]);
 
   return (
@@ -3693,6 +3730,7 @@ const MarketsTable = () => {
             rawMarket={detailModal.marketData}
             marketData={normalizeMarketData(detailModal.marketData)}
             userPosition={detailModalUserPosition ?? undefined}
+            userPositionLoadState={detailModalUserPositionLoad}
             onDeposit={() =>
               handleDepositClick(
                 detailModal.asset!,

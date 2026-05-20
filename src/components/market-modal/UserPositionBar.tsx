@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { formatUsdAmount } from '@/lib/utils';
-import { UserPosition } from './types';
+import { UserPosition, UserPositionLoadState } from './types';
 
 const StatCard = ({
   label,
@@ -21,9 +22,21 @@ const StatCard = ({
   </div>
 );
 
-export const UserPositionBar = ({ userPosition }: { userPosition?: UserPosition }) => {
+export const UserPositionBar = ({
+  userPosition,
+  loadState = 'idle',
+}: {
+  userPosition?: UserPosition;
+  loadState?: UserPositionLoadState;
+}) => {
   const [open, setOpen] = useState(true);
-  if (!userPosition) return null;
+
+  if (loadState === 'idle') return null;
+
+  const showBody =
+    loadState === 'loading' || loadState === 'error' || userPosition != null;
+  if (!showBody) return null;
+
   return (
     <div className="px-0 mb-2 min-w-0 w-full max-w-full overflow-x-hidden">
       <button
@@ -63,16 +76,31 @@ export const UserPositionBar = ({ userPosition }: { userPosition?: UserPosition 
         </svg>
       </button>
       {open && (
-        <div className="rounded-b-xl border border-t-0 border-border bg-muted/20 dark:bg-muted/15 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 px-2 py-3 items-stretch w-full min-w-0">
-          <StatCard label="Supplied" value={formatUsdAmount(userPosition.supplied)} color="text-green-600 dark:text-green-400" />
-          <StatCard label="Borrowed" value={formatUsdAmount(userPosition.borrowed)} color="text-orange-600 dark:text-orange-400" />
-          <StatCard label="Withdrawable" value={formatUsdAmount(userPosition.withdrawable)} color="text-cyan-600 dark:text-cyan-400" />
-          <StatCard label="Borrowable" value={formatUsdAmount(userPosition.borrowable)} color="text-blue-600 dark:text-blue-400" />
-          <StatCard
-            label="Health factor"
-            value={userPosition.healthFactor.toFixed(2)}
-            color="text-emerald-600 dark:text-emerald-400"
-          />
+        <div className="rounded-b-xl border border-t-0 border-border bg-muted/20 dark:bg-muted/15 px-2 py-3 w-full min-w-0">
+          {loadState === 'loading' && (
+            <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin shrink-0" aria-hidden />
+              Loading your position…
+            </div>
+          )}
+          {loadState === 'error' && (
+            <p className="py-4 text-center text-sm text-destructive">
+              Could not load your position. Try closing and reopening this market.
+            </p>
+          )}
+          {loadState === 'ready' && userPosition && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 items-stretch w-full min-w-0">
+              <StatCard label="Supplied" value={formatUsdAmount(userPosition.supplied)} color="text-green-600 dark:text-green-400" />
+              <StatCard label="Borrowed" value={formatUsdAmount(userPosition.borrowed)} color="text-orange-600 dark:text-orange-400" />
+              <StatCard label="Withdrawable" value={formatUsdAmount(userPosition.withdrawable)} color="text-cyan-600 dark:text-cyan-400" />
+              <StatCard label="Borrowable" value={formatUsdAmount(userPosition.borrowable)} color="text-blue-600 dark:text-blue-400" />
+              <StatCard
+                label="Health"
+                value={userPosition.healthFactor.toFixed(2)}
+                color="text-emerald-600 dark:text-emerald-400"
+              />
+            </div>
+          )}
         </div>
       )}
     </div>

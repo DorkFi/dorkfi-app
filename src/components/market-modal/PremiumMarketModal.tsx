@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { getAllTokensWithDisplayInfo, getMarketLabel, type NetworkId } from '@/config';
 import { useMimirTokenPrice24h } from '@/hooks/useMimirTokenPrice24h';
-import { MarketData, UserPosition } from './types';
+import { MarketData, UserPosition, UserPositionLoadState } from './types';
 import { MarketHeader } from './MarketHeader';
 import { UserPositionBar } from './UserPositionBar';
 import { MarketOverview } from './MarketOverview';
@@ -36,6 +36,7 @@ export interface PremiumMarketModalProps {
   networkId?: string | null;
   marketData: MarketData;
   userPosition?: UserPosition;
+  userPositionLoadState?: UserPositionLoadState;
   onDeposit?: () => void;
   onWithdraw?: () => void;
   onBorrow?: () => void;
@@ -51,6 +52,7 @@ export const PremiumMarketModal = ({
   networkId,
   marketData,
   userPosition,
+  userPositionLoadState = 'idle',
   onDeposit,
   onWithdraw,
   onBorrow,
@@ -113,7 +115,10 @@ export const PremiumMarketModal = ({
               chainId={chainId}
               marketLabel={marketLabel}
             />
-            <UserPositionBar userPosition={userPosition} />
+            <UserPositionBar
+              userPosition={userPosition}
+              loadState={userPositionLoadState}
+            />
 
             <section className={SECTION}>
               <MarketOverview marketData={marketData} />
