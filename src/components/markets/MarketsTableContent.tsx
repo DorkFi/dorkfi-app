@@ -1,11 +1,17 @@
 
 import { useBreakpoint } from "@/hooks/useBreakpoint";
-import { OnDemandMarketData, SortField, SortOrder } from "@/hooks/useOnDemandMarketData";
+import {
+  OnDemandMarketData,
+  SortField,
+  SortOrder,
+  type MarketFilter,
+} from "@/hooks/useOnDemandMarketData";
 import MarketsDesktopTable from "./MarketsDesktopTable";
 import MarketsTabletTable from "./MarketsTabletTable";
 import MarketCardView from "./MarketCardView";
 
 interface MarketsTableContentProps {
+  marketFilter?: MarketFilter;
   markets: OnDemandMarketData[];
   sortField?: SortField;
   sortOrder?: SortOrder;
@@ -30,8 +36,9 @@ interface MarketsTableContentProps {
   onRowMouseEnter?: (market: OnDemandMarketData) => void;
 }
 
-const MarketsTableContent = ({ 
-  markets, 
+const MarketsTableContent = ({
+  marketFilter = "all",
+  markets,
   sortField,
   sortOrder,
   userDeposits,
@@ -51,6 +58,7 @@ const MarketsTableContent = ({
   if (breakpoint === "mobile") {
     return (
       <MarketCardView
+        key={marketFilter}
         markets={markets}
         onRowClick={onRowClick}
         onInfoClick={onInfoClick}

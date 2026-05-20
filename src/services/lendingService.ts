@@ -1389,6 +1389,67 @@ export type ChainGlobalUserRow = {
 };
 
 /**
+ * Per-pool `get_global_user` for all enabled networks (~few RPC calls).
+ * Use for portfolio health factor; avoids scanning every market via {@link fetchUserDataFromChain}.
+ */
+export const fetchGlobalUserRowsFromChain = async (
+  userAddress: string
+): Promise<ChainGlobalUserRow[]> => {
+  const tasks: Array<Promise<ChainGlobalUserRow | null>> = [];
+
+  for (const networkId of getEnabledNetworks()) {
+    if (!isAlgorandCompatibleNetwork(networkId)) continue;
+
+    const networkConfig = getNetworkConfig(networkId);
+    const clientsPromise = algorandService.initializeClientsForReads(
+      networkConfig.walletNetworkId as AlgorandNetwork
+    );
+
+    for (const poolId of networkConfig.contracts.lendingPools) {
+      tasks.push(
+        (async () => {
+          try {
+            const clients = await clientsPromise;
+            const poolIdNum = Number(poolId);
+            const ci = new CONTRACT(
+              poolIdNum,
+              clients.algod,
+              undefined,
+              { ...LendingPoolAppSpec.contract, events: [] },
+              {
+                addr: algosdk.encodeAddress(
+                  algosdk.getApplicationAddress(poolIdNum).publicKey
+                ),
+                sk: new Uint8Array(),
+              }
+            );
+            ci.setFee(2000);
+            const globalUserR = await ci.get_global_user(userAddress);
+            if (!globalUserR.success) return null;
+            const globalUser = GlobalUserData(globalUserR.returnValue);
+            return {
+              network: networkId,
+              poolId: String(poolId),
+              totalCollateralValue: globalUser.totalCollateralValue.toString(),
+              totalBorrowValue: globalUser.totalBorrowValue.toString(),
+            };
+          } catch (e) {
+            console.warn(
+              `[fetchGlobalUserRowsFromChain] pool ${poolId} on ${networkId}:`,
+              e
+            );
+            return null;
+          }
+        })()
+      );
+    }
+  }
+
+  const settled = await Promise.all(tasks);
+  return settled.filter((r): r is ChainGlobalUserRow => r != null);
+};
+
+/**
  * Fetch global user rows and per-market user rows from chain for all enabled networks.
  * Mirrors the shape expected by Portfolio when building `user.computed` from API data.
  */

@@ -3864,6 +3864,95 @@ export const getAllTokensWithDisplayInfo = (networkId: NetworkId) => {
   return result;
 };
 
+export type DisplayTokenInfo = ReturnType<typeof getAllTokensWithDisplayInfo>[number];
+
+function tokenConfigRowMatchesPool(tc: TokenConfig, poolId: string): boolean {
+  if (String(tc.poolId ?? "") === poolId) return true;
+  if (tc.migration && String(tc.migration.poolId) === poolId) return true;
+  return false;
+}
+
+/**
+ * Resolve pool + market contract for on-chain position reads (deposit/borrow balances).
+ * Matches primary `poolId` on display tokens and legacy {@link TokenConfig.migration} pools.
+ */
+export function resolveTokenForMarketPosition(
+  networkId: NetworkId,
+  params: {
+    asset: string;
+    poolId?: string;
+    configSymbol?: string;
+  }
+): DisplayTokenInfo | null {
+  const poolStr =
+    params.poolId != null && String(params.poolId).trim() !== ""
+      ? String(params.poolId).trim()
+      : "";
+  const tokens = getAllTokensWithDisplayInfo(networkId);
+  const asset = params.asset.trim();
+  const configSymbol = params.configSymbol?.trim();
+
+  const matchesSymbol = (t: DisplayTokenInfo): boolean => {
+    if (configSymbol) {
+      return (
+        (t.originalSymbol ?? t.symbol) === configSymbol ||
+        t.configKey === configSymbol ||
+        t.symbol === configSymbol
+      );
+    }
+    return t.symbol === asset;
+  };
+
+  if (poolStr !== "") {
+    const direct = tokens.find(
+      (t) => matchesSymbol(t) && String(t.poolId ?? "") === poolStr
+    );
+    if (direct?.poolId && direct.underlyingContractId) return direct;
+
+    const book = config.networks[networkId]?.tokens;
+    if (book) {
+      for (const [configKey, raw] of Object.entries(book)) {
+        const rows: { config: TokenConfig; index: number }[] = Array.isArray(raw)
+          ? raw.map((config, index) => ({ config, index }))
+          : [{ config: raw, index: 0 }];
+        for (const { config: tc, index } of rows) {
+          if (!tokenConfigRowMatchesPool(tc, poolStr)) continue;
+          const keyMatches = configSymbol
+            ? configSymbol === configKey || configSymbol === tc.symbol
+            : false;
+          const assetMatches = configKey === asset || tc.symbol === asset;
+          if (!keyMatches && !assetMatches) continue;
+
+          const usesMigration =
+            tc.migration && String(tc.migration.poolId) === poolStr;
+          const rpcPoolId = usesMigration ? tc.migration!.poolId : String(tc.poolId ?? "");
+          const rpcContractId = usesMigration
+            ? tc.migration!.contractId
+            : String(tc.contractId ?? "").trim();
+          if (!rpcPoolId || !rpcContractId) continue;
+
+          const displayInfo = getTokenDisplayInfo(networkId, configKey, index);
+          if (!displayInfo) continue;
+
+          return {
+            configKey,
+            symbol: configKey,
+            ...displayInfo,
+            poolId: rpcPoolId,
+            underlyingContractId: rpcContractId,
+            decimals: tc.decimals,
+            logoPath: tc.logoPath,
+            isNew: isNewMarketByDataAddedAt(tc.dataAddedAt),
+          };
+        }
+      }
+    }
+  }
+
+  const fallback = tokens.find(matchesSymbol);
+  return fallback?.poolId && fallback.underlyingContractId ? fallback : null;
+}
+
 /**
  * Check if a token has market override configured
  * For tokens with multiple markets, checks the first market
