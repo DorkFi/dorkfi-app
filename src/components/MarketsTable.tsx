@@ -3046,6 +3046,7 @@ const MarketsTable = () => {
   };
 
   const detailPositionLoadKeyRef = useRef<string | null>(null);
+  const detailPositionLoadIdRef = useRef(0);
 
   useEffect(() => {
     if (!detailModal.isOpen) {
@@ -3120,16 +3121,61 @@ const MarketsTable = () => {
         norm.price > 0 && Number.isFinite(norm.price) ? norm.price : 0;
       const assetData = getAssetData(asset, poolId, detailModal.marketRowKey);
 
-      if (detailPositionLoadKeyRef.current !== loadKey) {
-        detailPositionLoadKeyRef.current = loadKey;
-        setDetailModalUserPosition({
-          supplied: 0,
-          borrowed: 0,
-          withdrawable: 0,
-          borrowable: 0,
-          healthFactor: 0,
-          earnings: 0,
-        });
+      const dep = depositBal ?? 0;
+      const bor = borrowData?.balance ?? 0;
+      const suppliedUsdRaw = dep * price;
+      const suppliedUsd = roundUsdToCents(suppliedUsdRaw);
+      const borrowedUsd = roundUsdToCents(bor * price);
+      const withdrawableTokens = maxWithdrawUnderlying ?? dep;
+      const withdrawableUsd = roundUsdToCents(withdrawableTokens * price);
+
+      const collateralFactor =
+        assetData?.collateralFactor ?? norm.maxLTV ?? 0;
+      let borrowableUsd = 0;
+      if (globalData) {
+        const cfDec = collateralFactor / 100;
+        borrowableUsd = Math.max(
+          0,
+          globalData.totalCollateralValue * cfDec -
+            globalData.totalBorrowValue
+        );
+        const totalBorrow =
+          assetData?.totalBorrow ?? Number(row.totalBorrow ?? 0);
+        const borrowCap = assetData?.maxTotalBorrows ?? 0;
+        if (borrowCap > 0 && price > 0) {
+          const remainingBorrowCapTokens = Math.max(
+            0,
+            borrowCap - totalBorrow
+          );
+          const remainingBorrowCapUsd = remainingBorrowCapTokens * price;
+          borrowableUsd = Math.min(borrowableUsd, remainingBorrowCapUsd);
+        }
+      }
+      borrowableUsd = roundUsdToCents(borrowableUsd);
+
+      let healthFactor = 0;
+      if (
+        portfolioHealthFactor != null &&
+        Number.isFinite(portfolioHealthFactor)
+      ) {
+        healthFactor = portfolioHealthFactor;
+      } else if (globalData) {
+        if (globalData.healthFactorIndex != null) {
+          healthFactor = globalData.healthFactorIndex;
+        } else if (
+          globalData.totalBorrowValue <= 0 &&
+          globalData.totalCollateralValue > 0
+        ) {
+          healthFactor = 3;
+        } else if (
+          globalData.totalBorrowValue > 0 &&
+          globalData.totalCollateralValue > 0
+        ) {
+          healthFactor = Math.min(
+            globalData.totalCollateralValue / globalData.totalBorrowValue,
+            3
+          );
+        }
       }
 
       const supplyAPY = norm.supplyAPY;
@@ -3147,6 +3193,8 @@ const MarketsTable = () => {
         earnings,
       };
     };
+
+    detailPositionLoadKeyRef.current = loadKey;
 
     const load = async () => {
       try {

@@ -1,6 +1,39 @@
-import { OHLCDataPoint, PriceDataPoint, MimirOHLCResponse, MimirPriceResponse, MIMIR_BASE_URL, TOKEN_MAP } from '@/types/mimirTypes';
+import {
+  OHLCDataPoint,
+  PriceDataPoint,
+  MimirOHLCResponse,
+  MimirPriceResponse,
+  MIMIR_BASE_URL,
+  TOKEN_MAP,
+  type Token,
+} from '@/types/mimirTypes';
 import { TokenService } from './tokenService';
 import { MockDataService } from './mockDataService';
+
+function resolveMimirTokenId(symbol: string, tokens: Token[]): string | null {
+  const trimmed = symbol.trim();
+  if (!trimmed) return null;
+  const upper = trimmed.toUpperCase();
+
+  const bySymbol = tokens.find(
+    (t) =>
+      t.symbol.toUpperCase() === upper ||
+      t.id.toUpperCase() === upper
+  );
+  if (bySymbol) return bySymbol.id;
+
+  const mapped = TOKEN_MAP[trimmed] ?? TOKEN_MAP[upper];
+  if (mapped) {
+    const byMapped = tokens.find(
+      (t) =>
+        t.symbol.toUpperCase() === mapped.toUpperCase() ||
+        t.id === mapped
+    );
+    return byMapped?.id ?? mapped;
+  }
+
+  return null;
+}
 
 interface SwapSimulationResult {
   expectedOutput: string;
@@ -136,26 +169,36 @@ export class PriceService {
     interval: '1m' | '5m' | '1h' = '5m',
     range: '1h' | '24h' | '7d' = '24h'
   ): Promise<PriceDataPoint[]> {
-    try {
-      const tokens = await TokenService.getTokens();
-      const tokenAId = tokens.find(t => t.symbol === tokenA)?.id || TOKEN_MAP[tokenA] || tokenA;
-      const tokenBId = tokens.find(t => t.symbol === tokenB)?.id || TOKEN_MAP[tokenB] || tokenB;
+    const tokens = await TokenService.getTokens();
+    const tokenAId = resolveMimirTokenId(tokenA, tokens);
+    const tokenBId = resolveMimirTokenId(tokenB, tokens);
 
-      const url = `${MIMIR_BASE_URL}/prices/history?tokenA=${tokenAId}&tokenB=${tokenBId}&interval=${interval}&range=${range}`;
+    if (!tokenAId || !tokenBId) {
+      return MockDataService.generateMockData(tokenA, tokenB, range);
+    }
+
+    try {
+      const url = `${MIMIR_BASE_URL}/prices/history?tokenA=${encodeURIComponent(tokenAId)}&tokenB=${encodeURIComponent(tokenBId)}&interval=${interval}&range=${range}`;
       const response = await fetch(url);
-      
+
+      if (response.status === 404) {
+        return MockDataService.generateMockData(tokenA, tokenB, range);
+      }
+
       if (!response.ok) {
         throw new Error(`Failed to fetch price history: ${response.status}`);
       }
-      
+
       const data: MimirPriceResponse[] = await response.json();
-      
-      return data.map(item => ({
+
+      return data.map((item) => ({
         timestamp: item.timestamp,
-        price: item.price
+        price: item.price,
       }));
     } catch (error) {
-      console.error('Error fetching price history:', error);
+      if (import.meta.env.DEV) {
+        console.debug('Mimir price history unavailable, using fallback:', error);
+      }
       return MockDataService.generateMockData(tokenA, tokenB, range);
     }
   }

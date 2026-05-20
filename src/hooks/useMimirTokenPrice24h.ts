@@ -32,21 +32,30 @@ export interface UseMimirTokenPrice24hResult {
   error: string | null;
 }
 
+/** Mimir price API is Voi-mainnet only; other networks should use on-chain/market data. */
+export function isMimirPriceNetwork(networkId?: string | null): boolean {
+  return networkId == null || networkId === "voi-mainnet";
+}
+
 /**
  * 24h USD-ish price series from Mimir (token vs USDC) for sparkline + % change.
- * Fetches only when `enabled` (e.g. modal open).
+ * Fetches only when `enabled` (e.g. modal open on Voi).
  */
 export function useMimirTokenPrice24h(
   symbol: string,
-  enabled: boolean
+  enabled: boolean,
+  options?: { networkId?: string | null; configSymbol?: string }
 ): UseMimirTokenPrice24hResult {
+  const priceSymbol = (options?.configSymbol?.trim() || symbol.trim()).trim();
+  const mimirEnabled =
+    enabled && isMimirPriceNetwork(options?.networkId ?? null);
   const [priceChange24h, setPriceChange24h] = useState(0);
   const [priceHistory, setPriceHistory] = useState<TokenPrice24hPoint[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetch24h = useCallback(async () => {
-    if (!enabled || !symbol?.trim()) {
+    if (!mimirEnabled || !priceSymbol) {
       setPriceChange24h(0);
       setPriceHistory([]);
       setIsLoading(false);
@@ -54,7 +63,7 @@ export function useMimirTokenPrice24h(
       return;
     }
 
-    const upper = symbol.trim().toUpperCase();
+    const upper = priceSymbol.toUpperCase();
     if (STABLE_ASSET_SYMBOLS.has(upper)) {
       setPriceChange24h(0);
       setPriceHistory([]);
@@ -68,7 +77,7 @@ export function useMimirTokenPrice24h(
 
     try {
       const points = await MimirApiService.getPriceHistory(
-        symbol.trim(),
+        priceSymbol,
         "USDC",
         "1h",
         "24h"
@@ -89,7 +98,7 @@ export function useMimirTokenPrice24h(
     } finally {
       setIsLoading(false);
     }
-  }, [symbol, enabled]);
+  }, [priceSymbol, mimirEnabled]);
 
   useEffect(() => {
     void fetch24h();

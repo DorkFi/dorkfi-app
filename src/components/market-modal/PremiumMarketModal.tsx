@@ -64,10 +64,23 @@ export const PremiumMarketModal = ({
     return getMarketLabel(networkId, poolId);
   }, [rawMarket, networkId]);
 
+  const mimirPriceSymbol = useMemo(() => {
+    const cs = rawMarket?.configSymbol;
+    return typeof cs === "string" && cs.trim() !== ""
+      ? cs.trim()
+      : marketData.symbol;
+  }, [rawMarket, marketData.symbol]);
+
   const {
     priceChange24h: mimirChange24h,
     priceHistory: mimirHistory,
-  } = useMimirTokenPrice24h(marketData.symbol, isOpen);
+  } = useMimirTokenPrice24h(mimirPriceSymbol, isOpen, {
+    networkId,
+    configSymbol:
+      typeof rawMarket?.configSymbol === "string"
+        ? rawMarket.configSymbol
+        : undefined,
+  });
 
   const headerMarketData = useMemo((): MarketData => {
     const mergedHistory =
