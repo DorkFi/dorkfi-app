@@ -68,6 +68,7 @@ import {
 } from "@/utils/poolCollateralMarketRows";
 import { marketRowForPortfolioPosition } from "@/utils/marketRowForPortfolioPosition";
 import { portfolioWalletBalanceCacheKey } from "@/utils/portfolioWalletBalanceCacheKey";
+import { warmWithdrawModalRpc } from "@/utils/modalPrefetch";
 import { withRainbowkitHostDialogDismissed } from "@/wallet/xchainSignUi";
 
 /**
@@ -188,12 +189,15 @@ interface PortfolioModalsProps {
         asset: string,
         poolId?: string,
         marketId?: string,
-        networkIdOverride?: string
+        networkIdOverride?: string,
+        configSymbol?: string
       ) => Promise<void>)
     | null
   >;
   /** Same Folks mint ratio as supplied table (`network|configSymbol|poolId` → minted f for 1 underlying atomic). */
   folksMintedOneUnderlyingByKey?: Record<string, string>;
+  isLoadingWalletBalance?: boolean;
+  isLoadingBorrowGlobalData?: boolean;
 }
 
 const PortfolioModals = ({
@@ -220,6 +224,8 @@ const PortfolioModals = ({
   onRefreshMarket,
   prefetchWithdrawIndicesRef,
   folksMintedOneUnderlyingByKey,
+  isLoadingWalletBalance = false,
+  isLoadingBorrowGlobalData = false,
 }: PortfolioModalsProps) => {
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
@@ -408,12 +414,49 @@ const PortfolioModals = ({
     [currentNetwork, activeAccount?.address]
   );
 
-  // Expose prefetch function via ref
+  // Expose prefetch (indices + max withdraw RPC cache) via ref for hover
   useEffect(() => {
-    if (prefetchWithdrawIndicesRef) {
-      prefetchWithdrawIndicesRef.current = fetchIndices;
-    }
-  }, [prefetchWithdrawIndicesRef, fetchIndices]);
+    if (!prefetchWithdrawIndicesRef) return;
+    prefetchWithdrawIndicesRef.current = async (
+      asset,
+      poolId,
+      marketId,
+      networkIdOverride,
+      configSymbol
+    ) => {
+      await fetchIndices(asset, poolId, marketId, networkIdOverride);
+      if (!activeAccount?.address) return;
+      const networkToUse = (networkIdOverride || currentNetwork) as NetworkId;
+      const withdrawalDeposit =
+        deposits.find(
+          (d) =>
+            d.asset === asset &&
+            String(d.poolId ?? "") === String(poolId ?? "") &&
+            (marketId == null ||
+              marketId === "" ||
+              String((d as Deposit).marketId ?? "") === String(marketId)) &&
+            (configSymbol == null ||
+              configSymbol === "" ||
+              String((d as Deposit).configSymbol ?? "") === String(configSymbol))
+        ) ?? deposits.find((d) => d.asset === asset);
+      warmWithdrawModalRpc({
+        userAddress: activeAccount.address,
+        networkId: networkToUse,
+        asset,
+        poolId,
+        configSymbol:
+          configSymbol ??
+          (withdrawalDeposit as Deposit | undefined)?.configSymbol,
+        marketId,
+      });
+    };
+  }, [
+    prefetchWithdrawIndicesRef,
+    fetchIndices,
+    activeAccount?.address,
+    currentNetwork,
+    deposits,
+  ]);
 
   // Fetch indices when withdraw modal opens (fallback)
   useEffect(() => {
@@ -2163,6 +2206,7 @@ const PortfolioModals = ({
                   walletBalances[depositModal.asset]?.lastUpdated
                 : walletBalances[depositModal.asset]?.lastUpdated
             }
+            isLoadingWalletBalance={isLoadingWalletBalance}
             onRefreshWalletBalance={
               depositModal.asset && onRefreshWalletBalance
                 ? () =>
@@ -2508,6 +2552,7 @@ const PortfolioModals = ({
             )}
             userGlobalData={userGlobalData}
             userBorrowBalance={userBorrowBalance || 0}
+            isLoadingBorrowGlobalData={isLoadingBorrowGlobalData}
             onTransactionSuccess={() => {
               if (onRefreshMarket) {
                 setTimeout(() => {
@@ -2538,6 +2583,7 @@ const PortfolioModals = ({
             onSelectAsset={onSelectBorrowMarket}
             userGlobalData={userGlobalData}
             userBorrowBalance={userBorrowBalance || 0}
+            isLoadingBorrowGlobalData={isLoadingBorrowGlobalData}
             poolCollateralMarkets={borrowPoolCollateralMarkets}
             onTransactionSuccess={() => {
               if (onRefreshMarket) {

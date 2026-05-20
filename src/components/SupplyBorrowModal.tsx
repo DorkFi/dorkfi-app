@@ -381,6 +381,10 @@ interface SupplyBorrowModalProps {
    * (e.g. f-ASA units). Omit when only underlying routes exist.
    */
   walletBalanceMarketToken?: number;
+  /** Parent is refreshing wallet balance after optimistic modal open. */
+  isLoadingWalletBalance?: boolean;
+  /** Parent is loading borrow global data after optimistic modal open. */
+  isLoadingBorrowGlobalData?: boolean;
 }
 
 const SupplyBorrowModal = ({
@@ -406,6 +410,8 @@ const SupplyBorrowModal = ({
   walletBalanceLastUpdated,
   poolCollateralMarkets,
   walletBalanceMarketToken,
+  isLoadingWalletBalance = false,
+  isLoadingBorrowGlobalData = false,
 }: SupplyBorrowModalProps) => {
   const [amount, setAmount] = useState("");
   const [fiatValue, setFiatValue] = useState(0);
@@ -1482,6 +1488,7 @@ const SupplyBorrowModal = ({
   const borrowMaxLineLoading = useMemo(() => {
     if (mode !== "borrow") return false;
     return (
+      isLoadingBorrowGlobalData ||
       isLoadingMaxBorrow ||
       (borrowInputReceiveBasis === "underlying" &&
         folksMintRatioStatus === "loading") ||
@@ -1489,6 +1496,7 @@ const SupplyBorrowModal = ({
     );
   }, [
     mode,
+    isLoadingBorrowGlobalData,
     isLoadingMaxBorrow,
     borrowInputReceiveBasis,
     folksMintRatioStatus,
@@ -3670,8 +3678,9 @@ const SupplyBorrowModal = ({
                 walletBalanceLastUpdated={walletBalanceLastUpdated}
                 onRefreshWalletBalance={onRefreshWalletBalance}
                 depositWalletBalancePending={
-                  isNativeAlgoConsensusDepositRoute &&
-                  nativeAlgoSpendableHuman == null
+                  isLoadingWalletBalance ||
+                  (isNativeAlgoConsensusDepositRoute &&
+                    nativeAlgoSpendableHuman == null)
                 }
                 amountFieldEndAdornment={
                   depositMultiRoute ? (

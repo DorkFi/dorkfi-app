@@ -41,6 +41,16 @@ interface MarketsTabletTableProps {
   onMintClick?: (asset: string, poolId?: string, marketRowKey?: string) => void;
   onMigrateClick?: (asset: string) => void;
   isLoadingBalance?: boolean;
+  getMarketActionHoverHandlers?: (
+    asset: string,
+    poolId?: string,
+    marketRowKey?: string
+  ) => {
+    onDepositMouseEnter?: (e: React.MouseEvent) => void;
+    onBorrowMouseEnter?: (e: React.MouseEvent) => void;
+    onMintMouseEnter?: (e: React.MouseEvent) => void;
+  };
+  onRowMouseEnter?: (market: OnDemandMarketData) => void;
 }
 
 const MarketsTabletTable = ({
@@ -54,6 +64,8 @@ const MarketsTabletTable = ({
   onMintClick,
   onMigrateClick,
   isLoadingBalance = false,
+  getMarketActionHoverHandlers,
+  onRowMouseEnter,
 }: MarketsTabletTableProps) => {
   const { currentNetwork } = useNetwork();
   const { activeAccount } = useWallet();
@@ -354,6 +366,7 @@ const MarketsTabletTable = ({
           isNested ? "bg-gray-50/50 dark:bg-slate-700/50" : ""
         }`}
         onClick={() => onRowClick(market)}
+        onMouseEnter={() => onRowMouseEnter?.(market)}
       >
         <TableCell className="text-center">
           <div className="flex items-center justify-center gap-2">
@@ -529,6 +542,11 @@ const MarketsTabletTable = ({
             // Use poolId from market object (most reliable - set when market data is loaded)
             // Fallback to token poolId, then marketInfo poolId
             const finalPoolId = market.poolId || token?.poolId || poolId || market.marketInfo?.poolId;
+            const hoverHandlers = getMarketActionHoverHandlers?.(
+              market.asset,
+              finalPoolId,
+              (market as { _sortKey?: string })._sortKey
+            );
 
             return (
               <MarketsTableActions
@@ -538,6 +556,9 @@ const MarketsTabletTable = ({
                 onDepositClick={onDepositClick}
                 onBorrowClick={onBorrowClick}
                 onMintClick={onMintClick}
+                onDepositMouseEnter={hoverHandlers?.onDepositMouseEnter}
+                onBorrowMouseEnter={hoverHandlers?.onBorrowMouseEnter}
+                onMintMouseEnter={hoverHandlers?.onMintMouseEnter}
                 onMigrateClick={
                   onMigrateClick &&
                   hasMigration &&
@@ -781,6 +802,12 @@ const MarketsTabletTable = ({
                       const borrowCap = Number(mainMarket.borrowCap ?? 0);
                       const borrowCapReached = isAtBorrowCap(totalBorrow, borrowCap);
 
+                      const groupedHoverHandlers =
+                        getMarketActionHoverHandlers?.(
+                          mainMarket.asset,
+                          mainMarket.marketInfo?.poolId || mainMarket.poolId,
+                          (mainMarket as { _sortKey?: string })._sortKey
+                        );
                       return (
                         <MarketsTableActions
                           asset={mainMarket.asset}
@@ -791,6 +818,15 @@ const MarketsTabletTable = ({
                           onDepositClick={onDepositClick}
                           onBorrowClick={onBorrowClick}
                           onMintClick={onMintClick}
+                          onDepositMouseEnter={
+                            groupedHoverHandlers?.onDepositMouseEnter
+                          }
+                          onBorrowMouseEnter={
+                            groupedHoverHandlers?.onBorrowMouseEnter
+                          }
+                          onMintMouseEnter={
+                            groupedHoverHandlers?.onMintMouseEnter
+                          }
                           onMigrateClick={
                             onMigrateClick &&
                             hasMigration &&
