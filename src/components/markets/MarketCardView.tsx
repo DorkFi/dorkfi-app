@@ -2,7 +2,10 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { OnDemandMarketData } from "@/hooks/useOnDemandMarketData";
+import {
+  OnDemandMarketData,
+  marketRowPoolIdForFilter,
+} from "@/hooks/useOnDemandMarketData";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import DorkFiButton from "@/components/ui/DorkFiButton";
 import APYDisplay from "@/components/APYDisplay";
@@ -135,7 +138,7 @@ const MarketCardView = ({
   const deduplicatedMarkets = useMemo(() => {
     const marketMap = new Map<string, OnDemandMarketData>();
     markets.forEach((market) => {
-      const poolId = market.marketInfo?.poolId || market.poolId || "default";
+      const poolId = marketRowPoolIdForFilter(market) || "default";
       const key =
         (market as { _sortKey?: string })._sortKey ??
         `${market.asset}-${poolId}`;
@@ -159,14 +162,13 @@ const MarketCardView = ({
   return (
     <div className="space-y-4">
       {deduplicatedMarkets.map((market) => {
-        const poolIdForLabel =
-          market.marketInfo?.poolId || market.poolId || undefined;
+        const poolIdForLabel = marketRowPoolIdForFilter(market) || undefined;
         const marketLabel = getMarketLabel(currentNetwork, poolIdForLabel);
 
         // Render special card for s-tokens
         if (market.isSToken) {
           // Use poolId in key to ensure uniqueness even if multiple markets exist
-          const marketKey = `${market.asset}-${market.marketInfo?.poolId || market.poolId || 'stoken'}`;
+          const marketKey = `${market.asset}-${marketRowPoolIdForFilter(market) || "stoken"}`;
           return (
             <STokenCard
               key={marketKey}
@@ -183,7 +185,7 @@ const MarketCardView = ({
 
         // Render regular card for non-s-tokens
         // Use poolId in key to ensure uniqueness even if multiple markets exist
-        const marketKey = `${market.asset}-${market.marketInfo?.poolId || market.poolId || 'default'}`;
+        const marketKey = `${market.asset}-${marketRowPoolIdForFilter(market) || "default"}`;
         return (
           <DorkFiCard
             key={marketKey}

@@ -878,28 +878,15 @@ export const useOnDemandMarketData = ({
         multiPoolAssetKeys.has(market.asset.toLowerCase())
       );
     }
-    // Filter by market (All / A / B / D — D uses {@link getMarketLabel} === "D", not only `lendingPools[2]`)
+    // Filter by market letter (A / B / D) via {@link getMarketLabel}, not raw `lendingPools` index —
+    // prod has pools [A, B, D] and token/API pool ids must match the label map, not only [0]/[1].
     if (marketFilter !== "all") {
       const nid = currentNetwork as NetworkId;
-      if (
-        (marketFilter === "A" || marketFilter === "B") &&
-        lendingPools.length >= 2
-      ) {
-        const poolIdA = lendingPools[0];
-        const poolIdB = lendingPools[1];
-        filtered = filtered.filter((market) => {
-          const pid = marketRowPoolIdForFilter(market);
-          if (marketFilter === "A") return pid === String(poolIdA);
-          if (marketFilter === "B") return pid === String(poolIdB);
-          return true;
-        });
-      } else if (marketFilter === "D") {
-        filtered = filtered.filter(
-          (market) =>
-            getMarketLabel(nid, marketRowPoolIdForFilter(market) || undefined) ===
-            "D"
-        );
-      }
+      filtered = filtered.filter(
+        (market) =>
+          getMarketLabel(nid, marketRowPoolIdForFilter(market) || undefined) ===
+          marketFilter
+      );
     }
     // Filter data based on search term
     const q = searchTerm.toLowerCase();

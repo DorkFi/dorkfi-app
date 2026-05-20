@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,6 +29,14 @@ import {
   type MarketFilter,
 } from "@/hooks/useOnDemandMarketData";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useIsMobile } from "@/hooks/use-mobile";
 import MarketSearchFilters from "@/components/markets/MarketSearchFilters";
 import MarketPagination from "@/components/markets/MarketPagination";
 import SupplyBorrowModal from "@/components/SupplyBorrowModal";
@@ -288,6 +296,8 @@ function marketsToolbarSpendableAlgoIsMeterGreen(balance: number | null): boolea
 
 const MarketsTable = () => {
   const { formatPercent, formatNumber } = useNumberI18n();
+  const isMobile = useIsMobile();
+  const marketsListRef = useRef<HTMLDivElement>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [sortField, setSortField] = useState<SortField>("default");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
@@ -791,6 +801,21 @@ const MarketsTable = () => {
     rewardMarketsOnly,
     multiPoolOnly,
   });
+
+  const handleMarketFilterChange = useCallback(
+    (value: MarketFilter) => {
+      setMarketFilter(value);
+      setCurrentPage(1);
+    },
+    [setCurrentPage]
+  );
+
+  useEffect(() => {
+    marketsListRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }, [marketFilter]);
 
   const rewardsAprByBaseUrl = useRewardsAprBonusMap([currentNetwork]);
 
@@ -3516,38 +3541,83 @@ const MarketsTable = () => {
                 )}
               </div>
             </div>
-            {/* Market filter: All / A / B / D (D when network has a third lending pool) */}
-            <Tabs
-              value={marketFilter}
-              onValueChange={(v) => {
-                setMarketFilter(v as MarketFilter);
-                setCurrentPage(1);
-              }}
-              className="w-full mt-4"
-            >
-              <TabsList
-                className={`grid w-full gap-1 ${
-                  hasDMarketTab
-                    ? "max-w-3xl grid-cols-2 sm:grid-cols-4"
-                    : "max-w-md grid-cols-3"
-                }`}
-              >
-                <TabsTrigger value="all" className="text-sm">
-                  All Markets
-                </TabsTrigger>
-                <TabsTrigger value="A" className="text-sm">
-                  A Markets
-                </TabsTrigger>
-                <TabsTrigger value="B" className="text-sm">
-                  B Markets
-                </TabsTrigger>
-                {hasDMarketTab && (
-                  <TabsTrigger value="D" className="text-sm">
-                    D Markets
-                  </TabsTrigger>
-                )}
-              </TabsList>
-            </Tabs>
+            {/* Market filter: All / A / B / D — native select on mobile (tabs swallow taps on nested labels) */}
+            <div className="relative z-20 isolate mt-4 mb-3 w-full">
+              {isMobile ? (
+                <Select
+                  value={marketFilter}
+                  onValueChange={(v) =>
+                    handleMarketFilterChange(v as MarketFilter)
+                  }
+                >
+                  <SelectTrigger
+                    className="min-h-11 w-full bg-background"
+                    aria-label="Filter by market"
+                  >
+                    <SelectValue placeholder="All markets" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All markets</SelectItem>
+                    <SelectItem value="A">A market</SelectItem>
+                    <SelectItem value="B">B market</SelectItem>
+                    {hasDMarketTab && (
+                      <SelectItem value="D">D market</SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Tabs
+                  value={marketFilter}
+                  onValueChange={(v) =>
+                    handleMarketFilterChange(v as MarketFilter)
+                  }
+                  className="w-full"
+                >
+                  <TabsList
+                    className={cn(
+                      "flex w-full h-auto min-h-10 flex-nowrap gap-1 p-1",
+                      hasDMarketTab ? "max-w-3xl" : "max-w-md"
+                    )}
+                  >
+                    <TabsTrigger
+                      value="all"
+                      className="min-h-10 min-w-0 flex-1 px-2 text-sm"
+                    >
+                      All Markets
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="A"
+                      className="min-h-10 min-w-0 flex-1 px-2 text-sm"
+                    >
+                      A Markets
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="B"
+                      className="min-h-10 min-w-0 flex-1 px-2 text-sm"
+                    >
+                      B Markets
+                    </TabsTrigger>
+                    {hasDMarketTab && (
+                      <TabsTrigger
+                        value="D"
+                        className="min-h-10 min-w-0 flex-1 px-2 text-sm"
+                      >
+                        D Markets
+                      </TabsTrigger>
+                    )}
+                  </TabsList>
+                </Tabs>
+              )}
+              {isMobile && marketFilter !== "all" && (
+                <p
+                  className="mt-2 text-xs text-muted-foreground"
+                  aria-live="polite"
+                >
+                  Showing {marketFilter} market
+                  {totalItems === 1 ? "" : "s"} ({totalItems})
+                </p>
+              )}
+            </div>
           </div>
           {/* Informational guidance - matches Liquidations Queue styles */}
           <section
@@ -3577,27 +3647,31 @@ const MarketsTable = () => {
             </div>
           </section>
 
-          {markets.length === 0 && !isLoading ? (
-            <div className="text-center py-8">
-              <p className="text-muted-foreground">
-                No markets found. Try adjusting your search criteria.
-              </p>
-            </div>
-          ) : (
-            <MarketsTableContent
-              markets={markets}
-              sortField={sortField}
-              sortOrder={sortOrder}
-              onRowClick={handleRowClick}
-              onInfoClick={handleInfoClick}
-              onDepositClick={handleDepositClick}
-              onWithdrawClick={handleWithdrawClick}
-              onBorrowClick={handleBorrowClick}
-              onMintClick={handleMintClick}
-              onMigrateClick={handleMigrateClick}
-              isLoadingBalance={isLoadingBalance}
-            />
-          )}
+          <div ref={marketsListRef}>
+            {markets.length === 0 && !isLoading ? (
+              <div className="text-center py-8">
+                <p className="text-muted-foreground">
+                  No markets found. Try adjusting your search criteria.
+                </p>
+              </div>
+            ) : (
+              <MarketsTableContent
+                key={marketFilter}
+                marketFilter={marketFilter}
+                markets={markets}
+                sortField={sortField}
+                sortOrder={sortOrder}
+                onRowClick={handleRowClick}
+                onInfoClick={handleInfoClick}
+                onDepositClick={handleDepositClick}
+                onWithdrawClick={handleWithdrawClick}
+                onBorrowClick={handleBorrowClick}
+                onMintClick={handleMintClick}
+                onMigrateClick={handleMigrateClick}
+                isLoadingBalance={isLoadingBalance}
+              />
+            )}
+          </div>
         </div>
 
         {/* Pagination */}
