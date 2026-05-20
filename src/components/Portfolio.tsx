@@ -498,6 +498,9 @@ const Portfolio = () => {
   const [userProfileAvatar, setUserProfileAvatar] = useState<string | null>(
     null
   );
+  // Guards for fetchUser: prevent concurrent fetches and stale-address races
+  const fetchUserInFlight = useRef(false);
+  const fetchUserAddressRef = useRef<string | null>(null);
 
   // Compute final avatar: prioritize user profile avatar > resolver avatar
   // If neither exists, components will show placeholder
@@ -3782,7 +3785,16 @@ const Portfolio = () => {
   ]);
 
   const fetchUser = async (userAddress: string) => {
+    // Deduplicate concurrent calls for the same address; cancel stale-address results
+    if (fetchUserInFlight.current && fetchUserAddressRef.current === userAddress) return;
+    fetchUserInFlight.current = true;
+    fetchUserAddressRef.current = userAddress;
+
+    const isCurrentFetchUser = () =>
+      fetchUserAddressRef.current === userAddress;
+
     const applyPortfolioComputed = (user: Record<string, unknown>) => {
+      if (!isCurrentFetchUser()) return;
       if (!user.globalUserData || !Array.isArray(user.globalUserData)) {
         return;
       }
@@ -3871,6 +3883,7 @@ const Portfolio = () => {
         },
       };
       console.log("[Portfolio] User:", computedUser);
+      if (!isCurrentFetchUser()) return;
       setUser(computedUser);
       console.log("[Portfolio] Network values:", networkValues);
     };
@@ -3884,6 +3897,7 @@ const Portfolio = () => {
       console.log("[Portfolio] API response:", apiResponse);
 
       if (apiResponse.success && apiResponse.data) {
+        if (!isCurrentFetchUser()) return;
         const user = apiResponse.data as Record<string, unknown>;
         console.log("[Portfolio] User data fetched from API:", user);
 
@@ -3906,7 +3920,7 @@ const Portfolio = () => {
         `[Portfolio] API failed; falling back to chain for ${userAddress}`
       );
       const chain = await fetchUserDataFromChain(userAddress);
-      if (chain) {
+      if (chain && isCurrentFetchUser()) {
         setUserProfileAvatar(null);
         applyPortfolioComputed({
           address: userAddress,
@@ -3918,7 +3932,7 @@ const Portfolio = () => {
     } catch (error) {
       console.error("Error fetching user global data:", error);
       const chain = await fetchUserDataFromChain(userAddress);
-      if (chain) {
+      if (chain && isCurrentFetchUser()) {
         setUserProfileAvatar(null);
         applyPortfolioComputed({
           address: userAddress,
@@ -3927,20 +3941,29 @@ const Portfolio = () => {
           userDataSource: "chain",
         });
       }
+    } finally {
+      // Only clear the in-flight flag if this call is still the current one
+      if (fetchUserAddressRef.current === userAddress) {
+        fetchUserInFlight.current = false;
+      }
     }
   };
 
   useEffect(() => {
-    if (displayAddress) {
-      fetchUser(displayAddress);
-    }
+    if (!displayAddress) return;
+    // Reset in-flight state when address changes so new address always fetches
+    fetchUserInFlight.current = false;
+    fetchUserAddressRef.current = null;
+    fetchUser(displayAddress);
   }, [displayAddress]);
 
-  // Fetch market data for all enabled networks when user data is available
+  // Fetch market data for all enabled networks when user data is available.
+  // Also fires after a 6s timeout so markets load even if fetchUser stalls (xChain race).
   useEffect(() => {
     const fetchMarketDataForAllNetworks = async () => {
-      if (!user?.computed) {
-        return; // Wait for user data to be available
+      // Proceed if user data is ready OR address is present (markets don't require user data)
+      if (!displayAddress && !user?.computed) {
+        return;
       }
 
       try {
@@ -3975,7 +3998,12 @@ const Portfolio = () => {
     };
 
     fetchMarketDataForAllNetworks();
-  }, [user?.computed, activeAccount?.address]);
+    // Fallback: if user data hasn't resolved in 6s (xChain wallet init race), load markets anyway
+    const fallbackTimer = setTimeout(() => {
+      if (displayAddress) void fetchMarketDataForAllNetworks();
+    }, 6000);
+    return () => clearTimeout(fallbackTimer);
+  }, [user?.computed, activeAccount?.address, displayAddress]);
 
   // Fetch user global data and market data when wallet connects
   // useEffect(() => {
