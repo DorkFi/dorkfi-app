@@ -89,16 +89,9 @@ export const UserPositionBar = ({
             </p>
           )}
           {loadState === 'ready' && userPosition && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 items-stretch w-full min-w-0">
+            <div className="grid grid-cols-2 gap-2 items-stretch w-full min-w-0">
               <StatCard label="Supplied" value={formatUsdAmount(userPosition.supplied)} color="text-green-600 dark:text-green-400" />
               <StatCard label="Borrowed" value={formatUsdAmount(userPosition.borrowed)} color="text-orange-600 dark:text-orange-400" />
-              <StatCard label="Withdrawable" value={formatUsdAmount(userPosition.withdrawable)} color="text-cyan-600 dark:text-cyan-400" />
-              <StatCard label="Borrowable" value={formatUsdAmount(userPosition.borrowable)} color="text-blue-600 dark:text-blue-400" />
-              <StatCard
-                label="Health"
-                value={userPosition.healthFactor.toFixed(2)}
-                color="text-emerald-600 dark:text-emerald-400"
-              />
             </div>
           )}
         </div>
