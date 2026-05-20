@@ -3790,7 +3790,11 @@ const Portfolio = () => {
     fetchUserInFlight.current = true;
     fetchUserAddressRef.current = userAddress;
 
+    const isCurrentFetchUser = () =>
+      fetchUserAddressRef.current === userAddress;
+
     const applyPortfolioComputed = (user: Record<string, unknown>) => {
+      if (!isCurrentFetchUser()) return;
       if (!user.globalUserData || !Array.isArray(user.globalUserData)) {
         return;
       }
@@ -3879,6 +3883,7 @@ const Portfolio = () => {
         },
       };
       console.log("[Portfolio] User:", computedUser);
+      if (!isCurrentFetchUser()) return;
       setUser(computedUser);
       console.log("[Portfolio] Network values:", networkValues);
     };
@@ -3892,6 +3897,7 @@ const Portfolio = () => {
       console.log("[Portfolio] API response:", apiResponse);
 
       if (apiResponse.success && apiResponse.data) {
+        if (!isCurrentFetchUser()) return;
         const user = apiResponse.data as Record<string, unknown>;
         console.log("[Portfolio] User data fetched from API:", user);
 
@@ -3914,7 +3920,7 @@ const Portfolio = () => {
         `[Portfolio] API failed; falling back to chain for ${userAddress}`
       );
       const chain = await fetchUserDataFromChain(userAddress);
-      if (chain) {
+      if (chain && isCurrentFetchUser()) {
         setUserProfileAvatar(null);
         applyPortfolioComputed({
           address: userAddress,
@@ -3926,7 +3932,7 @@ const Portfolio = () => {
     } catch (error) {
       console.error("Error fetching user global data:", error);
       const chain = await fetchUserDataFromChain(userAddress);
-      if (chain) {
+      if (chain && isCurrentFetchUser()) {
         setUserProfileAvatar(null);
         applyPortfolioComputed({
           address: userAddress,
