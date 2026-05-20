@@ -50,6 +50,16 @@ interface MarketsDesktopTableProps {
   onMintClick?: (asset: string, poolId?: string, marketRowKey?: string) => void;
   onMigrateClick?: (asset: string) => void;
   isLoadingBalance?: boolean;
+  getMarketActionHoverHandlers?: (
+    asset: string,
+    poolId?: string,
+    marketRowKey?: string
+  ) => {
+    onDepositMouseEnter?: (e: React.MouseEvent) => void;
+    onBorrowMouseEnter?: (e: React.MouseEvent) => void;
+    onMintMouseEnter?: (e: React.MouseEvent) => void;
+  };
+  onRowMouseEnter?: (market: OnDemandMarketData) => void;
 }
 
 const headerTooltips = {
@@ -86,6 +96,8 @@ const MarketsDesktopTable = ({
   onMintClick,
   onMigrateClick,
   isLoadingBalance = false,
+  getMarketActionHoverHandlers,
+  onRowMouseEnter,
 }: MarketsDesktopTableProps) => {
   const { currentNetwork } = useNetwork();
   const { activeAccount } = useWallet();
@@ -376,6 +388,8 @@ const MarketsDesktopTable = ({
           isLoadingBalance={isLoadingBalance}
           isNested={isNested}
           marketIndex={marketIndex}
+          getMarketActionHoverHandlers={getMarketActionHoverHandlers}
+          onRowMouseEnter={onRowMouseEnter}
         />
       );
     }
@@ -388,6 +402,7 @@ const MarketsDesktopTable = ({
           isNested ? "bg-gray-50/50 dark:bg-slate-700/50" : ""
         }`}
         onClick={() => onRowClick(market)}
+        onMouseEnter={() => onRowMouseEnter?.(market)}
       >
         <TableCell className="text-left align-top">
           <div className="flex items-center gap-3 w-full justify-between">
@@ -621,6 +636,11 @@ const MarketsDesktopTable = ({
             const borrowCap = Number(market.borrowCap ?? 0);
             const borrowCapReached = isAtBorrowCap(totalBorrow, borrowCap);
 
+            const hoverHandlers = getMarketActionHoverHandlers?.(
+              market.asset,
+              finalPoolId,
+              (market as { _sortKey?: string })._sortKey
+            );
             return (
               <MarketsTableActions
                 asset={market.asset}
@@ -641,6 +661,9 @@ const MarketsDesktopTable = ({
                 isSToken={market.isSToken}
                 depositDisabled={depositCapReached}
                 borrowDisabled={borrowCapReached}
+                onDepositMouseEnter={hoverHandlers?.onDepositMouseEnter}
+                onBorrowMouseEnter={hoverHandlers?.onBorrowMouseEnter}
+                onMintMouseEnter={hoverHandlers?.onMintMouseEnter}
               />
             );
           })()}
@@ -800,6 +823,7 @@ const MarketsDesktopTable = ({
                   {/* Main collapsible row */}
                 <TableRow
                     className="transition-all relative card-hover rounded-lg border border-gray-200/30 dark:border-ocean-teal/10 bg-white/50 dark:bg-slate-800/50 hover:border-teal-400 hover:shadow-[0_0_16px_4px_rgba(13,255,190,0.15)] hover:z-20"
+                    onMouseEnter={() => onRowMouseEnter?.(mainMarket)}
                 >
                   <TableCell className="text-left align-top">
                       <div className="flex items-center gap-3 w-full justify-between">
@@ -1058,6 +1082,12 @@ const MarketsDesktopTable = ({
                       const borrowCap = Number(mainMarket.borrowCap ?? 0);
                       const borrowCapReached = isAtBorrowCap(totalBorrow, borrowCap);
 
+                      const groupedHoverHandlers =
+                        getMarketActionHoverHandlers?.(
+                          mainMarket.asset,
+                          finalPoolId,
+                          (mainMarket as { _sortKey?: string })._sortKey
+                        );
                       return (
                         <MarketsTableActions
                           asset={mainMarket.asset}
@@ -1080,6 +1110,15 @@ const MarketsDesktopTable = ({
                           isSToken={mainMarket.isSToken}
                           depositDisabled={depositCapReached}
                           borrowDisabled={borrowCapReached}
+                          onDepositMouseEnter={
+                            groupedHoverHandlers?.onDepositMouseEnter
+                          }
+                          onBorrowMouseEnter={
+                            groupedHoverHandlers?.onBorrowMouseEnter
+                          }
+                          onMintMouseEnter={
+                            groupedHoverHandlers?.onMintMouseEnter
+                          }
                         />
                       );
                     })()}

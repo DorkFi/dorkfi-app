@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -86,6 +86,14 @@ import {
   XchainUsdcBridgeControls,
   shouldShowXchainUsdcBridgeControls,
 } from "@/components/xchain/XchainUsdcBridgeControls";
+import {
+  createDebouncedPrefetch,
+  warmMarketDetailUserPositionRpc,
+  poolIdFromMarketRow,
+  marketRowKeyFromMarket,
+  type MarketActionTokenParams,
+} from "@/utils/modalPrefetch";
+import { buildMarketHoverHandlers } from "@/utils/modalHoverHandlers";
 
 const MAX_CLAIMS_PER_TX = 3;
 
@@ -1106,45 +1114,45 @@ const MarketsTable = () => {
     poolId?: string,
     marketRowKey?: string
   ) => {
+    setMintModal({ isOpen: true, asset, poolId, marketRowKey });
+
     setIsLoadingGlobalData(true);
-
-    try {
-      // Fetch user global data before opening modal (only if wallet is connected)
-      if (activeAccount?.address) {
-        const globalData = await fetchUserGlobalData(
-          activeAccount.address,
-          currentNetwork
-        );
-        setUserGlobalData(globalData);
-
-        const token = resolveTokenForDisplayedAsset(asset, poolId, marketRowKey);
-
-        if (token && token.poolId && token.underlyingContractId) {
-          const borrowData = await fetchUserBorrowBalance(
+    void (async () => {
+      try {
+        if (activeAccount?.address) {
+          const globalData = await fetchUserGlobalData(
             activeAccount.address,
-            token.poolId,
-            token.underlyingContractId,
             currentNetwork
           );
-          setUserBorrowBalance(borrowData?.balance || 0);
+          setUserGlobalData(globalData);
+
+          const token = resolveTokenForDisplayedAsset(
+            asset,
+            poolId,
+            marketRowKey
+          );
+
+          if (token && token.poolId && token.underlyingContractId) {
+            const borrowData = await fetchUserBorrowBalance(
+              activeAccount.address,
+              token.poolId,
+              token.underlyingContractId,
+              currentNetwork
+            );
+            setUserBorrowBalance(borrowData?.balance || 0);
+          } else {
+            setUserBorrowBalance(0);
+          }
         } else {
+          setUserGlobalData(null);
           setUserBorrowBalance(0);
         }
-      } else {
-        // Not connected, set empty data
-        setUserGlobalData(null);
-        setUserBorrowBalance(0);
+      } catch (error) {
+        console.error("Error fetching user data for mint:", error);
+      } finally {
+        setIsLoadingGlobalData(false);
       }
-
-      // Open modal regardless of connection status, pass poolId if available
-      setMintModal({ isOpen: true, asset, poolId, marketRowKey });
-    } catch (error) {
-      console.error("Error fetching user data for mint:", error);
-      // Still open modal even if data fetch fails
-      setMintModal({ isOpen: true, asset, poolId, marketRowKey });
-    } finally {
-      setIsLoadingGlobalData(false);
-    }
+    })();
   };
 
   const handleMigrateClick = async (asset: string) => {
@@ -1506,9 +1514,27 @@ const MarketsTable = () => {
 
   // When the detail modal is open, replace the snapshot row with the refreshed row from
   // `loadMarketDataWithBypass` (chain-sourced marketInfo) once it lands in `markets`.
-  // Compare `lastFetched` so we do not churn on unrelated `markets` remaps (e.g. rewards APR).
+  // Key off `lastFetched` only — `markets` is remapped often (rewards APR) with new object refs.
+  const detailModalRowLastFetched = useMemo(() => {
+    if (!detailModal.isOpen || !detailModal.asset) return undefined;
+    const fresh = findMarketRowOnPage(
+      markets as Record<string, unknown>[],
+      detailModal.asset,
+      detailModal.poolId,
+      detailModal.marketRowKey
+    );
+    return (fresh as { lastFetched?: number } | undefined)?.lastFetched;
+  }, [
+    markets,
+    detailModal.isOpen,
+    detailModal.asset,
+    detailModal.poolId,
+    detailModal.marketRowKey,
+  ]);
+
   useEffect(() => {
     if (!detailModal.isOpen || !detailModal.asset) return;
+    if (detailModalRowLastFetched === undefined) return;
     const fresh = findMarketRowOnPage(
       markets as Record<string, unknown>[],
       detailModal.asset,
@@ -1518,20 +1544,17 @@ const MarketsTable = () => {
     if (!fresh) return;
     setDetailModal((prev) => {
       if (!prev.isOpen || !prev.marketData) return prev;
-      if (fresh === prev.marketData) return prev;
       const prevLast = (prev.marketData as { lastFetched?: number }).lastFetched;
-      const freshLast = (fresh as { lastFetched?: number }).lastFetched;
       if (
         prevLast !== undefined &&
-        freshLast !== undefined &&
-        freshLast <= prevLast
+        detailModalRowLastFetched <= prevLast
       ) {
         return prev;
       }
       return { ...prev, marketData: fresh };
     });
   }, [
-    markets,
+    detailModalRowLastFetched,
     detailModal.isOpen,
     detailModal.asset,
     detailModal.poolId,
@@ -2814,6 +2837,65 @@ const MarketsTable = () => {
     }
   };
 
+  const debouncedPrefetch = useMemo(() => createDebouncedPrefetch(), []);
+
+  const marketHoverBundle = useMemo(
+    () => ({
+      debounced: debouncedPrefetch,
+      userAddress: activeAccount?.address,
+      networkId: currentNetwork as NetworkId,
+      warmWalletBalance: (p: MarketActionTokenParams) => {
+        if (!activeAccount?.address) return;
+        const rowKey = p.configSymbol
+          ? `${p.asset}|${p.configSymbol}|${p.poolId ?? ""}`
+          : undefined;
+        void fetchWalletBalance(p.asset, p.poolId, rowKey);
+      },
+    }),
+    [debouncedPrefetch, activeAccount?.address, currentNetwork]
+  );
+
+  const getMarketActionHoverHandlers = useCallback(
+    (asset: string, poolId?: string, marketRowKey?: string) =>
+      buildMarketHoverHandlers(
+        marketHoverBundle,
+        asset,
+        poolId,
+        marketRowKey
+      ),
+    [marketHoverBundle]
+  );
+
+  const prefetchMarketRowOnHover = useCallback(
+    (market: Record<string, unknown>) => {
+      if (!activeAccount?.address) return;
+      const asset = typeof market.asset === "string" ? market.asset : null;
+      if (!asset) return;
+      const poolId = poolIdFromMarketRow(
+        market as { marketInfo?: { poolId?: string }; poolId?: string }
+      );
+      const rowKey = marketRowKeyFromMarket(
+        market as { asset?: string; poolId?: string; configSymbol?: string; _sortKey?: string }
+      );
+      const configSymbol =
+        typeof (market as { configSymbol?: string }).configSymbol === "string"
+          ? (market as { configSymbol?: string }).configSymbol
+          : configSymbolFromMarketRowKey(rowKey);
+      debouncedPrefetch(
+        `detailRow:${currentNetwork}:${asset}:${poolId ?? ""}:${configSymbol ?? ""}`,
+        () =>
+          warmMarketDetailUserPositionRpc({
+            userAddress: activeAccount.address,
+            networkId: currentNetwork as NetworkId,
+            asset,
+            poolId,
+            configSymbol,
+          })
+      );
+    },
+    [activeAccount?.address, currentNetwork, debouncedPrefetch]
+  );
+
   const getAssetData = (asset: string, poolId?: string, marketRowKey?: string) => {
     const poolIdStr = poolId != null && poolId !== "" ? String(poolId) : null;
     let market: (typeof markets)[0] | undefined;
@@ -2933,8 +3015,11 @@ const MarketsTable = () => {
     };
   };
 
+  const detailPositionLoadKeyRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!detailModal.isOpen) {
+      detailPositionLoadKeyRef.current = null;
       setDetailModalUserPosition(null);
       return;
     }
@@ -2952,6 +3037,16 @@ const MarketsTable = () => {
     }
 
     const poolId = detailModal.poolId;
+    const rowLastFetched = (row as { lastFetched?: number }).lastFetched;
+    const loadKey = [
+      asset,
+      poolId ?? "",
+      detailModal.marketRowKey ?? "",
+      activeAccount.address,
+      currentNetwork,
+      rowLastFetched ?? "",
+    ].join("|");
+
     const tokens = getAllTokensWithDisplayInfo(currentNetwork);
     const token =
       resolveTokenForDisplayedAsset(
@@ -2978,14 +3073,17 @@ const MarketsTable = () => {
         norm.price > 0 && Number.isFinite(norm.price) ? norm.price : 0;
       const assetData = getAssetData(asset, poolId, detailModal.marketRowKey);
 
-      setDetailModalUserPosition({
-        supplied: 0,
-        borrowed: 0,
-        withdrawable: 0,
-        borrowable: 0,
-        healthFactor: 0,
-        earnings: 0,
-      });
+      if (detailPositionLoadKeyRef.current !== loadKey) {
+        detailPositionLoadKeyRef.current = loadKey;
+        setDetailModalUserPosition({
+          supplied: 0,
+          borrowed: 0,
+          withdrawable: 0,
+          borrowable: 0,
+          healthFactor: 0,
+          earnings: 0,
+        });
+      }
 
       try {
         const [
@@ -3110,13 +3208,12 @@ const MarketsTable = () => {
     detailModal.asset,
     detailModal.poolId,
     detailModal.marketRowKey,
-    detailModal.marketData,
+    detailModalRowLastFetched,
     activeAccount?.address,
     currentNetwork,
-    resolveTokenForDisplayedAsset,
-    // Not `markets`: that list is rebuilt on every row/rewards update and caused a full
-    // Promise.all per tick while the modal stayed open. `detailModal.marketData` is enough;
-    // the sync effect updates it when the selected row’s `lastFetched` advances.
+    // Do not depend on `markets`, `detailModal.marketData` (new refs from rewards remap), or
+    // `resolveTokenForDisplayedAsset` (recreated when `markets` changes) — those caused a
+    // fetch/setState loop while the detail modal stayed open.
   ]);
 
   return (
@@ -3572,6 +3669,8 @@ const MarketsTable = () => {
               onMintClick={handleMintClick}
               onMigrateClick={handleMigrateClick}
               isLoadingBalance={isLoadingBalance}
+              getMarketActionHoverHandlers={getMarketActionHoverHandlers}
+              onRowMouseEnter={prefetchMarketRowOnHover}
             />
           )}
         </div>

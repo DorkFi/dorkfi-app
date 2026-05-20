@@ -18,6 +18,16 @@ interface MarketsTableContentProps {
   onMintClick?: (asset: string, poolId?: string, marketRowKey?: string) => void;
   onMigrateClick?: (asset: string) => void;
   isLoadingBalance?: boolean;
+  getMarketActionHoverHandlers?: (
+    asset: string,
+    poolId?: string,
+    marketRowKey?: string
+  ) => {
+    onDepositMouseEnter?: (e: React.MouseEvent) => void;
+    onBorrowMouseEnter?: (e: React.MouseEvent) => void;
+    onMintMouseEnter?: (e: React.MouseEvent) => void;
+  };
+  onRowMouseEnter?: (market: OnDemandMarketData) => void;
 }
 
 const MarketsTableContent = ({ 
@@ -32,7 +42,9 @@ const MarketsTableContent = ({
   onBorrowClick,
   onMintClick,
   onMigrateClick,
-  isLoadingBalance = false 
+  isLoadingBalance = false,
+  getMarketActionHoverHandlers,
+  onRowMouseEnter,
 }: MarketsTableContentProps) => {
   const breakpoint = useBreakpoint();
 
@@ -46,6 +58,8 @@ const MarketsTableContent = ({
         onBorrowClick={onBorrowClick}
         onMintClick={onMintClick}
         onMigrateClick={onMigrateClick}
+        getMarketActionHoverHandlers={getMarketActionHoverHandlers}
+        onRowMouseEnter={onRowMouseEnter}
       />
     );
   }
@@ -63,6 +77,8 @@ const MarketsTableContent = ({
         onMintClick={onMintClick}
         onMigrateClick={onMigrateClick}
         isLoadingBalance={isLoadingBalance}
+        getMarketActionHoverHandlers={getMarketActionHoverHandlers}
+        onRowMouseEnter={onRowMouseEnter}
       />
     );
   }
@@ -80,6 +96,8 @@ const MarketsTableContent = ({
       onMintClick={onMintClick}
       onMigrateClick={onMigrateClick}
       isLoadingBalance={isLoadingBalance}
+      getMarketActionHoverHandlers={getMarketActionHoverHandlers}
+      onRowMouseEnter={onRowMouseEnter}
     />
   );
 };

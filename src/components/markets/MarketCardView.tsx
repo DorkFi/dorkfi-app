@@ -33,6 +33,16 @@ interface MarketCardViewProps {
   onBorrowClick: (asset: string, poolId?: string, marketRowKey?: string) => void;
   onMintClick?: (asset: string, poolId?: string, marketRowKey?: string) => void;
   onMigrateClick?: (asset: string) => void;
+  getMarketActionHoverHandlers?: (
+    asset: string,
+    poolId?: string,
+    marketRowKey?: string
+  ) => {
+    onDepositMouseEnter?: (e: React.MouseEvent) => void;
+    onBorrowMouseEnter?: (e: React.MouseEvent) => void;
+    onMintMouseEnter?: (e: React.MouseEvent) => void;
+  };
+  onRowMouseEnter?: (market: OnDemandMarketData) => void;
 }
 
 const MarketCardView = ({ 
@@ -42,7 +52,9 @@ const MarketCardView = ({
   onDepositClick, 
   onBorrowClick,
   onMintClick,
-  onMigrateClick
+  onMigrateClick,
+  getMarketActionHoverHandlers,
+  onRowMouseEnter,
 }: MarketCardViewProps) => {
   const { currentNetwork } = useNetwork();
   const { activeAccount } = useWallet();
@@ -189,6 +201,7 @@ const MarketCardView = ({
             key={marketKey}
             className="flex flex-col md:flex-row md:items-stretch gap-4 md:gap-6"
             onClick={() => onRowClick(market)}
+            onMouseEnter={() => onRowMouseEnter?.(market)}
           >
             {/* Header with logo, asset info, and info button */}
             <div className="flex flex-col items-center text-center md:flex-col-reverse md:items-start md:text-left md:justify-normal">
@@ -277,6 +290,13 @@ const MarketCardView = ({
               <div className="flex gap-2 justify-center md:justify-start">
                 <DorkFiButton
                   variant="secondary"
+                  onMouseEnter={
+                    getMarketActionHoverHandlers?.(
+                      market.asset,
+                      market.marketInfo?.poolId || market.poolId,
+                      (market as { _sortKey?: string })._sortKey
+                    )?.onDepositMouseEnter
+                  }
                   onClick={e => {
                     e.stopPropagation();
                     onDepositClick(
@@ -294,6 +314,13 @@ const MarketCardView = ({
                 >Supply</DorkFiButton>
                 <DorkFiButton
                   variant="borrow-outline"
+                  onMouseEnter={
+                    getMarketActionHoverHandlers?.(
+                      market.asset,
+                      market.marketInfo?.poolId || market.poolId,
+                      (market as { _sortKey?: string })._sortKey
+                    )?.onBorrowMouseEnter
+                  }
                   onClick={e => {
                     e.stopPropagation();
                     if (isAtBorrowCap(Number(market.totalBorrow ?? 0), Number(market.borrowCap ?? 0))) return;

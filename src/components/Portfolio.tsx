@@ -75,6 +75,12 @@ import { usdPerTokenFromMarketInfoPrice } from "@/utils/assetDecimals";
 import { formatNftHolderClaimableDisplayFromAgent } from "@/utils/nftHolderClaimAgentDisplay";
 import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
 import { portfolioWalletBalanceCacheKey } from "@/utils/portfolioWalletBalanceCacheKey";
+import {
+  createDebouncedPrefetch,
+  warmBorrowModalMaxAndPool,
+  warmRepayModalRpc,
+  type MarketActionTokenParams,
+} from "@/utils/modalPrefetch";
 import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
 import { shouldShowConfigSymbolUnderDisplayAsset } from "@/utils/portfolioAssetSubline";
 import {
@@ -494,6 +500,7 @@ const Portfolio = () => {
   const [isLoadingWalletBalance, setIsLoadingWalletBalance] = useState(false);
   const [userBorrowBalance, setUserBorrowBalance] = useState<number>(0);
   const [isLoadingBorrowData, setIsLoadingBorrowData] = useState(false);
+  const [isLoadingRepayData, setIsLoadingRepayData] = useState(false);
   const [user, setUser] = useState<Record<string, unknown> | null>(null);
   const [userProfileAvatar, setUserProfileAvatar] = useState<string | null>(
     null
@@ -4254,24 +4261,110 @@ const Portfolio = () => {
         asset: string,
         poolId?: string,
         marketId?: string,
-        networkIdOverride?: string
+        networkIdOverride?: string,
+        configSymbol?: string
       ) => Promise<void>)
     | null
   >(null);
+
+  const debouncedPortfolioPrefetch = useMemo(() => createDebouncedPrefetch(), []);
 
   const prefetchWithdrawModalData = (
     asset: string,
     poolId?: string,
     networkId?: string,
-    marketId?: string
+    marketId?: string,
+    configSymbol?: string
   ) => {
     void prefetchWithdrawIndicesRef.current?.(
       asset,
       poolId,
       marketId,
-      networkId
+      networkId,
+      configSymbol
     );
   };
+
+  const prefetchDepositOnHover = useCallback(
+    (
+      asset: string,
+      poolId?: string,
+      networkId?: string,
+      configSymbol?: string,
+      marketId?: string
+    ) => {
+      if (!activeAccount?.address) return;
+      const networkToUse = (networkId || currentNetwork) as NetworkId;
+      const key = `deposit:${networkToUse}:${asset}:${poolId ?? ""}:${configSymbol ?? ""}:${marketId ?? ""}`;
+      debouncedPortfolioPrefetch(key, () => {
+        void fetchWalletBalance(asset, networkToUse, true, {
+          poolId,
+          marketId,
+          configSymbol,
+        });
+      });
+    },
+    [activeAccount?.address, currentNetwork, debouncedPortfolioPrefetch]
+  );
+
+  const prefetchBorrowOnHover = useCallback(
+    (
+      asset: string,
+      poolId?: string,
+      networkId?: string,
+      configSymbol?: string,
+      marketId?: string
+    ) => {
+      if (!activeAccount?.address) return;
+      const networkToUse = (networkId || currentNetwork) as NetworkId;
+      const params: MarketActionTokenParams = {
+        userAddress: activeAccount.address,
+        networkId: networkToUse,
+        asset,
+        poolId,
+        configSymbol,
+        marketId,
+      };
+      debouncedPortfolioPrefetch(
+        `borrow:${networkToUse}:${asset}:${poolId ?? ""}:${configSymbol ?? ""}:${marketId ?? ""}`,
+        () => warmBorrowModalMaxAndPool(params)
+      );
+    },
+    [activeAccount?.address, currentNetwork, debouncedPortfolioPrefetch]
+  );
+
+  const prefetchRepayOnHover = useCallback(
+    (
+      asset: string,
+      poolId?: string,
+      networkId?: string,
+      configSymbol?: string,
+      marketId?: string
+    ) => {
+      if (!activeAccount?.address) return;
+      const networkToUse = (networkId || currentNetwork) as NetworkId;
+      const params: MarketActionTokenParams = {
+        userAddress: activeAccount.address,
+        networkId: networkToUse,
+        asset,
+        poolId,
+        configSymbol,
+        marketId,
+      };
+      debouncedPortfolioPrefetch(
+        `repay:${networkToUse}:${asset}:${poolId ?? ""}:${configSymbol ?? ""}:${marketId ?? ""}`,
+        () => {
+          warmRepayModalRpc(params);
+          void fetchWalletBalance(asset, networkToUse, true, {
+            poolId,
+            marketId,
+            configSymbol,
+          });
+        }
+      );
+    },
+    [activeAccount?.address, currentNetwork, debouncedPortfolioPrefetch]
+  );
 
   const handleWithdrawClick = (
     asset: string,
@@ -4494,53 +4587,36 @@ const Portfolio = () => {
       return;
     }
 
-    try {
-      // Use the asset's network if provided, otherwise fall back to currentNetwork
-      const networkToUse = (networkId || currentNetwork) as NetworkId;
+    const networkToUse = (networkId || currentNetwork) as NetworkId;
 
-      // Fetch user global data from contract before opening modal (for accurate health factor)
-      if (activeAccount?.address) {
-        // Fetch markets from node api for accurate healthFactorIndex calculation
-        const markets = await fetchAllMarkets(networkToUse);
+    setRepayModal({
+      isOpen: true,
+      asset,
+      poolId,
+      network: networkToUse,
+      configSymbol,
+      marketId,
+    });
+
+    setIsLoadingRepayData(true);
+    void (async () => {
+      try {
         const globalData = await fetchUserGlobalData(
           activeAccount.address,
-          networkToUse,
-          markets
+          networkToUse
         );
         setUserGlobalData(globalData);
-      } else {
-        // Not connected, set empty data
-        setUserGlobalData(null);
+        await refreshWalletBalance(asset, networkToUse, {
+          poolId,
+          marketId,
+          configSymbol,
+        });
+      } catch (error) {
+        console.error("Error fetching data for repay:", error);
+      } finally {
+        setIsLoadingRepayData(false);
       }
-
-      // Fetch wallet balance for the asset before opening modal using the asset's network
-      await refreshWalletBalance(asset, networkToUse, {
-        poolId,
-        marketId,
-        configSymbol,
-      });
-
-      // Open modal after data is fetched
-      setRepayModal({
-        isOpen: true,
-        asset,
-        poolId,
-        network: networkToUse,
-        configSymbol,
-        marketId,
-      });
-    } catch (error) {
-      console.error("Error fetching data for repay:", error);
-      // Still open modal even if data fetch fails
-      setRepayModal({
-        isOpen: true,
-        asset,
-        poolId,
-        network: networkId,
-        configSymbol,
-        marketId,
-      });
-    }
+    })();
   };
 
   const handleAddCollateral = () => {
@@ -6663,10 +6739,34 @@ const Portfolio = () => {
                                         )
                                       : undefined
                                   }
+                                  onDepositMouseEnter={
+                                    !isViewOnly
+                                      ? () =>
+                                        prefetchDepositOnHover(
+                                          deposit.asset,
+                                          deposit.poolId,
+                                          (deposit as ItemWithNetwork).network,
+                                          (deposit as ItemWithNetwork).configSymbol,
+                                          (deposit as ItemWithNetwork).marketId
+                                        )
+                                      : undefined
+                                  }
                                   onWithdrawClick={
                                     !isViewOnly
                                       ? () =>
                                         handleWithdrawClick(
+                                          deposit.asset,
+                                          deposit.poolId,
+                                          (deposit as ItemWithNetwork).network,
+                                          (deposit as ItemWithNetwork).marketId,
+                                          (deposit as ItemWithNetwork).configSymbol
+                                        )
+                                      : undefined
+                                  }
+                                  onWithdrawMouseEnter={
+                                    !isViewOnly
+                                      ? () =>
+                                        prefetchWithdrawModalData(
                                           deposit.asset,
                                           deposit.poolId,
                                           (deposit as ItemWithNetwork).network,
@@ -7381,6 +7481,15 @@ const Portfolio = () => {
                                             <DorkFiButton
                                               size="sm"
                                               variant="secondary"
+                                              onMouseEnter={() =>
+                                                prefetchDepositOnHover(
+                                                  deposit.asset,
+                                                  deposit.poolId,
+                                                  (deposit as ItemWithNetwork).network,
+                                                  (deposit as ItemWithNetwork).configSymbol,
+                                                  (deposit as ItemWithNetwork).marketId
+                                                )
+                                              }
                                               onClick={(e) => {
                                                 e.stopPropagation();
                                                 if (depositCapReached) return;
@@ -7413,7 +7522,8 @@ const Portfolio = () => {
                                                 deposit.asset,
                                                 deposit.poolId,
                                                 (deposit as ItemWithNetwork).network,
-                                                (deposit as ItemWithNetwork).marketId
+                                                (deposit as ItemWithNetwork).marketId,
+                                                (deposit as ItemWithNetwork).configSymbol
                                               )
                                             }
                                             onClick={(e) => {
@@ -8499,10 +8609,34 @@ const Portfolio = () => {
                                         )
                                       : undefined
                                   }
+                                  onDepositMouseEnter={
+                                    !isViewOnly
+                                      ? () =>
+                                        prefetchBorrowOnHover(
+                                          borrow.asset,
+                                          borrow.poolId,
+                                          (borrow as ItemWithNetwork).network,
+                                          (borrow as ItemWithNetwork).configSymbol,
+                                          (borrow as ItemWithNetwork).marketId
+                                        )
+                                      : undefined
+                                  }
                                   onWithdrawClick={
                                     !isViewOnly
                                       ? () =>
                                         handleRepayClick(
+                                          borrow.asset,
+                                          borrow.poolId,
+                                          (borrow as ItemWithNetwork).network,
+                                          (borrow as ItemWithNetwork).configSymbol,
+                                          (borrow as ItemWithNetwork).marketId
+                                        )
+                                      : undefined
+                                  }
+                                  onWithdrawMouseEnter={
+                                    !isViewOnly
+                                      ? () =>
+                                        prefetchRepayOnHover(
                                           borrow.asset,
                                           borrow.poolId,
                                           (borrow as ItemWithNetwork).network,
@@ -9086,6 +9220,15 @@ const Portfolio = () => {
                                             <DorkFiButton
                                               size="sm"
                                               variant="borrow-outline"
+                                              onMouseEnter={() =>
+                                                prefetchBorrowOnHover(
+                                                  borrow.asset,
+                                                  borrow.poolId,
+                                                  (borrow as ItemWithNetwork).network,
+                                                  (borrow as ItemWithNetwork).configSymbol,
+                                                  (borrow as ItemWithNetwork).marketId
+                                                )
+                                              }
                                               onClick={(e) => {
                                                 e.stopPropagation();
                                                 if (borrowCapReached) return;
@@ -9113,6 +9256,15 @@ const Portfolio = () => {
                                           <DorkFiButton
                                             size="sm"
                                             variant="danger-outline"
+                                            onMouseEnter={() =>
+                                              prefetchRepayOnHover(
+                                                borrow.asset,
+                                                borrow.poolId,
+                                                (borrow as ItemWithNetwork).network,
+                                                (borrow as ItemWithNetwork).configSymbol,
+                                                (borrow as ItemWithNetwork).marketId
+                                              )
+                                            }
                                             onClick={(e) => {
                                               e.stopPropagation();
                                               handleRepayClick(

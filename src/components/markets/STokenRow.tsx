@@ -29,6 +29,16 @@ interface STokenRowProps {
   isLoadingBalance?: boolean;
   isNested?: boolean;
   marketIndex?: number;
+  getMarketActionHoverHandlers?: (
+    asset: string,
+    poolId?: string,
+    marketRowKey?: string
+  ) => {
+    onDepositMouseEnter?: (e: React.MouseEvent) => void;
+    onBorrowMouseEnter?: (e: React.MouseEvent) => void;
+    onMintMouseEnter?: (e: React.MouseEvent) => void;
+  };
+  onRowMouseEnter?: (market: OnDemandMarketData) => void;
 }
 
 const LoadingCell = () => (
@@ -54,6 +64,8 @@ const STokenRow = ({
   isLoadingBalance = false,
   isNested = false,
   marketIndex,
+  getMarketActionHoverHandlers,
+  onRowMouseEnter,
 }: STokenRowProps) => {
   const { formatNumber, formatCurrency } = useNumberI18n();
   const { currentNetwork } = useNetwork();
@@ -63,6 +75,7 @@ const STokenRow = ({
       key={market.asset}
       className="hover:bg-gradient-to-r hover:from-purple-50 hover:to-pink-50 dark:hover:from-purple-900/20 dark:hover:to-pink-900/20 cursor-pointer transition-all duration-300 border-l-4 border-l-purple-500 bg-gradient-to-r from-purple-50/30 to-pink-50/30 dark:from-purple-900/10 dark:to-pink-900/10"
       onClick={() => onRowClick(market)}
+      onMouseEnter={() => onRowMouseEnter?.(market)}
     >
       <TableCell className="text-center">
         <div className="flex items-center justify-center gap-3">
@@ -169,11 +182,33 @@ const STokenRow = ({
         <MarketsTableActions
           asset={market.asset}
           poolId={market.marketInfo?.poolId}
+          marketRowKey={(market as { _sortKey?: string })._sortKey}
           onDepositClick={onDepositClick}
           onBorrowClick={onBorrowClick}
           onMintClick={onMintClick}
           isLoadingBalance={isLoadingBalance}
           isSToken={true}
+          onDepositMouseEnter={
+            getMarketActionHoverHandlers?.(
+              market.asset,
+              market.marketInfo?.poolId,
+              (market as { _sortKey?: string })._sortKey
+            )?.onDepositMouseEnter
+          }
+          onBorrowMouseEnter={
+            getMarketActionHoverHandlers?.(
+              market.asset,
+              market.marketInfo?.poolId,
+              (market as { _sortKey?: string })._sortKey
+            )?.onBorrowMouseEnter
+          }
+          onMintMouseEnter={
+            getMarketActionHoverHandlers?.(
+              market.asset,
+              market.marketInfo?.poolId,
+              (market as { _sortKey?: string })._sortKey
+            )?.onMintMouseEnter
+          }
         />
       </TableCell>
     </TableRow>

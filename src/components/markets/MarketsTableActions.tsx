@@ -18,6 +18,9 @@ interface MarketsTableActionsProps {
   depositDisabled?: boolean;
   /** When true, borrow is disabled (e.g. market at or over borrow cap). */
   borrowDisabled?: boolean;
+  onDepositMouseEnter?: (e: React.MouseEvent) => void;
+  onBorrowMouseEnter?: (e: React.MouseEvent) => void;
+  onMintMouseEnter?: (e: React.MouseEvent) => void;
 }
 
 /**
@@ -37,6 +40,9 @@ const MarketsTableActions = ({
   isSToken = false,
   depositDisabled = false,
   borrowDisabled = false,
+  onDepositMouseEnter,
+  onBorrowMouseEnter,
+  onMintMouseEnter,
 }: MarketsTableActionsProps) => {
   return (
     <div className="flex flex-col space-y-2">
@@ -44,6 +50,7 @@ const MarketsTableActions = ({
         {!isSToken && (
           <DorkFiButton
             variant="secondary"
+            onMouseEnter={onDepositMouseEnter}
             onClick={(e) => {
               e.stopPropagation();
               onDepositClick(asset, poolId, marketRowKey);
@@ -56,6 +63,7 @@ const MarketsTableActions = ({
         )}
         <DorkFiButton
           variant={isSToken ? "mint" : "borrow-outline"}
+          onMouseEnter={isSToken ? onMintMouseEnter : onBorrowMouseEnter}
           onClick={(e) => {
             e.stopPropagation();
             if (isSToken && onMintClick) {
