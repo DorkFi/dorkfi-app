@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +15,7 @@ import {
   getAllTokensWithDisplayInfo,
   getFolksAdaptersForPhase,
   getTokenConfig,
+  resolveTokenForMarketPosition,
   getAlgorandNetworkFromNetworkId,
   tokenStandardUsesNativeWalletBalance,
 } from "@/config";
@@ -29,6 +30,14 @@ import {
   type MarketFilter,
 } from "@/hooks/useOnDemandMarketData";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useIsMobile } from "@/hooks/use-mobile";
 import MarketSearchFilters from "@/components/markets/MarketSearchFilters";
 import MarketPagination from "@/components/markets/MarketPagination";
 import SupplyBorrowModal from "@/components/SupplyBorrowModal";
@@ -42,13 +51,19 @@ import {
   fetchUserGlobalData,
   fetchUserBorrowBalance,
   fetchUserDepositBalance,
+  fetchGlobalUserRowsFromChain,
   getMaxWithdrawableForMarket,
   migrate,
   deposit,
   fetchMarketInfo,
   isMarketPaused,
 } from "@/services/lendingService";
-import type { UserPosition as MarketDetailUserPosition } from "@/components/market-modal/types";
+import { withRpcReadCache } from "@/utils/rpcReadCache";
+import { computePortfolioDisplayHealthFactor } from "@/utils/portfolioDisplayHealthFactor";
+import type {
+  UserPosition as MarketDetailUserPosition,
+  UserPositionLoadState,
+} from "@/components/market-modal/types";
 import { normalizeWadUsdPerToken, roundUsdToCents, cn } from "@/lib/utils";
 import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
 import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
@@ -86,6 +101,14 @@ import {
   XchainUsdcBridgeControls,
   shouldShowXchainUsdcBridgeControls,
 } from "@/components/xchain/XchainUsdcBridgeControls";
+import {
+  createDebouncedPrefetch,
+  warmMarketDetailUserPositionRpc,
+  poolIdFromMarketRow,
+  marketRowKeyFromMarket,
+  type MarketActionTokenParams,
+} from "@/utils/modalPrefetch";
+import { buildMarketHoverHandlers } from "@/utils/modalHoverHandlers";
 
 const MAX_CLAIMS_PER_TX = 3;
 
@@ -288,6 +311,8 @@ function marketsToolbarSpendableAlgoIsMeterGreen(balance: number | null): boolea
 
 const MarketsTable = () => {
   const { formatPercent, formatNumber } = useNumberI18n();
+  const isMobile = useIsMobile();
+  const marketsListRef = useRef<HTMLDivElement>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [sortField, setSortField] = useState<SortField>("default");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
@@ -363,6 +388,8 @@ const MarketsTable = () => {
   /** Live position for PremiumMarketModal (on-chain + pool caps). */
   const [detailModalUserPosition, setDetailModalUserPosition] =
     useState<MarketDetailUserPosition | null>(null);
+  const [detailModalUserPositionLoad, setDetailModalUserPositionLoad] =
+    useState<UserPositionLoadState>("idle");
 
   // Mock user deposits - in real app, this would come from user's wallet/backend
   const [userDeposits] = useState<Record<string, number>>({});
@@ -792,6 +819,21 @@ const MarketsTable = () => {
     multiPoolOnly,
   });
 
+  const handleMarketFilterChange = useCallback(
+    (value: MarketFilter) => {
+      setMarketFilter(value);
+      setCurrentPage(1);
+    },
+    [setCurrentPage]
+  );
+
+  useEffect(() => {
+    marketsListRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }, [marketFilter]);
+
   const rewardsAprByBaseUrl = useRewardsAprBonusMap([currentNetwork]);
 
   const markets = useMemo(() => {
@@ -823,31 +865,16 @@ const MarketsTable = () => {
       poolId: string | undefined,
       marketRowKey: string | undefined
     ) => {
-      const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-      if (marketRowKey) {
-        const row = markets.find(
-          (m) => (m as { _sortKey?: string })._sortKey === marketRowKey
-        );
-        const cs = row?.configSymbol;
-        if (cs) {
-          const t = tokens.find(
-            (x) =>
-              (x.originalSymbol ?? x.symbol) === cs &&
-              (poolId == null ||
-                poolId === "" ||
-                String(x.poolId) === String(poolId))
-          );
-          if (t) return t;
-        }
-      }
-      if (poolId != null && poolId !== "") {
-        return tokens.find(
-          (t) => t.symbol === asset && String(t.poolId) === String(poolId)
-        );
-      }
-      return tokens.find((t) => t.symbol === asset);
+      const configSymbol = marketRowKey
+        ? configSymbolFromMarketRowKey(marketRowKey)
+        : undefined;
+      return resolveTokenForMarketPosition(currentNetwork, {
+        asset,
+        poolId,
+        configSymbol,
+      });
     },
-    [markets, currentNetwork]
+    [currentNetwork, configSymbolFromMarketRowKey]
   );
 
   const borrowModalAvailableAssets = useMemo(() => {
@@ -973,58 +1000,42 @@ const MarketsTable = () => {
       }
     }
 
+    const configSymbol = configSymbolFromMarketRowKey(marketRowKey);
+    setDepositModal({
+      isOpen: true,
+      asset,
+      poolId,
+      marketRowKey,
+      configSymbol,
+    });
+
     setIsLoadingBalance(true);
+    void (async () => {
+      try {
+        await fetchWalletBalance(asset, poolId, marketRowKey);
 
-    try {
-      // Fetch wallet balance before opening modal
-      await fetchWalletBalance(asset, poolId, marketRowKey, {
-        bypassCache: true,
-      });
-
-      let poolCollateralRows: PoolCollateralMarketRow[] = [];
-      if (activeAccount?.address && poolId != null && poolId !== "") {
-        try {
-          poolCollateralRows = await fetchPoolCollateralMarketRowsForDeposit(
-            activeAccount.address,
-            currentNetwork as NetworkId,
-            poolId
-          );
-        } catch (e) {
-          console.error("Error loading pool collateral markets for deposit:", e);
+        if (activeAccount?.address && poolId != null && poolId !== "") {
+          try {
+            const poolCollateralRows =
+              await fetchPoolCollateralMarketRowsForDeposit(
+                activeAccount.address,
+                currentNetwork as NetworkId,
+                poolId
+              );
+            setDepositPoolCollateralMarkets(poolCollateralRows);
+          } catch (e) {
+            console.error(
+              "Error loading pool collateral markets for deposit:",
+              e
+            );
+          }
         }
+      } catch (error) {
+        console.error("Error fetching wallet balance for deposit:", error);
+      } finally {
+        setIsLoadingBalance(false);
       }
-      setDepositPoolCollateralMarkets(poolCollateralRows);
-
-      // Open modal after balance is fetched
-      const configSymbol = configSymbolFromMarketRowKey(marketRowKey);
-      console.log("Opening deposit modal with:", {
-        asset,
-        poolId,
-        marketRowKey,
-        configSymbol,
-      });
-      setDepositModal({
-        isOpen: true,
-        asset,
-        poolId,
-        marketRowKey,
-        configSymbol,
-      });
-    } catch (error) {
-      console.error("Error fetching wallet balance for deposit:", error);
-      setDepositPoolCollateralMarkets([]);
-      // Still open modal even if balance fetch fails
-      const configSymbol = configSymbolFromMarketRowKey(marketRowKey);
-      setDepositModal({
-        isOpen: true,
-        asset,
-        poolId,
-        marketRowKey,
-        configSymbol,
-      });
-    } finally {
-      setIsLoadingBalance(false);
-    }
+    })();
   };
 
   const handleWithdrawClick = (asset: string) => {
@@ -1052,77 +1063,69 @@ const MarketsTable = () => {
       }
     }
 
+    const configSymbol = configSymbolFromMarketRowKey(marketRowKey);
+    setBorrowModal({
+      isOpen: true,
+      asset,
+      poolId,
+      marketRowKey,
+      configSymbol,
+    });
+
     setIsLoadingGlobalData(true);
-
-    try {
-      // Fetch user global data before opening modal (only if wallet is connected)
-      if (activeAccount?.address) {
-        const globalData = await fetchUserGlobalData(
-          activeAccount.address,
-          currentNetwork
-        );
-        setUserGlobalData(globalData);
-
-        // Fetch user's current borrow balance for this specific asset
-        const token = resolveTokenForDisplayedAsset(asset, poolId, marketRowKey);
-
-        if (token && token.poolId && token.underlyingContractId) {
-          const borrowData = await fetchUserBorrowBalance(
+    void (async () => {
+      try {
+        if (activeAccount?.address) {
+          const globalData = await fetchUserGlobalData(
             activeAccount.address,
-            token.poolId,
-            token.underlyingContractId,
             currentNetwork
           );
-          setUserBorrowBalance(borrowData?.balance || 0);
+          setUserGlobalData(globalData);
+
+          const token = resolveTokenForDisplayedAsset(
+            asset,
+            poolId,
+            marketRowKey
+          );
+
+          if (token && token.poolId && token.underlyingContractId) {
+            const borrowData = await fetchUserBorrowBalance(
+              activeAccount.address,
+              token.poolId,
+              token.underlyingContractId,
+              currentNetwork
+            );
+            setUserBorrowBalance(borrowData?.balance || 0);
+          } else {
+            setUserBorrowBalance(0);
+          }
+
+          if (poolId != null && poolId !== "") {
+            try {
+              const poolCollateralRows =
+                await fetchPoolCollateralMarketRowsForDeposit(
+                  activeAccount.address,
+                  currentNetwork as NetworkId,
+                  poolId
+                );
+              setDepositPoolCollateralMarkets(poolCollateralRows);
+            } catch (e) {
+              console.error(
+                "Error loading pool collateral markets for borrow:",
+                e
+              );
+            }
+          }
         } else {
+          setUserGlobalData(null);
           setUserBorrowBalance(0);
         }
-      } else {
-        // Not connected, set empty data
-        setUserGlobalData(null);
-        setUserBorrowBalance(0);
+      } catch (error) {
+        console.error("Error fetching user data for borrow:", error);
+      } finally {
+        setIsLoadingGlobalData(false);
       }
-
-      let poolCollateralRows: PoolCollateralMarketRow[] = [];
-      if (activeAccount?.address && poolId != null && poolId !== "") {
-        try {
-          poolCollateralRows = await fetchPoolCollateralMarketRowsForDeposit(
-            activeAccount.address,
-            currentNetwork as NetworkId,
-            poolId
-          );
-        } catch (e) {
-          console.error(
-            "Error loading pool collateral markets for borrow:",
-            e
-          );
-        }
-      }
-      setDepositPoolCollateralMarkets(poolCollateralRows);
-
-      // Open modal regardless of connection status
-      const configSymbol = configSymbolFromMarketRowKey(marketRowKey);
-      setBorrowModal({
-        isOpen: true,
-        asset,
-        poolId,
-        marketRowKey,
-        configSymbol,
-      });
-    } catch (error) {
-      console.error("Error fetching user data for borrow:", error);
-      setDepositPoolCollateralMarkets([]);
-      const configSymbol = configSymbolFromMarketRowKey(marketRowKey);
-      setBorrowModal({
-        isOpen: true,
-        asset,
-        poolId,
-        marketRowKey,
-        configSymbol,
-      });
-    } finally {
-      setIsLoadingGlobalData(false);
-    }
+    })();
   };
 
   const handleMintClick = async (
@@ -1130,45 +1133,45 @@ const MarketsTable = () => {
     poolId?: string,
     marketRowKey?: string
   ) => {
+    setMintModal({ isOpen: true, asset, poolId, marketRowKey });
+
     setIsLoadingGlobalData(true);
-
-    try {
-      // Fetch user global data before opening modal (only if wallet is connected)
-      if (activeAccount?.address) {
-        const globalData = await fetchUserGlobalData(
-          activeAccount.address,
-          currentNetwork
-        );
-        setUserGlobalData(globalData);
-
-        const token = resolveTokenForDisplayedAsset(asset, poolId, marketRowKey);
-
-        if (token && token.poolId && token.underlyingContractId) {
-          const borrowData = await fetchUserBorrowBalance(
+    void (async () => {
+      try {
+        if (activeAccount?.address) {
+          const globalData = await fetchUserGlobalData(
             activeAccount.address,
-            token.poolId,
-            token.underlyingContractId,
             currentNetwork
           );
-          setUserBorrowBalance(borrowData?.balance || 0);
+          setUserGlobalData(globalData);
+
+          const token = resolveTokenForDisplayedAsset(
+            asset,
+            poolId,
+            marketRowKey
+          );
+
+          if (token && token.poolId && token.underlyingContractId) {
+            const borrowData = await fetchUserBorrowBalance(
+              activeAccount.address,
+              token.poolId,
+              token.underlyingContractId,
+              currentNetwork
+            );
+            setUserBorrowBalance(borrowData?.balance || 0);
+          } else {
+            setUserBorrowBalance(0);
+          }
         } else {
+          setUserGlobalData(null);
           setUserBorrowBalance(0);
         }
-      } else {
-        // Not connected, set empty data
-        setUserGlobalData(null);
-        setUserBorrowBalance(0);
+      } catch (error) {
+        console.error("Error fetching user data for mint:", error);
+      } finally {
+        setIsLoadingGlobalData(false);
       }
-
-      // Open modal regardless of connection status, pass poolId if available
-      setMintModal({ isOpen: true, asset, poolId, marketRowKey });
-    } catch (error) {
-      console.error("Error fetching user data for mint:", error);
-      // Still open modal even if data fetch fails
-      setMintModal({ isOpen: true, asset, poolId, marketRowKey });
-    } finally {
-      setIsLoadingGlobalData(false);
-    }
+    })();
   };
 
   const handleMigrateClick = async (asset: string) => {
@@ -1507,6 +1510,17 @@ const MarketsTable = () => {
     void loadMarketDataWithBypass(
       marketKeyForOnDemandLoad(poolId, configSymbol, asset)
     );
+    if (activeAccount?.address) {
+      const addr = activeAccount.address;
+      void fetchUserGlobalData(addr, currentNetwork).then((data) => {
+        if (data) setUserGlobalData(data);
+      });
+      void withRpcReadCache(
+        `globalUserRows:${addr}`,
+        () => fetchGlobalUserRowsFromChain(addr),
+        30_000
+      );
+    }
   };
 
   const handleRowClick = (market: Record<string, unknown>) => {
@@ -1530,9 +1544,27 @@ const MarketsTable = () => {
 
   // When the detail modal is open, replace the snapshot row with the refreshed row from
   // `loadMarketDataWithBypass` (chain-sourced marketInfo) once it lands in `markets`.
-  // Compare `lastFetched` so we do not churn on unrelated `markets` remaps (e.g. rewards APR).
+  // Key off `lastFetched` only — `markets` is remapped often (rewards APR) with new object refs.
+  const detailModalRowLastFetched = useMemo(() => {
+    if (!detailModal.isOpen || !detailModal.asset) return undefined;
+    const fresh = findMarketRowOnPage(
+      markets as Record<string, unknown>[],
+      detailModal.asset,
+      detailModal.poolId,
+      detailModal.marketRowKey
+    );
+    return (fresh as { lastFetched?: number } | undefined)?.lastFetched;
+  }, [
+    markets,
+    detailModal.isOpen,
+    detailModal.asset,
+    detailModal.poolId,
+    detailModal.marketRowKey,
+  ]);
+
   useEffect(() => {
     if (!detailModal.isOpen || !detailModal.asset) return;
+    if (detailModalRowLastFetched === undefined) return;
     const fresh = findMarketRowOnPage(
       markets as Record<string, unknown>[],
       detailModal.asset,
@@ -1542,20 +1574,17 @@ const MarketsTable = () => {
     if (!fresh) return;
     setDetailModal((prev) => {
       if (!prev.isOpen || !prev.marketData) return prev;
-      if (fresh === prev.marketData) return prev;
       const prevLast = (prev.marketData as { lastFetched?: number }).lastFetched;
-      const freshLast = (fresh as { lastFetched?: number }).lastFetched;
       if (
         prevLast !== undefined &&
-        freshLast !== undefined &&
-        freshLast <= prevLast
+        detailModalRowLastFetched <= prevLast
       ) {
         return prev;
       }
       return { ...prev, marketData: fresh };
     });
   }, [
-    markets,
+    detailModalRowLastFetched,
     detailModal.isOpen,
     detailModal.asset,
     detailModal.poolId,
@@ -2838,6 +2867,65 @@ const MarketsTable = () => {
     }
   };
 
+  const debouncedPrefetch = useMemo(() => createDebouncedPrefetch(), []);
+
+  const marketHoverBundle = useMemo(
+    () => ({
+      debounced: debouncedPrefetch,
+      userAddress: activeAccount?.address,
+      networkId: currentNetwork as NetworkId,
+      warmWalletBalance: (p: MarketActionTokenParams) => {
+        if (!activeAccount?.address) return;
+        const rowKey = p.configSymbol
+          ? `${p.asset}|${p.configSymbol}|${p.poolId ?? ""}`
+          : undefined;
+        void fetchWalletBalance(p.asset, p.poolId, rowKey);
+      },
+    }),
+    [debouncedPrefetch, activeAccount?.address, currentNetwork]
+  );
+
+  const getMarketActionHoverHandlers = useCallback(
+    (asset: string, poolId?: string, marketRowKey?: string) =>
+      buildMarketHoverHandlers(
+        marketHoverBundle,
+        asset,
+        poolId,
+        marketRowKey
+      ),
+    [marketHoverBundle]
+  );
+
+  const prefetchMarketRowOnHover = useCallback(
+    (market: Record<string, unknown>) => {
+      if (!activeAccount?.address) return;
+      const asset = typeof market.asset === "string" ? market.asset : null;
+      if (!asset) return;
+      const poolId = poolIdFromMarketRow(
+        market as { marketInfo?: { poolId?: string }; poolId?: string }
+      );
+      const rowKey = marketRowKeyFromMarket(
+        market as { asset?: string; poolId?: string; configSymbol?: string; _sortKey?: string }
+      );
+      const configSymbol =
+        typeof (market as { configSymbol?: string }).configSymbol === "string"
+          ? (market as { configSymbol?: string }).configSymbol
+          : configSymbolFromMarketRowKey(rowKey);
+      debouncedPrefetch(
+        `detailRow:${currentNetwork}:${asset}:${poolId ?? ""}:${configSymbol ?? ""}`,
+        () =>
+          warmMarketDetailUserPositionRpc({
+            userAddress: activeAccount.address,
+            networkId: currentNetwork as NetworkId,
+            asset,
+            poolId,
+            configSymbol,
+          })
+      );
+    },
+    [activeAccount?.address, currentNetwork, debouncedPrefetch]
+  );
+
   const getAssetData = (asset: string, poolId?: string, marketRowKey?: string) => {
     const poolIdStr = poolId != null && poolId !== "" ? String(poolId) : null;
     let market: (typeof markets)[0] | undefined;
@@ -2957,9 +3045,14 @@ const MarketsTable = () => {
     };
   };
 
+  const detailPositionLoadKeyRef = useRef<string | null>(null);
+  const detailPositionLoadIdRef = useRef(0);
+
   useEffect(() => {
     if (!detailModal.isOpen) {
+      detailPositionLoadKeyRef.current = null;
       setDetailModalUserPosition(null);
+      setDetailModalUserPositionLoad("idle");
       return;
     }
 
@@ -2967,15 +3060,27 @@ const MarketsTable = () => {
     const asset = detailModal.asset;
     if (!row || !asset) {
       setDetailModalUserPosition(null);
+      setDetailModalUserPositionLoad("idle");
       return;
     }
 
     if (!activeAccount?.address) {
       setDetailModalUserPosition(null);
+      setDetailModalUserPositionLoad("idle");
       return;
     }
 
     const poolId = detailModal.poolId;
+    const rowLastFetched = (row as { lastFetched?: number }).lastFetched;
+    const loadKey = [
+      asset,
+      poolId ?? "",
+      detailModal.marketRowKey ?? "",
+      activeAccount.address,
+      currentNetwork,
+      rowLastFetched ?? "",
+    ].join("|");
+
     const tokens = getAllTokensWithDisplayInfo(currentNetwork);
     const token =
       resolveTokenForDisplayedAsset(
@@ -2991,156 +3096,216 @@ const MarketsTable = () => {
 
     if (!token?.poolId || !token.underlyingContractId) {
       setDetailModalUserPosition(null);
+      setDetailModalUserPositionLoad("idle");
       return;
     }
 
-    let cancelled = false;
+    const loadId = ++detailPositionLoadIdRef.current;
+    const userAddress = activeAccount.address;
+    const rpcPoolId = token.poolId;
+    const rpcMarketId = token.underlyingContractId;
+    const tokenDecimals = token.decimals;
 
-    const load = async () => {
+    setDetailModalUserPosition(null);
+    setDetailModalUserPositionLoad("loading");
+
+    const buildPosition = (
+      depositBal: number | null,
+      borrowData: { balance: number; interest: number } | null,
+      globalData: Awaited<ReturnType<typeof fetchUserGlobalData>>,
+      portfolioHealthFactor: number | null,
+      maxWithdrawUnderlying: number | null
+    ): MarketDetailUserPosition => {
       const norm = normalizeMarketData(row);
       const price =
         norm.price > 0 && Number.isFinite(norm.price) ? norm.price : 0;
       const assetData = getAssetData(asset, poolId, detailModal.marketRowKey);
 
-      setDetailModalUserPosition({
-        supplied: 0,
-        borrowed: 0,
-        withdrawable: 0,
-        borrowable: 0,
-        healthFactor: 0,
-        earnings: 0,
-      });
+      const dep = depositBal ?? 0;
+      const bor = borrowData?.balance ?? 0;
+      const suppliedUsdRaw = dep * price;
+      const suppliedUsd = roundUsdToCents(suppliedUsdRaw);
+      const borrowedUsd = roundUsdToCents(bor * price);
+      const withdrawableTokens = maxWithdrawUnderlying ?? dep;
+      const withdrawableUsd = roundUsdToCents(withdrawableTokens * price);
 
+      const collateralFactor =
+        assetData?.collateralFactor ?? norm.maxLTV ?? 0;
+      let borrowableUsd = 0;
+      if (globalData) {
+        const cfDec = collateralFactor / 100;
+        borrowableUsd = Math.max(
+          0,
+          globalData.totalCollateralValue * cfDec -
+            globalData.totalBorrowValue
+        );
+        const totalBorrow =
+          assetData?.totalBorrow ?? Number(row.totalBorrow ?? 0);
+        const borrowCap = assetData?.maxTotalBorrows ?? 0;
+        if (borrowCap > 0 && price > 0) {
+          const remainingBorrowCapTokens = Math.max(
+            0,
+            borrowCap - totalBorrow
+          );
+          const remainingBorrowCapUsd = remainingBorrowCapTokens * price;
+          borrowableUsd = Math.min(borrowableUsd, remainingBorrowCapUsd);
+        }
+      }
+      borrowableUsd = roundUsdToCents(borrowableUsd);
+
+      let healthFactor = 0;
+      if (
+        portfolioHealthFactor != null &&
+        Number.isFinite(portfolioHealthFactor)
+      ) {
+        healthFactor = portfolioHealthFactor;
+      } else if (globalData) {
+        if (globalData.healthFactorIndex != null) {
+          healthFactor = globalData.healthFactorIndex;
+        } else if (
+          globalData.totalBorrowValue <= 0 &&
+          globalData.totalCollateralValue > 0
+        ) {
+          healthFactor = 3;
+        } else if (
+          globalData.totalBorrowValue > 0 &&
+          globalData.totalCollateralValue > 0
+        ) {
+          healthFactor = Math.min(
+            globalData.totalCollateralValue / globalData.totalBorrowValue,
+            3
+          );
+        }
+      }
+
+      const supplyAPY = norm.supplyAPY;
+      const earnings =
+        supplyAPY > 0 && suppliedUsdRaw > 0
+          ? roundUsdToCents(suppliedUsdRaw * (supplyAPY / 100))
+          : 0;
+
+      return {
+        supplied: suppliedUsd,
+        borrowed: borrowedUsd,
+        withdrawable: withdrawableUsd,
+        borrowable: borrowableUsd,
+        healthFactor,
+        earnings,
+      };
+    };
+
+    detailPositionLoadKeyRef.current = loadKey;
+
+    const load = async () => {
       try {
-        const [
-          depositBal,
-          borrowData,
-          globalData,
-          maxWithdrawResult,
-        ] = await Promise.all([
+        const [depositBal, borrowData, globalData] = await Promise.all([
           fetchUserDepositBalance(
-            activeAccount.address,
-            token.poolId!,
-            token.underlyingContractId!,
+            userAddress,
+            rpcPoolId,
+            rpcMarketId,
             currentNetwork
           ),
           fetchUserBorrowBalance(
-            activeAccount.address,
-            token.poolId!,
-            token.underlyingContractId!,
+            userAddress,
+            rpcPoolId,
+            rpcMarketId,
             currentNetwork
           ),
-          fetchUserGlobalData(activeAccount.address, currentNetwork),
-          getMaxWithdrawableForMarket(
-            token.poolId!,
-            token.underlyingContractId!,
-            activeAccount.address,
-            currentNetwork,
-            token.decimals
-          ),
+          fetchUserGlobalData(userAddress, currentNetwork),
         ]);
 
-        if (cancelled) return;
+        if (loadId !== detailPositionLoadIdRef.current) return;
 
-        const dep = depositBal ?? 0;
-        const bor = borrowData?.balance ?? 0;
-        const suppliedUsdRaw = dep * price;
-        const suppliedUsd = roundUsdToCents(suppliedUsdRaw);
-        const borrowedUsd = roundUsdToCents(bor * price);
-        const withdrawableTokens =
-          maxWithdrawResult?.maxWithdrawUnderlying ?? dep;
-        const withdrawableUsd = roundUsdToCents(withdrawableTokens * price);
+        const position = buildPosition(
+          depositBal,
+          borrowData,
+          globalData,
+          null,
+          null
+        );
+        setDetailModalUserPosition(position);
+        setDetailModalUserPositionLoad("ready");
 
-        const collateralFactor =
-          assetData?.collateralFactor ?? norm.maxLTV ?? 0;
-        let borrowableUsd = 0;
-        if (globalData) {
-          const cfDec = collateralFactor / 100;
-          borrowableUsd = Math.max(
-            0,
-            globalData.totalCollateralValue * cfDec -
-              globalData.totalBorrowValue
-          );
-          const totalBorrow =
-            assetData?.totalBorrow ?? Number(row.totalBorrow ?? 0);
-          const borrowCap = assetData?.maxTotalBorrows ?? 0;
-          if (borrowCap > 0 && price > 0) {
-            const remainingBorrowCapTokens = Math.max(
-              0,
-              borrowCap - totalBorrow
+        void withRpcReadCache(
+          `globalUserRows:${userAddress}`,
+          () => fetchGlobalUserRowsFromChain(userAddress),
+          30_000
+        )
+          .then((globalUserRows) => {
+            if (loadId !== detailPositionLoadIdRef.current) return;
+            const portfolioHealthFactor = computePortfolioDisplayHealthFactor({
+              globalUserData: globalUserRows,
+              deposits: [],
+              marketData: markets,
+              useMarketRowsForPoolLt: true,
+            });
+            if (portfolioHealthFactor == null) return;
+            setDetailModalUserPosition((prev) =>
+              prev
+                ? { ...prev, healthFactor: portfolioHealthFactor }
+                : prev
             );
-            const remainingBorrowCapUsd = remainingBorrowCapTokens * price;
-            borrowableUsd = Math.min(borrowableUsd, remainingBorrowCapUsd);
-          }
-        }
-        borrowableUsd = roundUsdToCents(borrowableUsd);
+          })
+          .catch((e) => {
+            console.warn("Market detail: portfolio health factor refresh failed:", e);
+          });
 
-        let healthFactor = 0;
-        if (globalData) {
-          if (globalData.healthFactorIndex != null) {
-            healthFactor = globalData.healthFactorIndex;
-          } else if (
-            globalData.totalBorrowValue <= 0 &&
-            globalData.totalCollateralValue > 0
-          ) {
-            healthFactor = 3;
-          } else if (
-            globalData.totalBorrowValue > 0 &&
-            globalData.totalCollateralValue > 0
-          ) {
-            healthFactor = Math.min(
-              globalData.totalCollateralValue / globalData.totalBorrowValue,
-              3
+        void getMaxWithdrawableForMarket(
+          rpcPoolId,
+          rpcMarketId,
+          userAddress,
+          currentNetwork,
+          tokenDecimals
+        )
+          .then((maxWithdrawResult) => {
+            if (loadId !== detailPositionLoadIdRef.current) return;
+            if (maxWithdrawResult?.maxWithdrawUnderlying == null) return;
+            setDetailModalUserPosition((prev) => {
+              if (!prev) return prev;
+              const norm = normalizeMarketData(row);
+              const price =
+                norm.price > 0 && Number.isFinite(norm.price) ? norm.price : 0;
+              const dep =
+                maxWithdrawResult.maxWithdrawUnderlying > 0
+                  ? maxWithdrawResult.maxWithdrawUnderlying
+                  : 0;
+              const effectivePrice =
+                price > 0 ? price : dep > 0 ? 1 : 0;
+              return {
+                ...prev,
+                withdrawable: roundUsdToCents(
+                  maxWithdrawResult.maxWithdrawUnderlying * effectivePrice
+                ),
+              };
+            });
+          })
+          .catch((e) => {
+            console.warn(
+              "Market detail: max withdrawable refresh failed (position still shown):",
+              e
             );
-          }
-        }
-
-        const supplyAPY = norm.supplyAPY;
-        const earnings =
-          supplyAPY > 0 && suppliedUsdRaw > 0
-            ? roundUsdToCents(suppliedUsdRaw * (supplyAPY / 100))
-            : 0;
-
-        setDetailModalUserPosition({
-          supplied: suppliedUsd,
-          borrowed: borrowedUsd,
-          withdrawable: withdrawableUsd,
-          borrowable: borrowableUsd,
-          healthFactor,
-          earnings,
-        });
+          });
       } catch (e) {
         console.error("Failed to load market detail user position:", e);
-        if (!cancelled) {
-          setDetailModalUserPosition({
-            supplied: 0,
-            borrowed: 0,
-            withdrawable: 0,
-            borrowable: 0,
-            healthFactor: 0,
-            earnings: 0,
-          });
+        if (loadId === detailPositionLoadIdRef.current) {
+          setDetailModalUserPosition(null);
+          setDetailModalUserPositionLoad("error");
         }
       }
     };
 
     void load();
-
-    return () => {
-      cancelled = true;
-    };
   }, [
     detailModal.isOpen,
     detailModal.asset,
     detailModal.poolId,
     detailModal.marketRowKey,
-    detailModal.marketData,
+    detailModalRowLastFetched,
     activeAccount?.address,
     currentNetwork,
-    resolveTokenForDisplayedAsset,
-    // Not `markets`: that list is rebuilt on every row/rewards update and caused a full
-    // Promise.all per tick while the modal stayed open. `detailModal.marketData` is enough;
-    // the sync effect updates it when the selected row’s `lastFetched` advances.
+    // Do not depend on `markets`, `detailModal.marketData` (new refs from rewards remap), or
+    // `resolveTokenForDisplayedAsset` (recreated when `markets` changes) — those caused a
+    // fetch/setState loop while the detail modal stayed open.
   ]);
 
   return (
@@ -3516,38 +3681,83 @@ const MarketsTable = () => {
                 )}
               </div>
             </div>
-            {/* Market filter: All / A / B / D (D when network has a third lending pool) */}
-            <Tabs
-              value={marketFilter}
-              onValueChange={(v) => {
-                setMarketFilter(v as MarketFilter);
-                setCurrentPage(1);
-              }}
-              className="w-full mt-4"
-            >
-              <TabsList
-                className={`grid w-full gap-1 ${
-                  hasDMarketTab
-                    ? "max-w-3xl grid-cols-2 sm:grid-cols-4"
-                    : "max-w-md grid-cols-3"
-                }`}
-              >
-                <TabsTrigger value="all" className="text-sm">
-                  All Markets
-                </TabsTrigger>
-                <TabsTrigger value="A" className="text-sm">
-                  A Markets
-                </TabsTrigger>
-                <TabsTrigger value="B" className="text-sm">
-                  B Markets
-                </TabsTrigger>
-                {hasDMarketTab && (
-                  <TabsTrigger value="D" className="text-sm">
-                    D Markets
-                  </TabsTrigger>
-                )}
-              </TabsList>
-            </Tabs>
+            {/* Market filter: All / A / B / D — native select on mobile (tabs swallow taps on nested labels) */}
+            <div className="relative z-20 isolate mt-4 mb-3 w-full">
+              {isMobile ? (
+                <Select
+                  value={marketFilter}
+                  onValueChange={(v) =>
+                    handleMarketFilterChange(v as MarketFilter)
+                  }
+                >
+                  <SelectTrigger
+                    className="min-h-11 w-full bg-background"
+                    aria-label="Filter by market"
+                  >
+                    <SelectValue placeholder="All markets" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All markets</SelectItem>
+                    <SelectItem value="A">A market</SelectItem>
+                    <SelectItem value="B">B market</SelectItem>
+                    {hasDMarketTab && (
+                      <SelectItem value="D">D market</SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Tabs
+                  value={marketFilter}
+                  onValueChange={(v) =>
+                    handleMarketFilterChange(v as MarketFilter)
+                  }
+                  className="w-full"
+                >
+                  <TabsList
+                    className={cn(
+                      "flex w-full h-auto min-h-10 flex-nowrap gap-1 p-1",
+                      hasDMarketTab ? "max-w-3xl" : "max-w-md"
+                    )}
+                  >
+                    <TabsTrigger
+                      value="all"
+                      className="min-h-10 min-w-0 flex-1 px-2 text-sm"
+                    >
+                      All Markets
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="A"
+                      className="min-h-10 min-w-0 flex-1 px-2 text-sm"
+                    >
+                      A Markets
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="B"
+                      className="min-h-10 min-w-0 flex-1 px-2 text-sm"
+                    >
+                      B Markets
+                    </TabsTrigger>
+                    {hasDMarketTab && (
+                      <TabsTrigger
+                        value="D"
+                        className="min-h-10 min-w-0 flex-1 px-2 text-sm"
+                      >
+                        D Markets
+                      </TabsTrigger>
+                    )}
+                  </TabsList>
+                </Tabs>
+              )}
+              {isMobile && marketFilter !== "all" && (
+                <p
+                  className="mt-2 text-xs text-muted-foreground"
+                  aria-live="polite"
+                >
+                  Showing {marketFilter} market
+                  {totalItems === 1 ? "" : "s"} ({totalItems})
+                </p>
+              )}
+            </div>
           </div>
           {/* Informational guidance - matches Liquidations Queue styles */}
           <section
@@ -3596,6 +3806,8 @@ const MarketsTable = () => {
               onMintClick={handleMintClick}
               onMigrateClick={handleMigrateClick}
               isLoadingBalance={isLoadingBalance}
+              getMarketActionHoverHandlers={getMarketActionHoverHandlers}
+              onRowMouseEnter={prefetchMarketRowOnHover}
             />
           )}
         </div>
@@ -3619,6 +3831,7 @@ const MarketsTable = () => {
             rawMarket={detailModal.marketData}
             marketData={normalizeMarketData(detailModal.marketData)}
             userPosition={detailModalUserPosition ?? undefined}
+            userPositionLoadState={detailModalUserPositionLoad}
             onDeposit={() =>
               handleDepositClick(
                 detailModal.asset!,
@@ -3680,6 +3893,7 @@ const MarketsTable = () => {
                 ]?.balanceUSD || 0
               }
               poolCollateralMarkets={depositPoolCollateralMarkets}
+              isLoadingWalletBalance={isLoadingBalance}
               onRefreshWalletBalance={
                 depositModal.asset
                   ? () => {
@@ -3791,6 +4005,7 @@ const MarketsTable = () => {
               onSelectAsset={handleSelectBorrowMarket}
               userGlobalData={userGlobalData}
               userBorrowBalance={userBorrowBalance}
+              isLoadingBorrowGlobalData={isLoadingGlobalData}
               poolCollateralMarkets={depositPoolCollateralMarkets}
               onTransactionSuccess={() => {
                 // Refresh market data after successful borrow

@@ -1,5 +1,5 @@
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,6 +17,12 @@ import { getAllTokensWithDisplayInfo } from "@/config";
 import { APYCalculationResult } from "@/utils/apyCalculations";
 import { useToast } from "@/hooks/use-toast";
 import { isAtBorrowCap as isAtBorrowCapUtil } from "@/constants/lendingCaps";
+import {
+  createDebouncedPrefetch,
+  warmBorrowModalMaxAndPool,
+  type MarketActionTokenParams,
+} from "@/utils/modalPrefetch";
+import type { NetworkId } from "@/config";
 import {
   borrowApyBadgeClassName,
   BORROW_APY_BADGE_DEFAULT,
@@ -92,6 +98,20 @@ const MarketDetailModal = ({ isOpen, onClose, asset, marketData }: MarketDetailM
     setSupplyModal({ isOpen: true, asset });
   };
 
+  const debouncedPrefetch = useMemo(() => createDebouncedPrefetch(), []);
+
+  const prefetchBorrowOnHover = useCallback(() => {
+    if (!activeAccount?.address) return;
+    const params: MarketActionTokenParams = {
+      userAddress: activeAccount.address,
+      networkId: currentNetwork as NetworkId,
+      asset,
+    };
+    debouncedPrefetch(`borrowDetail:${currentNetwork}:${asset}`, () =>
+      warmBorrowModalMaxAndPool(params)
+    );
+  }, [activeAccount?.address, currentNetwork, asset, debouncedPrefetch]);
+
   const handleBorrowClick = async () => {
     if (isAtBorrowCap) {
       toast({
@@ -102,44 +122,43 @@ const MarketDetailModal = ({ isOpen, onClose, asset, marketData }: MarketDetailM
       });
       return;
     }
+
+    setBorrowModal({ isOpen: true, asset });
+
     setIsLoadingGlobalData(true);
-    
-    try {
-      // Fetch user global data before opening modal (only if wallet is connected)
-      if (activeAccount?.address) {
-        const globalData = await fetchUserGlobalData(activeAccount.address, currentNetwork);
-        setUserGlobalData(globalData);
-        
-        // Fetch user's current borrow balance for this specific asset
-        const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-        const token = tokens.find((t) => t.symbol === asset);
-        
-        if (token && token.poolId && token.underlyingContractId) {
-          const borrowData = await fetchUserBorrowBalance(
+    void (async () => {
+      try {
+        if (activeAccount?.address) {
+          const globalData = await fetchUserGlobalData(
             activeAccount.address,
-            token.poolId,
-            token.underlyingContractId,
             currentNetwork
           );
-          setUserBorrowBalance(borrowData?.balance || 0);
+          setUserGlobalData(globalData);
+
+          const tokens = getAllTokensWithDisplayInfo(currentNetwork);
+          const token = tokens.find((t) => t.symbol === asset);
+
+          if (token && token.poolId && token.underlyingContractId) {
+            const borrowData = await fetchUserBorrowBalance(
+              activeAccount.address,
+              token.poolId,
+              token.underlyingContractId,
+              currentNetwork
+            );
+            setUserBorrowBalance(borrowData?.balance || 0);
+          } else {
+            setUserBorrowBalance(0);
+          }
         } else {
+          setUserGlobalData(null);
           setUserBorrowBalance(0);
         }
-      } else {
-        // Not connected, set empty data
-        setUserGlobalData(null);
-        setUserBorrowBalance(0);
+      } catch (error) {
+        console.error("Error fetching user data for borrow:", error);
+      } finally {
+        setIsLoadingGlobalData(false);
       }
-      
-      // Open modal regardless of connection status
-      setBorrowModal({ isOpen: true, asset });
-    } catch (error) {
-      console.error("Error fetching user data for borrow:", error);
-      // Still open modal even if data fetch fails
-      setBorrowModal({ isOpen: true, asset });
-    } finally {
-      setIsLoadingGlobalData(false);
-    }
+    })();
   };
 
   const handleCloseSupplyModal = () => {
@@ -564,6 +583,7 @@ const MarketDetailModal = ({ isOpen, onClose, asset, marketData }: MarketDetailM
                 Deposit {asset}
               </Button>
               <Button
+                onMouseEnter={prefetchBorrowOnHover}
                 onClick={handleBorrowClick}
                 variant="outline"
                 disabled={isAtBorrowCap}
@@ -598,6 +618,7 @@ const MarketDetailModal = ({ isOpen, onClose, asset, marketData }: MarketDetailM
           assetData={getAssetData()}
           userGlobalData={userGlobalData}
           userBorrowBalance={userBorrowBalance}
+          isLoadingBorrowGlobalData={isLoadingGlobalData}
         />
       )}
      </>

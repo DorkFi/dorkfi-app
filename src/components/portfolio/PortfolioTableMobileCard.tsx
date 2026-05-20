@@ -29,6 +29,8 @@ interface PortfolioTableMobileCardProps {
   poolId?: string;
   onDepositClick?: () => void;
   onWithdrawClick?: () => void;
+  onDepositMouseEnter?: () => void;
+  onWithdrawMouseEnter?: () => void;
   onRefreshClick?: () => void;
   isRefreshing?: boolean;
   type?: "deposit" | "borrow";
@@ -55,6 +57,8 @@ const PortfolioTableMobileCard = ({
   poolId,
   onDepositClick,
   onWithdrawClick,
+  onDepositMouseEnter,
+  onWithdrawMouseEnter,
   onRefreshClick,
   isRefreshing,
   type = "deposit",
@@ -247,6 +251,7 @@ const PortfolioTableMobileCard = ({
             <DorkFiButton
               variant={isDeposit ? "secondary" : "borrow-outline"}
               size="sm"
+              onMouseEnter={onDepositMouseEnter}
               onClick={onDepositClick}
               className="flex-1 min-w-0"
               disabled={isDeposit ? depositDisabled : borrowDisabled}
@@ -266,6 +271,7 @@ const PortfolioTableMobileCard = ({
             <DorkFiButton
               variant={isDeposit ? "withdraw" : "danger-outline"}
               size="sm"
+              onMouseEnter={onWithdrawMouseEnter}
               onClick={onWithdrawClick}
               className="flex-1 min-w-0"
             >

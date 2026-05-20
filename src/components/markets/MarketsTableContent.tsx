@@ -1,11 +1,17 @@
 
 import { useBreakpoint } from "@/hooks/useBreakpoint";
-import { OnDemandMarketData, SortField, SortOrder } from "@/hooks/useOnDemandMarketData";
+import {
+  OnDemandMarketData,
+  SortField,
+  SortOrder,
+  type MarketFilter,
+} from "@/hooks/useOnDemandMarketData";
 import MarketsDesktopTable from "./MarketsDesktopTable";
 import MarketsTabletTable from "./MarketsTabletTable";
 import MarketCardView from "./MarketCardView";
 
 interface MarketsTableContentProps {
+  marketFilter?: MarketFilter;
   markets: OnDemandMarketData[];
   sortField?: SortField;
   sortOrder?: SortOrder;
@@ -18,10 +24,21 @@ interface MarketsTableContentProps {
   onMintClick?: (asset: string, poolId?: string, marketRowKey?: string) => void;
   onMigrateClick?: (asset: string) => void;
   isLoadingBalance?: boolean;
+  getMarketActionHoverHandlers?: (
+    asset: string,
+    poolId?: string,
+    marketRowKey?: string
+  ) => {
+    onDepositMouseEnter?: (e: React.MouseEvent) => void;
+    onBorrowMouseEnter?: (e: React.MouseEvent) => void;
+    onMintMouseEnter?: (e: React.MouseEvent) => void;
+  };
+  onRowMouseEnter?: (market: OnDemandMarketData) => void;
 }
 
-const MarketsTableContent = ({ 
-  markets, 
+const MarketsTableContent = ({
+  marketFilter = "all",
+  markets,
   sortField,
   sortOrder,
   userDeposits,
@@ -32,13 +49,16 @@ const MarketsTableContent = ({
   onBorrowClick,
   onMintClick,
   onMigrateClick,
-  isLoadingBalance = false 
+  isLoadingBalance = false,
+  getMarketActionHoverHandlers,
+  onRowMouseEnter,
 }: MarketsTableContentProps) => {
   const breakpoint = useBreakpoint();
 
   if (breakpoint === "mobile") {
     return (
       <MarketCardView
+        key={marketFilter}
         markets={markets}
         onRowClick={onRowClick}
         onInfoClick={onInfoClick}
@@ -46,6 +66,8 @@ const MarketsTableContent = ({
         onBorrowClick={onBorrowClick}
         onMintClick={onMintClick}
         onMigrateClick={onMigrateClick}
+        getMarketActionHoverHandlers={getMarketActionHoverHandlers}
+        onRowMouseEnter={onRowMouseEnter}
       />
     );
   }
@@ -63,6 +85,8 @@ const MarketsTableContent = ({
         onMintClick={onMintClick}
         onMigrateClick={onMigrateClick}
         isLoadingBalance={isLoadingBalance}
+        getMarketActionHoverHandlers={getMarketActionHoverHandlers}
+        onRowMouseEnter={onRowMouseEnter}
       />
     );
   }
@@ -80,6 +104,8 @@ const MarketsTableContent = ({
       onMintClick={onMintClick}
       onMigrateClick={onMigrateClick}
       isLoadingBalance={isLoadingBalance}
+      getMarketActionHoverHandlers={getMarketActionHoverHandlers}
+      onRowMouseEnter={onRowMouseEnter}
     />
   );
 };
