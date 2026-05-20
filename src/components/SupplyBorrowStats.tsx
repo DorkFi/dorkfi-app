@@ -1084,6 +1084,23 @@ const SupplyBorrowStats = ({
                 {(assetData.totalSupply ?? 0).toLocaleString()} {asset}
               </span>
             </div>
+
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-1.5 md:gap-2">
+                <span className="text-[10px] md:text-sm text-slate-500 dark:text-slate-400">Total Borrows</span>
+                <Tooltip>
+                  <TooltipTrigger>
+                    <InfoIcon className="h-3 w-3 text-slate-400 dark:text-slate-500" />
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Total amount currently borrowed from this market</p>
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <span className="text-sm font-medium text-slate-600 dark:text-slate-400">
+                {Math.abs(assetData.totalBorrow ?? 0).toLocaleString()} {asset}
+              </span>
+            </div>
           </>
         )}
       </CardContent>
