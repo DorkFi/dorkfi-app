@@ -564,9 +564,11 @@ const Portfolio = () => {
         duration: 10000,
       });
       const stxns = await signTransactions(unsignedTxns);
-      const algorandNetwork = getAlgorandNetworkFromNetworkId(currentNetwork as NetworkId);
+      // NFT holder claims are built for Voi mainnet; do not use the wallet network selector.
+      const NFT_HOLDER_CLAIM_NETWORK_ID = "voi-mainnet" as const;
+      const algorandNetwork = getAlgorandNetworkFromNetworkId(NFT_HOLDER_CLAIM_NETWORK_ID);
       if (!algorandNetwork) {
-        throw new Error(`Invalid network: ${currentNetwork}`);
+        throw new Error(`Invalid network: ${NFT_HOLDER_CLAIM_NETWORK_ID}`);
       }
       const algorandClients =
         await algorandService.initializeClientsForTransactions(algorandNetwork);
@@ -580,14 +582,7 @@ const Portfolio = () => {
         description: `Transaction confirmed: ${res.txid}`,
       });
     },
-    [
-      signTransactions,
-      displayAddress,
-      activeWallet,
-      toast,
-      currentNetwork,
-      queryClient,
-    ]
+    [signTransactions, displayAddress, activeWallet, toast, queryClient]
   );
 
   const nftHolderClaimableDisplayAmount = nftHolderClaimAgent
