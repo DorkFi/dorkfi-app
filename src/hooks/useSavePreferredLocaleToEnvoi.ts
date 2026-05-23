@@ -45,7 +45,7 @@ export function useSavePreferredLocaleToEnvoi() {
 
   const savePreferredLocaleToEnvoi = useCallback(async () => {
     if (!canSave || !activeAccount?.address || !addressName || !signTransactions) {
-      setError(new Error("Save to Envoi profile is only available on Voi Mainnet with an Envoi name."));
+      setError(new Error("Save to Envoi profile is only available on Voi Network with an Envoi name."));
       return;
     }
 

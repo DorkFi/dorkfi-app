@@ -14,9 +14,12 @@ import {
   X,
 } from "lucide-react";
 import type { QueryClient } from "@tanstack/react-query";
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/hooks/use-toast";
+import { useNetwork } from "@/contexts/NetworkContext";
+import { getNetworkConfig } from "@/config";
 import type { NftHolderClaimSuccessDetails } from "@/components/portfolio/NftHolderClaimSuccessModal";
 import { NftHolderRewardsGatewayPaySection } from "./NftHolderRewardsGatewayPaySection";
 
@@ -127,6 +130,32 @@ export function NftHolderRewardsModalBody({
   onRequestOpenManualClaim,
   eligibilitySnapshot,
 }: NftHolderRewardsModalBodyProps) {
+  const { toast } = useToast();
+  const { currentNetwork, switchNetwork, isSwitchingNetwork } = useNetwork();
+  const [switchingToVoi, setSwitchingToVoi] = useState(false);
+  const isVoiNetwork = currentNetwork === "voi-mainnet";
+  const voiNetworkLabel = getNetworkConfig("voi-mainnet").name;
+
+  const handleSwitchToVoi = async () => {
+    if (isVoiNetwork || isSwitchingNetwork || switchingToVoi) return;
+    setSwitchingToVoi(true);
+    try {
+      await switchNetwork("voi-mainnet");
+      toast({
+        title: `Switched to ${voiNetworkLabel}`,
+        description: "You can open manual claim now.",
+      });
+    } catch (e) {
+      toast({
+        title: "Could not switch network",
+        description: e instanceof Error ? e.message : "Try again from the network menu.",
+        variant: "destructive",
+      });
+    } finally {
+      setSwitchingToVoi(false);
+    }
+  };
+
   const errText =
     claimAgentFetchError instanceof Error ? claimAgentFetchError.message : null;
   const agentOk = Boolean(claimAgent?.eligible ?? claimAgent?.claimable);
@@ -374,26 +403,55 @@ export function NftHolderRewardsModalBody({
 
         {displayAddress ? (
           <div className="space-y-4">
-            <div className="rounded-xl border border-sky-500/30 bg-sky-950/25 px-4 py-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-sky-300/95">
-                Claim manually
-              </p>
-              <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
-                Skip the in-app Base payer ({feeUsd} USDC x402). Opens the manual claim dialog so you
-                can review and sign on-chain yourself.
-              </p>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="mt-3 border-sky-500/40 text-sky-100 hover:bg-sky-950/60 hover:text-white"
-                disabled={!onRequestOpenManualClaim}
-                onClick={() => onRequestOpenManualClaim?.()}
-              >
-                <ExternalLink className="mr-2 h-3.5 w-3.5 shrink-0" aria-hidden />
-                Open manual claim
-              </Button>
-            </div>
+            {isVoiNetwork ? (
+              <div className="rounded-xl border border-sky-500/30 bg-sky-950/25 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-sky-300/95">
+                  Claim manually
+                </p>
+                <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
+                  Skip the in-app Base payer ({feeUsd} USDC x402). Opens the UNIT drip tool on{" "}
+                  {voiNetworkLabel} — up to 6 NFTs per wallet approval; claim again for more.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-3 border-sky-500/40 text-sky-100 hover:bg-sky-950/60 hover:text-white"
+                  disabled={!onRequestOpenManualClaim}
+                  onClick={() => onRequestOpenManualClaim?.()}
+                >
+                  <ExternalLink className="mr-2 h-3.5 w-3.5 shrink-0" aria-hidden />
+                  Open manual claim
+                </Button>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-950/20 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-amber-200/95">
+                  Claim manually
+                </p>
+                <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
+                  On-chain UNIT drip claims run on {voiNetworkLabel}. Switch from{" "}
+                  {getNetworkConfig(currentNetwork).name} to use manual claim.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-3 border-amber-500/40 text-amber-100 hover:bg-amber-950/50 hover:text-white"
+                  disabled={isSwitchingNetwork || switchingToVoi}
+                  onClick={() => void handleSwitchToVoi()}
+                >
+                  {isSwitchingNetwork || switchingToVoi ? (
+                    <>
+                      <Loader2 className="mr-2 h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+                      Switching…
+                    </>
+                  ) : (
+                    `Switch to ${voiNetworkLabel}`
+                  )}
+                </Button>
+              </div>
+            )}
             <div className="rounded-2xl border border-slate-700/80 bg-slate-900/30 p-4">
               <NftHolderRewardsGatewayPaySection
                 algorandPortfolioAddress={displayAddress}

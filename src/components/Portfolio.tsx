@@ -552,39 +552,6 @@ const Portfolio = () => {
     [nftHolderClaimAgent]
   );
 
-  const submitManualNftHolderClaim = useCallback(
-    async (unsignedTxns: Uint8Array[]) => {
-      if (!signTransactions || !displayAddress) {
-        throw new Error("Connect a wallet to sign this claim.");
-      }
-      const walletName = activeWallet?.metadata?.name || "your wallet";
-      toast({
-        title: "Sign in your wallet",
-        description: `Approve the manual NFT reward claim in ${walletName}.`,
-        duration: 10000,
-      });
-      const stxns = await signTransactions(unsignedTxns);
-      // NFT holder claims are built for Voi mainnet; do not use the wallet network selector.
-      const NFT_HOLDER_CLAIM_NETWORK_ID = "voi-mainnet" as const;
-      const algorandNetwork = getAlgorandNetworkFromNetworkId(NFT_HOLDER_CLAIM_NETWORK_ID);
-      if (!algorandNetwork) {
-        throw new Error(`Invalid network: ${NFT_HOLDER_CLAIM_NETWORK_ID}`);
-      }
-      const algorandClients =
-        await algorandService.initializeClientsForTransactions(algorandNetwork);
-      const res = await algorandClients.algod.sendRawTransaction(stxns).do();
-      await waitForConfirmation(algorandClients.algod, res.txid, 4);
-      void queryClient.invalidateQueries({
-        queryKey: ["nft-holder-claim-agent", displayAddress],
-      });
-      toast({
-        title: "Manual claim submitted",
-        description: `Transaction confirmed: ${res.txid}`,
-      });
-    },
-    [signTransactions, displayAddress, activeWallet, toast, queryClient]
-  );
-
   const nftHolderClaimableDisplayAmount = nftHolderClaimAgent
     ? Number.parseFloat(nftHolderClaimAgent.totalClaimableDisplay)
     : NaN;
@@ -10444,11 +10411,6 @@ const Portfolio = () => {
         open={nftClaimManualModalOpen}
         onOpenChange={setNftClaimManualModalOpen}
         beneficiaryAddress={displayAddress ?? ""}
-        submitManualNftClaim={
-          !isViewOnly && displayAddress && signTransactions
-            ? submitManualNftHolderClaim
-            : undefined
-        }
       />
 
       <NftHolderClaimSuccessModal
@@ -10480,7 +10442,7 @@ const Portfolio = () => {
           try {
             // Only supported on voi-mainnet
             if (currentNetwork !== "voi-mainnet") {
-              throw new Error("Profile NFTs are only supported on Voi Mainnet");
+              throw new Error("Profile NFTs are only supported on Voi Network");
             }
 
             const resolverNetwork = "mainnet";

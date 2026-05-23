@@ -868,7 +868,7 @@ export interface GlobalConfig {
 const baseVoiMainnetConfig: BaseNetworkConfig = {
   networkId: "voi-mainnet",
   walletNetworkId: "voimain",
-  name: "VOI Mainnet",
+  name: "VOI Network",
   networkType: "avm",
   rpcUrl: "https://mainnet-api.voi.dork.fi",
   rpcPort: 443,

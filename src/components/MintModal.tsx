@@ -384,7 +384,7 @@ const MintModal = ({
 
         if (!isSupported) {
           const networkName =
-            networkId === "voi-mainnet" ? "VOI Mainnet" : "Algorand Mainnet";
+            networkId === "voi-mainnet" ? "VOI Network" : "Algorand Mainnet";
           throw new Error(
             `Your wallet (${activeWallet.metadata?.name || walletId
             }) does not support ${networkName}. Please switch to a compatible wallet or network.`
