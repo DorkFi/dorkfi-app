@@ -20,8 +20,9 @@ import {
   getClaimlayerUsdAmount,
   getPaidWorkflowGatewayOrigin,
 } from "@/services/paidWorkflowGateway";
-import { AlertTriangle, ChevronRight, Loader2, RefreshCw } from "lucide-react";
+import { AlertTriangle, ChevronRight, Construction, Loader2, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { isFeatureEnabled } from "@/config";
 import { formatNftHolderClaimableDisplayFromAgent } from "@/utils/nftHolderClaimAgentDisplay";
 
 const walletConnectProjectId =
@@ -430,6 +431,24 @@ function NftHolderRewardsGatewayPayInner({
   );
 }
 
+function AgentClaimMaintenancePanel() {
+  return (
+    <div className="space-y-3 text-slate-100" role="status" aria-live="polite">
+      <div className="flex gap-3 rounded-xl border border-amber-500/35 bg-amber-950/25 px-4 py-4">
+        <Construction className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" aria-hidden />
+        <div className="min-w-0 space-y-1.5">
+          <p className="text-sm font-semibold text-amber-50">Maintenance mode</p>
+          <p className="text-xs leading-relaxed text-slate-400">
+            Pay agent on Base (x402) is temporarily unavailable. Wallet connection and USDC
+            payment are disabled until maintenance completes. Manual claim on Voi remains available
+            above when you are on the Voi network.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 type NftHolderRewardsGatewayPaySectionProps = {
   algorandPortfolioAddress: string;
   /** Connected AVM account from the app wallet (required for this flow; not sent as `targetAddress`). */
@@ -451,6 +470,10 @@ export function NftHolderRewardsGatewayPaySection({
   onClose,
   onClaimSuccessShare,
 }: NftHolderRewardsGatewayPaySectionProps) {
+  if (!isFeatureEnabled("enableAgentClaim")) {
+    return <AgentClaimMaintenancePanel />;
+  }
+
   const gatewayOrigin = getPaidWorkflowGatewayOrigin();
 
   if (!gatewayOrigin) {
