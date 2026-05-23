@@ -163,7 +163,7 @@ export function LocaleNumberSettings() {
                 )}
               </Button>
               <p className="text-xs text-muted-foreground mt-1.5">
-                Writes preferred locale to your Envoi name on Voi Mainnet.
+                Writes preferred locale to your Envoi name on Voi Network.
               </p>
             </div>
           )}

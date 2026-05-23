@@ -78,23 +78,60 @@ export type NftHolderUnsignedClaimTxnRow = {
   summary?: string;
 };
 
+/** Max manual claims per batch (matches claim-agent-service). */
+export const MAX_NFT_HOLDER_MANUAL_CLAIMS = 100;
+
+export type NftHolderUnsignedClaimGroup = {
+  slot?: NftHolderUnsignedClaimSlot | null;
+  claimable: boolean;
+  transactions: NftHolderUnsignedClaimTxnRow[];
+  errors: unknown[];
+};
+
 export type NftHolderUnsignedClaimResponse = {
   address: string;
   claimable: boolean;
   slot?: NftHolderUnsignedClaimSlot | null;
   transactions: NftHolderUnsignedClaimTxnRow[];
+  /** When `maxSlots` > 1 on the agent, one atomic group per claimable slot. */
+  groups?: NftHolderUnsignedClaimGroup[];
   errors: unknown[];
+};
+
+export type NftHolderBatchUnsignedClaimResponse = {
+  claims: NftHolderUnsignedClaimResponse[];
+  summary: {
+    total: number;
+    claimable: number;
+    withTransactions: number;
+    failed: number;
+  };
 };
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
 
-function parseUnsignedClaimJson(json: unknown): NftHolderUnsignedClaimResponse {
-  if (!isRecord(json)) {
-    throw new Error("Invalid unsigned claim response: not an object");
-  }
-  const transactionsRaw = json.transactions;
+function parseUnsignedClaimSlot(raw: unknown): NftHolderUnsignedClaimSlot | null | undefined {
+  if (raw === null) return null;
+  if (!isRecord(raw)) return undefined;
+  const s = raw;
+  return {
+    campaignId: typeof s.campaignId === "string" ? s.campaignId : undefined,
+    campaignName: typeof s.campaignName === "string" ? s.campaignName : undefined,
+    owner: typeof s.owner === "string" ? s.owner : undefined,
+    collectionId: typeof s.collectionId === "number" ? s.collectionId : undefined,
+    tokenId: typeof s.tokenId === "string" ? s.tokenId : undefined,
+    dripContractId: typeof s.dripContractId === "number" ? s.dripContractId : undefined,
+    rewardTokenContractId:
+      typeof s.rewardTokenContractId === "number" ? s.rewardTokenContractId : undefined,
+    rewardSymbol: typeof s.rewardSymbol === "string" ? s.rewardSymbol : undefined,
+    claimableRaw: typeof s.claimableRaw === "string" ? s.claimableRaw : undefined,
+    claimableDisplay: typeof s.claimableDisplay === "string" ? s.claimableDisplay : undefined,
+  };
+}
+
+function parseUnsignedClaimTransactions(transactionsRaw: unknown): NftHolderUnsignedClaimTxnRow[] {
   if (!Array.isArray(transactionsRaw)) {
     throw new Error("Invalid unsigned claim response: missing transactions[]");
   }
@@ -118,38 +155,91 @@ function parseUnsignedClaimJson(json: unknown): NftHolderUnsignedClaimResponse {
       summary: typeof row.summary === "string" ? row.summary : undefined,
     });
   }
+  return transactions;
+}
+
+function parseUnsignedClaimGroup(raw: unknown): NftHolderUnsignedClaimGroup | null {
+  if (!isRecord(raw)) return null;
+  const transactions = parseUnsignedClaimTransactions(raw.transactions);
+  const claimable = typeof raw.claimable === "boolean" ? raw.claimable : transactions.length > 0;
+  return {
+    slot: parseUnsignedClaimSlot(raw.slot),
+    claimable,
+    transactions,
+    errors: Array.isArray(raw.errors) ? raw.errors : [],
+  };
+}
+
+function parseUnsignedClaimJson(json: unknown): NftHolderUnsignedClaimResponse {
+  if (!isRecord(json)) {
+    throw new Error("Invalid unsigned claim response: not an object");
+  }
+  const transactions = parseUnsignedClaimTransactions(json.transactions);
   const addr = typeof json.address === "string" ? json.address : "";
   const claimable = typeof json.claimable === "boolean" ? json.claimable : false;
   const errors = Array.isArray(json.errors) ? json.errors : [];
-  let slot: NftHolderUnsignedClaimSlot | null | undefined;
-  if (json.slot === null) {
-    slot = null;
-  } else if (isRecord(json.slot)) {
-    const s = json.slot;
-    slot = {
-      campaignId: typeof s.campaignId === "string" ? s.campaignId : undefined,
-      campaignName: typeof s.campaignName === "string" ? s.campaignName : undefined,
-      owner: typeof s.owner === "string" ? s.owner : undefined,
-      collectionId: typeof s.collectionId === "number" ? s.collectionId : undefined,
-      tokenId: typeof s.tokenId === "string" ? s.tokenId : undefined,
-      dripContractId: typeof s.dripContractId === "number" ? s.dripContractId : undefined,
-      rewardTokenContractId:
-        typeof s.rewardTokenContractId === "number" ? s.rewardTokenContractId : undefined,
-      rewardSymbol: typeof s.rewardSymbol === "string" ? s.rewardSymbol : undefined,
-      claimableRaw: typeof s.claimableRaw === "string" ? s.claimableRaw : undefined,
-      claimableDisplay: typeof s.claimableDisplay === "string" ? s.claimableDisplay : undefined,
-    };
+  const slot = parseUnsignedClaimSlot(json.slot);
+  let groups: NftHolderUnsignedClaimGroup[] | undefined;
+  if (Array.isArray(json.groups)) {
+    const parsed = json.groups.map(parseUnsignedClaimGroup).filter((g): g is NftHolderUnsignedClaimGroup => g != null);
+    if (parsed.length > 0) groups = parsed;
   }
-  return { address: addr, claimable, slot, transactions, errors };
+  return { address: addr, claimable, slot, transactions, groups, errors };
+}
+
+/** Collect signable groups from a single-address or per-address batch response. */
+export function collectNftHolderUnsignedClaimGroups(
+  claim: NftHolderUnsignedClaimResponse
+): NftHolderUnsignedClaimGroup[] {
+  if (claim.groups?.length) {
+    return claim.groups.filter((g) => g.transactions.length > 0);
+  }
+  if (claim.transactions.length > 0) {
+    return [
+      {
+        slot: claim.slot,
+        claimable: claim.claimable,
+        transactions: claim.transactions,
+        errors: claim.errors,
+      },
+    ];
+  }
+  return [];
+}
+
+export function estimateNftHolderClaimFeeMicros(rows: NftHolderUnsignedClaimTxnRow[]): bigint {
+  let total = 0n;
+  for (const row of rows) {
+    if (!row.feeMicros) continue;
+    try {
+      total += BigInt(row.feeMicros);
+    } catch {
+      /* ignore invalid fee */
+    }
+  }
+  return total;
+}
+
+function getNftClaimAgentApiKey(): string | undefined {
+  const raw = (import.meta.env.VITE_NFT_CLAIM_AGENT_API_KEY as string | undefined)?.trim();
+  return raw || undefined;
+}
+
+function nftClaimAgentAuthHeaders(): HeadersInit {
+  const key = getNftClaimAgentApiKey();
+  if (!key) return {};
+  return { Authorization: `Bearer ${key}`, "x-api-key": key };
 }
 
 /**
- * Manual claim: unsigned transaction group from {@link getNftHolderClaimAgentBase}
- * (`GET …/claim/:address/unsigned?relayer=`).
+ * Manual claim: unsigned transaction group(s) from {@link getNftHolderClaimAgentBase}
+ * (`GET …/claim/:address/unsigned?relayer=&maxSlots=`).
  */
 export async function fetchNftHolderUnsignedClaim(params: {
   beneficiaryAddress: string;
   relayerAddress: string;
+  /** 1–100; default 1. Values > 1 request all claimable slots up to the cap. */
+  maxSlots?: number;
 }): Promise<NftHolderUnsignedClaimResponse> {
   const beneficiary = params.beneficiaryAddress.trim();
   const relayer = params.relayerAddress.trim();
@@ -159,15 +249,98 @@ export async function fetchNftHolderUnsignedClaim(params: {
   if (!relayer) {
     throw new Error("Missing relayer address for unsigned claim");
   }
+  const maxSlots = Math.min(
+    MAX_NFT_HOLDER_MANUAL_CLAIMS,
+    Math.max(1, Math.floor(params.maxSlots ?? 1))
+  );
   const base = getNftHolderClaimAgentBase();
   const url = new URL(`${base}/${encodeURIComponent(beneficiary)}/unsigned`);
   url.searchParams.set("relayer", relayer);
+  if (maxSlots > 1) url.searchParams.set("maxSlots", String(maxSlots));
   const res = await fetch(url.toString());
   if (!res.ok) {
     throw new Error(`Unsigned claim HTTP ${res.status}`);
   }
   const json: unknown = await res.json();
   return parseUnsignedClaimJson(json);
+}
+
+/**
+ * Batch manual claim: up to {@link MAX_NFT_HOLDER_MANUAL_CLAIMS} beneficiary addresses.
+ * Uses `POST …/claim/batch/unsigned` when an API key is configured; otherwise parallel GETs.
+ */
+export async function fetchNftHolderBatchUnsignedClaims(params: {
+  beneficiaryAddresses: string[];
+  relayerAddress: string;
+}): Promise<NftHolderBatchUnsignedClaimResponse> {
+  const relayer = params.relayerAddress.trim();
+  if (!relayer) {
+    throw new Error("Missing relayer address for batch unsigned claim");
+  }
+  const unique = [
+    ...new Set(
+      params.beneficiaryAddresses.map((a) => a.trim()).filter((a) => a.length > 0)
+    ),
+  ].slice(0, MAX_NFT_HOLDER_MANUAL_CLAIMS);
+  if (unique.length === 0) {
+    throw new Error("Add at least one beneficiary address");
+  }
+  if (unique.length > MAX_NFT_HOLDER_MANUAL_CLAIMS) {
+    throw new Error(`Batch is limited to ${MAX_NFT_HOLDER_MANUAL_CLAIMS} claims`);
+  }
+
+  const base = getNftHolderClaimAgentBase();
+  const apiKey = getNftClaimAgentApiKey();
+
+  if (apiKey) {
+    const url = new URL(`${base}/batch/unsigned`);
+    url.searchParams.set("relayer", relayer);
+    const res = await fetch(url.toString(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...nftClaimAgentAuthHeaders() },
+      body: JSON.stringify({ claims: unique.map((address) => ({ address })) }),
+    });
+    if (!res.ok) {
+      throw new Error(`Batch unsigned claim HTTP ${res.status}`);
+    }
+    const json: unknown = await res.json();
+    if (!isRecord(json) || !Array.isArray(json.claims)) {
+      throw new Error("Invalid batch unsigned claim response");
+    }
+    const claims = json.claims.map(parseUnsignedClaimJson);
+    const summaryRaw = json.summary;
+    const summary = isRecord(summaryRaw)
+      ? {
+          total: typeof summaryRaw.total === "number" ? summaryRaw.total : claims.length,
+          claimable: typeof summaryRaw.claimable === "number" ? summaryRaw.claimable : 0,
+          withTransactions:
+            typeof summaryRaw.withTransactions === "number" ? summaryRaw.withTransactions : 0,
+          failed: typeof summaryRaw.failed === "number" ? summaryRaw.failed : 0,
+        }
+      : {
+          total: claims.length,
+          claimable: claims.filter((c) => c.claimable && c.transactions.length > 0).length,
+          withTransactions: claims.filter((c) => c.transactions.length > 0).length,
+          failed: claims.filter((c) => c.transactions.length === 0).length,
+        };
+    return { claims, summary };
+  }
+
+  const claims = await Promise.all(
+    unique.map((beneficiaryAddress) =>
+      fetchNftHolderUnsignedClaim({ beneficiaryAddress, relayerAddress: relayer })
+    )
+  );
+  const withTransactions = claims.filter((c) => c.transactions.length > 0).length;
+  return {
+    claims,
+    summary: {
+      total: claims.length,
+      claimable: claims.filter((c) => c.claimable && c.transactions.length > 0).length,
+      withTransactions,
+      failed: claims.length - withTransactions,
+    },
+  };
 }
 
 const DEFAULT_NFT_CLAIM_MANUAL_URL = "https://docs.dork.fi";

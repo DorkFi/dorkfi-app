@@ -2,6 +2,64 @@
  * Converts technical error messages to user-friendly messages
  */
 
+function errorMessageString(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+/** Wallet / signer declined the transaction (not a protocol or build failure). */
+export function isTransactionUserRejection(error: unknown): boolean {
+  const msg = errorMessageString(error).toLowerCase();
+  if (
+    msg.includes("user rejected") ||
+    msg.includes("rejected request") ||
+    msg.includes("user cancelled") ||
+    msg.includes("user canceled") ||
+    msg.includes("user denied") ||
+    msg.includes("request rejected") ||
+    msg.includes("signing cancelled") ||
+    msg.includes("signing canceled") ||
+    msg.includes("transaction cancelled") ||
+    msg.includes("transaction canceled") ||
+    msg.includes("cancelled by user") ||
+    msg.includes("canceled by user")
+  ) {
+    return true;
+  }
+  const code = (error as { code?: number | string })?.code;
+  if (code === 4001 || code === "4001" || code === "ACTION_REJECTED") return true;
+  return false;
+}
+
+/** Wallet rejected txn list because atomic group structure is invalid (ARC-0001 / Lute 4300). */
+export function isInvalidGroupSignError(error: unknown): boolean {
+  const msg = errorMessageString(error).toLowerCase();
+  if (msg.includes("invalid group")) return true;
+  const code = (error as { code?: number | string })?.code;
+  if (code === 4300 || code === "4300") return true;
+  return (code === 4201 || code === "4201") && msg.includes("group");
+}
+
+export type TransactionErrorFeedback = {
+  userRejected: boolean;
+  message: string;
+};
+
+export function getTransactionErrorFeedback(error: unknown): TransactionErrorFeedback {
+  const userRejected = isTransactionUserRejection(error);
+  return {
+    userRejected,
+    message: userRejected
+      ? "Transaction cancelled in your wallet. You can try again when ready."
+      : getUserFriendlyError(error),
+  };
+}
+
 /**
  * Formats microAlgos to ALGO with proper decimals
  * Shows up to 6 decimal places, removing trailing zeros

@@ -13,6 +13,8 @@ interface ImportMetaEnv {
   readonly VITE_NFT_CLAIM_AGENT_BASE?: string;
   /** Optional 58-char relayer for `GET …/claim/:addr/unsigned?relayer=`; defaults to the beneficiary address. */
   readonly VITE_NFT_CLAIM_RELAYER_ADDRESS?: string;
+  /** Optional API key for `POST …/claim/batch/unsigned` (Bearer + x-api-key). Without it, batch uses parallel GETs. */
+  readonly VITE_NFT_CLAIM_AGENT_API_KEY?: string;
   /** Optional absolute URL for “claim manually” in the NFT rewards modal (defaults to docs). */
   readonly VITE_NFT_CLAIM_MANUAL_URL?: string;
   /** `claimlayer-paid-claimall` JSON `targetChain` (default `voi:mainnet`). Execute body includes `algorandAddress` + `address` (AVM beneficiary). */
