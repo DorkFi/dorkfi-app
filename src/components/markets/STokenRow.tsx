@@ -93,42 +93,7 @@ const STokenRow = ({
         </div>
       </TableCell>
       <TableCell className="text-center">
-        {market.isLoading ? (
-          <LoadingCell />
-        ) : market.error ? (
-          <ErrorCell error={market.error} />
-        ) : (
-          <div className="text-muted-foreground text-sm">
-            
-          </div>
-        )}
-      </TableCell>
-      <TableCell className="text-center">
-        {market.isLoading ? (
-          <LoadingCell />
-        ) : market.error ? (
-          <ErrorCell error={market.error} />
-        ) : (
-          <div className="text-muted-foreground text-sm">
-            
-          </div>
-        )}
-      </TableCell>
-      <TableCell className="text-center">
-        {market.isLoading ? (
-          <LoadingCell />
-        ) : market.error ? (
-          <ErrorCell error={market.error} />
-        ) : (
-          <div>
-            <div className="font-medium text-purple-700 dark:text-purple-300">
-              {formatCurrency(Math.round(market.totalBorrowUSD / 1_000_000), "USD", { maximumFractionDigits: 0 })}
-            </div>
-            <div className="text-sm text-muted-foreground">
-              {formatNumber(market.totalBorrow, { maximumFractionDigits: 3 })} {market.asset}
-            </div>
-          </div>
-        )}
+        <span className="text-muted-foreground text-sm">&nbsp;</span>
       </TableCell>
       <TableCell className="text-center">
         {market.isLoading ? (
@@ -155,6 +120,25 @@ const STokenRow = ({
               marketIndex={marketIndex}
             />
           </Badge>
+        )}
+      </TableCell>
+      <TableCell className="text-center">
+        <span className="text-muted-foreground text-sm">&nbsp;</span>
+      </TableCell>
+      <TableCell className="text-center">
+        {market.isLoading ? (
+          <LoadingCell />
+        ) : market.error ? (
+          <ErrorCell error={market.error} />
+        ) : (
+          <div>
+            <div className="font-medium text-purple-700 dark:text-purple-300">
+              {formatCurrency(Math.round(market.totalBorrowUSD / 1_000_000), "USD", { maximumFractionDigits: 0 })}
+            </div>
+            <div className="text-sm text-muted-foreground">
+              {formatNumber(market.totalBorrow, { maximumFractionDigits: 3 })} {market.asset}
+            </div>
+          </div>
         )}
       </TableCell>
       <TableCell className="text-center">

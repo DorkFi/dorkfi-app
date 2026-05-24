@@ -12,6 +12,7 @@ import PreFi from "@/pages/PreFi";
 import { useIsMobile } from "@/hooks/use-mobile";
 import LiquidationMonitor from "@/components/liquidation/LiquidationMonitor";
 import { isFeatureEnabled } from "@/config";
+import { cn } from "@/lib/utils";
 
 interface Token {
   symbol: string;
@@ -37,6 +38,7 @@ const Index = ({ activeTab, onTabChange }: IndexProps) => {
   );
   const location = useLocation();
   const isMobile = useIsMobile();
+  const isMarketsTab = activeTab === "markets";
 
   console.log(
     "Index render - activeTab:",
@@ -113,8 +115,19 @@ const Index = ({ activeTab, onTabChange }: IndexProps) => {
 
       <Header activeTab={activeTab} onTabChange={onTabChange} />
 
-      <main className="max-w-[1200px] mx-auto px-2 sm:px-4 md:px-6 py-4 md:py-8 relative z-10">
-        <div className="space-y-4 sm:space-y-6">{renderTabContent()}</div>
+      <main
+        className={cn(
+          "max-w-[1200px] mx-auto px-2 sm:px-4 md:px-6 relative z-10",
+          isMarketsTab ? "pt-2 pb-4 md:pt-3 md:pb-6" : "py-4 md:py-8"
+        )}
+      >
+        <div
+          className={cn(
+            isMarketsTab ? "space-y-2 sm:space-y-3" : "space-y-4 sm:space-y-6"
+          )}
+        >
+          {renderTabContent()}
+        </div>
       </main>
 
       <Footer />

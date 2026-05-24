@@ -7,7 +7,7 @@ const MarketsHeroSection = () => {
   return (
     <DorkFiCard 
       hoverable
-      className="relative text-center overflow-hidden p-6 md:p-8"
+      className="relative text-center overflow-hidden p-4 md:p-6"
     >
       {/* Decorative elements */}
       {/* Birds - light mode only */}
@@ -60,12 +60,12 @@ const MarketsHeroSection = () => {
 
       
       <div className="relative z-10">
-        <H1 className="m-0 text-4xl md:text-5xl">
+        <H1 className="m-0 text-3xl md:text-4xl">
           <span className="hero-header">Markets</span>
         </H1>
-        <Body className="text-sm sm:text-base md:text-lg lg:text-xl max-w-2xl md:max-w-none mx-auto">
-          <span className="block md:inline md:whitespace-nowrap">
-            Deposit tokens to earn interest. Need cash? Borrow without selling.
+        <Body className="text-sm sm:text-base md:text-lg max-w-2xl mx-auto text-muted-foreground">
+          <span className="block md:inline">
+            Supply to earn yield, or borrow against collateral without selling.
           </span>
         </Body>
       </div>

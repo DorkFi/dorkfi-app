@@ -25,6 +25,7 @@ import {
 } from "@/constants/marketUi";
 import { ARC200Service } from "@/services/arc200Service";
 import { migrationBalanceEffectKey } from "./migrationBalanceEffectKey";
+import { MarketRowStatusBadges } from "./MarketRowStatusBadges";
 import algorandService from "@/services/algorandService";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 
@@ -49,7 +50,7 @@ interface MarketCardViewProps {
 }
 
 const MarketCardView = ({ 
-  markets, 
+  markets,
   onRowClick, 
   onInfoClick, 
   onDepositClick, 
@@ -213,11 +214,17 @@ const MarketCardView = ({
                   poolLetterLabel={marketLabel}
                   imgClassName="w-10 h-10 md:w-8 md:h-8 flex-shrink-0 rounded-full object-contain"
                 />
-                <div className="flex flex-col items-center justify-center gap-1 text-center flex-1">
-                  <div className="font-semibold text-lg leading-tight">{market.asset}</div>
-                  <Badge variant="outline" className="text-xs px-2 py-0.5 h-4 flex items-center justify-center whitespace-nowrap">
+                <div className="flex min-w-0 max-w-full flex-1 flex-col items-center justify-center gap-1 text-center">
+                  <div className="font-semibold text-lg leading-tight whitespace-nowrap">
+                    {market.asset}
+                  </div>
+                  <Badge
+                    variant="outline"
+                    className="inline-flex h-auto min-h-4 items-center justify-center whitespace-nowrap px-2 py-0.5 text-xs leading-none"
+                  >
                     CF {market.collateralFactor}%
                   </Badge>
+                  <MarketRowStatusBadges market={market} className="justify-center" />
                 </div>
               </div>
               {/* Removed info icon */}
@@ -226,7 +233,7 @@ const MarketCardView = ({
             {/* APY and Supply/Borrow Info */}
             <div className="grid grid-cols-2 gap-4 sm:gap-2 md:grid-cols-2 text-center">
               <div className="flex flex-col items-center md:items-start">
-                <div className="text-sm text-muted-foreground mb-1">Deposit APY</div>
+                <div className="text-sm text-muted-foreground mb-1">Supply APY</div>
                 <Badge
                   className={depositApyBadgeClassName(
                     market.hasRewards,
