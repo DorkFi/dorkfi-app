@@ -26,6 +26,7 @@ interface EnhancedHealthFactorProps {
   isRefreshingMarkets?: boolean;
   onRepayDebt?: () => void;
   onWithdraw?: () => void;
+  achievementsSlot?: React.ReactNode;
 }
 
 const EnhancedHealthFactor = ({
@@ -42,6 +43,7 @@ const EnhancedHealthFactor = ({
   isRefreshingMarkets,
   onRepayDebt,
   onWithdraw,
+  achievementsSlot,
 }: EnhancedHealthFactorProps) => {
   return (
     <div className="w-full max-w-7xl mx-auto animate-fade-in">
@@ -57,31 +59,35 @@ const EnhancedHealthFactor = ({
                 dorkNftImage={dorkNftImage}
                 underwaterBg={underwaterBg}
                 onEdit={onEditProfile}
+                achievementsSlot={achievementsSlot}
               />
-              {/* Status message - directly below health factor value */}
-              <div
-                className={`rounded-xl border-2 p-4 transition-all duration-300 ${
-                  healthFactor === null
-                    ? "bg-slate-500/10 border-slate-500/30"
-                    : healthFactor <= 1.0
-                    ? "bg-red-500/15 border-red-500/40"
-                    : healthFactor <= 1.2
-                    ? "bg-amber-500/15 border-amber-500/40"
-                    : "bg-emerald-500/10 border-emerald-500/30"
-                }`}
-              >
-                <p className="text-sm font-medium text-foreground">
-                  {healthFactor === null && "No collateral yet. Supply assets to earn yield and borrow."}
-                  {healthFactor !== null && healthFactor <= 1.0 &&
-                    "Your health factor is at or below 1.0. Withdrawals and new borrows are blocked until you supply collateral or repay debt."}
-                  {healthFactor !== null && healthFactor > 1.0 && healthFactor <= 1.05 &&
-                    "You are very close to liquidation. Repay debt or add collateral to increase your buffer."}
-                  {healthFactor !== null && healthFactor > 1.05 && healthFactor <= 1.2 &&
-                    "Warning: limited room before your health factor becomes critical. Consider repaying or supplying more."}
-                  {healthFactor !== null && healthFactor > 1.2 &&
-                    "Your position is safe (health factor above 1.0). Supply or repay below if you want to adjust."}
-                </p>
-              </div>
+              {(healthFactor === null || healthFactor <= 1.2) && (
+                <div
+                  className={`rounded-xl border-2 p-4 transition-all duration-300 ${
+                    healthFactor === null
+                      ? "bg-slate-500/10 border-slate-500/30"
+                      : healthFactor <= 1.0
+                        ? "bg-red-500/15 border-red-500/40"
+                        : "bg-amber-500/15 border-amber-500/40"
+                  }`}
+                >
+                  <p className="text-sm font-medium text-foreground">
+                    {healthFactor === null &&
+                      "No collateral yet. Supply assets to earn yield and borrow."}
+                    {healthFactor !== null &&
+                      healthFactor <= 1.0 &&
+                      "Your health factor is at or below 1.0. Withdrawals and new borrows are blocked until you supply collateral or repay debt."}
+                    {healthFactor !== null &&
+                      healthFactor > 1.0 &&
+                      healthFactor <= 1.05 &&
+                      "You are very close to liquidation. Repay debt or add collateral to increase your buffer."}
+                    {healthFactor !== null &&
+                      healthFactor > 1.05 &&
+                      healthFactor <= 1.2 &&
+                      "Warning: limited room before your health factor becomes critical. Consider repaying or supplying more."}
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Right Side - Stats Panel & CTAs */}

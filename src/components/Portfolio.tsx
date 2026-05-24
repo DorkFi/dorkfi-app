@@ -89,6 +89,7 @@ import { resolveSupplyBorrowToken } from "./SupplyBorrowModal";
 import { XchainUsdcBridgeControls } from "@/components/xchain/XchainUsdcBridgeControls";
 import PortfolioTableMobileCard from "./portfolio/PortfolioTableMobileCard";
 import AccruedInterestMobileCard from "./portfolio/AccruedInterestMobileCard";
+import { AchievementsCompactTrigger } from "@/components/portfolio/AchievementsCompactTrigger";
 import { NftHolderClaimManualModal } from "@/components/portfolio/NftHolderClaimManualModal";
 import {
   NftHolderClaimSuccessModal,
@@ -5467,6 +5468,14 @@ const Portfolio = () => {
                 }
                 onRefreshMarkets={handleRefreshMarkets}
                 isRefreshingMarkets={isRefreshingMarkets}
+                achievementsSlot={
+                  displayAddress ? (
+                    <AchievementsCompactTrigger
+                      address={displayAddress}
+                      isViewOnly={isViewOnly}
+                    />
+                  ) : undefined
+                }
               />
               {showPortfolioNftHolderRewardsFetching && (
                 <div className="mx-auto mt-4 w-full max-w-7xl animate-fade-in">
