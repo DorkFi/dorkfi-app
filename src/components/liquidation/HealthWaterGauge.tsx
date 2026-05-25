@@ -68,22 +68,23 @@ export default function HealthWaterGauge({
   if (healthFactor === null) {
     return (
       <div className="relative w-full max-w-sm mx-auto">
-        <div className="text-center py-8 px-6 rounded-xl bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900 border border-gray-200/50 dark:border-gray-700/50">
-          <div className="text-sm text-muted-foreground mb-1 font-medium">Health Factor</div>
+        <div className="text-center py-2.5 px-4 rounded-xl bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900 border border-gray-200/50 dark:border-gray-700/50">
           {marketContextLine ? (
-            <p className="text-xs font-medium text-ocean-teal dark:text-cyan-400 mb-2">
+            <p className="text-xs font-medium text-ocean-teal dark:text-cyan-400 mb-1.5">
               {marketContextLine}
             </p>
           ) : null}
-          <div className="text-5xl font-bold text-gray-500 tracking-tight transition-all duration-300 mb-2">
-            N/A
+          <div className="flex flex-col items-center text-gray-500">
+            <span className="text-3xl font-bold tabular-nums tracking-tight sm:text-4xl">
+              N/A
+            </span>
+            <span className="mt-0.5 text-xs font-medium uppercase tracking-wide">
+              No collateral
+            </span>
           </div>
-          <div className="text-sm font-semibold text-gray-500 uppercase tracking-wide">
-            No Collateral
-          </div>
-          <div className="mt-2 text-xs text-gray-400 font-medium">
-            💡 Add assets to start earning and borrowing
-          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Add assets to start earning and borrowing
+          </p>
         </div>
       </div>
     );
@@ -236,24 +237,44 @@ export default function HealthWaterGauge({
         </Tooltip>
       </div>
 
-      {/* Enhanced Risk Score Display */}
-      <div className="text-center py-4 px-6 rounded-xl bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 border border-slate-200/50 dark:border-slate-700/50 animate-scale-in">
-        <div className="text-sm text-muted-foreground mb-1 font-medium">Health Factor</div>
-        <div className={`text-5xl font-bold ${riskLevel.color} tracking-tight transition-all duration-300 mb-2`}>
-          {hf.toFixed(2)}
-        </div>
-        <div className={`text-sm font-semibold ${riskLevel.color} uppercase tracking-wide`}>
-          {riskLevel.label}
-        </div>
-        <div className={`mt-2 text-sm font-medium ${riskLevel.color}`}>
-          {formatHealthFactorBuffer(healthFactor)}
-        </div>
-        {hf <= 1.2 && hf > 1 && (
-          <div className="mt-1 text-xs text-amber-600 dark:text-amber-400 font-medium">
-            Limited room before HF reaches 1.0
+      {/* Risk score — compact (label lives in header above gauge) */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            className="text-center py-2.5 px-4 rounded-xl bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 border border-slate-200/50 dark:border-slate-700/50 animate-scale-in cursor-help"
+            tabIndex={0}
+          >
+            <div className={`flex flex-col items-center ${riskLevel.color}`}>
+              <span className="text-3xl font-bold tabular-nums tracking-tight transition-all duration-300 sm:text-4xl">
+                {hf.toFixed(2)}
+              </span>
+              <p
+                className={`mt-0.5 text-xs font-medium ${riskLevel.color} opacity-90`}
+              >
+                <span className="uppercase tracking-wide">{riskLevel.label}</span>
+                <span className="mx-1.5 text-muted-foreground/70" aria-hidden>
+                  |
+                </span>
+                <span>{formatHealthFactorBuffer(healthFactor)}</span>
+                {hf <= 1.2 && hf > 1 ? (
+                  <span className="text-amber-600 dark:text-amber-400">
+                    {" · Limited room before liquidation"}
+                  </span>
+                ) : null}
+              </p>
+            </div>
           </div>
-        )}
-      </div>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="max-w-xs text-left">
+          <p className="text-sm">
+            Health factor measures position safety. Liquidation occurs at HF =
+            1.0.
+            {hf <= 1.2 && hf > 1
+              ? " You have limited buffer above liquidation."
+              : ""}
+          </p>
+        </TooltipContent>
+      </Tooltip>
 
       <style>{`
         @keyframes hf-drift {

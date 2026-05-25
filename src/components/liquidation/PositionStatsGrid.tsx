@@ -71,48 +71,53 @@ const PositionStatsGrid = ({
         </div>
       </div>
 
-      <div className="p-4 rounded-lg bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 border border-slate-200/50 dark:border-slate-600/30">
-        <div className="text-sm text-muted-foreground flex items-center gap-1 mb-1">
-          <div className="w-1.5 h-1.5 bg-cyan-500 rounded-full"></div>
-          Liquidation buffer
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Info className="w-3 h-3 cursor-help" />
-            </TooltipTrigger>
-            <TooltipContent className="max-w-xs">
-              <p>
-                How far your health factor is above liquidation (HF = 1.0). Higher buffer means more room before actions are blocked.
-              </p>
-            </TooltipContent>
-          </Tooltip>
-        </div>
-        <div className={`text-xl font-bold ${hfColorClass}`}>{bufferText}</div>
-      </div>
-
-      <div className="p-4 rounded-lg bg-gradient-to-r from-slate-50 to-gray-50 dark:from-slate-800 dark:to-slate-700 border border-slate-200/50 dark:border-slate-600/30">
-        <div className="text-sm text-muted-foreground mb-1">Net Portfolio Value</div>
-        <div
-          className={`text-2xl font-bold ${
-            totalCollateral - totalBorrowed >= 0
-              ? "text-green-600 dark:text-green-400"
-              : "text-red-600 dark:text-red-400"
-          }`}
-        >
-          $
-          {(totalCollateral - totalBorrowed).toLocaleString("en-US", {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          })}
-        </div>
-        {totalCollateral > 0 && (
-          <div className="text-xs text-muted-foreground mt-1">
-            {(
-              ((totalCollateral - totalBorrowed) / totalCollateral) *
-              100
-            ).toFixed(1)}
-            % of collateral value
+      <div className="grid grid-cols-2 gap-4">
+        <div className="h-full p-5 rounded-xl bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 border border-slate-200/50 dark:border-slate-600/30 hover:shadow-lg transition-all duration-300">
+          <div className="text-sm text-muted-foreground flex items-center gap-1 mb-2">
+            <div className="w-2 h-2 bg-cyan-500 rounded-full"></div>
+            Liquidation buffer
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Info className="w-3 h-3 cursor-help" />
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">
+                <p>
+                  How far your health factor is above liquidation (HF = 1.0).
+                  Higher buffer means more room before actions are blocked.
+                </p>
+              </TooltipContent>
+            </Tooltip>
           </div>
-        )}
+          <div className={`text-2xl font-bold ${hfColorClass}`}>{bufferText}</div>
+        </div>
+
+        <div className="h-full p-5 rounded-xl bg-gradient-to-r from-slate-50 to-gray-50 dark:from-slate-800 dark:to-slate-700 border border-slate-200/50 dark:border-slate-600/30 hover:shadow-lg transition-all duration-300">
+          <div className="text-sm text-muted-foreground mb-2">
+            Net Portfolio Value
+          </div>
+          <div
+            className={`text-2xl font-bold ${
+              totalCollateral - totalBorrowed >= 0
+                ? "text-green-600 dark:text-green-400"
+                : "text-red-600 dark:text-red-400"
+            }`}
+          >
+            $
+            {(totalCollateral - totalBorrowed).toLocaleString("en-US", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </div>
+          {totalCollateral > 0 && (
+            <div className="text-xs text-muted-foreground mt-1">
+              {(
+                ((totalCollateral - totalBorrowed) / totalCollateral) *
+                100
+              ).toFixed(1)}
+              % of collateral value
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
