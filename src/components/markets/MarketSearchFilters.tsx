@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import {
   Search,
   SortAsc,
@@ -6,7 +6,6 @@ import {
   Sparkles,
   Gift,
   Layers,
-  SlidersHorizontal,
   X,
   TrendingUp,
 } from "lucide-react";
@@ -20,11 +19,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import { SortField, SortOrder, type MarketFilter } from "@/hooks/useOnDemandMarketData";
 import MarketsTierFilter from "@/components/markets/MarketsTierFilter";
 
@@ -103,8 +97,6 @@ const MarketSearchFilters = ({
   onClearAll,
   embedded = false,
 }: MarketSearchFiltersProps) => {
-  const [moreOpen, setMoreOpen] = useState(false);
-
   const handleSortFieldChange = (field: SortField) => {
     onSortChange(field, sortOrder);
   };
@@ -119,6 +111,10 @@ const MarketSearchFilters = ({
 
   const topSupplyActive = sortField === "supplyAPY" && sortOrder === "desc";
   const topBorrowActive = sortField === "borrowAPY" && sortOrder === "desc";
+  const hasFilterChips =
+    (rewardMarketsCount > 0 && !!onRewardMarketsOnlyChange) ||
+    (newMarketsCount > 0 && !!onNewMarketsOnlyChange) ||
+    (multiPoolMarketsCount > 0 && !!onMultiPoolOnlyChange);
 
   return (
     <div
@@ -153,8 +149,8 @@ const MarketSearchFilters = ({
           )}
         </div>
 
-        <div className="flex flex-col gap-3 md:flex-row md:items-center">
-          <div className="relative flex-1 w-full md:max-w-md">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
+          <div className="relative flex-1 w-full min-w-0 sm:max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 dark:text-ocean-teal h-4 w-4" />
             <Input
               placeholder="Search by asset name..."
@@ -164,65 +160,36 @@ const MarketSearchFilters = ({
             />
           </div>
 
-          <Popover open={moreOpen} onOpenChange={setMoreOpen}>
-            <PopoverTrigger asChild>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="gap-2 border-gray-300 dark:border-ocean-teal/30 shrink-0"
-              >
-                <SlidersHorizontal className="h-4 w-4" />
-                More filters
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-72 space-y-3">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                Sort
-              </p>
-              <div className="flex items-center gap-2">
-                <Select value={sortField} onValueChange={handleSortFieldChange}>
-                  <SelectTrigger className="flex-1 bg-background">
-                    <SelectValue placeholder="Sort by..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="default">Default</SelectItem>
-                    <SelectItem value="asset">Asset</SelectItem>
-                    <SelectItem value="totalSupplyUSD">Total supply</SelectItem>
-                    <SelectItem value="supplyAPY">Supply APY</SelectItem>
-                    <SelectItem value="totalBorrowUSD">Total borrow</SelectItem>
-                    <SelectItem value="borrowAPY">Borrow APY</SelectItem>
-                    <SelectItem value="utilization">Utilization</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  onClick={toggleSortOrder}
-                  aria-label="Toggle sort direction"
-                >
-                  {sortOrder === "asc" ? (
-                    <SortAsc className="h-4 w-4" />
-                  ) : (
-                    <SortDesc className="h-4 w-4" />
-                  )}
-                </Button>
-              </div>
-              {multiPoolMarketsCount > 0 && onMultiPoolOnlyChange && (
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={multiPoolOnly}
-                    onChange={(e) => onMultiPoolOnlyChange(e.target.checked)}
-                    className="rounded border-border"
-                  />
-                  <Layers className="h-3.5 w-3.5 text-ocean-teal" />
-                  Multi-pool only ({multiPoolMarketsCount})
-                </label>
+          <div className="flex items-center gap-2 shrink-0">
+            <Select value={sortField} onValueChange={handleSortFieldChange}>
+              <SelectTrigger className="w-[9.5rem] sm:w-40 bg-white dark:bg-slate-800/50 border-gray-300 dark:border-ocean-teal/30">
+                <SelectValue placeholder="Sort by..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="default">Default</SelectItem>
+                <SelectItem value="asset">Asset</SelectItem>
+                <SelectItem value="totalSupplyUSD">Total supply</SelectItem>
+                <SelectItem value="supplyAPY">Supply APY</SelectItem>
+                <SelectItem value="totalBorrowUSD">Total borrow</SelectItem>
+                <SelectItem value="borrowAPY">Borrow APY</SelectItem>
+                <SelectItem value="utilization">Utilization</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="border-gray-300 dark:border-ocean-teal/30 shrink-0"
+              onClick={toggleSortOrder}
+              aria-label="Toggle sort direction"
+            >
+              {sortOrder === "asc" ? (
+                <SortAsc className="h-4 w-4" />
+              ) : (
+                <SortDesc className="h-4 w-4" />
               )}
-            </PopoverContent>
-          </Popover>
+            </Button>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -240,6 +207,13 @@ const MarketSearchFilters = ({
             <TrendingUp className="h-3 w-3" />
             Top borrow APY
           </FilterChip>
+          {hasFilterChips && (
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              className="mx-0.5 h-6 w-px shrink-0 bg-pink-400/70 dark:bg-pink-400/50"
+            />
+          )}
           {rewardMarketsCount > 0 && onRewardMarketsOnlyChange && (
             <FilterChip
               active={rewardMarketsOnly}
@@ -258,17 +232,15 @@ const MarketSearchFilters = ({
               New ({newMarketsCount})
             </FilterChip>
           )}
-          {multiPoolMarketsCount > 0 &&
-            onMultiPoolOnlyChange &&
-            multiPoolOnly && (
-              <FilterChip
-                active={multiPoolOnly}
-                onClick={() => onMultiPoolOnlyChange(false)}
-              >
-                <Layers className="h-3 w-3" />
-                Multi-pool
-              </FilterChip>
-            )}
+          {multiPoolMarketsCount > 0 && onMultiPoolOnlyChange && (
+            <FilterChip
+              active={multiPoolOnly}
+              onClick={() => onMultiPoolOnlyChange(!multiPoolOnly)}
+            >
+              <Layers className="h-3 w-3 text-ocean-teal" />
+              Multi-pool only ({multiPoolMarketsCount})
+            </FilterChip>
+          )}
         </div>
       </div>
     </div>
