@@ -88,7 +88,7 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
         baseWallets.push(
           {
             id: "rainbowkit",
-            name: "MetaMask (xChain)",
+            name: "EVM Wallet (xChain)",
             icon:
               wallets.find((w) => w.id === "rainbowkit")?.metadata.icon || "🔗",
             description:

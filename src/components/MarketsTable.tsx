@@ -29,16 +29,15 @@ import {
   SortOrder,
   type MarketFilter,
 } from "@/hooks/useOnDemandMarketData";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Separator } from "@/components/ui/separator";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { useIsMobile } from "@/hooks/use-mobile";
 import MarketSearchFilters from "@/components/markets/MarketSearchFilters";
+import MarketsPageGuidance from "@/components/markets/MarketsPageGuidance";
 import MarketPagination from "@/components/markets/MarketPagination";
 import SupplyBorrowModal from "@/components/SupplyBorrowModal";
 import WithdrawModal from "@/components/WithdrawModal";
@@ -320,6 +319,7 @@ const MarketsTable = () => {
   const [newMarketsOnly, setNewMarketsOnly] = useState(false);
   const [rewardMarketsOnly, setRewardMarketsOnly] = useState(false);
   const [multiPoolOnly, setMultiPoolOnly] = useState(false);
+  const [walletToolbarOpen, setWalletToolbarOpen] = useState(false);
   const [depositModal, setDepositModal] = useState<{
     isOpen: boolean;
     asset: string | null;
@@ -979,6 +979,36 @@ const MarketsTable = () => {
     setSortOrder(order);
     handleSortChange(field, order);
   };
+
+  const hasActiveFilters = useMemo(
+    () =>
+      searchTerm.trim() !== "" ||
+      newMarketsOnly ||
+      rewardMarketsOnly ||
+      multiPoolOnly ||
+      marketFilter !== "all" ||
+      sortField !== "default" ||
+      sortOrder !== "desc",
+    [
+      searchTerm,
+      newMarketsOnly,
+      rewardMarketsOnly,
+      multiPoolOnly,
+      marketFilter,
+      sortField,
+      sortOrder,
+    ]
+  );
+
+  const clearAllMarketFilters = useCallback(() => {
+    handleSearchTermChange("");
+    setNewMarketsOnly(false);
+    setRewardMarketsOnly(false);
+    setMultiPoolOnly(false);
+    setMarketFilter("all");
+    setCurrentPage(1);
+    handleSortFieldChange("default", "desc");
+  }, [setCurrentPage]);
 
   const handleDepositClick = async (
     asset: string,
@@ -3309,55 +3339,48 @@ const MarketsTable = () => {
   ]);
 
   return (
-    <div className="max-w-[1200px] mx-auto px-4">
-      <div className="space-y-4">
+    <div className="max-w-[1200px] mx-auto px-4 pt-0">
+      <div className="space-y-2 sm:space-y-3">
         {/* Network + liquidity toolbar */}
         {enabledNetworks.length > 0 && (
           <section
             aria-labelledby="markets-toolbar-heading"
-            className="mb-4"
+            className="mb-0"
           >
             <h2 id="markets-toolbar-heading" className="sr-only">
               Network, liquidity, and spendable ALGO
             </h2>
-            <div className="rounded-2xl border border-border/80 bg-muted/25 px-3 py-3 shadow-sm dark:bg-muted/10 sm:px-4 sm:py-3">
-              <div
-                className={cn(
-                  "flex flex-col gap-3",
-                  showMarketsLiquidityToolbar &&
-                    cn(
-                      "sm:flex-row sm:items-center sm:gap-4 md:gap-5 lg:items-start lg:gap-5 xl:gap-6",
-                      marketsToolbarSpendableExtraTight &&
-                        "lg:gap-3 xl:gap-4"
-                    )
-                )}
+            <div className="rounded-xl border border-border/80 bg-muted/25 px-2.5 py-2 shadow-sm dark:bg-muted/10 sm:px-3">
+              <Collapsible
+                open={showMarketsLiquidityToolbar ? walletToolbarOpen : undefined}
+                onOpenChange={
+                  showMarketsLiquidityToolbar ? setWalletToolbarOpen : undefined
+                }
+                className="flex flex-col gap-2"
               >
-                <div className="flex min-w-0 flex-col gap-1.5 self-start sm:shrink-0">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Network
-                  </span>
-                  <DropdownMenu>
+                <div className="flex flex-wrap items-center gap-2">
+                    <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
-                        className="h-9 gap-2 rounded-xl border-border bg-muted/40 px-3 dark:bg-muted/25 hover:bg-muted/60 dark:hover:bg-muted/35"
+                        className="h-8 gap-1.5 rounded-lg border-border bg-muted/40 px-2.5 text-xs sm:text-sm dark:bg-muted/25 hover:bg-muted/60 dark:hover:bg-muted/35"
                         aria-label={`Network: ${getNetworkConfig(currentNetwork).name}. Change network.`}
                       >
                         <img
                           src={getNetworkLogoPath(currentNetwork)}
                           alt=""
-                          className="h-5 w-5 shrink-0 rounded-full"
+                          className="h-4 w-4 shrink-0 rounded-full"
                           onError={(e) => {
                             const target = e.target as HTMLImageElement;
                             target.src = "/placeholder.svg";
                           }}
                         />
-                        <span className="text-sm font-medium">
+                        <span className="max-w-[9rem] truncate font-medium sm:max-w-none">
                           {getNetworkConfig(currentNetwork).name}
                         </span>
-                        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start" className="w-56">
@@ -3394,18 +3417,38 @@ const MarketsTable = () => {
                       })}
                     </DropdownMenuContent>
                   </DropdownMenu>
+
+                  {showMarketsLiquidityToolbar && (
+                      <CollapsibleTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 gap-1.5 rounded-lg border-border bg-muted/40 px-2.5 text-xs sm:text-sm dark:bg-muted/25"
+                        >
+                          <Fuel className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                          Wallet &amp; gas
+                          <ChevronDown
+                            className={cn(
+                              "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform",
+                              walletToolbarOpen && "rotate-180"
+                            )}
+                          />
+                        </Button>
+                      </CollapsibleTrigger>
+                  )}
                 </div>
 
                 {showMarketsLiquidityToolbar && (
-                  <>
-                    <div
-                      className="pointer-events-none hidden h-7 w-px shrink-0 self-center bg-muted-foreground/25 dark:bg-muted-foreground/35 sm:block"
-                      aria-hidden
-                    />
-                    <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        Liquidity
-                      </span>
+                      <CollapsibleContent className="border-t border-border/60 pt-2 mt-0.5">
+                        <div
+                          className={cn(
+                            "flex flex-col gap-3",
+                            "sm:flex-row sm:items-center sm:gap-3"
+                          )}
+                        >
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                      <span className="sr-only">Liquidity</span>
                       <div className="flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:flex-nowrap sm:items-center sm:gap-3 sm:w-auto">
                         <XchainUsdcBridgeControls />
                         {shouldShowXchainUsdcBridgeControls(
@@ -3421,14 +3464,14 @@ const MarketsTable = () => {
                           type="button"
                           variant="outline"
                           size="sm"
-                          className="flex h-9 w-fit shrink-0 items-center gap-2 self-start rounded-xl border-border bg-muted/40 dark:bg-muted/25 hover:bg-muted/60 dark:hover:bg-muted/35 sm:self-center"
+                          className="flex h-8 w-fit shrink-0 items-center gap-1.5 self-start rounded-lg border-border bg-muted/40 px-2.5 text-xs dark:bg-muted/25 hover:bg-muted/60 dark:hover:bg-muted/35 sm:self-center sm:text-sm"
                           onClick={() => {
                             setTinymanSwapOpenForGasUp(false);
                             setIsTinymanSwapModalOpen(true);
                           }}
                           aria-label="Open Tinyman swap"
                         >
-                          <ArrowDownUp className="h-4 w-4 shrink-0" />
+                          <ArrowDownUp className="h-3.5 w-3.5 shrink-0" />
                           Swap
                         </Button>
                       </div>
@@ -3574,9 +3617,10 @@ const MarketsTable = () => {
                         </div>
                       </div>
                     </div>
-                  </>
+                        </div>
+                      </CollapsibleContent>
                 )}
-              </div>
+              </Collapsible>
             </div>
           </section>
         )}
@@ -3584,35 +3628,11 @@ const MarketsTable = () => {
         {/* Hero Section */}
         <MarketsHeroSection />
 
-        {/* Search and Filters */}
-        <MarketSearchFilters
-          searchTerm={searchTerm}
-          onSearchChange={handleSearchTermChange}
-          sortField={sortField}
-          sortOrder={sortOrder}
-          onSortChange={handleSortFieldChange}
-          newMarketsCount={newMarketsCount}
-          newMarketsOnly={newMarketsOnly}
-          onNewMarketsOnlyChange={(v) => {
-            setNewMarketsOnly(v);
-            setCurrentPage(1);
-          }}
-          rewardMarketsCount={rewardMarketsCount}
-          rewardMarketsOnly={rewardMarketsOnly}
-          onRewardMarketsOnlyChange={(v) => {
-            setRewardMarketsOnly(v);
-            setCurrentPage(1);
-          }}
-          multiPoolMarketsCount={multiPoolMarketsCount}
-          multiPoolOnly={multiPoolOnly}
-          onMultiPoolOnlyChange={(v) => {
-            setMultiPoolOnly(v);
-            setCurrentPage(1);
-          }}
-        />
-
         {/* Markets Table */}
-        <div className="rounded-xl border bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 border-gray-200/50 dark:border-ocean-teal/20 p-4 card-hover overflow-visible">
+        <div
+          ref={marketsListRef}
+          className="rounded-xl border bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 border-gray-200/50 dark:border-ocean-teal/20 p-4 card-hover overflow-visible"
+        >
           <div className="pb-4">
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-4">
               <div className="text-xl md:text-2xl font-bold text-slate-800 dark:text-white">
@@ -3681,111 +3701,50 @@ const MarketsTable = () => {
                 )}
               </div>
             </div>
-            {/* Market filter: All / A / B / D — native select on mobile (tabs swallow taps on nested labels) */}
-            <div className="relative z-20 isolate mt-4 mb-3 w-full">
-              {isMobile ? (
-                <Select
-                  value={marketFilter}
-                  onValueChange={(v) =>
-                    handleMarketFilterChange(v as MarketFilter)
-                  }
-                >
-                  <SelectTrigger
-                    className="min-h-11 w-full bg-background"
-                    aria-label="Filter by market"
-                  >
-                    <SelectValue placeholder="All markets" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All markets</SelectItem>
-                    <SelectItem value="A">A market</SelectItem>
-                    <SelectItem value="B">B market</SelectItem>
-                    {hasDMarketTab && (
-                      <SelectItem value="D">D market</SelectItem>
-                    )}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <Tabs
-                  value={marketFilter}
-                  onValueChange={(v) =>
-                    handleMarketFilterChange(v as MarketFilter)
-                  }
-                  className="w-full"
-                >
-                  <TabsList
-                    className={cn(
-                      "flex w-full h-auto min-h-10 flex-nowrap gap-1 p-1",
-                      hasDMarketTab ? "max-w-3xl" : "max-w-md"
-                    )}
-                  >
-                    <TabsTrigger
-                      value="all"
-                      className="min-h-10 min-w-0 flex-1 px-2 text-sm"
-                    >
-                      All Markets
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="A"
-                      className="min-h-10 min-w-0 flex-1 px-2 text-sm"
-                    >
-                      A Markets
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="B"
-                      className="min-h-10 min-w-0 flex-1 px-2 text-sm"
-                    >
-                      B Markets
-                    </TabsTrigger>
-                    {hasDMarketTab && (
-                      <TabsTrigger
-                        value="D"
-                        className="min-h-10 min-w-0 flex-1 px-2 text-sm"
-                      >
-                        D Markets
-                      </TabsTrigger>
-                    )}
-                  </TabsList>
-                </Tabs>
-              )}
-              {isMobile && marketFilter !== "all" && (
-                <p
-                  className="mt-2 text-xs text-muted-foreground"
-                  aria-live="polite"
-                >
-                  Showing {marketFilter} market
-                  {totalItems === 1 ? "" : "s"} ({totalItems})
-                </p>
-              )}
+            <div className="relative z-20 isolate mt-4 mb-2 w-full">
+              <MarketsPageGuidance />
             </div>
           </div>
-          {/* Informational guidance - matches Liquidations Queue styles */}
-          <section
-            aria-label="What you can do here"
-            className="mb-4 hidden md:block"
-          >
-            <p className="text-sm text-muted-foreground mt-1">
-              What You Can Do Here:
-            </p>
-            <div className="mt-3 space-y-1 text-xs text-slate-600 dark:text-slate-400">
-              <p>
-                • Supply Assets: Earn interest with interest bearing tokens
-                that grow in value over time.
-              </p>
-              <p>
-                • Borrow Against Collateral: Access liquidity without selling
-                your holdings.
-              </p>
-              <p>
-                • Track Utilization: See how much of each market is borrowed vs.
-                supplied — a key signal for demand and interest rates.
-              </p>
-              <p>
-                • Compare Risk Profiles: Different assets have different
-                Loan-to-Value (LTV) limits and liquidation thresholds.
-              </p>
-            </div>
-          </section>
+
+          <div className="sticky top-2 z-20 -mx-1 px-1 pb-2 rounded-lg bg-blue-50/95 dark:bg-slate-900/95 backdrop-blur-sm">
+            <MarketSearchFilters
+              embedded
+              searchTerm={searchTerm}
+              onSearchChange={handleSearchTermChange}
+              sortField={sortField}
+              sortOrder={sortOrder}
+              onSortChange={handleSortFieldChange}
+              marketFilter={marketFilter}
+              onMarketFilterChange={handleMarketFilterChange}
+              hasDMarketTab={hasDMarketTab}
+              isMobile={isMobile}
+              newMarketsCount={newMarketsCount}
+              newMarketsOnly={newMarketsOnly}
+              onNewMarketsOnlyChange={(v) => {
+                setNewMarketsOnly(v);
+                setCurrentPage(1);
+              }}
+              rewardMarketsCount={rewardMarketsCount}
+              rewardMarketsOnly={rewardMarketsOnly}
+              onRewardMarketsOnlyChange={(v) => {
+                setRewardMarketsOnly(v);
+                setCurrentPage(1);
+              }}
+              multiPoolMarketsCount={multiPoolMarketsCount}
+              multiPoolOnly={multiPoolOnly}
+              onMultiPoolOnlyChange={(v) => {
+                setMultiPoolOnly(v);
+                setCurrentPage(1);
+              }}
+              hasActiveFilters={hasActiveFilters}
+              onClearAll={clearAllMarketFilters}
+            />
+          </div>
+
+          <Separator
+            className="my-5 h-px bg-gradient-to-r from-transparent via-slate-300/70 to-transparent dark:via-ocean-teal/30"
+            aria-hidden
+          />
 
           {markets.length === 0 && !isLoading ? (
             <div className="text-center py-8">
