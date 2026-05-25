@@ -9,7 +9,6 @@ import {
 import MarketsDesktopTable from "./MarketsDesktopTable";
 import MarketsTabletTable from "./MarketsTabletTable";
 import MarketCardView from "./MarketCardView";
-
 interface MarketsTableContentProps {
   marketFilter?: MarketFilter;
   markets: OnDemandMarketData[];

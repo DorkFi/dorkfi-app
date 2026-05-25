@@ -403,35 +403,38 @@ const MarketsTabletTable = ({
             </div>
           </div>
         </TableCell>
-        {!hasSTokens && (
-          <TableCell className="text-center">
-            {market.isLoading ? (
-              <div className="text-xs text-muted-foreground">Loading...</div>
-            ) : market.error ? (
-              <div className="text-xs text-red-500">Error</div>
-            ) : (
-              <Badge
-                className={depositApyBadgeClassName(
+        <TableCell className="text-center">
+          {market.isSToken ? (
+            <span className="text-muted-foreground text-xs">&nbsp;</span>
+          ) : market.isLoading &&
+            market.intrinsicSupplyApyPercent == null &&
+            !market.rewardsBonusSupplyAprPercent &&
+            !market.apyCalculation ? (
+            <div className="text-xs text-muted-foreground">Loading...</div>
+          ) : market.error ? (
+            <div className="text-xs text-red-500">Error</div>
+          ) : (
+            <Badge
+              className={depositApyBadgeClassName(
+                market.hasRewards,
+                market.intrinsicSupplyApyPercent
+              )}
+            >
+              <APYDisplay 
+                apyCalculation={market.apyCalculation}
+                fallbackAPY={market.supplyAPY}
+                intrinsicApyPercent={market.intrinsicSupplyApyPercent}
+                bonusRewardsAprPercent={market.rewardsBonusSupplyAprPercent}
+                hasRewardsProgram={!!market.hasRewards}
+                hasIntrinsicApy={isIntrinsicDepositApyBadge(
                   market.hasRewards,
                   market.intrinsicSupplyApyPercent
                 )}
-              >
-                <APYDisplay 
-                  apyCalculation={market.apyCalculation}
-                  fallbackAPY={market.supplyAPY}
-                  intrinsicApyPercent={market.intrinsicSupplyApyPercent}
-                  bonusRewardsAprPercent={market.rewardsBonusSupplyAprPercent}
-                  hasRewardsProgram={!!market.hasRewards}
-                  hasIntrinsicApy={isIntrinsicDepositApyBadge(
-                    market.hasRewards,
-                    market.intrinsicSupplyApyPercent
-                  )}
-                  showTooltip={true}
-                />
-              </Badge>
-            )}
-          </TableCell>
-        )}
+                showTooltip={true}
+              />
+            </Badge>
+          )}
+        </TableCell>
         <TableCell className="text-center">
           {market.isLoading ? (
             <div className="text-xs text-muted-foreground">Loading...</div>
@@ -577,9 +580,6 @@ const MarketsTabletTable = ({
     );
   };
 
-  // Check if any market is an s-token to determine if we should hide Deposit APY column
-  const hasSTokens = markets.some(market => market.isSToken);
-
   if (markets.length === 0) {
     return (
       <div className="text-center py-8">
@@ -596,7 +596,7 @@ const MarketsTabletTable = ({
         <TableHeader>
           <TableRow>
             <TableHead className="text-center">Asset</TableHead>
-            {!hasSTokens && <TableHead className="text-center">Deposit APY</TableHead>}
+            <TableHead className="text-center">Supply APY</TableHead>
             <TableHead className="text-center">Borrow APY</TableHead>
             <TableHead className="text-center">Util</TableHead>
             <TableHead className="text-center">Actions</TableHead>
@@ -712,35 +712,38 @@ const MarketsTabletTable = ({
                       </button>
                     </div>
                   </TableCell>
-                  {!hasSTokens && (
-                    <TableCell className="text-center">
-                      {mainMarket.isLoading ? (
-                        <div className="text-xs text-muted-foreground">Loading...</div>
-                      ) : mainMarket.error ? (
-                        <div className="text-xs text-red-500">Error</div>
-                      ) : (
-                        <Badge
-                          className={depositApyBadgeClassName(
+                  <TableCell className="text-center">
+                    {mainMarket.isSToken ? (
+                      <span className="text-muted-foreground text-xs">&nbsp;</span>
+                    ) : mainMarket.isLoading &&
+                      mainMarket.intrinsicSupplyApyPercent == null &&
+                      !mainMarket.rewardsBonusSupplyAprPercent &&
+                      !mainMarket.apyCalculation ? (
+                      <div className="text-xs text-muted-foreground">Loading...</div>
+                    ) : mainMarket.error ? (
+                      <div className="text-xs text-red-500">Error</div>
+                    ) : (
+                      <Badge
+                        className={depositApyBadgeClassName(
+                          mainMarket.hasRewards,
+                          mainMarket.intrinsicSupplyApyPercent
+                        )}
+                      >
+                        <APYDisplay 
+                          apyCalculation={mainMarket.apyCalculation}
+                          fallbackAPY={mainMarket.supplyAPY}
+                          intrinsicApyPercent={mainMarket.intrinsicSupplyApyPercent}
+                          bonusRewardsAprPercent={mainMarket.rewardsBonusSupplyAprPercent}
+                          hasRewardsProgram={!!mainMarket.hasRewards}
+                          hasIntrinsicApy={isIntrinsicDepositApyBadge(
                             mainMarket.hasRewards,
                             mainMarket.intrinsicSupplyApyPercent
                           )}
-                        >
-                          <APYDisplay 
-                            apyCalculation={mainMarket.apyCalculation}
-                            fallbackAPY={mainMarket.supplyAPY}
-                            intrinsicApyPercent={mainMarket.intrinsicSupplyApyPercent}
-                            bonusRewardsAprPercent={mainMarket.rewardsBonusSupplyAprPercent}
-                            hasRewardsProgram={!!mainMarket.hasRewards}
-                            hasIntrinsicApy={isIntrinsicDepositApyBadge(
-                              mainMarket.hasRewards,
-                              mainMarket.intrinsicSupplyApyPercent
-                            )}
-                            showTooltip={true}
-                          />
-                        </Badge>
-                      )}
-                    </TableCell>
-                  )}
+                          showTooltip={true}
+                        />
+                      </Badge>
+                    )}
+                  </TableCell>
                   <TableCell className="text-center">
                     {mainMarket.isLoading ? (
                       <div className="text-xs text-muted-foreground">Loading...</div>

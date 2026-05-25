@@ -38,6 +38,7 @@ import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import { migrationBalanceEffectKey } from "./migrationBalanceEffectKey";
+import { MarketRowStatusBadges } from "./MarketRowStatusBadges";
 
 interface MarketsDesktopTableProps {
   markets: OnDemandMarketData[];
@@ -367,6 +368,149 @@ const MarketsDesktopTable = ({
     });
   };
 
+  const renderSupplyApyCell = (market: OnDemandMarketData) => (
+    <TableCell className="text-center">
+      {market.isSToken ? (
+        <span>&nbsp;</span>
+      ) : market.isLoading &&
+        market.intrinsicSupplyApyPercent == null &&
+        !market.rewardsBonusSupplyAprPercent &&
+        !market.apyCalculation ? (
+        <LoadingCell />
+      ) : market.error ? (
+        <ErrorCell error={market.error} />
+      ) : (
+        <Badge
+          className={depositApyBadgeClassName(
+            market.hasRewards,
+            market.intrinsicSupplyApyPercent
+          )}
+        >
+          <APYDisplay
+            apyCalculation={market.apyCalculation}
+            fallbackAPY={market.supplyAPY}
+            intrinsicApyPercent={market.intrinsicSupplyApyPercent}
+            bonusRewardsAprPercent={market.rewardsBonusSupplyAprPercent}
+            hasRewardsProgram={!!market.hasRewards}
+            hasIntrinsicApy={isIntrinsicDepositApyBadge(
+              market.hasRewards,
+              market.intrinsicSupplyApyPercent
+            )}
+            showTooltip={true}
+          />
+        </Badge>
+      )}
+    </TableCell>
+  );
+
+  const renderBorrowApyCell = (
+    market: OnDemandMarketData,
+    marketIndex?: number
+  ) => (
+    <TableCell className="text-center">
+      {market.isLoading &&
+      market.intrinsicBorrowApyPercent == null &&
+      !market.borrowApyCalculation ? (
+        <LoadingCell />
+      ) : market.error ? (
+        <ErrorCell error={market.error} />
+      ) : (
+        <Badge
+          className={borrowApyBadgeClassName(
+            market.intrinsicBorrowApyPercent,
+            BORROW_APY_BADGE_DEFAULT
+          )}
+        >
+          <BorrowAPYDisplay
+            apyCalculation={market.apyCalculation}
+            fallbackAPY={market.borrowAPY}
+            intrinsicBorrowApyPercent={market.intrinsicBorrowApyPercent}
+            showTooltip={true}
+            networkId={currentNetwork}
+            asset={market.asset}
+            poolId={market.marketInfo?.poolId ?? market.poolId}
+            market={market}
+            marketIndex={marketIndex}
+          />
+        </Badge>
+      )}
+    </TableCell>
+  );
+
+  const renderTotalSupplyCell = (market: OnDemandMarketData) => (
+    <TableCell className="text-center">
+      {market.isSToken ? (
+        <span>&nbsp;</span>
+      ) : market.isLoading ? (
+        <LoadingCell />
+      ) : market.error ? (
+        <ErrorCell error={market.error} />
+      ) : (
+        <div>
+          <div className="font-medium">
+            {formatCurrency(Math.round(market.totalSupplyUSD / 1_000_000), "USD", {
+              maximumFractionDigits: 0,
+            })}
+          </div>
+          <div className="text-sm text-muted-foreground">
+            {formatNumber(market.totalSupply, { maximumFractionDigits: 3 })}{" "}
+            {market.asset}
+          </div>
+        </div>
+      )}
+    </TableCell>
+  );
+
+  const renderTotalBorrowCell = (market: OnDemandMarketData) => (
+    <TableCell className="text-center">
+      {market.isLoading ? (
+        <LoadingCell />
+      ) : market.error ? (
+        <ErrorCell error={market.error} />
+      ) : (
+        <div>
+          <div className="font-medium">
+            {formatCurrency(Math.round(market.totalBorrowUSD / 1_000_000), "USD", {
+              maximumFractionDigits: 0,
+            })}
+          </div>
+          <div className="text-sm text-muted-foreground">
+            {formatNumber(market.totalBorrow, { maximumFractionDigits: 3 })}{" "}
+            {market.asset}
+          </div>
+        </div>
+      )}
+    </TableCell>
+  );
+
+  const renderUtilizationCell = (market: OnDemandMarketData) => (
+    <TableCell className="text-center">
+      {market.isLoading ? (
+        <LoadingCell />
+      ) : market.error ? (
+        <ErrorCell error={market.error} />
+      ) : market.asset === "WAD" ? (
+        <span></span>
+      ) : (
+        <div className="flex flex-col items-center space-y-1">
+          <div className="text-sm font-medium">
+            {market.isSToken
+              ? "100.0%"
+              : formatPercent(market.utilization / 100, {
+                  maximumFractionDigits: 1,
+                })}
+          </div>
+          <div className="flex justify-center w-full">
+            <Progress
+              value={market.isSToken ? 100 : market.utilization}
+              className="h-2 w-20"
+            />
+          </div>
+        </div>
+      )}
+    </TableCell>
+  );
+
   // Helper function to render a single market row
   const renderMarketRow = (
     market: OnDemandMarketData,
@@ -436,126 +580,28 @@ const MarketsDesktopTable = ({
                 );
               })()}
               {/* Asset name and CF badge stacked */}
-              <div className="flex flex-col items-center">
-                <div className="font-extrabold text-lg leading-tight">
+              <div className="flex min-w-[5.5rem] max-w-full flex-col items-center gap-1 sm:min-w-0">
+                <div className="font-extrabold text-lg leading-tight whitespace-nowrap">
                   {market.asset}
                 </div>
-                <Badge variant="outline" className="text-xs px-2.5 py-0.5 h-5 mt-1 text-muted-foreground flex items-center justify-center whitespace-nowrap min-w-fit">
+                <Badge
+                  variant="outline"
+                  className="inline-flex h-auto min-h-5 items-center justify-center whitespace-nowrap px-2.5 py-0.5 text-xs leading-none text-muted-foreground"
+                >
                   CF {Math.round(market.collateralFactor)}%
                 </Badge>
+                <MarketRowStatusBadges market={market} className="justify-center" />
               </div>
             </div>
             {/* Spacer to align with collapsible rows */}
             <div className="w-6 flex-shrink-0" />
           </div>
         </TableCell>
-        <TableCell className="text-center">
-          {market.isSToken ? (
-            <span>&nbsp;</span>
-          ) : market.isLoading ? (
-            <LoadingCell />
-          ) : market.error ? (
-            <ErrorCell error={market.error} />
-          ) : (
-            <div>
-              <div className="font-medium">
-                {formatCurrency(Math.round(market.totalSupplyUSD / 1_000_000), "USD", { maximumFractionDigits: 0 })}
-              </div>
-              <div className="text-sm text-muted-foreground">
-                {formatNumber(market.totalSupply, { maximumFractionDigits: 3 })} {market.asset}
-              </div>
-            </div>
-          )}
-        </TableCell>
-        <TableCell className="text-center">
-          {market.isSToken ? (
-            <span>&nbsp;</span>
-          ) : market.isLoading ? (
-            <LoadingCell />
-          ) : market.error ? (
-            <ErrorCell error={market.error} />
-          ) : (
-            <Badge
-              className={depositApyBadgeClassName(
-                market.hasRewards,
-                market.intrinsicSupplyApyPercent
-              )}
-            >
-              <APYDisplay 
-                apyCalculation={market.apyCalculation}
-                fallbackAPY={market.supplyAPY}
-                intrinsicApyPercent={market.intrinsicSupplyApyPercent}
-                bonusRewardsAprPercent={market.rewardsBonusSupplyAprPercent}
-                hasRewardsProgram={!!market.hasRewards}
-                hasIntrinsicApy={isIntrinsicDepositApyBadge(
-                  market.hasRewards,
-                  market.intrinsicSupplyApyPercent
-                )}
-                showTooltip={true}
-              />
-            </Badge>
-          )}
-        </TableCell>
-        <TableCell className="text-center">
-          {market.isLoading ? (
-            <LoadingCell />
-          ) : market.error ? (
-            <ErrorCell error={market.error} />
-          ) : (
-            <div>
-              <div className="font-medium">
-                {formatCurrency(Math.round(market.totalBorrowUSD / 1_000_000), "USD", { maximumFractionDigits: 0 })}
-              </div>
-              <div className="text-sm text-muted-foreground">
-                {formatNumber(market.totalBorrow, { maximumFractionDigits: 3 })} {market.asset}
-              </div>
-            </div>
-          )}
-        </TableCell>
-        <TableCell className="text-center">
-          {market.isLoading ? (
-            <LoadingCell />
-          ) : market.error ? (
-            <ErrorCell error={market.error} />
-          ) : (
-            <Badge
-              className={borrowApyBadgeClassName(
-                market.intrinsicBorrowApyPercent,
-                BORROW_APY_BADGE_DEFAULT
-              )}
-            >
-              <BorrowAPYDisplay 
-                apyCalculation={market.apyCalculation}
-                fallbackAPY={market.borrowAPY}
-                intrinsicBorrowApyPercent={market.intrinsicBorrowApyPercent}
-                showTooltip={true}
-                networkId={currentNetwork}
-                asset={market.asset}
-                poolId={market.marketInfo?.poolId ?? market.poolId}
-                market={market}
-                marketIndex={marketIndex}
-              />
-            </Badge>
-          )}
-        </TableCell>
-        <TableCell className="text-center">
-          {market.isLoading ? (
-            <LoadingCell />
-          ) : market.error ? (
-            <ErrorCell error={market.error} />
-          ) : market.asset === "WAD" ? (
-            <span></span>
-          ) : (
-            <div className="flex flex-col items-center space-y-1">
-              <div className="text-sm font-medium">
-                {market.isSToken ? "100.0%" : formatPercent(market.utilization / 100, { maximumFractionDigits: 1 })}
-              </div>
-              <div className="flex justify-center w-full">
-                <Progress value={market.isSToken ? 100 : market.utilization} className="h-2 w-20" />
-              </div>
-            </div>
-          )}
-        </TableCell>
+        {renderSupplyApyCell(market)}
+        {renderBorrowApyCell(market, marketIndex)}
+        {renderTotalSupplyCell(market)}
+        {renderTotalBorrowCell(market)}
+        {renderUtilizationCell(market)}
         <TableCell className="text-center">
           {(() => {
             // Get token to access originalSymbol if market override exists
@@ -705,22 +751,7 @@ const MarketsDesktopTable = ({
               </TableHead>
               <TableHead className="text-center">
                 <div className="flex items-center justify-center gap-1">
-                  Total Supply
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span>
-                        <Info className="w-4 h-4 text-ocean-teal cursor-help" />
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {headerTooltips.totalDeposit}
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-              </TableHead>
-              <TableHead className="text-center">
-                <div className="flex items-center justify-center gap-1">
-                  Deposit APY
+                  Supply APY
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <span>
@@ -729,21 +760,6 @@ const MarketsDesktopTable = ({
                     </TooltipTrigger>
                     <TooltipContent>
                       {headerTooltips.depositAPY}
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-              </TableHead>
-              <TableHead className="text-center">
-                <div className="flex items-center justify-center gap-1">
-                  Total Borrow
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span>
-                        <Info className="w-4 h-4 text-ocean-teal cursor-help" />
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {headerTooltips.totalBorrow}
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -759,6 +775,36 @@ const MarketsDesktopTable = ({
                     </TooltipTrigger>
                     <TooltipContent>
                       {headerTooltips.borrowAPY}
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+              </TableHead>
+              <TableHead className="text-center">
+                <div className="flex items-center justify-center gap-1">
+                  Total Supply
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span>
+                        <Info className="w-4 h-4 text-ocean-teal cursor-help" />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {headerTooltips.totalDeposit}
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+              </TableHead>
+              <TableHead className="text-center">
+                <div className="flex items-center justify-center gap-1">
+                  Total Borrow
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span>
+                        <Info className="w-4 h-4 text-ocean-teal cursor-help" />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {headerTooltips.totalBorrow}
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -916,112 +962,11 @@ const MarketsDesktopTable = ({
                         </button>
                       </div>
                   </TableCell>
-                  <TableCell className="text-center">
-                    {mainMarket.isSToken ? (
-                      <span>&nbsp;</span>
-                    ) : mainMarket.isLoading ? (
-                      <LoadingCell />
-                    ) : mainMarket.error ? (
-                      <ErrorCell error={mainMarket.error} />
-                    ) : (
-                      <div>
-                        <div className="font-medium">
-                          {formatCurrency(mainMarket.totalSupplyUSD / 1_000_000, "USD", { maximumFractionDigits: 0 })}
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          {formatNumber(mainMarket.totalSupply, { maximumFractionDigits: 3 })} {mainMarket.asset}
-                        </div>
-                      </div>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-center">
-                    {mainMarket.isSToken ? (
-                      <span>&nbsp;</span>
-                    ) : mainMarket.isLoading ? (
-                      <LoadingCell />
-                    ) : mainMarket.error ? (
-                      <ErrorCell error={mainMarket.error} />
-                    ) : (
-                      <Badge
-                        className={depositApyBadgeClassName(
-                          mainMarket.hasRewards,
-                          mainMarket.intrinsicSupplyApyPercent
-                        )}
-                      >
-                        <APYDisplay 
-                          apyCalculation={mainMarket.apyCalculation}
-                          fallbackAPY={mainMarket.supplyAPY}
-                          intrinsicApyPercent={mainMarket.intrinsicSupplyApyPercent}
-                          bonusRewardsAprPercent={mainMarket.rewardsBonusSupplyAprPercent}
-                          hasRewardsProgram={!!mainMarket.hasRewards}
-                          hasIntrinsicApy={isIntrinsicDepositApyBadge(
-                            mainMarket.hasRewards,
-                            mainMarket.intrinsicSupplyApyPercent
-                          )}
-                          showTooltip={true}
-                        />
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-center">
-                    {mainMarket.isLoading ? (
-                      <LoadingCell />
-                    ) : mainMarket.error ? (
-                      <ErrorCell error={mainMarket.error} />
-                    ) : (
-                      <div>
-                        <div className="font-medium">
-                          {formatCurrency(mainMarket.totalBorrowUSD / 1_000_000, "USD", { maximumFractionDigits: 0 })}
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          {formatNumber(mainMarket.totalBorrow, { maximumFractionDigits: 3 })} {mainMarket.asset}
-                        </div>
-                      </div>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-center">
-                    {mainMarket.isLoading ? (
-                      <LoadingCell />
-                    ) : mainMarket.error ? (
-                      <ErrorCell error={mainMarket.error} />
-                    ) : (
-                      <Badge
-                        className={borrowApyBadgeClassName(
-                          mainMarket.intrinsicBorrowApyPercent,
-                          BORROW_APY_BADGE_DEFAULT
-                        )}
-                      >
-                        <BorrowAPYDisplay 
-                          apyCalculation={mainMarket.apyCalculation}
-                          fallbackAPY={mainMarket.borrowAPY}
-                          intrinsicBorrowApyPercent={mainMarket.intrinsicBorrowApyPercent}
-                          showTooltip={true}
-                          networkId={currentNetwork}
-                          asset={mainMarket.asset}
-                          poolId={mainMarket.marketInfo?.poolId ?? mainMarket.poolId}
-                          market={mainMarket}
-                        />
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-center">
-                    {mainMarket.isLoading ? (
-                      <LoadingCell />
-                    ) : mainMarket.error ? (
-                      <ErrorCell error={mainMarket.error} />
-                    ) : mainMarket.asset === "WAD" ? (
-                      <span></span>
-                    ) : (
-                      <div className="flex flex-col items-center space-y-1">
-                        <div className="text-sm font-medium">
-                          {mainMarket.isSToken ? "100.0%" : formatPercent(mainMarket.utilization / 100, { maximumFractionDigits: 1 })}
-                        </div>
-                        <div className="flex justify-center w-full">
-                          <Progress value={mainMarket.isSToken ? 100 : mainMarket.utilization} className="h-2 w-20" />
-                        </div>
-                      </div>
-                    )}
-                  </TableCell>
+                  {renderSupplyApyCell(mainMarket)}
+                  {renderBorrowApyCell(mainMarket, 0)}
+                  {renderTotalSupplyCell(mainMarket)}
+                  {renderTotalBorrowCell(mainMarket)}
+                  {renderUtilizationCell(mainMarket)}
                   <TableCell className="text-center">
                     {(() => {
                       // Get token to access originalSymbol if market override exists
