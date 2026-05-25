@@ -859,6 +859,8 @@ export interface GlobalConfig {
     enableGasStation: boolean;
     enableNFTBoost: boolean;
     enableLiquidatablePositions: boolean;
+    /** NFT holder rewards — pay agent on Base (x402) in portfolio modal. */
+    enableAgentClaim: boolean;
   };
 }
 
@@ -3054,6 +3056,7 @@ export const config: GlobalConfig = {
     enableGasStation: false,
     enableNFTBoost: true, // Enable NFT boost for governance voting power
     enableLiquidatablePositions: true, // Enable liquidatable positions section in portfolio
+    enableAgentClaim: true, // NFT holder reward claim — Base x402 pay-agent section
   },
 };
 
@@ -4010,7 +4013,7 @@ export const getPreFiParameters = (
 export const isFeatureEnabled = (
   feature: keyof GlobalConfig["features"]
 ): boolean => {
-  return config.features[feature];
+  return getConfig().features[feature];
 };
 
 /**
@@ -4083,6 +4086,12 @@ export const getEnvironmentConfig = (): Partial<GlobalConfig> => {
     envFeatures.enableLiquidatablePositions =
       import.meta.env.VITE_ENABLE_LIQUIDATABLE_POSITIONS === "true" ||
       import.meta.env.VITE_ENABLE_LIQUIDATABLE_POSITIONS === "1";
+  }
+
+  if (typeof import.meta.env.VITE_ENABLE_AGENT_CLAIM !== "undefined") {
+    envFeatures.enableAgentClaim =
+      import.meta.env.VITE_ENABLE_AGENT_CLAIM === "true" ||
+      import.meta.env.VITE_ENABLE_AGENT_CLAIM === "1";
   }
 
   if (env === "development") {

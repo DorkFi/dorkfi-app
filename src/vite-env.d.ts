@@ -19,4 +19,6 @@ interface ImportMetaEnv {
   readonly VITE_NFT_CLAIM_MANUAL_URL?: string;
   /** `claimlayer-paid-claimall` JSON `targetChain` (default `voi:mainnet`). Execute body includes `algorandAddress` + `address` (AVM beneficiary). */
   readonly VITE_CLAIMLAYER_TARGET_CHAIN?: string;
+  /** When `false` or `0`, NFT holder pay-agent on Base shows maintenance UI instead of WalletConnect. */
+  readonly VITE_ENABLE_AGENT_CLAIM?: string;
 }
