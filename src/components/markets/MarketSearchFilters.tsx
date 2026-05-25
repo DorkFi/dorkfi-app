@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/select";
 import { SortField, SortOrder, type MarketFilter } from "@/hooks/useOnDemandMarketData";
 import MarketsTierFilter from "@/components/markets/MarketsTierFilter";
+import { Separator } from "@/components/ui/separator";
 
 interface MarketSearchFiltersProps {
   searchTerm: string;
@@ -208,11 +209,18 @@ const MarketSearchFilters = ({
             Top borrow APY
           </FilterChip>
           {hasFilterChips && (
-            <div
-              role="separator"
-              aria-orientation="vertical"
-              className="mx-0.5 h-6 w-px shrink-0 bg-pink-400/70 dark:bg-pink-400/50"
-            />
+            <>
+              <Separator
+                orientation="horizontal"
+                className="basis-full h-px bg-gradient-to-r from-transparent via-slate-300/70 to-transparent dark:via-ocean-teal/30 sm:hidden"
+                aria-hidden
+              />
+              <Separator
+                orientation="vertical"
+                className="mx-0.5 hidden h-6 w-px bg-gradient-to-b from-transparent via-slate-300/70 to-transparent dark:via-ocean-teal/30 sm:block"
+                aria-hidden
+              />
+            </>
           )}
           {rewardMarketsCount > 0 && onRewardMarketsOnlyChange && (
             <FilterChip
