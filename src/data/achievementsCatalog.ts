@@ -5,7 +5,8 @@ export type AchievementFamilyId =
   | "dork-labs-investor"
   | "dork-fighter"
   | "bug-beta-grinder"
-  | "hula-looper";
+  | "hula-looper"
+  | "vote-first";
 
 export type AchievementTierDefinition = {
   label: string;
@@ -122,6 +123,27 @@ export const ACHIEVEMENT_FAMILIES: AchievementFamily[] = [
     },
   },
   {
+    id: "vote-first",
+    title: "First Vote",
+    description:
+      "Awarded to users who cast their first governance vote on DorkFi.",
+    lockedHint: "Cast your first governance vote to unlock",
+    tiers: {
+      gold: {
+        label: "Early governance participant",
+        imageUrl: tierImage("vote-first", "gold"),
+      },
+      silver: {
+        label: "Governance participant",
+        imageUrl: tierImage("vote-first", "silver"),
+      },
+      bronze: {
+        label: "First vote cast",
+        imageUrl: tierImage("vote-first", "bronze"),
+      },
+    },
+  },
+  {
     id: "hula-looper",
     title: "Hula Looper",
     description:
@@ -151,3 +173,8 @@ export const ACHIEVEMENT_FAMILY_BY_ID: Record<
 > = Object.fromEntries(
   ACHIEVEMENT_FAMILIES.map((family) => [family.id, family])
 ) as Record<AchievementFamilyId, AchievementFamily>;
+
+/** Families shown in portfolio UI (`vote-first` hidden until ready to ship). */
+export const PORTFOLIO_ACHIEVEMENT_FAMILIES = ACHIEVEMENT_FAMILIES.filter(
+  (family) => family.id !== "vote-first"
+);

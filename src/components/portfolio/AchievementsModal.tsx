@@ -11,11 +11,11 @@ import { ExternalLink, Info } from "lucide-react";
 import { AchievementWhaleIcon } from "./AchievementWhaleIcon";
 import {
   ACHIEVEMENT_DOCS_URL,
-  ACHIEVEMENT_FAMILIES,
+  PORTFOLIO_ACHIEVEMENT_FAMILIES,
   type AchievementFamily,
   type AchievementTier,
 } from "@/data/achievementsCatalog";
-import type { UserAchievements } from "@/data/mockUserAchievements";
+import type { UserAchievements } from "@/data/userAchievements";
 import { resolveAchievementDisplay } from "@/utils/achievementsDisplay";
 import { AchievementBadge } from "./AchievementBadge";
 import { Button } from "@/components/ui/button";
@@ -112,9 +112,8 @@ export function AchievementsModal({
             Your Achievements
           </DialogTitle>
           <DialogDescription className="text-left text-sm sm:text-base">
-            Soulbound NFT badges celebrate your contributions on DorkFi. Soulbound
-            achievements are permanently tied to your wallet. You receive only the
-            highest tier per category.
+            Achievements celebrate your contributions on DorkFi and are permanently
+            tied to your wallet. You receive only the highest tier per category.
           </DialogDescription>
         </DialogHeader>
 
@@ -132,13 +131,12 @@ export function AchievementsModal({
             />
             <p>
               <span className="font-medium text-foreground">Preview</span> —
-              soulbound achievement NFTs will appear on your profile after
-              distribution.
+              achievements will appear on your profile after distribution.
             </p>
           </div>
 
           <div className="space-y-4">
-            {ACHIEVEMENT_FAMILIES.map((family, index) => (
+            {PORTFOLIO_ACHIEVEMENT_FAMILIES.map((family, index) => (
               <AchievementModalCard
                 key={family.id}
                 family={family}

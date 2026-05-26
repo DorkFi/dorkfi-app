@@ -5514,15 +5514,15 @@ const Portfolio = () => {
                 }
                 onRefreshMarkets={handleRefreshMarkets}
                 isRefreshingMarkets={isRefreshingMarkets}
-                achievementsSlot={
-                  displayAddress ? (
-                    <AchievementsCompactTrigger
-                      address={displayAddress}
-                      isViewOnly={isViewOnly}
-                    />
-                  ) : undefined
-                }
               />
+              {displayAddress ? (
+                <div className="mx-auto mt-4 w-full max-w-7xl animate-fade-in">
+                  <AchievementsCompactTrigger
+                    address={displayAddress}
+                    isViewOnly={isViewOnly}
+                  />
+                </div>
+              ) : null}
               {showPortfolioNftHolderRewardsFetching && (
                 <div className="mx-auto mt-4 w-full max-w-7xl animate-fade-in">
                   <div

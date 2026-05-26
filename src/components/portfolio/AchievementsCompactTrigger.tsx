@@ -2,9 +2,8 @@ import { useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AchievementWhaleIcon } from "./AchievementWhaleIcon";
-import { ACHIEVEMENT_FAMILIES } from "@/data/achievementsCatalog";
+import { PORTFOLIO_ACHIEVEMENT_FAMILIES } from "@/data/achievementsCatalog";
 import { useUserAchievements } from "@/hooks/useUserAchievements";
-import { countEarnedAchievements } from "@/utils/achievementsDisplay";
 import { AchievementsModal } from "./AchievementsModal";
 
 type AchievementsCompactTriggerProps = {
@@ -23,8 +22,10 @@ export function AchievementsCompactTrigger({
     address
   );
 
-  const earnedCount = countEarnedAchievements(earned);
-  const totalFamilies = ACHIEVEMENT_FAMILIES.length;
+  const earnedCount = PORTFOLIO_ACHIEVEMENT_FAMILIES.filter(
+    (family) => earned[family.id] != null
+  ).length;
+  const totalFamilies = PORTFOLIO_ACHIEVEMENT_FAMILIES.length;
   const loading = isLoading || isFetching;
 
   return (
@@ -62,7 +63,7 @@ export function AchievementsCompactTrigger({
               ) : null}
             </div>
             <p className="text-xs text-muted-foreground group-hover:text-foreground/80">
-              Soulbound badges · tap to view all
+              Achievements · tap to view all
             </p>
           </div>
 

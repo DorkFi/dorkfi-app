@@ -26,7 +26,6 @@ interface EnhancedHealthFactorProps {
   isRefreshingMarkets?: boolean;
   onRepayDebt?: () => void;
   onWithdraw?: () => void;
-  achievementsSlot?: React.ReactNode;
 }
 
 const EnhancedHealthFactor = ({
@@ -43,7 +42,6 @@ const EnhancedHealthFactor = ({
   isRefreshingMarkets,
   onRepayDebt,
   onWithdraw,
-  achievementsSlot,
 }: EnhancedHealthFactorProps) => {
   return (
     <div className="w-full max-w-7xl mx-auto animate-fade-in">
@@ -59,7 +57,6 @@ const EnhancedHealthFactor = ({
                 dorkNftImage={dorkNftImage}
                 underwaterBg={underwaterBg}
                 onEdit={onEditProfile}
-                achievementsSlot={achievementsSlot}
               />
               {(healthFactor === null || healthFactor <= 1.2) && (
                 <div

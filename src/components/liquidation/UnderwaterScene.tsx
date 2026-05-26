@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import HealthWaterGauge from "./HealthWaterGauge";
 
 interface UnderwaterSceneProps {
@@ -7,7 +6,6 @@ interface UnderwaterSceneProps {
   dorkNftImage?: string;
   underwaterBg: string;
   onEdit?: () => void;
-  achievementsSlot?: ReactNode;
 }
 
 const UnderwaterScene = ({
@@ -16,7 +14,6 @@ const UnderwaterScene = ({
   dorkNftImage,
   underwaterBg: _underwaterBg,
   onEdit,
-  achievementsSlot,
 }: UnderwaterSceneProps) => {
   return (
     <div className="relative space-y-4">
@@ -26,7 +23,6 @@ const UnderwaterScene = ({
         avatarSrc={dorkNftImage}
         onEdit={onEdit}
       />
-      {achievementsSlot}
     </div>
   );
 };
