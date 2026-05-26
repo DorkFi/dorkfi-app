@@ -116,6 +116,13 @@ Complete guide for integrating the transaction-metadata endpoint to update appli
 
 **Perfect for:** UNIT holders using Governance, anyone reviewing how proposals appear in the UI; use the index to find all governance docs in one place
 
+### 🏅 [Achievements documentation (index)](achievements/index.md)
+**Catalog of achievement guides in this repo**
+
+- [Achievements guide](achievements/ACHIEVEMENTS.md): portfolio preview UI, achievement families and tiers, `dorkfi-achievements.json` format, TYPE mapping, images, and how to update wallet data
+
+**Perfect for:** Operators updating achievement distribution data, developers extending the catalog or portfolio UI
+
 ### 🏷️ [Adding a governance proposal category (workflow)](workflows/ADD_PROPOSAL_CATEGORY_TO_GOVERNANCE.md)
 **Wire a new on-chain category ID through the frontend**
 
@@ -166,10 +173,11 @@ Recorded checks for withdraw modal (desktop and mobile), supplied/borrowed actio
 6. **Claim Setup**: Follow [Claim setup (workflow)](workflows/SETUP_NEW_CLAIM.md) to configure reward claims
 7. **Transaction Updates**: Review [Transaction Metadata Integration](TRANSACTION_METADATA.md) for real-time state updates
 8. **Governance**: Read the [Governance User Guide](governance/GOVERNANCE_USER_GUIDE.md) (see [Governance documentation](governance/index.md)); to add a category, use [Adding a governance proposal category](workflows/ADD_PROPOSAL_CATEGORY_TO_GOVERNANCE.md)
-9. **Health Factor**: See [Health Factor Calculation](HEALTH_FACTOR_CALCULATION.md) for position safety math
-10. **Asset Decimals & Withdraw Value**: See [Asset Decimals and Display](ASSET_DECIMALS_AND_DISPLAY.md) for balance/amount formatting and withdraw modal USD consistency
-11. **Withdraw flow QA**: See [Portfolio Withdraw Flow – Verification](PORTFOLIO_WITHDRAW_FLOW_VERIFICATION.md) for the recorded verification pass
-12. **Codebase**: Explore the React/TypeScript frontend implementation
+9. **Achievements**: See [Achievements guide](achievements/ACHIEVEMENTS.md) (see [Achievements documentation](achievements/index.md)) for JSON data, catalog families, and portfolio UI
+10. **Health Factor**: See [Health Factor Calculation](HEALTH_FACTOR_CALCULATION.md) for position safety math
+11. **Asset Decimals & Withdraw Value**: See [Asset Decimals and Display](ASSET_DECIMALS_AND_DISPLAY.md) for balance/amount formatting and withdraw modal USD consistency
+12. **Withdraw flow QA**: See [Portfolio Withdraw Flow – Verification](PORTFOLIO_WITHDRAW_FLOW_VERIFICATION.md) for the recorded verification pass
+13. **Codebase**: Explore the React/TypeScript frontend implementation
 
 ## Key Features
 
