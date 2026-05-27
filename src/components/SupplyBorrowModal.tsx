@@ -30,6 +30,7 @@ import {
 } from "@/services/lendingService";
 import {
   getTokenConfig,
+  resolveTokenConfigFromDisplayToken,
   getAllTokensWithDisplayInfo,
   getAlgorandNetworkFromNetworkId,
   getNetworkConfig,
@@ -204,19 +205,7 @@ export function resolveSupplyBorrowToken<T extends SupplyBorrowTokenRow>(
   const poolOk = (t: T) =>
     poolId == null || poolId === "" || String(t.poolId) === String(poolId);
 
-  // Prefer config key first: API `marketId` may not match `underlyingContractId` (e.g. asset id),
-  // and display `symbol` + pool collide for ALGO vs fALGO.
-  if (configSymbol) {
-    const byKey = tokens.find(
-      (t) =>
-        poolOk(t) &&
-        (t.configKey === configSymbol ||
-          t.originalSymbol === configSymbol ||
-          t.symbol === configSymbol)
-    );
-    if (byKey) return byKey;
-  }
-
+  // Prefer market contract + pool first (e.g. legacy vs V2 wBTC share `wBTC` + pool id).
   if (marketId != null && marketId !== "" && poolId != null && poolId !== "") {
     const byContract = tokens.find(
       (t) =>
@@ -230,6 +219,27 @@ export function resolveSupplyBorrowToken<T extends SupplyBorrowTokenRow>(
         String(t.poolId ?? "") === String(poolId)
     );
     if (byOriginal) return byOriginal;
+  }
+
+  if (configSymbol) {
+    const keyHits = tokens.filter(
+      (t) =>
+        poolOk(t) &&
+        (t.configKey === configSymbol ||
+          t.originalSymbol === configSymbol ||
+          t.symbol === configSymbol)
+    );
+    if (keyHits.length === 1) return keyHits[0];
+    if (keyHits.length > 1 && marketId != null && String(marketId) !== "") {
+      const mid = String(marketId);
+      const byMid = keyHits.find(
+        (t) =>
+          String(t.underlyingContractId ?? "") === mid ||
+          String(t.originalContractId ?? "") === mid
+      );
+      if (byMid) return byMid;
+    }
+    if (keyHits.length > 0) return keyHits[0];
   }
 
   if (poolId != null && poolId !== "") {
@@ -1677,13 +1687,16 @@ const SupplyBorrowModal = ({
           );
         }
 
-        // Handle case where tokenConfig might be an array (multiple markets)
-        // Compare poolIds as strings to ensure exact match
-        const tokenConfig = Array.isArray(tokenConfigRaw)
-          ? tokenConfigRaw.find(
-            (tc) => String(tc.poolId) === String(token.poolId)
-          ) || tokenConfigRaw[0]
-          : tokenConfigRaw;
+        const tokenConfig = resolveTokenConfigFromDisplayToken(
+          networkToUse as NetworkId,
+          {
+            configKey: (token as { configKey?: string }).configKey,
+            originalSymbol,
+            symbol: token.symbol,
+            poolId: token.poolId,
+            underlyingContractId: token.underlyingContractId,
+          }
+        );
 
         if (!tokenConfig) {
           throw new Error(
@@ -2835,16 +2848,20 @@ const SupplyBorrowModal = ({
         );
       }
 
-      // Handle case where tokenConfig might be an array (multiple markets)
-      const originalTokenConfig = Array.isArray(tokenConfigRaw)
-        ? tokenConfigRaw.find(
-          (tc) => String(tc.poolId) === String(token.poolId)
-        ) || tokenConfigRaw[0]
-        : tokenConfigRaw;
+      const originalTokenConfig = resolveTokenConfigFromDisplayToken(
+        actualNetwork as NetworkId,
+        {
+          configKey: (token as { configKey?: string }).configKey,
+          originalSymbol,
+          symbol: token.symbol,
+          poolId: token.poolId,
+          underlyingContractId: token.underlyingContractId,
+        }
+      );
 
       if (!originalTokenConfig) {
         throw new Error(
-          `Original token config not found for ${asset} (originalSymbol: ${originalSymbol})`
+          `Original token config not found for ${asset} (originalSymbol: ${originalSymbol}, contractId: ${token.underlyingContractId})`
         );
       }
 
