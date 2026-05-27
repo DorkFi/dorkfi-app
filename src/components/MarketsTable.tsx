@@ -15,10 +15,12 @@ import {
   getAllTokensWithDisplayInfo,
   getFolksAdaptersForPhase,
   getTokenConfig,
+  resolveTokenConfigFromDisplayToken,
   resolveTokenForMarketPosition,
   getAlgorandNetworkFromNetworkId,
   tokenStandardUsesNativeWalletBalance,
 } from "@/config";
+import { marketContractIdFromRowCacheKey } from "@/hooks/useOnDemandMarketData";
 import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
 
@@ -328,12 +330,15 @@ const MarketsTable = () => {
     marketRowKey?: string;
     /** Config `tokens` key from the row (e.g. `fALGO`); passed to SupplyBorrowModal for token resolution. */
     configSymbol?: string;
+    /** nt200 market contract id (disambiguates e.g. legacy vs V2 wBTC). */
+    marketId?: string;
   }>({
     isOpen: false,
     asset: null,
     poolId: undefined,
     marketRowKey: undefined,
     configSymbol: undefined,
+    marketId: undefined,
   });
   const [withdrawModal, setWithdrawModal] = useState({
     isOpen: false,
@@ -859,6 +864,21 @@ const MarketsTable = () => {
     [markets]
   );
 
+  const marketContractIdFromMarketRowKey = useCallback(
+    (marketRowKey: string | undefined) => {
+      if (!marketRowKey) return undefined;
+      const row = markets.find(
+        (m) => (m as { _sortKey?: string })._sortKey === marketRowKey
+      );
+      const fromInfo = row?.marketInfo?.marketId;
+      if (fromInfo != null && String(fromInfo).trim() !== "") {
+        return String(fromInfo).trim();
+      }
+      return marketContractIdFromRowCacheKey(marketRowKey);
+    },
+    [markets]
+  );
+
   const resolveTokenForDisplayedAsset = useCallback(
     (
       asset: string,
@@ -872,9 +892,14 @@ const MarketsTable = () => {
         asset,
         poolId,
         configSymbol,
+        marketContractId: marketContractIdFromMarketRowKey(marketRowKey),
       });
     },
-    [currentNetwork, configSymbolFromMarketRowKey]
+    [
+      currentNetwork,
+      configSymbolFromMarketRowKey,
+      marketContractIdFromMarketRowKey,
+    ]
   );
 
   const borrowModalAvailableAssets = useMemo(() => {
@@ -1031,12 +1056,29 @@ const MarketsTable = () => {
     }
 
     const configSymbol = configSymbolFromMarketRowKey(marketRowKey);
+    const marketRow =
+      marketRowKey != null
+        ? markets.find(
+            (m) => (m as { _sortKey?: string })._sortKey === marketRowKey
+          )
+        : undefined;
+    const marketId =
+      marketContractIdFromMarketRowKey(marketRowKey) ??
+      (marketRow?.marketInfo?.marketId != null
+        ? String(marketRow.marketInfo.marketId)
+        : undefined) ??
+      resolveTokenForDisplayedAsset(asset, poolId, marketRowKey)
+        ?.underlyingContractId;
     setDepositModal({
       isOpen: true,
       asset,
       poolId,
       marketRowKey,
       configSymbol,
+      marketId:
+        marketId != null && String(marketId).trim() !== ""
+          ? String(marketId).trim()
+          : undefined,
     });
 
     setIsLoadingBalance(true);
@@ -1343,6 +1385,7 @@ const MarketsTable = () => {
       poolId: undefined,
       marketRowKey: undefined,
       configSymbol: undefined,
+      marketId: undefined,
     });
     setDepositPoolCollateralMarkets([]);
 
@@ -2592,27 +2635,20 @@ const MarketsTable = () => {
       // `network.tokens` key (e.g. `ALGO`); row may have `originalSymbol` `fALGO` under that key.
       const originalSymbol =
         "originalSymbol" in token ? (token as { originalSymbol?: string }).originalSymbol : asset;
-      const tokensMapKey =
-        (token as { configKey?: string }).configKey ?? originalSymbol;
-      const tokenConfigRaw = getTokenConfig(currentNetwork, tokensMapKey);
-      if (!tokenConfigRaw) {
-        console.error(
-          `Original token config not found for ${asset} (tokensMapKey: ${tokensMapKey}, originalSymbol: ${originalSymbol})`
-        );
-        return { balance: 0, balanceUSD: 0 };
-      }
-
-      // Handle case where tokenConfig might be an array (multiple markets)
-      // Compare poolIds as strings to ensure exact match
-      const originalTokenConfig = Array.isArray(tokenConfigRaw)
-        ? tokenConfigRaw.find(
-          (tc) => String(tc.poolId) === String(token.poolId)
-        ) || tokenConfigRaw[0]
-        : tokenConfigRaw;
+      const originalTokenConfig = resolveTokenConfigFromDisplayToken(
+        currentNetwork,
+        {
+          configKey: (token as { configKey?: string }).configKey,
+          originalSymbol,
+          symbol: token.symbol,
+          poolId: token.poolId,
+          underlyingContractId: token.underlyingContractId,
+        }
+      );
 
       if (!originalTokenConfig) {
         console.error(
-          `Original token config not found for ${asset} (tokensMapKey: ${tokensMapKey}, poolId: ${token.poolId})`
+          `Original token config not found for ${asset} (poolId: ${token.poolId}, contractId: ${token.underlyingContractId})`
         );
         return { balance: 0, balanceUSD: 0 };
       }
@@ -2967,14 +3003,39 @@ const MarketsTable = () => {
     }
 
     if (!market && poolIdStr) {
-      // Exact match by asset + poolId (required for 2 WAD markets etc. – never use another market’s data)
-      market = markets.find(
-        (m) =>
-          m.asset === asset &&
-          (String(m.poolId) === poolIdStr ||
-            String((m as { marketInfo?: { poolId?: string } }).marketInfo?.poolId) === poolIdStr)
-      );
-      // When poolId was provided, do not fall back to a different market – wrong collateral factor etc.
+      const contractFromKey = marketContractIdFromRowCacheKey(marketRowKey);
+      if (contractFromKey) {
+        const displayToken = resolveTokenForDisplayedAsset(
+          asset,
+          poolIdStr,
+          marketRowKey
+        );
+        market = markets.find((m) => {
+          if (m.asset !== asset) return false;
+          const poolMatch =
+            String(m.poolId) === poolIdStr ||
+            String(
+              (m as { marketInfo?: { poolId?: string } }).marketInfo?.poolId
+            ) === poolIdStr;
+          if (!poolMatch) return false;
+          const mid =
+            m.marketInfo?.marketId != null
+              ? String(m.marketInfo.marketId)
+              : displayToken?.underlyingContractId;
+          return mid === contractFromKey;
+        });
+      }
+      if (!market) {
+        // Exact match by asset + poolId (required for 2 WAD markets etc.)
+        market = markets.find(
+          (m) =>
+            m.asset === asset &&
+            (String(m.poolId) === poolIdStr ||
+              String(
+                (m as { marketInfo?: { poolId?: string } }).marketInfo?.poolId
+              ) === poolIdStr)
+        );
+      }
       if (!market) return null;
     }
 
@@ -3040,15 +3101,17 @@ const MarketsTable = () => {
           }
         : undefined;
 
-    const tokenConfigRaw = getTokenConfig(
-      currentNetwork,
-      (market as { configSymbol?: string }).configSymbol ?? asset
+    const rowKeyForConfig =
+      marketRowKey ?? (market as { _sortKey?: string })._sortKey;
+    const displayToken = resolveTokenForDisplayedAsset(
+      asset,
+      poolIdStr ?? undefined,
+      rowKeyForConfig
     );
-    const tokenConfig = Array.isArray(tokenConfigRaw)
-      ? poolIdStr
-        ? tokenConfigRaw.find((c: { poolId?: string }) => String(c.poolId) === poolIdStr) ?? tokenConfigRaw[0]
-        : tokenConfigRaw[0]
-      : tokenConfigRaw;
+    const tokenConfig =
+      displayToken != null
+        ? resolveTokenConfigFromDisplayToken(currentNetwork, displayToken)
+        : undefined;
     const decimals = (tokenConfig as { decimals?: number } | undefined)?.decimals ?? 8;
 
     return {
@@ -3824,6 +3887,8 @@ const MarketsTable = () => {
               asset={depositModal.asset}
               poolId={depositModal.poolId}
               configSymbol={depositModal.configSymbol}
+              marketId={depositModal.marketId}
+              marketRowKey={depositModal.marketRowKey}
               network={currentNetwork}
               mode="deposit"
               assetData={

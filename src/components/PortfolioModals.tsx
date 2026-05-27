@@ -45,6 +45,7 @@ import {
   tokenConfigHasNonFolksAdapter,
   tokenConfigHasAdapters,
   tokenStandardIsFolksAsaBridge,
+  resolveTokenConfigFromDisplayToken,
   FOLKS_MAINNET_ALGO_WITHDRAW,
   isFolksAlgoWithdrawTwoStepEnabled,
 } from "@/config";
@@ -1692,13 +1693,13 @@ const PortfolioModals = ({
     }
     const networkToUse = (repayModal.network || currentNetwork) as NetworkId;
     const tokens = getAllTokensWithDisplayInfo(networkToUse);
-    const tok = repayModal.poolId
-      ? tokens.find(
-          (t) =>
-            t.symbol === repayModal.asset &&
-            String(t.poolId) === String(repayModal.poolId)
-        )
-      : tokens.find((t) => t.symbol === repayModal.asset);
+    const tok = resolveSupplyBorrowToken(
+      tokens,
+      repayModal.asset ?? "",
+      repayModal.poolId,
+      repayModal.configSymbol,
+      repayModal.marketId
+    );
     const poolIdStr = repayModal.poolId
       ? String(repayModal.poolId)
       : tok?.poolId != null
@@ -1835,49 +1836,34 @@ const PortfolioModals = ({
 
       // Get token configuration using the borrow's network
       const tokens = getAllTokensWithDisplayInfo(networkToUse);
-      // If poolId is provided, find the token that matches both symbol and poolId
-      // Otherwise, fall back to finding by symbol only (for backward compatibility)
-      const token = repayModal.poolId
-        ? tokens.find(
-            (t) =>
-              t.symbol === repayModal.asset && t.poolId === repayModal.poolId
-          )
-        : tokens.find((t) => t.symbol === repayModal.asset);
+      const token = resolveSupplyBorrowToken(
+        tokens,
+        repayModal.asset ?? "",
+        repayModal.poolId,
+        repayModal.configSymbol,
+        repayModal.marketId
+      );
 
       if (!token) {
         throw new Error(
           `Token not found for ${repayModal.asset}${
             repayModal.poolId ? ` with poolId ${repayModal.poolId}` : ""
-          } on network ${networkToUse}`
+          }${repayModal.marketId ? ` marketId ${repayModal.marketId}` : ""} on network ${networkToUse}`
         );
       }
 
-      // Use originalSymbol to look up the config, as asset might be a display symbol
-      const originalSymbol =
-        "originalSymbol" in token
-          ? (token as any).originalSymbol
-          : repayModal.asset;
-      const originalTokenConfigRaw = getTokenConfig(
+      const originalTokenConfig = resolveTokenConfigFromDisplayToken(
         networkToUse,
-        originalSymbol
+        token
       );
-      if (!originalTokenConfigRaw) {
-        throw new Error(
-          `Token config not found for ${repayModal.asset} (originalSymbol: ${originalSymbol}) on network ${networkToUse}`
-        );
-      }
-
-      // Handle case where tokenConfig might be an array (multiple markets)
-      // Compare poolIds as strings to ensure exact match
-      const originalTokenConfig = Array.isArray(originalTokenConfigRaw)
-        ? originalTokenConfigRaw.find(
-            (tc) => String(tc.poolId) === String(token.poolId)
-          ) || originalTokenConfigRaw[0]
-        : originalTokenConfigRaw;
 
       if (!originalTokenConfig) {
         throw new Error(
-          `Token config not found for ${repayModal.asset} with poolId ${token.poolId} on network ${networkToUse}`
+          `Token config not found for ${repayModal.asset} with poolId ${token.poolId}${
+            token.underlyingContractId
+              ? ` contractId ${token.underlyingContractId}`
+              : ""
+          } on network ${networkToUse}`
         );
       }
 
@@ -2688,24 +2674,23 @@ const PortfolioModals = ({
             repayModal.configSymbol,
             repayModal.marketId
           );
+          const tcRepayModal = repayTokenRow
+            ? resolveTokenConfigFromDisplayToken(networkRep, repayTokenRow)
+            : undefined;
           const cfgSymRep =
-            repayTokenRow.configKey ??
-            repayTokenRow.originalSymbol ??
-            repayTokenRow.symbol;
-          const rawTcRep = getTokenConfig(networkRep, cfgSymRep);
-          const tcRepayModal = Array.isArray(rawTcRep)
-            ? rawTcRep.find(
-                (c) => String(c.poolId) === String(repayTokenRow.poolId)
-              ) ?? rawTcRep[0]
-            : rawTcRep;
+            repayTokenRow?.configKey ??
+            repayTokenRow?.originalSymbol ??
+            repayTokenRow?.symbol ??
+            repayModal.configSymbol ??
+            repayModal.asset;
           const repayFolksAdaptersList = tcRepayModal
             ? getFolksAdaptersForPhase(tcRepayModal, "repay")
             : [];
           const repayDecimals =
-            tcRepayModal?.decimals ?? repayTokenRow.decimals ?? 6;
+            tcRepayModal?.decimals ?? repayTokenRow?.decimals ?? 6;
 
           const repayMintKey = `${networkRep}|${cfgSymRep}|${String(
-            repayTokenRow.poolId ?? ""
+            repayTokenRow?.poolId ?? ""
           )}`;
 
           const xalgoConsensusRepayAlgoOption =

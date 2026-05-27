@@ -105,3 +105,20 @@ export async function fetchFolksMainnetFiTinyEcosystemPoolApySnapshot(
     ),
   };
 }
+
+/**
+ * Folks V2 WBTC (NTT) lending pool deposit and variable borrow yields — {@link MainnetPools.WBTC_NTT}.
+ */
+export async function fetchFolksMainnetWbtcNttPoolApySnapshot(
+  algod: Algodv2
+): Promise<FolksMainnetUsdcPoolApySnapshot> {
+  const info = await retrievePoolInfo(algod, MainnetPools.WBTC_NTT);
+  return {
+    depositPercent: yieldFixed16ToApyPercentPoints(
+      info.interest.depositInterestYield
+    ),
+    borrowPercent: yieldFixed16ToApyPercentPoints(
+      info.variableBorrow.variableBorrowInterestYield
+    ),
+  };
+}
