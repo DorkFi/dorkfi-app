@@ -2584,23 +2584,23 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     logoPath: "/lovable-uploads/goBTC.webp",
     tokenStandard: "asa",
   },
-  wBTC: //[
-    // {
-    //   assetId: "1058926737",
-    //   poolId: "3333688282",
-    //   contractId: "3211827406",
-    //   nTokenId: "3348042762",
-    //   migration: {
-    //     poolId: "3207735602",
-    //     contractId: "3211827406",
-    //     nTokenId: "3211979645",
-    //   },
-    //   decimals: 8,
-    //   name: "wBTC",
-    //   symbol: "wBTC",
-    //   logoPath: "/lovable-uploads/wBTCm.png",
-    //   tokenStandard: "asa",
-    // },
+  wBTC: [
+    {
+      assetId: "1058926737",
+      poolId: "3333688282",
+      contractId: "3211827406",
+      nTokenId: "3348042762",
+      migration: {
+        poolId: "3207735602",
+        contractId: "3211827406",
+        nTokenId: "3211979645",
+      },
+      decimals: 8,
+      name: "wBTC",
+      symbol: "wBTC",
+      logoPath: "/lovable-uploads/wBTCm.png",
+      tokenStandard: "asa",
+    },
     {
       assetId: "3495558025", // Folks V2 WBTC (NTT) underlying
       poolId: "3333688282",
@@ -2629,7 +2629,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
       intrinsicBorrowApyLiveSource: "folks_mainnet_wbtc_ntt_pool_deposit",
       iconBadgeFromSymbol: "FOLKS",
     },
-  //],
+  ],
   LINK: {
     assetId: "1200094857",
     poolId: "3333688282",
