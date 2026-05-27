@@ -1,5 +1,4 @@
-
-import HealthWaterGauge from './HealthWaterGauge';
+import HealthWaterGauge from "./HealthWaterGauge";
 
 interface UnderwaterSceneProps {
   healthFactor: number | null;
@@ -13,11 +12,11 @@ const UnderwaterScene = ({
   healthFactor,
   marketContextLine,
   dorkNftImage,
-  underwaterBg,
-  onEdit
+  underwaterBg: _underwaterBg,
+  onEdit,
 }: UnderwaterSceneProps) => {
   return (
-    <div className="relative">
+    <div className="relative space-y-4">
       <HealthWaterGauge
         healthFactor={healthFactor}
         marketContextLine={marketContextLine}
