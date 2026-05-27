@@ -9,6 +9,7 @@ import {
   FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY,
   FOLKS_FINANCE_FIUSDC_ADAPTER_POOL_PARAMS,
   FOLKS_FINANCE_FITINY_ADAPTER_POOL_PARAMS,
+  FOLKS_FINANCE_WBTC_ADAPTER_POOL_PARAMS,
   type FolksFinancePoolParams,
 } from "@/constants/folksFinance";
 
@@ -155,7 +156,8 @@ export interface TokenConfig {
   | "folks_mainnet_algo_pool_deposit"
   | "folks_mainnet_usdc_pool_deposit"
   | "folks_mainnet_fiusdc_ecosystem_pool_deposit"
-  | "folks_mainnet_fitiny_ecosystem_pool_deposit";
+  | "folks_mainnet_fitiny_ecosystem_pool_deposit"
+  | "folks_mainnet_wbtc_ntt_pool_deposit";
   /**
    * Optional intrinsic borrow APY in percentage points (e.g. 1.5 for 1.5%), added to displayed
    * borrow APY for this listing (e.g. wrapped-asset borrow uplift).
@@ -171,7 +173,9 @@ export interface TokenConfig {
   | "folks_mainnet_algo_pool_deposit"
   | "folks_mainnet_usdc_pool_borrow"
   | "folks_mainnet_fiusdc_ecosystem_pool_deposit"
-  | "folks_mainnet_fitiny_ecosystem_pool_deposit";
+  | "folks_mainnet_fitiny_ecosystem_pool_deposit"
+  | "folks_mainnet_wbtc_ntt_pool_deposit"
+  | "folks_mainnet_wbtc_ntt_pool_borrow";
   /**
    * Optional wrapped-asset / bridge adapters (e.g. Folks mint/redeem), in order.
    * Use {@link TokenAdapterConfig.phases} to split deposit vs withdraw legs, and `id` + `label`
@@ -612,6 +616,87 @@ export const FOLKS_MAINNET_FITINY_REPAY_UNDERLYING = {
   repayWalletBasis: "underlying" as const,
   phases: ["repay"] as const,
   folksParams: FOLKS_FINANCE_FITINY_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+/** Folks V2 WBTC (NTT) — same phase split as {@link FOLKS_MAINNET_USDC_DEPOSIT_FUSDC_WALLET}. */
+export const FOLKS_MAINNET_WBTC_DEPOSIT_FWBTC_WALLET = {
+  id: "folks-mainnet-wbtc-deposit-fwbtc",
+  name: "fWBTC",
+  type: "folks" as const,
+  label: "fWBTC",
+  depositWalletBasis: "market_token" as const,
+  phases: ["deposit"] as const,
+  folksParams: FOLKS_FINANCE_WBTC_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_WBTC_DEPOSIT_UNDERLYING = {
+  id: "folks-mainnet-wbtc-deposit-wbtc",
+  name: "wBTC",
+  type: "folks" as const,
+  label: "wBTC",
+  depositWalletBasis: "underlying" as const,
+  phases: ["deposit"] as const,
+  folksParams: FOLKS_FINANCE_WBTC_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_WBTC_WITHDRAW = {
+  id: "folks-mainnet-wbtc-withdraw-wbtc",
+  name: "wBTC",
+  type: "folks" as const,
+  label: "wBTC",
+  withdrawReceiveBasis: "underlying" as const,
+  phases: ["withdraw"] as const,
+  folksParams: FOLKS_FINANCE_WBTC_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_WBTC_WITHDRAW_FASSET_WALLET = {
+  id: "folks-mainnet-wbtc-withdraw-fwbtc",
+  name: "fWBTC",
+  type: "folks" as const,
+  label: "fWBTC",
+  withdrawReceiveBasis: "market_token" as const,
+  phases: ["withdraw"] as const,
+  folksParams: FOLKS_FINANCE_WBTC_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_WBTC_BORROW_FWBTC_WALLET = {
+  id: "folks-mainnet-wbtc-borrow-fwbtc",
+  name: "fWBTC",
+  type: "folks" as const,
+  label: "fWBTC",
+  borrowReceiveBasis: "market_token" as const,
+  phases: ["borrow"] as const,
+  folksParams: FOLKS_FINANCE_WBTC_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_WBTC_BORROW_UNDERLYING = {
+  id: "folks-mainnet-wbtc-borrow-wbtc",
+  name: "wBTC",
+  type: "folks" as const,
+  label: "wBTC",
+  borrowReceiveBasis: "underlying" as const,
+  phases: ["borrow"] as const,
+  folksParams: FOLKS_FINANCE_WBTC_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_WBTC_REPAY_FWBTC_WALLET = {
+  id: "folks-mainnet-wbtc-repay-fwbtc",
+  name: "fWBTC",
+  type: "folks" as const,
+  label: "fWBTC",
+  repayWalletBasis: "market_token" as const,
+  phases: ["repay"] as const,
+  folksParams: FOLKS_FINANCE_WBTC_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_WBTC_REPAY_UNDERLYING = {
+  id: "folks-mainnet-wbtc-repay-wbtc",
+  name: "wBTC",
+  type: "folks" as const,
+  label: "wBTC",
+  repayWalletBasis: "underlying" as const,
+  phases: ["repay"] as const,
+  folksParams: FOLKS_FINANCE_WBTC_ADAPTER_POOL_PARAMS,
 } satisfies TokenAdapterConfig;
 
 export type FolksTokenAdapterConfig = Extract<
@@ -2399,12 +2484,12 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
       FOLKS_MAINNET_FITINY_REPAY_FITINY_WALLET,
       FOLKS_MAINNET_FITINY_REPAY_UNDERLYING,
     ],
+    dataAddedAt: "2026-04-29T00:00:00.000Z",
     intrinsicApyPercent: 4.66,
     intrinsicBorrowApyPercent: 4.66,
     intrinsicApyLiveSource: "folks_mainnet_fitiny_ecosystem_pool_deposit",
     intrinsicBorrowApyLiveSource: "folks_mainnet_fitiny_ecosystem_pool_deposit",
     iconBadgeFromSymbol: "FOLKS",
-    dataAddedAt: "2026-04-29T00:00:00.000Z",
   },
   FINITE: [{
     assetId: "400593267",
@@ -2499,22 +2584,52 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     logoPath: "/lovable-uploads/goBTC.webp",
     tokenStandard: "asa",
   },
-  wBTC: {
-    assetId: "1058926737",
-    poolId: "3333688282",
-    contractId: "3211827406",
-    nTokenId: "3348042762",
-    migration: {
-      poolId: "3207735602",
-      contractId: "3211827406",
-      nTokenId: "3211979645",
+  wBTC: //[
+    // {
+    //   assetId: "1058926737",
+    //   poolId: "3333688282",
+    //   contractId: "3211827406",
+    //   nTokenId: "3348042762",
+    //   migration: {
+    //     poolId: "3207735602",
+    //     contractId: "3211827406",
+    //     nTokenId: "3211979645",
+    //   },
+    //   decimals: 8,
+    //   name: "wBTC",
+    //   symbol: "wBTC",
+    //   logoPath: "/lovable-uploads/wBTCm.png",
+    //   tokenStandard: "asa",
+    // },
+    {
+      assetId: "3495558025", // Folks V2 WBTC (NTT) underlying
+      poolId: "3333688282",
+      contractId: "3573862137", // Folks V2 Wrapped BTC (arc200)
+      nTokenId: "3573966772",
+      decimals: 8,
+      name: "wBTC",
+      symbol: "wBTC",
+      logoPath: "/lovable-uploads/wBTCm.png",
+      tokenStandard: "asa-asa",
+      dataAddedAt: "2026-05-26T00:00:00.000Z",
+      requireStandaloneFAssetOptInBeforeDeposit: true,
+      adapters: [
+        FOLKS_MAINNET_WBTC_DEPOSIT_FWBTC_WALLET,
+        FOLKS_MAINNET_WBTC_DEPOSIT_UNDERLYING,
+        FOLKS_MAINNET_WBTC_WITHDRAW,
+        FOLKS_MAINNET_WBTC_WITHDRAW_FASSET_WALLET,
+        FOLKS_MAINNET_WBTC_BORROW_FWBTC_WALLET,
+        FOLKS_MAINNET_WBTC_BORROW_UNDERLYING,
+        FOLKS_MAINNET_WBTC_REPAY_FWBTC_WALLET,
+        FOLKS_MAINNET_WBTC_REPAY_UNDERLYING,
+      ],
+      intrinsicApyPercent: 1,
+      intrinsicBorrowApyPercent: 1,
+      intrinsicApyLiveSource: "folks_mainnet_wbtc_ntt_pool_deposit",
+      intrinsicBorrowApyLiveSource: "folks_mainnet_wbtc_ntt_pool_deposit",
+      iconBadgeFromSymbol: "FOLKS",
     },
-    decimals: 8,
-    name: "wBTC",
-    symbol: "wBTC",
-    logoPath: "/lovable-uploads/wBTCm.png",
-    tokenStandard: "asa",
-  },
+  //],
   LINK: {
     assetId: "1200094857",
     poolId: "3333688282",
@@ -3484,51 +3599,69 @@ export function resolveTokenConfigFromDisplayToken(
 }
 
 /**
- * Single `TokenConfig` row for `symbol` + optional `poolId`, or any row matching `poolId` when
- * `getTokenConfig(symbol)` misses (e.g. fALGO row stored under `tokens.ALGO[]`).
+ * Single `TokenConfig` row for `symbol` + optional `poolId` (+ `marketContractId` when several
+ * rows share a pool, e.g. legacy vs V2 wBTC).
  */
 function resolveTokenConfigRowWithPool(
   networkId: NetworkId,
   symbol: string,
-  poolId: string | undefined
+  poolId: string | undefined,
+  marketContractId?: string
 ): TokenConfig | undefined {
+  const contractStr = String(marketContractId ?? "").trim();
   const raw = getTokenConfig(networkId, symbol);
   if (raw) {
-    return Array.isArray(raw)
-      ? poolId != null && poolId !== ""
-        ? raw.find((c) => String(c.poolId) === String(poolId)) ?? raw[0]
-        : raw[0]
-      : raw;
+    if (!Array.isArray(raw)) return raw;
+    const poolStr = poolId != null && poolId !== "" ? String(poolId) : "";
+    if (poolStr !== "" && contractStr !== "") {
+      const byBoth = raw.find(
+        (c) =>
+          String(c.poolId ?? "") === poolStr &&
+          String(c.contractId ?? "").trim() === contractStr
+      );
+      if (byBoth) return byBoth;
+    }
+    if (poolStr !== "") {
+      return raw.find((c) => String(c.poolId) === poolStr) ?? raw[0];
+    }
+    return raw[0];
   }
   if (poolId == null || poolId === "") return undefined;
+  const poolStr = String(poolId);
   const book = config.networks[networkId].tokens;
   for (const val of Object.values(book)) {
     if (Array.isArray(val)) {
-      const hit = val.find((c) => String(c.poolId) === String(poolId));
+      if (contractStr !== "") {
+        const byBoth = val.find(
+          (c) =>
+            String(c.poolId ?? "") === poolStr &&
+            String(c.contractId ?? "").trim() === contractStr
+        );
+        if (byBoth) return byBoth;
+      }
+      const hit = val.find((c) => String(c.poolId) === poolStr);
       if (hit) return hit;
-    } else if (val && String(val.poolId) === String(poolId)) {
-      return val;
+    } else if (val && String(val.poolId) === poolStr) {
+      if (
+        contractStr === "" ||
+        String(val.contractId ?? "").trim() === contractStr
+      ) {
+        return val;
+      }
     }
   }
   return undefined;
 }
 
-/** Intrinsic supply APY (% points) from config when set; 0 if unset or not applicable. */
-export const getIntrinsicSupplyApyPercent = (
-  networkId: NetworkId | string | undefined,
-  symbol: string,
-  poolId: string | undefined
-): number => {
-  if (!networkId) return 0;
-  const row = resolveTokenConfigRowWithPool(
-    networkId as NetworkId,
-    symbol,
-    poolId
-  );
-  if (!row) return 0;
-  const v = row.intrinsicApyPercent;
+function intrinsicSupplyApyBaseFromRow(row: TokenConfig | undefined): number {
+  const v = row?.intrinsicApyPercent;
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
-};
+}
+
+function intrinsicBorrowApyBaseFromRow(row: TokenConfig | undefined): number {
+  const v = row?.intrinsicBorrowApyPercent;
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
 
 /** Optional live intrinsic supply APY values (percentage points) for {@link resolveIntrinsicSupplyApyPercent}. */
 export type LiveIntrinsicSupplyApySnapshot = {
@@ -3548,6 +3681,158 @@ export type LiveIntrinsicSupplyApySnapshot = {
   folksMainnetFiTinyEcosystemDepositPercent?: number | null;
   /** Folks Algorand Ecosystem TINY pool variable borrow yield, percentage points. */
   folksMainnetFiTinyEcosystemBorrowPercent?: number | null;
+  /** Folks V2 WBTC (NTT) pool deposit yield, percentage points. */
+  folksMainnetWbtcNttDepositPercent?: number | null;
+  /** Folks V2 WBTC (NTT) pool variable borrow yield, percentage points. */
+  folksMainnetWbtcNttBorrowPercent?: number | null;
+};
+
+function applyLiveIntrinsicSupplyApySource(
+  source: TokenConfig["intrinsicApyLiveSource"] | undefined,
+  live: LiveIntrinsicSupplyApySnapshot | null | undefined,
+  base: number
+): number {
+  if (source === "tinyman_liquid_staking") {
+    const v = live?.tinymanLiquidStakingPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    return base;
+  }
+  if (source === "xalgo_governance_lambda") {
+    const v = live?.xalgoGovernanceLambdaPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    return base;
+  }
+  if (source === "folks_mainnet_algo_pool_deposit") {
+    const v = live?.folksMainnetAlgoDepositPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    return base;
+  }
+  if (source === "folks_mainnet_usdc_pool_deposit") {
+    const v = live?.folksMainnetUsdcDepositPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    return base;
+  }
+  if (source === "folks_mainnet_fiusdc_ecosystem_pool_deposit") {
+    const v = live?.folksMainnetFiUsdcEcosystemDepositPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    return base;
+  }
+  if (source === "folks_mainnet_fitiny_ecosystem_pool_deposit") {
+    const v = live?.folksMainnetFiTinyEcosystemDepositPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    return base;
+  }
+  if (source === "folks_mainnet_wbtc_ntt_pool_deposit") {
+    const v = live?.folksMainnetWbtcNttDepositPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    return base;
+  }
+  return base;
+}
+
+function applyLiveIntrinsicBorrowApySource(
+  source: TokenConfig["intrinsicBorrowApyLiveSource"] | undefined,
+  live: LiveIntrinsicSupplyApySnapshot | null | undefined,
+  base: number
+): number {
+  if (source === "tinyman_liquid_staking") {
+    const v = live?.tinymanLiquidStakingPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    return base;
+  }
+  if (source === "xalgo_governance_lambda") {
+    const v = live?.xalgoGovernanceLambdaPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    return base;
+  }
+  if (source === "folks_mainnet_algo_pool_deposit") {
+    const v = live?.folksMainnetAlgoDepositPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    return base;
+  }
+  if (source === "folks_mainnet_usdc_pool_borrow") {
+    const v = live?.folksMainnetUsdcBorrowPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    return base;
+  }
+  if (source === "folks_mainnet_fiusdc_ecosystem_pool_borrow") {
+    const v = live?.folksMainnetFiUsdcEcosystemBorrowPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    return base;
+  }
+  if (source === "folks_mainnet_fiusdc_ecosystem_pool_deposit") {
+    const v = live?.folksMainnetFiUsdcEcosystemDepositPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    return base;
+  }
+  if (source === "folks_mainnet_fitiny_ecosystem_pool_borrow") {
+    const v = live?.folksMainnetFiTinyEcosystemBorrowPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    return base;
+  }
+  if (source === "folks_mainnet_fitiny_ecosystem_pool_deposit") {
+    const v = live?.folksMainnetFiTinyEcosystemDepositPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    return base;
+  }
+  if (source === "folks_mainnet_wbtc_ntt_pool_deposit") {
+    const v = live?.folksMainnetWbtcNttDepositPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    return base;
+  }
+  if (source === "folks_mainnet_wbtc_ntt_pool_borrow") {
+    const v = live?.folksMainnetWbtcNttBorrowPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    return base;
+  }
+  return base;
+}
+
+/** Intrinsic supply APY (% points) from config when set; 0 if unset or not applicable. */
+export const getIntrinsicSupplyApyPercent = (
+  networkId: NetworkId | string | undefined,
+  symbol: string,
+  poolId: string | undefined,
+  marketContractId?: string
+): number => {
+  if (!networkId) return 0;
+  const row = resolveTokenConfigRowWithPool(
+    networkId as NetworkId,
+    symbol,
+    poolId,
+    marketContractId
+  );
+  return intrinsicSupplyApyBaseFromRow(row);
+};
+
+/** Resolve live / static intrinsic supply APY from an already-resolved config row. */
+export function resolveIntrinsicSupplyApyPercentForTokenConfig(
+  networkId: NetworkId | string | undefined,
+  row: TokenConfig | undefined,
+  live?: LiveIntrinsicSupplyApySnapshot | null
+): number {
+  const base = intrinsicSupplyApyBaseFromRow(row);
+  if (networkId !== "algorand-mainnet") return base;
+  return applyLiveIntrinsicSupplyApySource(
+    row?.intrinsicApyLiveSource,
+    live,
+    base
+  );
+}
+
+/** Resolve live / static intrinsic borrow APY from an already-resolved config row. */
+export function resolveIntrinsicBorrowApyPercentForTokenConfig(
+  networkId: NetworkId | string | undefined,
+  row: TokenConfig | undefined,
+  live?: LiveIntrinsicSupplyApySnapshot | null
+): number {
+  const base = intrinsicBorrowApyBaseFromRow(row);
+  if (networkId !== "algorand-mainnet") return base;
+  return applyLiveIntrinsicBorrowApySource(
+    row?.intrinsicBorrowApyLiveSource,
+    live,
+    base
+  );
 };
 
 /**
@@ -3559,72 +3844,31 @@ export const resolveIntrinsicSupplyApyPercent = (
   networkId: NetworkId | string | undefined,
   symbol: string,
   poolId: string | undefined,
-  live?: LiveIntrinsicSupplyApySnapshot | null
+  live?: LiveIntrinsicSupplyApySnapshot | null,
+  marketContractId?: string
 ): number => {
-  const base = getIntrinsicSupplyApyPercent(networkId, symbol, poolId);
-  if (networkId !== "algorand-mainnet") return base;
   const row = resolveTokenConfigRowWithPool(
     networkId as NetworkId,
     symbol,
-    poolId
+    poolId,
+    marketContractId
   );
-  const source = row?.intrinsicApyLiveSource;
-  if (source === "tinyman_liquid_staking") {
-    const v = live?.tinymanLiquidStakingPercent;
-    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
-      return v;
-    }
-    return base;
-  }
-  if (source === "xalgo_governance_lambda") {
-    const v = live?.xalgoGovernanceLambdaPercent;
-    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
-      return v;
-    }
-    return base;
-  }
-  if (source === "folks_mainnet_algo_pool_deposit") {
-    const v = live?.folksMainnetAlgoDepositPercent;
-    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
-      return v;
-    }
-    return base;
-  }
-  if (source === "folks_mainnet_usdc_pool_deposit") {
-    const v = live?.folksMainnetUsdcDepositPercent;
-    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
-      return v;
-    }
-    return base;
-  }
-  if (source === "folks_mainnet_fiusdc_ecosystem_pool_deposit") {
-    const v = live?.folksMainnetFiUsdcEcosystemDepositPercent;
-    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
-      return v;
-    }
-    return base;
-  }
-  if (source === "folks_mainnet_fitiny_ecosystem_pool_deposit") {
-    const v = live?.folksMainnetFiTinyEcosystemDepositPercent;
-    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
-      return v;
-    }
-    return base;
-  }
-  return base;
+  return resolveIntrinsicSupplyApyPercentForTokenConfig(networkId, row, live);
 };
 
 /** Whether this listing uses any configured live intrinsic supply APY source on Algorand mainnet. */
 export const tokenRowUsesLiveIntrinsicApy = (
   networkId: NetworkId | string | undefined,
   symbol: string,
-  poolId: string | undefined
+  poolId: string | undefined,
+  marketContractId?: string
 ): boolean => {
   if (networkId !== "algorand-mainnet") return false;
   const row = resolveTokenConfigRowWithPool(
     networkId as NetworkId,
     symbol,
-    poolId
+    poolId,
+    marketContractId
   );
   const s = row?.intrinsicApyLiveSource;
   return (
@@ -3633,7 +3877,8 @@ export const tokenRowUsesLiveIntrinsicApy = (
     s === "folks_mainnet_algo_pool_deposit" ||
     s === "folks_mainnet_usdc_pool_deposit" ||
     s === "folks_mainnet_fiusdc_ecosystem_pool_deposit" ||
-    s === "folks_mainnet_fitiny_ecosystem_pool_deposit"
+    s === "folks_mainnet_fitiny_ecosystem_pool_deposit" ||
+    s === "folks_mainnet_wbtc_ntt_pool_deposit"
   );
 };
 
@@ -3641,13 +3886,15 @@ export const tokenRowUsesLiveIntrinsicApy = (
 export const tokenRowUsesLiveIntrinsicBorrowApy = (
   networkId: NetworkId | string | undefined,
   symbol: string,
-  poolId: string | undefined
+  poolId: string | undefined,
+  marketContractId?: string
 ): boolean => {
   if (networkId !== "algorand-mainnet") return false;
   const row = resolveTokenConfigRowWithPool(
     networkId as NetworkId,
     symbol,
-    poolId
+    poolId,
+    marketContractId
   );
   const s = row?.intrinsicBorrowApyLiveSource;
   return (
@@ -3656,7 +3903,11 @@ export const tokenRowUsesLiveIntrinsicBorrowApy = (
     s === "folks_mainnet_algo_pool_deposit" ||
     s === "folks_mainnet_usdc_pool_borrow" ||
     s === "folks_mainnet_fiusdc_ecosystem_pool_borrow" ||
-    s === "folks_mainnet_fitiny_ecosystem_pool_borrow"
+    s === "folks_mainnet_fiusdc_ecosystem_pool_deposit" ||
+    s === "folks_mainnet_fitiny_ecosystem_pool_borrow" ||
+    s === "folks_mainnet_fitiny_ecosystem_pool_deposit" ||
+    s === "folks_mainnet_wbtc_ntt_pool_deposit" ||
+    s === "folks_mainnet_wbtc_ntt_pool_borrow"
   );
 };
 
@@ -3664,17 +3915,17 @@ export const tokenRowUsesLiveIntrinsicBorrowApy = (
 export const getIntrinsicBorrowApyPercent = (
   networkId: NetworkId | string | undefined,
   symbol: string,
-  poolId: string | undefined
+  poolId: string | undefined,
+  marketContractId?: string
 ): number => {
   if (!networkId) return 0;
   const row = resolveTokenConfigRowWithPool(
     networkId as NetworkId,
     symbol,
-    poolId
+    poolId,
+    marketContractId
   );
-  if (!row) return 0;
-  const v = row.intrinsicBorrowApyPercent;
-  return typeof v === "number" && Number.isFinite(v) ? v : 0;
+  return intrinsicBorrowApyBaseFromRow(row);
 };
 
 /**
@@ -3686,59 +3937,16 @@ export const resolveIntrinsicBorrowApyPercent = (
   networkId: NetworkId | string | undefined,
   symbol: string,
   poolId: string | undefined,
-  live?: LiveIntrinsicSupplyApySnapshot | null
+  live?: LiveIntrinsicSupplyApySnapshot | null,
+  marketContractId?: string
 ): number => {
-  const base = getIntrinsicBorrowApyPercent(networkId, symbol, poolId);
-  if (networkId !== "algorand-mainnet") return base;
   const row = resolveTokenConfigRowWithPool(
     networkId as NetworkId,
     symbol,
-    poolId
+    poolId,
+    marketContractId
   );
-  const source = row?.intrinsicBorrowApyLiveSource;
-  if (source === "tinyman_liquid_staking") {
-    const v = live?.tinymanLiquidStakingPercent;
-    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
-      return v;
-    }
-    return base;
-  }
-  if (source === "xalgo_governance_lambda") {
-    const v = live?.xalgoGovernanceLambdaPercent;
-    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
-      return v;
-    }
-    return base;
-  }
-  if (source === "folks_mainnet_algo_pool_deposit") {
-    const v = live?.folksMainnetAlgoDepositPercent;
-    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
-      return v;
-    }
-    return base;
-  }
-  if (source === "folks_mainnet_usdc_pool_borrow") {
-    const v = live?.folksMainnetUsdcBorrowPercent;
-    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
-      return v;
-    }
-    return base;
-  }
-  if (source === "folks_mainnet_fiusdc_ecosystem_pool_borrow") {
-    const v = live?.folksMainnetFiUsdcEcosystemBorrowPercent;
-    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
-      return v;
-    }
-    return base;
-  }
-  if (source === "folks_mainnet_fitiny_ecosystem_pool_borrow") {
-    const v = live?.folksMainnetFiTinyEcosystemBorrowPercent;
-    if (typeof v === "number" && Number.isFinite(v) && v > 0) {
-      return v;
-    }
-    return base;
-  }
-  return base;
+  return resolveIntrinsicBorrowApyPercentForTokenConfig(networkId, row, live);
 };
 
 export const getAllTokens = (networkId: NetworkId): TokenConfig[] => {
@@ -3885,12 +4093,15 @@ export function resolveTokenForMarketPosition(
     asset: string;
     poolId?: string;
     configSymbol?: string;
+    /** nt200 / Folks market contract (`TokenConfig.contractId`) when several rows share `poolId`. */
+    marketContractId?: string;
   }
 ): DisplayTokenInfo | null {
   const poolStr =
     params.poolId != null && String(params.poolId).trim() !== ""
       ? String(params.poolId).trim()
       : "";
+  const contractStr = String(params.marketContractId ?? "").trim();
   const tokens = getAllTokensWithDisplayInfo(networkId);
   const asset = params.asset.trim();
   const configSymbol = params.configSymbol?.trim();
@@ -3907,10 +4118,21 @@ export function resolveTokenForMarketPosition(
   };
 
   if (poolStr !== "") {
-    const direct = tokens.find(
+    const poolMatches = tokens.filter(
       (t) => matchesSymbol(t) && String(t.poolId ?? "") === poolStr
     );
-    if (direct?.poolId && direct.underlyingContractId) return direct;
+    if (contractStr !== "") {
+      const byContract = poolMatches.find(
+        (t) => String(t.underlyingContractId ?? "").trim() === contractStr
+      );
+      if (byContract?.poolId && byContract.underlyingContractId) {
+        return byContract;
+      }
+    }
+    if (poolMatches.length === 1) {
+      const direct = poolMatches[0];
+      if (direct?.poolId && direct.underlyingContractId) return direct;
+    }
 
     const book = config.networks[networkId]?.tokens;
     if (book) {

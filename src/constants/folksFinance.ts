@@ -291,6 +291,15 @@ export const FOLKS_FINANCE_FITINY_ADAPTER_POOL_PARAMS: FolksFinancePoolParams = 
   pool: "ISOLATED_TINY",
 };
 
+/**
+ * Adapter + SDK mint/withdraw params for Folks V2 WBTC (NTT). `pool` is the Folks SDK mainnet key
+ * `WBTC_NTT` (not legacy `WBTC` / `WBTC (old)`).
+ */
+export const FOLKS_FINANCE_WBTC_ADAPTER_POOL_PARAMS: FolksFinancePoolParams = {
+  ...FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.WBTC,
+  pool: "WBTC_NTT",
+};
+
 /** Resolve a mainnet pool row by `Pool` name from the docs (e.g. `ALGO`, `WBTC (old)`). */
 export function lookupFolksAlgorandMainnetPool(
   pool: string

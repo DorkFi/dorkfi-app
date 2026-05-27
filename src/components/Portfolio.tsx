@@ -182,6 +182,7 @@ import { useFolksMainnetAlgoDepositLiveApyPercent } from "@/hooks/useFolksMainne
 import { useFolksMainnetUsdcPoolLiveApyPercent } from "@/hooks/useFolksMainnetUsdcPoolLiveApyPercent";
 import { useFolksMainnetFiUsdcEcosystemPoolLiveApyPercent } from "@/hooks/useFolksMainnetFiUsdcEcosystemPoolLiveApyPercent";
 import { useFolksMainnetFiTinyEcosystemPoolLiveApyPercent } from "@/hooks/useFolksMainnetFiTinyEcosystemPoolLiveApyPercent";
+import { useFolksMainnetWbtcNttPoolLiveApyPercent } from "@/hooks/useFolksMainnetWbtcNttPoolLiveApyPercent";
 
 /* eslint-disable no-case-declarations -- many sort switch blocks use const in cases */
 /* eslint-disable react-hooks/exhaustive-deps -- many callbacks intentionally use stable deps subset */
@@ -375,6 +376,9 @@ const Portfolio = () => {
   const folksFiTinyEcosystemLiveApy = useFolksMainnetFiTinyEcosystemPoolLiveApyPercent(
     liveIntrinsicApyFetchEnabled
   );
+  const folksWbtcNttLiveApy = useFolksMainnetWbtcNttPoolLiveApyPercent(
+    liveIntrinsicApyFetchEnabled
+  );
   const liveIntrinsicSupplyApy = useMemo<LiveIntrinsicSupplyApySnapshot>(
     () => ({
       tinymanLiquidStakingPercent: tinymanLiveIntrinsicApyPct,
@@ -390,6 +394,10 @@ const Portfolio = () => {
         folksFiTinyEcosystemLiveApy?.depositPercent ?? null,
       folksMainnetFiTinyEcosystemBorrowPercent:
         folksFiTinyEcosystemLiveApy?.borrowPercent ?? null,
+      folksMainnetWbtcNttDepositPercent:
+        folksWbtcNttLiveApy?.depositPercent ?? null,
+      folksMainnetWbtcNttBorrowPercent:
+        folksWbtcNttLiveApy?.borrowPercent ?? null,
     }),
     [
       tinymanLiveIntrinsicApyPct,
@@ -398,6 +406,7 @@ const Portfolio = () => {
       folksUsdcPoolLiveApy,
       folksFiUsdcEcosystemLiveApy,
       folksFiTinyEcosystemLiveApy,
+      folksWbtcNttLiveApy,
     ]
   );
 

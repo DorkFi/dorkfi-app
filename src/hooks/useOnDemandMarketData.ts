@@ -8,7 +8,9 @@ import {
   getMarketLabel,
   getRewardsProgramPublicBaseUrl,
   resolveIntrinsicSupplyApyPercent,
+  resolveIntrinsicSupplyApyPercentForTokenConfig,
   resolveIntrinsicBorrowApyPercent,
+  resolveIntrinsicBorrowApyPercentForTokenConfig,
   tokenRowUsesLiveIntrinsicApy,
   tokenRowUsesLiveIntrinsicBorrowApy,
   type LiveIntrinsicSupplyApySnapshot,
@@ -31,6 +33,7 @@ import { useFolksMainnetAlgoDepositLiveApyPercent } from "@/hooks/useFolksMainne
 import { useFolksMainnetUsdcPoolLiveApyPercent } from "@/hooks/useFolksMainnetUsdcPoolLiveApyPercent";
 import { useFolksMainnetFiUsdcEcosystemPoolLiveApyPercent } from "@/hooks/useFolksMainnetFiUsdcEcosystemPoolLiveApyPercent";
 import { useFolksMainnetFiTinyEcosystemPoolLiveApyPercent } from "@/hooks/useFolksMainnetFiTinyEcosystemPoolLiveApyPercent";
+import { useFolksMainnetWbtcNttPoolLiveApyPercent } from "@/hooks/useFolksMainnetWbtcNttPoolLiveApyPercent";
 import { resolveTokenIconBadgeUrl } from "@/utils/tokenImageUtils";
 
 export interface OnDemandMarketData {
@@ -95,18 +98,59 @@ export interface OnDemandMarketData {
 }
 
 /**
- * Stable row / cache key: canonical config symbol (not display override) + pool id.
- * Required when multiple markets share the same display name and pool (e.g. ALGO vs fALGO both "Algo").
+ * Stable row / cache key: canonical config symbol (not display override) + pool id (+ market contract when set).
+ * Required when multiple markets share the same display name and pool (e.g. ALGO vs fALGO, legacy vs V2 wBTC).
  */
 export function marketRowCacheKey(token: {
   originalSymbol?: string;
   symbol: string;
   poolId?: string | null;
+  underlyingContractId?: string;
 }): string {
   const sym = (token.originalSymbol ?? token.symbol).toLowerCase();
-  return token.poolId != null && String(token.poolId) !== ""
-    ? `${sym}-${String(token.poolId)}`
-    : sym;
+  const pool =
+    token.poolId != null && String(token.poolId) !== ""
+      ? String(token.poolId)
+      : "";
+  const contract = String(token.underlyingContractId ?? "").trim();
+  if (pool !== "" && contract !== "") {
+    return `${sym}-${pool}-${contract}`;
+  }
+  if (pool !== "") {
+    return `${sym}-${pool}`;
+  }
+  return sym;
+}
+
+/** Parse {@link marketRowCacheKey} back into symbol / pool / optional market contract. */
+export function parseMarketRowCacheKey(marketKey: string): {
+  symbol: string;
+  poolId?: string;
+  contractId?: string;
+} {
+  const key = String(marketKey ?? "").trim();
+  const parts = key.split("-").filter((p) => p !== "");
+  const symbol = parts[0] ?? "";
+  if (parts.length >= 3) {
+    const contractId = parts[parts.length - 1];
+    const poolId = parts.slice(1, -1).join("-");
+    return { symbol, poolId, contractId };
+  }
+  if (parts.length === 2) {
+    return { symbol, poolId: parts[1] };
+  }
+  return { symbol };
+}
+
+/** Market contract id encoded in {@link marketRowCacheKey} (`sym-pool-contract`), when present. */
+export function marketContractIdFromRowCacheKey(
+  marketRowKey: string | undefined
+): string | undefined {
+  const parsed = parseMarketRowCacheKey(String(marketRowKey ?? "").trim());
+  const contract = parsed.contractId?.trim();
+  return contract !== "" && contract != null && /^\d+$/.test(contract)
+    ? contract
+    : undefined;
 }
 
 /** `network.tokens` object key (e.g. `ALGO` when the row's `originalSymbol` is `fALGO`). */
@@ -267,6 +311,9 @@ export const useOnDemandMarketData = ({
   const folksFiTinyEcosystemLiveApy = useFolksMainnetFiTinyEcosystemPoolLiveApyPercent(
     algorandMainnetMarkets
   );
+  const folksWbtcNttLiveApy = useFolksMainnetWbtcNttPoolLiveApyPercent(
+    algorandMainnetMarkets
+  );
   const liveIntrinsicSupplyApy = useMemo<LiveIntrinsicSupplyApySnapshot>(
     () => ({
       tinymanLiquidStakingPercent: tinymanLiveIntrinsicApyPct,
@@ -282,6 +329,10 @@ export const useOnDemandMarketData = ({
         folksFiTinyEcosystemLiveApy?.depositPercent ?? null,
       folksMainnetFiTinyEcosystemBorrowPercent:
         folksFiTinyEcosystemLiveApy?.borrowPercent ?? null,
+      folksMainnetWbtcNttDepositPercent:
+        folksWbtcNttLiveApy?.depositPercent ?? null,
+      folksMainnetWbtcNttBorrowPercent:
+        folksWbtcNttLiveApy?.borrowPercent ?? null,
     }),
     [
       tinymanLiveIntrinsicApyPct,
@@ -290,6 +341,7 @@ export const useOnDemandMarketData = ({
       folksUsdcPoolLiveApy,
       folksFiUsdcEcosystemLiveApy,
       folksFiTinyEcosystemLiveApy,
+      folksWbtcNttLiveApy,
     ]
   );
 
@@ -331,20 +383,14 @@ export const useOnDemandMarketData = ({
         tokenConfig as TokenConfig | undefined
       );
 
-      const intrinsicApr = resolveIntrinsicSupplyApyPercent(
+      const intrinsicApr = resolveIntrinsicSupplyApyPercentForTokenConfig(
         currentNetwork,
-        tokensMapKey,
-        token.poolId != null && token.poolId !== ""
-          ? String(token.poolId)
-          : undefined,
+        tokenConfig,
         liveIntrinsicSupplyApy
       );
-      const intrinsicBorrowApy = resolveIntrinsicBorrowApyPercent(
+      const intrinsicBorrowApy = resolveIntrinsicBorrowApyPercentForTokenConfig(
         currentNetwork,
-        tokensMapKey,
-        token.poolId != null && token.poolId !== ""
-          ? String(token.poolId)
-          : undefined,
+        tokenConfig,
         liveIntrinsicSupplyApy
       );
 
@@ -401,30 +447,47 @@ export const useOnDemandMarketData = ({
           row.poolId != null && String(row.poolId) !== ""
             ? String(row.poolId)
             : undefined;
+        const contractId = parseMarketRowCacheKey(key).contractId;
         let rowNext = row;
         const patchRow = (partial: Partial<OnDemandMarketData>) => {
           rowNext = { ...rowNext, ...partial };
           changed = true;
         };
 
-        if (tokenRowUsesLiveIntrinsicApy(currentNetwork, sym, poolId)) {
+        if (
+          tokenRowUsesLiveIntrinsicApy(
+            currentNetwork,
+            sym,
+            poolId,
+            contractId
+          )
+        ) {
           const resolved = resolveIntrinsicSupplyApyPercent(
             currentNetwork,
             sym,
             poolId,
-            liveIntrinsicSupplyApy
+            liveIntrinsicSupplyApy,
+            contractId
           );
           const newSupply = resolved > 0 ? resolved : undefined;
           if (rowNext.intrinsicSupplyApyPercent !== newSupply) {
             patchRow({ intrinsicSupplyApyPercent: newSupply });
           }
         }
-        if (tokenRowUsesLiveIntrinsicBorrowApy(currentNetwork, sym, poolId)) {
+        if (
+          tokenRowUsesLiveIntrinsicBorrowApy(
+            currentNetwork,
+            sym,
+            poolId,
+            contractId
+          )
+        ) {
           const resolvedBorrow = resolveIntrinsicBorrowApyPercent(
             currentNetwork,
             sym,
             poolId,
-            liveIntrinsicSupplyApy
+            liveIntrinsicSupplyApy,
+            contractId
           );
           const newBorrow =
             resolvedBorrow > 0 ? resolvedBorrow : undefined;
@@ -443,21 +506,23 @@ export const useOnDemandMarketData = ({
   // Load individual market data
   const loadMarketData = useCallback(
     async (marketKey: string, bypassCache = false) => {
-      // Parse marketKey: canonical symbol + optional pool id (e.g. falgo-3333688282, algo-3333688282)
-      const parts = marketKey.split("-");
-      const symbol = parts[0];
-      const poolIdFromKey = parts.length > 1 ? parts.slice(1).join("-") : undefined;
+      const { symbol, poolId: poolIdFromKey, contractId: contractFromKey } =
+        parseMarketRowCacheKey(marketKey);
 
       const canonical = (t: (typeof tokens)[0]) =>
         (t.originalSymbol ?? t.symbol).toLowerCase();
 
-      // Find matching tokens (compare poolId as string so "123" and 123 both match – e.g. 2 WAD markets)
       const matchingTokens = tokens.filter((t) => {
-        const matchesSymbol = canonical(t) === symbol.toLowerCase();
+        if (canonical(t) !== symbol.toLowerCase()) return false;
         if (poolIdFromKey != null && poolIdFromKey !== "") {
-          return matchesSymbol && String(t.poolId) === String(poolIdFromKey);
+          if (String(t.poolId) !== String(poolIdFromKey)) return false;
         }
-        return matchesSymbol;
+        if (contractFromKey != null && contractFromKey !== "") {
+          if (String(t.underlyingContractId ?? "") !== String(contractFromKey)) {
+            return false;
+          }
+        }
+        return true;
       });
 
       if (matchingTokens.length === 0) return;
@@ -637,22 +702,17 @@ export const useOnDemandMarketData = ({
               tokenConfig as TokenConfig | undefined
             );
 
-            const intrinsicApr = resolveIntrinsicSupplyApyPercent(
+            const intrinsicApr = resolveIntrinsicSupplyApyPercentForTokenConfig(
               currentNetwork,
-              tokensMapKey,
-              tokenPoolId != null && tokenPoolId !== ""
-                ? String(tokenPoolId)
-                : undefined,
+              tokenConfig,
               liveIntrinsicSupplyApy
             );
-            const intrinsicBorrowApy = resolveIntrinsicBorrowApyPercent(
-              currentNetwork,
-              tokensMapKey,
-              tokenPoolId != null && tokenPoolId !== ""
-                ? String(tokenPoolId)
-                : undefined,
-              liveIntrinsicSupplyApy
-            );
+            const intrinsicBorrowApy =
+              resolveIntrinsicBorrowApyPercentForTokenConfig(
+                currentNetwork,
+                tokenConfig,
+                liveIntrinsicSupplyApy
+              );
 
             // Safely resolve supplyAPY - avoid NaN when supplyRate is undefined
             const supplyAPYValue =

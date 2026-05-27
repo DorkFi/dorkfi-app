@@ -661,9 +661,17 @@ export const fetchMarketInfo = async (
       console.log("fetchMarketInfo tokenConfigRaw", { tokenConfigRaw, token });
       let tokenConfig: TokenConfig | undefined;
       if (Array.isArray(tokenConfigRaw)) {
-        // Find the token config that matches the poolId
+        const poolStr = String(poolId);
+        const marketStr = String(marketId).trim();
         tokenConfig =
-          tokenConfigRaw.find((config) => String(config.poolId) === String(poolId)) ||
+          (marketStr !== ""
+            ? tokenConfigRaw.find(
+                (config) =>
+                  String(config.poolId) === poolStr &&
+                  String(config.contractId ?? "").trim() === marketStr
+              )
+            : undefined) ??
+          tokenConfigRaw.find((config) => String(config.poolId) === poolStr) ??
           tokenConfigRaw[0];
       } else {
         tokenConfig = tokenConfigRaw;

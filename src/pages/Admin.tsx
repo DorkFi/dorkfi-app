@@ -157,7 +157,7 @@ import {
   buildNt200LendingPoolBalanceBoxTxns,
 } from "@/services/adminService";
 import dorkfiAPIService from "@/services/dorkfiAPIService";
-import { useOnDemandMarketData } from "@/hooks/useOnDemandMarketData";
+import { useOnDemandMarketData, marketRowCacheKey } from "@/hooks/useOnDemandMarketData";
 import WalletNetworkButton from "@/components/WalletNetworkButton";
 import { useWallet } from "@txnlab/use-wallet-react";
 import algosdk, { waitForConfirmation } from "algosdk";
@@ -195,18 +195,31 @@ const getMarketsFromConfig = (networkId: NetworkId) => {
   const tokens = getAllTokensWithDisplayInfo(networkId);
 
   return tokens.map((token) => {
-    const tokenConfigRaw = networkConfig.tokens[token.originalSymbol];
+    const lookupKey =
+      token.configKey ?? token.originalSymbol ?? token.symbol;
+    const tokenConfigRaw = networkConfig.tokens[lookupKey];
+    const poolStr =
+      token.poolId != null ? String(token.poolId).trim() : "";
+    const contractStr = String(token.underlyingContractId ?? "").trim();
     const tokenConfig = Array.isArray(tokenConfigRaw)
       ? tokenConfigRaw.find(
-          (c) => String(c.poolId) === String(token.poolId)
-        ) || tokenConfigRaw[0]
+          (c) =>
+            String(c.poolId ?? "") === poolStr &&
+            (contractStr === "" ||
+              String(c.contractId ?? "").trim() === contractStr)
+        ) ??
+        tokenConfigRaw.find((c) => String(c.poolId ?? "") === poolStr) ??
+        tokenConfigRaw[0]
       : tokenConfigRaw;
 
     return {
-      // Include poolId in id to make it unique for tokens with multiple markets
-      id: token.poolId
-        ? `${token.symbol.toLowerCase()}-${token.poolId}`
-        : token.symbol.toLowerCase(),
+      // Must match {@link marketRowCacheKey} / `useOnDemandMarketData` `marketsData` keys.
+      id: marketRowCacheKey({
+        originalSymbol: token.originalSymbol,
+        symbol: token.symbol,
+        poolId: token.poolId,
+        underlyingContractId: token.underlyingContractId,
+      }),
       name: token.name, // This will be "Voi" or "Algo" if override is configured
       symbol: token.symbol, // This will be "Voi" or "Algo" if override is configured
       originalName: token.originalName, // The original token name
