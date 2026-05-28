@@ -10,6 +10,7 @@ import {
   FOLKS_FINANCE_FIUSDC_ADAPTER_POOL_PARAMS,
   FOLKS_FINANCE_FITINY_ADAPTER_POOL_PARAMS,
   FOLKS_FINANCE_WBTC_ADAPTER_POOL_PARAMS,
+  FOLKS_FINANCE_WETH_ADAPTER_POOL_PARAMS,
   type FolksFinancePoolParams,
 } from "@/constants/folksFinance";
 
@@ -157,7 +158,8 @@ export interface TokenConfig {
   | "folks_mainnet_usdc_pool_deposit"
   | "folks_mainnet_fiusdc_ecosystem_pool_deposit"
   | "folks_mainnet_fitiny_ecosystem_pool_deposit"
-  | "folks_mainnet_wbtc_ntt_pool_deposit";
+  | "folks_mainnet_wbtc_ntt_pool_deposit"
+  | "folks_mainnet_weth_ntt_pool_deposit";
   /**
    * Optional intrinsic borrow APY in percentage points (e.g. 1.5 for 1.5%), added to displayed
    * borrow APY for this listing (e.g. wrapped-asset borrow uplift).
@@ -175,7 +177,9 @@ export interface TokenConfig {
   | "folks_mainnet_fiusdc_ecosystem_pool_deposit"
   | "folks_mainnet_fitiny_ecosystem_pool_deposit"
   | "folks_mainnet_wbtc_ntt_pool_deposit"
-  | "folks_mainnet_wbtc_ntt_pool_borrow";
+  | "folks_mainnet_wbtc_ntt_pool_borrow"
+  | "folks_mainnet_weth_ntt_pool_deposit"
+  | "folks_mainnet_weth_ntt_pool_borrow";
   /**
    * Optional wrapped-asset / bridge adapters (e.g. Folks mint/redeem), in order.
    * Use {@link TokenAdapterConfig.phases} to split deposit vs withdraw legs, and `id` + `label`
@@ -697,6 +701,87 @@ export const FOLKS_MAINNET_WBTC_REPAY_UNDERLYING = {
   repayWalletBasis: "underlying" as const,
   phases: ["repay"] as const,
   folksParams: FOLKS_FINANCE_WBTC_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+/** Folks V2 WETH (NTT) — same phase split as {@link FOLKS_MAINNET_WBTC_DEPOSIT_FWBTC_WALLET}. */
+export const FOLKS_MAINNET_WETH_DEPOSIT_FWETH_WALLET = {
+  id: "folks-mainnet-weth-deposit-fweth",
+  name: "fWETH",
+  type: "folks" as const,
+  label: "fWETH",
+  depositWalletBasis: "market_token" as const,
+  phases: ["deposit"] as const,
+  folksParams: FOLKS_FINANCE_WETH_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_WETH_DEPOSIT_UNDERLYING = {
+  id: "folks-mainnet-weth-deposit-weth",
+  name: "wETH",
+  type: "folks" as const,
+  label: "wETH",
+  depositWalletBasis: "underlying" as const,
+  phases: ["deposit"] as const,
+  folksParams: FOLKS_FINANCE_WETH_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_WETH_WITHDRAW = {
+  id: "folks-mainnet-weth-withdraw-weth",
+  name: "wETH",
+  type: "folks" as const,
+  label: "wETH",
+  withdrawReceiveBasis: "underlying" as const,
+  phases: ["withdraw"] as const,
+  folksParams: FOLKS_FINANCE_WETH_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_WETH_WITHDRAW_FASSET_WALLET = {
+  id: "folks-mainnet-weth-withdraw-fweth",
+  name: "fWETH",
+  type: "folks" as const,
+  label: "fWETH",
+  withdrawReceiveBasis: "market_token" as const,
+  phases: ["withdraw"] as const,
+  folksParams: FOLKS_FINANCE_WETH_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_WETH_BORROW_FWETH_WALLET = {
+  id: "folks-mainnet-weth-borrow-fweth",
+  name: "fWETH",
+  type: "folks" as const,
+  label: "fWETH",
+  borrowReceiveBasis: "market_token" as const,
+  phases: ["borrow"] as const,
+  folksParams: FOLKS_FINANCE_WETH_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_WETH_BORROW_UNDERLYING = {
+  id: "folks-mainnet-weth-borrow-weth",
+  name: "wETH",
+  type: "folks" as const,
+  label: "wETH",
+  borrowReceiveBasis: "underlying" as const,
+  phases: ["borrow"] as const,
+  folksParams: FOLKS_FINANCE_WETH_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_WETH_REPAY_FWETH_WALLET = {
+  id: "folks-mainnet-weth-repay-fweth",
+  name: "fWETH",
+  type: "folks" as const,
+  label: "fWETH",
+  repayWalletBasis: "market_token" as const,
+  phases: ["repay"] as const,
+  folksParams: FOLKS_FINANCE_WETH_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_WETH_REPAY_UNDERLYING = {
+  id: "folks-mainnet-weth-repay-weth",
+  name: "wETH",
+  type: "folks" as const,
+  label: "wETH",
+  repayWalletBasis: "underlying" as const,
+  phases: ["repay"] as const,
+  folksParams: FOLKS_FINANCE_WETH_ADAPTER_POOL_PARAMS,
 } satisfies TokenAdapterConfig;
 
 export type FolksTokenAdapterConfig = Extract<
@@ -2552,22 +2637,54 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     logoPath: "/lovable-uploads/goETH.webp",
     tokenStandard: "asa",
   },
-  wETH: {
-    assetId: "887406851",
-    poolId: "3333688282",
-    contractId: "3211811648",
-    nTokenId: "3348121075",
-    migration: {
-      poolId: "3207735602",
+  wETH: [
+    // wETH 887406851 8 3211811648
+    {
+      assetId: "887406851",
+      poolId: "3333688282",
       contractId: "3211811648",
-      nTokenId: "3211959473",
+      nTokenId: "3348121075",
+      migration: {
+        poolId: "3207735602",
+        contractId: "3211811648",
+        nTokenId: "3211959473",
+      },
+      decimals: 8,
+      name: "wETH",
+      symbol: "wETH",
+      logoPath: "/lovable-uploads/wETH.webp",
+      tokenStandard: "asa",
     },
-    decimals: 8,
-    name: "wETH",
-    symbol: "wETH",
-    logoPath: "/lovable-uploads/wETH.webp",
-    tokenStandard: "asa",
-  },
+    // fWETH 3514808788 8 3575840444
+    {
+      assetId: "3495722210",
+      poolId: "3333688282",
+      contractId: "3575840444",
+      nTokenId: "3575954102",
+      decimals: 8,
+      name: "wETH",
+      symbol: "wETH",
+      logoPath: "/lovable-uploads/wETH.png",
+      tokenStandard: "asa-asa",
+      dataAddedAt: "2026-05-27T00:00:00.000Z",
+      requireStandaloneFAssetOptInBeforeDeposit: true,
+      adapters: [
+        FOLKS_MAINNET_WETH_DEPOSIT_FWETH_WALLET,
+        FOLKS_MAINNET_WETH_DEPOSIT_UNDERLYING,
+        FOLKS_MAINNET_WETH_WITHDRAW,
+        FOLKS_MAINNET_WETH_WITHDRAW_FASSET_WALLET,
+        FOLKS_MAINNET_WETH_BORROW_FWETH_WALLET,
+        FOLKS_MAINNET_WETH_BORROW_UNDERLYING,
+        FOLKS_MAINNET_WETH_REPAY_FWETH_WALLET,
+        FOLKS_MAINNET_WETH_REPAY_UNDERLYING,
+      ],
+      iconBadgeFromSymbol: "FOLKS",
+      intrinsicApyPercent: 0.82,
+      intrinsicBorrowApyPercent: 0.82,
+      intrinsicApyLiveSource: "folks_mainnet_weth_ntt_pool_deposit",
+      intrinsicBorrowApyLiveSource: "folks_mainnet_weth_ntt_pool_deposit",
+    }
+  ],
   goBTC: {
     assetId: "386192725",
     poolId: "3333688282",
@@ -2585,6 +2702,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     tokenStandard: "asa",
   },
   wBTC: [
+    // wBTC 1058926737 8 3211827406
     {
       assetId: "1058926737",
       poolId: "3333688282",
@@ -2601,11 +2719,12 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
       logoPath: "/lovable-uploads/wBTCm.png",
       tokenStandard: "asa",
     },
+    // fWBTC 3514808410 8 3575837891
     {
-      assetId: "3495558025", // Folks V2 WBTC (NTT) underlying
+      assetId: "3495558025",
       poolId: "3333688282",
-      contractId: "3573862137", // Folks V2 Wrapped BTC (arc200)
-      nTokenId: "3573966772",
+      contractId: "3575837891",
+      nTokenId: "3575859479",
       decimals: 8,
       name: "wBTC",
       symbol: "wBTC",
@@ -3685,6 +3804,10 @@ export type LiveIntrinsicSupplyApySnapshot = {
   folksMainnetWbtcNttDepositPercent?: number | null;
   /** Folks V2 WBTC (NTT) pool variable borrow yield, percentage points. */
   folksMainnetWbtcNttBorrowPercent?: number | null;
+  /** Folks V2 WETH (NTT) pool deposit yield, percentage points. */
+  folksMainnetWethNttDepositPercent?: number | null;
+  /** Folks V2 WETH (NTT) pool variable borrow yield, percentage points. */
+  folksMainnetWethNttBorrowPercent?: number | null;
 };
 
 function applyLiveIntrinsicSupplyApySource(
@@ -3724,6 +3847,11 @@ function applyLiveIntrinsicSupplyApySource(
   }
   if (source === "folks_mainnet_wbtc_ntt_pool_deposit") {
     const v = live?.folksMainnetWbtcNttDepositPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    return base;
+  }
+  if (source === "folks_mainnet_weth_ntt_pool_deposit") {
+    const v = live?.folksMainnetWethNttDepositPercent;
     if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
     return base;
   }
@@ -3782,6 +3910,16 @@ function applyLiveIntrinsicBorrowApySource(
   }
   if (source === "folks_mainnet_wbtc_ntt_pool_borrow") {
     const v = live?.folksMainnetWbtcNttBorrowPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    return base;
+  }
+  if (source === "folks_mainnet_weth_ntt_pool_deposit") {
+    const v = live?.folksMainnetWethNttDepositPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    return base;
+  }
+  if (source === "folks_mainnet_weth_ntt_pool_borrow") {
+    const v = live?.folksMainnetWethNttBorrowPercent;
     if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
     return base;
   }
@@ -3878,7 +4016,8 @@ export const tokenRowUsesLiveIntrinsicApy = (
     s === "folks_mainnet_usdc_pool_deposit" ||
     s === "folks_mainnet_fiusdc_ecosystem_pool_deposit" ||
     s === "folks_mainnet_fitiny_ecosystem_pool_deposit" ||
-    s === "folks_mainnet_wbtc_ntt_pool_deposit"
+    s === "folks_mainnet_wbtc_ntt_pool_deposit" ||
+    s === "folks_mainnet_weth_ntt_pool_deposit"
   );
 };
 
@@ -3907,7 +4046,9 @@ export const tokenRowUsesLiveIntrinsicBorrowApy = (
     s === "folks_mainnet_fitiny_ecosystem_pool_borrow" ||
     s === "folks_mainnet_fitiny_ecosystem_pool_deposit" ||
     s === "folks_mainnet_wbtc_ntt_pool_deposit" ||
-    s === "folks_mainnet_wbtc_ntt_pool_borrow"
+    s === "folks_mainnet_wbtc_ntt_pool_borrow" ||
+    s === "folks_mainnet_weth_ntt_pool_deposit" ||
+    s === "folks_mainnet_weth_ntt_pool_borrow"
   );
 };
 
