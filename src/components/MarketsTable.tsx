@@ -3769,7 +3769,7 @@ const MarketsTable = () => {
             </div>
           </div>
 
-          <div className="sticky top-2 z-20 -mx-1 px-1 pb-2 rounded-lg bg-blue-50/95 dark:bg-slate-900/95 backdrop-blur-sm">
+          <div className="-mx-1 px-1 pb-2 rounded-lg md:sticky md:top-2 md:z-20 md:bg-blue-50/95 dark:md:bg-slate-900/95 md:backdrop-blur-sm">
             <MarketSearchFilters
               embedded
               searchTerm={searchTerm}
