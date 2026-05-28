@@ -11,6 +11,10 @@ import {
   borrowApyBadgeClassName,
   BORROW_APY_BADGE_STOKEN,
 } from "@/constants/marketUi";
+import {
+  isAtBorrowCap,
+  MINT_BORROW_CAP_TOOLTIP,
+} from "@/constants/lendingCaps";
 import { MarketRowTokenIcon } from "./MarketRowTokenIcon";
 
 interface STokenCardProps {
@@ -35,6 +39,11 @@ const STokenCard = ({
 }: STokenCardProps) => {
   const { formatCurrency, formatPercent } = useNumberI18n();
   const { currentNetwork } = useNetwork();
+  const borrowCapReached = isAtBorrowCap(
+    Number(market.totalBorrow ?? 0),
+    Number(market.borrowCap ?? 0)
+  );
+
   return (
     <DorkFiCard
       key={market.asset}
@@ -105,7 +114,13 @@ const STokenCard = ({
       <div className="flex gap-2 pt-1 justify-center md:justify-start">
         <DorkFiButton
           variant="secondary"
-          onClick={e => { e.stopPropagation(); onMintClick?.(market.asset, market.marketInfo?.poolId); }}
+          onClick={e => {
+            e.stopPropagation();
+            if (borrowCapReached) return;
+            onMintClick?.(market.asset, market.marketInfo?.poolId);
+          }}
+          disabled={borrowCapReached}
+          title={borrowCapReached ? MINT_BORROW_CAP_TOOLTIP : undefined}
           className="w-full bg-purple-100 hover:bg-purple-200 text-purple-800 dark:bg-purple-900 dark:hover:bg-purple-800 dark:text-purple-200"
         >
           Mint
