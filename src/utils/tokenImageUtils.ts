@@ -28,7 +28,7 @@ export const getTokenImagePath = (symbol: string): string => {
     TINY: "/lovable-uploads/TINY.webp",
     FINITE: "/lovable-uploads/FINITE.webp",
     goETH: "/lovable-uploads/goETH.webp",
-    wETH: "/lovable-uploads/wETH.webp",
+    wETH: "/lovable-uploads/wETH.png",
     goBTC: "/lovable-uploads/goBTC.webp",
     wBTC: "/lovable-uploads/wBTCm.png",
     LINK: "/lovable-uploads/LINK.png",
