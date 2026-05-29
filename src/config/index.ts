@@ -1031,6 +1031,8 @@ export interface GlobalConfig {
     enableLiquidatablePositions: boolean;
     /** NFT holder rewards — pay agent on Base (x402) in portfolio modal. */
     enableAgentClaim: boolean;
+    /** Dev/staging: skip NFT holder eligibility checks before pay-agent (never enable in production). */
+    bypassAgentClaimEligibility: boolean;
   };
 }
 
@@ -3291,6 +3293,7 @@ export const config: GlobalConfig = {
     enableNFTBoost: true, // Enable NFT boost for governance voting power
     enableLiquidatablePositions: true, // Enable liquidatable positions section in portfolio
     enableAgentClaim: true, // NFT holder reward claim — Base x402 pay-agent section
+    bypassAgentClaimEligibility: false,
   },
 };
 
@@ -4455,6 +4458,12 @@ export const getEnvironmentConfig = (): Partial<GlobalConfig> => {
     envFeatures.enableAgentClaim =
       import.meta.env.VITE_ENABLE_AGENT_CLAIM === "true" ||
       import.meta.env.VITE_ENABLE_AGENT_CLAIM === "1";
+  }
+
+  if (typeof import.meta.env.VITE_BYPASS_AGENT_CLAIM_ELIGIBILITY !== "undefined") {
+    envFeatures.bypassAgentClaimEligibility =
+      import.meta.env.VITE_BYPASS_AGENT_CLAIM_ELIGIBILITY === "true" ||
+      import.meta.env.VITE_BYPASS_AGENT_CLAIM_ELIGIBILITY === "1";
   }
 
   if (env === "development") {
