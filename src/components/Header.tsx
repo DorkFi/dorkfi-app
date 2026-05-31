@@ -23,6 +23,7 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
 
   // Determine activeTab from location if not provided
   const currentActiveTab = activeTab || (() => {
+    if (location.pathname === "/pools") return "pools";
     if (location.pathname === "/analytics") return "analytics";
     if (location.pathname === "/liquidation-markets") return "liquidations";
     if (location.pathname === "/gas-station") return "gas-station";
@@ -46,6 +47,8 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
       navigate("/analytics");
     } else if (value === "governance") {
       navigate("/governance");
+    } else if (value === "pools") {
+      navigate("/pools");
     } else if (value === "portfolio") {
       navigate("/portfolio");
     } else if (value === "markets") {
@@ -75,6 +78,8 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
         onTabChange("gas-station");
       } else if (location.pathname === "/governance") {
         onTabChange("governance");
+      } else if (location.pathname === "/pools") {
+        onTabChange("pools");
       } else if (location.pathname === "/portfolio" || location.pathname.startsWith("/portfolio/")) {
         onTabChange("portfolio");
       } else if (location.pathname === "/market") {
@@ -93,6 +98,9 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
       ? [{ value: "prefi", label: "PreFi" }]
       : []),
     { value: "markets", label: "Markets" },
+    ...(isFeatureEnabled("enablePools")
+      ? [{ value: "pools", label: "Pools" }]
+      : []),
     ...(activeAccount ? [{ value: "portfolio", label: "Portfolio" }] : []),
     ...(isFeatureEnabled("enableLiquidations")
       ? [{ value: "liquidations", label: "Liquidations" }]

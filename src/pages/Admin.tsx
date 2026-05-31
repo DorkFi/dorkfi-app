@@ -93,6 +93,7 @@ import {
   isCurrentNetworkEVM,
   NetworkId,
   getLendingPools,
+  getLendingPoolLabel,
   getAllTokensWithDisplayInfo,
   getPreFiParameters,
   getAlgorandConfigForReads,
@@ -365,8 +366,8 @@ export default function AdminDashboard() {
   // Generate pool options with class labels
   const getPoolOptions = () => {
     const lendingPools = getLendingPools(currentNetwork);
-    return lendingPools.map((poolId, index) => {
-      const classLabel = String.fromCharCode(65 + index); // A, B, C, etc.
+    return lendingPools.map((poolId) => {
+      const classLabel = getLendingPoolLabel(currentNetwork, poolId);
       return {
         value: poolId,
         label: `${classLabel} Market (${poolId})`,
@@ -1273,7 +1274,7 @@ export default function AdminDashboard() {
     setIsLoadingCurrentUserRoles(true);
     try {
       const roleChecks = await checkAllRoles(activeAccount.address);
-      setCurrentUserRoles(roleChecks);
+      setCurrentUserRoles(roleChecks ?? []);
     } catch (error) {
       console.error("Error checking current user roles:", error);
       setCurrentUserRoles([]);
@@ -1295,9 +1296,16 @@ export default function AdminDashboard() {
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
-      // get lending pool id from selected pool or fallback to first pool
-      const lendingPoolId =
-        selectedLendingPool || networkConfig.contracts.lendingPools[0];
+      // get lending pool id from selected pool
+      if (!selectedLendingPool) {
+        toast.error("Select a lending pool first", {
+          description:
+            "Choose the target pool (e.g. C Market) in the Roles tab before revoking roles.",
+        });
+        return;
+      }
+      const lendingPoolId = selectedLendingPool;
+      const poolLabel = getLendingPoolLabel(currentNetwork, lendingPoolId);
       // get lending pool contract
       const ci = new CONTRACT(
         Number(lendingPoolId),
@@ -1337,8 +1345,8 @@ export default function AdminDashboard() {
       const res = await clients.algod.sendRawTransaction(stxns).do();
       await waitForConfirmation(clients.algod, res.txid, 4);
       toast.success("Role revoked successfully", {
-        description: `Successfully revoked ${roles.find((r) => r.id === roleId)?.name || "selected role"
-          } role from ${address}.`,
+        description: `Revoked ${roles.find((r) => r.id === roleId)?.name || "selected role"
+          } on Pool ${poolLabel} (${lendingPoolId}) from ${address}.`,
       });
 
       // Refresh current user roles if the revoked role was for the current user
@@ -1358,7 +1366,18 @@ export default function AdminDashboard() {
   const checkAllRoles = async (address: string) => {
     if (!address.trim()) {
       toast.error("Please provide an address to check roles");
-      return;
+      return [];
+    }
+    if (!activeAccount?.address) {
+      toast.error("Connect your wallet to check roles on-chain");
+      return [];
+    }
+    if (!selectedLendingPool) {
+      toast.error("Select a lending pool first", {
+        description:
+          "Choose the target pool (e.g. C Market) in the Roles tab before checking roles.",
+      });
+      return [];
     }
 
     setIsCheckingRoles(true);
@@ -1368,16 +1387,15 @@ export default function AdminDashboard() {
       const clients = algorandService.initializeClients(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
-      // get lending pool id from selected pool or fallback to first pool
-      const lendingPoolId =
-        selectedLendingPool || networkConfig.contracts.lendingPools[0];
-      // get lending pool contract
+      const lendingPoolId = selectedLendingPool;
+      const poolLabel = getLendingPoolLabel(currentNetwork, lendingPoolId);
+      // get lending pool contract — caller must be connected wallet (not target address)
       const ci = new CONTRACT(
         Number(lendingPoolId),
         clients.algod,
         undefined,
         { ...LendingPoolAppSpec.contract, events: [] },
-        { addr: address, sk: new Uint8Array() }
+        { addr: activeAccount.address, sk: new Uint8Array() }
       );
       ci.setEnableRawBytes(true);
 
@@ -1428,11 +1446,11 @@ export default function AdminDashboard() {
 
       if (hasAnyRole) {
         toast.success("Role Check Complete", {
-          description: `${address} has the following roles: ${roleSummary}`,
+          description: `Pool ${poolLabel}: ${address} has ${roleSummary}`,
         });
       } else {
         toast.info("Role Check Complete", {
-          description: `${address} does not have any of the predefined roles.`,
+          description: `Pool ${poolLabel}: ${address} does not have any predefined roles.`,
         });
       }
 
@@ -1706,7 +1724,7 @@ export default function AdminDashboard() {
 
   // Check if current user has price feed manager role
   const hasPriceFeedManagerRole = () => {
-    return currentUserRoles.some(
+    return (currentUserRoles ?? []).some(
       (role) => role.roleId === "price-feed-manager" && role.hasRole
     );
   };
@@ -2740,11 +2758,6 @@ export default function AdminDashboard() {
   // Load Envoi name when component mounts or account changes
   React.useEffect(() => {
     loadCurrentUserEnvoiName();
-  }, [activeAccount?.address]);
-
-  // Check current user's roles when component mounts or account changes
-  React.useEffect(() => {
-    checkCurrentUserRoles();
   }, [activeAccount?.address]);
 
   // Debounced search for revoke modal Envoi names
@@ -6870,6 +6883,15 @@ export default function AdminDashboard() {
       setSelectedLendingPool(lendingPools[0]);
     }
   }, [currentNetwork, selectedLendingPool]);
+
+  // Check current user's roles when wallet or selected pool changes
+  React.useEffect(() => {
+    if (!activeAccount?.address || !selectedLendingPool) {
+      setCurrentUserRoles([]);
+      return;
+    }
+    void checkCurrentUserRoles();
+  }, [activeAccount?.address, selectedLendingPool]);
 
   // Load paused states for all pools when network changes
   React.useEffect(() => {
@@ -11437,18 +11459,17 @@ export default function AdminDashboard() {
                           <SelectValue placeholder="Select a lending pool" />
                         </SelectTrigger>
                         <SelectContent>
-                          {getLendingPools(currentNetwork).map(
-                            (poolId, index) => {
-                              const classLabel = String.fromCharCode(
-                                65 + index
-                              ); // A, B, C, etc.
-                              return (
-                                <SelectItem key={poolId} value={poolId}>
-                                  Pool {classLabel} ({poolId})
-                                </SelectItem>
-                              );
-                            }
-                          )}
+                          {getLendingPools(currentNetwork).map((poolId) => {
+                            const classLabel = getLendingPoolLabel(
+                              currentNetwork,
+                              poolId
+                            );
+                            return (
+                              <SelectItem key={poolId} value={poolId}>
+                                Pool {classLabel} ({poolId})
+                              </SelectItem>
+                            );
+                          })}
                         </SelectContent>
                       </Select>
                     </div>
@@ -11458,13 +11479,13 @@ export default function AdminDashboard() {
                       <p className="text-sm text-blue-800 dark:text-blue-200">
                         <strong>Active Pool:</strong> All role operations (assign,
                         revoke, check) will be performed on Pool{" "}
-                        {String.fromCharCode(
-                          65 +
-                          getLendingPools(currentNetwork).indexOf(
-                            selectedLendingPool
-                          )
-                        )}{" "}
+                        {getLendingPoolLabel(currentNetwork, selectedLendingPool)}{" "}
                         ({selectedLendingPool})
+                      </p>
+                      <p className="text-xs text-blue-700/80 dark:text-blue-300/80 mt-1">
+                        Roles are per lending pool contract. Your wallet must
+                        already hold Market Controller (or deployer admin) on
+                        this pool to assign roles here.
                       </p>
                     </div>
                   )}
@@ -11609,13 +11630,13 @@ export default function AdminDashboard() {
                           Checking roles...
                         </span>
                       </div>
-                    ) : currentUserRoles.length > 0 ? (
+                    ) : (currentUserRoles ?? []).length > 0 ? (
                       <div className="space-y-3">
                         <h4 className="font-medium text-sm">
                           Smart Contract Roles:
                         </h4>
                         <div className="grid gap-2">
-                          {currentUserRoles
+                          {(currentUserRoles ?? [])
                             .filter((role) => role.hasRole)
                             .map((role) => (
                               <div
@@ -11653,15 +11674,15 @@ export default function AdminDashboard() {
                     )}
 
                     {/* Role Summary */}
-                    {currentUserRoles.length > 0 && (
+                    {(currentUserRoles ?? []).length > 0 && (
                       <div className="mt-4 p-3 bg-muted/30 rounded-lg">
                         <p className="text-sm text-muted-foreground">
                           <strong>Role Summary:</strong> You have{" "}
                           {
-                            currentUserRoles.filter((role) => role.hasRole)
+                            (currentUserRoles ?? []).filter((role) => role.hasRole)
                               .length
                           }{" "}
-                          of {currentUserRoles.length} predefined roles
+                          of {(currentUserRoles ?? []).length} predefined roles
                           assigned.
                         </p>
                       </div>
@@ -18224,7 +18245,11 @@ export default function AdminDashboard() {
               Assign {selectedRole?.name} Role
             </DialogTitle>
             <DialogDescription>
-              Grant this role to an address to provide system permissions.
+              Grant this role to an address on Pool{" "}
+              {selectedLendingPool
+                ? `${getLendingPoolLabel(currentNetwork, selectedLendingPool)} (${selectedLendingPool})`
+                : "— select a lending pool in the Roles tab first"}
+              .
             </DialogDescription>
           </DialogHeader>
 
@@ -18412,12 +18437,19 @@ export default function AdminDashboard() {
                   // Check if this is a Price Oracle role assignment
                   const isPriceOracleRole = selectedRole.id === "price-oracle";
 
-                  // All roles (including PriceOracle) are assigned on the LendingPool contract
-                  // The PriceOracle role on the LendingPool contract grants permission to update prices
-                  // Use selected lending pool or fallback to first pool
-                  const lendingPoolId =
-                    selectedLendingPool ||
-                    networkConfig.contracts.lendingPools[0];
+                  // All roles are assigned on the selected lending pool contract
+                  if (!selectedLendingPool) {
+                    toast.error("Select a lending pool first", {
+                      description:
+                        "Choose Pool C (or another pool) in the Roles tab before assigning.",
+                    });
+                    return;
+                  }
+                  const lendingPoolId = selectedLendingPool;
+                  const poolLabel = getLendingPoolLabel(
+                    currentNetwork,
+                    lendingPoolId
+                  );
                   const contractId = Number(lendingPoolId);
                   const targetAddress = assignAddress;
                   const contractSpec = {
@@ -18447,8 +18479,10 @@ export default function AdminDashboard() {
                   console.log("role_keyR", role_keyR);
                   if (!role_keyR.success) {
                     toast.error("Failed to get role key", {
-                      description: `Could not retrieve role key for ${selectedRole?.name || "selected role"
-                        }. Please try again.`,
+                      description: String(
+                        (role_keyR as { error?: string }).error ??
+                          `Could not retrieve role key on Pool ${poolLabel} (${lendingPoolId}).`
+                      ),
                     });
                     return;
                   }
@@ -18460,8 +18494,10 @@ export default function AdminDashboard() {
                   );
                   if (!set_roleR.success) {
                     toast.error("Failed to set role", {
-                      description: `Could not set role for ${selectedRole?.name || "selected role"
-                        }. Please try again.`,
+                      description: String(
+                        (set_roleR as { error?: string }).error ??
+                          `Could not set role on Pool ${poolLabel}. Your wallet may lack Market Controller on this pool.`
+                      ),
                     });
                     return;
                   }
@@ -18477,8 +18513,8 @@ export default function AdminDashboard() {
                   await waitForConfirmation(clients.algod, res.txid, 4);
 
                   toast.success("Role assigned successfully", {
-                    description: `Successfully assigned ${selectedRole?.name || "selected role"
-                      } role to ${targetAddress}.`,
+                    description: `Assigned ${selectedRole?.name || "selected role"
+                      } on Pool ${poolLabel} (${lendingPoolId}) to ${targetAddress}.`,
                   });
 
                   // Refresh oracle contract info if this was a Price Oracle role assignment

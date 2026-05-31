@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback, useEffect } from "react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import {
   getAllTokensWithDisplayInfo,
+  isMarketsTableExcludedPool,
   NetworkId,
   getNetworkConfig,
   getLendingPools,
@@ -354,9 +355,13 @@ export const useOnDemandMarketData = ({
     ]
   );
 
-  // Get token configuration for current network
+  // Get token configuration for current network (omit pools excluded from Markets table)
   const tokens = useMemo(
-    () => getAllTokensWithDisplayInfo(currentNetwork),
+    () =>
+      getAllTokensWithDisplayInfo(currentNetwork).filter(
+        (token) =>
+          !isMarketsTableExcludedPool(currentNetwork, token.poolId)
+      ),
     [currentNetwork]
   );
 
