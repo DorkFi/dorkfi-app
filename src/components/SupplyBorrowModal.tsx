@@ -395,6 +395,10 @@ interface SupplyBorrowModalProps {
   isLoadingWalletBalance?: boolean;
   /** Parent is loading borrow global data after optimistic modal open. */
   isLoadingBorrowGlobalData?: boolean;
+  /** Optional deposit-mode notice (e.g. Tinyman farm reward disqualification). */
+  depositNotice?: string;
+  /** Stacked icons for LP pair markets (underlying assets). */
+  assetPairIcons?: { asset1Icon: string; asset2Icon: string };
 }
 
 const SupplyBorrowModal = ({
@@ -422,6 +426,8 @@ const SupplyBorrowModal = ({
   walletBalanceMarketToken,
   isLoadingWalletBalance = false,
   isLoadingBorrowGlobalData = false,
+  depositNotice,
+  assetPairIcons,
 }: SupplyBorrowModalProps) => {
   const [amount, setAmount] = useState("");
   const [fiatValue, setFiatValue] = useState(0);
@@ -3393,6 +3399,7 @@ const SupplyBorrowModal = ({
                     mode={mode}
                     asset={asset}
                     assetIcon={assetData.icon}
+                    assetPairIcons={assetPairIcons}
                   />
                 )}
               </DialogHeader>
@@ -3620,6 +3627,14 @@ const SupplyBorrowModal = ({
                   </p>
                 </div>
               )}
+
+              {mode === "deposit" && depositNotice ? (
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 mb-4">
+                  <p className="text-xs leading-relaxed text-amber-900 dark:text-amber-100">
+                    {depositNotice}
+                  </p>
+                </div>
+              ) : null}
 
               <SupplyBorrowForm
                 key={

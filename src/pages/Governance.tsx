@@ -68,6 +68,9 @@ const Governance = () => {
 
   // Calculate effective voting power (same logic as GovernanceDashboardCard)
   const effectiveVotingPower = useMemo(() => {
+
+    console.log("userVoterInfo", { userVoterInfo });
+
     // Calculate base power
     const basePower = userVoterInfo 
       ? Number(userVoterInfo.voteBasePower) / 1e8 
