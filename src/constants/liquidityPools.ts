@@ -361,12 +361,15 @@ export function pairHasPoolsPageLendingPosition(
   return pairHasUnitLpLendingMarket(networkId, pair);
 }
 
-/** Lending market row for Pools page supply/withdraw (UNIT→WAD association only). */
+/** Lending market row for Pools page supply/withdraw (UNIT LP collateral or WAD LP markets). */
 export function resolvePoolsPageLendingMarket(
   networkId: NetworkId,
   pair: LiquidityPoolPairConfig
 ): LiquidityPoolLendingMarket | null {
-  if (!pairHasPoolsPageLendingPosition(networkId, pair)) return null;
+  const hasLending =
+    pairHasPoolsPageLendingPosition(networkId, pair) ||
+    pairHasWadLpLendingMarket(networkId, pair);
+  if (!hasLending) return null;
   return resolveLiquidityPoolLendingMarket(networkId, pair);
 }
 
