@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useWallet } from "@txnlab/use-wallet-react";
 import {
+  resolvePoolsPageLendingMarket,
   resolveLiquidityPoolLendingMarket,
   poolHasTinymanFarm,
   type LiquidityPoolPairConfig,
@@ -18,9 +19,13 @@ import PoolLendingModals from "./PoolLendingModals";
 
 interface LiquidityPoolCardContainerProps {
   pair: LiquidityPoolPairConfig;
+  onLendingSuccess?: () => void;
 }
 
-const LiquidityPoolCardContainer = ({ pair }: LiquidityPoolCardContainerProps) => {
+const LiquidityPoolCardContainer = ({
+  pair,
+  onLendingSuccess,
+}: LiquidityPoolCardContainerProps) => {
   const { activeAccount } = useWallet();
   const { data: snapshot, isLoading, refetch } = useLiquidityPoolSnapshot(pair);
   const { data: position, refetch: refetchPosition } = useLiquidityPoolPosition(
@@ -36,7 +41,7 @@ const LiquidityPoolCardContainer = ({ pair }: LiquidityPoolCardContainerProps) =
   const [suppliedBalance, setSuppliedBalance] = useState(0);
 
   const lendingMarket = useMemo(
-    () => resolveLiquidityPoolLendingMarket(pair.networkId, pair),
+    () => resolvePoolsPageLendingMarket(pair.networkId, pair),
     [pair]
   );
 
@@ -84,6 +89,7 @@ const LiquidityPoolCardContainer = ({ pair }: LiquidityPoolCardContainerProps) =
     invalidatePools();
     void refetch();
     void refetchPosition();
+    onLendingSuccess?.();
   };
 
   return (
@@ -101,6 +107,7 @@ const LiquidityPoolCardContainer = ({ pair }: LiquidityPoolCardContainerProps) =
         onLendingWithdraw={() => setLendingWithdrawOpen(true)}
         lendingSupplyDisabled={walletLpBalanceHuman <= 0}
         lendingWithdrawDisabled={suppliedBalance <= 0}
+        suppliedLpBalance={suppliedBalance}
       />
       {showDepositWithdraw && snapshot ? (
         <PoolLiquidityModal
@@ -109,6 +116,7 @@ const LiquidityPoolCardContainer = ({ pair }: LiquidityPoolCardContainerProps) =
           mode={modalMode}
           pair={pair}
           snapshot={snapshot}
+          suppliedLpBalance={suppliedBalance}
           onSuccess={() => {
             invalidatePools();
             void refetch();
@@ -118,6 +126,7 @@ const LiquidityPoolCardContainer = ({ pair }: LiquidityPoolCardContainerProps) =
       ) : null}
       {lendingMarket ? (
         <PoolLendingModals
+          pair={pair}
           lendingMarket={lendingMarket}
           supplyOpen={supplyOpen}
           withdrawOpen={lendingWithdrawOpen}

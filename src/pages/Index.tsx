@@ -1,9 +1,8 @@
 import { useLocation } from "react-router-dom";
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import Dashboard from "@/components/Dashboard";
-import MarketsTable from "@/components/MarketsTable";
 import Portfolio from "@/components/Portfolio";
 import SwapWidget from "@/components/SwapWidget";
 import SwapHeroSection from "@/components/SwapHeroSection";
@@ -13,6 +12,8 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import LiquidationMonitor from "@/components/liquidation/LiquidationMonitor";
 import { isFeatureEnabled } from "@/config";
 import { cn } from "@/lib/utils";
+
+const MarketsTable = lazy(() => import("@/components/MarketsTable"));
 
 interface Token {
   symbol: string;
@@ -65,7 +66,11 @@ const Index = ({ activeTab, onTabChange }: IndexProps) => {
       case "dashboard":
         return <Dashboard onTabChange={onTabChange} />;
       case "markets":
-        return <MarketsTable />;
+        return (
+          <Suspense fallback={null}>
+            <MarketsTable />
+          </Suspense>
+        );
       case "portfolio":
         return <Portfolio />;
       case "liquidations":

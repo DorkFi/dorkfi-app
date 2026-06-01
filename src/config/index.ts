@@ -3019,6 +3019,18 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
       tokenStandard: "arc200-exchange",
       dataAddedAt: "2026-04-19T00:00:00.000Z",
     },
+    {
+      assetId: "3334160924",
+      contractId: "3333688448",
+      poolId: "3578814346",
+      nTokenId: "3583297246",
+      decimals: 6,
+      name: "WAD",
+      symbol: "WAD",
+      logoPath: "/lovable-uploads/WAD_fixed.png",
+      tokenStandard: "arc200-exchange",
+      dataAddedAt: "2026-06-01T00:00:00.000Z",
+    }
   ],
   // TMPOOL2 3157974960 6 3577729953
   // name: "TinymanPool2.0 UNIT-ALGO",
@@ -3539,8 +3551,9 @@ export const getLendingPoolLabel = (
 };
 
 /**
- * Lending pools omitted from the Markets table (still in config for Pools, Portfolio, Admin).
- * Algorand prod C pool holds Tinyman LP nt200 markets — surfaced on the Pools page instead.
+ * Lending pools whose LP nt200 markets are omitted from the Markets table
+ * (still in config for Pools page, Admin, etc.).
+ * Algorand prod C pool holds Tinyman LP markets — surfaced on the Pools page instead.
  */
 const MARKETS_TABLE_EXCLUDED_POOL_IDS: Partial<
   Record<NetworkId, readonly string[]>
@@ -3548,7 +3561,179 @@ const MARKETS_TABLE_EXCLUDED_POOL_IDS: Partial<
   "algorand-mainnet": [algorandProdCMarket],
 };
 
-/** True when a pool's markets should not appear on the Markets table. */
+/**
+ * Lending pool app id for an nt200 / underlying market contract.
+ * Pool C TMPOOL2 + WAD rows are indexed here so Pools / portfolio can resolve
+ * `contractId → poolId` without scanning `tokens`.
+ */
+const LENDING_POOL_BY_MARKET_CONTRACT: Partial<
+  Record<NetworkId, Readonly<Record<string, string>>>
+> = {
+  "algorand-mainnet": {
+    [algorandProdSToken]: algorandProdCMarket,
+    "3577729953": algorandProdCMarket,
+    "3577777819": algorandProdCMarket,
+    "3577783311": algorandProdCMarket,
+  },
+};
+
+/** WAD borrow market on Pool C paired with UNIT TMPOOL2 collateral (`tokens.WAD` row). */
+export type UnitLendingWadBorrowMarketRef = {
+  poolId: string;
+  contractId: string;
+  nTokenId: string;
+  configKey: "WAD";
+};
+
+/**
+ * UNIT LP nt200 collateral markets on Pool C that borrow against
+ * {@link UNIT_LENDING_WAD_BORROW_MARKET} (WAD @ pool 3578814346).
+ */
+const UNIT_LENDING_COLLATERAL_CONTRACT_IDS: Partial<
+  Record<NetworkId, readonly string[]>
+> = {
+  "algorand-mainnet": ["3577729953", "3577777819"],
+};
+
+/** WAD borrow market for UNIT LP lending on Pool C (`algorandProdTokens.WAD[1]`). */
+const UNIT_LENDING_WAD_BORROW_MARKET: Partial<
+  Record<NetworkId, UnitLendingWadBorrowMarketRef>
+> = {
+  "algorand-mainnet": {
+    poolId: algorandProdCMarket,
+    contractId: algorandProdSToken,
+    nTokenId: "3583297246",
+    configKey: "WAD",
+  },
+};
+
+/** nt200 contract ids for UNIT TMPOOL2 collateral markets on Pool C. */
+export function getUnitLendingCollateralContractIds(
+  networkId: NetworkId | string | null | undefined
+): readonly string[] {
+  if (!networkId) return [];
+  return UNIT_LENDING_COLLATERAL_CONTRACT_IDS[networkId as NetworkId] ?? [];
+}
+
+/** True when `marketContractId` is a UNIT LP collateral market on Pool C. */
+export function isUnitLpCollateralMarketContract(
+  networkId: NetworkId | string | null | undefined,
+  marketContractId: string | number | null | undefined
+): boolean {
+  if (marketContractId == null || String(marketContractId) === "") return false;
+  const id = String(marketContractId);
+  return getUnitLendingCollateralContractIds(networkId).some(
+    (contractId) => contractId === id
+  );
+}
+
+/** Pool C WAD borrow market ref paired with UNIT LP collateral. */
+export function getUnitLendingWadBorrowMarketRef(
+  networkId: NetworkId | string | null | undefined
+): UnitLendingWadBorrowMarketRef | null {
+  if (!networkId) return null;
+  return UNIT_LENDING_WAD_BORROW_MARKET[networkId as NetworkId] ?? null;
+}
+
+/** Resolve WAD borrow {@link TokenConfig} for Pool C UNIT LP lending. */
+export function getUnitLendingWadBorrowMarketConfig(
+  networkId: NetworkId | string | null | undefined
+): TokenConfig | null {
+  const ref = getUnitLendingWadBorrowMarketRef(networkId);
+  if (!ref || !networkId) return null;
+
+  const wadToken = getNetworkConfig(networkId as NetworkId).tokens?.WAD;
+  const configs: TokenConfig[] = Array.isArray(wadToken)
+    ? wadToken
+    : wadToken
+      ? [wadToken]
+      : [];
+
+  return (
+    configs.find(
+      (config) =>
+        String(config.poolId) === ref.poolId &&
+        String(config.contractId) === ref.contractId &&
+        String(config.nTokenId) === ref.nTokenId
+    ) ?? null
+  );
+}
+
+/** WAD deposit markets on other pools (excludes Pool C borrow row and sToken mint rows). */
+export function getWadSupplyMarketConfigsExcludingPoolCBorrow(
+  networkId: NetworkId | string | null | undefined
+): TokenConfig[] {
+  if (!networkId) return [];
+  const borrowRef = getUnitLendingWadBorrowMarketRef(networkId);
+  const wadToken = getNetworkConfig(networkId as NetworkId).tokens?.WAD;
+  const configs: TokenConfig[] = Array.isArray(wadToken)
+    ? wadToken
+    : wadToken
+      ? [wadToken]
+      : [];
+
+  return configs.filter((config) => {
+    if (config.isStoken) return false;
+    if (!borrowRef) return true;
+    return !(
+      String(config.poolId) === borrowRef.poolId &&
+      String(config.contractId) === borrowRef.contractId &&
+      String(config.nTokenId) === borrowRef.nTokenId
+    );
+  });
+}
+
+/** Lending pool app id for Pool C on this network, if configured. */
+export function getPoolCLendingPoolId(
+  networkId: NetworkId | string | null | undefined
+): string | null {
+  if (!networkId) return null;
+  const excluded = MARKETS_TABLE_EXCLUDED_POOL_IDS[networkId as NetworkId];
+  if (!excluded?.length) return null;
+  return String(excluded[0]);
+}
+
+/** Resolve lending pool app id from nt200 / underlying market `contractId`. */
+export function getLendingPoolIdForMarketContract(
+  networkId: NetworkId | string | null | undefined,
+  marketContractId: string | number | null | undefined
+): string | null {
+  if (!networkId || marketContractId == null || String(marketContractId) === "") {
+    return null;
+  }
+  const byNetwork =
+    LENDING_POOL_BY_MARKET_CONTRACT[networkId as NetworkId];
+  if (!byNetwork) return null;
+  return byNetwork[String(marketContractId)] ?? null;
+}
+
+/** True when `marketContractId` is a Pool C market in {@link LENDING_POOL_BY_MARKET_CONTRACT}. */
+export function isPoolCMarketContract(
+  networkId: NetworkId | string | null | undefined,
+  marketContractId: string | number | null | undefined
+): boolean {
+  const poolId = getLendingPoolIdForMarketContract(networkId, marketContractId);
+  const poolC = getPoolCLendingPoolId(networkId);
+  return poolId != null && poolC != null && poolId === poolC;
+}
+
+/** All nt200 / underlying contract ids registered on Pool C for this network. */
+export function getPoolCMarketContractIds(
+  networkId: NetworkId | string | null | undefined
+): string[] {
+  const poolC = getPoolCLendingPoolId(networkId);
+  if (!poolC) return [];
+  const byNetwork = LENDING_POOL_BY_MARKET_CONTRACT[networkId as NetworkId];
+  if (!byNetwork) return [];
+  return Object.entries(byNetwork)
+    .filter(([, poolId]) => String(poolId) === poolC)
+    .map(([contractId]) => contractId);
+}
+
+/** Pool C config keys that remain visible on Markets table and portfolio (WAD borrow). */
+const MARKETS_TABLE_POOL_C_VISIBLE_CONFIG_KEYS = new Set(["WAD"]);
+
+/** True when the entire lending pool is omitted from the Markets table (before per-market exceptions). */
 export function isMarketsTableExcludedPool(
   networkId: NetworkId | string | null | undefined,
   poolId: string | number | null | undefined
@@ -3558,6 +3743,21 @@ export function isMarketsTableExcludedPool(
   if (!excluded?.length) return false;
   const pid = String(poolId);
   return excluded.some((id) => String(id) === pid);
+}
+
+/**
+ * True when a configured market row should not appear on the Markets table (or matching portfolio market lists).
+ * Pool C LP (`LP_TMPOOL2_*`) stays hidden; WAD on Pool C is the exception and remains visible.
+ */
+export function isMarketsTableExcludedMarket(
+  networkId: NetworkId | string | null | undefined,
+  poolId: string | number | null | undefined,
+  configKey?: string | null
+): boolean {
+  if (!isMarketsTableExcludedPool(networkId, poolId)) return false;
+  const key = configKey?.trim();
+  if (key && MARKETS_TABLE_POOL_C_VISIBLE_CONFIG_KEYS.has(key)) return false;
+  return true;
 }
 
 /**

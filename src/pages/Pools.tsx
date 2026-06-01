@@ -1,24 +1,33 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Droplets, RefreshCw } from "lucide-react";
+import { useWallet } from "@txnlab/use-wallet-react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import DorkFiButton from "@/components/ui/DorkFiButton";
 import { H1, Body } from "@/components/ui/Typography";
 import LiquidityPoolCardContainer from "@/components/pools/LiquidityPoolCardContainer";
+import PoolsLendingGlobalSummary from "@/components/pools/PoolsLendingGlobalSummary";
+import PoolsWadBorrowSection from "@/components/pools/PoolsWadBorrowSection";
 import PoolsTokenFilter from "@/components/pools/PoolsTokenFilter";
 import {
   countPoolsByBaseTokenFilter,
   getCuratedLiquidityPoolsForNetwork,
   getPoolBaseTokenFilterAssetId,
   poolMatchesBaseTokenFilter,
+  POOL_BASE_TOKEN_FILTERS,
+  resolvePoolCWadMarket,
+  resolveUnitLendingPoolIdsForFilter,
   type PoolBaseTokenFilterId,
 } from "@/constants/liquidityPools";
 import {
   useInvalidateLiquidityPools,
   useLiquidityPoolsOrderedByApr,
+  usePoolsLendingGlobalSummary,
 } from "@/hooks/useLiquidityPoolData";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { tinymanNetworkFromNetworkId } from "@/services/tinymanLiquidityService";
+import type { NetworkId } from "@/config";
 
 interface PoolsPageProps {
   activeTab: string;
@@ -27,6 +36,8 @@ interface PoolsPageProps {
 
 const PoolsPage = ({ activeTab, onTabChange }: PoolsPageProps) => {
   const { currentNetwork } = useNetwork();
+  const { activeAccount } = useWallet();
+  const queryClient = useQueryClient();
   const [tokenFilter, setTokenFilter] = useState<PoolBaseTokenFilterId>("all");
   const pairs = useMemo(
     () => getCuratedLiquidityPoolsForNetwork(currentNetwork),
@@ -40,6 +51,42 @@ const PoolsPage = ({ activeTab, onTabChange }: PoolsPageProps) => {
   const orderedPairs = useLiquidityPoolsOrderedByApr(filteredPairs);
   const invalidatePools = useInvalidateLiquidityPools(pairs);
   const tinymanSupported = tinymanNetworkFromNetworkId(currentNetwork) != null;
+  const filterSymbol =
+    POOL_BASE_TOKEN_FILTERS.find((f) => f.id === tokenFilter)?.symbol ??
+    tokenFilter.toUpperCase();
+  const lendingPoolIds = useMemo(() => {
+    const networkId = currentNetwork as NetworkId;
+    if (tokenFilter === "unit") {
+      return resolveUnitLendingPoolIdsForFilter(networkId, filteredPairs);
+    }
+    return [];
+  }, [currentNetwork, filteredPairs, tokenFilter]);
+  const showLendingGlobalSummary = lendingPoolIds.length > 0;
+  const poolCWadMarket = useMemo(
+    () => resolvePoolCWadMarket(currentNetwork as NetworkId),
+    [currentNetwork]
+  );
+  const { summary, poolIds, isLoading: lendingGlobalLoading } =
+    usePoolsLendingGlobalSummary(
+      currentNetwork as NetworkId,
+      lendingPoolIds,
+      activeAccount?.address,
+      showLendingGlobalSummary
+    );
+  const canBorrowWad = (summary?.totalCollateralValue ?? 0) > 0;
+  const showWadBorrowSection =
+    tokenFilter === "unit" &&
+    poolCWadMarket != null &&
+    Boolean(activeAccount?.address);
+
+  const invalidateLendingSummary = () => {
+    const networkId = currentNetwork as NetworkId;
+    for (const poolId of lendingPoolIds) {
+      void queryClient.invalidateQueries({
+        queryKey: ["pools-lending-global", networkId, poolId, activeAccount?.address],
+      });
+    }
+  };
 
   useEffect(() => {
     setTokenFilter("all");
@@ -64,8 +111,8 @@ const PoolsPage = ({ activeTab, onTabChange }: PoolsPageProps) => {
             </div>
             <H1>Liquidity Pools</H1>
             <Body className="max-w-2xl text-muted-foreground">
-              Deposit into curated Tinyman v2 pairs to earn trading fees. Withdraw
-              anytime by burning your LP tokens.
+              Deposit into curated pairs to earn trading fees.
+              Withdraw your available LP tokens any time.
             </Body>
           </div>
           <DorkFiButton
@@ -99,6 +146,25 @@ const PoolsPage = ({ activeTab, onTabChange }: PoolsPageProps) => {
               counts={filterCounts}
               className="mb-4"
             />
+            {showLendingGlobalSummary ? (
+              <PoolsLendingGlobalSummary
+                filterSymbol={filterSymbol}
+                networkId={currentNetwork as NetworkId}
+                summary={summary}
+                poolIds={poolIds}
+                isLoading={lendingGlobalLoading}
+                walletConnected={Boolean(activeAccount?.address)}
+              />
+            ) : null}
+            {showWadBorrowSection && poolCWadMarket ? (
+              <PoolsWadBorrowSection
+                networkId={currentNetwork as NetworkId}
+                wadMarket={poolCWadMarket}
+                summary={summary}
+                canBorrow={canBorrowWad}
+                onBorrowSuccess={invalidateLendingSummary}
+              />
+            ) : null}
             {orderedPairs.length === 0 ? (
               <div className="rounded-xl border px-4 py-6 text-center text-muted-foreground">
                 No pools match this token filter.
@@ -106,7 +172,11 @@ const PoolsPage = ({ activeTab, onTabChange }: PoolsPageProps) => {
             ) : (
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {orderedPairs.map((pair) => (
-                  <LiquidityPoolCardContainer key={pair.id} pair={pair} />
+                  <LiquidityPoolCardContainer
+                    key={pair.id}
+                    pair={pair}
+                    onLendingSuccess={invalidateLendingSummary}
+                  />
                 ))}
               </div>
             )}

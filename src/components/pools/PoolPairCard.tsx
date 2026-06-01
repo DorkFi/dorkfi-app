@@ -40,6 +40,8 @@ interface PoolPairCardProps {
   onLendingWithdraw?: () => void;
   lendingSupplyDisabled?: boolean;
   lendingWithdrawDisabled?: boolean;
+  /** Human-unit LP supplied in the platform lending market (from deposit balance). */
+  suppliedLpBalance?: number;
 }
 
 function PoolAssetIcon({
@@ -80,6 +82,7 @@ const PoolPairCard = ({
   onLendingWithdraw,
   lendingSupplyDisabled = true,
   lendingWithdrawDisabled = true,
+  suppliedLpBalance = 0,
 }: PoolPairCardProps) => {
   const { formatPercent, formatCurrency } = useNumberI18n();
   const asset1 = snapshot?.asset1 ?? resolveLiquidityAssetMeta(pair.networkId, pair.asset1Id);
@@ -90,8 +93,8 @@ const PoolPairCard = ({
   const hasPosition = Boolean(
     position &&
       (position.poolTokenBalance > 0n ||
-        position.nt200LpBalance > 0n ||
-        position.farmLpBalance > 0n)
+        position.farmLpBalance > 0n ||
+        suppliedLpBalance > 0)
   );
   const apr = snapshot?.apr;
   const displayApr = apr?.totalAprPercent ?? apr?.feeAprPercent ?? null;
@@ -120,7 +123,7 @@ const PoolPairCard = ({
   }, [farms, pair.platform, pair.poolAddr, platformLabel]);
 
   return (
-    <DorkFiCard className="flex flex-col gap-4 p-5">
+    <DorkFiCard className="flex flex-col gap-4 p-5 transition-shadow">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="flex -space-x-2">
@@ -199,9 +202,14 @@ const PoolPairCard = ({
                 <p className="font-medium tabular-nums text-sm">
                   {formatLiquidityAtomic(position.poolTokenBalance, 6)} LP in wallet
                 </p>
-                <p className="font-medium tabular-nums text-sm">
-                  {formatLiquidityAtomic(position.nt200LpBalance, 6)} LP in platform
-                </p>
+                {suppliedLpBalance > 0 ? (
+                  <p className="font-medium tabular-nums text-sm">
+                    {suppliedLpBalance.toLocaleString(undefined, {
+                      maximumFractionDigits: 6,
+                    })}{" "}
+                    LP in platform
+                  </p>
+                ) : null}
                 {position.poolTokenBalance > 0n ? (
                   <p className="text-xs text-muted-foreground tabular-nums">
                     {position.poolSharePercent.toFixed(4)}% pool share (wallet LP)
@@ -228,7 +236,8 @@ const PoolPairCard = ({
               dexLink.isFarm &&
                 "border-amber-500/40 text-amber-800 hover:bg-amber-50 dark:text-amber-200 dark:hover:bg-amber-950/40"
             )}
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation();
               window.open(dexLink.url, "_blank", "noopener,noreferrer");
             }}
           >
@@ -244,7 +253,10 @@ const PoolPairCard = ({
               variant="secondary"
               className="flex-1"
               disabled={!snapshot || lendingSupplyDisabled}
-              onClick={onSupply}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSupply?.();
+              }}
             >
               <ArrowDownToLine className="mr-2 h-4 w-4" aria-hidden />
               Supply
@@ -253,7 +265,10 @@ const PoolPairCard = ({
               variant="borrow-outline"
               className="flex-1"
               disabled={!snapshot || lendingWithdrawDisabled}
-              onClick={onLendingWithdraw}
+              onClick={(e) => {
+                e.stopPropagation();
+                onLendingWithdraw?.();
+              }}
             >
               <ArrowUpFromLine className="mr-2 h-4 w-4" aria-hidden />
               Withdraw
@@ -267,7 +282,10 @@ const PoolPairCard = ({
           variant="secondary"
           className="flex-1"
           disabled={!snapshot}
-          onClick={onDeposit}
+          onClick={(e) => {
+            e.stopPropagation();
+            onDeposit();
+          }}
         >
           <ArrowDownToLine className="mr-2 h-4 w-4" aria-hidden />
           Deposit
@@ -276,7 +294,10 @@ const PoolPairCard = ({
           variant="borrow-outline"
           className="flex-1"
           disabled={!snapshot || !hasPosition}
-          onClick={onWithdraw}
+          onClick={(e) => {
+            e.stopPropagation();
+            onWithdraw();
+          }}
         >
           <ArrowUpFromLine className="mr-2 h-4 w-4" aria-hidden />
           Withdraw

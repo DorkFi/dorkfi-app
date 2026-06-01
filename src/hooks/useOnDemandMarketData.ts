@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useEffect } from "react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import {
   getAllTokensWithDisplayInfo,
-  isMarketsTableExcludedPool,
+  isMarketsTableExcludedMarket,
   NetworkId,
   getNetworkConfig,
   getLendingPools,
@@ -271,6 +271,8 @@ interface UseOnDemandMarketDataProps {
   rewardMarketsOnly?: boolean;
   /** When true, only assets that have a market in more than one lending pool are shown. */
   multiPoolOnly?: boolean;
+  /** Include Pool C (and other markets-table-excluded pools); use on Admin. */
+  includeExcludedPools?: boolean;
 }
 
 // Throttle duration: 2 minute
@@ -287,6 +289,7 @@ export const useOnDemandMarketData = ({
   newMarketsOnly = false,
   rewardMarketsOnly = false,
   multiPoolOnly = false,
+  includeExcludedPools = false,
 }: UseOnDemandMarketDataProps = {}) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [marketsData, setMarketsData] = useState<
@@ -355,14 +358,19 @@ export const useOnDemandMarketData = ({
     ]
   );
 
-  // Get token configuration for current network (omit pools excluded from Markets table)
+  // Omit Pool C LP markets from the table; WAD @ Pool C remains visible.
   const tokens = useMemo(
     () =>
       getAllTokensWithDisplayInfo(currentNetwork).filter(
         (token) =>
-          !isMarketsTableExcludedPool(currentNetwork, token.poolId)
+          includeExcludedPools ||
+          !isMarketsTableExcludedMarket(
+            currentNetwork,
+            token.poolId,
+            token.configKey
+          )
       ),
-    [currentNetwork]
+    [currentNetwork, includeExcludedPools]
   );
 
   // Clear markets data when network changes

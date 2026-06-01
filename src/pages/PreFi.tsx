@@ -67,7 +67,6 @@ import {
   TokenStandard,
   getEnabledNetworks,
   isMigrationEnabled,
-  getCurrentGasStationSymbols,
 } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { deposit, withdraw, fetchMarketInfo } from "@/services/lendingService";

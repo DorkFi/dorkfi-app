@@ -355,6 +355,7 @@ export default function AdminDashboard() {
     autoLoad: true,
     pageSize: 50, // Load more markets for admin view
     throttleMs: 60 * 1000, // 1 minute throttle
+    includeExcludedPools: true,
   });
 
   // Get markets for current network (for backward compatibility with existing UI)

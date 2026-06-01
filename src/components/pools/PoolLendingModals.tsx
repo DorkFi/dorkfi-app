@@ -9,7 +9,9 @@ import WithdrawModal, {
 import {
   POOL_FARM_SUPPLY_NOTICE,
   type LiquidityPoolLendingMarket,
+  type LiquidityPoolPairConfig,
 } from "@/constants/liquidityPools";
+import { resolveLiquidityPairDisplay } from "@/services/tinymanLiquidityService";
 import { useNetwork } from "@/contexts/NetworkContext";
 import {
   getAlgorandNetworkFromNetworkId,
@@ -28,6 +30,7 @@ import { usdPerTokenFromMarketInfoPrice } from "@/utils/assetDecimals";
 import { waitForConfirmation } from "algosdk";
 
 type PoolLendingModalsProps = {
+  pair: LiquidityPoolPairConfig;
   lendingMarket: LiquidityPoolLendingMarket;
   supplyOpen: boolean;
   withdrawOpen: boolean;
@@ -110,6 +113,7 @@ function marketInfoToAssetData(
 }
 
 const PoolLendingModals = ({
+  pair,
   lendingMarket,
   supplyOpen,
   withdrawOpen,
@@ -123,6 +127,15 @@ const PoolLendingModals = ({
   const { currentNetwork } = useNetwork();
   const { activeAccount } = useWallet();
   const networkId = currentNetwork as NetworkId;
+
+  const pairDisplay = useMemo(() => resolveLiquidityPairDisplay(pair), [pair]);
+  const assetPairIcons = useMemo(() => {
+    if (!pairDisplay.asset1Icon || !pairDisplay.asset2Icon) return undefined;
+    return {
+      asset1Icon: pairDisplay.asset1Icon,
+      asset2Icon: pairDisplay.asset2Icon,
+    };
+  }, [pairDisplay.asset1Icon, pairDisplay.asset2Icon]);
 
   const [assetData, setAssetData] = useState<LendingMarketStats | null>(null);
   const [walletBalance, setWalletBalance] = useState(initialWalletLpBalance);
@@ -254,7 +267,7 @@ const PoolLendingModals = ({
         underlyingAssetId: lendingMarket.assetId,
         networkId,
         txSignPreviewVariant: "lending",
-        assetDisplaySymbol: lendingMarket.displaySymbol,
+        assetDisplaySymbol: pairDisplay.label,
         amountHuman: amount,
       };
     },
@@ -318,7 +331,7 @@ const PoolLendingModals = ({
         <SupplyBorrowModal
           isOpen={supplyOpen}
           onClose={onCloseSupply}
-          asset={lendingMarket.displaySymbol}
+          asset={pairDisplay.label}
           poolId={lendingMarket.poolId}
           configSymbol={lendingMarket.configSymbol}
           marketId={lendingMarket.marketId}
@@ -326,6 +339,7 @@ const PoolLendingModals = ({
           network={networkId}
           mode="deposit"
           assetData={resolvedAssetData}
+          assetPairIcons={assetPairIcons}
           walletBalance={walletBalance}
           walletBalanceUSD={walletBalance * tokenPrice}
           isLoadingWalletBalance={loadingMarket}
@@ -344,8 +358,10 @@ const PoolLendingModals = ({
         <WithdrawModal
           isOpen={withdrawOpen}
           onClose={onCloseWithdraw}
-          tokenSymbol={lendingMarket.displaySymbol}
+          tokenSymbol={pairDisplay.label}
           tokenIcon={lendingMarket.logoPath}
+          tokenPairIcons={assetPairIcons}
+          tokenDisplayName={lendingMarket.displayName}
           tokenDecimals={lendingMarket.decimals}
           currentlyDeposited={suppliedBalance}
           poolId={lendingMarket.poolId}
