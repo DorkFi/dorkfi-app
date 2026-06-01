@@ -18,6 +18,7 @@ import CountdownPage from "./pages/Countdown";
 import MarketsTable from "./components/MarketsTable";
 import Dashboard from "./components/Dashboard";
 import Portfolio from "./components/Portfolio";
+import PoolsPage from "./pages/Pools";
 import PortfolioPage from "./pages/PortfolioPage";
 //const LAUNCH_TIMESTAMP = Date.UTC(2025, 10, 21, 2, 0, 0); // Nov 20, 2025 6:00 PM PST (Nov 21, 2025 2:00 AM UTC)
 const LAUNCH_TIMESTAMP = Date.now();
@@ -118,6 +119,17 @@ function App() {
                 <Route
                   path="/governance"
                   element={<Governance />}
+                />
+              )}
+              {isFeatureEnabled("enablePools") && (
+                <Route
+                  path="/pools"
+                  element={
+                    <PoolsPage
+                      activeTab={activeTab}
+                      onTabChange={setActiveTab}
+                    />
+                  }
                 />
               )}
               <Route path="/portfolio" element={<PortfolioPage />} />

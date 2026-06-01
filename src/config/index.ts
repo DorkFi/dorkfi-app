@@ -1033,6 +1033,10 @@ export interface GlobalConfig {
     enableAgentClaim: boolean;
     /** Dev/staging: skip NFT holder eligibility checks before pay-agent (never enable in production). */
     bypassAgentClaimEligibility: boolean;
+    /** Tinyman v2 liquidity pools — curated pairs page (browse / APR). */
+    enablePools: boolean;
+    /** In-app Deposit / Withdraw LP actions on pool cards (off until Tinyman LP flows are production-ready). Supply / Withdraw lending stays enabled. */
+    enablePoolDepositWithdraw: boolean;
   };
 }
 
@@ -2102,6 +2106,7 @@ const algorandMainnetPrefiConfig: NetworkConfig = {
 };
 const algorandProdAMarket = "3333688282";
 const algorandProdBMarket = "3345940978";
+const algorandProdCMarket = "3578814346";
 const algorandProdDMarket = "3526240577";
 const algorandProdPriceOracle = "3333688500";
 const algorandProdLiquidationEngine = undefined;
@@ -2118,10 +2123,11 @@ const algorandProdMarketController = "3333688332";
 const algorandProdSToken = "3333688448";
 const algorandProdBeacon = "3209233839";
 const algorandProdAppStorageId = "3333688254";
-// A, B, D markets (C market slot not used on prod)
+// A, B, C, D lending pools on prod
 const algorandProdLendingPools = [
   algorandProdAMarket,
   algorandProdBMarket,
+  algorandProdCMarket,
   algorandProdDMarket,
 ];
 const algorandProdContracts: ContractConfig = {
@@ -3014,6 +3020,57 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
       dataAddedAt: "2026-04-19T00:00:00.000Z",
     },
   ],
+  // TMPOOL2 3157974960 6 3577729953
+  // name: "TinymanPool2.0 UNIT-ALGO",
+  // symbol: "TMPOOL2",
+  // decimals: 6,
+  // contractId: 3577729953
+  LP_TMPOOL2_UNIT_ALGO: {
+    assetId: "3157974960",
+    contractId: "3577729953",
+    poolId: "3578814346",
+    nTokenId: "3579176126",
+    decimals: 6,
+    name: "TinymanPool2.0 UNIT-ALGO",
+    symbol: "TMPOOL2",
+    logoPath: "/lovable-uploads/LP_TMPOOL2_UNIT_ALGO.png",
+    tokenStandard: "asa",
+    dataAddedAt: "2026-05-29T00:00:00.000Z",
+  },
+  // TMPOOL2 3159132330 6 3577777819
+  // name: "TinymanPool2.0 UNIT-goBTC",
+  // symbol: "TMPOOL2",
+  // decimals: 6,
+  // contractId: 3577777819
+  LP_TMPOOL2_UNIT_GOBTC: {
+    assetId: "3159132330",
+    contractId: "3577777819",
+    poolId: "3578814346",
+    nTokenId: "3579373167",
+    decimals: 6,
+    name: "TinymanPool2.0 UNIT-goBTC",
+    symbol: "TMPOOL2",
+    logoPath: "/lovable-uploads/LP_TMPOOL2_UNIT_GOBTC.png",
+    tokenStandard: "asa",
+    dataAddedAt: "2026-05-29T00:00:00.000Z",
+  },
+  // TMPOOL2 3334546641 6 3577783311
+  // name: "TinymanPool2.0 WAD-UNIT",
+  // symbol: "TMPOOL2",
+  // decimals: 6,
+  // contractId: 3577783311
+  LP_TMPOOL2_WAD_UNIT: {
+    assetId: "3334546641",
+    contractId: "3577783311",
+    poolId: "3578814346",
+    nTokenId: "3579418200",
+    decimals: 6,
+    name: "TinymanPool2.0 WAD-UNIT",
+    symbol: "TMPOOL2",
+    logoPath: "/lovable-uploads/LP_TMPOOL2_WAD_UNIT.png",
+    tokenStandard: "asa",
+    dataAddedAt: "2026-05-29T00:00:00.000Z",
+  },
 };
 const algorandMainnetProdConfig: NetworkConfig = {
   networkId: "algorand-mainnet",
@@ -3294,6 +3351,8 @@ export const config: GlobalConfig = {
     enableLiquidatablePositions: true, // Enable liquidatable positions section in portfolio
     enableAgentClaim: true, // NFT holder reward claim — Base x402 pay-agent section
     bypassAgentClaimEligibility: false,
+    enablePools: true,
+    enablePoolDepositWithdraw: false,
   },
 };
 
@@ -3308,7 +3367,8 @@ export const marketLabelMap: Record<string, string> = {
   // Algorand Mainnet (prod pools in this file)
   "algorand-mainnet-3333688282": "A",
   "algorand-mainnet-3345940978": "B",
-  /** Third prod lending pool (array order is A, B, D — no “C” market id). */
+  "algorand-mainnet-3578814346": "C",
+  /** Third prod lending pool (array order is A, B, C, D). */
   "algorand-mainnet-3526240577": "D",
 };
 
@@ -3452,13 +3512,15 @@ export const getMarketLabel = (
     return marketLabelMap[key];
   }
 
-  // Fallback: try to get from network config
+  // Fallback: derive label from lending pool order (A = index 0, B = 1, …)
   try {
     const networkConfig = getNetworkConfig(normalizedNetworkId as NetworkId);
     const lendingPools = networkConfig?.contracts?.lendingPools || [];
-    if (lendingPools.length >= 2) {
-      if (String(poolId) === String(lendingPools[0])) return "A";
-      if (String(poolId) === String(lendingPools[1])) return "B";
+    const poolIndex = lendingPools.findIndex(
+      (pool) => String(pool) === normalizedPoolId
+    );
+    if (poolIndex >= 0) {
+      return String.fromCharCode(65 + poolIndex);
     }
   } catch (e) {
     // Network not found in config, return null
@@ -3466,6 +3528,37 @@ export const getMarketLabel = (
 
   return null;
 };
+
+/** Market letter for a lending pool id (A, B, C, …), with index fallback. */
+export const getLendingPoolLabel = (
+  networkId: NetworkId | string | null | undefined,
+  poolId: string | null | undefined
+): string => {
+  const label = getMarketLabel(networkId, poolId);
+  return label ?? "?";
+};
+
+/**
+ * Lending pools omitted from the Markets table (still in config for Pools, Portfolio, Admin).
+ * Algorand prod C pool holds Tinyman LP nt200 markets — surfaced on the Pools page instead.
+ */
+const MARKETS_TABLE_EXCLUDED_POOL_IDS: Partial<
+  Record<NetworkId, readonly string[]>
+> = {
+  "algorand-mainnet": [algorandProdCMarket],
+};
+
+/** True when a pool's markets should not appear on the Markets table. */
+export function isMarketsTableExcludedPool(
+  networkId: NetworkId | string | null | undefined,
+  poolId: string | number | null | undefined
+): boolean {
+  if (!networkId || poolId == null || String(poolId) === "") return false;
+  const excluded = MARKETS_TABLE_EXCLUDED_POOL_IDS[networkId as NetworkId];
+  if (!excluded?.length) return false;
+  const pid = String(poolId);
+  return excluded.some((id) => String(id) === pid);
+}
 
 /**
  * Pool id when the row object has not yet populated `marketInfo` / `poolId` (same rules as markets table `getPoolIdForSorting`).
@@ -4464,6 +4557,18 @@ export const getEnvironmentConfig = (): Partial<GlobalConfig> => {
     envFeatures.bypassAgentClaimEligibility =
       import.meta.env.VITE_BYPASS_AGENT_CLAIM_ELIGIBILITY === "true" ||
       import.meta.env.VITE_BYPASS_AGENT_CLAIM_ELIGIBILITY === "1";
+  }
+
+  if (typeof import.meta.env.VITE_ENABLE_POOLS !== "undefined") {
+    envFeatures.enablePools =
+      import.meta.env.VITE_ENABLE_POOLS === "true" ||
+      import.meta.env.VITE_ENABLE_POOLS === "1";
+  }
+
+  if (typeof import.meta.env.VITE_ENABLE_POOL_DEPOSIT_WITHDRAW !== "undefined") {
+    envFeatures.enablePoolDepositWithdraw =
+      import.meta.env.VITE_ENABLE_POOL_DEPOSIT_WITHDRAW === "true" ||
+      import.meta.env.VITE_ENABLE_POOL_DEPOSIT_WITHDRAW === "1";
   }
 
   if (env === "development") {
