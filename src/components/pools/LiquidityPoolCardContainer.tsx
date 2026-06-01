@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useWallet } from "@txnlab/use-wallet-react";
 import {
   resolvePoolsPageLendingMarket,
+  resolveLiquidityPoolLendingMarket,
   poolHasTinymanFarm,
   type LiquidityPoolPairConfig,
 } from "@/constants/liquidityPools";
