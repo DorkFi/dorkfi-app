@@ -397,6 +397,8 @@ interface SupplyBorrowModalProps {
   isLoadingBorrowGlobalData?: boolean;
   /** Optional deposit-mode notice (e.g. Tinyman farm reward disqualification). */
   depositNotice?: string;
+  /** Stacked icons for LP pair markets (underlying assets). */
+  assetPairIcons?: { asset1Icon: string; asset2Icon: string };
 }
 
 const SupplyBorrowModal = ({
@@ -425,6 +427,7 @@ const SupplyBorrowModal = ({
   isLoadingWalletBalance = false,
   isLoadingBorrowGlobalData = false,
   depositNotice,
+  assetPairIcons,
 }: SupplyBorrowModalProps) => {
   const [amount, setAmount] = useState("");
   const [fiatValue, setFiatValue] = useState(0);
@@ -3396,6 +3399,7 @@ const SupplyBorrowModal = ({
                     mode={mode}
                     asset={asset}
                     assetIcon={assetData.icon}
+                    assetPairIcons={assetPairIcons}
                   />
                 )}
               </DialogHeader>

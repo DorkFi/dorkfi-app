@@ -41,6 +41,8 @@ interface PoolLiquidityModalProps {
   pair: LiquidityPoolPairConfig;
   snapshot: LiquidityPoolSnapshot | null;
   onSuccess?: () => void;
+  /** Human-unit LP supplied in the platform lending market; shown only when &gt; 0. */
+  suppliedLpBalance?: number;
 }
 
 const PoolLiquidityModal = ({
@@ -50,6 +52,7 @@ const PoolLiquidityModal = ({
   pair,
   snapshot,
   onSuccess,
+  suppliedLpBalance = 0,
 }: PoolLiquidityModalProps) => {
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { toast } = useToast();
@@ -243,12 +246,16 @@ const PoolLiquidityModal = ({
           {balancesLoading ? "…" : lpBalanceHuman}
         </p>
       </div>
-      <div>
-        <p className="text-muted-foreground">In platform</p>
-        <p className="font-medium tabular-nums">
-          {balancesLoading ? "…" : nt200LpBalanceHuman}
-        </p>
-      </div>
+      {suppliedLpBalance > 0 ? (
+        <div>
+          <p className="text-muted-foreground">In platform</p>
+          <p className="font-medium tabular-nums">
+            {suppliedLpBalance.toLocaleString(undefined, {
+              maximumFractionDigits: 6,
+            })}
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 

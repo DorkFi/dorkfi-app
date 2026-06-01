@@ -144,6 +144,25 @@ function applyPairAssetOverrides(
   };
 }
 
+/** Human pair label and underlying asset icons for LP lending UI. */
+export function resolveLiquidityPairDisplay(pair: LiquidityPoolPairConfig): {
+  label: string;
+  asset1Icon?: string;
+  asset2Icon?: string;
+} {
+  const asset1 = resolveLiquidityAssetMeta(pair.networkId, pair.asset1Id);
+  const asset2 = applyPairAssetOverrides(
+    pair,
+    pair.asset2Id,
+    resolveLiquidityAssetMeta(pair.networkId, pair.asset2Id)
+  );
+  return {
+    label: pair.label ?? `${asset1.symbol} / ${asset2.symbol}`,
+    asset1Icon: asset1.logoPath,
+    asset2Icon: asset2.logoPath,
+  };
+}
+
 function snapshotAssetsInPairOrder(
   pair: LiquidityPoolPairConfig,
   pool: V2PoolInfo,

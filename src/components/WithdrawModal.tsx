@@ -34,6 +34,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import SupplyBorrowCongrats from "./SupplyBorrowCongrats";
+import LpPairIconStack from "@/components/pools/LpPairIconStack";
 import { calculateDepositAPY } from "@/utils/apyCalculations";
 import { useTokenPrice } from "@/hooks/useTokenPrice";
 import { useNetwork } from "@/contexts/NetworkContext";
@@ -254,6 +255,10 @@ interface WithdrawModalProps {
    * receive ALGO (consensus burn after nt200 withdraw).
    */
   xalgoConsensusWithdrawAlgoOption?: boolean;
+  /** Stacked icons for LP pair markets (underlying assets). */
+  tokenPairIcons?: { asset1Icon: string; asset2Icon: string };
+  /** Full token name for tooltip when display symbol is a pair label. */
+  tokenDisplayName?: string;
 }
 
 const WithdrawModal = ({
@@ -288,6 +293,8 @@ const WithdrawModal = ({
   positionMarketTokenHuman,
   folksWithdrawAdapters = [],
   xalgoConsensusWithdrawAlgoOption = false,
+  tokenPairIcons,
+  tokenDisplayName,
 }: WithdrawModalProps) => {
   const withdrawFolksAdapters = folksWithdrawAdapters;
   const { currentNetwork } = useNetwork();
@@ -1380,12 +1387,21 @@ const WithdrawModal = ({
                     </Select>
                   ) : (
                     <>
-                      <img
-                        src={tokenIcon}
-                        alt={tokenSymbol}
-                        className="w-12 h-12 rounded-full shadow"
-                      />
-                      {showTooltip ? (
+                      {tokenPairIcons ? (
+                        <LpPairIconStack
+                          asset1Icon={tokenPairIcons.asset1Icon}
+                          asset2Icon={tokenPairIcons.asset2Icon}
+                          fallbackIcon={tokenIcon}
+                          alt={tokenSymbol}
+                        />
+                      ) : (
+                        <img
+                          src={tokenIcon}
+                          alt={tokenSymbol}
+                          className="w-12 h-12 rounded-full shadow"
+                        />
+                      )}
+                      {showTooltip || tokenDisplayName ? (
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <span className="text-xl font-semibold text-slate-800 dark:text-white cursor-help underline decoration-dotted">
@@ -1393,7 +1409,7 @@ const WithdrawModal = ({
                             </span>
                           </TooltipTrigger>
                           <TooltipContent>
-                            <p>{tooltipText}</p>
+                            <p>{tokenDisplayName ?? tooltipText}</p>
                           </TooltipContent>
                         </Tooltip>
                       ) : (
