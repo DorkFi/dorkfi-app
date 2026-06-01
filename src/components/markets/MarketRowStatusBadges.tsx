@@ -52,7 +52,7 @@ export function MarketRowStatusBadges({
   const showNew = market.isNew;
   const showRewards = market.hasRewards;
 
-  if (!showNew && !showRewards && !atSupplyCap && !(atBorrowCap && !market.isSToken)) {
+  if (!showNew && !showRewards && !atSupplyCap && !atBorrowCap) {
     return null;
   }
 
@@ -92,7 +92,7 @@ export function MarketRowStatusBadges({
           title="Supply cap nearly full"
         />
       )}
-      {atBorrowCap && !market.isSToken && (
+      {atBorrowCap && (
         <CapBadge
           label="Borrow cap"
           shortLabel="B. cap"

@@ -17,6 +17,7 @@ import {
   borrowApyBadgeClassName,
   BORROW_APY_BADGE_STOKEN,
 } from "@/constants/marketUi";
+import { isAtBorrowCap } from "@/constants/lendingCaps";
 import { MarketRowTokenIcon } from "./MarketRowTokenIcon";
 
 interface STokenRowProps {
@@ -69,6 +70,10 @@ const STokenRow = ({
 }: STokenRowProps) => {
   const { formatNumber, formatCurrency } = useNumberI18n();
   const { currentNetwork } = useNetwork();
+  const borrowCapReached = isAtBorrowCap(
+    Number(market.totalBorrow ?? 0),
+    Number(market.borrowCap ?? 0)
+  );
 
   return (
     <TableRow
@@ -172,6 +177,7 @@ const STokenRow = ({
           onMintClick={onMintClick}
           isLoadingBalance={isLoadingBalance}
           isSToken={true}
+          borrowDisabled={borrowCapReached}
           onDepositMouseEnter={
             getMarketActionHoverHandlers?.(
               market.asset,

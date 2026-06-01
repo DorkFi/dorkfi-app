@@ -1,5 +1,8 @@
 
 import DorkFiButton from "@/components/ui/DorkFiButton";
+import {
+  MINT_BORROW_CAP_TOOLTIP,
+} from "@/constants/lendingCaps";
 import { ArrowRightLeft } from "lucide-react";
 
 interface MarketsTableActionsProps {
@@ -25,7 +28,7 @@ interface MarketsTableActionsProps {
 
 /**
  * Deposit / Borrow (or Mint for sToken) actions.
- * For sToken the second button is "Mint"; it is not disabled by borrowDisabled by design (mint is independent of borrow cap).
+ * For mintable (sToken) markets, Mint is disabled when borrow cap utilization reaches the configured threshold.
  */
 const MarketsTableActions = ({
   asset,
@@ -66,14 +69,21 @@ const MarketsTableActions = ({
           onMouseEnter={isSToken ? onMintMouseEnter : onBorrowMouseEnter}
           onClick={(e) => {
             e.stopPropagation();
+            if (borrowDisabled) return;
             if (isSToken && onMintClick) {
               onMintClick(asset, poolId, marketRowKey);
-            } else if (!borrowDisabled) {
+            } else {
               onBorrowClick(asset, poolId, marketRowKey);
             }
           }}
-          disabled={!isSToken && borrowDisabled}
-          title={!isSToken && borrowDisabled ? "Market at borrow cap" : undefined}
+          disabled={borrowDisabled}
+          title={
+            borrowDisabled
+              ? isSToken
+                ? MINT_BORROW_CAP_TOOLTIP
+                : "Market at borrow cap"
+              : undefined
+          }
           className={isSToken ? "min-w-[140px] flex-1" : ""}
         >
           {isSToken ? "Mint" : "Borrow"}

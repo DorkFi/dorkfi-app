@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { getNetworkConfig } from "@/config";
+import { getNetworkConfig, isFeatureEnabled } from "@/config";
 import type { NftHolderClaimSuccessDetails } from "@/components/portfolio/NftHolderClaimSuccessModal";
 import { NftHolderRewardsGatewayPaySection } from "./NftHolderRewardsGatewayPaySection";
 
@@ -202,12 +202,15 @@ export function NftHolderRewardsModalBody({
       ? "met"
       : "not_met";
 
+  const bypassEligibility = isFeatureEnabled("bypassAgentClaimEligibility");
+
   const rewardsEligibilityMet =
-    nftCheck === "met" &&
-    avatarCheck === "met" &&
-    collateralCheck === "met" &&
-    borrowCheck === "met" &&
-    healthCheck === "met";
+    bypassEligibility ||
+    (nftCheck === "met" &&
+      avatarCheck === "met" &&
+      collateralCheck === "met" &&
+      borrowCheck === "met" &&
+      healthCheck === "met");
 
   const processSteps = [
     {
@@ -294,6 +297,15 @@ export function NftHolderRewardsModalBody({
             Opening this modal refreshes the claim agent. NFT row follows that snapshot; avatar,
             collateral, borrows, and health use your live portfolio totals.
           </p>
+          {bypassEligibility ? (
+            <p className="mt-2 rounded-md border border-amber-500/40 bg-amber-950/30 px-2.5 py-1.5 text-[11px] leading-snug text-amber-200/95">
+              Eligibility bypass is enabled via{" "}
+              <code className="rounded bg-slate-900/80 px-1 text-[10px]">
+                VITE_BYPASS_AGENT_CLAIM_ELIGIBILITY
+              </code>
+              . Pay agent is allowed regardless of the checks below.
+            </p>
+          ) : null}
           <div className="mt-4 flex flex-col divide-y divide-slate-700/90 lg:flex-row lg:divide-x lg:divide-y-0">
             <div className="flex flex-col items-center gap-2 px-2 py-4 text-center lg:flex-1 lg:py-3 lg:first:pl-0">
               <div className="flex items-center gap-2">

@@ -66,11 +66,13 @@ export function borrowApyBadgeClassName(
   return fallbackClassName;
 }
 
-/** Background classes for A/B/D pool letter badges (markets table, portfolio, lists). */
+/** Background classes for A/B/C/D pool letter badges (markets table, portfolio, lists). */
 export function marketPoolBadgeBgClassName(
   label: string | null | undefined
 ): string {
   if (label === "A") return "bg-blue-500 dark:bg-blue-600";
+  if (label === "B") return "bg-purple-500 dark:bg-purple-600";
+  if (label === "C") return "bg-teal-500 dark:bg-teal-600";
   if (label === "D") return "bg-amber-500 dark:bg-amber-600";
-  return "bg-purple-500 dark:bg-purple-600";
+  return "bg-slate-500 dark:bg-slate-600";
 }

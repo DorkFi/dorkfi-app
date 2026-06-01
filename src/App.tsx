@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -6,8 +6,6 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Admin from "./pages/Admin";
-import GasStation from "./pages/GasStation";
-import LiquidationMarkets from "./pages/LiquidationMarkets";
 import Analytics from "./pages/Analytics";
 import Governance from "./pages/Governance";
 import { NetworkProvider } from "./contexts/NetworkContext";
@@ -15,12 +13,15 @@ import { LocaleSettingsProvider } from "./contexts/LocaleSettingsContext";
 import Index from "./pages/Index";
 import { isFeatureEnabled } from "./config";
 import CountdownPage from "./pages/Countdown";
-import MarketsTable from "./components/MarketsTable";
 import Dashboard from "./components/Dashboard";
 import Portfolio from "./components/Portfolio";
+import PoolsPage from "./pages/Pools";
 import PortfolioPage from "./pages/PortfolioPage";
 //const LAUNCH_TIMESTAMP = Date.UTC(2025, 10, 21, 2, 0, 0); // Nov 20, 2025 6:00 PM PST (Nov 21, 2025 2:00 AM UTC)
 const LAUNCH_TIMESTAMP = Date.now();
+
+const GasStationPage = lazy(() => import("./pages/GasStation"));
+const LiquidationMarketsPage = lazy(() => import("./pages/LiquidationMarkets"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -91,17 +92,26 @@ function App() {
               />
               <Route path="/admin" element={<Admin />} />
               {isFeatureEnabled("enableGasStation") && (
-                <Route path="/gas-station" element={<GasStation />} />
+                <Route
+                  path="/gas-station"
+                  element={
+                    <Suspense fallback={null}>
+                      <GasStationPage />
+                    </Suspense>
+                  }
+                />
               )}
               {/*<Route path="/countdown" element={<CountdownPage />} />*/}
               {isFeatureEnabled("enableLiquidations") && (
                 <Route
                   path="/liquidation-markets"
                   element={
-                    <LiquidationMarkets
-                      activeTab={activeTab}
-                      onTabChange={setActiveTab}
-                    />
+                    <Suspense fallback={null}>
+                      <LiquidationMarketsPage
+                        activeTab={activeTab}
+                        onTabChange={setActiveTab}
+                      />
+                    </Suspense>
                   }
                 />
               )}
@@ -118,6 +128,17 @@ function App() {
                 <Route
                   path="/governance"
                   element={<Governance />}
+                />
+              )}
+              {isFeatureEnabled("enablePools") && (
+                <Route
+                  path="/pools"
+                  element={
+                    <PoolsPage
+                      activeTab={activeTab}
+                      onTabChange={setActiveTab}
+                    />
+                  }
                 />
               )}
               <Route path="/portfolio" element={<PortfolioPage />} />

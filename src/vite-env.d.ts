@@ -21,4 +21,10 @@ interface ImportMetaEnv {
   readonly VITE_CLAIMLAYER_TARGET_CHAIN?: string;
   /** When `false` or `0`, NFT holder pay-agent on Base shows maintenance UI instead of WalletConnect. */
   readonly VITE_ENABLE_AGENT_CLAIM?: string;
+  /** When `true` or `1`, skip NFT holder eligibility checks before pay-agent (dev/staging only). */
+  readonly VITE_BYPASS_AGENT_CLAIM_ELIGIBILITY?: string;
+  /** When `false` or `0`, hide the Liquidity Pools page. */
+  readonly VITE_ENABLE_POOLS?: string;
+  /** When `true` or `1`, show Deposit / Withdraw LP actions on pool cards (Supply / Withdraw always shown). */
+  readonly VITE_ENABLE_POOL_DEPOSIT_WITHDRAW?: string;
 }

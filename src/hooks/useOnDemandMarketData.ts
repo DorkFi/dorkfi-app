@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback, useEffect } from "react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import {
   getAllTokensWithDisplayInfo,
+  isMarketsTableExcludedMarket,
   NetworkId,
   getNetworkConfig,
   getLendingPools,
@@ -34,6 +35,7 @@ import { useFolksMainnetUsdcPoolLiveApyPercent } from "@/hooks/useFolksMainnetUs
 import { useFolksMainnetFiUsdcEcosystemPoolLiveApyPercent } from "@/hooks/useFolksMainnetFiUsdcEcosystemPoolLiveApyPercent";
 import { useFolksMainnetFiTinyEcosystemPoolLiveApyPercent } from "@/hooks/useFolksMainnetFiTinyEcosystemPoolLiveApyPercent";
 import { useFolksMainnetWbtcNttPoolLiveApyPercent } from "@/hooks/useFolksMainnetWbtcNttPoolLiveApyPercent";
+import { useFolksMainnetWethNttPoolLiveApyPercent } from "@/hooks/useFolksMainnetWethNttPoolLiveApyPercent";
 import { resolveTokenIconBadgeUrl } from "@/utils/tokenImageUtils";
 
 export interface OnDemandMarketData {
@@ -269,6 +271,8 @@ interface UseOnDemandMarketDataProps {
   rewardMarketsOnly?: boolean;
   /** When true, only assets that have a market in more than one lending pool are shown. */
   multiPoolOnly?: boolean;
+  /** Include Pool C (and other markets-table-excluded pools); use on Admin. */
+  includeExcludedPools?: boolean;
 }
 
 // Throttle duration: 2 minute
@@ -285,6 +289,7 @@ export const useOnDemandMarketData = ({
   newMarketsOnly = false,
   rewardMarketsOnly = false,
   multiPoolOnly = false,
+  includeExcludedPools = false,
 }: UseOnDemandMarketDataProps = {}) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [marketsData, setMarketsData] = useState<
@@ -314,6 +319,9 @@ export const useOnDemandMarketData = ({
   const folksWbtcNttLiveApy = useFolksMainnetWbtcNttPoolLiveApyPercent(
     algorandMainnetMarkets
   );
+  const folksWethNttLiveApy = useFolksMainnetWethNttPoolLiveApyPercent(
+    algorandMainnetMarkets
+  );
   const liveIntrinsicSupplyApy = useMemo<LiveIntrinsicSupplyApySnapshot>(
     () => ({
       tinymanLiquidStakingPercent: tinymanLiveIntrinsicApyPct,
@@ -333,6 +341,10 @@ export const useOnDemandMarketData = ({
         folksWbtcNttLiveApy?.depositPercent ?? null,
       folksMainnetWbtcNttBorrowPercent:
         folksWbtcNttLiveApy?.borrowPercent ?? null,
+      folksMainnetWethNttDepositPercent:
+        folksWethNttLiveApy?.depositPercent ?? null,
+      folksMainnetWethNttBorrowPercent:
+        folksWethNttLiveApy?.borrowPercent ?? null,
     }),
     [
       tinymanLiveIntrinsicApyPct,
@@ -342,13 +354,23 @@ export const useOnDemandMarketData = ({
       folksFiUsdcEcosystemLiveApy,
       folksFiTinyEcosystemLiveApy,
       folksWbtcNttLiveApy,
+      folksWethNttLiveApy,
     ]
   );
 
-  // Get token configuration for current network
+  // Omit Pool C LP markets from the table; WAD @ Pool C remains visible.
   const tokens = useMemo(
-    () => getAllTokensWithDisplayInfo(currentNetwork),
-    [currentNetwork]
+    () =>
+      getAllTokensWithDisplayInfo(currentNetwork).filter(
+        (token) =>
+          includeExcludedPools ||
+          !isMarketsTableExcludedMarket(
+            currentNetwork,
+            token.poolId,
+            token.configKey
+          )
+      ),
+    [currentNetwork, includeExcludedPools]
   );
 
   // Clear markets data when network changes

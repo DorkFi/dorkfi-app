@@ -6,7 +6,7 @@ import WalletNetworkButton from "@/components/WalletNetworkButton";
 import { WalletNetworkUnsupportedBanner } from "@/components/WalletNetworkUnsupportedBanner";
 import { LocaleNumberSettings } from "@/components/LocaleNumberSettings";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { getCurrentGasStationSymbols, isFeatureEnabled } from "@/config";
+import { getGasStationSymbols, isFeatureEnabled } from "@/config";
 import { useWallet } from "@txnlab/use-wallet-react";
 
 interface HeaderProps {
@@ -22,10 +22,21 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
   const { activeAccount } = useWallet();
 
   // Determine activeTab from location if not provided
+  const gasStationEnabled = isFeatureEnabled("enableGasStation");
+  const liquidationsEnabled = isFeatureEnabled("enableLiquidations");
+
   const currentActiveTab = activeTab || (() => {
+    if (location.pathname === "/pools") return "pools";
     if (location.pathname === "/analytics") return "analytics";
-    if (location.pathname === "/liquidation-markets") return "liquidations";
-    if (location.pathname === "/gas-station") return "gas-station";
+    if (
+      liquidationsEnabled &&
+      location.pathname === "/liquidation-markets"
+    ) {
+      return "liquidations";
+    }
+    if (gasStationEnabled && location.pathname === "/gas-station") {
+      return "gas-station";
+    }
     if (location.pathname === "/governance") return "governance";
     if (location.pathname === "/portfolio" || location.pathname.startsWith("/portfolio/")) return "portfolio";
     if (location.pathname === "/market") return "markets";
@@ -38,14 +49,16 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
       onTabChange(value);
     }
 
-    if (value === "liquidations") {
+    if (liquidationsEnabled && value === "liquidations") {
       navigate("/liquidation-markets");
-    } else if (value === "gas-station") {
+    } else if (gasStationEnabled && value === "gas-station") {
       navigate("/gas-station");
     } else if (value === "analytics") {
       navigate("/analytics");
     } else if (value === "governance") {
       navigate("/governance");
+    } else if (value === "pools") {
+      navigate("/pools");
     } else if (value === "portfolio") {
       navigate("/portfolio");
     } else if (value === "markets") {
@@ -69,23 +82,28 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
     if (onTabChange) {
       if (location.pathname === "/analytics") {
         onTabChange("analytics");
-      } else if (location.pathname === "/liquidation-markets") {
+      } else if (
+        liquidationsEnabled &&
+        location.pathname === "/liquidation-markets"
+      ) {
         onTabChange("liquidations");
-      } else if (location.pathname === "/gas-station") {
+      } else if (gasStationEnabled && location.pathname === "/gas-station") {
         onTabChange("gas-station");
       } else if (location.pathname === "/governance") {
         onTabChange("governance");
+      } else if (location.pathname === "/pools") {
+        onTabChange("pools");
       } else if (location.pathname === "/portfolio" || location.pathname.startsWith("/portfolio/")) {
         onTabChange("portfolio");
       } else if (location.pathname === "/market") {
         onTabChange("markets");
       }
     }
-  }, [location.pathname, onTabChange]);
+  }, [gasStationEnabled, liquidationsEnabled, location.pathname, onTabChange]);
 
-  // Check if current network has gas stations available
-  const gasStationSymbols = getCurrentGasStationSymbols();
-  const hasGasStation = gasStationSymbols.length > 0;
+  const hasGasStation =
+    gasStationEnabled &&
+    getGasStationSymbols(currentNetwork).length > 0;
 
   const tabs = [
     // { value: 'dashboard', label: 'Dashboard' }, // Temporarily hidden
@@ -93,8 +111,11 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
       ? [{ value: "prefi", label: "PreFi" }]
       : []),
     { value: "markets", label: "Markets" },
+    ...(isFeatureEnabled("enablePools")
+      ? [{ value: "pools", label: "Pools" }]
+      : []),
     ...(activeAccount ? [{ value: "portfolio", label: "Portfolio" }] : []),
-    ...(isFeatureEnabled("enableLiquidations")
+    ...(liquidationsEnabled
       ? [{ value: "liquidations", label: "Liquidations" }]
       : []),
     { value: "analytics", label: "Analytics" },
@@ -102,9 +123,7 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
       ? [{ value: "governance", label: "Governance" }]
       : []),
     //{ value: 'swap', label: 'Swap' },
-    ...(isFeatureEnabled("enableGasStation") && hasGasStation
-      ? [{ value: "gas-station", label: "Gas Station" }]
-      : []),
+    ...(hasGasStation ? [{ value: "gas-station", label: "Gas Station" }] : []),
   ];
 
   // Hide tabs navigation when only one tab is visible

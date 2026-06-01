@@ -300,6 +300,15 @@ export const FOLKS_FINANCE_WBTC_ADAPTER_POOL_PARAMS: FolksFinancePoolParams = {
   pool: "WBTC_NTT",
 };
 
+/**
+ * Adapter + SDK mint/withdraw params for Folks V2 WETH (NTT). `pool` is the Folks SDK mainnet key
+ * `WETH_NTT` (not legacy `WETH` / `WETH (old)`).
+ */
+export const FOLKS_FINANCE_WETH_ADAPTER_POOL_PARAMS: FolksFinancePoolParams = {
+  ...FOLKS_FINANCE_ALGORAND_MAINNET_POOLS_BY_KEY.WETH,
+  pool: "WETH_NTT",
+};
+
 /** Resolve a mainnet pool row by `Pool` name from the docs (e.g. `ALGO`, `WBTC (old)`). */
 export function lookupFolksAlgorandMainnetPool(
   pool: string

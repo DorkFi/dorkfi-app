@@ -5,6 +5,10 @@
  */
 export const CAP_UTILIZATION_THRESHOLD = 0.95;
 
+/** Tooltip when mint is disabled because borrow cap utilization is near capacity. */
+export const MINT_BORROW_CAP_TOOLTIP =
+  "Minting temporarily unavailable due to borrow cap utilization";
+
 /**
  * True when market supply is at or over the deposit cap (≥ threshold of max).
  * Both args must be in the same units (e.g. human-readable token amount).

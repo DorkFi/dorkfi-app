@@ -10,6 +10,7 @@ import {
   FOLKS_FINANCE_FIUSDC_ADAPTER_POOL_PARAMS,
   FOLKS_FINANCE_FITINY_ADAPTER_POOL_PARAMS,
   FOLKS_FINANCE_WBTC_ADAPTER_POOL_PARAMS,
+  FOLKS_FINANCE_WETH_ADAPTER_POOL_PARAMS,
   type FolksFinancePoolParams,
 } from "@/constants/folksFinance";
 
@@ -157,7 +158,8 @@ export interface TokenConfig {
   | "folks_mainnet_usdc_pool_deposit"
   | "folks_mainnet_fiusdc_ecosystem_pool_deposit"
   | "folks_mainnet_fitiny_ecosystem_pool_deposit"
-  | "folks_mainnet_wbtc_ntt_pool_deposit";
+  | "folks_mainnet_wbtc_ntt_pool_deposit"
+  | "folks_mainnet_weth_ntt_pool_deposit";
   /**
    * Optional intrinsic borrow APY in percentage points (e.g. 1.5 for 1.5%), added to displayed
    * borrow APY for this listing (e.g. wrapped-asset borrow uplift).
@@ -175,7 +177,9 @@ export interface TokenConfig {
   | "folks_mainnet_fiusdc_ecosystem_pool_deposit"
   | "folks_mainnet_fitiny_ecosystem_pool_deposit"
   | "folks_mainnet_wbtc_ntt_pool_deposit"
-  | "folks_mainnet_wbtc_ntt_pool_borrow";
+  | "folks_mainnet_wbtc_ntt_pool_borrow"
+  | "folks_mainnet_weth_ntt_pool_deposit"
+  | "folks_mainnet_weth_ntt_pool_borrow";
   /**
    * Optional wrapped-asset / bridge adapters (e.g. Folks mint/redeem), in order.
    * Use {@link TokenAdapterConfig.phases} to split deposit vs withdraw legs, and `id` + `label`
@@ -699,6 +703,87 @@ export const FOLKS_MAINNET_WBTC_REPAY_UNDERLYING = {
   folksParams: FOLKS_FINANCE_WBTC_ADAPTER_POOL_PARAMS,
 } satisfies TokenAdapterConfig;
 
+/** Folks V2 WETH (NTT) — same phase split as {@link FOLKS_MAINNET_WBTC_DEPOSIT_FWBTC_WALLET}. */
+export const FOLKS_MAINNET_WETH_DEPOSIT_FWETH_WALLET = {
+  id: "folks-mainnet-weth-deposit-fweth",
+  name: "fWETH",
+  type: "folks" as const,
+  label: "fWETH",
+  depositWalletBasis: "market_token" as const,
+  phases: ["deposit"] as const,
+  folksParams: FOLKS_FINANCE_WETH_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_WETH_DEPOSIT_UNDERLYING = {
+  id: "folks-mainnet-weth-deposit-weth",
+  name: "wETH",
+  type: "folks" as const,
+  label: "wETH",
+  depositWalletBasis: "underlying" as const,
+  phases: ["deposit"] as const,
+  folksParams: FOLKS_FINANCE_WETH_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_WETH_WITHDRAW = {
+  id: "folks-mainnet-weth-withdraw-weth",
+  name: "wETH",
+  type: "folks" as const,
+  label: "wETH",
+  withdrawReceiveBasis: "underlying" as const,
+  phases: ["withdraw"] as const,
+  folksParams: FOLKS_FINANCE_WETH_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_WETH_WITHDRAW_FASSET_WALLET = {
+  id: "folks-mainnet-weth-withdraw-fweth",
+  name: "fWETH",
+  type: "folks" as const,
+  label: "fWETH",
+  withdrawReceiveBasis: "market_token" as const,
+  phases: ["withdraw"] as const,
+  folksParams: FOLKS_FINANCE_WETH_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_WETH_BORROW_FWETH_WALLET = {
+  id: "folks-mainnet-weth-borrow-fweth",
+  name: "fWETH",
+  type: "folks" as const,
+  label: "fWETH",
+  borrowReceiveBasis: "market_token" as const,
+  phases: ["borrow"] as const,
+  folksParams: FOLKS_FINANCE_WETH_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_WETH_BORROW_UNDERLYING = {
+  id: "folks-mainnet-weth-borrow-weth",
+  name: "wETH",
+  type: "folks" as const,
+  label: "wETH",
+  borrowReceiveBasis: "underlying" as const,
+  phases: ["borrow"] as const,
+  folksParams: FOLKS_FINANCE_WETH_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_WETH_REPAY_FWETH_WALLET = {
+  id: "folks-mainnet-weth-repay-fweth",
+  name: "fWETH",
+  type: "folks" as const,
+  label: "fWETH",
+  repayWalletBasis: "market_token" as const,
+  phases: ["repay"] as const,
+  folksParams: FOLKS_FINANCE_WETH_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
+export const FOLKS_MAINNET_WETH_REPAY_UNDERLYING = {
+  id: "folks-mainnet-weth-repay-weth",
+  name: "wETH",
+  type: "folks" as const,
+  label: "wETH",
+  repayWalletBasis: "underlying" as const,
+  phases: ["repay"] as const,
+  folksParams: FOLKS_FINANCE_WETH_ADAPTER_POOL_PARAMS,
+} satisfies TokenAdapterConfig;
+
 export type FolksTokenAdapterConfig = Extract<
   TokenAdapterConfig,
   { type: "folks" }
@@ -946,6 +1031,12 @@ export interface GlobalConfig {
     enableLiquidatablePositions: boolean;
     /** NFT holder rewards — pay agent on Base (x402) in portfolio modal. */
     enableAgentClaim: boolean;
+    /** Dev/staging: skip NFT holder eligibility checks before pay-agent (never enable in production). */
+    bypassAgentClaimEligibility: boolean;
+    /** Tinyman v2 liquidity pools — curated pairs page (browse / APR). */
+    enablePools: boolean;
+    /** In-app Deposit / Withdraw LP actions on pool cards (off until Tinyman LP flows are production-ready). Supply / Withdraw lending stays enabled. */
+    enablePoolDepositWithdraw: boolean;
   };
 }
 
@@ -2015,6 +2106,7 @@ const algorandMainnetPrefiConfig: NetworkConfig = {
 };
 const algorandProdAMarket = "3333688282";
 const algorandProdBMarket = "3345940978";
+const algorandProdCMarket = "3578814346";
 const algorandProdDMarket = "3526240577";
 const algorandProdPriceOracle = "3333688500";
 const algorandProdLiquidationEngine = undefined;
@@ -2031,10 +2123,11 @@ const algorandProdMarketController = "3333688332";
 const algorandProdSToken = "3333688448";
 const algorandProdBeacon = "3209233839";
 const algorandProdAppStorageId = "3333688254";
-// A, B, D markets (C market slot not used on prod)
+// A, B, C, D lending pools on prod
 const algorandProdLendingPools = [
   algorandProdAMarket,
   algorandProdBMarket,
+  algorandProdCMarket,
   algorandProdDMarket,
 ];
 const algorandProdContracts: ContractConfig = {
@@ -2552,22 +2645,54 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     logoPath: "/lovable-uploads/goETH.webp",
     tokenStandard: "asa",
   },
-  wETH: {
-    assetId: "887406851",
-    poolId: "3333688282",
-    contractId: "3211811648",
-    nTokenId: "3348121075",
-    migration: {
-      poolId: "3207735602",
+  wETH: [
+    // wETH 887406851 8 3211811648
+    {
+      assetId: "887406851",
+      poolId: "3333688282",
       contractId: "3211811648",
-      nTokenId: "3211959473",
+      nTokenId: "3348121075",
+      migration: {
+        poolId: "3207735602",
+        contractId: "3211811648",
+        nTokenId: "3211959473",
+      },
+      decimals: 8,
+      name: "wETH",
+      symbol: "wETH",
+      logoPath: "/lovable-uploads/wETH.webp",
+      tokenStandard: "asa",
     },
-    decimals: 8,
-    name: "wETH",
-    symbol: "wETH",
-    logoPath: "/lovable-uploads/wETH.webp",
-    tokenStandard: "asa",
-  },
+    // fWETH 3514808788 8 3575840444
+    {
+      assetId: "3495722210",
+      poolId: "3333688282",
+      contractId: "3575840444",
+      nTokenId: "3575954102",
+      decimals: 8,
+      name: "wETH",
+      symbol: "wETH",
+      logoPath: "/lovable-uploads/wETH.png",
+      tokenStandard: "asa-asa",
+      dataAddedAt: "2026-05-27T00:00:00.000Z",
+      requireStandaloneFAssetOptInBeforeDeposit: true,
+      adapters: [
+        FOLKS_MAINNET_WETH_DEPOSIT_FWETH_WALLET,
+        FOLKS_MAINNET_WETH_DEPOSIT_UNDERLYING,
+        FOLKS_MAINNET_WETH_WITHDRAW,
+        FOLKS_MAINNET_WETH_WITHDRAW_FASSET_WALLET,
+        FOLKS_MAINNET_WETH_BORROW_FWETH_WALLET,
+        FOLKS_MAINNET_WETH_BORROW_UNDERLYING,
+        FOLKS_MAINNET_WETH_REPAY_FWETH_WALLET,
+        FOLKS_MAINNET_WETH_REPAY_UNDERLYING,
+      ],
+      iconBadgeFromSymbol: "FOLKS",
+      intrinsicApyPercent: 0.82,
+      intrinsicBorrowApyPercent: 0.82,
+      intrinsicApyLiveSource: "folks_mainnet_weth_ntt_pool_deposit",
+      intrinsicBorrowApyLiveSource: "folks_mainnet_weth_ntt_pool_deposit",
+    }
+  ],
   goBTC: {
     assetId: "386192725",
     poolId: "3333688282",
@@ -2584,28 +2709,30 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     logoPath: "/lovable-uploads/goBTC.webp",
     tokenStandard: "asa",
   },
-  wBTC: //[
-    // {
-    //   assetId: "1058926737",
-    //   poolId: "3333688282",
-    //   contractId: "3211827406",
-    //   nTokenId: "3348042762",
-    //   migration: {
-    //     poolId: "3207735602",
-    //     contractId: "3211827406",
-    //     nTokenId: "3211979645",
-    //   },
-    //   decimals: 8,
-    //   name: "wBTC",
-    //   symbol: "wBTC",
-    //   logoPath: "/lovable-uploads/wBTCm.png",
-    //   tokenStandard: "asa",
-    // },
+  wBTC: [
+    // wBTC 1058926737 8 3211827406
     {
-      assetId: "3495558025", // Folks V2 WBTC (NTT) underlying
+      assetId: "1058926737",
       poolId: "3333688282",
-      contractId: "3573862137", // Folks V2 Wrapped BTC (arc200)
-      nTokenId: "3573966772",
+      contractId: "3211827406",
+      nTokenId: "3348042762",
+      migration: {
+        poolId: "3207735602",
+        contractId: "3211827406",
+        nTokenId: "3211979645",
+      },
+      decimals: 8,
+      name: "wBTC",
+      symbol: "wBTC",
+      logoPath: "/lovable-uploads/wBTCm.png",
+      tokenStandard: "asa",
+    },
+    // fWBTC 3514808410 8 3575837891
+    {
+      assetId: "3495558025",
+      poolId: "3333688282",
+      contractId: "3575837891",
+      nTokenId: "3575859479",
       decimals: 8,
       name: "wBTC",
       symbol: "wBTC",
@@ -2629,7 +2756,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
       intrinsicBorrowApyLiveSource: "folks_mainnet_wbtc_ntt_pool_deposit",
       iconBadgeFromSymbol: "FOLKS",
     },
-  //],
+  ],
   LINK: {
     assetId: "1200094857",
     poolId: "3333688282",
@@ -2892,7 +3019,70 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
       tokenStandard: "arc200-exchange",
       dataAddedAt: "2026-04-19T00:00:00.000Z",
     },
+    {
+      assetId: "3334160924",
+      contractId: "3333688448",
+      poolId: "3578814346",
+      nTokenId: "3583297246",
+      decimals: 6,
+      name: "WAD",
+      symbol: "WAD",
+      logoPath: "/lovable-uploads/WAD_fixed.png",
+      tokenStandard: "arc200-exchange",
+      dataAddedAt: "2026-06-01T00:00:00.000Z",
+    }
   ],
+  // TMPOOL2 3157974960 6 3577729953
+  // name: "TinymanPool2.0 UNIT-ALGO",
+  // symbol: "TMPOOL2",
+  // decimals: 6,
+  // contractId: 3577729953
+  LP_TMPOOL2_UNIT_ALGO: {
+    assetId: "3157974960",
+    contractId: "3577729953",
+    poolId: "3578814346",
+    nTokenId: "3579176126",
+    decimals: 6,
+    name: "TinymanPool2.0 UNIT-ALGO",
+    symbol: "TMPOOL2",
+    logoPath: "/lovable-uploads/LP_TMPOOL2_UNIT_ALGO.png",
+    tokenStandard: "asa",
+    dataAddedAt: "2026-05-29T00:00:00.000Z",
+  },
+  // TMPOOL2 3159132330 6 3577777819
+  // name: "TinymanPool2.0 UNIT-goBTC",
+  // symbol: "TMPOOL2",
+  // decimals: 6,
+  // contractId: 3577777819
+  LP_TMPOOL2_UNIT_GOBTC: {
+    assetId: "3159132330",
+    contractId: "3577777819",
+    poolId: "3578814346",
+    nTokenId: "3579373167",
+    decimals: 6,
+    name: "TinymanPool2.0 UNIT-goBTC",
+    symbol: "TMPOOL2",
+    logoPath: "/lovable-uploads/LP_TMPOOL2_UNIT_GOBTC.png",
+    tokenStandard: "asa",
+    dataAddedAt: "2026-05-29T00:00:00.000Z",
+  },
+  // TMPOOL2 3334546641 6 3577783311
+  // name: "TinymanPool2.0 WAD-UNIT",
+  // symbol: "TMPOOL2",
+  // decimals: 6,
+  // contractId: 3577783311
+  LP_TMPOOL2_WAD_UNIT: {
+    assetId: "3334546641",
+    contractId: "3577783311",
+    poolId: "3578814346",
+    nTokenId: "3579418200",
+    decimals: 6,
+    name: "TinymanPool2.0 WAD-UNIT",
+    symbol: "TMPOOL2",
+    logoPath: "/lovable-uploads/LP_TMPOOL2_WAD_UNIT.png",
+    tokenStandard: "asa",
+    dataAddedAt: "2026-05-29T00:00:00.000Z",
+  },
 };
 const algorandMainnetProdConfig: NetworkConfig = {
   networkId: "algorand-mainnet",
@@ -3172,6 +3362,9 @@ export const config: GlobalConfig = {
     enableNFTBoost: true, // Enable NFT boost for governance voting power
     enableLiquidatablePositions: true, // Enable liquidatable positions section in portfolio
     enableAgentClaim: true, // NFT holder reward claim — Base x402 pay-agent section
+    bypassAgentClaimEligibility: false,
+    enablePools: true,
+    enablePoolDepositWithdraw: false,
   },
 };
 
@@ -3186,7 +3379,8 @@ export const marketLabelMap: Record<string, string> = {
   // Algorand Mainnet (prod pools in this file)
   "algorand-mainnet-3333688282": "A",
   "algorand-mainnet-3345940978": "B",
-  /** Third prod lending pool (array order is A, B, D — no “C” market id). */
+  "algorand-mainnet-3578814346": "C",
+  /** Third prod lending pool (array order is A, B, C, D). */
   "algorand-mainnet-3526240577": "D",
 };
 
@@ -3330,13 +3524,15 @@ export const getMarketLabel = (
     return marketLabelMap[key];
   }
 
-  // Fallback: try to get from network config
+  // Fallback: derive label from lending pool order (A = index 0, B = 1, …)
   try {
     const networkConfig = getNetworkConfig(normalizedNetworkId as NetworkId);
     const lendingPools = networkConfig?.contracts?.lendingPools || [];
-    if (lendingPools.length >= 2) {
-      if (String(poolId) === String(lendingPools[0])) return "A";
-      if (String(poolId) === String(lendingPools[1])) return "B";
+    const poolIndex = lendingPools.findIndex(
+      (pool) => String(pool) === normalizedPoolId
+    );
+    if (poolIndex >= 0) {
+      return String.fromCharCode(65 + poolIndex);
     }
   } catch (e) {
     // Network not found in config, return null
@@ -3344,6 +3540,225 @@ export const getMarketLabel = (
 
   return null;
 };
+
+/** Market letter for a lending pool id (A, B, C, …), with index fallback. */
+export const getLendingPoolLabel = (
+  networkId: NetworkId | string | null | undefined,
+  poolId: string | null | undefined
+): string => {
+  const label = getMarketLabel(networkId, poolId);
+  return label ?? "?";
+};
+
+/**
+ * Lending pools whose LP nt200 markets are omitted from the Markets table
+ * (still in config for Pools page, Admin, etc.).
+ * Algorand prod C pool holds Tinyman LP markets — surfaced on the Pools page instead.
+ */
+const MARKETS_TABLE_EXCLUDED_POOL_IDS: Partial<
+  Record<NetworkId, readonly string[]>
+> = {
+  "algorand-mainnet": [algorandProdCMarket],
+};
+
+/**
+ * Lending pool app id for an nt200 / underlying market contract.
+ * Pool C TMPOOL2 + WAD rows are indexed here so Pools / portfolio can resolve
+ * `contractId → poolId` without scanning `tokens`.
+ */
+const LENDING_POOL_BY_MARKET_CONTRACT: Partial<
+  Record<NetworkId, Readonly<Record<string, string>>>
+> = {
+  "algorand-mainnet": {
+    [algorandProdSToken]: algorandProdCMarket,
+    "3577729953": algorandProdCMarket,
+    "3577777819": algorandProdCMarket,
+    "3577783311": algorandProdCMarket,
+  },
+};
+
+/** WAD borrow market on Pool C paired with UNIT TMPOOL2 collateral (`tokens.WAD` row). */
+export type UnitLendingWadBorrowMarketRef = {
+  poolId: string;
+  contractId: string;
+  nTokenId: string;
+  configKey: "WAD";
+};
+
+/**
+ * UNIT LP nt200 collateral markets on Pool C that borrow against
+ * {@link UNIT_LENDING_WAD_BORROW_MARKET} (WAD @ pool 3578814346).
+ */
+const UNIT_LENDING_COLLATERAL_CONTRACT_IDS: Partial<
+  Record<NetworkId, readonly string[]>
+> = {
+  "algorand-mainnet": ["3577729953", "3577777819"],
+};
+
+/** WAD borrow market for UNIT LP lending on Pool C (`algorandProdTokens.WAD[1]`). */
+const UNIT_LENDING_WAD_BORROW_MARKET: Partial<
+  Record<NetworkId, UnitLendingWadBorrowMarketRef>
+> = {
+  "algorand-mainnet": {
+    poolId: algorandProdCMarket,
+    contractId: algorandProdSToken,
+    nTokenId: "3583297246",
+    configKey: "WAD",
+  },
+};
+
+/** nt200 contract ids for UNIT TMPOOL2 collateral markets on Pool C. */
+export function getUnitLendingCollateralContractIds(
+  networkId: NetworkId | string | null | undefined
+): readonly string[] {
+  if (!networkId) return [];
+  return UNIT_LENDING_COLLATERAL_CONTRACT_IDS[networkId as NetworkId] ?? [];
+}
+
+/** True when `marketContractId` is a UNIT LP collateral market on Pool C. */
+export function isUnitLpCollateralMarketContract(
+  networkId: NetworkId | string | null | undefined,
+  marketContractId: string | number | null | undefined
+): boolean {
+  if (marketContractId == null || String(marketContractId) === "") return false;
+  const id = String(marketContractId);
+  return getUnitLendingCollateralContractIds(networkId).some(
+    (contractId) => contractId === id
+  );
+}
+
+/** Pool C WAD borrow market ref paired with UNIT LP collateral. */
+export function getUnitLendingWadBorrowMarketRef(
+  networkId: NetworkId | string | null | undefined
+): UnitLendingWadBorrowMarketRef | null {
+  if (!networkId) return null;
+  return UNIT_LENDING_WAD_BORROW_MARKET[networkId as NetworkId] ?? null;
+}
+
+/** Resolve WAD borrow {@link TokenConfig} for Pool C UNIT LP lending. */
+export function getUnitLendingWadBorrowMarketConfig(
+  networkId: NetworkId | string | null | undefined
+): TokenConfig | null {
+  const ref = getUnitLendingWadBorrowMarketRef(networkId);
+  if (!ref || !networkId) return null;
+
+  const wadToken = getNetworkConfig(networkId as NetworkId).tokens?.WAD;
+  const configs: TokenConfig[] = Array.isArray(wadToken)
+    ? wadToken
+    : wadToken
+      ? [wadToken]
+      : [];
+
+  return (
+    configs.find(
+      (config) =>
+        String(config.poolId) === ref.poolId &&
+        String(config.contractId) === ref.contractId &&
+        String(config.nTokenId) === ref.nTokenId
+    ) ?? null
+  );
+}
+
+/** WAD deposit markets on other pools (excludes Pool C borrow row and sToken mint rows). */
+export function getWadSupplyMarketConfigsExcludingPoolCBorrow(
+  networkId: NetworkId | string | null | undefined
+): TokenConfig[] {
+  if (!networkId) return [];
+  const borrowRef = getUnitLendingWadBorrowMarketRef(networkId);
+  const wadToken = getNetworkConfig(networkId as NetworkId).tokens?.WAD;
+  const configs: TokenConfig[] = Array.isArray(wadToken)
+    ? wadToken
+    : wadToken
+      ? [wadToken]
+      : [];
+
+  return configs.filter((config) => {
+    if (config.isStoken) return false;
+    if (!borrowRef) return true;
+    return !(
+      String(config.poolId) === borrowRef.poolId &&
+      String(config.contractId) === borrowRef.contractId &&
+      String(config.nTokenId) === borrowRef.nTokenId
+    );
+  });
+}
+
+/** Lending pool app id for Pool C on this network, if configured. */
+export function getPoolCLendingPoolId(
+  networkId: NetworkId | string | null | undefined
+): string | null {
+  if (!networkId) return null;
+  const excluded = MARKETS_TABLE_EXCLUDED_POOL_IDS[networkId as NetworkId];
+  if (!excluded?.length) return null;
+  return String(excluded[0]);
+}
+
+/** Resolve lending pool app id from nt200 / underlying market `contractId`. */
+export function getLendingPoolIdForMarketContract(
+  networkId: NetworkId | string | null | undefined,
+  marketContractId: string | number | null | undefined
+): string | null {
+  if (!networkId || marketContractId == null || String(marketContractId) === "") {
+    return null;
+  }
+  const byNetwork =
+    LENDING_POOL_BY_MARKET_CONTRACT[networkId as NetworkId];
+  if (!byNetwork) return null;
+  return byNetwork[String(marketContractId)] ?? null;
+}
+
+/** True when `marketContractId` is a Pool C market in {@link LENDING_POOL_BY_MARKET_CONTRACT}. */
+export function isPoolCMarketContract(
+  networkId: NetworkId | string | null | undefined,
+  marketContractId: string | number | null | undefined
+): boolean {
+  const poolId = getLendingPoolIdForMarketContract(networkId, marketContractId);
+  const poolC = getPoolCLendingPoolId(networkId);
+  return poolId != null && poolC != null && poolId === poolC;
+}
+
+/** All nt200 / underlying contract ids registered on Pool C for this network. */
+export function getPoolCMarketContractIds(
+  networkId: NetworkId | string | null | undefined
+): string[] {
+  const poolC = getPoolCLendingPoolId(networkId);
+  if (!poolC) return [];
+  const byNetwork = LENDING_POOL_BY_MARKET_CONTRACT[networkId as NetworkId];
+  if (!byNetwork) return [];
+  return Object.entries(byNetwork)
+    .filter(([, poolId]) => String(poolId) === poolC)
+    .map(([contractId]) => contractId);
+}
+
+/** Pool C config keys that remain visible on Markets table and portfolio (WAD borrow). */
+const MARKETS_TABLE_POOL_C_VISIBLE_CONFIG_KEYS = new Set(["WAD"]);
+
+/** True when the entire lending pool is omitted from the Markets table (before per-market exceptions). */
+export function isMarketsTableExcludedPool(
+  networkId: NetworkId | string | null | undefined,
+  poolId: string | number | null | undefined
+): boolean {
+  if (!networkId || poolId == null || String(poolId) === "") return false;
+  const excluded = MARKETS_TABLE_EXCLUDED_POOL_IDS[networkId as NetworkId];
+  if (!excluded?.length) return false;
+  const pid = String(poolId);
+  return excluded.some((id) => String(id) === pid);
+}
+
+/**
+ * True when a configured market row should not appear on the Markets table (or matching portfolio market lists).
+ * Pool C LP (`LP_TMPOOL2_*`) stays hidden; WAD on Pool C is the exception and remains visible.
+ */
+export function isMarketsTableExcludedMarket(
+  networkId: NetworkId | string | null | undefined,
+  poolId: string | number | null | undefined,
+  configKey?: string | null
+): boolean {
+  if (!isMarketsTableExcludedPool(networkId, poolId)) return false;
+  const key = configKey?.trim();
+  if (key && MARKETS_TABLE_POOL_C_VISIBLE_CONFIG_KEYS.has(key)) return false;
+  return true;
+}
 
 /**
  * Pool id when the row object has not yet populated `marketInfo` / `poolId` (same rules as markets table `getPoolIdForSorting`).
@@ -3685,6 +4100,10 @@ export type LiveIntrinsicSupplyApySnapshot = {
   folksMainnetWbtcNttDepositPercent?: number | null;
   /** Folks V2 WBTC (NTT) pool variable borrow yield, percentage points. */
   folksMainnetWbtcNttBorrowPercent?: number | null;
+  /** Folks V2 WETH (NTT) pool deposit yield, percentage points. */
+  folksMainnetWethNttDepositPercent?: number | null;
+  /** Folks V2 WETH (NTT) pool variable borrow yield, percentage points. */
+  folksMainnetWethNttBorrowPercent?: number | null;
 };
 
 function applyLiveIntrinsicSupplyApySource(
@@ -3724,6 +4143,11 @@ function applyLiveIntrinsicSupplyApySource(
   }
   if (source === "folks_mainnet_wbtc_ntt_pool_deposit") {
     const v = live?.folksMainnetWbtcNttDepositPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    return base;
+  }
+  if (source === "folks_mainnet_weth_ntt_pool_deposit") {
+    const v = live?.folksMainnetWethNttDepositPercent;
     if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
     return base;
   }
@@ -3782,6 +4206,16 @@ function applyLiveIntrinsicBorrowApySource(
   }
   if (source === "folks_mainnet_wbtc_ntt_pool_borrow") {
     const v = live?.folksMainnetWbtcNttBorrowPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    return base;
+  }
+  if (source === "folks_mainnet_weth_ntt_pool_deposit") {
+    const v = live?.folksMainnetWethNttDepositPercent;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    return base;
+  }
+  if (source === "folks_mainnet_weth_ntt_pool_borrow") {
+    const v = live?.folksMainnetWethNttBorrowPercent;
     if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
     return base;
   }
@@ -3878,7 +4312,8 @@ export const tokenRowUsesLiveIntrinsicApy = (
     s === "folks_mainnet_usdc_pool_deposit" ||
     s === "folks_mainnet_fiusdc_ecosystem_pool_deposit" ||
     s === "folks_mainnet_fitiny_ecosystem_pool_deposit" ||
-    s === "folks_mainnet_wbtc_ntt_pool_deposit"
+    s === "folks_mainnet_wbtc_ntt_pool_deposit" ||
+    s === "folks_mainnet_weth_ntt_pool_deposit"
   );
 };
 
@@ -3907,7 +4342,9 @@ export const tokenRowUsesLiveIntrinsicBorrowApy = (
     s === "folks_mainnet_fitiny_ecosystem_pool_borrow" ||
     s === "folks_mainnet_fitiny_ecosystem_pool_deposit" ||
     s === "folks_mainnet_wbtc_ntt_pool_deposit" ||
-    s === "folks_mainnet_wbtc_ntt_pool_borrow"
+    s === "folks_mainnet_wbtc_ntt_pool_borrow" ||
+    s === "folks_mainnet_weth_ntt_pool_deposit" ||
+    s === "folks_mainnet_weth_ntt_pool_borrow"
   );
 };
 
@@ -4314,6 +4751,24 @@ export const getEnvironmentConfig = (): Partial<GlobalConfig> => {
     envFeatures.enableAgentClaim =
       import.meta.env.VITE_ENABLE_AGENT_CLAIM === "true" ||
       import.meta.env.VITE_ENABLE_AGENT_CLAIM === "1";
+  }
+
+  if (typeof import.meta.env.VITE_BYPASS_AGENT_CLAIM_ELIGIBILITY !== "undefined") {
+    envFeatures.bypassAgentClaimEligibility =
+      import.meta.env.VITE_BYPASS_AGENT_CLAIM_ELIGIBILITY === "true" ||
+      import.meta.env.VITE_BYPASS_AGENT_CLAIM_ELIGIBILITY === "1";
+  }
+
+  if (typeof import.meta.env.VITE_ENABLE_POOLS !== "undefined") {
+    envFeatures.enablePools =
+      import.meta.env.VITE_ENABLE_POOLS === "true" ||
+      import.meta.env.VITE_ENABLE_POOLS === "1";
+  }
+
+  if (typeof import.meta.env.VITE_ENABLE_POOL_DEPOSIT_WITHDRAW !== "undefined") {
+    envFeatures.enablePoolDepositWithdraw =
+      import.meta.env.VITE_ENABLE_POOL_DEPOSIT_WITHDRAW === "true" ||
+      import.meta.env.VITE_ENABLE_POOL_DEPOSIT_WITHDRAW === "1";
   }
 
   if (env === "development") {
