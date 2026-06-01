@@ -24,6 +24,7 @@ import {
 } from "@/services/lendingService";
 import algorandService from "@/services/algorandService";
 import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
+import { usdPerTokenFromMarketInfoPrice } from "@/utils/assetDecimals";
 import { waitForConfirmation } from "algosdk";
 
 type PoolLendingModalsProps = {
@@ -52,6 +53,8 @@ type LendingMarketStats = {
   liquidationThreshold?: number;
   liquidity: number;
   liquidityUSD: number;
+  /** USD per 1 human token (oracle-adjusted). */
+  tokenPrice: number;
   apyParameters?: {
     borrowRateBps: number;
     slopeBps: number;
@@ -61,9 +64,13 @@ type LendingMarketStats = {
 
 function marketInfoToAssetData(
   marketInfo: NonNullable<Awaited<ReturnType<typeof fetchMarketInfo>>>,
-  logoPath: string
+  logoPath: string,
+  tokenDecimals: number
 ): LendingMarketStats {
-  const tokenPrice = parseFloat(marketInfo.price) || 0;
+  const usdPerToken = usdPerTokenFromMarketInfoPrice(
+    marketInfo.price,
+    tokenDecimals
+  );
   const totalSupply = parseFloat(marketInfo.totalDeposits) || 0;
   const totalBorrow = parseFloat(marketInfo.totalBorrows) || 0;
   const supplyAPY =
@@ -80,21 +87,20 @@ function marketInfoToAssetData(
       : typeof marketInfo.borrowRateCurrent === "number"
         ? marketInfo.borrowRateCurrent * 100
         : 0) ?? 0;
-  const decScale = Math.pow(10, marketInfo.decimals + 6) / Math.pow(10, 12);
-
   return {
     icon: logoPath,
     totalSupply,
-    totalSupplyUSD: totalSupply * tokenPrice * decScale,
+    totalSupplyUSD: totalSupply * usdPerToken,
     supplyAPY,
     totalBorrow,
-    totalBorrowUSD: totalBorrow * tokenPrice * decScale,
+    totalBorrowUSD: totalBorrow * usdPerToken,
     borrowAPY,
     utilization: (marketInfo.utilizationRate ?? 0) * 100,
     collateralFactor: (marketInfo.collateralFactor ?? 0) * 100,
     liquidationThreshold: (marketInfo.liquidationThreshold ?? 0) * 100,
     liquidity: Math.max(0, totalSupply - totalBorrow),
-    liquidityUSD: Math.max(0, totalSupply - totalBorrow) * tokenPrice * decScale,
+    liquidityUSD: Math.max(0, totalSupply - totalBorrow) * usdPerToken,
+    tokenPrice: usdPerToken,
     apyParameters: {
       borrowRateBps: Math.round((marketInfo.borrowRate ?? 0) * 10000),
       slopeBps: Math.round((marketInfo.slope ?? 0) * 10000),
@@ -182,7 +188,13 @@ const PoolLendingModals = ({
         networkId
       );
       if (marketInfo) {
-        setAssetData(marketInfoToAssetData(marketInfo, lendingMarket.logoPath));
+        setAssetData(
+          marketInfoToAssetData(
+            marketInfo,
+            lendingMarket.logoPath,
+            lendingMarket.decimals
+          )
+        );
       }
     } finally {
       setLoadingMarket(false);
@@ -292,15 +304,13 @@ const PoolLendingModals = ({
       collateralFactor: 0,
       liquidity: 0,
       liquidityUSD: 0,
+      tokenPrice: 0,
     }),
     [lendingMarket.logoPath]
   );
 
   const resolvedAssetData = assetData ?? emptyAssetData;
-  const tokenPrice =
-    resolvedAssetData.totalSupply > 0
-      ? resolvedAssetData.totalSupplyUSD / resolvedAssetData.totalSupply
-      : 0;
+  const tokenPrice = resolvedAssetData.tokenPrice;
 
   return (
     <>

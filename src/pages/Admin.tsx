@@ -107,7 +107,7 @@ import {
   type TokenStandard,
 } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
+import { APP_SPEC as LendingPoolAppSpec, GlobalUserData } from "@/clients/DorkFiLendingPoolClient";
 import { APP_SPEC as UNITGovernanceAppSpec } from "@/clients/UNITGovernanceClient";
 import { APP_SPEC as PriceOracleAppSpec } from "@/clients/PriceOracleClient";
 import algorandService, { AlgorandNetwork } from "@/services/algorandService";
@@ -480,6 +480,33 @@ export default function AdminDashboard() {
   const [poolBoxError, setPoolBoxError] = useState<string | null>(null);
   const [poolBoxQuickPick, setPoolBoxQuickPick] = useState("__manual__");
 
+  /** Tools: on-chain get_global_user per lending pool */
+  type GlobalUserToolRow = {
+    poolId: string;
+    poolLabel: string;
+    ok: boolean;
+    error?: string;
+    rawCollateral?: string;
+    rawBorrow?: string;
+    rawLastUpdateTime?: string;
+    collateralUsd?: number;
+    borrowUsd?: number;
+    lastUpdateTime?: number;
+    healthFactor?: number | null;
+  };
+  const [globalUserToolNetwork, setGlobalUserToolNetwork] = useState<NetworkId>(
+    () => currentNetwork as NetworkId
+  );
+  const [globalUserToolAddress, setGlobalUserToolAddress] = useState("");
+  const [globalUserToolPoolId, setGlobalUserToolPoolId] = useState("__all__");
+  const [globalUserToolLoading, setGlobalUserToolLoading] = useState(false);
+  const [globalUserToolError, setGlobalUserToolError] = useState<string | null>(
+    null
+  );
+  const [globalUserToolRows, setGlobalUserToolRows] = useState<
+    GlobalUserToolRow[]
+  >([]);
+
   const poolBoxTokenOptions = useMemo(() => {
     return getAllTokensWithDisplayInfo(poolBoxNetwork).filter(
       (t) => t.underlyingContractId && t.poolId
@@ -505,6 +532,119 @@ export default function AdminDashboard() {
   useEffect(() => {
     setPoolBoxQuickPick("__manual__");
   }, [poolBoxNetwork]);
+
+  useEffect(() => {
+    if (activeAccount?.address && !globalUserToolAddress) {
+      setGlobalUserToolAddress(activeAccount.address);
+    }
+  }, [activeAccount?.address, globalUserToolAddress]);
+
+  const handleGlobalUserToolLoad = useCallback(async () => {
+    const addr = globalUserToolAddress.trim();
+    if (!addr) {
+      toast.error("Enter a user address.");
+      return;
+    }
+    if (!isAlgorandCompatibleNetwork(globalUserToolNetwork)) {
+      toast.error("This tool only supports Algorand-compatible networks.");
+      return;
+    }
+
+    setGlobalUserToolLoading(true);
+    setGlobalUserToolError(null);
+    setGlobalUserToolRows([]);
+
+    try {
+      const networkConfig = getNetworkConfig(globalUserToolNetwork);
+      const clients = await algorandService.initializeClientsForReads(
+        networkConfig.walletNetworkId as AlgorandNetwork
+      );
+
+      const poolIds =
+        globalUserToolPoolId.trim() && globalUserToolPoolId !== "__all__"
+          ? [globalUserToolPoolId.trim()]
+          : networkConfig.contracts.lendingPools.map(String);
+
+      const rows: GlobalUserToolRow[] = [];
+
+      for (const poolId of poolIds) {
+        const poolLabel = getLendingPoolLabel(globalUserToolNetwork, poolId);
+        try {
+          const poolIdNum = Number(poolId);
+          const ci = new CONTRACT(
+            poolIdNum,
+            clients.algod,
+            undefined,
+            { ...LendingPoolAppSpec.contract, events: [] },
+            {
+              addr: algosdk.encodeAddress(
+                algosdk.getApplicationAddress(poolIdNum).publicKey
+              ),
+              sk: new Uint8Array(),
+            }
+          );
+          ci.setFee(2000);
+          const globalUserR = await ci.get_global_user(addr);
+          if (!globalUserR.success) {
+            rows.push({
+              poolId,
+              poolLabel,
+              ok: false,
+              error: "get_global_user failed (missing user box or RPC error)",
+            });
+            continue;
+          }
+
+          const globalUser = GlobalUserData(globalUserR.returnValue);
+          const collateralUsd = new BigNumber(
+            globalUser.totalCollateralValue.toString()
+          )
+            .div(1e12)
+            .toNumber();
+          const borrowUsd = new BigNumber(globalUser.totalBorrowValue.toString())
+            .div(1e12)
+            .toNumber();
+          const lastUpdateTime = Number(globalUser.lastUpdateTime);
+          const healthFactor =
+            borrowUsd > 0 ? Math.min(collateralUsd / borrowUsd, 3) : null;
+
+          rows.push({
+            poolId,
+            poolLabel,
+            ok: true,
+            rawCollateral: globalUser.totalCollateralValue.toString(),
+            rawBorrow: globalUser.totalBorrowValue.toString(),
+            rawLastUpdateTime: globalUser.lastUpdateTime.toString(),
+            collateralUsd,
+            borrowUsd,
+            lastUpdateTime,
+            healthFactor,
+          });
+        } catch (e) {
+          rows.push({
+            poolId,
+            poolLabel,
+            ok: false,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
+
+      setGlobalUserToolRows(rows);
+      const okCount = rows.filter((r) => r.ok).length;
+      if (okCount === 0) {
+        toast.error("No global user data returned for any pool.");
+      } else {
+        toast.success(`Loaded global user data for ${okCount} pool(s).`);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setGlobalUserToolError(msg);
+      toast.error(msg);
+    } finally {
+      setGlobalUserToolLoading(false);
+    }
+  }, [globalUserToolAddress, globalUserToolNetwork, globalUserToolPoolId]);
 
   const handleSyncUserForPriceChange = useCallback(async () => {
     const u = pcSyncUserAddress.trim();
@@ -12066,6 +12206,228 @@ export default function AdminDashboard() {
                   <p className="text-sm font-mono text-muted-foreground">
                     Last txid: {poolBoxLastTxid}
                   </p>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="border-blue-500/25 bg-blue-500/[0.03]">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Users className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                  Global user data (get_global_user)
+                </CardTitle>
+                <CardDescription>
+                  Reads lending pool{" "}
+                  <code className="text-xs">get_global_user</code> on-chain for
+                  a wallet. Returns per-pool collateral and borrow totals (scaled
+                  ÷ 1e12 → USD) and last update time — same source as Portfolio
+                  health factor.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div className="space-y-2">
+                    <Label>Network</Label>
+                    <Select
+                      value={globalUserToolNetwork}
+                      onValueChange={(v) =>
+                        setGlobalUserToolNetwork(v as NetworkId)
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Network" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {getEnabledNetworks().map((nid) => (
+                          <SelectItem key={nid} value={nid}>
+                            {nid}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <Label>User address</Label>
+                    <Input
+                      className="font-mono text-xs"
+                      placeholder="Algorand address"
+                      value={globalUserToolAddress}
+                      onChange={(e) =>
+                        setGlobalUserToolAddress(e.target.value)
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Lending pool</Label>
+                    <Select
+                      value={globalUserToolPoolId}
+                      onValueChange={setGlobalUserToolPoolId}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="All pools" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__all__">All pools</SelectItem>
+                        {getLendingPools(globalUserToolNetwork).map((poolId) => (
+                          <SelectItem key={poolId} value={poolId}>
+                            Pool {getLendingPoolLabel(globalUserToolNetwork, poolId)}{" "}
+                            ({poolId})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="default"
+                  onClick={() => void handleGlobalUserToolLoad()}
+                  disabled={globalUserToolLoading}
+                >
+                  {globalUserToolLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Reading chain…
+                    </>
+                  ) : (
+                    <>
+                      <Database className="h-4 w-4 mr-2" />
+                      Load global user data
+                    </>
+                  )}
+                </Button>
+                {globalUserToolError && (
+                  <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                    {globalUserToolError}
+                  </div>
+                )}
+                {globalUserToolRows.length > 0 && (
+                  <div className="space-y-3">
+                    {globalUserToolRows.some((r) => r.ok) && (
+                      <div className="rounded-lg border border-border bg-muted/30 p-3 text-sm">
+                        <p className="font-semibold text-foreground mb-2">
+                          Network totals (successful pools)
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 font-mono text-xs">
+                          <div>
+                            <span className="text-muted-foreground">
+                              Collateral USD
+                            </span>
+                            <p className="font-medium tabular-nums">
+                              $
+                              {globalUserToolRows
+                                .filter((r) => r.ok)
+                                .reduce(
+                                  (sum, r) => sum + (r.collateralUsd ?? 0),
+                                  0
+                                )
+                                .toLocaleString(undefined, {
+                                  maximumFractionDigits: 2,
+                                })}
+                            </p>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">
+                              Borrow USD
+                            </span>
+                            <p className="font-medium tabular-nums">
+                              $
+                              {globalUserToolRows
+                                .filter((r) => r.ok)
+                                .reduce(
+                                  (sum, r) => sum + (r.borrowUsd ?? 0),
+                                  0
+                                )
+                                .toLocaleString(undefined, {
+                                  maximumFractionDigits: 2,
+                                })}
+                            </p>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">
+                              Worst HF (C÷B, cap 3)
+                            </span>
+                            <p className="font-medium tabular-nums">
+                              {(() => {
+                                const hfs = globalUserToolRows
+                                  .filter(
+                                    (r) =>
+                                      r.ok &&
+                                      r.healthFactor != null &&
+                                      Number.isFinite(r.healthFactor)
+                                  )
+                                  .map((r) => r.healthFactor as number);
+                                if (hfs.length === 0) return "—";
+                                return Math.min(...hfs).toFixed(4);
+                              })()}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {globalUserToolRows.map((row) => (
+                      <div
+                        key={row.poolId}
+                        className="rounded-lg border border-border bg-muted/20 p-3 space-y-2 text-sm"
+                      >
+                        <p className="font-semibold text-foreground">
+                          Pool {row.poolLabel} ({row.poolId})
+                        </p>
+                        {!row.ok ? (
+                          <p className="text-destructive text-xs">{row.error}</p>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 font-mono text-xs">
+                            <span className="text-muted-foreground">
+                              totalCollateralValue (raw)
+                            </span>
+                            <span className="break-all">{row.rawCollateral}</span>
+                            <span className="text-muted-foreground">
+                              totalBorrowValue (raw)
+                            </span>
+                            <span className="break-all">{row.rawBorrow}</span>
+                            <span className="text-muted-foreground">
+                              Collateral USD (÷ 1e12)
+                            </span>
+                            <span>
+                              $
+                              {(row.collateralUsd ?? 0).toLocaleString(
+                                undefined,
+                                { maximumFractionDigits: 4 }
+                              )}
+                            </span>
+                            <span className="text-muted-foreground">
+                              Borrow USD (÷ 1e12)
+                            </span>
+                            <span>
+                              $
+                              {(row.borrowUsd ?? 0).toLocaleString(undefined, {
+                                maximumFractionDigits: 4,
+                              })}
+                            </span>
+                            <span className="text-muted-foreground">
+                              lastUpdateTime
+                            </span>
+                            <span>
+                              {row.lastUpdateTime}{" "}
+                              {row.lastUpdateTime
+                                ? `(${new Date(
+                                    row.lastUpdateTime * 1000
+                                  ).toISOString()})`
+                                : ""}
+                            </span>
+                            <span className="text-muted-foreground">
+                              Health factor (C÷B, cap 3)
+                            </span>
+                            <span>
+                              {row.healthFactor != null
+                                ? row.healthFactor.toFixed(4)
+                                : "— (no borrows)"}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 )}
               </CardContent>
             </Card>
