@@ -3817,6 +3817,7 @@ const MarketsTable = () => {
             </div>
           ) : (
             <MarketsTableContent
+              marketFilter={marketFilter}
               markets={markets}
               sortField={sortField}
               sortOrder={sortOrder}
