@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { handleTokenImageError } from "@/utils/tokenImageUtils";
 
 interface LpPairIconStackProps {
   asset1Icon?: string;
@@ -6,13 +7,16 @@ interface LpPairIconStackProps {
   /** Shown when pair icons are unavailable (e.g. dedicated LP ASA logo). */
   fallbackIcon?: string;
   alt?: string;
-  size?: "sm" | "md";
+  size?: "sm" | "md" | "lg" | "xl";
   className?: string;
+  imgClassName?: string;
 }
 
 const sizeClasses = {
   sm: "h-8 w-8",
   md: "h-12 w-12",
+  lg: "h-16 w-16",
+  xl: "h-24 w-24",
 } as const;
 
 const LpPairIconStack = ({
@@ -22,8 +26,9 @@ const LpPairIconStack = ({
   alt = "LP pair",
   size = "md",
   className,
+  imgClassName,
 }: LpPairIconStackProps) => {
-  const iconSize = sizeClasses[size];
+  const iconSize = imgClassName ?? sizeClasses[size];
 
   if (asset1Icon && asset2Icon) {
     return (
@@ -35,6 +40,7 @@ const LpPairIconStack = ({
             iconSize,
             "rounded-full border border-border/50 object-contain bg-white shadow"
           )}
+          onError={handleTokenImageError}
         />
         <img
           src={asset2Icon}
@@ -43,6 +49,7 @@ const LpPairIconStack = ({
             iconSize,
             "rounded-full border border-border/50 object-contain bg-white shadow"
           )}
+          onError={handleTokenImageError}
         />
       </div>
     );
@@ -53,7 +60,12 @@ const LpPairIconStack = ({
       <img
         src={fallbackIcon}
         alt={alt}
-        className={cn(iconSize, "rounded-full object-contain shadow shrink-0", className)}
+        className={cn(
+          iconSize,
+          "rounded-full object-contain shadow shrink-0",
+          className
+        )}
+        onError={handleTokenImageError}
       />
     );
   }

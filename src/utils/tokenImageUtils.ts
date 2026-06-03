@@ -99,3 +99,15 @@ export function resolveTokenIconBadgeUrl(
   if (!s) return undefined;
   return getTokenImagePath(s);
 }
+
+export const PLACEHOLDER_ICON = "/placeholder.svg";
+
+/** Swap broken token images to the shared placeholder (safe to reuse on `onError`). */
+export function handleTokenImageError(event: {
+  currentTarget: HTMLImageElement;
+}): void {
+  const target = event.currentTarget;
+  if (!target.src.endsWith(PLACEHOLDER_ICON)) {
+    target.src = PLACEHOLDER_ICON;
+  }
+}

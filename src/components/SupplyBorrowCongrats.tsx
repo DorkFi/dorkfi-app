@@ -1,6 +1,8 @@
 import React from "react";
 import { CheckCircle2, Sparkles } from "lucide-react";
 import DorkFiButton from "@/components/ui/DorkFiButton";
+import LpPairIconStack from "@/components/pools/LpPairIconStack";
+import { handleTokenImageError } from "@/utils/tokenImageUtils";
 
 interface SupplyBorrowCongratsProps {
   transactionType: "deposit" | "borrow" | "withdraw" | "repay";
@@ -13,6 +15,8 @@ interface SupplyBorrowCongratsProps {
   onClose: () => void;
   /** When true, disables “View transaction” (e.g. no tx id yet). */
   viewTransactionDisabled?: boolean;
+  /** Underlying pair icons for Tinyman LP tokens (preferred over `assetIcon`). */
+  assetPairIcons?: { asset1Icon: string; asset2Icon: string };
 }
 
 const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
@@ -25,6 +29,7 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
   onMakeAnother,
   onClose,
   viewTransactionDisabled = false,
+  assetPairIcons,
 }) => {
   const getTransactionMessage = () => {
     switch (transactionType) {
@@ -43,6 +48,25 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
 
   const { action, preposition } = getTransactionMessage();
 
+  const assetIconNode =
+    assetPairIcons?.asset1Icon && assetPairIcons?.asset2Icon ? (
+      <LpPairIconStack
+        asset1Icon={assetPairIcons.asset1Icon}
+        asset2Icon={assetPairIcons.asset2Icon}
+        fallbackIcon={assetIcon}
+        alt={asset}
+        size="xl"
+        className="mt-[-30px] rounded-xl border-4 border-whale-gold bg-bubble-white dark:bg-slate-800 p-2 shadow-md mx-auto"
+      />
+    ) : (
+      <img
+        src={assetIcon}
+        alt={`${asset} icon`}
+        className="mt-[-30px] w-32 h-32 rounded-xl shadow-md border-4 border-whale-gold mx-auto bg-bubble-white dark:bg-slate-800 object-cover"
+        onError={handleTokenImageError}
+      />
+    );
+
   return (
     <div className="flex flex-col items-center justify-center gap-4 animate-fade-in">
       {/* Confetti & Sparkles */}
@@ -50,11 +74,7 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
         <Sparkles className="absolute -top-3 -left-3 text-whale-gold w-7 h-7 animate-bounce" />
         <Sparkles className="absolute -top-3 -right-3 text-highlight-aqua w-7 h-7 animate-bounce animation-delay-300" />
         <CheckCircle2 className="w-16 h-16 text-green-500 drop-shadow-xl bg-white dark:bg-slate-800 rounded-full p-1 border-4 border-whale-gold z-10" />
-        <img
-          src={assetIcon}
-          alt={`${asset} icon`}
-          className="mt-[-30px] w-32 h-32 rounded-xl shadow-md border-4 border-whale-gold mx-auto bg-bubble-white dark:bg-slate-800 object-cover"
-        />
+        {assetIconNode}
       </div>
 
       <h2 className="text-xl font-bold text-center mb-1">
@@ -78,14 +98,6 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
         >
           View Transaction
         </DorkFiButton>
-
-        {/*<DorkFiButton
-          variant="secondary"
-          className="w-full border-ocean-teal text-ocean-teal dark:border-whale-gold dark:text-whale-gold"
-          onClick={onGoToPortfolio}
-        >
-          Go to Portfolio
-        </DorkFiButton>*/}
 
         <DorkFiButton
           variant="secondary"

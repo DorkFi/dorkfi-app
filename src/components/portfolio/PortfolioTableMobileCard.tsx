@@ -102,6 +102,8 @@ const PortfolioTableMobileCard = ({
               }}
               poolLetterLabel={marketLabel}
               imgClassName="h-12 w-12 flex-shrink-0 rounded-full object-contain"
+              configSymbol={configSymbol}
+              networkId={rowNetwork}
             />
             <div className="text-center">
               <div className="font-semibold text-base text-slate-800 dark:text-white">

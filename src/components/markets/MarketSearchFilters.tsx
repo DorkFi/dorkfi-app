@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/select";
 import { SortField, SortOrder, type MarketFilter } from "@/hooks/useOnDemandMarketData";
 import MarketsTierFilter from "@/components/markets/MarketsTierFilter";
+import MarketsTierFilterMobileSelect from "@/components/markets/MarketsTierFilterMobileSelect";
 import { Separator } from "@/components/ui/separator";
 
 interface MarketSearchFiltersProps {
@@ -45,6 +46,8 @@ interface MarketSearchFiltersProps {
   hasActiveFilters?: boolean;
   onClearAll?: () => void;
   embedded?: boolean;
+  /** Filtered market count (mobile tier select confirmation). */
+  filteredMarketCount?: number;
 }
 
 function FilterChip({
@@ -97,6 +100,7 @@ const MarketSearchFilters = ({
   hasActiveFilters = false,
   onClearAll,
   embedded = false,
+  filteredMarketCount,
 }: MarketSearchFiltersProps) => {
   const handleSortFieldChange = (field: SortField) => {
     onSortChange(field, sortOrder);
@@ -128,13 +132,21 @@ const MarketSearchFilters = ({
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 flex-1">
-            <MarketsTierFilter
-              hideLabel
-              value={marketFilter}
-              onChange={onMarketFilterChange}
-              hasDMarketTab={hasDMarketTab}
-              isMobile={isMobile}
-            />
+            {isMobile ? (
+              <MarketsTierFilterMobileSelect
+                value={marketFilter}
+                onChange={onMarketFilterChange}
+                hasDMarketTab={hasDMarketTab}
+                totalItems={filteredMarketCount}
+              />
+            ) : (
+              <MarketsTierFilter
+                hideLabel
+                value={marketFilter}
+                onChange={onMarketFilterChange}
+                hasDMarketTab={hasDMarketTab}
+              />
+            )}
           </div>
           {hasActiveFilters && onClearAll && (
             <Button

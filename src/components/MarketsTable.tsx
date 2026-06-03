@@ -3801,6 +3801,7 @@ const MarketsTable = () => {
               }}
               hasActiveFilters={hasActiveFilters}
               onClearAll={clearAllMarketFilters}
+              filteredMarketCount={isMobile ? totalItems : undefined}
             />
           </div>
 
@@ -3817,6 +3818,7 @@ const MarketsTable = () => {
             </div>
           ) : (
             <MarketsTableContent
+              marketFilter={isMobile ? marketFilter : undefined}
               markets={markets}
               sortField={sortField}
               sortOrder={sortOrder}

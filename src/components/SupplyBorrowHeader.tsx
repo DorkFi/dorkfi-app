@@ -1,5 +1,6 @@
 
 import LpPairIconStack from "@/components/pools/LpPairIconStack";
+import { handleTokenImageError } from "@/utils/tokenImageUtils";
 
 interface SupplyBorrowHeaderProps {
   mode: "deposit" | "borrow";
@@ -33,6 +34,7 @@ const SupplyBorrowHeader = ({
             src={assetIcon}
             alt={asset}
             className="w-10 h-10 rounded-full"
+            onError={handleTokenImageError}
           />
         )}
         <span className="text-xl font-bold text-slate-800 dark:text-white">{asset}</span>

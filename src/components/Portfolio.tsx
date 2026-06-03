@@ -7411,6 +7411,13 @@ const Portfolio = () => {
                                           depositMarketLabel ?? null
                                         }
                                         imgClassName="w-8 h-8 shrink-0 rounded-full object-contain"
+                                        configSymbol={
+                                          (deposit as ItemWithNetwork).configSymbol
+                                        }
+                                        networkId={
+                                          ((deposit as ItemWithNetwork).network ??
+                                            currentNetwork) as NetworkId
+                                        }
                                       />
                                       <span className="font-medium truncate text-center">
                                         {deposit.asset}
@@ -8146,6 +8153,13 @@ const Portfolio = () => {
                                             }}
                                             poolLetterLabel={marketLabel}
                                             imgClassName="h-6 w-6 shrink-0 rounded-full object-contain"
+                                            configSymbol={
+                                              (asset as ItemWithNetwork).configSymbol
+                                            }
+                                            networkId={
+                                              ((asset as ItemWithNetwork).network ??
+                                                currentNetwork) as NetworkId
+                                            }
                                           />
                                           <span className="font-medium">
                                             {asset.asset}
@@ -9154,6 +9168,13 @@ const Portfolio = () => {
                                           borrowMarketLabel ?? null
                                         }
                                         imgClassName="w-8 h-8 shrink-0 rounded-full object-contain"
+                                        configSymbol={
+                                          (borrow as ItemWithNetwork).configSymbol
+                                        }
+                                        networkId={
+                                          ((borrow as ItemWithNetwork).network ??
+                                            currentNetwork) as NetworkId
+                                        }
                                       />
                                       <span className="font-medium truncate text-center">
                                         {borrow.asset}
@@ -9909,6 +9930,13 @@ const Portfolio = () => {
                                           accruedMarketLabel ?? null
                                         }
                                         imgClassName="w-8 h-8 shrink-0 rounded-full object-contain"
+                                        configSymbol={
+                                          (item as ItemWithNetwork).configSymbol
+                                        }
+                                        networkId={
+                                          ((item as ItemWithNetwork).network ??
+                                            currentNetwork) as NetworkId
+                                        }
                                       />
                                       <span className="font-medium truncate text-center">
                                         {item.asset}
@@ -10178,6 +10206,13 @@ const Portfolio = () => {
                           }}
                           poolLetterLabel={null}
                           imgClassName="h-6 w-6 shrink-0 rounded-full object-contain"
+                          configSymbol={
+                            (borrow as ItemWithNetwork).configSymbol
+                          }
+                          networkId={
+                            ((borrow as ItemWithNetwork).network ??
+                              currentNetwork) as NetworkId
+                          }
                         />
                         <div>
                           <div className="text-sm font-medium text-red-400">

@@ -52,3 +52,17 @@ describe("resolvePoolsPageLendingMarket", () => {
     }
   });
 });
+
+describe("findCuratedLiquidityPairByLpTokenId", () => {
+  it("maps LP ASA id to curated pair", async () => {
+    const { findCuratedLiquidityPairByLpTokenId } = await import(
+      "@/constants/liquidityPools"
+    );
+    expect(findCuratedLiquidityPairByLpTokenId(NETWORK, 3334546641)?.id).toBe(
+      "wad-unit"
+    );
+    expect(findCuratedLiquidityPairByLpTokenId(NETWORK, 3334448440)?.id).toBe(
+      "wad-usdc"
+    );
+  });
+});

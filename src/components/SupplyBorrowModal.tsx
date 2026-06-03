@@ -3284,6 +3284,7 @@ const SupplyBorrowModal = ({
               transactionType={mode}
               asset={asset}
               assetIcon={assetData.icon}
+              assetPairIcons={assetPairIcons}
               amount={amount}
               onViewTransaction={handleViewTransaction}
               onGoToPortfolio={handleGoToPortfolio}

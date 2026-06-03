@@ -5,8 +5,8 @@ import { ArrowDown, Info, RefreshCw } from "lucide-react";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import DorkFiButton from "@/components/ui/DorkFiButton";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { getNetworkConfig, getTokenConfig } from "@/config";
-import { marketPoolBadgeBgClassName } from "@/constants/marketUi";
+import { getNetworkConfig, getTokenConfig, type NetworkId } from "@/config";
+import { MarketRowTokenIcon } from "@/components/markets/MarketRowTokenIcon";
 
 interface Deposit {
   asset: string;
@@ -18,6 +18,7 @@ interface Deposit {
   tokenPrice: number;
   poolId?: string;
   network?: string;
+  configSymbol?: string;
   accruedInterest?: number;
   accruedInterestValue?: number;
 }
@@ -82,20 +83,16 @@ const DepositsList = ({ deposits, onDepositClick, onWithdrawClick, onRefresh, is
             >
               {/* Token Icon + Name (column 1) */}
               <div className="flex flex-col items-center gap-1 w-16 sm:w-20">
-                <div className="relative flex-shrink-0">
-                  <img 
-                    src={deposit.icon} 
-                    alt={deposit.asset}
-                    className="w-10 h-10 sm:w-12 sm:h-12 md:w-10 md:h-10 rounded-full"
-                  />
-                  {marketLabel && (
-                    <div className={`absolute -top-1 -right-1 w-5 h-5 rounded-full ${marketPoolBadgeBgClassName(
-                      marketLabel
-                    )} border-2 border-white dark:border-slate-800 flex items-center justify-center`}>
-                      <span className="text-xs font-bold text-white">{marketLabel}</span>
-                    </div>
-                  )}
-                </div>
+                <MarketRowTokenIcon
+                  market={{
+                    icon: deposit.icon,
+                    asset: deposit.asset,
+                  }}
+                  poolLetterLabel={marketLabel}
+                  imgClassName="w-10 h-10 sm:w-12 sm:h-12 md:w-10 md:h-10 rounded-full object-contain"
+                  configSymbol={deposit.configSymbol}
+                  networkId={(deposit.network ?? currentNetwork) as NetworkId}
+                />
                 <div className="font-bold text-base text-slate-800 dark:text-white text-center truncate w-full">{deposit.asset}</div>
               </div>
             {/* $ value, APY, Balances & Price Info (column 2) */}

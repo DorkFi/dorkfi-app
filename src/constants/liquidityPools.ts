@@ -262,6 +262,32 @@ export function getCuratedLiquidityPoolsForNetwork(
   return CURATED_LIQUIDITY_POOLS.filter((p) => p.networkId === networkId);
 }
 
+/** Curated Tinyman pair whose LP ASA matches `lpTokenId` on the given network. */
+export function findCuratedLiquidityPairByLpTokenId(
+  networkId: NetworkId,
+  lpTokenId: number | string
+): LiquidityPoolPairConfig | undefined {
+  const id = String(lpTokenId);
+  return CURATED_LIQUIDITY_POOLS.find(
+    (p) => p.networkId === networkId && String(p.lpTokenId) === id
+  );
+}
+
+/** Curated pair for an `LP_*` lending token config key (e.g. `LP_TMPOOL2_WAD_UNIT`). */
+export function findCuratedLiquidityPairByLpConfigSymbol(
+  networkId: NetworkId,
+  configSymbol: string
+): LiquidityPoolPairConfig | undefined {
+  if (!configSymbol.startsWith("LP_")) return undefined;
+  const tokenConfig = getNetworkConfig(networkId).tokens?.[configSymbol];
+  if (!tokenConfig) return undefined;
+  const tc: TokenConfig = Array.isArray(tokenConfig)
+    ? tokenConfig[0]
+    : tokenConfig;
+  if (!tc?.assetId) return undefined;
+  return findCuratedLiquidityPairByLpTokenId(networkId, tc.assetId);
+}
+
 /** Lending market row in config (`LP_*`) matching a curated Tinyman pool. */
 export interface LiquidityPoolLendingMarket {
   configSymbol: string;
