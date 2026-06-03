@@ -130,6 +130,7 @@ const MarketsTierFilter = ({
               aria-label={o.label}
               title={o.description}
               onClick={() => onChange(o.value)}
+              style={{ touchAction: "manipulation" }}
               className={cn(
                 "inline-flex shrink-0 items-center justify-center font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ocean-teal/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                 isLetterOnly
