@@ -9,8 +9,12 @@ import {
 } from "@/services/lendingService";
 import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
-import { getTokenConfig, tokenStandardUsesNativeWalletBalance } from "@/config";
-import { getAllTokensWithDisplayInfo } from "@/config";
+import {
+  getTokenConfig,
+  tokenStandardUsesNativeWalletBalance,
+  getPortfolioVisibleTokens,
+  getAllTokensWithDisplayInfo,
+} from "@/config";
 import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
 
 export interface PortfolioPosition {
@@ -107,7 +111,7 @@ export const usePortfolioData = () => {
           networkId,
           marketsCount: markets.length,
         });
-        const tokens = getAllTokensWithDisplayInfo(networkId as any);
+        const tokens = getPortfolioVisibleTokens(networkId as any);
         const positions: PortfolioPosition[] = [];
 
         for (const token of tokens) {
