@@ -1,10 +1,13 @@
 import {
   getPoolCLendingPoolId,
+  getPoolELendingPoolId,
   getUnitLendingWadBorrowMarketConfig,
+  getWadLpLendingWadBorrowMarketConfig,
   getNetworkConfig,
   getLendingPoolIdForMarketContract,
   getTokenDisplayInfo,
   isUnitLpCollateralMarketContract,
+  isWadLpCollateralMarketContract,
   type NetworkId,
   type TokenConfig,
 } from "@/config";
@@ -324,6 +327,14 @@ export function pairHasUnitLpLendingMarket(
   return isUnitLpCollateralMarketContract(networkId, pair.lpContractId);
 }
 
+/** True when the curated pair supplies WAD LP collateral on Pool E. */
+export function pairHasWadLpCollateralLendingMarket(
+  networkId: NetworkId,
+  pair: LiquidityPoolPairConfig
+): boolean {
+  return isWadLpCollateralMarketContract(networkId, pair.lpContractId);
+}
+
 /** Lending pool app ids for UNIT LP markets among the given curated pairs. */
 export function resolveUnitLendingPoolIdsForPairs(
   networkId: NetworkId,
@@ -350,6 +361,13 @@ export function hasUnitLendingWadBorrowAssociation(
   networkId: NetworkId
 ): boolean {
   return getUnitLendingWadBorrowMarketConfig(networkId) != null;
+}
+
+/** True when WAD LP collateral on Pool E borrows against a configured WAD market. */
+export function hasWadLpLendingWadBorrowAssociation(
+  networkId: NetworkId
+): boolean {
+  return getWadLpLendingWadBorrowMarketConfig(networkId) != null;
 }
 
 /** True when the curated pair shows platform lending on the Pools page. */
@@ -390,6 +408,23 @@ export function resolveUnitLendingPoolIdsForFilter(
   return resolveUnitLendingPoolIdsForPairs(networkId, unitPairs);
 }
 
+/** Pool ids for WAD LP global user reads on the Pools page (Pool E). */
+export function resolveWadLendingPoolIdsForFilter(
+  networkId: NetworkId,
+  filteredPairs: LiquidityPoolPairConfig[]
+): string[] {
+  const wadPairs = filteredPairs.filter(
+    (pair) =>
+      pairHasWadLpLendingMarket(networkId, pair) &&
+      pairHasWadLpCollateralLendingMarket(networkId, pair)
+  );
+  if (wadPairs.length === 0) return [];
+
+  const poolE = getPoolELendingPoolId(networkId);
+  if (poolE) return [poolE];
+  return resolveWadLendingPoolIdsForPairs(networkId, wadPairs);
+}
+
 /** LP lending is enabled for WAD-base Tinyman pairs with configured `LP_TMPOOL2_WAD_*` markets. */
 export function pairHasWadLpLendingMarket(
   networkId: NetworkId,
@@ -422,4 +457,11 @@ export function resolvePoolCWadMarket(
   networkId: NetworkId
 ): TokenConfig | null {
   return getUnitLendingWadBorrowMarketConfig(networkId);
+}
+
+/** WAD borrow market paired with Pool E WAD LP collateral. */
+export function resolvePoolEWadMarket(
+  networkId: NetworkId
+): TokenConfig | null {
+  return getWadLpLendingWadBorrowMarketConfig(networkId);
 }
