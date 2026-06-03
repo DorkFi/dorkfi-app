@@ -2104,10 +2104,11 @@ const algorandMainnetPrefiConfig: NetworkConfig = {
   contracts: algorandPrefiContracts,
   tokens: algorandPrefiTokens,
 };
-const algorandProdAMarket = "3333688282";
-const algorandProdBMarket = "3345940978";
-const algorandProdCMarket = "3578814346";
-const algorandProdDMarket = "3526240577";
+const algorandProdAMarket = "3333688282"; // A Prime
+const algorandProdBMarket = "3345940978"; // B Sub-prime
+const algorandProdCMarket = "3578814346"; // C UNIT Pair LPs
+const algorandProdDMarket = "3526240577"; // D Folks Markets
+const algorandProdEMarket = "3585829377"; // C WAD Pair LPs
 const algorandProdPriceOracle = "3333688500";
 const algorandProdLiquidationEngine = undefined;
 const algorandProdGovernance = {
@@ -2129,6 +2130,11 @@ const algorandProdLendingPools = [
   algorandProdBMarket,
   algorandProdCMarket,
   algorandProdDMarket,
+  algorandProdEMarket,
+];
+const algorandProdCLendingPools = [
+  algorandProdCMarket,
+  algorandProdEMarket,
 ];
 const algorandProdContracts: ContractConfig = {
   lendingPools: algorandProdLendingPools,
@@ -3030,6 +3036,18 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
       logoPath: "/lovable-uploads/WAD_fixed.png",
       tokenStandard: "arc200-exchange",
       dataAddedAt: "2026-06-01T00:00:00.000Z",
+    },
+    {
+      assetId: "3334160924",
+      contractId: "3333688448",
+      poolId: "3585829377",
+      nTokenId: "3585972631",
+      decimals: 6,
+      name: "WAD",
+      symbol: "WAD",
+      logoPath: "/lovable-uploads/WAD_fixed.png",
+      tokenStandard: "arc200-exchange",
+      dataAddedAt: "2026-06-03T00:00:00.000Z",
     }
   ],
   // TMPOOL2 3157974960 6 3577729953
@@ -3082,6 +3100,74 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     logoPath: "/lovable-uploads/LP_TMPOOL2_WAD_UNIT.png",
     tokenStandard: "asa",
     dataAddedAt: "2026-05-29T00:00:00.000Z",
+  },
+  // TMPOOL2 3346320836 6 3578405588
+  // name: "TinymanPool2.0 WAD-ALGO",
+  // symbol: "TMPOOL2",
+  // decimals: 6,
+  // contractId: 3578405588
+  LP_TMPOOL2_WAD_ALGO: {
+    assetId: "3346320836",
+    contractId: "3578405588",
+    poolId: "3585829377",
+    nTokenId: "3585842159",
+    decimals: 6,
+    name: "TinymanPool2.0 WAD-ALGO",
+    symbol: "TMPOOL2",
+    logoPath: "/lovable-uploads/LP_TMPOOL2_WAD_ALGO.png",
+    tokenStandard: "asa",
+    dataAddedAt: "2026-06-03T00:00:00.000Z",
+  },
+  // TMPOOL2 3334448440 6 3577799583
+  // name: "TinymanPool2.0 WAD-USDC",
+  // symbol: "TMPOOL2",
+  // decimals: 6,
+  // contractId: 3577799583
+  LP_TMPOOL2_WAD_USDC: {
+    assetId: "3334448440",
+    contractId: "3577799583",
+    poolId: "3585829377",
+    nTokenId: "3585878192",
+    decimals: 6,
+    name: "TinymanPool2.0 WAD-USDC",
+    symbol: "TMPOOL2",
+    logoPath: "/lovable-uploads/LP_TMPOOL2_WAD_USDC.png",
+    tokenStandard: "asa",
+    dataAddedAt: "2026-06-03T00:00:00.000Z",
+  },
+  // TMPOOL2 3495913115 6 3578394082
+  // name: "TinymanPool2.0 WAD-goETH",
+  // symbol: "TMPOOL2",
+  // decimals: 6,
+  // contractId: 3578394082
+  LP_TMPOOL2_WAD_GOETH: {
+    assetId: "3495913115",
+    contractId: "3578394082",
+    poolId: "3585829377",
+    nTokenId: "3585888277",
+    decimals: 6,
+    name: "TinymanPool2.0 WAD-goETH",
+    symbol: "TMPOOL2",
+    logoPath: "/lovable-uploads/LP_TMPOOL2_WAD_GOETH.png",
+    tokenStandard: "asa",
+    dataAddedAt: "2026-06-03T00:00:00.000Z",
+  },
+  // TMPOOL2 3355755995 6 3578387558
+  // name: "TinymanPool2.0 WAD-goBTC",
+  // symbol: "TMPOOL2",
+  // decimals: 6,
+  // contractId: 3578387558
+  LP_TMPOOL2_WAD_GOBTC: {
+    assetId: "3355755995",
+    contractId: "3578387558",
+    poolId: "3585829377",
+    nTokenId: "3585917646",
+    decimals: 6,
+    name: "TinymanPool2.0 WAD-goBTC",
+    symbol: "TMPOOL2",
+    logoPath: "/lovable-uploads/LP_TMPOOL2_WAD_GOBTC.png",
+    tokenStandard: "asa",
+    dataAddedAt: "2026-06-03T00:00:00.000Z",
   },
 };
 const algorandMainnetProdConfig: NetworkConfig = {
@@ -3382,6 +3468,7 @@ export const marketLabelMap: Record<string, string> = {
   "algorand-mainnet-3578814346": "C",
   /** Third prod lending pool (array order is A, B, C, D). */
   "algorand-mainnet-3526240577": "D",
+  "algorand-mainnet-3585829377": "E",
 };
 
 /**
@@ -3553,17 +3640,17 @@ export const getLendingPoolLabel = (
 /**
  * Lending pools whose LP nt200 markets are omitted from the Markets table
  * (still in config for Pools page, Admin, etc.).
- * Algorand prod C pool holds Tinyman LP markets — surfaced on the Pools page instead.
+ * Algorand prod C/E pools hold Tinyman LP markets — surfaced on the Pools page instead.
  */
 const MARKETS_TABLE_EXCLUDED_POOL_IDS: Partial<
   Record<NetworkId, readonly string[]>
 > = {
-  "algorand-mainnet": [algorandProdCMarket],
+  "algorand-mainnet": [algorandProdCMarket, algorandProdEMarket],
 };
 
 /**
  * Lending pool app id for an nt200 / underlying market contract.
- * Pool C TMPOOL2 + WAD rows are indexed here so Pools / portfolio can resolve
+ * Pool C/E TMPOOL2 + WAD rows are indexed here so Pools / portfolio can resolve
  * `contractId → poolId` without scanning `tokens`.
  */
 const LENDING_POOL_BY_MARKET_CONTRACT: Partial<
@@ -3574,6 +3661,10 @@ const LENDING_POOL_BY_MARKET_CONTRACT: Partial<
     "3577729953": algorandProdCMarket,
     "3577777819": algorandProdCMarket,
     "3577783311": algorandProdCMarket,
+    "3578405588": algorandProdEMarket,
+    "3577799583": algorandProdEMarket,
+    "3578394082": algorandProdEMarket,
+    "3578387558": algorandProdEMarket,
   },
 };
 
@@ -3595,7 +3686,7 @@ const UNIT_LENDING_COLLATERAL_CONTRACT_IDS: Partial<
   "algorand-mainnet": ["3577729953", "3577777819"],
 };
 
-/** WAD borrow market for UNIT LP lending on Pool C (`algorandProdTokens.WAD[1]`). */
+/** WAD borrow market for UNIT LP lending on Pool C (`algorandProdTokens.WAD` Pool C row). */
 const UNIT_LENDING_WAD_BORROW_MARKET: Partial<
   Record<NetworkId, UnitLendingWadBorrowMarketRef>
 > = {
@@ -3603,6 +3694,36 @@ const UNIT_LENDING_WAD_BORROW_MARKET: Partial<
     poolId: algorandProdCMarket,
     contractId: algorandProdSToken,
     nTokenId: "3583297246",
+    configKey: "WAD",
+  },
+};
+
+/** WAD borrow market on Pool E paired with WAD-base TMPOOL2 collateral. */
+export type WadLpLendingWadBorrowMarketRef = UnitLendingWadBorrowMarketRef;
+
+/**
+ * WAD LP nt200 collateral markets on Pool E that borrow against
+ * {@link WAD_LP_LENDING_WAD_BORROW_MARKET} (WAD @ pool 3585829377).
+ */
+const WAD_LP_LENDING_COLLATERAL_CONTRACT_IDS: Partial<
+  Record<NetworkId, readonly string[]>
+> = {
+  "algorand-mainnet": [
+    "3578405588",
+    "3577799583",
+    "3578394082",
+    "3578387558",
+  ],
+};
+
+/** WAD borrow market for WAD LP lending on Pool E (`algorandProdTokens.WAD` Pool E row). */
+const WAD_LP_LENDING_WAD_BORROW_MARKET: Partial<
+  Record<NetworkId, WadLpLendingWadBorrowMarketRef>
+> = {
+  "algorand-mainnet": {
+    poolId: algorandProdEMarket,
+    contractId: algorandProdSToken,
+    nTokenId: "3585972631",
     configKey: "WAD",
   },
 };
@@ -3635,14 +3756,13 @@ export function getUnitLendingWadBorrowMarketRef(
   return UNIT_LENDING_WAD_BORROW_MARKET[networkId as NetworkId] ?? null;
 }
 
-/** Resolve WAD borrow {@link TokenConfig} for Pool C UNIT LP lending. */
-export function getUnitLendingWadBorrowMarketConfig(
-  networkId: NetworkId | string | null | undefined
+function resolveWadBorrowMarketConfigFromRef(
+  networkId: NetworkId,
+  ref: UnitLendingWadBorrowMarketRef | null
 ): TokenConfig | null {
-  const ref = getUnitLendingWadBorrowMarketRef(networkId);
-  if (!ref || !networkId) return null;
+  if (!ref) return null;
 
-  const wadToken = getNetworkConfig(networkId as NetworkId).tokens?.WAD;
+  const wadToken = getNetworkConfig(networkId).tokens?.WAD;
   const configs: TokenConfig[] = Array.isArray(wadToken)
     ? wadToken
     : wadToken
@@ -3659,12 +3779,65 @@ export function getUnitLendingWadBorrowMarketConfig(
   );
 }
 
-/** WAD deposit markets on other pools (excludes Pool C borrow row and sToken mint rows). */
+/** Resolve WAD borrow {@link TokenConfig} for Pool C UNIT LP lending. */
+export function getUnitLendingWadBorrowMarketConfig(
+  networkId: NetworkId | string | null | undefined
+): TokenConfig | null {
+  if (!networkId) return null;
+  return resolveWadBorrowMarketConfigFromRef(
+    networkId as NetworkId,
+    getUnitLendingWadBorrowMarketRef(networkId)
+  );
+}
+
+/** nt200 contract ids for WAD TMPOOL2 collateral markets on Pool E. */
+export function getWadLpLendingCollateralContractIds(
+  networkId: NetworkId | string | null | undefined
+): readonly string[] {
+  if (!networkId) return [];
+  return WAD_LP_LENDING_COLLATERAL_CONTRACT_IDS[networkId as NetworkId] ?? [];
+}
+
+/** True when `marketContractId` is a WAD LP collateral market on Pool E. */
+export function isWadLpCollateralMarketContract(
+  networkId: NetworkId | string | null | undefined,
+  marketContractId: string | number | null | undefined
+): boolean {
+  if (marketContractId == null || String(marketContractId) === "") return false;
+  const id = String(marketContractId);
+  return getWadLpLendingCollateralContractIds(networkId).some(
+    (contractId) => contractId === id
+  );
+}
+
+/** Pool E WAD borrow market ref paired with WAD LP collateral. */
+export function getWadLpLendingWadBorrowMarketRef(
+  networkId: NetworkId | string | null | undefined
+): WadLpLendingWadBorrowMarketRef | null {
+  if (!networkId) return null;
+  return WAD_LP_LENDING_WAD_BORROW_MARKET[networkId as NetworkId] ?? null;
+}
+
+/** Resolve WAD borrow {@link TokenConfig} for Pool E WAD LP lending. */
+export function getWadLpLendingWadBorrowMarketConfig(
+  networkId: NetworkId | string | null | undefined
+): TokenConfig | null {
+  if (!networkId) return null;
+  return resolveWadBorrowMarketConfigFromRef(
+    networkId as NetworkId,
+    getWadLpLendingWadBorrowMarketRef(networkId)
+  );
+}
+
+/** WAD deposit markets on other pools (excludes TMPOOL collateral borrow rows and sToken mint). */
 export function getWadSupplyMarketConfigsExcludingPoolCBorrow(
   networkId: NetworkId | string | null | undefined
 ): TokenConfig[] {
   if (!networkId) return [];
-  const borrowRef = getUnitLendingWadBorrowMarketRef(networkId);
+  const borrowRefs = [
+    getUnitLendingWadBorrowMarketRef(networkId),
+    getWadLpLendingWadBorrowMarketRef(networkId),
+  ].filter((ref): ref is UnitLendingWadBorrowMarketRef => ref != null);
   const wadToken = getNetworkConfig(networkId as NetworkId).tokens?.WAD;
   const configs: TokenConfig[] = Array.isArray(wadToken)
     ? wadToken
@@ -3674,11 +3847,11 @@ export function getWadSupplyMarketConfigsExcludingPoolCBorrow(
 
   return configs.filter((config) => {
     if (config.isStoken) return false;
-    if (!borrowRef) return true;
-    return !(
-      String(config.poolId) === borrowRef.poolId &&
-      String(config.contractId) === borrowRef.contractId &&
-      String(config.nTokenId) === borrowRef.nTokenId
+    return !borrowRefs.some(
+      (borrowRef) =>
+        String(config.poolId) === borrowRef.poolId &&
+        String(config.contractId) === borrowRef.contractId &&
+        String(config.nTokenId) === borrowRef.nTokenId
     );
   });
 }
@@ -3691,6 +3864,16 @@ export function getPoolCLendingPoolId(
   const excluded = MARKETS_TABLE_EXCLUDED_POOL_IDS[networkId as NetworkId];
   if (!excluded?.length) return null;
   return String(excluded[0]);
+}
+
+/** Lending pool app id for Pool E (WAD-base TMPOOL2 markets) on this network. */
+export function getPoolELendingPoolId(
+  networkId: NetworkId | string | null | undefined
+): string | null {
+  if (!networkId) return null;
+  const excluded = MARKETS_TABLE_EXCLUDED_POOL_IDS[networkId as NetworkId];
+  if (!excluded || excluded.length < 2) return null;
+  return String(excluded[1]);
 }
 
 /** Resolve lending pool app id from nt200 / underlying market `contractId`. */
@@ -3730,8 +3913,8 @@ export function getPoolCMarketContractIds(
     .map(([contractId]) => contractId);
 }
 
-/** Pool C config keys that remain visible on Markets table and portfolio (WAD borrow). */
-const MARKETS_TABLE_POOL_C_VISIBLE_CONFIG_KEYS = new Set(["WAD"]);
+/** Config keys that remain visible on Markets table for excluded TMPOOL pools (WAD borrow). */
+const MARKETS_TABLE_TMPOOL_VISIBLE_CONFIG_KEYS = new Set(["WAD"]);
 
 /** True when the entire lending pool is omitted from the Markets table (before per-market exceptions). */
 export function isMarketsTableExcludedPool(
@@ -3747,7 +3930,7 @@ export function isMarketsTableExcludedPool(
 
 /**
  * True when a configured market row should not appear on the Markets table (or matching portfolio market lists).
- * Pool C LP (`LP_TMPOOL2_*`) stays hidden; WAD on Pool C is the exception and remains visible.
+ * Pool C/E LP (`LP_TMPOOL2_*`) stays hidden; WAD borrow on those pools remains visible.
  */
 export function isMarketsTableExcludedMarket(
   networkId: NetworkId | string | null | undefined,
@@ -3756,7 +3939,7 @@ export function isMarketsTableExcludedMarket(
 ): boolean {
   if (!isMarketsTableExcludedPool(networkId, poolId)) return false;
   const key = configKey?.trim();
-  if (key && MARKETS_TABLE_POOL_C_VISIBLE_CONFIG_KEYS.has(key)) return false;
+  if (key && MARKETS_TABLE_TMPOOL_VISIBLE_CONFIG_KEYS.has(key)) return false;
   return true;
 }
 

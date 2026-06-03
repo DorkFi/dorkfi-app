@@ -5,18 +5,27 @@ import {
 } from "@/config";
 
 const POOL_C = "3578814346";
+const POOL_E = "3585829377";
 
 describe("markets table Pool C exclusion", () => {
-  it("excludes entire Pool C at pool level", () => {
+  it("excludes Pool C and Pool E at pool level", () => {
     expect(isMarketsTableExcludedPool("algorand-mainnet", POOL_C)).toBe(true);
+    expect(isMarketsTableExcludedPool("algorand-mainnet", POOL_E)).toBe(true);
   });
 
-  it("hides Pool C LP markets from the table", () => {
+  it("hides Pool C and Pool E LP markets from the table", () => {
     expect(
       isMarketsTableExcludedMarket(
         "algorand-mainnet",
         POOL_C,
         "LP_TMPOOL2_UNIT_ALGO"
+      )
+    ).toBe(true);
+    expect(
+      isMarketsTableExcludedMarket(
+        "algorand-mainnet",
+        POOL_E,
+        "LP_TMPOOL2_WAD_ALGO"
       )
     ).toBe(true);
   });

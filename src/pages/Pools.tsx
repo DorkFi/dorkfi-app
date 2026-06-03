@@ -17,7 +17,9 @@ import {
   poolMatchesBaseTokenFilter,
   POOL_BASE_TOKEN_FILTERS,
   resolvePoolCWadMarket,
+  resolvePoolEWadMarket,
   resolveUnitLendingPoolIdsForFilter,
+  resolveWadLendingPoolIdsForFilter,
   type PoolBaseTokenFilterId,
 } from "@/constants/liquidityPools";
 import {
@@ -59,13 +61,20 @@ const PoolsPage = ({ activeTab, onTabChange }: PoolsPageProps) => {
     if (tokenFilter === "unit") {
       return resolveUnitLendingPoolIdsForFilter(networkId, filteredPairs);
     }
+    if (tokenFilter === "wad") {
+      return resolveWadLendingPoolIdsForFilter(networkId, filteredPairs);
+    }
     return [];
   }, [currentNetwork, filteredPairs, tokenFilter]);
   const showLendingGlobalSummary = lendingPoolIds.length > 0;
-  const poolCWadMarket = useMemo(
-    () => resolvePoolCWadMarket(currentNetwork as NetworkId),
-    [currentNetwork]
-  );
+  const poolsWadBorrowMarket = useMemo(() => {
+    const networkId = currentNetwork as NetworkId;
+    if (tokenFilter === "unit") return resolvePoolCWadMarket(networkId);
+    if (tokenFilter === "wad") return resolvePoolEWadMarket(networkId);
+    return null;
+  }, [currentNetwork, tokenFilter]);
+  const wadBorrowCollateralLabel =
+    tokenFilter === "wad" ? "WAD LP" : "UNIT LP";
   const { summary, poolIds, isLoading: lendingGlobalLoading } =
     usePoolsLendingGlobalSummary(
       currentNetwork as NetworkId,
@@ -75,8 +84,8 @@ const PoolsPage = ({ activeTab, onTabChange }: PoolsPageProps) => {
     );
   const canBorrowWad = (summary?.totalCollateralValue ?? 0) > 0;
   const showWadBorrowSection =
-    tokenFilter === "unit" &&
-    poolCWadMarket != null &&
+    (tokenFilter === "unit" || tokenFilter === "wad") &&
+    poolsWadBorrowMarket != null &&
     Boolean(activeAccount?.address);
 
   const invalidateLendingSummary = () => {
@@ -156,10 +165,11 @@ const PoolsPage = ({ activeTab, onTabChange }: PoolsPageProps) => {
                 walletConnected={Boolean(activeAccount?.address)}
               />
             ) : null}
-            {showWadBorrowSection && poolCWadMarket ? (
+            {showWadBorrowSection && poolsWadBorrowMarket ? (
               <PoolsWadBorrowSection
                 networkId={currentNetwork as NetworkId}
-                wadMarket={poolCWadMarket}
+                wadMarket={poolsWadBorrowMarket}
+                collateralLabel={wadBorrowCollateralLabel}
                 summary={summary}
                 canBorrow={canBorrowWad}
                 onBorrowSuccess={invalidateLendingSummary}

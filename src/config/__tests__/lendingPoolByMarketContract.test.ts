@@ -3,24 +3,32 @@ import {
   getLendingPoolIdForMarketContract,
   getPoolCMarketContractIds,
   getPoolCLendingPoolId,
+  getPoolELendingPoolId,
   getUnitLendingCollateralContractIds,
   getUnitLendingWadBorrowMarketConfig,
   getUnitLendingWadBorrowMarketRef,
+  getWadLpLendingCollateralContractIds,
+  getWadLpLendingWadBorrowMarketConfig,
+  getWadLpLendingWadBorrowMarketRef,
   getWadSupplyMarketConfigsExcludingPoolCBorrow,
   isPoolCMarketContract,
   isUnitLpCollateralMarketContract,
+  isWadLpCollateralMarketContract,
 } from "@/config";
 
 const POOL_C = "3578814346";
+const POOL_E = "3585829377";
 const WAD_STOKEN = "3333688448";
 const WAD_NTOKEN_POOL_C = "3583297246";
+const WAD_NTOKEN_POOL_E = "3585972631";
 const LP_UNIT_ALGO = "3577729953";
 const LP_UNIT_GOBTC = "3577777819";
 const LP_WAD_UNIT = "3577783311";
 
 describe("LENDING_POOL_BY_MARKET_CONTRACT", () => {
-  it("returns Pool C id for algorand-mainnet", () => {
+  it("returns Pool C and Pool E ids for algorand-mainnet", () => {
     expect(getPoolCLendingPoolId("algorand-mainnet")).toBe(POOL_C);
+    expect(getPoolELendingPoolId("algorand-mainnet")).toBe(POOL_E);
   });
 
   it("maps WAD SToken and TMPOOL2 nt200 contracts to Pool C", () => {
@@ -52,6 +60,33 @@ describe("LENDING_POOL_BY_MARKET_CONTRACT", () => {
     expect(getPoolCMarketContractIds("algorand-mainnet").sort()).toEqual(
       [WAD_STOKEN, LP_UNIT_ALGO, LP_UNIT_GOBTC, LP_WAD_UNIT].sort()
     );
+  });
+
+  it("points WAD LP collateral at WAD @ Pool E (tokens.WAD row)", () => {
+    expect(getWadLpLendingWadBorrowMarketRef("algorand-mainnet")).toEqual({
+      poolId: POOL_E,
+      contractId: WAD_STOKEN,
+      nTokenId: WAD_NTOKEN_POOL_E,
+      configKey: "WAD",
+    });
+
+    const wadMarket = getWadLpLendingWadBorrowMarketConfig("algorand-mainnet");
+    expect(wadMarket).toMatchObject({
+      poolId: POOL_E,
+      contractId: WAD_STOKEN,
+      nTokenId: WAD_NTOKEN_POOL_E,
+      symbol: "WAD",
+    });
+  });
+
+  it("maps Pool E WAD TMPOOL2 nt200 contracts to Pool E", () => {
+    for (const contractId of getWadLpLendingCollateralContractIds(
+      "algorand-mainnet"
+    )) {
+      expect(
+        getLendingPoolIdForMarketContract("algorand-mainnet", contractId)
+      ).toBe(POOL_E);
+    }
   });
 });
 

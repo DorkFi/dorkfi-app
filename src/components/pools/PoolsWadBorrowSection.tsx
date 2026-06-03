@@ -123,6 +123,8 @@ async function fetchWadBorrowMarketInfo(
 interface PoolsWadBorrowSectionProps {
   networkId: NetworkId;
   wadMarket: TokenConfig;
+  /** Collateral type shown in copy (e.g. UNIT LP on Pool C, WAD LP on Pool E). */
+  collateralLabel?: string;
   summary: PoolsLendingGlobalSummary | null;
   canBorrow: boolean;
   onBorrowSuccess?: () => void;
@@ -237,10 +239,11 @@ function marketInfoToAssetData(
   };
 }
 
-/** Borrow WAD from the pair market and deposit into the best WAD supply APY (UNIT filter). */
+/** Borrow WAD from the pair market and deposit into the best WAD supply APY. */
 const PoolsWadBorrowSection = ({
   networkId,
   wadMarket,
+  collateralLabel = "UNIT LP",
   summary,
   canBorrow,
   onBorrowSuccess,
@@ -536,8 +539,8 @@ const PoolsWadBorrowSection = ({
                 <p className="text-sm font-semibold text-foreground">WAD lending</p>
               </div>
               <p className="text-xs text-muted-foreground mt-0.5 max-w-xl">
-                Borrow WAD from the Pool {poolLabel} market against your UNIT LP
-                collateral, then deposit into the best WAD supply APY
+                Borrow WAD from the Pool {poolLabel} market against your{" "}
+                {collateralLabel} collateral, then deposit into the best WAD supply APY
                 {bestDepositTarget ? ` on Pool ${bestDepositTarget.poolLabel}` : ""}.
               </p>
             </div>
@@ -637,7 +640,7 @@ const PoolsWadBorrowSection = ({
 
         {!canBorrow ? (
           <p className="mt-3 text-xs text-muted-foreground">
-            Supply UNIT LP to the platform on any pool below to borrow WAD.
+            Supply {collateralLabel} to the platform on any pool below to borrow WAD.
           </p>
         ) : null}
         {!activeAccount?.address ? (
