@@ -2104,10 +2104,11 @@ const algorandMainnetPrefiConfig: NetworkConfig = {
   contracts: algorandPrefiContracts,
   tokens: algorandPrefiTokens,
 };
-const algorandProdAMarket = "3333688282";
-const algorandProdBMarket = "3345940978";
-const algorandProdCMarket = "3578814346";
-const algorandProdDMarket = "3526240577";
+const algorandProdAMarket = "3333688282"; // A Prime
+const algorandProdBMarket = "3345940978"; // B Sub-prime
+const algorandProdCMarket = "3578814346"; // C UNIT Pair LPs
+const algorandProdDMarket = "3526240577"; // D Folks Markets
+const algorandProdEMarket = "3585829377"; // C WAD Pair LPs
 const algorandProdPriceOracle = "3333688500";
 const algorandProdLiquidationEngine = undefined;
 const algorandProdGovernance = {
@@ -2129,6 +2130,11 @@ const algorandProdLendingPools = [
   algorandProdBMarket,
   algorandProdCMarket,
   algorandProdDMarket,
+  algorandProdEMarket,
+];
+const algorandProdCLendingPools = [
+  algorandProdCMarket,
+  algorandProdEMarket,
 ];
 const algorandProdContracts: ContractConfig = {
   lendingPools: algorandProdLendingPools,
@@ -3082,6 +3088,74 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     logoPath: "/lovable-uploads/LP_TMPOOL2_WAD_UNIT.png",
     tokenStandard: "asa",
     dataAddedAt: "2026-05-29T00:00:00.000Z",
+  },
+  // TMPOOL2 3346320836 6 3578405588
+  // name: "TinymanPool2.0 WAD-ALGO",
+  // symbol: "TMPOOL2",
+  // decimals: 6,
+  // contractId: 3578405588
+  LP_TMPOOL2_WAD_ALGO: {
+    assetId: "3346320836",
+    contractId: "3578405588",
+    poolId: "3585829377",
+    nTokenId: "3585842159",
+    decimals: 6,
+    name: "TinymanPool2.0 WAD-ALGO",
+    symbol: "TMPOOL2",
+    logoPath: "/lovable-uploads/LP_TMPOOL2_WAD_ALGO.png",
+    tokenStandard: "asa",
+    dataAddedAt: "2026-06-03T00:00:00.000Z",
+  },
+  // TMPOOL2 3334448440 6 3577799583
+  // name: "TinymanPool2.0 WAD-USDC",
+  // symbol: "TMPOOL2",
+  // decimals: 6,
+  // contractId: 3577799583
+  LP_TMPOOL2_WAD_USDC: {
+    assetId: "3334448440",
+    contractId: "3577799583",
+    poolId: "3585829377",
+    nTokenId: "3585878192",
+    decimals: 6,
+    name: "TinymanPool2.0 WAD-USDC",
+    symbol: "TMPOOL2",
+    logoPath: "/lovable-uploads/LP_TMPOOL2_WAD_USDC.png",
+    tokenStandard: "asa",
+    dataAddedAt: "2026-06-03T00:00:00.000Z",
+  },
+  // TMPOOL2 3495913115 6 3578394082
+  // name: "TinymanPool2.0 WAD-goETH",
+  // symbol: "TMPOOL2",
+  // decimals: 6,
+  // contractId: 3578394082
+  LP_TMPOOL2_WAD_GOETH: {
+    assetId: "3495913115",
+    contractId: "3578394082",
+    poolId: "3585829377",
+    nTokenId: "3585888277",
+    decimals: 6,
+    name: "TinymanPool2.0 WAD-goETH",
+    symbol: "TMPOOL2",
+    logoPath: "/lovable-uploads/LP_TMPOOL2_WAD_GOETH.png",
+    tokenStandard: "asa",
+    dataAddedAt: "2026-06-03T00:00:00.000Z",
+  },
+  // TMPOOL2 3355755995 6 3578387558
+  // name: "TinymanPool2.0 WAD-goBTC",
+  // symbol: "TMPOOL2",
+  // decimals: 6,
+  // contractId: 3578387558
+  LP_TMPOOL2_WAD_GOBTC: {
+    assetId: "3355755995",
+    contractId: "3578387558",
+    poolId: "3585829377",
+    nTokenId: "3585917646",
+    decimals: 6,
+    name: "TinymanPool2.0 WAD-goBTC",
+    symbol: "TMPOOL2",
+    logoPath: "/lovable-uploads/LP_TMPOOL2_WAD_GOBTC.png",
+    tokenStandard: "asa",
+    dataAddedAt: "2026-06-03T00:00:00.000Z",
   },
 };
 const algorandMainnetProdConfig: NetworkConfig = {
