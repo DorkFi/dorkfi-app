@@ -22,12 +22,28 @@ import { marketRowCacheKey } from "@/hooks/useOnDemandMarketData";
 import {
   fetchMarketInfo,
   fetchUserDepositBalance,
+  fetchUserGlobalDataForPool,
+  getMaxWithdrawableForMarket,
   withdraw,
 } from "@/services/lendingService";
 import algorandService from "@/services/algorandService";
 import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
 import { usdPerTokenFromMarketInfoPrice } from "@/utils/assetDecimals";
+import {
+  fetchPoolCollateralMarketRowsForDeposit,
+  type PoolCollateralMarketRow,
+} from "@/utils/poolCollateralMarketRows";
 import { waitForConfirmation } from "algosdk";
+
+function poolMinLiquidationThresholdBps(minPercentField: number): bigint {
+  if (!Number.isFinite(minPercentField) || minPercentField <= 0) {
+    return BigInt(8500);
+  }
+  if (minPercentField <= 1) {
+    return BigInt(Math.round(minPercentField * 10000));
+  }
+  return BigInt(Math.round(minPercentField * 100));
+}
 
 type PoolLendingModalsProps = {
   pair: LiquidityPoolPairConfig;
@@ -141,6 +157,20 @@ const PoolLendingModals = ({
   const [walletBalance, setWalletBalance] = useState(initialWalletLpBalance);
   const [suppliedBalance, setSuppliedBalance] = useState(0);
   const [loadingMarket, setLoadingMarket] = useState(false);
+  const [maxWithdrawUnderlying, setMaxWithdrawUnderlying] = useState<
+    number | undefined
+  >(undefined);
+  const [maxWithdrawScaled, setMaxWithdrawScaled] = useState<
+    string | undefined
+  >(undefined);
+  const [userGlobalData, setUserGlobalData] = useState<{
+    totalCollateralValue: number;
+    totalBorrowValue: number;
+    lastUpdateTime: number;
+  } | null>(null);
+  const [poolCollateralMarkets, setPoolCollateralMarkets] = useState<
+    PoolCollateralMarketRow[]
+  >([]);
 
   const marketRowKey = useMemo(
     () =>
@@ -226,6 +256,73 @@ const PoolLendingModals = ({
     }
   }, [supplyOpen, initialWalletLpBalance]);
 
+  useEffect(() => {
+    if (!withdrawOpen || !activeAccount?.address) {
+      setMaxWithdrawUnderlying(undefined);
+      setMaxWithdrawScaled(undefined);
+      setUserGlobalData(null);
+      setPoolCollateralMarkets([]);
+      return;
+    }
+
+    let cancelled = false;
+    const poolId = lendingMarket.poolId;
+    const marketId = lendingMarket.marketId;
+
+    void (async () => {
+      const [globalData, collateralRows] = await Promise.all([
+        fetchUserGlobalDataForPool(activeAccount.address, networkId, poolId),
+        fetchPoolCollateralMarketRowsForDeposit(
+          activeAccount.address,
+          networkId,
+          poolId
+        ),
+      ]);
+      if (cancelled) return;
+      setUserGlobalData(globalData);
+      setPoolCollateralMarkets(collateralRows);
+
+      const minLiquidationThresholdBps =
+        collateralRows.length > 0
+          ? poolMinLiquidationThresholdBps(
+              Math.min(
+                ...collateralRows.map((row) => row.liquidationThresholdPercent)
+              )
+            )
+          : undefined;
+
+      const maxData = await getMaxWithdrawableForMarket(
+        poolId,
+        marketId,
+        activeAccount.address,
+        networkId,
+        lendingMarket.decimals,
+        minLiquidationThresholdBps !== undefined
+          ? { minLiquidationThresholdBps }
+          : undefined
+      );
+      if (cancelled) return;
+      if (!maxData) {
+        setMaxWithdrawUnderlying(undefined);
+        setMaxWithdrawScaled(undefined);
+        return;
+      }
+      setMaxWithdrawUnderlying(maxData.maxWithdrawUnderlying);
+      setMaxWithdrawScaled(maxData.maxWithdrawScaled.toString());
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeAccount?.address,
+    lendingMarket.decimals,
+    lendingMarket.marketId,
+    lendingMarket.poolId,
+    networkId,
+    withdrawOpen,
+  ]);
+
   const tokenConfig = useMemo(() => {
     const raw = getTokenConfig(networkId, lendingMarket.configSymbol);
     return Array.isArray(raw) ? raw[0] : raw;
@@ -236,10 +333,16 @@ const PoolLendingModals = ({
       amount: string,
       options?: WithdrawSubmitOptions
     ): Promise<WithdrawPhasedSignPayload> => {
-      if (!activeAccount?.address || !tokenConfig) {
+      if (!activeAccount?.address) {
         throw new Error("Connect your wallet to withdraw.");
       }
+      if (!tokenConfig) {
+        throw new Error(
+          `Token config not found for ${lendingMarket.configSymbol} on ${networkId}.`
+        );
+      }
 
+      const withdrawAllConfirmed = Boolean(options?.withdrawAllConfirmed);
       const result = await withdraw(
         lendingMarket.poolId,
         lendingMarket.marketId,
@@ -248,7 +351,13 @@ const PoolLendingModals = ({
         activeAccount.address,
         networkId,
         {
-          withdrawAll: Boolean(options?.withdrawAllConfirmed),
+          withdrawAll: withdrawAllConfirmed,
+          maxWithdrawScaled:
+            withdrawAllConfirmed &&
+            options?.isMaxWithdraw &&
+            maxWithdrawScaled
+              ? BigInt(maxWithdrawScaled)
+              : undefined,
         }
       );
 
@@ -271,7 +380,14 @@ const PoolLendingModals = ({
         amountHuman: amount,
       };
     },
-    [activeAccount?.address, lendingMarket, networkId, tokenConfig]
+    [
+      activeAccount?.address,
+      lendingMarket,
+      maxWithdrawScaled,
+      networkId,
+      pairDisplay.label,
+      tokenConfig,
+    ]
   );
 
   const finalizeWithdrawSigned = useCallback(
@@ -289,11 +405,10 @@ const PoolLendingModals = ({
         await algorandService.initializeClientsForTransactions(algorandNetwork);
       const res = await clients.algod.sendRawTransaction(stxns).do();
       await waitForConfirmation(clients.algod, res.txid, 4);
-      onSuccess?.();
       void refreshBalances();
       return { txId: res.txid };
     },
-    [onSuccess, refreshBalances]
+    [refreshBalances]
   );
 
   const withdrawPhased = useMemo(
@@ -368,7 +483,12 @@ const PoolLendingModals = ({
           network={networkId}
           selectedMarketId={lendingMarket.marketId}
           selectedConfigSymbol={lendingMarket.configSymbol}
-          poolHasNoBorrows
+          maxWithdrawUnderlying={maxWithdrawUnderlying}
+          poolCollateralMarkets={poolCollateralMarkets}
+          poolHasNoBorrows={
+            !userGlobalData?.totalBorrowValue ||
+            userGlobalData.totalBorrowValue === 0
+          }
           marketStats={{
             supplyAPY: resolvedAssetData.supplyAPY,
             borrowAPY: resolvedAssetData.borrowAPY,
@@ -381,6 +501,10 @@ const PoolLendingModals = ({
             apyParameters: resolvedAssetData.apyParameters,
           }}
           withdrawPhased={withdrawPhased}
+          onTransactionSuccess={() => {
+            onSuccess?.();
+            void refreshBalances();
+          }}
           onRefreshBalance={() => {
             void refreshBalances();
           }}
