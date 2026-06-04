@@ -6,6 +6,8 @@ interface SupplyBorrowCongratsProps {
   transactionType: "deposit" | "borrow" | "withdraw" | "repay";
   asset: string;
   assetIcon: string;
+  /** Stacked underlying icons for Tinyman LP pair markets. */
+  assetPairIcons?: { asset1Icon: string; asset2Icon: string };
   amount: string;
   onViewTransaction: () => void;
   onGoToPortfolio: () => void;
@@ -19,6 +21,7 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
   transactionType,
   asset,
   assetIcon,
+  assetPairIcons,
   amount,
   onViewTransaction,
   onGoToPortfolio,
@@ -42,6 +45,7 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
   };
 
   const { action, preposition } = getTransactionMessage();
+  const assetLabel = assetPairIcons ? `${asset} LP` : asset;
 
   return (
     <div className="flex flex-col items-center justify-center gap-4 animate-fade-in">
@@ -50,11 +54,29 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
         <Sparkles className="absolute -top-3 -left-3 text-whale-gold w-7 h-7 animate-bounce" />
         <Sparkles className="absolute -top-3 -right-3 text-highlight-aqua w-7 h-7 animate-bounce animation-delay-300" />
         <CheckCircle2 className="w-16 h-16 text-green-500 drop-shadow-xl bg-white dark:bg-slate-800 rounded-full p-1 border-4 border-whale-gold z-10" />
-        <img
-          src={assetIcon}
-          alt={`${asset} icon`}
-          className="mt-[-30px] w-32 h-32 rounded-xl shadow-md border-4 border-whale-gold mx-auto bg-bubble-white dark:bg-slate-800 object-cover"
-        />
+        {assetPairIcons ? (
+          <div
+            className="mt-[-30px] mx-auto flex -space-x-4 justify-center"
+            aria-hidden
+          >
+            <img
+              src={assetPairIcons.asset1Icon}
+              alt=""
+              className="h-24 w-24 rounded-xl border-4 border-whale-gold bg-bubble-white object-contain shadow-md dark:bg-slate-800"
+            />
+            <img
+              src={assetPairIcons.asset2Icon}
+              alt=""
+              className="h-24 w-24 rounded-xl border-4 border-whale-gold bg-bubble-white object-contain shadow-md dark:bg-slate-800"
+            />
+          </div>
+        ) : (
+          <img
+            src={assetIcon}
+            alt={`${asset} icon`}
+            className="mt-[-30px] w-32 h-32 rounded-xl shadow-md border-4 border-whale-gold mx-auto bg-bubble-white dark:bg-slate-800 object-cover"
+          />
+        )}
       </div>
 
       <h2 className="text-xl font-bold text-center mb-1">
@@ -64,7 +86,7 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
       <div className="text-center text-base text-slate-700 dark:text-slate-200 mb-2 font-medium">
         You successfully {action}{" "}
         <span className="text-whale-gold">
-          {amount} {asset}
+          {amount} {assetLabel}
         </span>{" "}
         {preposition} the protocol.
       </div>
