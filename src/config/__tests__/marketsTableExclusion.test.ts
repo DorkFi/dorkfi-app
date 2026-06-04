@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  getPortfolioVisibleTokens,
   isMarketsTableExcludedMarket,
   isMarketsTableExcludedPool,
+  isPortfolioExcludedMarketContract,
 } from "@/config";
 
 const POOL_C = "3578814346";
@@ -39,6 +41,39 @@ describe("markets table Pool C exclusion", () => {
   it("does not exclude WAD on Pool A", () => {
     expect(
       isMarketsTableExcludedMarket("algorand-mainnet", "3333688282", "WAD")
+    ).toBe(false);
+  });
+
+  it("excludes Pool C LP from portfolio visible tokens", () => {
+    const visible = getPortfolioVisibleTokens("algorand-mainnet");
+    expect(
+      visible.some(
+        (t) =>
+          String(t.poolId) === POOL_C &&
+          t.configKey === "LP_TMPOOL2_UNIT_ALGO"
+      )
+    ).toBe(false);
+    expect(
+      visible.some(
+        (t) => String(t.poolId) === POOL_C && t.configKey === "WAD"
+      )
+    ).toBe(true);
+  });
+
+  it("resolves portfolio exclusion by market contract id", () => {
+    expect(
+      isPortfolioExcludedMarketContract(
+        "algorand-mainnet",
+        POOL_C,
+        "3577729953"
+      )
+    ).toBe(true);
+    expect(
+      isPortfolioExcludedMarketContract(
+        "algorand-mainnet",
+        POOL_C,
+        "3333688448"
+      )
     ).toBe(false);
   });
 });
