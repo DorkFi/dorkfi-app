@@ -46,6 +46,7 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
   };
 
   const { action, preposition } = getTransactionMessage();
+  const assetLabel = assetPairIcons ? `${asset} LP` : asset;
 
   return (
     <div className="flex flex-col items-center justify-center gap-4 animate-fade-in">
@@ -81,7 +82,7 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
       <div className="text-center text-base text-slate-700 dark:text-slate-200 mb-2 font-medium">
         You successfully {action}{" "}
         <span className="text-whale-gold">
-          {amount} {asset}
+          {amount} {assetLabel}
         </span>{" "}
         {preposition} the protocol.
       </div>

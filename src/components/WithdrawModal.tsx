@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
   Dialog,
   DialogContent,
@@ -217,6 +217,8 @@ interface WithdrawModalProps {
   showTooltip?: boolean;
   tooltipText?: string;
   onRefreshBalance?: () => void;
+  /** Called after a successful withdraw is shown (deferred so success UI renders first). */
+  onTransactionSuccess?: () => void;
   /** Lending pool (for pool-scoped LT / est. health, same as deposit modal). */
   poolId?: string;
   network?: string;
@@ -280,6 +282,7 @@ const WithdrawModal = ({
   showTooltip = false,
   tooltipText = "",
   onRefreshBalance,
+  onTransactionSuccess,
   poolId,
   network: networkProp,
   poolCollateralMarkets,
@@ -325,6 +328,10 @@ const WithdrawModal = ({
   const [fiatValue, setFiatValue] = useState(0);
   const [showSuccess, setShowSuccess] = useState(false);
   const [successTxId, setSuccessTxId] = useState<string | null>(null);
+  const [successSnapshot, setSuccessSnapshot] = useState<{
+    amount: string;
+    asset: string;
+  } | null>(null);
   const [pendingWithdrawReview, setPendingWithdrawReview] =
     useState<WithdrawPhasedSignPayload | null>(null);
   const [isSigningWithdrawPhase, setIsSigningWithdrawPhase] = useState(false);
@@ -846,6 +853,7 @@ const WithdrawModal = ({
     if (isOpen) {
       setShowSuccess(false);
       setSuccessTxId(null);
+      setSuccessSnapshot(null);
       setPendingWithdrawReview(null);
       setIsSigningWithdrawPhase(false);
       setAmount("");
@@ -903,6 +911,7 @@ const WithdrawModal = ({
   const handleMakeAnother = () => {
     setShowSuccess(false);
     setSuccessTxId(null);
+    setSuccessSnapshot(null);
     setPendingWithdrawReview(null);
     setAmount("");
     setFiatValue(0);
@@ -1014,6 +1023,75 @@ const WithdrawModal = ({
     }
     return base;
   };
+
+  const completeWithdrawSuccess = useCallback(
+    (opts: {
+      txId: string | null;
+      amountHuman: string;
+      assetLabel: string;
+    }) => {
+      setSuccessSnapshot({
+        amount: opts.amountHuman,
+        asset: opts.assetLabel,
+      });
+      setSuccessTxId(opts.txId);
+      setPendingWithdrawReview(null);
+      setFolksWithdrawTwoStepAwaitRedeem(null);
+      setShowSuccess(true);
+      if (onTransactionSuccess) {
+        window.setTimeout(() => onTransactionSuccess(), 1500);
+      }
+    },
+    [onTransactionSuccess]
+  );
+
+  const finishWithdrawFlow = useCallback(
+    (
+      opts: {
+        txId: string | null;
+        amountHuman: string;
+        assetLabel: string;
+      },
+      rainbowkitDismiss: boolean
+    ) => {
+      setPendingWithdrawReview(null);
+      setFolksWithdrawTwoStepAwaitRedeem(null);
+      if (rainbowkitDismiss) {
+        setShowSuccess(false);
+        setSuccessSnapshot(null);
+        toast({
+          title: "Withdraw confirmed",
+          description:
+            "Your transaction was submitted. The portfolio will update shortly.",
+        });
+        if (onTransactionSuccess) {
+          window.setTimeout(() => onTransactionSuccess(), 1500);
+        }
+        onClose();
+        return;
+      }
+      completeWithdrawSuccess(opts);
+    },
+    [completeWithdrawSuccess, onClose, onTransactionSuccess, toast]
+  );
+
+  const resolveSuccessAssetLabel = useCallback(
+    (pending?: WithdrawPhasedSignPayload | null) => {
+      if (pending?.assetDisplaySymbol?.trim()) {
+        return pending.assetDisplaySymbol.trim();
+      }
+      if (withdrawAmountIsUnderlying || withdrawFolksAdapters.length > 0) {
+        return effectiveAmountLabelSymbol;
+      }
+      return tokenSymbol;
+    },
+    [
+      effectiveAmountLabelSymbol,
+      tokenSymbol,
+      withdrawAmountIsUnderlying,
+      withdrawFolksAdapters.length,
+    ]
+  );
 
   const handleSubmit = async () => {
     setInternalLoading(true);
@@ -1174,8 +1252,8 @@ const WithdrawModal = ({
           ? String(meta.txId).trim()
           : null;
       const atomic = meta?.fAssetToRedeemAtomic?.trim();
-      setSuccessTxId(tx);
-      setPendingWithdrawReview(null);
+      const rainbowkitDismiss =
+        isRainbowkitXchainWallet(activeWallet) && !withdrawTwoStepChainFailed;
 
       if (
         atomic &&
@@ -1199,15 +1277,21 @@ const WithdrawModal = ({
             duration: 10000,
           });
           const meta2 = await signAndFinalize(step2Built);
-          setPendingWithdrawReview(null);
-          setFolksWithdrawTwoStepAwaitRedeem(null);
           const tx2 =
             meta2?.txId != null && String(meta2.txId).trim() !== ""
               ? String(meta2.txId).trim()
               : null;
-          setSuccessTxId(tx2);
           if (!meta2?.skipSuccessModal) {
-            setShowSuccess(true);
+            finishWithdrawFlow(
+              {
+                txId: tx2,
+                amountHuman: step2Built.amountHuman,
+                assetLabel: resolveSuccessAssetLabel(step2Built),
+              },
+              rainbowkitDismiss
+            );
+          } else {
+            setPendingWithdrawReview(null);
           }
         } catch (chainErr) {
           withdrawTwoStepChainFailed = true;
@@ -1231,22 +1315,17 @@ const WithdrawModal = ({
       } else {
         const skipCongrats = meta?.skipSuccessModal === true;
         if (!skipCongrats) {
-          setFolksWithdrawTwoStepAwaitRedeem(null);
-          setShowSuccess(true);
+          finishWithdrawFlow(
+            {
+              txId: tx,
+              amountHuman: pendingStep1.amountHuman,
+              assetLabel: resolveSuccessAssetLabel(pendingStep1),
+            },
+            rainbowkitDismiss
+          );
+        } else {
+          setPendingWithdrawReview(null);
         }
-      }
-
-      if (
-        isRainbowkitXchainWallet(activeWallet) &&
-        !withdrawTwoStepChainFailed
-      ) {
-        setShowSuccess(false);
-        toast({
-          title: "Withdraw confirmed",
-          description:
-            "Your transaction was submitted. The portfolio will update shortly.",
-        });
-        onClose();
       }
     } catch (error) {
       if (isRainbowkitXchainWallet(activeWallet)) {
@@ -1292,9 +1371,10 @@ const WithdrawModal = ({
             <SupplyBorrowCongrats
               transactionType="withdraw"
               asset={
-                withdrawAmountIsUnderlying || withdrawFolksAdapters.length > 0
+                successSnapshot?.asset ??
+                (withdrawAmountIsUnderlying || withdrawFolksAdapters.length > 0
                   ? effectiveAmountLabelSymbol
-                  : tokenSymbol
+                  : tokenSymbol)
               }
               assetIcon={tokenIcon}
               assetPairIcons={tokenPairIcons}

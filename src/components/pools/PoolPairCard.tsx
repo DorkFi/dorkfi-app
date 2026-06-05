@@ -252,7 +252,7 @@ const PoolPairCard = ({
             <DorkFiButton
               variant="secondary"
               className="flex-1"
-              disabled={!snapshot || lendingSupplyDisabled}
+              disabled={lendingSupplyDisabled}
               onClick={(e) => {
                 e.stopPropagation();
                 onSupply?.();
@@ -264,7 +264,7 @@ const PoolPairCard = ({
             <DorkFiButton
               variant="borrow-outline"
               className="flex-1"
-              disabled={!snapshot || lendingWithdrawDisabled}
+              disabled={lendingWithdrawDisabled}
               onClick={(e) => {
                 e.stopPropagation();
                 onLendingWithdraw?.();

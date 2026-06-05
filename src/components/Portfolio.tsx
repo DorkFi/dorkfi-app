@@ -63,9 +63,11 @@ import {
   tokenStandardUsesNativeWalletBalance,
   getAnyFolksAdapter,
   getFolksAdapterForPhase,
+  getPortfolioVisibleTokens,
+  filterPortfolioVisibleMarketRows,
   isMarketsTableExcludedMarket,
+  getAllTokensWithDisplayInfo,
 } from "@/config";
-import { getAllTokensWithDisplayInfo } from "@/config";
 import {
   getTokenImagePath,
   resolveTokenIconBadgeUrl,
@@ -247,6 +249,23 @@ function folksUnderlyingUsdFallbackSamePool(
   }) as { price?: string | number } | undefined;
   if (!m?.price) return 0;
   return usdPerTokenFromMarketInfoPrice(m.price, ref.decimals);
+}
+
+function isExcludedPortfolioPositionRow(pos: {
+  poolId?: string | null;
+  network?: string;
+  configSymbol?: string;
+  configKey?: string;
+}): boolean {
+  const networkId = pos.network;
+  if (!networkId || pos.poolId == null || String(pos.poolId) === "") {
+    return false;
+  }
+  return isMarketsTableExcludedMarket(
+    networkId,
+    pos.poolId,
+    pos.configSymbol ?? pos.configKey
+  );
 }
 
 /** Standalone "Accrued Interest" summary card + table (below Supplied/Borrowed). */
@@ -808,7 +827,7 @@ const Portfolio = () => {
         networkId,
         marketsCount: markets.length,
       });
-      const tokens = getAllTokensWithDisplayInfo(networkId as NetworkId);
+      const tokens = getPortfolioVisibleTokens(networkId as NetworkId);
       const positions = [];
 
       for (const token of tokens) {
@@ -1581,14 +1600,20 @@ const Portfolio = () => {
   // Use transformed deposits and borrows from user.computed, fallback to userPositions
   // If user.computed exists but transformation resulted in empty arrays, fall back to userPositions
   const hasComputedData = user?.computed?.deposits || user?.computed?.borrows;
-  const deposits =
+  const rawDeposits =
     hasComputedData && transformedDepositsAndBorrows.deposits.length > 0
       ? transformedDepositsAndBorrows.deposits
       : userPositions.filter((pos) => pos.type === "deposit");
-  const borrows =
+  const rawBorrows =
     hasComputedData && transformedDepositsAndBorrows.borrows.length > 0
       ? transformedDepositsAndBorrows.borrows
       : userPositions.filter((pos) => pos.type === "borrow");
+  const deposits = rawDeposits.filter(
+    (pos) => !isExcludedPortfolioPositionRow(pos as ItemWithNetwork)
+  );
+  const borrows = rawBorrows.filter(
+    (pos) => !isExcludedPortfolioPositionRow(pos as ItemWithNetwork)
+  );
 
   const hasBothPositionTypes =
     deposits.length > 0 && borrows.length > 0;
@@ -2995,9 +3020,10 @@ const Portfolio = () => {
 
       for (const networkId of enabledNetworks) {
         try {
-          const networkMarkets = await fetchAllMarkets(networkId, {
-            excludeMarketsTableHidden: true,
-          });
+          const networkMarkets = filterPortfolioVisibleMarketRows(
+            networkId as NetworkId,
+            await fetchAllMarkets(networkId)
+          );
           const networkPositions = await fetchUserPositions(
             displayAddress,
             networkId,
@@ -3998,9 +4024,10 @@ const Portfolio = () => {
         const allMarketData: unknown[] = [];
         for (const networkId of enabledNetworks) {
           try {
-            const markets = await fetchAllMarkets(networkId as NetworkId, {
-              excludeMarketsTableHidden: true,
-            });
+            const markets = filterPortfolioVisibleMarketRows(
+              networkId as NetworkId,
+              await fetchAllMarkets(networkId as NetworkId)
+            );
             allMarketData.push(...markets);
           } catch (error) {
             console.error(

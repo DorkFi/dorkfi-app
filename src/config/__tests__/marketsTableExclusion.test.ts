@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   getMarketsTableVisibleTokensWithDisplayInfo,
+  getPortfolioVisibleTokens,
   isMarketsTableExcludedMarket,
   isMarketsTableExcludedPool,
+  isPortfolioExcludedMarketContract,
 } from "@/config";
 
 const POOL_C = "3578814346";

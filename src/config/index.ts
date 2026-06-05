@@ -4117,6 +4117,58 @@ export function isMarketsTableExcludedMarket(
   return true;
 }
 
+/** Config `tokens` key for a pool + underlying market contract (from display token rows). */
+export function resolveDisplayTokenConfigKey(
+  networkId: NetworkId,
+  poolId: string | number,
+  marketContractId: string | number
+): string | null {
+  const pid = String(poolId);
+  const mid = String(marketContractId);
+  const token = getAllTokensWithDisplayInfo(networkId).find(
+    (t) =>
+      String(t.poolId ?? "") === pid &&
+      (String(t.underlyingContractId ?? "") === mid ||
+        String(t.originalContractId ?? "") === mid)
+  );
+  return token?.configKey ?? null;
+}
+
+/** True when a pool + market contract row should be hidden on Portfolio (same rules as Markets table). */
+export function isPortfolioExcludedMarketContract(
+  networkId: NetworkId | string | null | undefined,
+  poolId: string | number | null | undefined,
+  marketContractId: string | number | null | undefined
+): boolean {
+  if (!networkId || poolId == null || marketContractId == null) return false;
+  const configKey = resolveDisplayTokenConfigKey(
+    networkId as NetworkId,
+    poolId,
+    marketContractId
+  );
+  return isMarketsTableExcludedMarket(networkId, poolId, configKey);
+}
+
+/** Display tokens for Portfolio lists (Pool C/E LP hidden; WAD borrow on those pools stays visible). */
+export function getPortfolioVisibleTokens(
+  networkId: NetworkId
+): ReturnType<typeof getAllTokensWithDisplayInfo> {
+  return getAllTokensWithDisplayInfo(networkId).filter(
+    (token) =>
+      !isMarketsTableExcludedMarket(networkId, token.poolId, token.configKey)
+  );
+}
+
+/** Omit Pool C/E LP market rows from Portfolio market snapshots. */
+export function filterPortfolioVisibleMarketRows<
+  T extends { poolId: string; marketId?: string },
+>(networkId: NetworkId, rows: T[]): T[] {
+  return rows.filter(
+    (row) =>
+      !isPortfolioExcludedMarketContract(networkId, row.poolId, row.marketId)
+  );
+}
+
 /**
  * Pool id when the row object has not yet populated `marketInfo` / `poolId` (same rules as markets table `getPoolIdForSorting`).
  */
