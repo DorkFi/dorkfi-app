@@ -18,7 +18,9 @@ import {
   POOL_BASE_TOKEN_FILTERS,
   resolvePoolCWadMarket,
   resolvePoolEWadMarket,
+  resolvePoolFWadMarket,
   resolveUnitLendingPoolIdsForFilter,
+  resolveUsdcLendingPoolIdsForFilter,
   resolveWadLendingPoolIdsForFilter,
   type PoolBaseTokenFilterId,
 } from "@/constants/liquidityPools";
@@ -64,6 +66,9 @@ const PoolsPage = ({ activeTab, onTabChange }: PoolsPageProps) => {
     if (tokenFilter === "wad") {
       return resolveWadLendingPoolIdsForFilter(networkId, filteredPairs);
     }
+    if (tokenFilter === "usdc") {
+      return resolveUsdcLendingPoolIdsForFilter(networkId, filteredPairs);
+    }
     return [];
   }, [currentNetwork, filteredPairs, tokenFilter]);
   const showLendingGlobalSummary = lendingPoolIds.length > 0;
@@ -71,10 +76,15 @@ const PoolsPage = ({ activeTab, onTabChange }: PoolsPageProps) => {
     const networkId = currentNetwork as NetworkId;
     if (tokenFilter === "unit") return resolvePoolCWadMarket(networkId);
     if (tokenFilter === "wad") return resolvePoolEWadMarket(networkId);
+    if (tokenFilter === "usdc") return resolvePoolFWadMarket(networkId);
     return null;
   }, [currentNetwork, tokenFilter]);
   const wadBorrowCollateralLabel =
-    tokenFilter === "wad" ? "WAD LP" : "UNIT LP";
+    tokenFilter === "wad"
+      ? "WAD LP"
+      : tokenFilter === "usdc"
+        ? "USDC LP"
+        : "UNIT LP";
   const { summary, poolIds, isLoading: lendingGlobalLoading } =
     usePoolsLendingGlobalSummary(
       currentNetwork as NetworkId,
@@ -84,7 +94,9 @@ const PoolsPage = ({ activeTab, onTabChange }: PoolsPageProps) => {
     );
   const canBorrowWad = (summary?.totalCollateralValue ?? 0) > 0;
   const showWadBorrowSection =
-    (tokenFilter === "unit" || tokenFilter === "wad") &&
+    (tokenFilter === "unit" ||
+      tokenFilter === "wad" ||
+      tokenFilter === "usdc") &&
     poolsWadBorrowMarket != null &&
     Boolean(activeAccount?.address);
 

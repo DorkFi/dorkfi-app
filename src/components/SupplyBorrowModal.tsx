@@ -3201,9 +3201,7 @@ const SupplyBorrowModal = ({
   };
 
   const handleViewTransaction = () => {
-    if (!transactionId) {
-      throw new Error("Transaction ID not found");
-    }
+    if (!transactionId) return;
     const net = (transactionNetworkId || network || currentNetwork) as NetworkId;
     window.open(getExplorerTransactionUrl(net, transactionId), "_blank");
   };
@@ -3284,11 +3282,13 @@ const SupplyBorrowModal = ({
               transactionType={mode}
               asset={asset}
               assetIcon={assetData.icon}
+              assetPairIcons={assetPairIcons}
               amount={amount}
               onViewTransaction={handleViewTransaction}
               onGoToPortfolio={handleGoToPortfolio}
               onMakeAnother={handleMakeAnother}
               onClose={onClose}
+              viewTransactionDisabled={!transactionId}
             />
           </div>
         ) : (

@@ -1,11 +1,14 @@
 import React from "react";
 import { CheckCircle2, Sparkles } from "lucide-react";
 import DorkFiButton from "@/components/ui/DorkFiButton";
+import LpPairIconStack from "@/components/pools/LpPairIconStack";
 
 interface SupplyBorrowCongratsProps {
   transactionType: "deposit" | "borrow" | "withdraw" | "repay";
   asset: string;
   assetIcon: string;
+  /** Underlying pair icons for LP markets (preferred over `assetIcon` when set). */
+  assetPairIcons?: { asset1Icon: string; asset2Icon: string };
   amount: string;
   onViewTransaction: () => void;
   onGoToPortfolio: () => void;
@@ -19,6 +22,7 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
   transactionType,
   asset,
   assetIcon,
+  assetPairIcons,
   amount,
   onViewTransaction,
   onGoToPortfolio,
@@ -50,11 +54,24 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
         <Sparkles className="absolute -top-3 -left-3 text-whale-gold w-7 h-7 animate-bounce" />
         <Sparkles className="absolute -top-3 -right-3 text-highlight-aqua w-7 h-7 animate-bounce animation-delay-300" />
         <CheckCircle2 className="w-16 h-16 text-green-500 drop-shadow-xl bg-white dark:bg-slate-800 rounded-full p-1 border-4 border-whale-gold z-10" />
-        <img
-          src={assetIcon}
-          alt={`${asset} icon`}
-          className="mt-[-30px] w-32 h-32 rounded-xl shadow-md border-4 border-whale-gold mx-auto bg-bubble-white dark:bg-slate-800 object-cover"
-        />
+        <div className="mt-[-30px] mx-auto flex h-32 w-32 items-center justify-center rounded-xl border-4 border-whale-gold bg-bubble-white shadow-md dark:bg-slate-800">
+          {assetPairIcons ? (
+            <LpPairIconStack
+              asset1Icon={assetPairIcons.asset1Icon}
+              asset2Icon={assetPairIcons.asset2Icon}
+              fallbackIcon={assetIcon}
+              alt={asset}
+              size="md"
+              className="scale-[2.2]"
+            />
+          ) : (
+            <img
+              src={assetIcon}
+              alt={`${asset} icon`}
+              className="h-24 w-24 rounded-lg object-contain"
+            />
+          )}
+        </div>
       </div>
 
       <h2 className="text-xl font-bold text-center mb-1">

@@ -63,6 +63,7 @@ import {
   tokenStandardUsesNativeWalletBalance,
   getAnyFolksAdapter,
   getFolksAdapterForPhase,
+  isMarketsTableExcludedMarket,
 } from "@/config";
 import { getAllTokensWithDisplayInfo } from "@/config";
 import {
@@ -812,6 +813,15 @@ const Portfolio = () => {
 
       for (const token of tokens) {
         if (token.underlyingContractId && token.poolId) {
+          if (
+            isMarketsTableExcludedMarket(
+              networkId as NetworkId,
+              token.poolId,
+              token.configKey
+            )
+          ) {
+            continue;
+          }
           const rowTokenConfigRaw = getTokenConfig(
             networkId as NetworkId,
             token.configKey ?? token.originalSymbol ?? token.symbol
@@ -1121,6 +1131,16 @@ const Portfolio = () => {
             return;
           }
 
+          if (
+            isMarketsTableExcludedMarket(
+              networkId as NetworkId,
+              appId,
+              token.configKey
+            )
+          ) {
+            return;
+          }
+
           // Find market data (do not match display symbol only — ALGO vs fALGO both "Algo" on same pool)
           const market = marketRowForPortfolioPosition(marketData, {
             marketId,
@@ -1362,6 +1382,16 @@ const Portfolio = () => {
             console.warn(
               `Token not found for marketId ${marketId}, appId ${appId} on network ${networkId}`
             );
+            return;
+          }
+
+          if (
+            isMarketsTableExcludedMarket(
+              networkId as NetworkId,
+              appId,
+              token.configKey
+            )
+          ) {
             return;
           }
 
@@ -2937,7 +2967,9 @@ const Portfolio = () => {
     try {
       // fetch market from node api for accurate position info
       // Fetch fresh market data and global data first
-      const markets = await fetchAllMarkets(currentNetwork);
+      const markets = await fetchAllMarkets(currentNetwork, {
+        excludeMarketsTableHidden: true,
+      });
       // const marketDataResponse =
       //   await dorkfiAPIService.getAllMarketDataByNetwork(currentNetwork);
       // const freshMarketData = marketDataResponse.success
@@ -2963,7 +2995,9 @@ const Portfolio = () => {
 
       for (const networkId of enabledNetworks) {
         try {
-          const networkMarkets = await fetchAllMarkets(networkId);
+          const networkMarkets = await fetchAllMarkets(networkId, {
+            excludeMarketsTableHidden: true,
+          });
           const networkPositions = await fetchUserPositions(
             displayAddress,
             networkId,
@@ -3964,7 +3998,9 @@ const Portfolio = () => {
         const allMarketData: unknown[] = [];
         for (const networkId of enabledNetworks) {
           try {
-            const markets = await fetchAllMarkets(networkId as NetworkId);
+            const markets = await fetchAllMarkets(networkId as NetworkId, {
+              excludeMarketsTableHidden: true,
+            });
             allMarketData.push(...markets);
           } catch (error) {
             console.error(

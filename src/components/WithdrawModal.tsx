@@ -1297,6 +1297,7 @@ const WithdrawModal = ({
                   : tokenSymbol
               }
               assetIcon={tokenIcon}
+              assetPairIcons={tokenPairIcons}
               amount={amount !== "" ? amount.toString() : ""}
               onViewTransaction={handleViewTransaction}
               onGoToPortfolio={handleGoToPortfolio}

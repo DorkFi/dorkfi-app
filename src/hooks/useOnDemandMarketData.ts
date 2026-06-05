@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useEffect } from "react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import {
   getAllTokensWithDisplayInfo,
-  isMarketsTableExcludedMarket,
+  getMarketsTableVisibleTokensWithDisplayInfo,
   NetworkId,
   getNetworkConfig,
   getLendingPools,
@@ -358,18 +358,12 @@ export const useOnDemandMarketData = ({
     ]
   );
 
-  // Omit Pool C LP markets from the table; WAD @ Pool C remains visible.
+  // Omit Pool C/E/F LP markets from the table; WAD @ those pools remains visible.
   const tokens = useMemo(
     () =>
-      getAllTokensWithDisplayInfo(currentNetwork).filter(
-        (token) =>
-          includeExcludedPools ||
-          !isMarketsTableExcludedMarket(
-            currentNetwork,
-            token.poolId,
-            token.configKey
-          )
-      ),
+      includeExcludedPools
+        ? getAllTokensWithDisplayInfo(currentNetwork)
+        : getMarketsTableVisibleTokensWithDisplayInfo(currentNetwork),
     [currentNetwork, includeExcludedPools]
   );
 

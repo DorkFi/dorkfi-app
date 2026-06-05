@@ -2,15 +2,19 @@ import { describe, expect, it } from "vitest";
 import {
   CURATED_LIQUIDITY_POOLS,
   pairHasPoolsPageLendingPosition,
+  pairHasUsdcLpCollateralLendingMarket,
+  pairHasUsdcLpLendingMarket,
   pairHasWadLpCollateralLendingMarket,
   pairHasWadLpLendingMarket,
   resolvePoolsPageLendingMarket,
+  resolveUsdcLendingPoolIdsForFilter,
   resolveWadLendingPoolIdsForFilter,
 } from "@/constants/liquidityPools";
 
 const NETWORK = "algorand-mainnet" as const;
 const POOL_C = "3578814346";
 const POOL_E = "3585829377";
+const POOL_F = "3589083110";
 const LP_WAD_UNIT = "3577783311";
 
 function pairById(id: string) {
@@ -85,6 +89,44 @@ describe("resolvePoolsPageLendingMarket", () => {
       });
     }
   });
+
+  it("resolves Pool F USDC LP pairs (ALGO, tALGO, HAY, ALPHA)", () => {
+    const expectations: Record<
+      string,
+      { configSymbol: string; marketId: string; assetId: string }
+    > = {
+      "usdc-algo": {
+        configSymbol: "LP_TMPOOL2_USDC_ALGO",
+        marketId: "3589026317",
+        assetId: "1002590888",
+      },
+      "talgo-usdc": {
+        configSymbol: "LP_TMPOOL2_TALGO_USDC",
+        marketId: "3589029580",
+        assetId: "2537254960",
+      },
+      "hay-usdc": {
+        configSymbol: "LP_TMPOOL2_HAY_USDC",
+        marketId: "3589032117",
+        assetId: "3196310546",
+      },
+      "alpha-usdc": {
+        configSymbol: "LP_TMPOOL2_ALPHA_USDC",
+        marketId: "3589036846",
+        assetId: "2741116468",
+      },
+    };
+
+    for (const [id, expected] of Object.entries(expectations)) {
+      const pair = pairById(id);
+      expect(pairHasUsdcLpLendingMarket(NETWORK, pair)).toBe(true);
+      expect(pairHasUsdcLpCollateralLendingMarket(NETWORK, pair)).toBe(true);
+      expect(resolvePoolsPageLendingMarket(NETWORK, pair)).toMatchObject({
+        poolId: POOL_F,
+        ...expected,
+      });
+    }
+  });
 });
 
 describe("resolveWadLendingPoolIdsForFilter", () => {
@@ -96,6 +138,17 @@ describe("resolveWadLendingPoolIdsForFilter", () => {
     );
     expect(resolveWadLendingPoolIdsForFilter(NETWORK, wadPairs)).toEqual([
       POOL_E,
+    ]);
+  });
+});
+
+describe("resolveUsdcLendingPoolIdsForFilter", () => {
+  it("returns Pool F when USDC LP collateral pairs are in the filter", () => {
+    const usdcPairs = CURATED_LIQUIDITY_POOLS.filter((p) =>
+      ["usdc-algo", "talgo-usdc", "hay-usdc", "alpha-usdc"].includes(p.id)
+    );
+    expect(resolveUsdcLendingPoolIdsForFilter(NETWORK, usdcPairs)).toEqual([
+      POOL_F,
     ]);
   });
 });

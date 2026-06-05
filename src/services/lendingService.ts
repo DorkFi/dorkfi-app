@@ -15,6 +15,7 @@ import {
   getAlgorandNetworkFromNetworkId,
   NetworkId,
   getAllTokensWithDisplayInfo,
+  getMarketsTableVisibleTokensWithDisplayInfo,
   getTokenConfig,
   resolveTokenConfigFromDisplayToken,
   tokenConfigLookupKeyFromDisplayToken,
@@ -1016,14 +1017,17 @@ export async function fetchFreshMarketInfo(
  * Fetch all markets information
  */
 export const fetchAllMarkets = async (
-  networkId: NetworkId
+  networkId: NetworkId,
+  options?: { excludeMarketsTableHidden?: boolean }
 ): Promise<MarketInfo[]> => {
   try {
     const networkConfig = getNetworkConfig(networkId);
 
     if (isAlgorandCompatibleNetwork(networkId)) {
       // Get markets from config
-      const tokens = getAllTokensWithDisplayInfo(networkId);
+      const tokens = options?.excludeMarketsTableHidden
+        ? getMarketsTableVisibleTokensWithDisplayInfo(networkId)
+        : getAllTokensWithDisplayInfo(networkId);
 
       console.log("Fetching real market data for", tokens.length, "tokens");
 

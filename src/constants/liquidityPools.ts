@@ -1,12 +1,15 @@
 import {
   getPoolCLendingPoolId,
   getPoolELendingPoolId,
+  getPoolFLendingPoolId,
   getUnitLendingWadBorrowMarketConfig,
+  getUsdcLpLendingWadBorrowMarketConfig,
   getWadLpLendingWadBorrowMarketConfig,
   getNetworkConfig,
   getLendingPoolIdForMarketContract,
   getTokenDisplayInfo,
   isUnitLpCollateralMarketContract,
+  isUsdcLpCollateralMarketContract,
   isWadLpCollateralMarketContract,
   type NetworkId,
   type TokenConfig,
@@ -53,10 +56,11 @@ export function poolHasTinymanFarm(
 export const POOL_FARM_SUPPLY_NOTICE =
   "If pool has an active Tinyman farm. Supplying LP to the platform may disqualify your LP from farm rewards.";
 
-/** Base-token filters for the Pools page (UNIT / WAD curated pairs). */
+/** Base-token filters for the Pools page (UNIT / WAD / USDC curated pairs). */
 export const POOL_BASE_TOKEN_FILTERS = [
   { id: "unit", symbol: "UNIT", assetId: 3121954282 },
   { id: "wad", symbol: "WAD", assetId: 3334160924 },
+  { id: "usdc", symbol: "USDC", assetId: 31566704 },
 ] as const;
 
 export type PoolBaseTokenFilterId =
@@ -100,6 +104,7 @@ export function countPoolsByBaseTokenFilter(
     all: pairs.length,
     unit: 0,
     wad: 0,
+    usdc: 0,
   };
 
   for (const filter of POOL_BASE_TOKEN_FILTERS) {
@@ -257,6 +262,62 @@ export const CURATED_LIQUIDITY_POOLS: LiquidityPoolPairConfig[] = [
       "T4VXZUUONE2DS7G5QXGVBDR27G32MCM25KEQLBITC4ENOK6N7CMM5VLRSM",
     farms: [],
   },
+  // TMPOOL2 1002590888 6 3589026317
+  {
+    id: "usdc-algo",
+    platform: "tinyman",
+    networkId: "algorand-mainnet",
+    lpTokenId: 1002590888,
+    lpContractId: 3589026317,
+    asset1Id: 31566704,
+    asset2Id: 0,
+    label: "USDC / ALGO",
+    poolAddr:
+      "2PIFZW53RHCSFSYMCFUBW4XOCXOMB7XOYQSQ6KGT3KVGJTL4HM6COZRNMM",
+    farms: [],
+  },
+  // TMPOOL2 2537254960 6 3589029580
+  {
+    id: "talgo-usdc",
+    platform: "tinyman",
+    networkId: "algorand-mainnet",
+    lpTokenId: 2537254960,
+    lpContractId: 3589029580,
+    asset1Id: 2537013734,
+    asset2Id: 31566704,
+    label: "tALGO / USDC",
+    poolAddr:
+      "VVBWRAJ3YSZGXBGJ2K654J3WA2VZOJW5U4SJCZWLM634H572WTGWTT53EE",
+    farms: [],
+  },
+  // TMPOOL2 3196310546 6 3589032117
+  {
+    id: "hay-usdc",
+    platform: "tinyman",
+    networkId: "algorand-mainnet",
+    lpTokenId: 3196310546,
+    lpContractId: 3589032117,
+    asset1Id: 3160000000,
+    asset2Id: 31566704,
+    label: "HAY / USDC",
+    poolAddr:
+      "HHDWSEYBFMKLEUC6ZNHUK4AAKXJMSVK4NQFKO7JFB4OEHRAS4SJ32LOTVA",
+    farms: [],
+  },
+  // TMPOOL2 2741116468 6 3589036846
+  {
+    id: "alpha-usdc",
+    platform: "tinyman",
+    networkId: "algorand-mainnet",
+    lpTokenId: 2741116468,
+    lpContractId: 3589036846,
+    asset1Id: 2726252423,
+    asset2Id: 31566704,
+    label: "ALPHA / USDC",
+    poolAddr:
+      "J7CN6WTMUWXY2KODKAMM5BLZ42FEIQLM4D32FRQ23VOOJC2SEUHKE565T4",
+    farms: [],
+  },
 ];
 
 export function getCuratedLiquidityPoolsForNetwork(
@@ -379,14 +440,15 @@ export function pairHasPoolsPageLendingPosition(
   return pairHasUnitLpLendingMarket(networkId, pair);
 }
 
-/** Lending market row for Pools page supply/withdraw (UNIT LP collateral or WAD LP markets). */
+/** Lending market row for Pools page supply/withdraw (UNIT LP, WAD LP, or USDC LP markets). */
 export function resolvePoolsPageLendingMarket(
   networkId: NetworkId,
   pair: LiquidityPoolPairConfig
 ): LiquidityPoolLendingMarket | null {
   const hasLending =
     pairHasPoolsPageLendingPosition(networkId, pair) ||
-    pairHasWadLpLendingMarket(networkId, pair);
+    pairHasWadLpLendingMarket(networkId, pair) ||
+    pairHasUsdcLpLendingMarket(networkId, pair);
   if (!hasLending) return null;
   return resolveLiquidityPoolLendingMarket(networkId, pair);
 }
@@ -423,6 +485,23 @@ export function resolveWadLendingPoolIdsForFilter(
   const poolE = getPoolELendingPoolId(networkId);
   if (poolE) return [poolE];
   return resolveWadLendingPoolIdsForPairs(networkId, wadPairs);
+}
+
+/** Pool ids for USDC LP global user reads on the Pools page (Pool F). */
+export function resolveUsdcLendingPoolIdsForFilter(
+  networkId: NetworkId,
+  filteredPairs: LiquidityPoolPairConfig[]
+): string[] {
+  const usdcPairs = filteredPairs.filter(
+    (pair) =>
+      pairHasUsdcLpLendingMarket(networkId, pair) &&
+      pairHasUsdcLpCollateralLendingMarket(networkId, pair)
+  );
+  if (usdcPairs.length === 0) return [];
+
+  const poolF = getPoolFLendingPoolId(networkId);
+  if (poolF) return [poolF];
+  return resolveUsdcLendingPoolIdsForPairs(networkId, usdcPairs);
 }
 
 /** LP lending is enabled for WAD-base Tinyman pairs with configured `LP_TMPOOL2_WAD_*` markets. */
@@ -464,4 +543,46 @@ export function resolvePoolEWadMarket(
   networkId: NetworkId
 ): TokenConfig | null {
   return getWadLpLendingWadBorrowMarketConfig(networkId);
+}
+
+/** WAD borrow market paired with Pool F USDC LP collateral. */
+export function resolvePoolFWadMarket(
+  networkId: NetworkId
+): TokenConfig | null {
+  return getUsdcLpLendingWadBorrowMarketConfig(networkId);
+}
+
+/** LP lending is enabled for USDC-base Tinyman pairs on Pool F. */
+export function pairHasUsdcLpLendingMarket(
+  networkId: NetworkId,
+  pair: LiquidityPoolPairConfig
+): boolean {
+  if (!isUsdcLpCollateralMarketContract(networkId, pair.lpContractId)) {
+    return false;
+  }
+  return resolveLiquidityPoolLendingMarket(networkId, pair) != null;
+}
+
+/** True when the curated pair supplies USDC-base LP collateral on Pool F. */
+export function pairHasUsdcLpCollateralLendingMarket(
+  networkId: NetworkId,
+  pair: LiquidityPoolPairConfig
+): boolean {
+  return isUsdcLpCollateralMarketContract(networkId, pair.lpContractId);
+}
+
+/** Lending pool app ids for USDC LP markets among the given curated pairs. */
+export function resolveUsdcLendingPoolIdsForPairs(
+  networkId: NetworkId,
+  pairs: LiquidityPoolPairConfig[]
+): string[] {
+  const poolIds = new Set<string>();
+  for (const pair of pairs) {
+    if (!pairHasUsdcLpLendingMarket(networkId, pair)) continue;
+    const market = resolveLiquidityPoolLendingMarket(networkId, pair);
+    if (market?.poolId) {
+      poolIds.add(market.poolId);
+    }
+  }
+  return [...poolIds];
 }
