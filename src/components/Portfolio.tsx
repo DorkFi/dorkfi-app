@@ -832,6 +832,15 @@ const Portfolio = () => {
 
       for (const token of tokens) {
         if (token.underlyingContractId && token.poolId) {
+          if (
+            isMarketsTableExcludedMarket(
+              networkId as NetworkId,
+              token.poolId,
+              token.configKey
+            )
+          ) {
+            continue;
+          }
           const rowTokenConfigRaw = getTokenConfig(
             networkId as NetworkId,
             token.configKey ?? token.originalSymbol ?? token.symbol
@@ -2983,10 +2992,9 @@ const Portfolio = () => {
     try {
       // fetch market from node api for accurate position info
       // Fetch fresh market data and global data first
-      const markets = filterPortfolioVisibleMarketRows(
-        currentNetwork,
-        await fetchAllMarkets(currentNetwork)
-      );
+      const markets = await fetchAllMarkets(currentNetwork, {
+        excludeMarketsTableHidden: true,
+      });
       // const marketDataResponse =
       //   await dorkfiAPIService.getAllMarketDataByNetwork(currentNetwork);
       // const freshMarketData = marketDataResponse.success

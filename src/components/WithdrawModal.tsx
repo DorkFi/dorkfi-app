@@ -1378,10 +1378,7 @@ const WithdrawModal = ({
               }
               assetIcon={tokenIcon}
               assetPairIcons={tokenPairIcons}
-              amount={
-                successSnapshot?.amount ??
-                (amount !== "" ? amount.toString() : "")
-              }
+              amount={amount !== "" ? amount.toString() : ""}
               onViewTransaction={handleViewTransaction}
               onGoToPortfolio={handleGoToPortfolio}
               onMakeAnother={handleMakeAnother}

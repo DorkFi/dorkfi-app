@@ -4,31 +4,39 @@ import {
   getPoolCMarketContractIds,
   getPoolCLendingPoolId,
   getPoolELendingPoolId,
+  getPoolFLendingPoolId,
   getUnitLendingCollateralContractIds,
   getUnitLendingWadBorrowMarketConfig,
   getUnitLendingWadBorrowMarketRef,
+  getUsdcLpLendingCollateralContractIds,
+  getUsdcLpLendingWadBorrowMarketConfig,
+  getUsdcLpLendingWadBorrowMarketRef,
   getWadLpLendingCollateralContractIds,
   getWadLpLendingWadBorrowMarketConfig,
   getWadLpLendingWadBorrowMarketRef,
   getWadSupplyMarketConfigsExcludingPoolCBorrow,
   isPoolCMarketContract,
   isUnitLpCollateralMarketContract,
+  isUsdcLpCollateralMarketContract,
   isWadLpCollateralMarketContract,
 } from "@/config";
 
 const POOL_C = "3578814346";
 const POOL_E = "3585829377";
+const POOL_F = "3589083110";
 const WAD_STOKEN = "3333688448";
 const WAD_NTOKEN_POOL_C = "3583297246";
 const WAD_NTOKEN_POOL_E = "3585972631";
+const WAD_NTOKEN_POOL_F = "3589241382";
 const LP_UNIT_ALGO = "3577729953";
 const LP_UNIT_GOBTC = "3577777819";
 const LP_WAD_UNIT = "3577783311";
 
 describe("LENDING_POOL_BY_MARKET_CONTRACT", () => {
-  it("returns Pool C and Pool E ids for algorand-mainnet", () => {
+  it("returns Pool C, Pool E, and Pool F ids for algorand-mainnet", () => {
     expect(getPoolCLendingPoolId("algorand-mainnet")).toBe(POOL_C);
     expect(getPoolELendingPoolId("algorand-mainnet")).toBe(POOL_E);
+    expect(getPoolFLendingPoolId("algorand-mainnet")).toBe(POOL_F);
   });
 
   it("maps WAD SToken and TMPOOL2 nt200 contracts to Pool C", () => {
@@ -87,6 +95,36 @@ describe("LENDING_POOL_BY_MARKET_CONTRACT", () => {
         getLendingPoolIdForMarketContract("algorand-mainnet", contractId)
       ).toBe(POOL_E);
     }
+  });
+
+  it("maps Pool F USDC TMPOOL2 nt200 contracts to Pool F", () => {
+    for (const contractId of getUsdcLpLendingCollateralContractIds(
+      "algorand-mainnet"
+    )) {
+      expect(
+        getLendingPoolIdForMarketContract("algorand-mainnet", contractId)
+      ).toBe(POOL_F);
+      expect(
+        isUsdcLpCollateralMarketContract("algorand-mainnet", contractId)
+      ).toBe(true);
+    }
+  });
+
+  it("points USDC LP collateral at WAD @ Pool F (tokens.WAD row)", () => {
+    expect(getUsdcLpLendingWadBorrowMarketRef("algorand-mainnet")).toEqual({
+      poolId: POOL_F,
+      contractId: WAD_STOKEN,
+      nTokenId: WAD_NTOKEN_POOL_F,
+      configKey: "WAD",
+    });
+
+    const wadMarket = getUsdcLpLendingWadBorrowMarketConfig("algorand-mainnet");
+    expect(wadMarket).toMatchObject({
+      poolId: POOL_F,
+      contractId: WAD_STOKEN,
+      nTokenId: WAD_NTOKEN_POOL_F,
+      symbol: "WAD",
+    });
   });
 });
 
