@@ -27,4 +27,6 @@ interface ImportMetaEnv {
   readonly VITE_ENABLE_POOLS?: string;
   /** When `true` or `1`, show Deposit / Withdraw LP actions on pool cards (Supply / Withdraw always shown). */
   readonly VITE_ENABLE_POOL_DEPOSIT_WITHDRAW?: string;
+  /** X share API base URL. Defaults to `/api/x-share` (Vite dev proxy). Use absolute https URL in production. */
+  readonly VITE_X_SHARE_API_BASE?: string;
 }
