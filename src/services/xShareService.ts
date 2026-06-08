@@ -1,11 +1,21 @@
 import type { GovernanceShareResult } from "@/utils/governanceShare/types";
 
+/** Deploy `server/` to Railway and set VITE_X_SHARE_API_BASE to this origin in production builds. */
+export const X_SHARE_API_DEFAULT_ORIGIN =
+  "https://dorkfi-x-share-production.up.railway.app";
+
 export type XShareStatus = {
   connected: boolean;
   configured: boolean;
   linkShareEnabled?: boolean;
   username?: string;
   userId?: string;
+};
+
+export type XShareHealth = {
+  ok: boolean;
+  linkShareEnabled: boolean;
+  sharePublicBase?: string;
 };
 
 export type XSharePostResult = {
@@ -44,9 +54,23 @@ export class XShareApiError extends Error {
   }
 }
 
+export class XShareLinkUnavailableError extends Error {
+  constructor(message = "Governance share links are unavailable right now") {
+    super(message);
+    this.name = "XShareLinkUnavailableError";
+  }
+}
+
 export function xShareApiBase(): string {
   const raw = import.meta.env.VITE_X_SHARE_API_BASE?.trim();
-  if (raw) return raw.replace(/\/+$/, "");
+  const trimmed = raw?.replace(/\/+$/, "") ?? "";
+  if (trimmed) return trimmed;
+
+  // app.dork.fi is static hosting — /api/x-share returns SPA HTML, not the share server.
+  if (import.meta.env.PROD) {
+    return X_SHARE_API_DEFAULT_ORIGIN;
+  }
+
   return "/api/x-share";
 }
 
@@ -62,8 +86,19 @@ function buildUrl(path: string): string {
   return `${base}${path}`;
 }
 
+function isHtmlResponse(text: string): boolean {
+  const trimmed = text.trimStart().toLowerCase();
+  return trimmed.startsWith("<!doctype html") || trimmed.startsWith("<html");
+}
+
 async function parseJson<T>(response: Response): Promise<T> {
   const text = await response.text();
+  if (isHtmlResponse(text)) {
+    throw new XShareApiError(
+      "Share server returned HTML instead of JSON. Check VITE_X_SHARE_API_BASE and that the share server is deployed.",
+      response.status || 502
+    );
+  }
   if (!response.ok) {
     let message = text || response.statusText;
     try {
@@ -75,6 +110,24 @@ async function parseJson<T>(response: Response): Promise<T> {
     throw new XShareApiError(message, response.status);
   }
   return JSON.parse(text) as T;
+}
+
+export async function getShareServerHealth(): Promise<XShareHealth> {
+  try {
+    const response = await fetch(buildUrl("/health"));
+    const json = await parseJson<{
+      ok?: boolean;
+      linkShareEnabled?: boolean;
+      sharePublicBase?: string;
+    }>(response);
+    return {
+      ok: json.ok === true,
+      linkShareEnabled: json.linkShareEnabled !== false,
+      sharePublicBase: json.sharePublicBase,
+    };
+  } catch {
+    return { ok: false, linkShareEnabled: false };
+  }
 }
 
 export async function getXShareStatus(): Promise<XShareStatus> {
@@ -165,9 +218,15 @@ export async function createGovernanceShareLink(
 
 export function getXShareHelperText(
   status: XShareStatus,
-  canNativeShare: boolean
+  canNativeShare: boolean,
+  linkShareServerOk = true
 ): string {
-  const linkShareAvailable = status.linkShareEnabled !== false;
+  const linkShareAvailable =
+    linkShareServerOk && status.linkShareEnabled !== false;
+
+  if (!linkShareServerOk) {
+    return "Share link service is unavailable. Save the image and attach it manually, or try again later.";
+  }
 
   if (status.configured && status.connected) {
     return `Connected as ${status.username ?? "your X account"}. Share on X will post your image and tweet text automatically.`;

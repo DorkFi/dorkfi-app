@@ -1,8 +1,10 @@
 import {
   createGovernanceShareLink,
+  getShareServerHealth,
   getXShareStatus,
   isXShareApiConfigured,
   postGovernanceVoteToX,
+  XShareLinkUnavailableError,
 } from "@/services/xShareService";
 import {
   buildGenericGovernanceShareTweetText,
@@ -182,22 +184,41 @@ async function tryApiShare(
 async function tryLinkShare(
   result: GovernanceShareResult,
   options: ShareGovernanceVoteOptions
-): Promise<string | null> {
+): Promise<string> {
+  const link = await createGovernanceShareLink({
+    proposalId: options.proposalId!,
+    proposalTitle: options.proposalTitle!,
+    support: options.support!,
+    votingPower: options.votingPower!,
+    image: result.blob,
+  });
+  return link.shareUrl;
+}
+
+type LinkShareResolution =
+  | { attempted: false }
+  | { attempted: true; healthOk: false }
+  | { attempted: true; healthOk: true; shareUrl: string }
+  | { attempted: true; healthOk: true; shareUrl: null };
+
+async function resolveLinkShare(
+  result: GovernanceShareResult,
+  options: ShareGovernanceVoteOptions
+): Promise<LinkShareResolution> {
   if (!isXShareApiConfigured() || !hasLinkShareMetadata(options)) {
-    return null;
+    return { attempted: false };
+  }
+
+  const health = await getShareServerHealth();
+  if (!health.ok || !health.linkShareEnabled) {
+    return { attempted: true, healthOk: false };
   }
 
   try {
-    const link = await createGovernanceShareLink({
-      proposalId: options.proposalId!,
-      proposalTitle: options.proposalTitle!,
-      support: options.support!,
-      votingPower: options.votingPower!,
-      image: result.blob,
-    });
-    return link.shareUrl;
+    const shareUrl = await tryLinkShare(result, options);
+    return { attempted: true, healthOk: true, shareUrl };
   } catch {
-    return null;
+    return { attempted: true, healthOk: true, shareUrl: null };
   }
 }
 
@@ -229,11 +250,22 @@ export async function shareGovernanceVote(
     return apiResult;
   }
 
-  const shareUrl = await tryLinkShare(result, options);
-  if (shareUrl) {
-    const text = resolveShareTweetText(options, shareUrl);
+  const linkShare = await resolveLinkShare(result, options);
+
+  if (linkShare.attempted && linkShare.healthOk && linkShare.shareUrl) {
+    const text = resolveShareTweetText(options, linkShare.shareUrl);
     openXCompose(text);
-    return { outcome: "link", shareUrl };
+    return { outcome: "link", shareUrl: linkShare.shareUrl };
+  }
+
+  if (
+    linkShare.attempted &&
+    linkShare.healthOk &&
+    linkShare.shareUrl === null
+  ) {
+    throw new XShareLinkUnavailableError(
+      "Could not create a share link for your vote image. Please try again."
+    );
   }
 
   const fallbackText = resolveShareTweetText(options);

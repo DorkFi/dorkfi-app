@@ -14,9 +14,26 @@ function optional(name: string, fallback: string): string {
 const DEFAULT_DEV_CALLBACK_URL =
   "http://localhost:8080/api/x-share/auth/x/callback";
 
+const DEFAULT_DEV_SHARE_PUBLIC_BASE = "http://localhost:8080/api/x-share";
+
+function resolveSharePublicBase(): string {
+  const explicit = process.env.X_SHARE_PUBLIC_BASE?.trim();
+  if (explicit) return explicit.replace(/\/+$/, "");
+
+  const railwayDomain = process.env.RAILWAY_PUBLIC_DOMAIN?.trim();
+  if (railwayDomain) {
+    return `https://${railwayDomain.replace(/\/+$/, "")}`;
+  }
+
+  return DEFAULT_DEV_SHARE_PUBLIC_BASE;
+}
+
 export const config = {
-  port: Number(optional("X_SHARE_PORT", "8788")),
-  frontendOrigin: optional("X_SHARE_FRONTEND_ORIGIN", "http://localhost:8080"),
+  port: Number(process.env.PORT || optional("X_SHARE_PORT", "8788")),
+  frontendOrigin: optional(
+    "X_SHARE_FRONTEND_ORIGIN",
+    process.env.RAILWAY_PUBLIC_DOMAIN ? "https://app.dork.fi" : "http://localhost:8080"
+  ),
   callbackUrl: optional("X_CALLBACK_URL", DEFAULT_DEV_CALLBACK_URL),
   sessionSecret: optional(
     "X_SHARE_SESSION_SECRET",
@@ -34,10 +51,7 @@ export const config = {
   governanceShareTtlMs:
     Number(optional("X_GOVERNANCE_SHARE_TTL_DAYS", "90")) * 24 * 60 * 60 * 1000,
   /** Public base URL for share permalinks (used in tweets and og:image). */
-  sharePublicBase: optional(
-    "X_SHARE_PUBLIC_BASE",
-    "http://localhost:8080/api/x-share"
-  ),
+  sharePublicBase: resolveSharePublicBase(),
   xClientId: process.env.X_CLIENT_ID?.trim() ?? "",
   xClientSecret: process.env.X_CLIENT_SECRET?.trim() ?? "",
   isProduction: process.env.NODE_ENV === "production",

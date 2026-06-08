@@ -2,13 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
   DialogTitle,
-  DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import {
-  PartyPopper,
   TrendingUp,
   TrendingDown,
   ExternalLink,
@@ -23,6 +20,7 @@ import {
 } from "@/utils/governanceShare/generateGovernanceShareImage";
 import {
   disconnectXShare,
+  getShareServerHealth,
   getXShareHelperText,
   getXShareStatus,
   startXShareConnect,
@@ -75,6 +73,7 @@ export const VoteSuccessModal = ({
   });
   const [isLoadingXShareStatus, setIsLoadingXShareStatus] = useState(false);
   const [isDisconnectingX, setIsDisconnectingX] = useState(false);
+  const [linkShareServerOk, setLinkShareServerOk] = useState(true);
 
   useEffect(() => {
     shareImageRef.current = shareImage;
@@ -155,11 +154,26 @@ export const VoteSuccessModal = ({
     const loadStatus = async () => {
       setIsLoadingXShareStatus(true);
       try {
-        const status = await getXShareStatus();
-        if (!cancelled) setXShareStatus(status);
+        const [statusResult, healthResult] = await Promise.allSettled([
+          getXShareStatus(),
+          getShareServerHealth(),
+        ]);
+        if (!cancelled) {
+          setXShareStatus(
+            statusResult.status === "fulfilled"
+              ? statusResult.value
+              : { connected: false, configured: false }
+          );
+          setLinkShareServerOk(
+            healthResult.status === "fulfilled" &&
+              healthResult.value.ok &&
+              healthResult.value.linkShareEnabled
+          );
+        }
       } catch {
         if (!cancelled) {
           setXShareStatus({ connected: false, configured: false });
+          setLinkShareServerOk(false);
         }
       } finally {
         if (!cancelled) setIsLoadingXShareStatus(false);
@@ -265,23 +279,115 @@ export const VoteSuccessModal = ({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
-        <DialogHeader className="pt-6 px-6">
-          <div className="mx-auto mb-4 relative">
-            <div className="p-4 rounded-full bg-gradient-to-br from-primary/20 to-primary/5">
-              <PartyPopper className="h-8 w-8 text-primary" />
-            </div>
-            <div className="absolute -top-2 -left-2 w-2 h-2 rounded-full bg-yellow-400 animate-bounce" />
-            <div className="absolute -top-1 -right-3 w-1.5 h-1.5 rounded-full bg-pink-400 animate-bounce delay-100" />
-            <div className="absolute -bottom-1 -left-3 w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce delay-200" />
-            <div className="absolute -bottom-2 -right-2 w-2 h-2 rounded-full bg-green-400 animate-bounce delay-75" />
-          </div>
-          <DialogTitle className="text-xl">Vote Submitted!</DialogTitle>
-          <DialogDescription className="text-center pt-2">
-            Your voice has been heard. Thank you for participating in governance!
-          </DialogDescription>
-        </DialogHeader>
+        <DialogTitle className="sr-only">Vote submitted</DialogTitle>
 
-        <div className="px-6 py-4 space-y-4">
+        <div className="px-6 pt-6 pb-4 space-y-4">
+          <div className="space-y-3">
+            <div className="relative w-full aspect-video rounded-lg overflow-hidden border border-border bg-muted/40">
+              {isGeneratingShare && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-muted/60">
+                  <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                  <span className="text-xs text-muted-foreground">
+                    Creating your share image...
+                  </span>
+                </div>
+              )}
+              {!isGeneratingShare && shareImage && (
+                <img
+                  src={shareImage.objectUrl}
+                  alt="Your governance vote share preview"
+                  className="h-full w-full object-cover"
+                />
+              )}
+              {!isGeneratingShare && shareError && (
+                <div className="absolute inset-0 flex items-center justify-center px-4 text-center">
+                  <span className="text-xs text-destructive">{shareError}</span>
+                </div>
+              )}
+            </div>
+
+            {xShareStatus.configured && (
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-xs font-medium text-foreground">
+                    {isLoadingXShareStatus
+                      ? "Checking X connection..."
+                      : xShareStatus.connected
+                        ? `Connected ${xShareStatus.username ?? "to X"}`
+                        : "X account not connected"}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {xShareStatus.connected
+                      ? "Share on X posts your image automatically."
+                      : "Connect once for one-click image posts, or share via link preview."}
+                  </p>
+                </div>
+                {xShareStatus.connected ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0 min-h-[36px]"
+                    disabled={isDisconnectingX}
+                    onClick={() => void handleDisconnectX()}
+                  >
+                    {isDisconnectingX ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      "Disconnect"
+                    )}
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="shrink-0 min-h-[36px] bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100"
+                    disabled={isLoadingXShareStatus}
+                    onClick={handleConnectX}
+                  >
+                    Connect X
+                  </Button>
+                )}
+              </div>
+            )}
+
+            <p className="text-xs text-muted-foreground text-center">
+              {getXShareHelperText(xShareStatus, canNativeShare, linkShareServerOk)}
+            </p>
+
+            <button
+              type="button"
+              onClick={() => void handleShare()}
+              disabled={!shareImage || isGeneratingShare || isSharing}
+              className="w-full flex items-center justify-center gap-2 py-3 px-6 rounded-lg bg-black hover:bg-gray-900 dark:bg-white dark:hover:bg-gray-100 text-white dark:text-black font-semibold text-base text-center transition border border-border min-h-[44px] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSharing ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              ) : (
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                  <path d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932ZM17.61 20.644h2.039L6.486 3.24H4.298Z" />
+                </svg>
+              )}
+              Share on X
+            </button>
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleSaveImage}
+              disabled={!shareImage || isGeneratingShare}
+              className="w-full min-h-[44px]"
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Save image
+            </Button>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-px bg-border" />
+            <span className="text-xs text-muted-foreground">Vote details</span>
+            <div className="flex-1 h-px bg-border" />
+          </div>
           <div className="p-4 rounded-lg bg-muted/50 border border-border space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Proposal</span>
@@ -375,113 +481,6 @@ export const VoteSuccessModal = ({
             <ExternalLink className="h-4 w-4" />
             View Transaction
           </button>
-
-          <div className="flex items-center gap-3 my-2">
-            <div className="flex-1 h-px bg-border" />
-            <span className="text-xs text-muted-foreground">Share</span>
-            <div className="flex-1 h-px bg-border" />
-          </div>
-
-          <div className="space-y-3">
-            <div className="relative w-full aspect-video rounded-lg overflow-hidden border border-border bg-muted/40">
-              {isGeneratingShare && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-muted/60">
-                  <Loader2 className="h-6 w-6 animate-spin text-primary" />
-                  <span className="text-xs text-muted-foreground">
-                    Creating your share image...
-                  </span>
-                </div>
-              )}
-              {!isGeneratingShare && shareImage && (
-                <img
-                  src={shareImage.objectUrl}
-                  alt="Your governance vote share preview"
-                  className="h-full w-full object-cover"
-                />
-              )}
-              {!isGeneratingShare && shareError && (
-                <div className="absolute inset-0 flex items-center justify-center px-4 text-center">
-                  <span className="text-xs text-destructive">{shareError}</span>
-                </div>
-              )}
-            </div>
-
-            {xShareStatus.configured && (
-              <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2">
-                <div className="min-w-0">
-                  <p className="text-xs font-medium text-foreground">
-                    {isLoadingXShareStatus
-                      ? "Checking X connection..."
-                      : xShareStatus.connected
-                        ? `Connected ${xShareStatus.username ?? "to X"}`
-                        : "X account not connected"}
-                  </p>
-                  <p className="text-[11px] text-muted-foreground">
-                    {xShareStatus.connected
-                      ? "Share on X posts your image automatically."
-                      : "Connect once for one-click image posts, or share via link preview."}
-                  </p>
-                </div>
-                {xShareStatus.connected ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="shrink-0 min-h-[36px]"
-                    disabled={isDisconnectingX}
-                    onClick={() => void handleDisconnectX()}
-                  >
-                    {isDisconnectingX ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      "Disconnect"
-                    )}
-                  </Button>
-                ) : (
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="shrink-0 min-h-[36px] bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100"
-                    disabled={isLoadingXShareStatus}
-                    onClick={handleConnectX}
-                  >
-                    Connect X
-                  </Button>
-                )}
-              </div>
-            )}
-
-            <p className="text-xs text-muted-foreground text-center">
-              {getXShareHelperText(xShareStatus, canNativeShare)}
-            </p>
-
-            <button
-              type="button"
-              onClick={() => void handleShare()}
-              disabled={!shareImage || isGeneratingShare || isSharing}
-              className="w-full flex items-center justify-center gap-2 py-3 px-6 rounded-lg bg-black hover:bg-gray-900 dark:bg-white dark:hover:bg-gray-100 text-white dark:text-black font-semibold text-base text-center transition border border-border min-h-[44px] disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isSharing ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              ) : (
-                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                  <path d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932ZM17.61 20.644h2.039L6.486 3.24H4.298Z" />
-                </svg>
-              )}
-              Share on X
-            </button>
-
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleSaveImage}
-              disabled={!shareImage || isGeneratingShare}
-              className="w-full min-h-[44px]"
-            >
-              <Download className="h-4 w-4 mr-2" />
-              Save image
-            </Button>
-          </div>
         </div>
 
         <div className="px-6 pb-6">

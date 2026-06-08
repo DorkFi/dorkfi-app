@@ -9,6 +9,7 @@ import {
 
 vi.mock("@/services/xShareService", () => ({
   isXShareApiConfigured: vi.fn(() => false),
+  getShareServerHealth: vi.fn(),
   getXShareStatus: vi.fn(),
   postGovernanceVoteToX: vi.fn(),
   createGovernanceShareLink: vi.fn(),
@@ -16,6 +17,7 @@ vi.mock("@/services/xShareService", () => ({
 
 import {
   createGovernanceShareLink,
+  getShareServerHealth,
   getXShareStatus,
   isXShareApiConfigured,
   postGovernanceVoteToX,
@@ -81,6 +83,10 @@ describe("shareGovernanceVote", () => {
 
   beforeEach(() => {
     vi.mocked(isXShareApiConfigured).mockReturnValue(false);
+    vi.mocked(getShareServerHealth).mockResolvedValue({
+      ok: false,
+      linkShareEnabled: false,
+    });
     vi.mocked(getXShareStatus).mockReset();
     vi.mocked(postGovernanceVoteToX).mockReset();
     vi.mocked(createGovernanceShareLink).mockReset();
@@ -114,6 +120,10 @@ describe("shareGovernanceVote", () => {
 
   it("opens X compose with share link when link share succeeds", async () => {
     vi.mocked(isXShareApiConfigured).mockReturnValue(true);
+    vi.mocked(getShareServerHealth).mockResolvedValue({
+      ok: true,
+      linkShareEnabled: true,
+    });
     vi.mocked(getXShareStatus).mockResolvedValue({
       connected: false,
       configured: false,

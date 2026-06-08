@@ -60,25 +60,27 @@ The Vite proxy forwards `/api/x-share/*` → `http://127.0.0.1:8788/*` so sessio
 
 ## Production deployment
 
-Deploy `server/` as a separate service (e.g. Railway). Set:
+`app.dork.fi` is static hosting — `/api/x-share` on that domain returns the SPA, **not** the share server. Deploy `server/` separately (e.g. Railway using `railway.toml` in the repo root).
 
 | Variable | Example |
 |----------|---------|
-| `X_CLIENT_ID` | From X Developer Portal |
-| `X_CLIENT_SECRET` | From X Developer Portal |
+| `X_CLIENT_ID` | From X Developer Portal (optional for link-share-only) |
+| `X_CLIENT_SECRET` | From X Developer Portal (optional for link-share-only) |
 | `X_CALLBACK_URL` | `https://your-share-api.example.com/auth/x/callback` |
 | `X_SHARE_FRONTEND_ORIGIN` | `https://app.dork.fi` |
 | `X_SHARE_SESSION_SECRET` | Long random string |
-| `X_SHARE_PUBLIC_BASE` | Public URL for share permalinks (e.g. `https://share-api.example.com`) |
+| `X_SHARE_PUBLIC_BASE` | Optional — auto-set from `RAILWAY_PUBLIC_DOMAIN` on Railway |
 | `NODE_ENV` | `production` |
 
-Build the frontend with:
+Build the frontend with the deployed share server origin (or rely on the production default in `xShareService.ts`):
 
 ```bash
 VITE_X_SHARE_API_BASE=https://your-share-api.example.com npm run build
 ```
 
 Ensure CORS allows `X_SHARE_FRONTEND_ORIGIN` with credentials. Cookies use `SameSite=None; Secure` in production.
+
+**Link preview requirement:** X’s crawler must reach `https://your-share-api.example.com/gov/:id` and `.../image.png` over the public internet. `localhost` URLs will not show a card preview on X.
 
 ## Share priority
 

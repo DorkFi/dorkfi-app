@@ -25,7 +25,7 @@ const TEXT_LEFT_X = 48;
 const SAFE_TEXT_RIGHT = 660;
 const TITLE_MAX_WIDTH = SAFE_TEXT_RIGHT - TEXT_LEFT_X;
 const TITLE_MAX_LINES = 2;
-/** Aligns headline with whale head top on v7 YES template (1200×675 canvas). */
+/** Aligns headline with whale head top on v8 YES template (1200×675 canvas). */
 const TEXT_TOP_Y = 108;
 const LOGO_ZONE_TOP = 510;
 
