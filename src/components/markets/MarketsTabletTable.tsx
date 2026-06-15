@@ -51,6 +51,8 @@ interface MarketsTabletTableProps {
     onMintMouseEnter?: (e: React.MouseEvent) => void;
   };
   onRowMouseEnter?: (market: OnDemandMarketData) => void;
+  /** WAD Mint market pinned above paginated rows (excluded from sort/filter/page). */
+  pinnedWadMintMarket?: OnDemandMarketData | null;
 }
 
 const MarketsTabletTable = ({
@@ -66,6 +68,7 @@ const MarketsTabletTable = ({
   isLoadingBalance = false,
   getMarketActionHoverHandlers,
   onRowMouseEnter,
+  pinnedWadMintMarket,
 }: MarketsTabletTableProps) => {
   const { currentNetwork } = useNetwork();
   const { activeAccount } = useWallet();
@@ -311,7 +314,7 @@ const MarketsTabletTable = ({
     return sortedGroups;
   }, [markets, currentNetwork, sortField, sortOrder]);
 
-  if (markets.length === 0) {
+  if (markets.length === 0 && !pinnedWadMintMarket) {
     return (
       <div className="text-center py-8">
         <p className="text-ink-blue">
@@ -354,6 +357,8 @@ const MarketsTabletTable = ({
           isLoadingBalance={isLoadingBalance}
           isNested={isNested}
           marketIndex={marketIndex}
+          getMarketActionHoverHandlers={getMarketActionHoverHandlers}
+          onRowMouseEnter={onRowMouseEnter}
         />
       );
     }
@@ -580,7 +585,33 @@ const MarketsTabletTable = ({
     );
   };
 
-  if (markets.length === 0) {
+  const renderPinnedWadMintRow = () => {
+    if (!pinnedWadMintMarket) return null;
+    const poolId =
+      pinnedWadMintMarket.marketInfo?.poolId ?? pinnedWadMintMarket.poolId;
+    const marketRowKey = (pinnedWadMintMarket as { _sortKey?: string })
+      ._sortKey;
+    return (
+      <STokenTabletRow
+        key="pinned-wad-mint"
+        market={pinnedWadMintMarket}
+        onRowClick={onRowClick}
+        onInfoClick={onInfoClick}
+        onDepositClick={(asset) =>
+          onDepositClick(asset, poolId, marketRowKey)
+        }
+        onBorrowClick={(asset) =>
+          onBorrowClick(asset, poolId, marketRowKey)
+        }
+        onMintClick={onMintClick}
+        isLoadingBalance={isLoadingBalance}
+        getMarketActionHoverHandlers={getMarketActionHoverHandlers}
+        onRowMouseEnter={onRowMouseEnter}
+      />
+    );
+  };
+
+  if (markets.length === 0 && !pinnedWadMintMarket) {
     return (
       <div className="text-center py-8">
         <p className="text-ink-blue">
@@ -603,6 +634,7 @@ const MarketsTabletTable = ({
           </TableRow>
         </TableHeader>
           <TableBody>
+            {renderPinnedWadMintRow()}
             {Object.entries(groupedMarkets).map(([symbol, symbolMarkets]) => {
               const hasMultipleMarkets = symbolMarkets.length > 1;
               const isExpanded = expandedSymbols.has(symbol);

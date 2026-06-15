@@ -3,10 +3,10 @@ import { Progress } from "@/components/ui/progress";
 import { OnDemandMarketData } from "@/hooks/useOnDemandMarketData";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import DorkFiButton from "@/components/ui/DorkFiButton";
-import APYDisplay from "@/components/APYDisplay";
 import BorrowAPYDisplay from "@/components/BorrowAPYDisplay";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import { useNetwork } from "@/contexts/NetworkContext";
+import { cn } from "@/lib/utils";
 import {
   borrowApyBadgeClassName,
   BORROW_APY_BADGE_STOKEN,
@@ -25,7 +25,10 @@ interface STokenCardProps {
   onInfoClick: (e: React.MouseEvent, market: OnDemandMarketData) => void;
   onDepositClick: (asset: string) => void;
   onBorrowClick: (asset: string) => void;
-  onMintClick?: (asset: string, poolId?: string) => void;
+  onMintClick?: (asset: string, poolId?: string, marketRowKey?: string) => void;
+  marketRowKey?: string;
+  onMintMouseEnter?: (e: React.MouseEvent) => void;
+  className?: string;
 }
 
 const STokenCard = ({ 
@@ -35,19 +38,28 @@ const STokenCard = ({
   onInfoClick, 
   onDepositClick, 
   onBorrowClick,
-  onMintClick
+  onMintClick,
+  marketRowKey: marketRowKeyProp,
+  onMintMouseEnter,
+  className,
 }: STokenCardProps) => {
-  const { formatCurrency, formatPercent } = useNumberI18n();
+  const { formatCurrency, formatPercent, formatNumber } = useNumberI18n();
   const { currentNetwork } = useNetwork();
   const borrowCapReached = isAtBorrowCap(
     Number(market.totalBorrow ?? 0),
     Number(market.borrowCap ?? 0)
   );
+  const poolId = market.marketInfo?.poolId ?? market.poolId;
+  const marketRowKey =
+    marketRowKeyProp ?? (market as { _sortKey?: string })._sortKey;
 
   return (
     <DorkFiCard
       key={market.asset}
-      className="flex flex-col md:flex-row md:items-stretch gap-4 md:gap-6 border-l-4 border-l-purple-500 bg-gradient-to-r from-purple-50/30 to-pink-50/30 dark:from-purple-900/10 dark:to-pink-900/10 hover:from-purple-50 hover:to-pink-50 dark:hover:from-purple-900/20 dark:hover:to-pink-900/20 transition-all duration-300"
+      className={cn(
+        "flex flex-col md:flex-row md:items-stretch gap-4 md:gap-6 border-l-4 border-l-purple-500 bg-gradient-to-r from-purple-50/30 to-pink-50/30 dark:from-purple-900/10 dark:to-pink-900/10 hover:from-purple-50 hover:to-pink-50 dark:hover:from-purple-900/20 dark:hover:to-pink-900/20 transition-all duration-300",
+        className
+      )}
       onClick={() => onRowClick(market)}
     >
       {/* Header with logo, asset info, and info button */}
@@ -91,7 +103,10 @@ const STokenCard = ({
             />
           </Badge>
           <div className="text-xs text-purple-700 dark:text-purple-300 mt-1">
-            {formatCurrency(market.totalBorrowUSD / 1_000_000, "USD", { maximumFractionDigits: 0 })}
+            {formatCurrency(Math.round(market.totalBorrowUSD / 1_000_000), "USD", { maximumFractionDigits: 0 })}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {formatNumber(market.totalBorrow, { maximumFractionDigits: 3 })} {market.asset}
           </div>
         </div>
       </div>
@@ -117,8 +132,9 @@ const STokenCard = ({
           onClick={e => {
             e.stopPropagation();
             if (borrowCapReached) return;
-            onMintClick?.(market.asset, market.marketInfo?.poolId);
+            onMintClick?.(market.asset, poolId, marketRowKey);
           }}
+          onMouseEnter={onMintMouseEnter}
           disabled={borrowCapReached}
           title={borrowCapReached ? MINT_BORROW_CAP_TOOLTIP : undefined}
           className="w-full bg-purple-100 hover:bg-purple-200 text-purple-800 dark:bg-purple-900 dark:hover:bg-purple-800 dark:text-purple-200"
