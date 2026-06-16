@@ -18,6 +18,27 @@ function formatNumber(n: number, maxFrac = 4): string {
   });
 }
 
+function resolveMarketCapUnits(
+  fromRow: unknown,
+  fromMarketInfo: unknown
+): number | null {
+  const rowN = Number(fromRow);
+  if (Number.isFinite(rowN) && rowN > 0) return rowN;
+  if (fromMarketInfo != null && String(fromMarketInfo).trim() !== "") {
+    const infoN = parseFloat(String(fromMarketInfo));
+    if (Number.isFinite(infoN) && infoN > 0) return infoN;
+    if (Number.isFinite(infoN) && infoN === 0) return 0;
+  }
+  if (Number.isFinite(rowN) && rowN === 0) return 0;
+  return null;
+}
+
+function formatCapUnitsDisplay(cap: number | null): string {
+  if (cap === null) return "—";
+  if (cap <= 0) return "Unlimited";
+  return formatNumber(cap);
+}
+
 export interface MarketDetailStatsSectionProps {
   rawMarket: Record<string, unknown>;
   networkId: string;
@@ -52,8 +73,17 @@ export const MarketDetailStatsSection: React.FC<MarketDetailStatsSectionProps> =
   const totalBorrowUSD = Number(rawMarket.totalBorrowUSD ?? 0);
   const totalSupply = Number(rawMarket.totalSupply ?? 0);
   const totalBorrow = Number(rawMarket.totalBorrow ?? 0);
-  const supplyCap = Number(rawMarket.supplyCap ?? 0);
-  const borrowCap = Number(rawMarket.borrowCap ?? 0);
+  const marketInfo = rawMarket.marketInfo as
+    | { maxTotalDeposits?: string; maxTotalBorrows?: string }
+    | undefined;
+  const supplyCapUnits = resolveMarketCapUnits(
+    rawMarket.supplyCap,
+    marketInfo?.maxTotalDeposits
+  );
+  const borrowCapUnits = resolveMarketCapUnits(
+    rawMarket.borrowCap,
+    marketInfo?.maxTotalBorrows
+  );
   const asset = String(rawMarket.asset ?? "—");
 
   const isLoading = rawMarket.isLoading === true;
@@ -97,11 +127,11 @@ export const MarketDetailStatsSection: React.FC<MarketDetailStatsSectionProps> =
     },
     {
       label: "Supply cap (units)",
-      value: supplyCap > 0 ? formatNumber(supplyCap) : "—",
+      value: formatCapUnitsDisplay(supplyCapUnits),
     },
     {
       label: "Borrow cap (units)",
-      value: borrowCap > 0 ? formatNumber(borrowCap) : "—",
+      value: formatCapUnitsDisplay(borrowCapUnits),
     },
   ];
 
