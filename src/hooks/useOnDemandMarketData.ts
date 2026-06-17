@@ -439,7 +439,7 @@ export const useOnDemandMarketData = ({
         liquidationPenalty: 0,
         reserveFactor: 0,
         collectorContract: "",
-        isLoading: false,
+        isLoading: true,
         isLoaded: false,
         isSToken: tokenConfig?.isStoken || false,
         poolId: token.poolId, // Store poolId for multi-market tokens
@@ -1109,13 +1109,16 @@ export const useOnDemandMarketData = ({
   );
 
   // Load all markets (for cases where you want to preload everything)
-  const loadAllMarkets = useCallback(() => {
-    Object.keys(marketsData).forEach((marketKey) => {
-      if (!loadingMarkets.has(marketKey)) {
-        loadMarketData(marketKey);
-      }
-    });
-  }, [marketsData, loadingMarkets, loadMarketData]);
+  const loadAllMarkets = useCallback(
+    (bypassCache = false) => {
+      Object.keys(marketsData).forEach((marketKey) => {
+        if (!loadingMarkets.has(marketKey)) {
+          loadMarketData(marketKey, bypassCache);
+        }
+      });
+    },
+    [marketsData, loadingMarkets, loadMarketData]
+  );
 
   return {
     data: paginatedData,

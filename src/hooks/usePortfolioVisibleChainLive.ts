@@ -366,7 +366,8 @@ export function usePortfolioVisibleChainLive(opts: {
             mkt.price as string | number,
             token.decimals
           )
-        : 1;
+        : null;
+      if (tp == null || !Number.isFinite(tp) || tp <= 0) continue;
 
       try {
         if (kind === "deposit") {
@@ -499,7 +500,10 @@ export function usePortfolioVisibleChainLive(opts: {
             group.market.price as string | number,
             group.tokenDecimals
           )
-        : 1;
+        : null;
+      if (tokenPrice == null || !Number.isFinite(tokenPrice) || tokenPrice <= 0) {
+        continue;
+      }
 
       let groupDepositMinted: bigint | null = null;
       const firstKey = group.rows[0]?.portfolioKey;

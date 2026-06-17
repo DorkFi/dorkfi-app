@@ -16,6 +16,7 @@ import CountdownPage from "./pages/Countdown";
 import Dashboard from "./components/Dashboard";
 import Portfolio from "./components/Portfolio";
 import PoolsPage from "./pages/Pools";
+import { MarketPrefetch } from "./components/MarketPrefetch";
 import PortfolioPage from "./pages/PortfolioPage";
 //const LAUNCH_TIMESTAMP = Date.UTC(2025, 10, 21, 2, 0, 0); // Nov 20, 2025 6:00 PM PST (Nov 21, 2025 2:00 AM UTC)
 const LAUNCH_TIMESTAMP = Date.now();
@@ -68,6 +69,7 @@ function App() {
       <NetworkProvider>
         <LocaleSettingsProvider>
         <TooltipProvider delayDuration={300} skipDelayDuration={100}>
+          <MarketPrefetch />
           <Toaster />
           <Sonner />
           <BrowserRouter>

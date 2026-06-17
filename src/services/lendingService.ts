@@ -1021,6 +1021,150 @@ export async function fetchFreshMarketInfo(
   }
 }
 
+const MARKET_FETCH_CONCURRENCY = 5;
+
+type DisplayToken = ReturnType<typeof getAllTokensWithDisplayInfo>[number];
+
+function marketRowKey(poolId: string, marketId: string): string {
+  return `${poolId}|${marketId}`;
+}
+
+function matchDisplayTokenForApiMarket(
+  tokens: DisplayToken[],
+  item: Record<string, unknown>
+): DisplayToken | undefined {
+  const marketId = String(item.marketId ?? "");
+  const appId = String(item.appId ?? item.poolId ?? "");
+
+  let token = tokens.find(
+    (t) =>
+      (t.underlyingContractId === marketId ||
+        t.originalContractId === marketId) &&
+      String(t.poolId) === appId
+  );
+
+  if (!token && marketId === "0") {
+    token = tokens.find(
+      (t) =>
+        String(t.poolId) === appId &&
+        (t.assetId === "0" || t.originalContractId === "0")
+    );
+  }
+
+  return token;
+}
+
+async function fetchTokensMarketInfoParallel(
+  tokens: DisplayToken[],
+  networkId: NetworkId,
+  concurrency = MARKET_FETCH_CONCURRENCY
+): Promise<MarketInfo[]> {
+  const markets: MarketInfo[] = [];
+  let index = 0;
+
+  async function worker() {
+    while (index < tokens.length) {
+      const tokenIndex = index++;
+      const token = tokens[tokenIndex];
+      try {
+        const poolId = token.poolId;
+        if (!poolId) continue;
+
+        const marketId = token.underlyingContractId || token.symbol;
+        const marketInfo = await fetchMarketInfo(poolId, marketId, networkId);
+        if (marketInfo) {
+          markets.push(marketInfo);
+        }
+      } catch (error) {
+        console.error(
+          `Error fetching market data for ${token.symbol}:`,
+          error
+        );
+      }
+    }
+  }
+
+  const workerCount = Math.min(concurrency, Math.max(tokens.length, 1));
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+  return markets;
+}
+
+async function fetchAllMarketsViaBulkApi(
+  networkId: NetworkId,
+  tokens: DisplayToken[]
+): Promise<MarketInfo[] | null> {
+  try {
+    const response = await dorkfiAPIService.getAllMarketDataByNetwork(networkId);
+    if (!response?.success || !Array.isArray(response.data) || response.data.length === 0) {
+      return null;
+    }
+
+    const markets: MarketInfo[] = [];
+    const coveredKeys = new Set<string>();
+
+    for (const rawItem of response.data) {
+      const item = rawItem as Record<string, unknown>;
+      const token = matchDisplayTokenForApiMarket(tokens, item);
+      if (!token) continue;
+
+      const poolId = String(item.appId ?? item.poolId ?? token.poolId ?? "");
+      const marketId = String(item.marketId ?? token.underlyingContractId ?? "");
+      const key = marketRowKey(poolId, marketId);
+      if (coveredKeys.has(key)) continue;
+      coveredKeys.add(key);
+
+      const tokenConfig = resolveTokenConfigFromDisplayToken(networkId, token);
+      const merged = {
+        ...item,
+        network: networkId,
+        poolId,
+        appId: poolId,
+        marketId,
+      };
+      markets.push(enhanceAVMMarketInfo(merged, tokenConfig));
+    }
+
+    return markets.length > 0 ? markets : null;
+  } catch (error) {
+    console.warn("[fetchAllMarkets] bulk API failed, falling back:", error);
+    return null;
+  }
+}
+
+async function fetchAllMarketsForTokenList(
+  networkId: NetworkId,
+  tokens: DisplayToken[]
+): Promise<MarketInfo[]> {
+  const bulkMarkets = await fetchAllMarketsViaBulkApi(networkId, tokens);
+  if (bulkMarkets && bulkMarkets.length > 0) {
+    const bulkKeys = new Set(
+      bulkMarkets.map((m) =>
+        marketRowKey(String(m.poolId ?? ""), String(m.marketId ?? ""))
+      )
+    );
+    const missingTokens = tokens.filter((token) => {
+      const poolId = token.poolId;
+      if (!poolId) return false;
+      const marketId = token.underlyingContractId || token.symbol;
+      return !bulkKeys.has(marketRowKey(String(poolId), String(marketId)));
+    });
+
+    if (missingTokens.length > 0) {
+      const extra = await fetchTokensMarketInfoParallel(
+        missingTokens,
+        networkId
+      );
+      return [...bulkMarkets, ...extra];
+    }
+
+    return bulkMarkets;
+  }
+
+  return fetchTokensMarketInfoParallel(tokens, networkId);
+}
+
+
 /**
  * Fetch all markets information
  */
@@ -1029,123 +1173,40 @@ export const fetchAllMarkets = async (
   options?: { excludeMarketsTableHidden?: boolean }
 ): Promise<MarketInfo[]> => {
   try {
-    const networkConfig = getNetworkConfig(networkId);
-
     if (isAlgorandCompatibleNetwork(networkId)) {
-      // Get markets from config
       const tokens = options?.excludeMarketsTableHidden
         ? getMarketsTableVisibleTokensWithDisplayInfo(networkId)
         : getAllTokensWithDisplayInfo(networkId);
 
-      console.log("Fetching real market data for", tokens.length, "tokens");
-
-      // Fetch real market data for each token
-      const markets: MarketInfo[] = [];
-
-      for (const token of tokens) {
-        try {
-          // Use the token's own poolId from config, not the first lending pool
-          const poolId = token.poolId;
-
-          if (!poolId) {
-            console.warn(
-              `No pool ID configured for token ${token.symbol}, skipping`
-            );
-            continue;
-          }
-
-          const marketId = token.underlyingContractId || token.symbol;
-
-          console.log(
-            `Fetching market data for ${token.symbol} (marketId: ${marketId}, poolId: ${poolId})`
-          );
-
-          const marketInfo = await fetchMarketInfo(poolId, marketId, networkId); // fetch from api
-
-          if (marketInfo) {
-            console.log(
-              `Successfully fetched market data for ${token.symbol}:`,
-              {
-                price: marketInfo.price,
-                totalDeposits: marketInfo.totalDeposits,
-                totalBorrows: marketInfo.totalBorrows,
-                utilizationRate: marketInfo.utilizationRate,
-              }
-            );
-            markets.push(marketInfo);
-          } else {
-            console.warn(`No market data found for ${token.symbol}, skipping`);
-          }
-        } catch (error) {
-          console.error(
-            `Error fetching market data for ${token.symbol}:`,
-            error
-          );
-          // Continue with other tokens even if one fails
-        }
-      }
-
-      console.log(`Successfully fetched ${markets.length} markets`);
+      console.log(
+        "[fetchAllMarkets] loading",
+        tokens.length,
+        "tokens for",
+        networkId
+      );
+      const markets = await fetchAllMarketsForTokenList(networkId, tokens);
+      console.log(
+        `[fetchAllMarkets] loaded ${markets.length} markets for ${networkId}`
+      );
       return markets;
-    } else if (isEVMNetwork(networkId)) {
-      // For EVM networks, fetch real market data
-      const tokens = getAllTokensWithDisplayInfo(networkId);
-
-      console.log("Fetching real EVM market data for", tokens.length, "tokens");
-
-      // Fetch real market data for each token
-      const markets: MarketInfo[] = [];
-
-      for (const token of tokens) {
-        try {
-          // Use the token's own poolId from config, not the first lending pool
-          const poolId = token.poolId;
-
-          if (!poolId) {
-            console.warn(
-              `No pool ID configured for token ${token.symbol}, skipping`
-            );
-            continue;
-          }
-
-          const marketId = token.underlyingContractId || token.symbol;
-
-          console.log(
-            `Fetching EVM market data for ${token.symbol} (marketId: ${marketId}, poolId: ${poolId})`
-          );
-
-          const marketInfo = await fetchMarketInfo(poolId, marketId, networkId);
-
-          if (marketInfo) {
-            console.log(
-              `Successfully fetched EVM market data for ${token.symbol}:`,
-              {
-                price: marketInfo.price,
-                totalDeposits: marketInfo.totalDeposits,
-                totalBorrows: marketInfo.totalBorrows,
-                utilizationRate: marketInfo.utilizationRate,
-              }
-            );
-            markets.push(marketInfo);
-          } else {
-            console.warn(
-              `No EVM market data found for ${token.symbol}, skipping`
-            );
-          }
-        } catch (error) {
-          console.error(
-            `Error fetching EVM market data for ${token.symbol}:`,
-            error
-          );
-          // Continue with other tokens even if one fails
-        }
-      }
-
-      console.log(`Successfully fetched ${markets.length} EVM markets`);
-      return markets;
-    } else {
-      throw new Error("Unsupported network");
     }
+
+    if (isEVMNetwork(networkId)) {
+      const tokens = getAllTokensWithDisplayInfo(networkId);
+      console.log(
+        "[fetchAllMarkets] loading",
+        tokens.length,
+        "EVM tokens for",
+        networkId
+      );
+      const markets = await fetchAllMarketsForTokenList(networkId, tokens);
+      console.log(
+        `[fetchAllMarkets] loaded ${markets.length} EVM markets for ${networkId}`
+      );
+      return markets;
+    }
+
+    throw new Error("Unsupported network");
   } catch (error) {
     console.error("Error fetching all markets:", error);
     return [];

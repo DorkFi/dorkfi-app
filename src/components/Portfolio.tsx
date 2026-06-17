@@ -84,6 +84,11 @@ import {
   PortfolioPositionsFilteredEmptyState,
 } from "@/components/portfolio/PortfolioPositionsFilterBar";
 import PortfolioPositionsCardHeader from "@/components/portfolio/PortfolioPositionsCardHeader";
+import { usePortfolioLoader } from "@/hooks/usePortfolioLoader";
+import {
+  applyPortfolioUserComputed,
+  extractUserProfileAvatar,
+} from "@/utils/portfolioUserComputed";
 import { usdPerTokenFromMarketInfoPrice } from "@/utils/assetDecimals";
 import { formatNftHolderClaimableDisplayFromAgent } from "@/utils/nftHolderClaimAgentDisplay";
 import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
@@ -541,6 +546,15 @@ const Portfolio = () => {
   // Guards for fetchUser: prevent concurrent fetches and stale-address races
   const fetchUserInFlight = useRef(false);
   const fetchUserAddressRef = useRef<string | null>(null);
+
+  const { reloadPortfolio } = usePortfolioLoader({
+    displayAddress,
+    setUser,
+    setMarketData,
+    setUserProfileAvatar,
+    setIsLoadingData,
+    setIsLoadingPositions,
+  });
 
   // Compute final avatar: prioritize user profile avatar > resolver avatar
   // If neither exists, components will show placeholder
@@ -1175,20 +1189,16 @@ const Portfolio = () => {
               : (item.scaledDeposits || 0).toString();
           const scaledDeposits = BigInt(scaledDepositsValue);
 
-          // Get depositIndex from market data - it should be a string representation of BigInt
-          // If not available, use default SCALE (1e18) as fallback to still show the item
-          let depositIndex: bigint;
-          let depositIndexStr: string;
+          // Require market indices before showing position amounts
           if (!market?.depositIndex) {
             console.warn(
-              `[Portfolio] depositIndex not found for ${token.symbol} (poolId: ${appId}), using default SCALE`
+              `[Portfolio] depositIndex not found for ${token.symbol} (poolId: ${appId}), skipping until market data loads`
             );
-            depositIndex = SCALE;
-            depositIndexStr = SCALE.toString();
-          } else {
-            depositIndexStr = market.depositIndex.toString();
-            depositIndex = BigInt(depositIndexStr);
+            return;
           }
+
+          const depositIndexStr = market.depositIndex.toString();
+          const depositIndex = BigInt(depositIndexStr);
 
           const actualDepositsRaw =
             scaledDeposits === 0n
@@ -1255,7 +1265,10 @@ const Portfolio = () => {
             }
           }
           if (!Number.isFinite(tokenPrice) || tokenPrice <= 0) {
-            tokenPrice = 1;
+            console.warn(
+              `[Portfolio] price not available for ${token.symbol} (poolId: ${appId}), skipping until market data loads`
+            );
+            return;
           }
 
           // Get APY
@@ -1420,20 +1433,15 @@ const Portfolio = () => {
               : (item.scaledBorrows || 0).toString();
           const scaledBorrows = BigInt(scaledBorrowsValue);
 
-          // Get borrowIndex from market data - it should be a string representation of BigInt
-          // If not available, use default SCALE (1e18) as fallback to still show the item
-          let borrowIndex: bigint;
-          let borrowIndexStr: string;
           if (!market?.borrowIndex) {
             console.warn(
-              `[Portfolio] borrowIndex not found for ${token.symbol} (poolId: ${appId}), using default SCALE`
+              `[Portfolio] borrowIndex not found for ${token.symbol} (poolId: ${appId}), skipping until market data loads`
             );
-            borrowIndex = SCALE;
-            borrowIndexStr = SCALE.toString();
-          } else {
-            borrowIndexStr = market.borrowIndex.toString();
-            borrowIndex = BigInt(borrowIndexStr);
+            return;
           }
+
+          const borrowIndexStr = market.borrowIndex.toString();
+          const borrowIndex = BigInt(borrowIndexStr);
 
           const actualBorrowsRaw =
             scaledBorrows === 0n ? 0n : (scaledBorrows * borrowIndex) / SCALE;
@@ -1498,7 +1506,10 @@ const Portfolio = () => {
             }
           }
           if (!Number.isFinite(tokenPrice) || tokenPrice <= 0) {
-            tokenPrice = 1;
+            console.warn(
+              `[Portfolio] price not available for ${token.symbol} (poolId: ${appId}), skipping until market data loads`
+            );
+            return;
           }
 
           // Get APY
@@ -3033,72 +3044,11 @@ const Portfolio = () => {
     [signTransactions, activeAccount?.address]
   );
 
-  // Function to refresh positions data
-  const handleRefreshPositions = async () => {
-    if (!activeAccount?.address || !currentNetwork) {
-      return;
-    }
-
-    setIsLoadingPositions(true);
-    try {
-      // fetch market from node api for accurate position info
-      // Fetch fresh market data and global data first
-      const markets = await fetchAllMarkets(currentNetwork, {
-        excludeMarketsTableHidden: true,
-      });
-      // const marketDataResponse =
-      //   await dorkfiAPIService.getAllMarketDataByNetwork(currentNetwork);
-      // const freshMarketData = marketDataResponse.success
-      //   ? marketDataResponse.data
-      //   : [];
-      const marketData = markets;
-
-      if (!displayAddress) {
-        setIsLoadingPositions(false);
-        return;
-      }
-
-      const freshGlobalData = await fetchUserGlobalData(
-        displayAddress,
-        currentNetwork,
-        marketData
-      );
-
-      // Fetch user positions from all enabled networks (not just currentNetwork)
-      // This ensures VOI items don't disappear when doing Algorand transactions
-      const enabledNetworks = getEnabledNetworks();
-      const allPositions = [];
-
-      for (const networkId of enabledNetworks) {
-        try {
-          const networkMarkets = filterPortfolioVisibleMarketRows(
-            networkId as NetworkId,
-            await fetchAllMarkets(networkId)
-          );
-          const networkPositions = await fetchUserPositions(
-            displayAddress,
-            networkId,
-            networkMarkets
-          );
-          allPositions.push(...networkPositions);
-        } catch (error) {
-          console.error(
-            `Error fetching positions for network ${networkId}:`,
-            error
-          );
-        }
-      }
-
-      setMarketData(marketData);
-      setUserPositions(allPositions);
-      setUserGlobalData(freshGlobalData);
-    } catch (error) {
-      console.error("Error refreshing positions:", error);
-      setDataError("Failed to refresh positions data");
-    } finally {
-      setIsLoadingPositions(false);
-    }
-  };
+  // Function to refresh positions data (same orchestration as initial load).
+  const handleRefreshPositions = useCallback(async () => {
+    if (!displayAddress) return;
+    await reloadPortfolio(displayAddress, { soft: true });
+  }, [displayAddress, reloadPortfolio]);
 
   // Function to refresh all markets via POST requests
   const handleRefreshMarkets = useCallback(async () => {
@@ -3894,97 +3844,10 @@ const Portfolio = () => {
 
     const applyPortfolioComputed = (user: Record<string, unknown>) => {
       if (!isCurrentFetchUser()) return;
-      if (!user.globalUserData || !Array.isArray(user.globalUserData)) {
-        return;
-      }
-      console.log(
-        "[Portfolio] User data globalUserData:",
-        user.globalUserData
-      );
-      const globalCollateralValue =
-        user.globalUserData
-          .map((item: Record<string, unknown>) =>
-            BigInt(item.totalCollateralValue as string | number)
-          )
-          .reduce((acc: bigint, curr: bigint) => acc + curr, BigInt(0)) /
-        BigInt(1e12);
-      console.log(
-        "[Portfolio] Global collateral value:",
-        globalCollateralValue
-      );
-      const globalBorrowValue =
-        user.globalUserData
-          .map((item: Record<string, unknown>) =>
-            BigInt(item.totalBorrowValue as string | number)
-          )
-          .reduce((acc: bigint, curr: bigint) => acc + curr, BigInt(0)) /
-        BigInt(1e12);
-      console.log("[Portfolio] Global borrow value:", globalBorrowValue);
-      const globalNetPortfolioValue = globalCollateralValue - globalBorrowValue;
-      console.log(
-        "[Portfolio] Global net portfolio value:",
-        globalNetPortfolioValue
-      );
-
-      const networkValues: Record<
-        string,
-        {
-          collateral: number;
-          borrow: number;
-          netValue: number;
-        }
-      > = {};
-
-      user.globalUserData.forEach((item: Record<string, unknown>) => {
-        const network = String(item.network || "unknown");
-        const collateralValue = Number(
-          BigInt(String(item.totalCollateralValue ?? 0)) / BigInt(1e12)
-        );
-        const borrowValue = Number(
-          BigInt(String(item.totalBorrowValue ?? 0)) / BigInt(1e12)
-        );
-        const netValue = collateralValue - borrowValue;
-
-        if (!networkValues[network]) {
-          networkValues[network] = {
-            collateral: 0,
-            borrow: 0,
-            netValue: 0,
-          };
-        }
-
-        networkValues[network].collateral += collateralValue;
-        networkValues[network].borrow += borrowValue;
-        networkValues[network].netValue += netValue;
-      });
-
-      const deposits: Record<string, unknown>[] = [];
-      const borrows: Record<string, unknown>[] = [];
-      if (user.userData && Array.isArray(user.userData)) {
-        user.userData.forEach((item: Record<string, unknown>) => {
-          if (BigInt(String(item.scaledDeposits ?? 0)) > BigInt(0)) {
-            deposits.push(item);
-          }
-          if (BigInt(String(item.scaledBorrows ?? 0)) > BigInt(0)) {
-            borrows.push(item);
-          }
-        });
-      }
-      const computedUser = {
-        ...user,
-        computed: {
-          globalCollateralValue: Number(globalCollateralValue),
-          globalBorrowValue: Number(globalBorrowValue),
-          globalNetPortfolioValue: Number(globalNetPortfolioValue),
-          networkValues: networkValues,
-          deposits,
-          borrows,
-        },
-      };
+      const computedUser = applyPortfolioUserComputed(user);
+      if (!computedUser) return;
       console.log("[Portfolio] User:", computedUser);
-      if (!isCurrentFetchUser()) return;
       setUser(computedUser);
-      console.log("[Portfolio] Network values:", networkValues);
     };
 
     try {
@@ -4001,10 +3864,7 @@ const Portfolio = () => {
         console.log("[Portfolio] User data fetched from API:", user);
 
         if (user.avatar || user.avatarImage || user.profileImage) {
-          const avatarUrl =
-            (user.avatar || user.avatarImage || user.profileImage) as string;
-          setUserProfileAvatar(avatarUrl);
-          console.log("[Portfolio] User profile avatar found:", avatarUrl);
+          setUserProfileAvatar(extractUserProfileAvatar(user));
         } else {
           setUserProfileAvatar(null);
         }
@@ -4047,214 +3907,6 @@ const Portfolio = () => {
       }
     }
   };
-
-  useEffect(() => {
-    if (!displayAddress) return;
-    // Reset in-flight state when address changes so new address always fetches
-    fetchUserInFlight.current = false;
-    fetchUserAddressRef.current = null;
-    fetchUser(displayAddress);
-  }, [displayAddress]);
-
-  // Fetch market data for all enabled networks when user data is available.
-  // Also fires after a 6s timeout so markets load even if fetchUser stalls (xChain race).
-  useEffect(() => {
-    const fetchMarketDataForAllNetworks = async () => {
-      // Proceed if user data is ready OR address is present (markets don't require user data)
-      if (!displayAddress && !user?.computed) {
-        return;
-      }
-
-      try {
-        const enabledNetworks = getEnabledNetworks();
-
-        // Market POST `/market-data/...` for visible table rows is handled in
-        // `usePortfolioVisibleChainLive` (intersection) before user-data fetch.
-
-        // GET-backed `fetchAllMarkets` for portfolio display
-        const allMarketData: unknown[] = [];
-        for (const networkId of enabledNetworks) {
-          try {
-            const markets = filterPortfolioVisibleMarketRows(
-              networkId as NetworkId,
-              await fetchAllMarkets(networkId as NetworkId)
-            );
-            allMarketData.push(...markets);
-          } catch (error) {
-            console.error(
-              `Error fetching market data for network ${networkId}:`,
-              error
-            );
-          }
-        }
-
-        console.log("[Portfolio] Fetched market data for all networks:", {
-          count: allMarketData.length,
-          networks: enabledNetworks,
-        });
-
-        setMarketData(allMarketData);
-      } catch (error) {
-        console.error("Error fetching market data:", error);
-      }
-    };
-
-    fetchMarketDataForAllNetworks();
-    // Fallback: if user data hasn't resolved in 6s (xChain wallet init race), load markets anyway
-    const fallbackTimer = setTimeout(() => {
-      if (displayAddress) void fetchMarketDataForAllNetworks();
-    }, 6000);
-    return () => clearTimeout(fallbackTimer);
-  }, [user?.computed, activeAccount?.address, displayAddress]);
-
-  // Fetch user global data and market data when wallet connects
-  // useEffect(() => {
-  //   const fetchData = async () => {
-  //     if (!activeAccount?.address || !currentNetwork) {
-  //       setUserGlobalData(null);
-  //       setMarketData([]);
-  //       return;
-  //     }
-
-  //     setIsLoadingData(true);
-  //     setDataError(null);
-
-  //     try {
-  //       console.log(
-  //         "Fetching user global data for:",
-  //         activeAccount.address,
-  //         "on network:",
-  //         currentNetwork
-  //       );
-
-  //       // fetch market data from api for faster response on page load
-  //       // Fetch markets first, then global data (so we can pass marketData for healthFactorIndex calculation)
-  //       const markets = await fetchAllMarkets(currentNetwork);
-  //       const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-  //       const marketDataResponse =
-  //         await dorkfiAPIService.getAllMarketDataByNetwork(currentNetwork);
-  //       const freshMarketData = marketDataResponse.success
-  //         ? marketDataResponse.data.map((item: any) => {
-  //             // Try multiple matching strategies to find the correct token
-  //             let token = tokens.find(
-  //               (t) =>
-  //                 t.originalContractId === `${item.marketId}` &&
-  //                 t.poolId === `${item.appId}`
-  //             );
-
-  //             // If not found, try matching by underlyingContractId
-  //             if (!token) {
-  //               token = tokens.find(
-  //                 (t) =>
-  //                   t.underlyingContractId === `${item.marketId}` &&
-  //                   t.poolId === `${item.appId}`
-  //               );
-  //             }
-
-  //             // If still not found, try matching by poolId and marketId "0" (for network tokens like VOI)
-  //             if (!token && item.marketId === "0") {
-  //               token = tokens.find(
-  //                 (t) =>
-  //                   t.poolId === `${item.appId}` &&
-  //                   (t.assetId === "0" || t.originalContractId === "0")
-  //               );
-  //             }
-
-  //             // Log if token not found for debugging
-  //             if (!token) {
-  //               console.warn(
-  //                 `Token not found for marketId ${item.marketId}, appId ${item.appId}`,
-  //                 {
-  //                   availableTokens: tokens.map((t) => ({
-  //                     symbol: t.symbol,
-  //                     originalContractId: t.originalContractId,
-  //                     underlyingContractId: t.underlyingContractId,
-  //                     poolId: t.poolId,
-  //                   })),
-  //                 }
-  //               );
-  //             }
-
-  //             return enhanceAVMMarketInfo(item, token as any);
-  //           })
-  //         : [];
-  //       const marketData = markets;
-
-  //       const globalData = await fetchUserGlobalData(
-  //         activeAccount.address,
-  //         currentNetwork,
-  //         marketData
-  //       );
-
-  //       // Fetch user positions from all enabled networks
-  //       const enabledNetworks = getEnabledNetworks();
-  //       const allPositions = [];
-
-  //       for (const networkId of enabledNetworks) {
-  //         try {
-  //           const networkMarkets = await fetchAllMarkets(networkId);
-  //           const networkPositions = await fetchUserPositions(
-  //             activeAccount.address,
-  //             networkId,
-  //             networkMarkets
-  //           );
-  //           allPositions.push(...networkPositions);
-  //         } catch (error) {
-  //           console.error(
-  //             `Error fetching positions for network ${networkId}:`,
-  //             error
-  //           );
-  //         }
-  //       }
-
-  //       console.log({
-  //         markets,
-  //         freshMarketData,
-  //         marketData,
-  //         globalData: globalData,
-  //         positions: allPositions,
-  //       });
-
-  //       if (globalData) {
-  //         console.log("User global data fetched:", globalData);
-  //         setUserGlobalData(globalData);
-  //       } else {
-  //         console.log("No user global data found");
-  //         setUserGlobalData(null);
-  //       }
-
-  //       if (freshMarketData) {
-  //         console.log("Market data fetched:", freshMarketData);
-  //         setMarketData(freshMarketData);
-  //       } else {
-  //         console.log("No market data found");
-  //         setMarketData([]);
-  //       }
-
-  //       if (allPositions && allPositions.length > 0) {
-  //         console.log(
-  //           "User positions fetched from all networks:",
-  //           allPositions
-  //         );
-  //         setUserPositions(allPositions);
-  //       } else {
-  //         console.log("No user positions found");
-  //         setUserPositions([]);
-  //       }
-  //     } catch (error) {
-  //       console.error("Error fetching data:", error);
-  //       setDataError(
-  //         error instanceof Error ? error.message : "Failed to fetch data"
-  //       );
-  //       setUserGlobalData(null);
-  //       setMarketData([]);
-  //     } finally {
-  //       setIsLoadingData(false);
-  //     }
-  //   };
-
-  //   fetchData();
-  // }, [activeAccount?.address, currentNetwork]);
 
   // Reset supplied list page when filters change
   useEffect(() => {
@@ -5362,8 +5014,8 @@ const Portfolio = () => {
     [activeAccount?.address, toast]
   );
 
-  // Show loading state
-  if (isLoadingData) {
+  // Show loading state during initial portfolio fetch (headline data not ready yet)
+  if (isLoadingData && !user) {
     return (
       <div className="space-y-3 sm:space-y-6">
         {/* Hero skeleton — hidden on mobile to match connected layout */}

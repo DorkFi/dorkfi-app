@@ -2577,7 +2577,7 @@ const MarketsTable = () => {
 
   // Handle refresh button click
   const handleRefresh = () => {
-    loadAllMarkets();
+    loadAllMarkets(true);
     setMarketsToolbarAlgoRefreshNonce((n) => n + 1);
   };
 
