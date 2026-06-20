@@ -69,3 +69,52 @@ export function hasActivePortfolioPositionFilters(
     searchTerm.trim() !== ""
   );
 }
+
+export type PortfolioPositionFilterItem = {
+  asset: string;
+  poolId?: string;
+  network?: string;
+};
+
+export type PortfolioPositionFilterOptions = {
+  searchTerm?: string;
+  networkFilter: PortfolioNetworkFilterValue;
+  marketFilter?: MarketFilter;
+  /** Used for market-tier matching when the row has no network field. */
+  marketNetworkFallback?: string;
+};
+
+/** Shared filter for supplied/borrowed rows, pool breakdown, and tab counts. */
+export function itemMatchesPortfolioPositionFilters(
+  item: PortfolioPositionFilterItem,
+  options: PortfolioPositionFilterOptions
+): boolean {
+  const search = options.searchTerm?.trim();
+  if (search && !item.asset.toLowerCase().includes(search.toLowerCase())) {
+    return false;
+  }
+
+  if (options.networkFilter !== "all" && item.network) {
+    if (
+      !positionMatchesNetworkFilter(item.network, options.networkFilter)
+    ) {
+      return false;
+    }
+  }
+
+  const marketFilter = options.marketFilter ?? "all";
+  if (marketFilter !== "all") {
+    const networkForMarket = item.network ?? options.marketNetworkFallback;
+    if (
+      !positionMatchesMarketFilter(
+        networkForMarket,
+        item.poolId,
+        marketFilter
+      )
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}

@@ -29,7 +29,6 @@ type PortfolioInsightsHubProps = {
   embedded?: boolean;
   layout?: PortfolioInsightsLayout;
   showNetworkRow: boolean;
-  poolPortfolioBreakdown: PortfolioPoolBreakdownRow[];
   networkPortfolioPoolsFiltered: PortfolioPoolBreakdownRow[];
   positionsNetworkFilter: PortfolioNetworkFilterValue;
   positionsMarketFilter: MarketFilter;
@@ -52,7 +51,6 @@ const PortfolioInsightsHub = ({
   embedded = false,
   layout = "chips",
   showNetworkRow,
-  poolPortfolioBreakdown,
   networkPortfolioPoolsFiltered,
   positionsNetworkFilter,
   positionsMarketFilter,
@@ -86,13 +84,13 @@ const PortfolioInsightsHub = ({
     showAchievementsRow && (isLoading || isFetching);
 
   const networkSummary = useMemo(() => {
-    const count = poolPortfolioBreakdown.length;
-    const netTotal = poolPortfolioBreakdown.reduce(
+    const count = networkPortfolioPoolsFiltered.length;
+    const netTotal = networkPortfolioPoolsFiltered.reduce(
       (sum, row) => sum + row.netValue,
       0
     );
     return { count, netTotal };
-  }, [poolPortfolioBreakdown]);
+  }, [networkPortfolioPoolsFiltered]);
 
   const visibleRows = [
     showNetworkRow,

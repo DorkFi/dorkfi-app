@@ -76,8 +76,7 @@ import { MarketRowTokenIcon } from "@/components/markets/MarketRowTokenIcon";
 import { marketRowForPortfolioPosition } from "@/utils/marketRowForPortfolioPosition";
 import {
   enabledNetworksHaveDMarket,
-  positionMatchesMarketFilter,
-  positionMatchesNetworkFilter,
+  itemMatchesPortfolioPositionFilters,
   type PortfolioNetworkFilterValue,
 } from "@/utils/portfolioMarketFilter";
 import type { MarketFilter } from "@/hooks/useOnDemandMarketData";
@@ -2266,16 +2265,15 @@ const Portfolio = () => {
   }, [user?.globalUserData, deposits, borrows, marketData]);
 
   const networkPortfolioPoolsFiltered = useMemo(() => {
-    return poolPortfolioBreakdown.filter((row) => {
-      if (!positionMatchesNetworkFilter(row.network, positionsNetworkFilter)) {
-        return false;
-      }
-      return positionMatchesMarketFilter(
-        row.network,
-        row.poolId,
-        positionsMarketFilter
-      );
-    });
+    return poolPortfolioBreakdown.filter((row) =>
+      itemMatchesPortfolioPositionFilters(
+        { asset: row.title, poolId: row.poolId, network: row.network },
+        {
+          networkFilter: positionsNetworkFilter,
+          marketFilter: positionsMarketFilter,
+        }
+      )
+    );
   }, [
     poolPortfolioBreakdown,
     positionsNetworkFilter,
@@ -4269,27 +4267,28 @@ const Portfolio = () => {
   }, [positionsSearchTerm, positionsNetworkFilter, positionsMarketFilter]);
 
   const positionPassesPortfolioFilters = useCallback(
-    (item: { asset: string; poolId?: string; network?: string }) => {
-      if (positionsSearchTerm.trim()) {
-        const q = positionsSearchTerm.toLowerCase();
-        if (!item.asset.toLowerCase().includes(q)) return false;
-      }
-      const network = (item as ItemWithNetwork).network || currentNetwork;
-      if (!positionMatchesNetworkFilter(network, positionsNetworkFilter)) {
-        return false;
-      }
-      return positionMatchesMarketFilter(
-        network,
-        item.poolId,
-        positionsMarketFilter
-      );
-    },
+    (item: { asset: string; poolId?: string; network?: string }) =>
+      itemMatchesPortfolioPositionFilters(item, {
+        searchTerm: positionsSearchTerm,
+        networkFilter: positionsNetworkFilter,
+        marketFilter: positionsMarketFilter,
+        marketNetworkFallback: currentNetwork,
+      }),
     [
       positionsSearchTerm,
       positionsNetworkFilter,
       positionsMarketFilter,
       currentNetwork,
     ]
+  );
+
+  const accruedInterestPassesNetworkFilter = useCallback(
+    (item: { asset: string; network?: string }) =>
+      itemMatchesPortfolioPositionFilters(item, {
+        searchTerm: accruedInterestSearchTerm,
+        networkFilter: positionsNetworkFilter,
+      }),
+    [accruedInterestSearchTerm, positionsNetworkFilter]
   );
 
   const filteredSuppliedCount = useMemo(
@@ -5679,7 +5678,6 @@ const Portfolio = () => {
                     <PortfolioInsightsHub
                       layout="toolbar"
                       showNetworkRow={poolPortfolioBreakdown.length > 0}
-                      poolPortfolioBreakdown={poolPortfolioBreakdown}
                       networkPortfolioPoolsFiltered={
                         networkPortfolioPoolsFiltered
                       }
@@ -5750,39 +5748,7 @@ const Portfolio = () => {
                     <div className="space-y-3">
                       {(() => {
                         const filteredAndSorted = deposits
-                          .filter((deposit) => {
-                            if (positionsSearchTerm) {
-                              const searchLower =
-                                positionsSearchTerm.toLowerCase();
-                              const assetMatch = deposit.asset
-                                .toLowerCase()
-                                .includes(searchLower);
-                              if (!assetMatch) return false;
-                            }
-                            if (positionsNetworkFilter === "all")
-                              return true;
-                            const depositNetwork = (deposit as ItemWithNetwork).network;
-                            if (depositNetwork) {
-                              const normalizedNetwork =
-                                depositNetwork.toLowerCase();
-                              if (positionsNetworkFilter === "algorand") {
-                                return normalizedNetwork.includes("algorand");
-                              } else if (
-                                positionsNetworkFilter === "voi"
-                              ) {
-                                return normalizedNetwork.includes("voi");
-                              }
-                            }
-                            return true;
-                          })
-                          .filter((deposit) =>
-                            positionMatchesMarketFilter(
-                              (deposit as ItemWithNetwork).network ||
-                                currentNetwork,
-                              deposit.poolId,
-                              positionsMarketFilter
-                            )
-                          )
+                          .filter(positionPassesPortfolioFilters)
                           .sort((a, b) => {
                             let comparison = 0;
 
@@ -6336,73 +6302,7 @@ const Portfolio = () => {
                         <TableBody>
                           {(() => {
                             const filteredAndSorted = deposits
-                              .filter((deposit) => {
-                                // Filter by search term
-                                if (positionsSearchTerm) {
-                                  const searchLower =
-                                    positionsSearchTerm.toLowerCase();
-                                  const assetMatch = deposit.asset
-                                    .toLowerCase()
-                                    .includes(searchLower);
-                                  if (!assetMatch) {
-                                    return false;
-                                  }
-                                }
-
-                                // Filter by network
-                                if (positionsNetworkFilter === "all") {
-                                  return true; // Show all deposits
-                                }
-
-                                // Get network from deposit (if available) or infer from networkValues
-                                const depositNetwork = (deposit as ItemWithNetwork).network;
-                                if (depositNetwork) {
-                                  const normalizedNetwork =
-                                    depositNetwork.toLowerCase();
-                                  if (
-                                    positionsNetworkFilter === "algorand"
-                                  ) {
-                                    return normalizedNetwork.includes(
-                                      "algorand"
-                                    );
-                                  } else if (
-                                    positionsNetworkFilter === "voi"
-                                  ) {
-                                    return normalizedNetwork.includes("voi");
-                                  }
-                                }
-
-                                // Fallback: try to match by network values
-                                const matchingNetwork = Object.entries(
-                                  user.computed.networkValues
-                                ).find(([network, values]: [string, unknown]) => {
-                                  const normalizedNetwork =
-                                    network.toLowerCase();
-                                  if (
-                                    positionsNetworkFilter === "algorand"
-                                  ) {
-                                    return normalizedNetwork.includes(
-                                      "algorand"
-                                    );
-                                  } else if (
-                                    positionsNetworkFilter === "voi"
-                                  ) {
-                                    return normalizedNetwork.includes("voi");
-                                  }
-                                  return false;
-                                });
-
-                                // If we can't determine, show it (better to show than hide)
-                                return true;
-                              })
-                              .filter((deposit) =>
-                                positionMatchesMarketFilter(
-                                  (deposit as ItemWithNetwork).network ||
-                                    currentNetwork,
-                                  deposit.poolId,
-                                  positionsMarketFilter
-                                )
-                              )
+                              .filter(positionPassesPortfolioFilters)
                               .sort((a, b) => {
                                 let comparison = 0;
 
@@ -6920,49 +6820,7 @@ const Portfolio = () => {
                   {!isMobile &&
                     (() => {
                       const filteredAndSorted = deposits
-                        .filter((deposit) => {
-                          // Filter by search term
-                          if (positionsSearchTerm) {
-                            const searchLower =
-                              positionsSearchTerm.toLowerCase();
-                            const assetMatch = deposit.asset
-                              .toLowerCase()
-                              .includes(searchLower);
-                            if (!assetMatch) {
-                              return false;
-                            }
-                          }
-
-                          // Filter by network
-                          if (positionsNetworkFilter === "all") {
-                            return true;
-                          }
-
-                          const depositNetwork = (deposit as ItemWithNetwork).network;
-                          if (depositNetwork) {
-                            const normalizedNetwork =
-                              depositNetwork.toLowerCase();
-                            if (positionsNetworkFilter === "algorand") {
-                              return normalizedNetwork.includes("algorand");
-                            } else if (positionsNetworkFilter === "voi") {
-                              return normalizedNetwork.includes("voi");
-                            }
-                          }
-
-                          const matchingNetwork = Object.entries(
-                            user?.computed?.networkValues || {}
-                          ).find(([network, values]: [string, unknown]) => {
-                            const normalizedNetwork = network.toLowerCase();
-                            if (positionsNetworkFilter === "algorand") {
-                              return normalizedNetwork.includes("algorand");
-                            } else if (positionsNetworkFilter === "voi") {
-                              return normalizedNetwork.includes("voi");
-                            }
-                            return false;
-                          });
-
-                          return true;
-                        })
+                        .filter(positionPassesPortfolioFilters)
                         .sort((a, b) => {
                           let comparison = 0;
 
@@ -7034,39 +6892,7 @@ const Portfolio = () => {
                     <div className="space-y-3">
                       {(() => {
                         const filteredAndSorted = borrows
-                          .filter((borrow) => {
-                            if (positionsSearchTerm) {
-                              const searchLower =
-                                positionsSearchTerm.toLowerCase();
-                              const assetMatch = borrow.asset
-                                .toLowerCase()
-                                .includes(searchLower);
-                              if (!assetMatch) return false;
-                            }
-                            if (positionsNetworkFilter === "all")
-                              return true;
-                            const borrowNetwork = (borrow as ItemWithNetwork).network;
-                            if (borrowNetwork) {
-                              const normalizedNetwork =
-                                borrowNetwork.toLowerCase();
-                              if (positionsNetworkFilter === "algorand") {
-                                return normalizedNetwork.includes("algorand");
-                              } else if (
-                                positionsNetworkFilter === "voi"
-                              ) {
-                                return normalizedNetwork.includes("voi");
-                              }
-                            }
-                            return true;
-                          })
-                          .filter((borrow) =>
-                            positionMatchesMarketFilter(
-                              (borrow as ItemWithNetwork).network ||
-                                currentNetwork,
-                              borrow.poolId,
-                              positionsMarketFilter
-                            )
-                          )
+                          .filter(positionPassesPortfolioFilters)
                           .sort((a, b) => {
                             let comparison = 0;
                             switch (borrowedAssetsSort.column) {
@@ -7482,70 +7308,7 @@ const Portfolio = () => {
                         <TableBody>
                           {(() => {
                             const filteredAndSorted = borrows
-                              .filter((borrow) => {
-                                // Filter by search term
-                                if (positionsSearchTerm) {
-                                  const searchLower =
-                                    positionsSearchTerm.toLowerCase();
-                                  const assetMatch = borrow.asset
-                                    .toLowerCase()
-                                    .includes(searchLower);
-                                  if (!assetMatch) {
-                                    return false;
-                                  }
-                                }
-
-                                // Filter by network
-                                if (positionsNetworkFilter === "all") {
-                                  return true;
-                                }
-
-                                const borrowNetwork = (borrow as ItemWithNetwork).network;
-                                if (borrowNetwork) {
-                                  const normalizedNetwork =
-                                    borrowNetwork.toLowerCase();
-                                  if (
-                                    positionsNetworkFilter === "algorand"
-                                  ) {
-                                    return normalizedNetwork.includes(
-                                      "algorand"
-                                    );
-                                  } else if (
-                                    positionsNetworkFilter === "voi"
-                                  ) {
-                                    return normalizedNetwork.includes("voi");
-                                  }
-                                }
-
-                                const matchingNetwork = Object.entries(
-                                  user?.computed?.networkValues || {}
-                                ).find(([network, values]: [string, unknown]) => {
-                                  const normalizedNetwork =
-                                    network.toLowerCase();
-                                  if (
-                                    positionsNetworkFilter === "algorand"
-                                  ) {
-                                    return normalizedNetwork.includes(
-                                      "algorand"
-                                    );
-                                  } else if (
-                                    positionsNetworkFilter === "voi"
-                                  ) {
-                                    return normalizedNetwork.includes("voi");
-                                  }
-                                  return false;
-                                });
-
-                                return true;
-                              })
-                              .filter((borrow) =>
-                                positionMatchesMarketFilter(
-                                  (borrow as ItemWithNetwork).network ||
-                                    currentNetwork,
-                                  borrow.poolId,
-                                  positionsMarketFilter
-                                )
-                              )
+                              .filter(positionPassesPortfolioFilters)
                               .sort((a, b) => {
                                 let comparison = 0;
 
@@ -7905,49 +7668,7 @@ const Portfolio = () => {
                   {!isMobile &&
                     (() => {
                       const filteredAndSorted = borrows
-                        .filter((borrow) => {
-                          // Filter by search term
-                          if (positionsSearchTerm) {
-                            const searchLower =
-                              positionsSearchTerm.toLowerCase();
-                            const assetMatch = borrow.asset
-                              .toLowerCase()
-                              .includes(searchLower);
-                            if (!assetMatch) {
-                              return false;
-                            }
-                          }
-
-                          // Filter by network
-                          if (positionsNetworkFilter === "all") {
-                            return true;
-                          }
-
-                          const borrowNetwork = (borrow as ItemWithNetwork).network;
-                          if (borrowNetwork) {
-                            const normalizedNetwork =
-                              borrowNetwork.toLowerCase();
-                            if (positionsNetworkFilter === "algorand") {
-                              return normalizedNetwork.includes("algorand");
-                            } else if (positionsNetworkFilter === "voi") {
-                              return normalizedNetwork.includes("voi");
-                            }
-                          }
-
-                          const matchingNetwork = Object.entries(
-                            user?.computed?.networkValues || {}
-                          ).find(([network, values]: [string, unknown]) => {
-                            const normalizedNetwork = network.toLowerCase();
-                            if (positionsNetworkFilter === "algorand") {
-                              return normalizedNetwork.includes("algorand");
-                            } else if (positionsNetworkFilter === "voi") {
-                              return normalizedNetwork.includes("voi");
-                            }
-                            return false;
-                          });
-
-                          return true;
-                        })
+                        .filter(positionPassesPortfolioFilters)
                         .sort((a, b) => {
                           let comparison = 0;
 
@@ -8593,28 +8314,7 @@ const Portfolio = () => {
                     <div className="space-y-3">
                       {(() => {
                         const filteredAndSorted = accruedInterestItems
-                          .filter((item) => {
-                            if (accruedInterestSearchTerm) {
-                              const searchLower =
-                                accruedInterestSearchTerm.toLowerCase();
-                              const assetMatch = item.asset
-                                .toLowerCase()
-                                .includes(searchLower);
-                              if (!assetMatch) return false;
-                            }
-                            if (positionsNetworkFilter === "all") return true;
-                            const itemNetwork = (item as ItemWithNetwork).network;
-                            if (itemNetwork) {
-                              const normalizedNetwork =
-                                itemNetwork.toLowerCase();
-                              if (positionsNetworkFilter === "algorand") {
-                                return normalizedNetwork.includes("algorand");
-                              } else if (positionsNetworkFilter === "voi") {
-                                return normalizedNetwork.includes("voi");
-                              }
-                            }
-                            return true;
-                          })
+                          .filter(accruedInterestPassesNetworkFilter)
                           .sort((a, b) => {
                             let comparison = 0;
                             switch (accruedInterestSort.column) {
@@ -8843,54 +8543,7 @@ const Portfolio = () => {
                         <TableBody>
                           {(() => {
                             const filteredAndSorted = accruedInterestItems
-                              .filter((item) => {
-                                // Filter by search term
-                                if (accruedInterestSearchTerm) {
-                                  const searchLower =
-                                    accruedInterestSearchTerm.toLowerCase();
-                                  const assetMatch = item.asset
-                                    .toLowerCase()
-                                    .includes(searchLower);
-                                  if (!assetMatch) {
-                                    return false;
-                                  }
-                                }
-
-                                // Filter by network
-                                if (positionsNetworkFilter === "all") {
-                                  return true;
-                                }
-
-                                const itemNetwork = (item as ItemWithNetwork).network;
-                                if (itemNetwork) {
-                                  const normalizedNetwork =
-                                    itemNetwork.toLowerCase();
-                                  if (positionsNetworkFilter === "algorand") {
-                                    return normalizedNetwork.includes(
-                                      "algorand"
-                                    );
-                                  } else if (positionsNetworkFilter === "voi") {
-                                    return normalizedNetwork.includes("voi");
-                                  }
-                                }
-
-                                const matchingNetwork = Object.entries(
-                                  user?.computed?.networkValues || {}
-                                ).find(([network, values]: [string, unknown]) => {
-                                  const normalizedNetwork =
-                                    network.toLowerCase();
-                                  if (positionsNetworkFilter === "algorand") {
-                                    return normalizedNetwork.includes(
-                                      "algorand"
-                                    );
-                                  } else if (positionsNetworkFilter === "voi") {
-                                    return normalizedNetwork.includes("voi");
-                                  }
-                                  return false;
-                                });
-
-                                return true;
-                              })
+                              .filter(accruedInterestPassesNetworkFilter)
                               .sort((a, b) => {
                                 let comparison = 0;
 
@@ -9093,46 +8746,7 @@ const Portfolio = () => {
                   {!isMobile &&
                     (() => {
                       const filteredAndSorted = accruedInterestItems
-                        .filter((item) => {
-                          if (accruedInterestSearchTerm) {
-                            const searchLower =
-                              accruedInterestSearchTerm.toLowerCase();
-                            const assetMatch = item.asset
-                              .toLowerCase()
-                              .includes(searchLower);
-                            if (!assetMatch) {
-                              return false;
-                            }
-                          }
-
-                          if (positionsNetworkFilter === "all") {
-                            return true;
-                          }
-
-                          const itemNetwork = (item as ItemWithNetwork).network;
-                          if (itemNetwork) {
-                            const normalizedNetwork = itemNetwork.toLowerCase();
-                            if (positionsNetworkFilter === "algorand") {
-                              return normalizedNetwork.includes("algorand");
-                            } else if (positionsNetworkFilter === "voi") {
-                              return normalizedNetwork.includes("voi");
-                            }
-                          }
-
-                          const matchingNetwork = Object.entries(
-                            user?.computed?.networkValues || {}
-                          ).find(([network, values]: [string, unknown]) => {
-                            const normalizedNetwork = network.toLowerCase();
-                            if (positionsNetworkFilter === "algorand") {
-                              return normalizedNetwork.includes("algorand");
-                            } else if (positionsNetworkFilter === "voi") {
-                              return normalizedNetwork.includes("voi");
-                            }
-                            return false;
-                          });
-
-                          return true;
-                        })
+                        .filter(accruedInterestPassesNetworkFilter)
                         .sort((a, b) => {
                           let comparison = 0;
 
