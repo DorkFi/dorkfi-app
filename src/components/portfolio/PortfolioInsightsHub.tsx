@@ -3,11 +3,7 @@ import { Gift, Globe, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import DorkFiButton from "@/components/ui/DorkFiButton";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { DesktopTooltip } from "@/components/ui/tooltip";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import { PORTFOLIO_ACHIEVEMENT_FAMILIES } from "@/data/achievementsCatalog";
 import { useUserAchievements } from "@/hooks/useUserAchievements";
@@ -125,84 +121,75 @@ const PortfolioInsightsHub = ({
       className={cn(
         "grid gap-2",
         visibleRows === 1 && "grid-cols-1",
-        visibleRows === 2 && "grid-cols-2",
-        visibleRows === 3 && "grid-cols-3",
+        visibleRows === 2 && "grid-cols-1 sm:grid-cols-2",
+        visibleRows === 3 && "grid-cols-1 sm:grid-cols-3",
         className
       )}
     >
       {showNetworkRow ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <DorkFiButton
-              type="button"
-              variant="secondary"
-              size="sm"
-              className="h-10 w-full min-w-0 gap-1.5 px-2"
-              onClick={() => setNetworkModalOpen(true)}
-              aria-label={`Networks. ${networkTooltip}. Open breakdown.`}
-            >
-              <Globe className="h-4 w-4 shrink-0" aria-hidden />
-              <span className="truncate">Networks</span>
-            </DorkFiButton>
-          </TooltipTrigger>
-          <TooltipContent>{networkTooltip}</TooltipContent>
-        </Tooltip>
+        <DesktopTooltip content={networkTooltip}>
+          <DorkFiButton
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="h-10 w-full min-w-0 gap-1.5 px-2"
+            onClick={() => setNetworkModalOpen(true)}
+            aria-label={`Networks. ${networkTooltip}. Open breakdown.`}
+          >
+            <Globe className="h-4 w-4 shrink-0" aria-hidden />
+            <span className="truncate">Networks</span>
+          </DorkFiButton>
+        </DesktopTooltip>
       ) : null}
 
       {showAchievementsRow ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <DorkFiButton
-              type="button"
-              variant="secondary"
-              size="sm"
-              className="h-10 w-full min-w-0 gap-1.5 px-2"
-              disabled={achievementsLoading}
-              onClick={() => setAchievementsModalOpen(true)}
-              aria-label={`Achievements. ${achievementsTooltip}. Open details.`}
-            >
-              {achievementsLoading ? (
-                <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-              ) : (
-                <AchievementWhaleIcon className="h-4 w-4 shrink-0" />
-              )}
-              <span className="truncate">
-                {achievementsLoading
-                  ? "…"
-                  : `${earnedCount}/${totalFamilies} Achievements`}
-              </span>
-            </DorkFiButton>
-          </TooltipTrigger>
-          <TooltipContent>{achievementsTooltip}</TooltipContent>
-        </Tooltip>
+        <DesktopTooltip content={achievementsTooltip}>
+          <DorkFiButton
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="h-10 w-full min-w-0 gap-1.5 px-2"
+            disabled={achievementsLoading}
+            onClick={() => setAchievementsModalOpen(true)}
+            aria-label={`Achievements. ${achievementsTooltip}. Open details.`}
+          >
+            {achievementsLoading ? (
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+            ) : (
+              <AchievementWhaleIcon className="h-4 w-4 shrink-0" />
+            )}
+            <span className="truncate">
+              {achievementsLoading
+                ? "…"
+                : `${earnedCount}/${totalFamilies} Achievements`}
+            </span>
+          </DorkFiButton>
+        </DesktopTooltip>
       ) : null}
 
       {showNftRow ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <DorkFiButton
-              type="button"
-              variant={nftHasClaimable ? "moderate" : "secondary"}
-              size="sm"
-              className={cn(
-                "h-10 w-full min-w-0 gap-1.5 px-2",
-                nftHasClaimable &&
-                  "border-yellow-500/60 bg-yellow-400/90 text-slate-900 hover:bg-yellow-300"
-              )}
-              disabled={nftRewardsLoading}
-              onClick={onOpenNftRewards}
-              aria-label={`NFT rewards. ${nftTooltip}`}
-            >
-              {nftRewardsLoading ? (
-                <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-              ) : (
-                <Gift className="h-4 w-4 shrink-0" aria-hidden />
-              )}
-              <span className="truncate">Rewards</span>
-            </DorkFiButton>
-          </TooltipTrigger>
-          <TooltipContent>{nftTooltip}</TooltipContent>
-        </Tooltip>
+        <DesktopTooltip content={nftTooltip}>
+          <DorkFiButton
+            type="button"
+            variant={nftHasClaimable ? "moderate" : "secondary"}
+            size="sm"
+            className={cn(
+              "h-10 w-full min-w-0 gap-1.5 px-2",
+              nftHasClaimable &&
+                "border-yellow-500/60 bg-yellow-400/90 text-slate-900 hover:bg-yellow-300"
+            )}
+            disabled={nftRewardsLoading}
+            onClick={onOpenNftRewards}
+            aria-label={`NFT rewards. ${nftTooltip}`}
+          >
+            {nftRewardsLoading ? (
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+            ) : (
+              <Gift className="h-4 w-4 shrink-0" aria-hidden />
+            )}
+            <span className="truncate">Rewards</span>
+          </DorkFiButton>
+        </DesktopTooltip>
       ) : null}
     </div>
   );

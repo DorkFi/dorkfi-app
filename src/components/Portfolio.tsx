@@ -105,10 +105,10 @@ import DepositsList from "./DepositsList";
 import BorrowsList from "./BorrowsList";
 import PortfolioModals from "./PortfolioModals";
 import { resolveSupplyBorrowToken } from "./SupplyBorrowModal";
-import { XchainUsdcBridgeControls } from "@/components/xchain/XchainUsdcBridgeControls";
 import PortfolioTableMobileCard from "./portfolio/PortfolioTableMobileCard";
 import AccruedInterestMobileCard from "./portfolio/AccruedInterestMobileCard";
 import PortfolioInsightsHub from "@/components/portfolio/PortfolioInsightsHub";
+import PortfolioWalletStatusBar from "@/components/portfolio/PortfolioWalletStatusBar";
 import { NftHolderClaimManualModal } from "@/components/portfolio/NftHolderClaimManualModal";
 import {
   NftHolderClaimSuccessModal,
@@ -5365,26 +5365,32 @@ const Portfolio = () => {
   // Show loading state
   if (isLoadingData) {
     return (
-      <div className="space-y-6">
-        {/* Hero Section Skeleton */}
-        <DorkFiCard className="relative text-center overflow-hidden p-6 md:p-8">
+      <div className="space-y-3 sm:space-y-6">
+        {/* Hero skeleton — hidden on mobile to match connected layout */}
+        <DorkFiCard className="relative hidden overflow-hidden p-6 text-center md:p-8 sm:block">
           <div className="relative z-10">
-            <Skeleton className="h-12 w-64 mx-auto mb-4" />
-            <Skeleton className="h-6 w-96 mx-auto" />
+            <Skeleton className="mx-auto mb-4 h-12 w-64" />
+            <Skeleton className="mx-auto h-6 w-96" />
           </div>
         </DorkFiCard>
 
         {/* Health Factor Skeleton */}
-        <DorkFiCard className="p-8">
-          <div className="grid grid-cols-1 xl:grid-cols-[420px,1fr] gap-8 lg:gap-10">
-            <div className="xl:border-r-2 xl:border-ocean-teal/20 xl:pr-8">
+        <DorkFiCard className="p-4 sm:p-8">
+          <div className="grid grid-cols-1 items-start gap-4 sm:gap-8 lg:grid-cols-[420px,1fr] lg:gap-10">
+            <div className="order-2 space-y-4 lg:order-1 lg:border-r-2 lg:border-ocean-teal/20 lg:pr-8">
               <Skeleton className="h-72 w-full rounded-2xl" />
             </div>
-            <div className="space-y-6">
-              <Skeleton className="h-8 w-48" />
+            <div className="order-1 space-y-4 sm:space-y-6 lg:order-2">
+              <Skeleton className="hidden h-8 w-48 sm:block" />
+              <div className="space-y-3 sm:hidden">
+                <Skeleton className="h-8 w-48" />
+                <Skeleton className="h-4 w-full max-w-xs" />
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <Skeleton className="h-24 w-full" />
                 <Skeleton className="h-24 w-full" />
+                <Skeleton className="col-span-2 h-16 w-full sm:col-span-1 sm:h-24" />
+                <Skeleton className="hidden h-24 w-full sm:block" />
               </div>
             </div>
           </div>
@@ -5400,7 +5406,7 @@ const Portfolio = () => {
         {/* Hero Section */}
         <DorkFiCard
           hoverable
-          className="relative text-center overflow-hidden p-6 md:p-8"
+          className="relative text-center overflow-hidden px-6 py-3 md:px-8 md:py-4"
         >
           <div className="relative z-10">
             <H1 className="m-0 text-4xl md:text-5xl">
@@ -5439,30 +5445,33 @@ const Portfolio = () => {
   // Show loading state while avatar check is in progress
   if (!isAvatarResolved) {
     return (
-      <div className="space-y-6">
-        {/* Hero Section Skeleton */}
-        <DorkFiCard className="relative text-center overflow-hidden p-6 md:p-8">
+      <div className="space-y-3 sm:space-y-6">
+        {/* Hero skeleton — hidden on mobile to match connected layout */}
+        <DorkFiCard className="relative hidden overflow-hidden p-6 text-center md:p-8 sm:block">
           <div className="space-y-4">
-            <Skeleton className="h-12 w-64 mx-auto" />
-            <Skeleton className="h-6 w-full max-w-2xl mx-auto" />
-            <Skeleton className="h-4 w-48 mx-auto" />
+            <Skeleton className="mx-auto h-12 w-64" />
+            <Skeleton className="mx-auto h-6 w-full max-w-2xl" />
+            <Skeleton className="mx-auto h-4 w-48" />
           </div>
         </DorkFiCard>
 
         {/* Health Factor Skeleton */}
-        <DorkFiCard className="p-6 md:p-8">
-          <div className="grid grid-cols-1 xl:grid-cols-[420px,1fr] gap-8 lg:gap-10">
-            <div className="space-y-4">
-              <Skeleton className="h-8 w-32" />
+        <DorkFiCard className="p-4 sm:p-6 md:p-8">
+          <div className="grid grid-cols-1 items-start gap-4 sm:gap-8 lg:grid-cols-[420px,1fr] lg:gap-10">
+            <div className="order-2 space-y-4 lg:order-1 lg:border-r-2 lg:border-ocean-teal/20 lg:pr-8">
               <Skeleton className="h-72 w-full rounded-2xl" />
             </div>
-            <div className="space-y-4">
-              <Skeleton className="h-8 w-40" />
+            <div className="order-1 space-y-4 sm:space-y-6 lg:order-2">
+              <Skeleton className="hidden h-8 w-40 sm:block" />
+              <div className="space-y-3 sm:hidden">
+                <Skeleton className="h-8 w-48" />
+                <Skeleton className="h-4 w-full max-w-xs" />
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <Skeleton className="h-24 w-full" />
                 <Skeleton className="h-24 w-full" />
-                <Skeleton className="h-24 w-full" />
-                <Skeleton className="h-24 w-full" />
+                <Skeleton className="col-span-2 h-16 w-full sm:col-span-1 sm:h-24" />
+                <Skeleton className="hidden h-24 w-full sm:block" />
               </div>
             </div>
           </div>
@@ -5472,11 +5481,21 @@ const Portfolio = () => {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Hero Section */}
+    <div className="space-y-3 sm:space-y-6">
+      {dataError && (
+        <div className="rounded-lg border border-red-500/50 bg-red-500/20 p-3 sm:hidden">
+          <div className="flex items-center gap-2">
+            <div className="h-2 w-2 rounded-full bg-red-500" />
+            <span className="text-sm text-red-400">
+              Error loading data: {dataError}
+            </span>
+          </div>
+        </div>
+      )}
+      {/* Hero Section — hidden on mobile when connected; Portfolio Overview covers stats */}
       <DorkFiCard
         hoverable
-        className="relative text-center overflow-hidden p-6 md:p-8"
+        className="relative hidden overflow-hidden px-6 py-3 text-center sm:block md:px-8 md:py-4"
       >
         {/* Decorative elements */}
         {/* Birds - light mode only */}
@@ -5549,51 +5568,21 @@ const Portfolio = () => {
               <span className="hero-header">Portfolio Health</span>
             </H1>
           </div>
-          <Body className="text-sm sm:text-base md:text-lg lg:text-xl max-w-2xl md:max-w-none mx-auto">
-            <span className="block md:inline md:whitespace-nowrap">
-              Track Your Health Factor, Monitor Your Positions, and Manage Your
-              Portfolio.
-            </span>
-          </Body>
 
-          {/* Data Source Indicator */}
-          <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground">
-            <div
-              className={`w-2 h-2 rounded-full ${user?.computed || userGlobalData
-                ? "bg-green-500"
-                : "bg-gray-500"
-                }`}
-            ></div>
-            <span>
-              {user?.computed
-                ? "Global Portfolio Data"
-                : userGlobalData
-                  ? "Live Data"
-                  : "No Data"}{" "}
-              •{" "}
-              {addressName ||
-                `${activeAccount?.address.slice(
-                  0,
-                  8
-                )}...${activeAccount?.address.slice(-8)}`}
-            </span>
-            {user?.computed?.globalNetPortfolioValue !== undefined && (
-              <span className="ml-2 shrink-0">
-                • Net Value:{" "}
-                {formatCurrency(Number(user.computed.globalNetPortfolioValue), "USD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </span>
-            )}
-            <div className="mt-2 flex w-full basis-full shrink-0 justify-center px-2 empty:hidden lg:mt-0 lg:ml-2 lg:w-auto lg:basis-auto lg:px-0">
-              <XchainUsdcBridgeControls className="justify-center lg:justify-start" />
-            </div>
-            {marketData.length > 0 && totalBorrowed > 0 && (
-              <span className="ml-2">
-                • Collateral Factor:{" "}
-                {formatPercent(weightedCollateralFactor, { maximumFractionDigits: 0 })} • Liquidation
-                Threshold: {formatPercent(weightedLiquidationThreshold, { maximumFractionDigits: 1 })}
-              </span>
-            )}
-          </div>
+          <PortfolioWalletStatusBar
+            className="mt-4"
+            centered
+            hasComputedData={Boolean(user?.computed)}
+            hasUserGlobalData={Boolean(userGlobalData)}
+            addressLabel={
+              addressName ||
+              `${activeAccount?.address.slice(0, 8)}...${activeAccount?.address.slice(-8)}`
+            }
+            globalNetPortfolioValue={user?.computed?.globalNetPortfolioValue}
+            showRiskMetrics={marketData.length > 0 && totalBorrowed > 0}
+            weightedCollateralFactor={weightedCollateralFactor}
+            weightedLiquidationThreshold={weightedLiquidationThreshold}
+          />
 
           {/* Error State */}
           {dataError && (
@@ -5621,6 +5610,10 @@ const Portfolio = () => {
             walletName.includes("pera") ||
             walletName.includes("defly");
 
+          const walletAddressLabel =
+            addressName ||
+            `${activeAccount?.address.slice(0, 8)}...${activeAccount?.address.slice(-8)}`;
+
           return (
             <>
               <EnhancedHealthFactor
@@ -5628,6 +5621,15 @@ const Portfolio = () => {
                 marketContextLine={positionOverviewMarketLine}
                 totalCollateral={totalCollateral}
                 totalBorrowed={totalBorrowed}
+                walletStatus={{
+                  hasComputedData: Boolean(user?.computed),
+                  hasUserGlobalData: Boolean(userGlobalData),
+                  addressLabel: walletAddressLabel,
+                  globalNetPortfolioValue: user?.computed?.globalNetPortfolioValue,
+                  showRiskMetrics: marketData.length > 0 && totalBorrowed > 0,
+                  weightedCollateralFactor,
+                  weightedLiquidationThreshold,
+                }}
                 dorkNftImage={displayAvatar || undefined}
                 underwaterBg="/lovable-uploads/44ebe994-a30e-4eb1-a4a1-776aa2978776.png"
                 onAddCollateral={!isViewOnly ? handleAddCollateral : undefined}

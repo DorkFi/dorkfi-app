@@ -2,6 +2,7 @@ import * as React from "react"
 import * as TooltipPrimitive from "@radix-ui/react-tooltip"
 
 import { cn } from "@/lib/utils"
+import { useIsMobile } from "@/hooks/use-mobile"
 
 const TooltipProvider = TooltipPrimitive.Provider
 
@@ -29,4 +30,42 @@ const TooltipContent = React.forwardRef<
 ))
 TooltipContent.displayName = TooltipPrimitive.Content.displayName
 
-export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider }
+type DesktopTooltipProps = {
+  children: React.ReactElement
+  content: React.ReactNode
+} & Pick<
+  React.ComponentPropsWithoutRef<typeof TooltipContent>,
+  "side" | "className" | "sideOffset"
+>
+
+/** Hover tooltip for pointer devices only; renders children alone on mobile. */
+function DesktopTooltip({
+  children,
+  content,
+  side,
+  className,
+  sideOffset,
+}: DesktopTooltipProps) {
+  const isMobile = useIsMobile()
+
+  if (isMobile) {
+    return children
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent side={side} className={className} sideOffset={sideOffset}>
+        {content}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+export {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+  DesktopTooltip,
+}
