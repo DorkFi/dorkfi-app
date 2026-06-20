@@ -67,7 +67,7 @@ const PortfolioNetworkFilterDropdown = ({
             variant="outline"
             size="sm"
             className={cn(
-              "justify-between gap-1.5 rounded-lg border-border bg-muted/40 px-2.5 text-xs dark:bg-muted/25 hover:bg-muted/60 dark:hover:bg-muted/35 sm:text-sm",
+              "justify-between gap-1.5 rounded-lg border-border bg-muted/40 px-2.5 text-xs dark:bg-muted/25 hover:bg-muted/60 hover:text-foreground dark:hover:bg-muted/35 dark:hover:text-foreground data-[state=open]:bg-muted/60 data-[state=open]:text-foreground dark:data-[state=open]:bg-muted/35 sm:text-sm",
               compact
                 ? "h-8 w-auto shrink-0"
                 : "h-9 w-full min-w-[10.5rem] sm:min-w-[12rem]"
