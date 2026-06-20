@@ -91,48 +91,46 @@ const PortfolioTableMobileCard = ({
   return (
     <DorkFiCard className={`p-4 ${bgColor} border`}>
       <div className="space-y-3">
-        {/* Header: Asset Icon above Ticker + Actions */}
-        <div className="flex items-center justify-between">
-          <div className="flex flex-col items-center gap-1">
-            <MarketRowTokenIcon
-              market={{
-                icon,
-                asset,
-                iconBadgeUrl: resolvedBadgeUrl,
-              }}
-              poolLetterLabel={marketLabel}
-              imgClassName="h-12 w-12 flex-shrink-0 rounded-full object-contain"
-            />
-            <div className="text-center">
-              <div className="font-semibold text-base text-slate-800 dark:text-white">
-                {asset}
-              </div>
-              {shouldShowConfigSymbolUnderDisplayAsset(asset, configSymbol) && (
-                  <div className="text-[10px] text-muted-foreground leading-tight">
-                    {configSymbol}
-                  </div>
-                )}
-              {network && (
-                <div className="text-xs text-muted-foreground">
-                  {network.split("-")[0].charAt(0).toUpperCase() +
-                    network.split("-")[0].slice(1)}
-                </div>
-              )}
-            </div>
-          </div>
+        {/* Header: centered icon + ticker; refresh pinned top-right */}
+        <div className="relative flex flex-col items-center gap-1">
           {onRefreshClick && (
             <DorkFiButton
               variant="secondary"
               size="sm"
               onClick={onRefreshClick}
               disabled={isRefreshing}
-              className="min-w-0 h-8 w-8 p-0"
+              className="absolute right-0 top-0 min-w-0 h-8 w-8 p-0"
             >
               <RefreshCw
                 className={`w-4 h-4 ${isRefreshing ? "animate-spin" : ""}`}
               />
             </DorkFiButton>
           )}
+          <MarketRowTokenIcon
+            market={{
+              icon,
+              asset,
+              iconBadgeUrl: resolvedBadgeUrl,
+            }}
+            poolLetterLabel={marketLabel}
+            imgClassName="h-12 w-12 flex-shrink-0 rounded-full object-contain"
+          />
+          <div className="text-center">
+            <div className="font-semibold text-base text-slate-800 dark:text-white">
+              {asset}
+            </div>
+            {shouldShowConfigSymbolUnderDisplayAsset(asset, configSymbol) && (
+              <div className="text-[10px] text-muted-foreground leading-tight">
+                {configSymbol}
+              </div>
+            )}
+            {network && (
+              <div className="text-xs text-muted-foreground">
+                {network.split("-")[0].charAt(0).toUpperCase() +
+                  network.split("-")[0].slice(1)}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Value and APY */}

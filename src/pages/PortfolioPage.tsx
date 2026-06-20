@@ -21,7 +21,7 @@ const PortfolioPage = () => {
 
       <Header activeTab={activeTab} onTabChange={handleTabChange} />
 
-      <main className="max-w-[1200px] mx-auto px-2 sm:px-4 md:px-6 py-4 md:py-8 relative z-10">
+      <main className="max-w-[1200px] mx-auto px-2 sm:px-4 md:px-6 py-2 sm:py-4 md:py-8 relative z-10">
         <div className="space-y-4 sm:space-y-6">
           <Portfolio />
         </div>

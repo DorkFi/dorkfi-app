@@ -74,6 +74,16 @@ import {
 } from "@/utils/tokenImageUtils";
 import { MarketRowTokenIcon } from "@/components/markets/MarketRowTokenIcon";
 import { marketRowForPortfolioPosition } from "@/utils/marketRowForPortfolioPosition";
+import {
+  enabledNetworksHaveDMarket,
+  itemMatchesPortfolioPositionFilters,
+  type PortfolioNetworkFilterValue,
+} from "@/utils/portfolioMarketFilter";
+import type { MarketFilter } from "@/hooks/useOnDemandMarketData";
+import {
+  PortfolioPositionsFilteredEmptyState,
+} from "@/components/portfolio/PortfolioPositionsFilterBar";
+import PortfolioPositionsCardHeader from "@/components/portfolio/PortfolioPositionsCardHeader";
 import { usdPerTokenFromMarketInfoPrice } from "@/utils/assetDecimals";
 import { formatNftHolderClaimableDisplayFromAgent } from "@/utils/nftHolderClaimAgentDisplay";
 import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
@@ -95,10 +105,10 @@ import DepositsList from "./DepositsList";
 import BorrowsList from "./BorrowsList";
 import PortfolioModals from "./PortfolioModals";
 import { resolveSupplyBorrowToken } from "./SupplyBorrowModal";
-import { XchainUsdcBridgeControls } from "@/components/xchain/XchainUsdcBridgeControls";
 import PortfolioTableMobileCard from "./portfolio/PortfolioTableMobileCard";
 import AccruedInterestMobileCard from "./portfolio/AccruedInterestMobileCard";
-import { AchievementsCompactTrigger } from "@/components/portfolio/AchievementsCompactTrigger";
+import PortfolioInsightsHub from "@/components/portfolio/PortfolioInsightsHub";
+import PortfolioWalletStatusBar from "@/components/portfolio/PortfolioWalletStatusBar";
 import { NftHolderClaimManualModal } from "@/components/portfolio/NftHolderClaimManualModal";
 import {
   NftHolderClaimSuccessModal,
@@ -128,16 +138,8 @@ import {
   ArrowUp,
   ArrowDown,
   Search,
-  Filter,
-  ChevronDown,
-  ChevronUp,
-  Gift,
-  ChevronRight,
   Loader2,
 } from "lucide-react";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -147,14 +149,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  PieChart,
-  Pie,
-  Cell,
-  ResponsiveContainer,
-  Legend,
-  Tooltip,
-} from "recharts";
 import {
   Table,
   TableBody,
@@ -465,8 +459,8 @@ const Portfolio = () => {
   const { toast } = useToast();
   const breakpoint = useBreakpoint();
   const isMobile = breakpoint === "mobile";
-  /** Matches Tailwind `lg` (1024px+) — wide layouts for Portfolio controls */
-  const isLargePortfolioScreen = breakpoint === "desktop";
+  const isNarrowPositionsViewport =
+    breakpoint === "mobile" || breakpoint === "tablet";
 
   const [depositModal, setDepositModal] = useState<{
     isOpen: boolean;
@@ -617,34 +611,30 @@ const Portfolio = () => {
     !showPortfolioRewardsClaim &&
     !showPortfolioNftHolderRewardsNoBalance;
 
-  const [selectedNetworkFilter, setSelectedNetworkFilter] =
-    useState<string>("all");
-  const [suppliedAssetsNetworkFilter, setSuppliedAssetsNetworkFilter] =
-    useState<string>("all");
-  const [borrowedAssetsNetworkFilter, setBorrowedAssetsNetworkFilter] =
-    useState<string>("all");
-  const [suppliedAssetsMarketFilter, setSuppliedAssetsMarketFilter] =
-    useState<string>("both");
-  const [borrowedAssetsMarketFilter, setBorrowedAssetsMarketFilter] =
-    useState<string>("both");
-  const [atRiskAssetsMarketFilter, setAtRiskAssetsMarketFilter] =
-    useState<string>("both");
-  const [suppliedAssetsFilterModalOpen, setSuppliedAssetsFilterModalOpen] =
-    useState<boolean>(false);
-  const [borrowedAssetsFilterModalOpen, setBorrowedAssetsFilterModalOpen] =
-    useState<boolean>(false);
-  const [atRiskAssetsFilterModalOpen, setAtRiskAssetsFilterModalOpen] =
-    useState<boolean>(false);
+  const [positionsNetworkFilter, setPositionsNetworkFilter] =
+    useState<PortfolioNetworkFilterValue>("all");
+  const [positionsMarketFilter, setPositionsMarketFilter] =
+    useState<MarketFilter>("all");
+  const [positionsSearchTerm, setPositionsSearchTerm] = useState("");
+  const hasDMarketTab = useMemo(() => enabledNetworksHaveDMarket(), []);
+
+  useEffect(() => {
+    if (hasDMarketTab) return;
+    if (positionsMarketFilter === "D") setPositionsMarketFilter("all");
+  }, [hasDMarketTab, positionsMarketFilter]);
+
+  const clearPositionsFilters = useCallback(() => {
+    setPositionsNetworkFilter("all");
+    setPositionsMarketFilter("all");
+    setPositionsSearchTerm("");
+  }, []);
+
   const [suppliedAssetsSort, setSuppliedAssetsSort] = useState<{
     column: string | null;
     direction: "asc" | "desc";
   }>({ column: "apy", direction: "desc" });
-  const [suppliedAssetsSearchTerm, setSuppliedAssetsSearchTerm] =
-    useState<string>("");
   const [suppliedAssetsPage, setSuppliedAssetsPage] = useState(0);
   const suppliedAssetsTableRef = useRef<HTMLDivElement>(null);
-  const [borrowedAssetsSearchTerm, setBorrowedAssetsSearchTerm] =
-    useState<string>("");
   const [portfolioPositionsTab, setPortfolioPositionsTab] = useState<
     "supplied" | "borrowed"
   >("supplied");
@@ -663,7 +653,6 @@ const Portfolio = () => {
     column: string | null;
     direction: "asc" | "desc";
   }>({ column: "value", direction: "desc" });
-  const [networkPortfolioOpen, setNetworkPortfolioOpen] = useState(false);
   const [atRiskAssetsSort, setAtRiskAssetsSort] = useState<{
     column: string | null;
     direction: "asc" | "desc";
@@ -1970,17 +1959,6 @@ const Portfolio = () => {
   // Prefer each pool's get_global_user-style totals from `user.globalUserData`; portfolio HF = worst (min) HF
   // across pools with borrows. Fallback to aggregate collateral/borrow when per-pool data is missing.
 
-  const calculateHealthFactor = (
-    collateral: number,
-    borrowed: number
-  ): number | null =>
-    calculateUserHealthFactor(
-      collateral,
-      borrowed,
-      minLiquidationThresholdForHealth,
-      "portfolio"
-    );
-
   const { healthFactor, hfWorstPoolId, hfWorstNetwork } = useMemo(() => {
     const md = marketData as Array<{
       symbol?: string;
@@ -2092,10 +2070,11 @@ const Portfolio = () => {
     return Math.min(healthFactor, 3.0);
   };
 
-  /** One row per lending pool (`globalUserData`), for Network Portfolio — not network-aggregated. */
+  /** One row per lending pool, for Network Portfolio — not network-aggregated. */
   const poolPortfolioBreakdown = useMemo(() => {
-    const gud = user?.globalUserData;
-    if (!Array.isArray(gud) || gud.length === 0) return [];
+    const gudArray = Array.isArray(user?.globalUserData)
+      ? user.globalUserData
+      : [];
 
     const md = marketData as Array<{
       symbol?: string;
@@ -2127,22 +2106,17 @@ const Portfolio = () => {
         : normalizeLiquidationThresholdToDecimal(undefined);
     };
 
-    const rows: Array<{
-      poolKey: string;
+    type PoolAgg = {
       poolId: string;
       network: string;
-      networkDisplayName: string;
-      marketLabel: string | null;
-      title: string;
-      chartLabel: string;
       collateral: number;
       borrow: number;
-      netValue: number;
-      healthFactor: number | null;
-      liquidationMargin: number;
-    }> = [];
+      fromGud: boolean;
+    };
 
-    for (const raw of gud) {
+    const byKey = new Map<string, PoolAgg>();
+
+    for (const raw of gudArray) {
       const rec = raw as Record<string, unknown>;
       const poolId = String(rec.appId ?? rec.poolId ?? "");
       if (!poolId) continue;
@@ -2160,9 +2134,80 @@ const Portfolio = () => {
         continue;
       }
 
-      if (collateral <= 0 && borrow <= 0) continue;
-
       const network = String(rec.network || "unknown");
+      byKey.set(`${network}:${poolId}`, {
+        poolId,
+        network,
+        collateral,
+        borrow,
+        fromGud: true,
+      });
+    }
+
+    const ensurePool = (network: string, poolId: string) => {
+      if (!poolId || !network) return;
+      const key = `${network}:${poolId}`;
+      if (!byKey.has(key)) {
+        byKey.set(key, {
+          poolId,
+          network,
+          collateral: 0,
+          borrow: 0,
+          fromGud: false,
+        });
+      }
+    };
+
+    for (const deposit of deposits) {
+      ensurePool(
+        String((deposit as ItemWithNetwork).network ?? ""),
+        String(deposit.poolId ?? "")
+      );
+    }
+    for (const borrow of borrows) {
+      ensurePool(
+        String((borrow as ItemWithNetwork).network ?? ""),
+        String(borrow.poolId ?? "")
+      );
+    }
+
+    for (const agg of byKey.values()) {
+      if (agg.fromGud) continue;
+      agg.collateral = deposits
+        .filter(
+          (d) =>
+            String(d.poolId ?? "") === agg.poolId &&
+            String((d as ItemWithNetwork).network ?? "") === agg.network
+        )
+        .reduce((sum, d) => sum + (d.value || 0), 0);
+      agg.borrow = borrows
+        .filter(
+          (b) =>
+            String(b.poolId ?? "") === agg.poolId &&
+            String((b as ItemWithNetwork).network ?? "") === agg.network
+        )
+        .reduce((sum, b) => sum + (b.value || 0), 0);
+    }
+
+    const rows: Array<{
+      poolKey: string;
+      poolId: string;
+      network: string;
+      networkDisplayName: string;
+      marketLabel: string | null;
+      title: string;
+      chartLabel: string;
+      collateral: number;
+      borrow: number;
+      netValue: number;
+      healthFactor: number | null;
+      liquidationMargin: number;
+    }> = [];
+
+    for (const agg of byKey.values()) {
+      if (agg.collateral <= 0 && agg.borrow <= 0) continue;
+
+      const { poolId, network, collateral, borrow } = agg;
       const networkDisplayName = network
         .split("-")
         .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
@@ -2217,17 +2262,23 @@ const Portfolio = () => {
     return rows.sort(
       (a, b) => b.collateral + b.borrow - (a.collateral + a.borrow)
     );
-  }, [user?.globalUserData, deposits, marketData]);
+  }, [user?.globalUserData, deposits, borrows, marketData]);
 
   const networkPortfolioPoolsFiltered = useMemo(() => {
-    return poolPortfolioBreakdown.filter((row) => {
-      if (selectedNetworkFilter === "all") return true;
-      const n = row.network.toLowerCase();
-      if (selectedNetworkFilter === "algorand") return n.includes("algorand");
-      if (selectedNetworkFilter === "voi") return n.includes("voi");
-      return true;
-    });
-  }, [poolPortfolioBreakdown, selectedNetworkFilter]);
+    return poolPortfolioBreakdown.filter((row) =>
+      itemMatchesPortfolioPositionFilters(
+        { asset: row.title, poolId: row.poolId, network: row.network },
+        {
+          networkFilter: positionsNetworkFilter,
+          marketFilter: positionsMarketFilter,
+        }
+      )
+    );
+  }, [
+    poolPortfolioBreakdown,
+    positionsNetworkFilter,
+    positionsMarketFilter,
+  ]);
 
   // Fetch wallet balance when repay modal opens
   useEffect(() => {
@@ -4208,20 +4259,47 @@ const Portfolio = () => {
   // Reset supplied list page when filters change
   useEffect(() => {
     setSuppliedAssetsPage(0);
-  }, [suppliedAssetsSearchTerm, suppliedAssetsNetworkFilter]);
+  }, [positionsSearchTerm, positionsNetworkFilter, positionsMarketFilter]);
 
   // Reset borrowed list page when filters change
   useEffect(() => {
     setBorrowedAssetsPage(0);
-  }, [borrowedAssetsSearchTerm, borrowedAssetsNetworkFilter]);
+  }, [positionsSearchTerm, positionsNetworkFilter, positionsMarketFilter]);
 
-  // Section filter modals are mobile-only; close when viewport shows inline filters
-  useEffect(() => {
-    if (breakpoint !== "mobile") {
-      setSuppliedAssetsFilterModalOpen(false);
-      setBorrowedAssetsFilterModalOpen(false);
-    }
-  }, [breakpoint]);
+  const positionPassesPortfolioFilters = useCallback(
+    (item: { asset: string; poolId?: string; network?: string }) =>
+      itemMatchesPortfolioPositionFilters(item, {
+        searchTerm: positionsSearchTerm,
+        networkFilter: positionsNetworkFilter,
+        marketFilter: positionsMarketFilter,
+        marketNetworkFallback: currentNetwork,
+      }),
+    [
+      positionsSearchTerm,
+      positionsNetworkFilter,
+      positionsMarketFilter,
+      currentNetwork,
+    ]
+  );
+
+  const accruedInterestPassesNetworkFilter = useCallback(
+    (item: { asset: string; network?: string }) =>
+      itemMatchesPortfolioPositionFilters(item, {
+        searchTerm: accruedInterestSearchTerm,
+        networkFilter: positionsNetworkFilter,
+      }),
+    [accruedInterestSearchTerm, positionsNetworkFilter]
+  );
+
+  const filteredSuppliedCount = useMemo(
+    () => deposits.filter(positionPassesPortfolioFilters).length,
+    [deposits, positionPassesPortfolioFilters]
+  );
+
+  const filteredBorrowedCount = useMemo(
+    () => borrows.filter(positionPassesPortfolioFilters).length,
+    [borrows, positionPassesPortfolioFilters]
+  );
 
   const handleDepositClick = async (
     asset: string,
@@ -5287,26 +5365,32 @@ const Portfolio = () => {
   // Show loading state
   if (isLoadingData) {
     return (
-      <div className="space-y-6">
-        {/* Hero Section Skeleton */}
-        <DorkFiCard className="relative text-center overflow-hidden p-6 md:p-8">
+      <div className="space-y-3 sm:space-y-6">
+        {/* Hero skeleton — hidden on mobile to match connected layout */}
+        <DorkFiCard className="relative hidden overflow-hidden p-6 text-center md:p-8 sm:block">
           <div className="relative z-10">
-            <Skeleton className="h-12 w-64 mx-auto mb-4" />
-            <Skeleton className="h-6 w-96 mx-auto" />
+            <Skeleton className="mx-auto mb-4 h-12 w-64" />
+            <Skeleton className="mx-auto h-6 w-96" />
           </div>
         </DorkFiCard>
 
         {/* Health Factor Skeleton */}
-        <DorkFiCard className="p-8">
-          <div className="grid grid-cols-1 xl:grid-cols-[420px,1fr] gap-8 lg:gap-10">
-            <div className="xl:border-r-2 xl:border-ocean-teal/20 xl:pr-8">
+        <DorkFiCard className="p-4 sm:p-8">
+          <div className="grid grid-cols-1 items-start gap-4 sm:gap-8 lg:grid-cols-[420px,1fr] lg:gap-10">
+            <div className="order-2 space-y-4 lg:order-1 lg:border-r-2 lg:border-ocean-teal/20 lg:pr-8">
               <Skeleton className="h-72 w-full rounded-2xl" />
             </div>
-            <div className="space-y-6">
-              <Skeleton className="h-8 w-48" />
+            <div className="order-1 space-y-4 sm:space-y-6 lg:order-2">
+              <Skeleton className="hidden h-8 w-48 sm:block" />
+              <div className="space-y-3 sm:hidden">
+                <Skeleton className="h-8 w-48" />
+                <Skeleton className="h-4 w-full max-w-xs" />
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <Skeleton className="h-24 w-full" />
                 <Skeleton className="h-24 w-full" />
+                <Skeleton className="col-span-2 h-16 w-full sm:col-span-1 sm:h-24" />
+                <Skeleton className="hidden h-24 w-full sm:block" />
               </div>
             </div>
           </div>
@@ -5322,7 +5406,7 @@ const Portfolio = () => {
         {/* Hero Section */}
         <DorkFiCard
           hoverable
-          className="relative text-center overflow-hidden p-6 md:p-8"
+          className="relative text-center overflow-hidden px-6 py-3 md:px-8 md:py-4"
         >
           <div className="relative z-10">
             <H1 className="m-0 text-4xl md:text-5xl">
@@ -5361,30 +5445,33 @@ const Portfolio = () => {
   // Show loading state while avatar check is in progress
   if (!isAvatarResolved) {
     return (
-      <div className="space-y-6">
-        {/* Hero Section Skeleton */}
-        <DorkFiCard className="relative text-center overflow-hidden p-6 md:p-8">
+      <div className="space-y-3 sm:space-y-6">
+        {/* Hero skeleton — hidden on mobile to match connected layout */}
+        <DorkFiCard className="relative hidden overflow-hidden p-6 text-center md:p-8 sm:block">
           <div className="space-y-4">
-            <Skeleton className="h-12 w-64 mx-auto" />
-            <Skeleton className="h-6 w-full max-w-2xl mx-auto" />
-            <Skeleton className="h-4 w-48 mx-auto" />
+            <Skeleton className="mx-auto h-12 w-64" />
+            <Skeleton className="mx-auto h-6 w-full max-w-2xl" />
+            <Skeleton className="mx-auto h-4 w-48" />
           </div>
         </DorkFiCard>
 
         {/* Health Factor Skeleton */}
-        <DorkFiCard className="p-6 md:p-8">
-          <div className="grid grid-cols-1 xl:grid-cols-[420px,1fr] gap-8 lg:gap-10">
-            <div className="space-y-4">
-              <Skeleton className="h-8 w-32" />
+        <DorkFiCard className="p-4 sm:p-6 md:p-8">
+          <div className="grid grid-cols-1 items-start gap-4 sm:gap-8 lg:grid-cols-[420px,1fr] lg:gap-10">
+            <div className="order-2 space-y-4 lg:order-1 lg:border-r-2 lg:border-ocean-teal/20 lg:pr-8">
               <Skeleton className="h-72 w-full rounded-2xl" />
             </div>
-            <div className="space-y-4">
-              <Skeleton className="h-8 w-40" />
+            <div className="order-1 space-y-4 sm:space-y-6 lg:order-2">
+              <Skeleton className="hidden h-8 w-40 sm:block" />
+              <div className="space-y-3 sm:hidden">
+                <Skeleton className="h-8 w-48" />
+                <Skeleton className="h-4 w-full max-w-xs" />
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <Skeleton className="h-24 w-full" />
                 <Skeleton className="h-24 w-full" />
-                <Skeleton className="h-24 w-full" />
-                <Skeleton className="h-24 w-full" />
+                <Skeleton className="col-span-2 h-16 w-full sm:col-span-1 sm:h-24" />
+                <Skeleton className="hidden h-24 w-full sm:block" />
               </div>
             </div>
           </div>
@@ -5394,11 +5481,21 @@ const Portfolio = () => {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Hero Section */}
+    <div className="space-y-3 sm:space-y-6">
+      {dataError && (
+        <div className="rounded-lg border border-red-500/50 bg-red-500/20 p-3 sm:hidden">
+          <div className="flex items-center gap-2">
+            <div className="h-2 w-2 rounded-full bg-red-500" />
+            <span className="text-sm text-red-400">
+              Error loading data: {dataError}
+            </span>
+          </div>
+        </div>
+      )}
+      {/* Hero Section — hidden on mobile when connected; Portfolio Overview covers stats */}
       <DorkFiCard
         hoverable
-        className="relative text-center overflow-hidden p-6 md:p-8"
+        className="relative hidden overflow-hidden px-6 py-3 text-center sm:block md:px-8 md:py-4"
       >
         {/* Decorative elements */}
         {/* Birds - light mode only */}
@@ -5471,51 +5568,21 @@ const Portfolio = () => {
               <span className="hero-header">Portfolio Health</span>
             </H1>
           </div>
-          <Body className="text-sm sm:text-base md:text-lg lg:text-xl max-w-2xl md:max-w-none mx-auto">
-            <span className="block md:inline md:whitespace-nowrap">
-              Track Your Health Factor, Monitor Your Positions, and Manage Your
-              Portfolio.
-            </span>
-          </Body>
 
-          {/* Data Source Indicator */}
-          <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground">
-            <div
-              className={`w-2 h-2 rounded-full ${user?.computed || userGlobalData
-                ? "bg-green-500"
-                : "bg-gray-500"
-                }`}
-            ></div>
-            <span>
-              {user?.computed
-                ? "Global Portfolio Data"
-                : userGlobalData
-                  ? "Live Data"
-                  : "No Data"}{" "}
-              •{" "}
-              {addressName ||
-                `${activeAccount?.address.slice(
-                  0,
-                  8
-                )}...${activeAccount?.address.slice(-8)}`}
-            </span>
-            {user?.computed?.globalNetPortfolioValue !== undefined && (
-              <span className="ml-2 shrink-0">
-                • Net Value:{" "}
-                {formatCurrency(Number(user.computed.globalNetPortfolioValue), "USD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </span>
-            )}
-            <div className="mt-2 flex w-full basis-full shrink-0 justify-center px-2 empty:hidden lg:mt-0 lg:ml-2 lg:w-auto lg:basis-auto lg:px-0">
-              <XchainUsdcBridgeControls className="justify-center lg:justify-start" />
-            </div>
-            {marketData.length > 0 && totalBorrowed > 0 && (
-              <span className="ml-2">
-                • Collateral Factor:{" "}
-                {formatPercent(weightedCollateralFactor, { maximumFractionDigits: 0 })} • Liquidation
-                Threshold: {formatPercent(weightedLiquidationThreshold, { maximumFractionDigits: 1 })}
-              </span>
-            )}
-          </div>
+          <PortfolioWalletStatusBar
+            className="mt-4"
+            centered
+            hasComputedData={Boolean(user?.computed)}
+            hasUserGlobalData={Boolean(userGlobalData)}
+            addressLabel={
+              addressName ||
+              `${activeAccount?.address.slice(0, 8)}...${activeAccount?.address.slice(-8)}`
+            }
+            globalNetPortfolioValue={user?.computed?.globalNetPortfolioValue}
+            showRiskMetrics={marketData.length > 0 && totalBorrowed > 0}
+            weightedCollateralFactor={weightedCollateralFactor}
+            weightedLiquidationThreshold={weightedLiquidationThreshold}
+          />
 
           {/* Error State */}
           {dataError && (
@@ -5543,6 +5610,10 @@ const Portfolio = () => {
             walletName.includes("pera") ||
             walletName.includes("defly");
 
+          const walletAddressLabel =
+            addressName ||
+            `${activeAccount?.address.slice(0, 8)}...${activeAccount?.address.slice(-8)}`;
+
           return (
             <>
               <EnhancedHealthFactor
@@ -5550,6 +5621,15 @@ const Portfolio = () => {
                 marketContextLine={positionOverviewMarketLine}
                 totalCollateral={totalCollateral}
                 totalBorrowed={totalBorrowed}
+                walletStatus={{
+                  hasComputedData: Boolean(user?.computed),
+                  hasUserGlobalData: Boolean(userGlobalData),
+                  addressLabel: walletAddressLabel,
+                  globalNetPortfolioValue: user?.computed?.globalNetPortfolioValue,
+                  showRiskMetrics: marketData.length > 0 && totalBorrowed > 0,
+                  weightedCollateralFactor,
+                  weightedLiquidationThreshold,
+                }}
                 dorkNftImage={displayAvatar || undefined}
                 underwaterBg="/lovable-uploads/44ebe994-a30e-4eb1-a4a1-776aa2978776.png"
                 onAddCollateral={!isViewOnly ? handleAddCollateral : undefined}
@@ -5595,916 +5675,82 @@ const Portfolio = () => {
                 }
                 onRefreshMarkets={handleRefreshMarkets}
                 isRefreshingMarkets={isRefreshingMarkets}
+                insights={
+                  poolPortfolioBreakdown.length > 0 || displayAddress ? (
+                    <PortfolioInsightsHub
+                      layout="toolbar"
+                      showNetworkRow={poolPortfolioBreakdown.length > 0}
+                      networkPortfolioPoolsFiltered={
+                        networkPortfolioPoolsFiltered
+                      }
+                      positionsNetworkFilter={positionsNetworkFilter}
+                      positionsMarketFilter={positionsMarketFilter}
+                      borrows={borrows}
+                      healthFactor={healthFactor}
+                      displayHealthFactor={displayHealthFactor}
+                      totalBorrowed={totalBorrowed}
+                      isMobile={isMobile}
+                      displayAddress={displayAddress}
+                      isViewOnly={isViewOnly}
+                      showNftRow={!isViewOnly && Boolean(displayAddress)}
+                      nftRewardsLoading={showPortfolioNftHolderRewardsFetching}
+                      nftClaimableDisplay={nftHolderClaimableDisplayWithSymbol}
+                      nftHasClaimable={showPortfolioRewardsClaim}
+                      onOpenNftRewards={() =>
+                        setNftHolderRewardsClaimModalOpen(true)
+                      }
+                    />
+                  ) : undefined
+                }
               />
-              {displayAddress ? (
-                <div className="mx-auto mt-4 w-full max-w-7xl animate-fade-in">
-                  <AchievementsCompactTrigger
-                    address={displayAddress}
-                    isViewOnly={isViewOnly}
-                  />
-                </div>
-              ) : null}
-              {showPortfolioNftHolderRewardsFetching && (
-                <div className="mx-auto mt-4 w-full max-w-7xl animate-fade-in">
-                  <div
-                    role="status"
-                    aria-busy="true"
-                    aria-live="polite"
-                    aria-label="Loading NFT holder rewards"
-                    className="flex w-full flex-col gap-4 rounded-xl border border-yellow-400/30 bg-gradient-to-r from-yellow-400/10 via-amber-950/20 to-slate-900/50 px-4 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-6 sm:py-5 dark:border-yellow-500/25"
-                  >
-                    <div className="flex min-w-0 flex-1 items-start gap-3">
-                      <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-yellow-400/75 text-slate-900 dark:bg-yellow-400/60">
-                        <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
-                      </div>
-                      <div className="min-w-0 flex-1 space-y-2">
-                        <p className="text-base font-semibold text-slate-900 dark:text-yellow-100">
-                          NFT holder rewards
-                        </p>
-                        <p className="text-sm leading-snug text-slate-700 dark:text-slate-300">
-                          Fetching your claim agent snapshot—claimable amount and next steps will
-                          show here in a moment.
-                        </p>
-                        <div className="flex flex-col gap-1.5 pt-0.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
-                          <Skeleton className="h-4 w-36 bg-slate-600/35 dark:bg-slate-700/70" />
-                          <Skeleton className="h-4 w-48 bg-slate-600/35 dark:bg-slate-700/70" />
-                        </div>
-                      </div>
-                    </div>
-                    <Button
-                      type="button"
-                      disabled
-                      variant="outline"
-                      className="h-auto w-full shrink-0 cursor-wait border-yellow-500/30 px-5 py-3 opacity-70 sm:w-auto"
-                      aria-disabled
-                    >
-                      <span className="flex items-center justify-center gap-2">
-                        <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-                        Loading…
-                      </span>
-                    </Button>
-                  </div>
-                </div>
-              )}
-              {showPortfolioRewardsClaim && (
-                <div className="w-full max-w-7xl mx-auto mt-4 animate-fade-in">
-                  <div
-                    role="region"
-                    aria-label="Dork NFT holder rewards"
-                    className="w-full flex flex-col gap-4 rounded-xl border-2 border-yellow-400/60 bg-gradient-to-r from-yellow-400/20 via-amber-100/80 to-yellow-400/15 px-4 py-4 shadow-md sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-6 sm:py-5 dark:border-yellow-400/35 dark:from-yellow-400/12 dark:via-amber-950/40 dark:to-yellow-500/10"
-                  >
-                    <div className="flex min-w-0 flex-1 items-start gap-3">
-                      <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-yellow-400 text-slate-900 shadow-sm dark:bg-yellow-400/90">
-                        <Gift className="h-5 w-5" aria-hidden="true" />
-                      </div>
-                      <div className="min-w-0 space-y-1">
-                        <p className="text-base font-semibold text-slate-900 dark:text-yellow-100">
-                          NFT holder rewards
-                        </p>
-                        <p className="text-sm leading-snug text-slate-700 dark:text-slate-300">
-                          Weekly distributions for Dork and Dork V2 holders. Claimable now:{" "}
-                          <span className="font-semibold text-slate-900 dark:text-yellow-50 tabular-nums">
-                            {nftHolderClaimableDisplayWithSymbol}
-                          </span>
-                          . Continue below to choose settlement.
-                        </p>
-                      </div>
-                    </div>
-                    <Button
-                      type="button"
-                      onClick={() => setNftHolderRewardsClaimModalOpen(true)}
-                      className="h-auto w-full shrink-0 border-2 border-yellow-500 bg-yellow-400 px-5 py-3 text-base font-bold text-slate-900 shadow hover:bg-yellow-300 focus-visible:ring-yellow-500 sm:w-auto sm:py-3"
-                      aria-label={`Claim UNIT — Dork NFT holder rewards (${nftHolderClaimableDisplayWithSymbol} claimable)`}
-                    >
-                      <span className="flex items-center justify-center gap-2">
-                        Claim UNIT
-                        <ChevronRight className="h-5 w-5 shrink-0" aria-hidden="true" />
-                      </span>
-                    </Button>
-                  </div>
-                </div>
-              )}
-              {showPortfolioNftHolderRewardsNoBalance && (
-                <div className="w-full max-w-7xl mx-auto mt-4 animate-fade-in">
-                  <div
-                    role="region"
-                    aria-label="Dork NFT holder rewards status"
-                    className="w-full flex flex-col gap-4 rounded-xl border border-ocean-teal/25 bg-muted/40 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-6 sm:py-5 dark:border-ocean-teal/20 dark:bg-slate-900/50"
-                  >
-                    <div className="flex min-w-0 flex-1 items-start gap-3">
-                      <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-ocean-teal/30 bg-background text-ocean-teal dark:text-cyan-400">
-                        <Info className="h-5 w-5" aria-hidden="true" />
-                      </div>
-                      <div className="min-w-0 space-y-1">
-                        <p className="text-base font-semibold text-foreground">
-                          NFT holder rewards
-                        </p>
-                        <p className="text-sm leading-snug text-muted-foreground">
-                          No claimable balance right now for this wallet. Dork and Dork V2
-                          holders receive weekly distributions—check back after the next drop,
-                          or open Markets anytime.
-                        </p>
-                      </div>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => navigate("/market")}
-                      className="h-auto w-full shrink-0 border-ocean-teal/40 px-5 py-3 sm:w-auto"
-                      aria-label="Open Markets"
-                    >
-                      <span className="flex items-center justify-center gap-2">
-                        View Markets
-                        <ChevronRight className="h-5 w-5 shrink-0" aria-hidden="true" />
-                      </span>
-                    </Button>
-                  </div>
-                </div>
-              )}
             </>
           );
         })()}
-
-      {/* Network Portfolio Breakdown */}
-      {user?.computed?.networkValues &&
-        Object.keys(user.computed.networkValues).length > 0 && (
-          <DorkFiCard className="p-6 md:p-8">
-            <Collapsible open={networkPortfolioOpen} onOpenChange={setNetworkPortfolioOpen}>
-              <CollapsibleTrigger asChild>
-                <Button
-                  variant="ghost"
-                  className="w-full min-w-0 flex items-start justify-between gap-3 p-0 h-auto hover:bg-transparent mb-6 text-left"
-                >
-                  <div className="min-w-0 flex-1 text-left">
-                    <H1 className="text-2xl md:text-3xl mb-1">Network Portfolio</H1>
-                    <Body className="text-xs sm:text-sm text-muted-foreground leading-snug">
-                      Per-pool on-chain totals. Network tabs filter the chart and cards.
-                    </Body>
-                  </div>
-                  {networkPortfolioOpen ? (
-                    <ChevronUp className="w-5 h-5 shrink-0 mt-1 text-muted-foreground" />
-                  ) : (
-                    <ChevronDown className="w-5 h-5 shrink-0 mt-1 text-muted-foreground" />
-                  )}
-                </Button>
-              </CollapsibleTrigger>
-              <CollapsibleContent>
-            {/* Network Filter Tabs */}
-            <Tabs
-              value={selectedNetworkFilter}
-              onValueChange={setSelectedNetworkFilter}
-              className="w-full"
-            >
-              <TabsList className="grid w-full grid-cols-3 mb-6">
-                <TabsTrigger value="all" className="text-sm">
-                  All Networks
-                </TabsTrigger>
-                <TabsTrigger value="algorand" className="text-sm">
-                  Algorand
-                </TabsTrigger>
-                <TabsTrigger value="voi" className="text-sm">
-                  VOI
-                </TabsTrigger>
-              </TabsList>
-
-              {/* Visual Slice: Allocation + Risk */}
-              {(() => {
-                // Collateral allocation: one slice per lending pool (not network-aggregate)
-                const allocationData = networkPortfolioPoolsFiltered
-                  .map((row) => ({
-                    name: row.chartLabel,
-                    value: row.collateral,
-                    poolKey: row.poolKey,
-                  }))
-                  .filter((item) => item.value > 0)
-                  .sort((a, b) => b.value - a.value);
-
-                const totalAllocation = allocationData.reduce(
-                  (sum, item) => sum + item.value,
-                  0
-                );
-
-                // Calculate risk metrics
-                const topBorrowedAsset =
-                  borrows.length > 0
-                    ? borrows.reduce((top, current) =>
-                      current.value > (top?.value || 0) ? current : top
-                    )
-                    : null;
-
-                const topBorrowedPercentage =
-                  topBorrowedAsset && totalBorrowed > 0
-                    ? (topBorrowedAsset.value / totalBorrowed) * 100
-                    : 0;
-
-                // Find position closest to liquidation (lowest health factor)
-                const positionsWithHealth = deposits
-                  .map((deposit) => {
-                    // For each deposit, calculate a simplified health factor
-                    // This is a simplified calculation - in reality, you'd need network-specific data
-                    const depositHealthFactor = calculateHealthFactor(
-                      deposit.value,
-                      0
-                    );
-                    return {
-                      ...deposit,
-                      healthFactor: depositHealthFactor,
-                    };
-                  })
-                  .filter((pos) => pos.healthFactor !== null);
-
-                const closestToLiquidation =
-                  borrows.length > 0 &&
-                    healthFactor !== null &&
-                    healthFactor < 2.0
-                    ? {
-                      asset: "Portfolio",
-                      healthFactor: healthFactor,
-                    }
-                    : null;
-
-                // Chart colors
-                const COLORS = [
-                  "#0ea5e9", // sky-500
-                  "#8b5cf6", // violet-500
-                  "#10b981", // emerald-500
-                  "#f59e0b", // amber-500
-                  "#ef4444", // red-500
-                  "#06b6d4", // cyan-500
-                  "#a855f7", // purple-500
-                  "#14b8a6", // teal-500
-                ];
-
-                return (
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 mb-6">
-                    {/* Left: Allocation Chart */}
-                    <DorkFiCard className="p-4 sm:p-5">
-                      <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4">
-                        Collateral Allocation
-                      </h3>
-                      {totalAllocation > 0 && allocationData.length > 0 ? (
-                        <div className="flex flex-col items-center">
-                          <ResponsiveContainer
-                            width="100%"
-                            height={isMobile ? 200 : 250}
-                          >
-                            <PieChart>
-                              <Pie
-                                data={allocationData}
-                                cx="50%"
-                                cy="50%"
-                                labelLine={false}
-                                label={({ name, percent }) =>
-                                  `${name}: ${formatPercent(percent, { maximumFractionDigits: 0 })}`
-                                }
-                                outerRadius={80}
-                                fill="#8884d8"
-                                dataKey="value"
-                              >
-                                {allocationData.map((entry, index) => (
-                                  <Cell
-                                    key={entry.poolKey ?? `cell-${index}`}
-                                    fill={COLORS[index % COLORS.length]}
-                                  />
-                                ))}
-                              </Pie>
-                              <Tooltip
-                                formatter={(value: number) => [
-                                  `${formatCurrency(value, "USD", {
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
-                                  })}`,
-                                  "Collateral",
-                                ]}
-                              />
-                            </PieChart>
-                          </ResponsiveContainer>
-                          <div className="mt-4 w-full space-y-2">
-                            {allocationData.slice(0, 5).map((item, index) => (
-                              <div
-                                key={item.poolKey ?? index}
-                                className="flex items-center justify-between text-sm"
-                              >
-                                <div className="flex items-center gap-2">
-                                  <div
-                                    className="w-3 h-3 rounded-full"
-                                    style={{
-                                      backgroundColor:
-                                        COLORS[index % COLORS.length],
-                                    }}
-                                  />
-                                  <span className="text-muted-foreground">
-                                    {item.name}
-                                  </span>
-                                </div>
-                                <span className="font-semibold">
-                                  {formatPercent(item.value / totalAllocation, { maximumFractionDigits: 1 })}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-center h-64 text-muted-foreground">
-                          <p>No collateral data available</p>
-                        </div>
-                      )}
-                    </DorkFiCard>
-
-                    {/* Right: Risk Cards */}
-                    <div className="space-y-4">
-                      <h3 className="text-lg font-semibold mb-4">
-                        Risk Overview
-                      </h3>
-
-                      {/* Lowest Liquidation Margin Card */}
-                      {(() => {
-                        const poolMargins = networkPortfolioPoolsFiltered.map(
-                          (row) => row.liquidationMargin
-                        );
-                        const lowestLiquidationMargin =
-                          poolMargins.length > 0
-                            ? Math.min(...poolMargins)
-                            : null;
-
-                        return lowestLiquidationMargin !== null ? (
-                          <UITooltip>
-                            <TooltipTrigger asChild>
-                              <DorkFiCard className="p-4 border-l-4 border-orange-500 cursor-help">
-                                <div className="flex items-start gap-3">
-                                  <AlertTriangle className="w-5 h-5 text-orange-500 mt-0.5" />
-                                  <div className="flex-1">
-                                    <div className="text-sm font-semibold text-orange-600 dark:text-orange-400 mb-1 flex items-center gap-1">
-                                      Lowest Liquidation Margin
-                                      <Info className="w-3 h-3" />
-                                    </div>
-                                    <div className="text-base font-bold">
-                                      {formatPercent(lowestLiquidationMargin / 100, { maximumFractionDigits: 2 })}
-                                    </div>
-                                    <div className="text-xs text-muted-foreground mt-1">
-                                      {selectedNetworkFilter === "all"
-                                        ? "Lowest among pools shown (all networks)"
-                                        : "Lowest among pools on this network"}
-                                    </div>
-                                  </div>
-                                </div>
-                              </DorkFiCard>
-                            </TooltipTrigger>
-                            <TooltipContent className="max-w-xs">
-                              <p className="font-semibold mb-1">
-                                Liquidation Margin
-                              </p>
-                              <p className="text-sm">
-                                The safety buffer before liquidation. This is
-                                the difference between the liquidation threshold
-                                and your current LTV. A lower margin means
-                                you're closer to liquidation risk. Keep this
-                                above 10-15% for safety.
-                              </p>
-                            </TooltipContent>
-                          </UITooltip>
-                        ) : null;
-                      })()}
-
-                      {/* Top Borrowed Asset Card */}
-                      {topBorrowedAsset && topBorrowedPercentage > 0 && (
-                        <DorkFiCard className="p-4 border-l-4 border-amber-500">
-                          <div className="flex items-start gap-3">
-                            <TrendingDown className="w-5 h-5 text-amber-500 mt-0.5" />
-                            <div className="flex-1">
-                              <div className="text-sm font-semibold text-amber-600 dark:text-amber-400 mb-1">
-                                Top Borrowed Asset
-                              </div>
-                              <div className="text-base font-bold">
-                                {topBorrowedAsset.asset}
-                              </div>
-                              <div className="text-sm text-muted-foreground mt-1">
-                                {formatPercent(topBorrowedPercentage / 100, { maximumFractionDigits: 1 })} of total
-                                borrows
-                              </div>
-                              <div className="text-xs text-muted-foreground mt-1">
-                                $
-                                {formatNumber(topBorrowedAsset.value, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              </div>
-                            </div>
-                          </div>
-                        </DorkFiCard>
-                      )}
-
-                      {/* Closest to Liquidation Card */}
-                      {closestToLiquidation && (
-                        <DorkFiCard className="p-4 border-l-4 border-red-500">
-                          <div className="flex items-start gap-3">
-                            <AlertCircle className="w-5 h-5 text-red-500 mt-0.5" />
-                            <div className="flex-1">
-                              <div className="text-sm font-semibold text-red-600 dark:text-red-400 mb-1">
-                                Closest to Liquidation
-                              </div>
-                              <div className="text-base font-bold">
-                                {closestToLiquidation.asset}
-                              </div>
-                              <div className="text-sm text-muted-foreground mt-1">
-                                Health Factor:{" "}
-                                <span
-                                  className={`font-semibold ${closestToLiquidation.healthFactor >= 1.5
-                                    ? "text-green-600 dark:text-green-400"
-                                    : closestToLiquidation.healthFactor >= 1.0
-                                      ? "text-yellow-600 dark:text-yellow-400"
-                                      : "text-red-600 dark:text-red-400"
-                                    }`}
-                                >
-                                  {formatNumber(closestToLiquidation.healthFactor, { maximumFractionDigits: 2 })}
-                                </span>
-                              </div>
-                              {closestToLiquidation.healthFactor < 1.5 && (
-                                <div className="text-xs text-red-500 mt-1">
-                                  Consider adding collateral or repaying debt
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </DorkFiCard>
-                      )}
-
-                      {/* Risk Score Card */}
-                      {healthFactor !== null && (
-                        <UITooltip>
-                          <TooltipTrigger asChild>
-                            <DorkFiCard className="p-4 border-l-4 border-ocean-teal cursor-help">
-                              <div className="flex items-start gap-3">
-                                <AlertTriangle className="w-5 h-5 text-ocean-teal mt-0.5" />
-                                <div className="flex-1">
-                                  <div className="text-sm font-semibold text-ocean-teal mb-1 flex items-center gap-1">
-                                    Portfolio Risk Score
-                                    <Info className="w-3 h-3" />
-                                  </div>
-                                  <div className="flex items-center gap-3 mt-2">
-                                    <div className="flex-1">
-                                      <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
-                                        <div
-                                          className={`h-2.5 rounded-full transition-all ${healthFactor >= 2.0
-                                            ? "bg-green-500"
-                                            : healthFactor >= 1.5
-                                              ? "bg-yellow-500"
-                                              : healthFactor >= 1.0
-                                                ? "bg-orange-500"
-                                                : "bg-red-500"
-                                            }`}
-                                          style={{
-                                            width: `${Math.min(
-                                              ((displayHealthFactor || 0) /
-                                                3.0) *
-                                              100,
-                                              100
-                                            )}%`,
-                                          }}
-                                        />
-                                      </div>
-                                    </div>
-                                    <div className="text-sm font-semibold">
-                                      {displayHealthFactor !== null
-                                        ? formatNumber(displayHealthFactor, { maximumFractionDigits: 2 })
-                                        : "N/A"}
-                                    </div>
-                                  </div>
-                                  <div className="text-xs text-muted-foreground mt-2">
-                                    {healthFactor >= 2.0
-                                      ? "Low Risk"
-                                      : healthFactor >= 1.5
-                                        ? "Moderate Risk"
-                                        : healthFactor >= 1.0
-                                          ? "High Risk"
-                                          : "Critical Risk"}
-                                  </div>
-                                </div>
-                              </div>
-                            </DorkFiCard>
-                          </TooltipTrigger>
-                          <TooltipContent className="max-w-xs">
-                            <p className="font-semibold mb-1">Health Factor</p>
-                            <p className="text-sm mb-2">
-                              Measures your portfolio's safety. Calculated as:
-                              (Total Collateral × Collateral Factor) / Total
-                              Borrowed.
-                            </p>
-                            <ul className="text-xs space-y-1 list-disc list-inside">
-                              <li>
-                                <strong>&gt; 2.0:</strong> Low Risk - Safe
-                                position
-                              </li>
-                              <li>
-                                <strong>1.5-2.0:</strong> Moderate Risk -
-                                Monitor closely
-                              </li>
-                              <li>
-                                <strong>1.0-1.5:</strong> High Risk - Consider
-                                adding collateral
-                              </li>
-                              <li>
-                                <strong>&lt; 1.0:</strong> Critical - At risk of
-                                liquidation
-                              </li>
-                            </ul>
-                          </TooltipContent>
-                        </UITooltip>
-                      )}
-
-                      {/* Empty state if no risk data */}
-                      {!topBorrowedAsset &&
-                        !closestToLiquidation &&
-                        healthFactor === null && (
-                          <DorkFiCard className="p-4">
-                            <div className="text-center text-muted-foreground">
-                              <p className="text-sm">No risk data available</p>
-                            </div>
-                          </DorkFiCard>
-                        )}
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* Per-pool portfolio cards (global user per pool app) */}
-              {(() => {
-                if (networkPortfolioPoolsFiltered.length === 0) {
-                  return (
-                    <div className="text-center py-8 text-muted-foreground">
-                      <p>No lending pools found for the selected filter.</p>
-                    </div>
-                  );
-                }
-
-                return (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {networkPortfolioPoolsFiltered.map((row) => {
-                      const {
-                        poolKey,
-                        poolId,
-                        title,
-                        collateral: poolCollateral,
-                        borrow: poolBorrow,
-                        netValue: poolNetValue,
-                        healthFactor: poolHealthFactor,
-                        liquidationMargin: poolLiquidationMargin,
-                      } = row;
-
-                      return (
-                        <DorkFiCard
-                          key={poolKey}
-                          className="p-4 sm:p-5 border-2 hover:border-ocean-teal/50 transition-all"
-                        >
-                          <div className="space-y-4">
-                            <div>
-                              <h3 className="text-lg font-semibold mb-1">
-                                {title}
-                              </h3>
-                              <p className="text-xs text-muted-foreground font-mono break-all">
-                                Pool {poolId}
-                              </p>
-                            </div>
-
-                            <div className="space-y-3">
-                              <div className="flex justify-between items-center gap-2">
-                                <span className="text-sm text-muted-foreground">
-                                  Collateral:
-                                </span>
-                                <span className="text-sm font-semibold text-right tabular-nums">
-                                  {formatCurrency(poolCollateral, "USD", {
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
-                                  })}
-                                </span>
-                              </div>
-
-                              <div className="flex justify-between items-center gap-2">
-                                <span className="text-sm text-muted-foreground">
-                                  Borrowed:
-                                </span>
-                                <span className="text-sm font-semibold text-right tabular-nums">
-                                  {formatCurrency(poolBorrow, "USD", {
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
-                                  })}
-                                </span>
-                              </div>
-
-                              <div className="flex justify-between items-center gap-2">
-                                <span className="text-sm text-muted-foreground">
-                                  Net Value:
-                                </span>
-                                <span
-                                  className={`text-sm font-semibold text-right tabular-nums ${poolNetValue >= 0
-                                    ? "text-green-600 dark:text-green-400"
-                                    : "text-red-600 dark:text-red-400"
-                                    }`}
-                                >
-                                  {formatCurrency(poolNetValue, "USD", {
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
-                                  })}
-                                </span>
-                              </div>
-
-                              <div className="pt-2 border-t border-border space-y-2">
-                                <div className="flex justify-between items-center gap-2">
-                                  <span className="text-sm text-muted-foreground">
-                                    Health Factor:
-                                  </span>
-                                  <span
-                                    className={`text-sm font-semibold tabular-nums ${poolHealthFactor === null
-                                      ? "text-muted-foreground"
-                                      : poolHealthFactor >= 1.5
-                                        ? "text-green-600 dark:text-green-400"
-                                        : poolHealthFactor >= 1.0
-                                          ? "text-yellow-600 dark:text-yellow-400"
-                                          : "text-red-600 dark:text-red-400"
-                                      }`}
-                                  >
-                                    {poolHealthFactor === null
-                                      ? "N/A"
-                                      : formatNumber(poolHealthFactor, {
-                                        maximumFractionDigits: 2,
-                                      })}
-                                  </span>
-                                </div>
-                                <div className="flex justify-between items-center gap-2">
-                                  <span className="text-sm text-muted-foreground">
-                                    Liquidation Margin:
-                                  </span>
-                                  <span
-                                    className={`text-sm font-semibold tabular-nums ${poolLiquidationMargin >= 20
-                                      ? "text-green-600 dark:text-green-400"
-                                      : poolLiquidationMargin >= 10
-                                        ? "text-yellow-600 dark:text-yellow-400"
-                                        : poolLiquidationMargin >= 0
-                                          ? "text-orange-600 dark:text-orange-400"
-                                          : "text-red-600 dark:text-red-400"
-                                      }`}
-                                  >
-                                    {formatPercent(poolLiquidationMargin / 100, {
-                                      maximumFractionDigits: 2,
-                                    })}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </DorkFiCard>
-                      );
-                    })}
-                  </div>
-                );
-              })()}
-            </Tabs>
-              </CollapsibleContent>
-            </Collapsible>
-          </DorkFiCard>
-        )}
-
 
       {/* Per-Network Asset Tables */}
       {user?.computed?.networkValues &&
         Object.keys(user.computed.networkValues).length > 0 && (
           <TooltipProvider>
             <div className="flex flex-col gap-6">
-              {hasBothPositionTypes && isLargePortfolioScreen && (
-                <div className="order-0 hidden rounded-lg border border-border bg-muted/40 p-4 md:p-5 lg:block">
-                  <ToggleGroup
-                    type="single"
-                    value={portfolioPositionsTab}
-                    onValueChange={(v) => {
-                      if (v === "supplied" || v === "borrowed") {
-                        setPortfolioPositionsTab(v);
-                      }
-                    }}
-                    variant="outline"
-                    className="inline-flex w-full max-w-md gap-0 rounded-lg border border-input bg-background p-1 shadow-sm"
-                    aria-label="Switch between supplied and borrowed positions"
-                  >
-                    <ToggleGroupItem
-                      value="supplied"
-                      className="flex-1 rounded-md px-4 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground sm:min-w-[8rem]"
-                    >
-                      Supplied
-                    </ToggleGroupItem>
-                    <ToggleGroupItem
-                      value="borrowed"
-                      className="flex-1 rounded-md px-4 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground sm:min-w-[8rem]"
-                    >
-                      Borrowed
-                    </ToggleGroupItem>
-                  </ToggleGroup>
-                </div>
-              )}
+              {(deposits.length > 0 || borrows.length > 0) && (
+                <DorkFiCard className="order-0 p-4 md:p-6">
+                  <PortfolioPositionsCardHeader
+                    portfolioPositionsTab={portfolioPositionsTab}
+                    onTabChange={setPortfolioPositionsTab}
+                    hasBothPositionTypes={hasBothPositionTypes}
+                    hasSupplied={deposits.length > 0}
+                    hasBorrowed={borrows.length > 0}
+                    filteredSuppliedCount={filteredSuppliedCount}
+                    filteredBorrowedCount={filteredBorrowedCount}
+                    isViewOnly={isViewOnly}
+                    refreshingSection={refreshingSection}
+                    onRefreshSupplied={() => void handleRefreshSuppliedAssets()}
+                    onRefreshBorrowed={() => void handleRefreshBorrowedAssets()}
+                    networkFilter={positionsNetworkFilter}
+                    onNetworkFilterChange={setPositionsNetworkFilter}
+                    marketFilter={positionsMarketFilter}
+                    onMarketFilterChange={setPositionsMarketFilter}
+                    searchTerm={positionsSearchTerm}
+                    onSearchTermChange={setPositionsSearchTerm}
+                    hasDMarketTab={hasDMarketTab}
+                    isMobile={isNarrowPositionsViewport}
+                  />
               {/* Supplied Assets Table */}
               {deposits.length > 0 && (
-                <DorkFiCard
+                <div
+                  ref={suppliedAssetsTableRef}
                   className={cn(
-                    "p-6 md:p-8",
-                    hasBothPositionTypes && "order-1",
                     hasBothPositionTypes &&
-                      isLargePortfolioScreen &&
                       portfolioPositionsTab === "borrowed" &&
-                      "lg:hidden"
+                      "hidden"
                   )}
                 >
-                  <div ref={suppliedAssetsTableRef} className="mb-4">
-                    <div className="flex items-center justify-between mb-4">
-                      <H1 className="text-xl md:text-2xl">Supplied Assets</H1>
-                      <DorkFiButton
-                        onClick={handleRefreshSuppliedAssets}
-                        disabled={refreshingSection === "Supplied Assets"}
-                        variant="secondary"
-                        size="sm"
-                        className="min-w-0"
-                        title={
-                          isViewOnly
-                            ? "Refresh market data (view-only mode)"
-                            : "Refresh market data for supplied assets"
-                        }
-                      >
-                        <RefreshCw
-                          className={`w-3 h-3 mr-1.5 ${refreshingSection === "Supplied Assets"
-                            ? "animate-spin"
-                            : ""
-                            }`}
-                        />
-                        Refresh
-                      </DorkFiButton>
-                    </div>
-                    <div className="mb-4 flex flex-row flex-wrap items-center gap-3">
-                      <div className="relative flex-1 min-w-0 max-w-md">
-                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4 pointer-events-none" />
-                        <Input
-                          placeholder="Search assets..."
-                          value={suppliedAssetsSearchTerm}
-                          onChange={(e) =>
-                            setSuppliedAssetsSearchTerm(e.target.value)
-                          }
-                          className="pl-10"
-                        />
-                      </div>
-                      <DorkFiButton
-                        variant="secondary"
-                        size="sm"
-                        type="button"
-                        className="shrink-0 md:hidden"
-                        onClick={() => setSuppliedAssetsFilterModalOpen(true)}
-                      >
-                        <Filter className="h-4 w-4" />
-                        Filter assets
-                      </DorkFiButton>
-                    </div>
-                    <div className="hidden md:flex md:flex-row md:items-end md:gap-4 lg:gap-6 mb-4">
-                      <div className="min-w-0 flex-1">
-                        <label className="text-sm font-medium mb-2 block">
-                          Network
-                        </label>
-                        <Tabs
-                          value={suppliedAssetsNetworkFilter}
-                          onValueChange={setSuppliedAssetsNetworkFilter}
-                          className="w-full"
-                        >
-                          <TabsList className="grid w-full grid-cols-3 h-9">
-                            <TabsTrigger value="all" className="text-xs px-1.5 lg:text-sm lg:px-2">
-                              All Networks
-                            </TabsTrigger>
-                            <TabsTrigger value="algorand" className="text-xs px-1.5 lg:text-sm lg:px-2">
-                              Algorand
-                            </TabsTrigger>
-                            <TabsTrigger value="voi" className="text-xs px-1.5 lg:text-sm lg:px-2">
-                              VOI
-                            </TabsTrigger>
-                          </TabsList>
-                        </Tabs>
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <label className="text-sm font-medium mb-2 block">
-                          Market
-                        </label>
-                        <Tabs
-                          value={suppliedAssetsMarketFilter}
-                          onValueChange={setSuppliedAssetsMarketFilter}
-                          className="w-full"
-                        >
-                          <TabsList className="grid w-full grid-cols-3 h-9">
-                            <TabsTrigger value="both" className="text-xs px-1.5 lg:text-sm lg:px-2">
-                              Both Markets
-                            </TabsTrigger>
-                            <TabsTrigger value="A" className="text-xs px-1.5 lg:text-sm lg:px-2">
-                              A Market
-                            </TabsTrigger>
-                            <TabsTrigger value="B" className="text-xs px-1.5 lg:text-sm lg:px-2">
-                              B Market
-                            </TabsTrigger>
-                          </TabsList>
-                        </Tabs>
-                      </div>
-                    </div>
-                  </div>
-                  {/* Network / market filters (mobile modal) */}
-                  <Dialog
-                    open={suppliedAssetsFilterModalOpen}
-                    onOpenChange={setSuppliedAssetsFilterModalOpen}
-                  >
-                    <DialogContent className="sm:max-w-md p-6">
-                      <DialogHeader>
-                        <DialogTitle>Filter Assets</DialogTitle>
-                      </DialogHeader>
-                      <div className="space-y-4 mt-4">
-                        <div>
-                          <label className="text-sm font-medium mb-2 block">
-                            Network
-                          </label>
-                          <Tabs
-                            value={suppliedAssetsNetworkFilter}
-                            onValueChange={setSuppliedAssetsNetworkFilter}
-                            className="w-full"
-                          >
-                            <TabsList className="grid w-full grid-cols-3">
-                              <TabsTrigger value="all" className="text-sm">
-                                All Networks
-                              </TabsTrigger>
-                              <TabsTrigger value="algorand" className="text-sm">
-                                Algorand
-                              </TabsTrigger>
-                              <TabsTrigger value="voi" className="text-sm">
-                                VOI
-                              </TabsTrigger>
-                            </TabsList>
-                          </Tabs>
-                        </div>
-                        <div>
-                          <label className="text-sm font-medium mb-2 block">
-                            Market
-                          </label>
-                          <Tabs
-                            value={suppliedAssetsMarketFilter}
-                            onValueChange={setSuppliedAssetsMarketFilter}
-                            className="w-full"
-                          >
-                            <TabsList className="grid w-full grid-cols-3">
-                              <TabsTrigger value="both" className="text-sm">
-                                Both Markets
-                              </TabsTrigger>
-                              <TabsTrigger value="A" className="text-sm">
-                                A Market
-                              </TabsTrigger>
-                              <TabsTrigger value="B" className="text-sm">
-                                B Market
-                              </TabsTrigger>
-                            </TabsList>
-                          </Tabs>
-                        </div>
-                      </div>
-                    </DialogContent>
-                  </Dialog>
-
                   {/* Mobile Card View */}
                   {isMobile ? (
                     <div className="space-y-3">
                       {(() => {
                         const filteredAndSorted = deposits
-                          .filter((deposit) => {
-                            if (suppliedAssetsSearchTerm) {
-                              const searchLower =
-                                suppliedAssetsSearchTerm.toLowerCase();
-                              const assetMatch = deposit.asset
-                                .toLowerCase()
-                                .includes(searchLower);
-                              if (!assetMatch) return false;
-                            }
-                            if (suppliedAssetsNetworkFilter === "all")
-                              return true;
-                            const depositNetwork = (deposit as ItemWithNetwork).network;
-                            if (depositNetwork) {
-                              const normalizedNetwork =
-                                depositNetwork.toLowerCase();
-                              if (suppliedAssetsNetworkFilter === "algorand") {
-                                return normalizedNetwork.includes("algorand");
-                              } else if (
-                                suppliedAssetsNetworkFilter === "voi"
-                              ) {
-                                return normalizedNetwork.includes("voi");
-                              }
-                            }
-                            return true;
-                          })
-                          .filter((deposit) => {
-                            // Filter by market (A, B, or both)
-                            if (suppliedAssetsMarketFilter === "both") {
-                              return true;
-                            }
-                            const depositNetworkForMarket =
-                              (deposit as ItemWithNetwork).network || currentNetwork;
-                            const depositMarketLabel = getMarketLabel(
-                              depositNetworkForMarket,
-                              deposit.poolId
-                            );
-                            return (
-                              depositMarketLabel === suppliedAssetsMarketFilter
-                            );
-                          })
+                          .filter(positionPassesPortfolioFilters)
                           .sort((a, b) => {
                             let comparison = 0;
 
@@ -6695,9 +5941,11 @@ const Portfolio = () => {
 
                         if (displayDeposits.length === 0) {
                           return (
-                            <div className="text-center py-8 text-muted-foreground">
-                              <p>No supplied assets</p>
-                            </div>
+                            <PortfolioPositionsFilteredEmptyState
+                              totalCount={deposits.length}
+                              entityLabel="supplied assets"
+                              onClearFilters={clearPositionsFilters}
+                            />
                           );
                         }
 
@@ -7056,81 +6304,7 @@ const Portfolio = () => {
                         <TableBody>
                           {(() => {
                             const filteredAndSorted = deposits
-                              .filter((deposit) => {
-                                // Filter by search term
-                                if (suppliedAssetsSearchTerm) {
-                                  const searchLower =
-                                    suppliedAssetsSearchTerm.toLowerCase();
-                                  const assetMatch = deposit.asset
-                                    .toLowerCase()
-                                    .includes(searchLower);
-                                  if (!assetMatch) {
-                                    return false;
-                                  }
-                                }
-
-                                // Filter by network
-                                if (suppliedAssetsNetworkFilter === "all") {
-                                  return true; // Show all deposits
-                                }
-
-                                // Get network from deposit (if available) or infer from networkValues
-                                const depositNetwork = (deposit as ItemWithNetwork).network;
-                                if (depositNetwork) {
-                                  const normalizedNetwork =
-                                    depositNetwork.toLowerCase();
-                                  if (
-                                    suppliedAssetsNetworkFilter === "algorand"
-                                  ) {
-                                    return normalizedNetwork.includes(
-                                      "algorand"
-                                    );
-                                  } else if (
-                                    suppliedAssetsNetworkFilter === "voi"
-                                  ) {
-                                    return normalizedNetwork.includes("voi");
-                                  }
-                                }
-
-                                // Fallback: try to match by network values
-                                const matchingNetwork = Object.entries(
-                                  user.computed.networkValues
-                                ).find(([network, values]: [string, unknown]) => {
-                                  const normalizedNetwork =
-                                    network.toLowerCase();
-                                  if (
-                                    suppliedAssetsNetworkFilter === "algorand"
-                                  ) {
-                                    return normalizedNetwork.includes(
-                                      "algorand"
-                                    );
-                                  } else if (
-                                    suppliedAssetsNetworkFilter === "voi"
-                                  ) {
-                                    return normalizedNetwork.includes("voi");
-                                  }
-                                  return false;
-                                });
-
-                                // If we can't determine, show it (better to show than hide)
-                                return true;
-                              })
-                              .filter((deposit) => {
-                                // Filter by market (A, B, or both)
-                                if (suppliedAssetsMarketFilter === "both") {
-                                  return true;
-                                }
-                                const depositNetworkForMarket =
-                                  (deposit as ItemWithNetwork).network || currentNetwork;
-                                const depositMarketLabel = getMarketLabel(
-                                  depositNetworkForMarket,
-                                  deposit.poolId
-                                );
-                                return (
-                                  depositMarketLabel ===
-                                  suppliedAssetsMarketFilter
-                                );
-                              })
+                              .filter(positionPassesPortfolioFilters)
                               .sort((a, b) => {
                                 let comparison = 0;
 
@@ -7404,7 +6578,7 @@ const Portfolio = () => {
                                     .join(" ");
                                 }
                               } else if (
-                                suppliedAssetsNetworkFilter === "all"
+                                positionsNetworkFilter === "all"
                               ) {
                                 // Fallback: try to infer from networkValues
                                 const matchingNetwork = Object.entries(
@@ -7648,49 +6822,7 @@ const Portfolio = () => {
                   {!isMobile &&
                     (() => {
                       const filteredAndSorted = deposits
-                        .filter((deposit) => {
-                          // Filter by search term
-                          if (suppliedAssetsSearchTerm) {
-                            const searchLower =
-                              suppliedAssetsSearchTerm.toLowerCase();
-                            const assetMatch = deposit.asset
-                              .toLowerCase()
-                              .includes(searchLower);
-                            if (!assetMatch) {
-                              return false;
-                            }
-                          }
-
-                          // Filter by network
-                          if (suppliedAssetsNetworkFilter === "all") {
-                            return true;
-                          }
-
-                          const depositNetwork = (deposit as ItemWithNetwork).network;
-                          if (depositNetwork) {
-                            const normalizedNetwork =
-                              depositNetwork.toLowerCase();
-                            if (suppliedAssetsNetworkFilter === "algorand") {
-                              return normalizedNetwork.includes("algorand");
-                            } else if (suppliedAssetsNetworkFilter === "voi") {
-                              return normalizedNetwork.includes("voi");
-                            }
-                          }
-
-                          const matchingNetwork = Object.entries(
-                            user?.computed?.networkValues || {}
-                          ).find(([network, values]: [string, unknown]) => {
-                            const normalizedNetwork = network.toLowerCase();
-                            if (suppliedAssetsNetworkFilter === "algorand") {
-                              return normalizedNetwork.includes("algorand");
-                            } else if (suppliedAssetsNetworkFilter === "voi") {
-                              return normalizedNetwork.includes("voi");
-                            }
-                            return false;
-                          });
-
-                          return true;
-                        })
+                        .filter(positionPassesPortfolioFilters)
                         .sort((a, b) => {
                           let comparison = 0;
 
@@ -7745,806 +6877,24 @@ const Portfolio = () => {
                         />
                       );
                     })()}
-                </DorkFiCard>
+                </div>
               )}
 
-              {/* At Risk Assets Table */}
-              {atRiskAssets.length > 0 &&
-                (() => {
-                  // Check if any asset has non-zero pool borrows
-                  const hasPoolBorrows = atRiskAssets.some(
-                    (asset) => asset.poolBorrowsUSD > 0
-                  );
-
-                  return (
-                    <DorkFiCard
-                      className={cn(
-                        "p-6 md:p-8 border-orange-500/50 bg-orange-500/5",
-                        hasBothPositionTypes && "order-2 lg:order-3"
-                      )}
-                    >
-                      <div className="mb-4">
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-2">
-                            <AlertTriangle className="w-6 h-6 text-orange-500" />
-                            <H1 className="text-xl md:text-2xl text-orange-500">
-                              At Risk Assets
-                            </H1>
-                          </div>
-                          <DorkFiButton
-                            onClick={handleRefreshAtRiskAssets}
-                            disabled={refreshingSection === "At Risk Assets"}
-                            variant="secondary"
-                            size="sm"
-                            className="min-w-0"
-                            title={
-                              isViewOnly
-                                ? "Refresh market data (view-only mode)"
-                                : "Refresh market data for at risk assets"
-                            }
-                          >
-                            <RefreshCw
-                              className={`w-3 h-3 mr-1.5 ${refreshingSection === "At Risk Assets"
-                                ? "animate-spin"
-                                : ""
-                                }`}
-                            />
-                            Refresh
-                          </DorkFiButton>
-                        </div>
-                        <Body className="text-sm text-muted-foreground">
-                          These assets have a health factor (collateral value ×
-                          liquidation factor / total borrows) less than 1.0,
-                          indicating potential liquidation risk.
-                        </Body>
-                      </div>
-                      {/* Market Filter Tabs - Hidden on mobile */}
-                      <div className="hidden md:block mb-4">
-                        <Tabs
-                          value={atRiskAssetsMarketFilter}
-                          onValueChange={setAtRiskAssetsMarketFilter}
-                          className="w-full"
-                        >
-                          <TabsList className="grid w-full grid-cols-3">
-                            <TabsTrigger value="both" className="text-sm">
-                              Both Markets
-                            </TabsTrigger>
-                            <TabsTrigger value="A" className="text-sm">
-                              A Market
-                            </TabsTrigger>
-                            <TabsTrigger value="B" className="text-sm">
-                              B Market
-                            </TabsTrigger>
-                          </TabsList>
-                        </Tabs>
-                      </div>
-                      {/* Filter Button for Mobile - At Risk Assets */}
-                      <div className="md:hidden mb-4 flex justify-end">
-                        <DorkFiButton
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => setAtRiskAssetsFilterModalOpen(true)}
-                          className="flex items-center gap-2 min-w-0"
-                        >
-                          <Filter className="h-4 w-4" />
-                          Filter
-                        </DorkFiButton>
-                      </div>
-                      {/* Filter Modal for Mobile - At Risk Assets */}
-                      <Dialog
-                        open={atRiskAssetsFilterModalOpen}
-                        onOpenChange={setAtRiskAssetsFilterModalOpen}
-                      >
-                        <DialogContent className="sm:max-w-md p-6">
-                          <DialogHeader>
-                            <DialogTitle>Filter Assets</DialogTitle>
-                          </DialogHeader>
-                          <div className="space-y-4 mt-4">
-                            <div>
-                              <label className="text-sm font-medium mb-2 block">
-                                Market
-                              </label>
-                              <Tabs
-                                value={atRiskAssetsMarketFilter}
-                                onValueChange={setAtRiskAssetsMarketFilter}
-                                className="w-full"
-                              >
-                                <TabsList className="grid w-full grid-cols-3">
-                                  <TabsTrigger value="both" className="text-sm">
-                                    Both Markets
-                                  </TabsTrigger>
-                                  <TabsTrigger value="A" className="text-sm">
-                                    A Market
-                                  </TabsTrigger>
-                                  <TabsTrigger value="B" className="text-sm">
-                                    B Market
-                                  </TabsTrigger>
-                                </TabsList>
-                              </Tabs>
-                            </div>
-                          </div>
-                        </DialogContent>
-                      </Dialog>
-                      <div className="overflow-x-auto">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>
-                                <button
-                                  onClick={() => {
-                                    if (atRiskAssetsSort.column === "asset") {
-                                      setAtRiskAssetsSort({
-                                        column: "asset",
-                                        direction:
-                                          atRiskAssetsSort.direction === "asc"
-                                            ? "desc"
-                                            : "asc",
-                                      });
-                                    } else {
-                                      setAtRiskAssetsSort({
-                                        column: "asset",
-                                        direction: "asc",
-                                      });
-                                    }
-                                  }}
-                                  className="flex items-center gap-1 hover:text-foreground transition-colors"
-                                >
-                                  Asset
-                                  {atRiskAssetsSort.column === "asset" ? (
-                                    atRiskAssetsSort.direction === "asc" ? (
-                                      <ArrowUp className="w-3 h-3" />
-                                    ) : (
-                                      <ArrowDown className="w-3 h-3" />
-                                    )
-                                  ) : (
-                                    <ArrowUpDown className="w-3 h-3 opacity-50" />
-                                  )}
-                                </button>
-                              </TableHead>
-                              <TableHead>
-                                <button
-                                  onClick={() => {
-                                    if (atRiskAssetsSort.column === "network") {
-                                      setAtRiskAssetsSort({
-                                        column: "network",
-                                        direction:
-                                          atRiskAssetsSort.direction === "asc"
-                                            ? "desc"
-                                            : "asc",
-                                      });
-                                    } else {
-                                      setAtRiskAssetsSort({
-                                        column: "network",
-                                        direction: "asc",
-                                      });
-                                    }
-                                  }}
-                                  className="flex items-center justify-center gap-1 hover:text-foreground transition-colors w-full"
-                                >
-                                  Network
-                                  {atRiskAssetsSort.column === "network" ? (
-                                    atRiskAssetsSort.direction === "asc" ? (
-                                      <ArrowUp className="w-3 h-3" />
-                                    ) : (
-                                      <ArrowDown className="w-3 h-3" />
-                                    )
-                                  ) : (
-                                    <ArrowUpDown className="w-3 h-3 opacity-50" />
-                                  )}
-                                </button>
-                              </TableHead>
-                              <TableHead>Market</TableHead>
-                              <TableHead>
-                                <button
-                                  onClick={() => {
-                                    if (atRiskAssetsSort.column === "value") {
-                                      setAtRiskAssetsSort({
-                                        column: "value",
-                                        direction:
-                                          atRiskAssetsSort.direction === "asc"
-                                            ? "desc"
-                                            : "asc",
-                                      });
-                                    } else {
-                                      setAtRiskAssetsSort({
-                                        column: "value",
-                                        direction: "desc",
-                                      });
-                                    }
-                                  }}
-                                  className="flex items-center gap-1 hover:text-foreground transition-colors"
-                                >
-                                  Value (USD)
-                                  {atRiskAssetsSort.column === "value" ? (
-                                    atRiskAssetsSort.direction === "asc" ? (
-                                      <ArrowUp className="w-3 h-3" />
-                                    ) : (
-                                      <ArrowDown className="w-3 h-3" />
-                                    )
-                                  ) : (
-                                    <ArrowUpDown className="w-3 h-3 opacity-50" />
-                                  )}
-                                </button>
-                              </TableHead>
-                              <TableHead>
-                                <button
-                                  onClick={() => {
-                                    if (
-                                      atRiskAssetsSort.column ===
-                                      "liquidationFactor"
-                                    ) {
-                                      setAtRiskAssetsSort({
-                                        column: "liquidationFactor",
-                                        direction:
-                                          atRiskAssetsSort.direction === "asc"
-                                            ? "desc"
-                                            : "asc",
-                                      });
-                                    } else {
-                                      setAtRiskAssetsSort({
-                                        column: "liquidationFactor",
-                                        direction: "desc",
-                                      });
-                                    }
-                                  }}
-                                  className="flex items-center gap-1 hover:text-foreground transition-colors"
-                                >
-                                  Liquidation Factor
-                                  {atRiskAssetsSort.column ===
-                                    "liquidationFactor" ? (
-                                    atRiskAssetsSort.direction === "asc" ? (
-                                      <ArrowUp className="w-3 h-3" />
-                                    ) : (
-                                      <ArrowDown className="w-3 h-3" />
-                                    )
-                                  ) : (
-                                    <ArrowUpDown className="w-3 h-3 opacity-50" />
-                                  )}
-                                </button>
-                              </TableHead>
-                              <TableHead>
-                                <button
-                                  onClick={() => {
-                                    if (
-                                      atRiskAssetsSort.column === "depositValue"
-                                    ) {
-                                      setAtRiskAssetsSort({
-                                        column: "depositValue",
-                                        direction:
-                                          atRiskAssetsSort.direction === "asc"
-                                            ? "desc"
-                                            : "asc",
-                                      });
-                                    } else {
-                                      setAtRiskAssetsSort({
-                                        column: "depositValue",
-                                        direction: "desc",
-                                      });
-                                    }
-                                  }}
-                                  className="flex items-center gap-1 hover:text-foreground transition-colors"
-                                >
-                                  Deposit Value
-                                  {atRiskAssetsSort.column ===
-                                    "depositValue" ? (
-                                    atRiskAssetsSort.direction === "asc" ? (
-                                      <ArrowUp className="w-3 h-3" />
-                                    ) : (
-                                      <ArrowDown className="w-3 h-3" />
-                                    )
-                                  ) : (
-                                    <ArrowUpDown className="w-3 h-3 opacity-50" />
-                                  )}
-                                </button>
-                              </TableHead>
-                              {hasPoolBorrows && (
-                                <TableHead>
-                                  <button
-                                    onClick={() => {
-                                      if (
-                                        atRiskAssetsSort.column ===
-                                        "borrowValue"
-                                      ) {
-                                        setAtRiskAssetsSort({
-                                          column: "borrowValue",
-                                          direction:
-                                            atRiskAssetsSort.direction === "asc"
-                                              ? "desc"
-                                              : "asc",
-                                        });
-                                      } else {
-                                        setAtRiskAssetsSort({
-                                          column: "borrowValue",
-                                          direction: "desc",
-                                        });
-                                      }
-                                    }}
-                                    className="flex items-center gap-1 hover:text-foreground transition-colors"
-                                  >
-                                    Borrow Value
-                                    {atRiskAssetsSort.column ===
-                                      "borrowValue" ? (
-                                      atRiskAssetsSort.direction === "asc" ? (
-                                        <ArrowUp className="w-3 h-3" />
-                                      ) : (
-                                        <ArrowDown className="w-3 h-3" />
-                                      )
-                                    ) : (
-                                      <ArrowUpDown className="w-3 h-3 opacity-50" />
-                                    )}
-                                  </button>
-                                </TableHead>
-                              )}
-                              <TableHead>
-                                <button
-                                  onClick={() => {
-                                    if (
-                                      atRiskAssetsSort.column === "riskRatio"
-                                    ) {
-                                      setAtRiskAssetsSort({
-                                        column: "riskRatio",
-                                        direction:
-                                          atRiskAssetsSort.direction === "asc"
-                                            ? "desc"
-                                            : "asc",
-                                      });
-                                    } else {
-                                      setAtRiskAssetsSort({
-                                        column: "riskRatio",
-                                        direction: "asc",
-                                      });
-                                    }
-                                  }}
-                                  className="flex items-center gap-1 hover:text-foreground transition-colors"
-                                >
-                                  Health Factor
-                                  {atRiskAssetsSort.column === "riskRatio" ? (
-                                    atRiskAssetsSort.direction === "asc" ? (
-                                      <ArrowUp className="w-3 h-3" />
-                                    ) : (
-                                      <ArrowDown className="w-3 h-3" />
-                                    )
-                                  ) : (
-                                    <ArrowUpDown className="w-3 h-3 opacity-50" />
-                                  )}
-                                </button>
-                              </TableHead>
-                              <TableHead>Actions</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {(() => {
-                              // Sort at-risk assets based on selected column
-                              const sortedAtRiskAssets = [...atRiskAssets].sort(
-                                (a, b) => {
-                                  let comparison = 0;
-
-                                  switch (atRiskAssetsSort.column) {
-                                    case "asset":
-                                      comparison = a.asset.localeCompare(
-                                        b.asset
-                                      );
-                                      break;
-                                    case "network":
-                                      const networkA = (
-                                        (a as ItemWithNetwork).network || "Unknown"
-                                      ).toLowerCase();
-                                      const networkB = (
-                                        (b as ItemWithNetwork).network || "Unknown"
-                                      ).toLowerCase();
-                                      comparison =
-                                        networkA.localeCompare(networkB);
-                                      break;
-                                    case "value":
-                                      comparison = a.value - b.value;
-                                      break;
-                                    case "liquidationFactor":
-                                      comparison =
-                                        a.liquidationFactor -
-                                        b.liquidationFactor;
-                                      break;
-                                    case "depositValue":
-                                      comparison =
-                                        a.poolCollateralValueUSD -
-                                        b.poolCollateralValueUSD;
-                                      break;
-                                    case "borrowValue":
-                                      comparison =
-                                        a.poolBorrowsUSD - b.poolBorrowsUSD;
-                                      break;
-                                    case "riskRatio":
-                                    default:
-                                      comparison = a.riskRatio - b.riskRatio;
-                                      break;
-                                  }
-
-                                  return atRiskAssetsSort.direction === "asc"
-                                    ? comparison
-                                    : -comparison;
-                                }
-                              );
-
-                              // Filter by market (A, B, or both)
-                              const filteredAtRiskAssets =
-                                sortedAtRiskAssets.filter((asset) => {
-                                  if (atRiskAssetsMarketFilter === "both") {
-                                    return true;
-                                  }
-                                  const assetNetwork =
-                                    (asset as ItemWithNetwork).network || currentNetwork;
-                                  const marketLabel = getMarketLabel(
-                                    assetNetwork,
-                                    asset.poolId
-                                  );
-                                  return (
-                                    marketLabel === atRiskAssetsMarketFilter
-                                  );
-                                });
-
-                              return filteredAtRiskAssets.map(
-                                (asset, index) => {
-                                  // Get market label using the asset's network, not currentNetwork
-                                  const assetNetwork =
-                                    (asset as ItemWithNetwork).network || currentNetwork;
-                                  const marketLabel = getMarketLabel(
-                                    assetNetwork,
-                                    asset.poolId
-                                  );
-
-                                  return (
-                                    <TableRow
-                                      key={`${asset.asset}-${asset.poolId || index
-                                        }`}
-                                      className="transition-all relative card-hover rounded-lg border border-gray-200/30 dark:border-ocean-teal/10 bg-white/50 dark:bg-slate-800/50 hover:border-orange-400 hover:shadow-[0_0_16px_4px_rgba(249,115,22,0.15)] hover:bg-orange-500/5 hover:z-20 cursor-pointer"
-                                    >
-                                      <TableCell>
-                                        <div className="flex items-center gap-2">
-                                          <MarketRowTokenIcon
-                                            market={{
-                                              icon: asset.icon,
-                                              asset: asset.asset,
-                                              iconBadgeUrl: (
-                                                asset as { iconBadgeUrl?: string }
-                                              ).iconBadgeUrl,
-                                            }}
-                                            poolLetterLabel={marketLabel}
-                                            imgClassName="h-6 w-6 shrink-0 rounded-full object-contain"
-                                          />
-                                          <span className="font-medium">
-                                            {asset.asset}
-                                          </span>
-                                        </div>
-                                      </TableCell>
-                                      <TableCell className="text-center">
-                                        {(() => {
-                                          const depositNetwork = (asset as ItemWithNetwork)
-                                            .network;
-                                          if (depositNetwork) {
-                                            // Format network name: "algorand-mainnet" -> "Algorand", "voi-mainnet" -> "VOI"
-                                            const normalized =
-                                              depositNetwork.toLowerCase();
-                                            if (
-                                              normalized.includes("algorand")
-                                            ) {
-                                              return "Algorand";
-                                            } else if (
-                                              normalized.includes("voi")
-                                            ) {
-                                              return "VOI";
-                                            } else {
-                                              // Fallback to formatted name
-                                              return depositNetwork
-                                                .split("-")
-                                                .map(
-                                                  (word) =>
-                                                    word
-                                                      .charAt(0)
-                                                      .toUpperCase() +
-                                                    word.slice(1)
-                                                )
-                                                .join(" ");
-                                            }
-                                          }
-                                          return "Unknown";
-                                        })()}
-                                      </TableCell>
-                                      <TableCell className="text-center">
-                                        {marketLabel || "-"}
-                                      </TableCell>
-                                      <TableCell>
-                                        $
-                                        {formatNumber(asset.value, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                      </TableCell>
-                                      <TableCell>
-                                        {formatPercent(asset.liquidationFactor, { maximumFractionDigits: 1 })}
-                                      </TableCell>
-                                      <TableCell>
-                                        <span className="text-muted-foreground">
-                                          {formatCurrency(asset.poolCollateralValueUSD, "USD", {
-                                            minimumFractionDigits: 2,
-                                            maximumFractionDigits: 2,
-                                          })}
-                                        </span>
-                                      </TableCell>
-                                      {hasPoolBorrows && (
-                                        <TableCell>
-                                          <span className="text-muted-foreground">
-                                            {formatCurrency(asset.poolBorrowsUSD, "USD",
-                                              {
-                                                minimumFractionDigits: 2,
-                                                maximumFractionDigits: 2,
-                                              }
-                                            )}
-                                          </span>
-                                        </TableCell>
-                                      )}
-                                      <TableCell>
-                                        <span
-                                          className={`font-semibold ${asset.riskRatio < 0.5
-                                            ? "text-red-500"
-                                            : asset.riskRatio < 0.75
-                                              ? "text-orange-500"
-                                              : "text-yellow-500"
-                                            }`}
-                                        >
-                                          {formatNumber(asset.riskRatio, { maximumFractionDigits: 3 })}
-                                        </span>
-                                      </TableCell>
-                                      <TableCell>
-                                        <div className="flex items-center gap-2">
-                                          {!isViewOnly && (() => {
-                                            const atRiskMarket =
-                                              marketRowForPortfolioPosition(
-                                                marketData,
-                                                {
-                                                  marketId: (asset as ItemWithNetwork)
-                                                    .marketId,
-                                                  poolId: asset.poolId,
-                                                  displaySymbol: asset.asset,
-                                                }
-                                              ) as any;
-                                            const depositCapReached =
-                                              atRiskMarket &&
-                                              isAtDepositCap(
-                                                Number(atRiskMarket?.totalDeposits ?? 0),
-                                                Number(atRiskMarket?.maxTotalDeposits ?? 0),
-                                              );
-                                            return !atRiskMarket?.isPaused && (
-                                              <DorkFiButton
-                                                variant="secondary"
-                                                size="sm"
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  handleDepositClick(
-                                                    asset.asset,
-                                                    asset.poolId,
-                                                    (asset as ItemWithNetwork).network,
-                                                    (asset as ItemWithNetwork).configSymbol,
-                                                    (asset as ItemWithNetwork).marketId
-                                                  );
-                                                }}
-                                                disabled={depositCapReached}
-                                                title={
-                                                  depositCapReached
-                                                    ? "Market at deposit cap"
-                                                    : "Supply more of this asset to earn yield and use as collateral"
-                                                }
-                                                aria-label="Supply"
-                                                className="min-w-[92px] h-8 px-2 gap-1"
-                                              >
-                                                <span className="text-base leading-none">+</span>
-                                                <span className="hidden lg:inline text-xs">Supply</span>
-                                              </DorkFiButton>
-                                            );
-                                          })()}
-                                        </div>
-                                      </TableCell>
-                                    </TableRow>
-                                  );
-                                }
-                              );
-                            })()}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </DorkFiCard>
-                  );
-                })()}
-
-              {/* Borrowed Assets Table */}
               {borrows.length > 0 && (
-                <DorkFiCard
+                <div
+                  ref={borrowedAssetsTableRef}
                   className={cn(
-                    "p-6 md:p-8",
-                    hasBothPositionTypes && "order-3 lg:order-2",
                     hasBothPositionTypes &&
-                      isLargePortfolioScreen &&
                       portfolioPositionsTab === "supplied" &&
-                      "lg:hidden"
+                      "hidden"
                   )}
                 >
-                  <div ref={borrowedAssetsTableRef} className="mb-4">
-                    <div className="flex items-center justify-between mb-4">
-                      <H1 className="text-xl md:text-2xl">Borrowed Assets</H1>
-                      <DorkFiButton
-                        onClick={handleRefreshBorrowedAssets}
-                        disabled={refreshingSection === "Borrowed Assets"}
-                        variant="secondary"
-                        size="sm"
-                        className="min-w-0"
-                        title={
-                          isViewOnly
-                            ? "Refresh market data (view-only mode)"
-                            : "Refresh market data for borrowed assets"
-                        }
-                      >
-                        <RefreshCw
-                          className={`w-3 h-3 mr-1.5 ${refreshingSection === "Borrowed Assets"
-                            ? "animate-spin"
-                            : ""
-                            }`}
-                        />
-                        Refresh
-                      </DorkFiButton>
-                    </div>
-                    <div className="mb-4 flex flex-row flex-wrap items-center gap-3">
-                      <div className="relative flex-1 min-w-0 max-w-md">
-                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4 pointer-events-none" />
-                        <Input
-                          placeholder="Search assets..."
-                          value={borrowedAssetsSearchTerm}
-                          onChange={(e) =>
-                            setBorrowedAssetsSearchTerm(e.target.value)
-                          }
-                          className="pl-10"
-                        />
-                      </div>
-                      <DorkFiButton
-                        variant="secondary"
-                        size="sm"
-                        type="button"
-                        className="shrink-0 md:hidden"
-                        onClick={() => setBorrowedAssetsFilterModalOpen(true)}
-                      >
-                        <Filter className="h-4 w-4" />
-                        Filter assets
-                      </DorkFiButton>
-                    </div>
-                    <div className="hidden md:flex md:flex-row md:items-end md:gap-4 lg:gap-6 mb-4">
-                      <div className="min-w-0 flex-1">
-                        <label className="text-sm font-medium mb-2 block">
-                          Network
-                        </label>
-                        <Tabs
-                          value={borrowedAssetsNetworkFilter}
-                          onValueChange={setBorrowedAssetsNetworkFilter}
-                          className="w-full"
-                        >
-                          <TabsList className="grid w-full grid-cols-3 h-9">
-                            <TabsTrigger value="all" className="text-xs px-1.5 lg:text-sm lg:px-2">
-                              All Networks
-                            </TabsTrigger>
-                            <TabsTrigger value="algorand" className="text-xs px-1.5 lg:text-sm lg:px-2">
-                              Algorand
-                            </TabsTrigger>
-                            <TabsTrigger value="voi" className="text-xs px-1.5 lg:text-sm lg:px-2">
-                              VOI
-                            </TabsTrigger>
-                          </TabsList>
-                        </Tabs>
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <label className="text-sm font-medium mb-2 block">
-                          Market
-                        </label>
-                        <Tabs
-                          value={borrowedAssetsMarketFilter}
-                          onValueChange={setBorrowedAssetsMarketFilter}
-                          className="w-full"
-                        >
-                          <TabsList className="grid w-full grid-cols-3 h-9">
-                            <TabsTrigger value="both" className="text-xs px-1.5 lg:text-sm lg:px-2">
-                              Both Markets
-                            </TabsTrigger>
-                            <TabsTrigger value="A" className="text-xs px-1.5 lg:text-sm lg:px-2">
-                              A Market
-                            </TabsTrigger>
-                            <TabsTrigger value="B" className="text-xs px-1.5 lg:text-sm lg:px-2">
-                              B Market
-                            </TabsTrigger>
-                          </TabsList>
-                        </Tabs>
-                      </div>
-                    </div>
-                  </div>
-                  {/* Network / market filters (mobile modal) */}
-                  <Dialog
-                    open={borrowedAssetsFilterModalOpen}
-                    onOpenChange={setBorrowedAssetsFilterModalOpen}
-                  >
-                    <DialogContent className="sm:max-w-md p-6">
-                      <DialogHeader>
-                        <DialogTitle>Filter Assets</DialogTitle>
-                      </DialogHeader>
-                      <div className="space-y-4 mt-4">
-                        <div>
-                          <label className="text-sm font-medium mb-2 block">
-                            Network
-                          </label>
-                          <Tabs
-                            value={borrowedAssetsNetworkFilter}
-                            onValueChange={setBorrowedAssetsNetworkFilter}
-                            className="w-full"
-                          >
-                            <TabsList className="grid w-full grid-cols-3">
-                              <TabsTrigger value="all" className="text-sm">
-                                All Networks
-                              </TabsTrigger>
-                              <TabsTrigger value="algorand" className="text-sm">
-                                Algorand
-                              </TabsTrigger>
-                              <TabsTrigger value="voi" className="text-sm">
-                                VOI
-                              </TabsTrigger>
-                            </TabsList>
-                          </Tabs>
-                        </div>
-                        <div>
-                          <label className="text-sm font-medium mb-2 block">
-                            Market
-                          </label>
-                          <Tabs
-                            value={borrowedAssetsMarketFilter}
-                            onValueChange={setBorrowedAssetsMarketFilter}
-                            className="w-full"
-                          >
-                            <TabsList className="grid w-full grid-cols-3">
-                              <TabsTrigger value="both" className="text-sm">
-                                Both Markets
-                              </TabsTrigger>
-                              <TabsTrigger value="A" className="text-sm">
-                                A Market
-                              </TabsTrigger>
-                              <TabsTrigger value="B" className="text-sm">
-                                B Market
-                              </TabsTrigger>
-                            </TabsList>
-                          </Tabs>
-                        </div>
-                      </div>
-                    </DialogContent>
-                  </Dialog>
-
                   {/* Mobile Card View */}
                   {isMobile ? (
                     <div className="space-y-3">
                       {(() => {
                         const filteredAndSorted = borrows
-                          .filter((borrow) => {
-                            if (borrowedAssetsSearchTerm) {
-                              const searchLower =
-                                borrowedAssetsSearchTerm.toLowerCase();
-                              const assetMatch = borrow.asset
-                                .toLowerCase()
-                                .includes(searchLower);
-                              if (!assetMatch) return false;
-                            }
-                            if (borrowedAssetsNetworkFilter === "all")
-                              return true;
-                            const borrowNetwork = (borrow as ItemWithNetwork).network;
-                            if (borrowNetwork) {
-                              const normalizedNetwork =
-                                borrowNetwork.toLowerCase();
-                              if (borrowedAssetsNetworkFilter === "algorand") {
-                                return normalizedNetwork.includes("algorand");
-                              } else if (
-                                borrowedAssetsNetworkFilter === "voi"
-                              ) {
-                                return normalizedNetwork.includes("voi");
-                              }
-                            }
-                            return true;
-                          })
+                          .filter(positionPassesPortfolioFilters)
                           .sort((a, b) => {
                             let comparison = 0;
                             switch (borrowedAssetsSort.column) {
@@ -8573,9 +6923,11 @@ const Portfolio = () => {
 
                         if (displayBorrows.length === 0) {
                           return (
-                            <div className="text-center py-8 text-muted-foreground">
-                              <p>No borrowed assets</p>
-                            </div>
+                            <PortfolioPositionsFilteredEmptyState
+                              totalCount={borrows.length}
+                              entityLabel="borrowed assets"
+                              onClearFilters={clearPositionsFilters}
+                            />
                           );
                         }
 
@@ -8958,78 +7310,7 @@ const Portfolio = () => {
                         <TableBody>
                           {(() => {
                             const filteredAndSorted = borrows
-                              .filter((borrow) => {
-                                // Filter by search term
-                                if (borrowedAssetsSearchTerm) {
-                                  const searchLower =
-                                    borrowedAssetsSearchTerm.toLowerCase();
-                                  const assetMatch = borrow.asset
-                                    .toLowerCase()
-                                    .includes(searchLower);
-                                  if (!assetMatch) {
-                                    return false;
-                                  }
-                                }
-
-                                // Filter by network
-                                if (borrowedAssetsNetworkFilter === "all") {
-                                  return true;
-                                }
-
-                                const borrowNetwork = (borrow as ItemWithNetwork).network;
-                                if (borrowNetwork) {
-                                  const normalizedNetwork =
-                                    borrowNetwork.toLowerCase();
-                                  if (
-                                    borrowedAssetsNetworkFilter === "algorand"
-                                  ) {
-                                    return normalizedNetwork.includes(
-                                      "algorand"
-                                    );
-                                  } else if (
-                                    borrowedAssetsNetworkFilter === "voi"
-                                  ) {
-                                    return normalizedNetwork.includes("voi");
-                                  }
-                                }
-
-                                const matchingNetwork = Object.entries(
-                                  user?.computed?.networkValues || {}
-                                ).find(([network, values]: [string, unknown]) => {
-                                  const normalizedNetwork =
-                                    network.toLowerCase();
-                                  if (
-                                    borrowedAssetsNetworkFilter === "algorand"
-                                  ) {
-                                    return normalizedNetwork.includes(
-                                      "algorand"
-                                    );
-                                  } else if (
-                                    borrowedAssetsNetworkFilter === "voi"
-                                  ) {
-                                    return normalizedNetwork.includes("voi");
-                                  }
-                                  return false;
-                                });
-
-                                return true;
-                              })
-                              .filter((borrow) => {
-                                // Filter by market (A, B, or both)
-                                if (borrowedAssetsMarketFilter === "both") {
-                                  return true;
-                                }
-                                const borrowNetwork =
-                                  (borrow as ItemWithNetwork).network || currentNetwork;
-                                const borrowMarketLabel = getMarketLabel(
-                                  borrowNetwork,
-                                  borrow.poolId
-                                );
-                                return (
-                                  borrowMarketLabel ===
-                                  borrowedAssetsMarketFilter
-                                );
-                              })
+                              .filter(positionPassesPortfolioFilters)
                               .sort((a, b) => {
                                 let comparison = 0;
 
@@ -9152,7 +7433,7 @@ const Portfolio = () => {
                                     .join(" ");
                                 }
                               } else if (
-                                borrowedAssetsNetworkFilter === "all"
+                                positionsNetworkFilter === "all"
                               ) {
                                 // Fallback: try to infer from networkValues
                                 const matchingNetwork = Object.entries(
@@ -9389,49 +7670,7 @@ const Portfolio = () => {
                   {!isMobile &&
                     (() => {
                       const filteredAndSorted = borrows
-                        .filter((borrow) => {
-                          // Filter by search term
-                          if (borrowedAssetsSearchTerm) {
-                            const searchLower =
-                              borrowedAssetsSearchTerm.toLowerCase();
-                            const assetMatch = borrow.asset
-                              .toLowerCase()
-                              .includes(searchLower);
-                            if (!assetMatch) {
-                              return false;
-                            }
-                          }
-
-                          // Filter by network
-                          if (selectedNetworkFilter === "all") {
-                            return true;
-                          }
-
-                          const borrowNetwork = (borrow as ItemWithNetwork).network;
-                          if (borrowNetwork) {
-                            const normalizedNetwork =
-                              borrowNetwork.toLowerCase();
-                            if (selectedNetworkFilter === "algorand") {
-                              return normalizedNetwork.includes("algorand");
-                            } else if (selectedNetworkFilter === "voi") {
-                              return normalizedNetwork.includes("voi");
-                            }
-                          }
-
-                          const matchingNetwork = Object.entries(
-                            user?.computed?.networkValues || {}
-                          ).find(([network, values]: [string, unknown]) => {
-                            const normalizedNetwork = network.toLowerCase();
-                            if (selectedNetworkFilter === "algorand") {
-                              return normalizedNetwork.includes("algorand");
-                            } else if (selectedNetworkFilter === "voi") {
-                              return normalizedNetwork.includes("voi");
-                            }
-                            return false;
-                          });
-
-                          return true;
-                        })
+                        .filter(positionPassesPortfolioFilters)
                         .sort((a, b) => {
                           let comparison = 0;
 
@@ -9486,8 +7725,534 @@ const Portfolio = () => {
                         />
                       );
                     })()}
+                </div>
+              )}
                 </DorkFiCard>
               )}
+
+              {/* At Risk Assets Table */}
+              {atRiskAssets.length > 0 &&
+                (() => {
+                  // Check if any asset has non-zero pool borrows
+                  const hasPoolBorrows = atRiskAssets.some(
+                    (asset) => asset.poolBorrowsUSD > 0
+                  );
+
+                  return (
+                    <DorkFiCard
+                      className={cn(
+                        "p-6 md:p-8 border-orange-500/50 bg-orange-500/5",
+                        hasBothPositionTypes && "order-2 lg:order-3"
+                      )}
+                    >
+                      <div className="mb-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <AlertTriangle className="w-6 h-6 text-orange-500" />
+                            <H1 className="text-xl md:text-2xl text-orange-500">
+                              At Risk Assets
+                            </H1>
+                          </div>
+                          <DorkFiButton
+                            onClick={handleRefreshAtRiskAssets}
+                            disabled={refreshingSection === "At Risk Assets"}
+                            variant="secondary"
+                            size="sm"
+                            className="min-w-0"
+                            title={
+                              isViewOnly
+                                ? "Refresh market data (view-only mode)"
+                                : "Refresh market data for at risk assets"
+                            }
+                          >
+                            <RefreshCw
+                              className={`w-3 h-3 mr-1.5 ${refreshingSection === "At Risk Assets"
+                                ? "animate-spin"
+                                : ""
+                                }`}
+                            />
+                            Refresh
+                          </DorkFiButton>
+                        </div>
+                        <Body className="text-sm text-muted-foreground">
+                          These assets have a health factor (collateral value ×
+                          liquidation factor / total borrows) less than 1.0,
+                          indicating potential liquidation risk.
+                        </Body>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>
+                                <button
+                                  onClick={() => {
+                                    if (atRiskAssetsSort.column === "asset") {
+                                      setAtRiskAssetsSort({
+                                        column: "asset",
+                                        direction:
+                                          atRiskAssetsSort.direction === "asc"
+                                            ? "desc"
+                                            : "asc",
+                                      });
+                                    } else {
+                                      setAtRiskAssetsSort({
+                                        column: "asset",
+                                        direction: "asc",
+                                      });
+                                    }
+                                  }}
+                                  className="flex items-center gap-1 hover:text-foreground transition-colors"
+                                >
+                                  Asset
+                                  {atRiskAssetsSort.column === "asset" ? (
+                                    atRiskAssetsSort.direction === "asc" ? (
+                                      <ArrowUp className="w-3 h-3" />
+                                    ) : (
+                                      <ArrowDown className="w-3 h-3" />
+                                    )
+                                  ) : (
+                                    <ArrowUpDown className="w-3 h-3 opacity-50" />
+                                  )}
+                                </button>
+                              </TableHead>
+                              <TableHead>
+                                <button
+                                  onClick={() => {
+                                    if (atRiskAssetsSort.column === "network") {
+                                      setAtRiskAssetsSort({
+                                        column: "network",
+                                        direction:
+                                          atRiskAssetsSort.direction === "asc"
+                                            ? "desc"
+                                            : "asc",
+                                      });
+                                    } else {
+                                      setAtRiskAssetsSort({
+                                        column: "network",
+                                        direction: "asc",
+                                      });
+                                    }
+                                  }}
+                                  className="flex items-center justify-center gap-1 hover:text-foreground transition-colors w-full"
+                                >
+                                  Network
+                                  {atRiskAssetsSort.column === "network" ? (
+                                    atRiskAssetsSort.direction === "asc" ? (
+                                      <ArrowUp className="w-3 h-3" />
+                                    ) : (
+                                      <ArrowDown className="w-3 h-3" />
+                                    )
+                                  ) : (
+                                    <ArrowUpDown className="w-3 h-3 opacity-50" />
+                                  )}
+                                </button>
+                              </TableHead>
+                              <TableHead>Market</TableHead>
+                              <TableHead>
+                                <button
+                                  onClick={() => {
+                                    if (atRiskAssetsSort.column === "value") {
+                                      setAtRiskAssetsSort({
+                                        column: "value",
+                                        direction:
+                                          atRiskAssetsSort.direction === "asc"
+                                            ? "desc"
+                                            : "asc",
+                                      });
+                                    } else {
+                                      setAtRiskAssetsSort({
+                                        column: "value",
+                                        direction: "desc",
+                                      });
+                                    }
+                                  }}
+                                  className="flex items-center gap-1 hover:text-foreground transition-colors"
+                                >
+                                  Value (USD)
+                                  {atRiskAssetsSort.column === "value" ? (
+                                    atRiskAssetsSort.direction === "asc" ? (
+                                      <ArrowUp className="w-3 h-3" />
+                                    ) : (
+                                      <ArrowDown className="w-3 h-3" />
+                                    )
+                                  ) : (
+                                    <ArrowUpDown className="w-3 h-3 opacity-50" />
+                                  )}
+                                </button>
+                              </TableHead>
+                              <TableHead>
+                                <button
+                                  onClick={() => {
+                                    if (
+                                      atRiskAssetsSort.column ===
+                                      "liquidationFactor"
+                                    ) {
+                                      setAtRiskAssetsSort({
+                                        column: "liquidationFactor",
+                                        direction:
+                                          atRiskAssetsSort.direction === "asc"
+                                            ? "desc"
+                                            : "asc",
+                                      });
+                                    } else {
+                                      setAtRiskAssetsSort({
+                                        column: "liquidationFactor",
+                                        direction: "desc",
+                                      });
+                                    }
+                                  }}
+                                  className="flex items-center gap-1 hover:text-foreground transition-colors"
+                                >
+                                  Liquidation Factor
+                                  {atRiskAssetsSort.column ===
+                                    "liquidationFactor" ? (
+                                    atRiskAssetsSort.direction === "asc" ? (
+                                      <ArrowUp className="w-3 h-3" />
+                                    ) : (
+                                      <ArrowDown className="w-3 h-3" />
+                                    )
+                                  ) : (
+                                    <ArrowUpDown className="w-3 h-3 opacity-50" />
+                                  )}
+                                </button>
+                              </TableHead>
+                              <TableHead>
+                                <button
+                                  onClick={() => {
+                                    if (
+                                      atRiskAssetsSort.column === "depositValue"
+                                    ) {
+                                      setAtRiskAssetsSort({
+                                        column: "depositValue",
+                                        direction:
+                                          atRiskAssetsSort.direction === "asc"
+                                            ? "desc"
+                                            : "asc",
+                                      });
+                                    } else {
+                                      setAtRiskAssetsSort({
+                                        column: "depositValue",
+                                        direction: "desc",
+                                      });
+                                    }
+                                  }}
+                                  className="flex items-center gap-1 hover:text-foreground transition-colors"
+                                >
+                                  Deposit Value
+                                  {atRiskAssetsSort.column ===
+                                    "depositValue" ? (
+                                    atRiskAssetsSort.direction === "asc" ? (
+                                      <ArrowUp className="w-3 h-3" />
+                                    ) : (
+                                      <ArrowDown className="w-3 h-3" />
+                                    )
+                                  ) : (
+                                    <ArrowUpDown className="w-3 h-3 opacity-50" />
+                                  )}
+                                </button>
+                              </TableHead>
+                              {hasPoolBorrows && (
+                                <TableHead>
+                                  <button
+                                    onClick={() => {
+                                      if (
+                                        atRiskAssetsSort.column ===
+                                        "borrowValue"
+                                      ) {
+                                        setAtRiskAssetsSort({
+                                          column: "borrowValue",
+                                          direction:
+                                            atRiskAssetsSort.direction === "asc"
+                                              ? "desc"
+                                              : "asc",
+                                        });
+                                      } else {
+                                        setAtRiskAssetsSort({
+                                          column: "borrowValue",
+                                          direction: "desc",
+                                        });
+                                      }
+                                    }}
+                                    className="flex items-center gap-1 hover:text-foreground transition-colors"
+                                  >
+                                    Borrow Value
+                                    {atRiskAssetsSort.column ===
+                                      "borrowValue" ? (
+                                      atRiskAssetsSort.direction === "asc" ? (
+                                        <ArrowUp className="w-3 h-3" />
+                                      ) : (
+                                        <ArrowDown className="w-3 h-3" />
+                                      )
+                                    ) : (
+                                      <ArrowUpDown className="w-3 h-3 opacity-50" />
+                                    )}
+                                  </button>
+                                </TableHead>
+                              )}
+                              <TableHead>
+                                <button
+                                  onClick={() => {
+                                    if (
+                                      atRiskAssetsSort.column === "riskRatio"
+                                    ) {
+                                      setAtRiskAssetsSort({
+                                        column: "riskRatio",
+                                        direction:
+                                          atRiskAssetsSort.direction === "asc"
+                                            ? "desc"
+                                            : "asc",
+                                      });
+                                    } else {
+                                      setAtRiskAssetsSort({
+                                        column: "riskRatio",
+                                        direction: "asc",
+                                      });
+                                    }
+                                  }}
+                                  className="flex items-center gap-1 hover:text-foreground transition-colors"
+                                >
+                                  Health Factor
+                                  {atRiskAssetsSort.column === "riskRatio" ? (
+                                    atRiskAssetsSort.direction === "asc" ? (
+                                      <ArrowUp className="w-3 h-3" />
+                                    ) : (
+                                      <ArrowDown className="w-3 h-3" />
+                                    )
+                                  ) : (
+                                    <ArrowUpDown className="w-3 h-3 opacity-50" />
+                                  )}
+                                </button>
+                              </TableHead>
+                              <TableHead>Actions</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {(() => {
+                              // Sort at-risk assets based on selected column
+                              const sortedAtRiskAssets = [...atRiskAssets].sort(
+                                (a, b) => {
+                                  let comparison = 0;
+
+                                  switch (atRiskAssetsSort.column) {
+                                    case "asset":
+                                      comparison = a.asset.localeCompare(
+                                        b.asset
+                                      );
+                                      break;
+                                    case "network":
+                                      const networkA = (
+                                        (a as ItemWithNetwork).network || "Unknown"
+                                      ).toLowerCase();
+                                      const networkB = (
+                                        (b as ItemWithNetwork).network || "Unknown"
+                                      ).toLowerCase();
+                                      comparison =
+                                        networkA.localeCompare(networkB);
+                                      break;
+                                    case "value":
+                                      comparison = a.value - b.value;
+                                      break;
+                                    case "liquidationFactor":
+                                      comparison =
+                                        a.liquidationFactor -
+                                        b.liquidationFactor;
+                                      break;
+                                    case "depositValue":
+                                      comparison =
+                                        a.poolCollateralValueUSD -
+                                        b.poolCollateralValueUSD;
+                                      break;
+                                    case "borrowValue":
+                                      comparison =
+                                        a.poolBorrowsUSD - b.poolBorrowsUSD;
+                                      break;
+                                    case "riskRatio":
+                                    default:
+                                      comparison = a.riskRatio - b.riskRatio;
+                                      break;
+                                  }
+
+                                  return atRiskAssetsSort.direction === "asc"
+                                    ? comparison
+                                    : -comparison;
+                                }
+                              );
+
+                              const filteredAtRiskAssets =
+                                sortedAtRiskAssets.filter(
+                                  positionPassesPortfolioFilters
+                                );
+
+                              return filteredAtRiskAssets.map(
+                                (asset, index) => {
+                                  // Get market label using the asset's network, not currentNetwork
+                                  const assetNetwork =
+                                    (asset as ItemWithNetwork).network || currentNetwork;
+                                  const marketLabel = getMarketLabel(
+                                    assetNetwork,
+                                    asset.poolId
+                                  );
+
+                                  return (
+                                    <TableRow
+                                      key={`${asset.asset}-${asset.poolId || index
+                                        }`}
+                                      className="transition-all relative card-hover rounded-lg border border-gray-200/30 dark:border-ocean-teal/10 bg-white/50 dark:bg-slate-800/50 hover:border-orange-400 hover:shadow-[0_0_16px_4px_rgba(249,115,22,0.15)] hover:bg-orange-500/5 hover:z-20 cursor-pointer"
+                                    >
+                                      <TableCell>
+                                        <div className="flex items-center gap-2">
+                                          <MarketRowTokenIcon
+                                            market={{
+                                              icon: asset.icon,
+                                              asset: asset.asset,
+                                              iconBadgeUrl: (
+                                                asset as { iconBadgeUrl?: string }
+                                              ).iconBadgeUrl,
+                                            }}
+                                            poolLetterLabel={marketLabel}
+                                            imgClassName="h-6 w-6 shrink-0 rounded-full object-contain"
+                                          />
+                                          <span className="font-medium">
+                                            {asset.asset}
+                                          </span>
+                                        </div>
+                                      </TableCell>
+                                      <TableCell className="text-center">
+                                        {(() => {
+                                          const depositNetwork = (asset as ItemWithNetwork)
+                                            .network;
+                                          if (depositNetwork) {
+                                            // Format network name: "algorand-mainnet" -> "Algorand", "voi-mainnet" -> "VOI"
+                                            const normalized =
+                                              depositNetwork.toLowerCase();
+                                            if (
+                                              normalized.includes("algorand")
+                                            ) {
+                                              return "Algorand";
+                                            } else if (
+                                              normalized.includes("voi")
+                                            ) {
+                                              return "VOI";
+                                            } else {
+                                              // Fallback to formatted name
+                                              return depositNetwork
+                                                .split("-")
+                                                .map(
+                                                  (word) =>
+                                                    word
+                                                      .charAt(0)
+                                                      .toUpperCase() +
+                                                    word.slice(1)
+                                                )
+                                                .join(" ");
+                                            }
+                                          }
+                                          return "Unknown";
+                                        })()}
+                                      </TableCell>
+                                      <TableCell className="text-center">
+                                        {marketLabel || "-"}
+                                      </TableCell>
+                                      <TableCell>
+                                        $
+                                        {formatNumber(asset.value, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </TableCell>
+                                      <TableCell>
+                                        {formatPercent(asset.liquidationFactor, { maximumFractionDigits: 1 })}
+                                      </TableCell>
+                                      <TableCell>
+                                        <span className="text-muted-foreground">
+                                          {formatCurrency(asset.poolCollateralValueUSD, "USD", {
+                                            minimumFractionDigits: 2,
+                                            maximumFractionDigits: 2,
+                                          })}
+                                        </span>
+                                      </TableCell>
+                                      {hasPoolBorrows && (
+                                        <TableCell>
+                                          <span className="text-muted-foreground">
+                                            {formatCurrency(asset.poolBorrowsUSD, "USD",
+                                              {
+                                                minimumFractionDigits: 2,
+                                                maximumFractionDigits: 2,
+                                              }
+                                            )}
+                                          </span>
+                                        </TableCell>
+                                      )}
+                                      <TableCell>
+                                        <span
+                                          className={`font-semibold ${asset.riskRatio < 0.5
+                                            ? "text-red-500"
+                                            : asset.riskRatio < 0.75
+                                              ? "text-orange-500"
+                                              : "text-yellow-500"
+                                            }`}
+                                        >
+                                          {formatNumber(asset.riskRatio, { maximumFractionDigits: 3 })}
+                                        </span>
+                                      </TableCell>
+                                      <TableCell>
+                                        <div className="flex items-center gap-2">
+                                          {!isViewOnly && (() => {
+                                            const atRiskMarket =
+                                              marketRowForPortfolioPosition(
+                                                marketData,
+                                                {
+                                                  marketId: (asset as ItemWithNetwork)
+                                                    .marketId,
+                                                  poolId: asset.poolId,
+                                                  displaySymbol: asset.asset,
+                                                }
+                                              ) as any;
+                                            const depositCapReached =
+                                              atRiskMarket &&
+                                              isAtDepositCap(
+                                                Number(atRiskMarket?.totalDeposits ?? 0),
+                                                Number(atRiskMarket?.maxTotalDeposits ?? 0),
+                                              );
+                                            return !atRiskMarket?.isPaused && (
+                                              <DorkFiButton
+                                                variant="secondary"
+                                                size="sm"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  handleDepositClick(
+                                                    asset.asset,
+                                                    asset.poolId,
+                                                    (asset as ItemWithNetwork).network,
+                                                    (asset as ItemWithNetwork).configSymbol,
+                                                    (asset as ItemWithNetwork).marketId
+                                                  );
+                                                }}
+                                                disabled={depositCapReached}
+                                                title={
+                                                  depositCapReached
+                                                    ? "Market at deposit cap"
+                                                    : "Supply more of this asset to earn yield and use as collateral"
+                                                }
+                                                aria-label="Supply"
+                                                className="min-w-[92px] h-8 px-2 gap-1"
+                                              >
+                                                <span className="text-base leading-none">+</span>
+                                                <span className="hidden lg:inline text-xs">Supply</span>
+                                              </DorkFiButton>
+                                            );
+                                          })()}
+                                        </div>
+                                      </TableCell>
+                                    </TableRow>
+                                  );
+                                }
+                              );
+                            })()}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </DorkFiCard>
+                  );
+                })()}
 
               {/* Accrued Interest Table */}
               {SHOW_ACCRUED_INTEREST_SECTION && accruedInterestItems.length > 0 && (
@@ -9501,11 +8266,11 @@ const Portfolio = () => {
                     <div className="flex items-center justify-between mb-2">
                       <H1 className="text-xl md:text-2xl">
                         Accrued Interest
-                        {selectedNetworkFilter !== "all" && (
+                        {positionsNetworkFilter !== "all" && (
                           <span className="text-lg text-muted-foreground ml-2">
                             (
-                            {selectedNetworkFilter.charAt(0).toUpperCase() +
-                              selectedNetworkFilter.slice(1)}
+                            {positionsNetworkFilter.charAt(0).toUpperCase() +
+                              positionsNetworkFilter.slice(1)}
                             )
                           </span>
                         )}
@@ -9551,28 +8316,7 @@ const Portfolio = () => {
                     <div className="space-y-3">
                       {(() => {
                         const filteredAndSorted = accruedInterestItems
-                          .filter((item) => {
-                            if (accruedInterestSearchTerm) {
-                              const searchLower =
-                                accruedInterestSearchTerm.toLowerCase();
-                              const assetMatch = item.asset
-                                .toLowerCase()
-                                .includes(searchLower);
-                              if (!assetMatch) return false;
-                            }
-                            if (selectedNetworkFilter === "all") return true;
-                            const itemNetwork = (item as ItemWithNetwork).network;
-                            if (itemNetwork) {
-                              const normalizedNetwork =
-                                itemNetwork.toLowerCase();
-                              if (selectedNetworkFilter === "algorand") {
-                                return normalizedNetwork.includes("algorand");
-                              } else if (selectedNetworkFilter === "voi") {
-                                return normalizedNetwork.includes("voi");
-                              }
-                            }
-                            return true;
-                          })
+                          .filter(accruedInterestPassesNetworkFilter)
                           .sort((a, b) => {
                             let comparison = 0;
                             switch (accruedInterestSort.column) {
@@ -9693,7 +8437,7 @@ const Portfolio = () => {
                                 )}
                               </button>
                             </TableHead>
-                            {selectedNetworkFilter === "all" && (
+                            {positionsNetworkFilter === "all" && (
                               <TableHead>
                                 <button
                                   onClick={() => {
@@ -9801,54 +8545,7 @@ const Portfolio = () => {
                         <TableBody>
                           {(() => {
                             const filteredAndSorted = accruedInterestItems
-                              .filter((item) => {
-                                // Filter by search term
-                                if (accruedInterestSearchTerm) {
-                                  const searchLower =
-                                    accruedInterestSearchTerm.toLowerCase();
-                                  const assetMatch = item.asset
-                                    .toLowerCase()
-                                    .includes(searchLower);
-                                  if (!assetMatch) {
-                                    return false;
-                                  }
-                                }
-
-                                // Filter by network
-                                if (selectedNetworkFilter === "all") {
-                                  return true;
-                                }
-
-                                const itemNetwork = (item as ItemWithNetwork).network;
-                                if (itemNetwork) {
-                                  const normalizedNetwork =
-                                    itemNetwork.toLowerCase();
-                                  if (selectedNetworkFilter === "algorand") {
-                                    return normalizedNetwork.includes(
-                                      "algorand"
-                                    );
-                                  } else if (selectedNetworkFilter === "voi") {
-                                    return normalizedNetwork.includes("voi");
-                                  }
-                                }
-
-                                const matchingNetwork = Object.entries(
-                                  user?.computed?.networkValues || {}
-                                ).find(([network, values]: [string, unknown]) => {
-                                  const normalizedNetwork =
-                                    network.toLowerCase();
-                                  if (selectedNetworkFilter === "algorand") {
-                                    return normalizedNetwork.includes(
-                                      "algorand"
-                                    );
-                                  } else if (selectedNetworkFilter === "voi") {
-                                    return normalizedNetwork.includes("voi");
-                                  }
-                                  return false;
-                                });
-
-                                return true;
-                              })
+                              .filter(accruedInterestPassesNetworkFilter)
                               .sort((a, b) => {
                                 let comparison = 0;
 
@@ -9909,7 +8606,7 @@ const Portfolio = () => {
                                     )
                                     .join(" ");
                                 }
-                              } else if (selectedNetworkFilter === "all") {
+                              } else if (positionsNetworkFilter === "all") {
                                 const matchingNetwork = Object.entries(
                                   user.computed.networkValues
                                 ).find(([network, values]: [string, unknown]) => {
@@ -9978,7 +8675,7 @@ const Portfolio = () => {
                                       </span>
                                     </div>
                                   </TableCell>
-                                  {selectedNetworkFilter === "all" && (
+                                  {positionsNetworkFilter === "all" && (
                                     <TableCell className="font-medium">
                                       {networkName}
                                     </TableCell>
@@ -10051,46 +8748,7 @@ const Portfolio = () => {
                   {!isMobile &&
                     (() => {
                       const filteredAndSorted = accruedInterestItems
-                        .filter((item) => {
-                          if (accruedInterestSearchTerm) {
-                            const searchLower =
-                              accruedInterestSearchTerm.toLowerCase();
-                            const assetMatch = item.asset
-                              .toLowerCase()
-                              .includes(searchLower);
-                            if (!assetMatch) {
-                              return false;
-                            }
-                          }
-
-                          if (selectedNetworkFilter === "all") {
-                            return true;
-                          }
-
-                          const itemNetwork = (item as ItemWithNetwork).network;
-                          if (itemNetwork) {
-                            const normalizedNetwork = itemNetwork.toLowerCase();
-                            if (selectedNetworkFilter === "algorand") {
-                              return normalizedNetwork.includes("algorand");
-                            } else if (selectedNetworkFilter === "voi") {
-                              return normalizedNetwork.includes("voi");
-                            }
-                          }
-
-                          const matchingNetwork = Object.entries(
-                            user?.computed?.networkValues || {}
-                          ).find(([network, values]: [string, unknown]) => {
-                            const normalizedNetwork = network.toLowerCase();
-                            if (selectedNetworkFilter === "algorand") {
-                              return normalizedNetwork.includes("algorand");
-                            } else if (selectedNetworkFilter === "voi") {
-                              return normalizedNetwork.includes("voi");
-                            }
-                            return false;
-                          });
-
-                          return true;
-                        })
+                        .filter(accruedInterestPassesNetworkFilter)
                         .sort((a, b) => {
                           let comparison = 0;
 

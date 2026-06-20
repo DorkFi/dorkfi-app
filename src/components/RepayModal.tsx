@@ -899,7 +899,14 @@ const RepayModal = ({
       open={isOpen && !rainbowkitHostOverlaySuppressed}
       onOpenChange={onClose}
     >
-      <DialogContent className="bg-card dark:bg-slate-900 rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-[95vw] md:max-w-lg lg:max-w-4xl h-[90vh] md:h-auto md:max-h-[85vh] overflow-hidden flex flex-col px-0 py-0">
+      <DialogContent
+        className={cn(
+          "bg-card dark:bg-slate-900 rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-[95vw] overflow-hidden flex flex-col px-0 py-0",
+          showSuccess
+            ? "md:max-w-md h-auto max-h-[min(90vh,90dvh)]"
+            : "md:max-w-lg lg:max-w-4xl h-[90vh] md:h-auto md:max-h-[85vh]"
+        )}
+      >
         {showSuccess ? (
           <div className="p-6 overflow-y-auto">
             <SupplyBorrowCongrats

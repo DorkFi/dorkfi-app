@@ -68,3 +68,48 @@ export function formatHealthFactorBuffer(healthFactor: number | null): string {
   }
   return "Liquidation at HF = 1.0";
 }
+
+export type HealthFactorStatusPanel = {
+  message: string;
+  panelClassName: string;
+};
+
+/** Copy + panel styling for the hero gauge status slot (always visible). */
+export function getHealthFactorStatusPanel(
+  healthFactor: number | null
+): HealthFactorStatusPanel {
+  const band = getHealthFactorBand(healthFactor);
+  switch (band) {
+    case "none":
+      return {
+        message:
+          "No collateral yet. Supply assets to earn yield and borrow.",
+        panelClassName: "bg-slate-500/10 border-slate-500/30",
+      };
+    case "blocked":
+      return {
+        message:
+          "Your health factor is at or below 1.0. Withdrawals and new borrows are blocked until you supply collateral or repay debt.",
+        panelClassName: "bg-red-500/15 border-red-500/40",
+      };
+    case "at_risk":
+      return {
+        message:
+          "You are very close to liquidation. Repay debt or add collateral to increase your buffer.",
+        panelClassName: "bg-amber-500/15 border-amber-500/40",
+      };
+    case "warning":
+      return {
+        message:
+          "Warning: limited room before your health factor becomes critical. Consider repaying or supplying more.",
+        panelClassName: "bg-amber-500/15 border-amber-500/40",
+      };
+    case "safe":
+    default:
+      return {
+        message:
+          "Your position is healthy with room above liquidation (HF = 1.0).",
+        panelClassName: "bg-green-500/10 border-green-500/30",
+      };
+  }
+}
