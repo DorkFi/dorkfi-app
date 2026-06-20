@@ -327,6 +327,16 @@ function totalBorrowsIncludingInterest(
     .toFixed(4);
 }
 
+/** Human-readable supply/borrow cap from on-chain atomic units (issue #492). */
+export function formatMarketCapHuman(
+  atomicCap: string | bigint | number,
+  decimals: number
+): string {
+  return new BigNumber(atomicCap.toString())
+    .div(new BigNumber(10).pow(decimals))
+    .toFixed(4);
+}
+
 export const enhanceAVMMarketInfo = (
   market: any,
   token?: TokenConfig
@@ -424,12 +434,8 @@ export const enhanceAVMMarketInfo = (
     reserveFactor: parseFloat(market.reserveFactor.toString()) / 10000,
     borrowRate: parseFloat(market.borrowRate.toString()) / 10000,
     slope: parseFloat(market.slope.toString()) / 10000,
-    maxTotalDeposits: BigNumber(market.maxTotalDeposits.toString())
-      .div(10 ** decimals)
-      .toFixed(0),
-    maxTotalBorrows: BigNumber(market.maxTotalBorrows.toString())
-      .div(10 ** decimals)
-      .toFixed(0),
+    maxTotalDeposits: formatMarketCapHuman(market.maxTotalDeposits.toString(), decimals),
+    maxTotalBorrows: formatMarketCapHuman(market.maxTotalBorrows.toString(), decimals),
     liquidationBonus: parseFloat(market.liquidationBonus.toString()) / 10000,
     closeFactor: parseFloat(market.closeFactor.toString()) / 10000,
     totalDeposits,
@@ -808,12 +814,14 @@ export const fetchMarketInfo = async (
         reserveFactor: parseFloat(market.reserveFactor) / 10000,
         borrowRate: parseFloat(market.borrowRate) / 10000,
         slope: parseFloat(market.slope) / 10000,
-        maxTotalDeposits: BigNumber(market.maxTotalDeposits)
-          .div(10 ** token?.decimals || 0)
-          .toFixed(0),
-        maxTotalBorrows: BigNumber(market.maxTotalBorrows)
-          .div(10 ** token?.decimals || 0)
-          .toFixed(0),
+        maxTotalDeposits: formatMarketCapHuman(
+          market.maxTotalDeposits,
+          tokenDecimals
+        ),
+        maxTotalBorrows: formatMarketCapHuman(
+          market.maxTotalBorrows,
+          tokenDecimals
+        ),
         liquidationBonus: parseFloat(market.liquidationBonus) / 10000,
         closeFactor: parseFloat(market.closeFactor) / 10000,
         totalDeposits,
