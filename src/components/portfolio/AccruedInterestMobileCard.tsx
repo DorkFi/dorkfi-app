@@ -66,43 +66,41 @@ const AccruedInterestMobileCard = ({
         : "bg-red-500/5 border-red-500/10"
     }`}>
       <div className="space-y-3">
-        {/* Header: Asset Icon + Name + Actions */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <MarketRowTokenIcon
-              market={{
-                icon,
-                asset,
-                iconBadgeUrl: resolvedBadgeUrl,
-              }}
-              poolLetterLabel={marketLabel}
-              imgClassName="h-12 w-12 flex-shrink-0 rounded-full object-contain"
-            />
-            <div>
-              <div className="font-semibold text-base text-slate-800 dark:text-white">
-                {asset}
-              </div>
-              {network && (
-                <div className="text-xs text-muted-foreground">
-                  {network.split("-")[0].charAt(0).toUpperCase() +
-                    network.split("-")[0].slice(1)}
-                </div>
-              )}
-            </div>
-          </div>
+        {/* Header: centered icon + ticker; refresh pinned top-right */}
+        <div className="relative flex flex-col items-center gap-1">
           {onRefreshClick && (
             <Button
               variant="ghost"
               size="sm"
               onClick={onRefreshClick}
               disabled={isRefreshing}
-              className="h-8 w-8 p-0"
+              className="absolute right-0 top-0 h-8 w-8 p-0"
             >
               <RefreshCw
                 className={`w-4 h-4 ${isRefreshing ? "animate-spin" : ""}`}
               />
             </Button>
           )}
+          <MarketRowTokenIcon
+            market={{
+              icon,
+              asset,
+              iconBadgeUrl: resolvedBadgeUrl,
+            }}
+            poolLetterLabel={marketLabel}
+            imgClassName="h-12 w-12 flex-shrink-0 rounded-full object-contain"
+          />
+          <div className="text-center">
+            <div className="font-semibold text-base text-slate-800 dark:text-white">
+              {asset}
+            </div>
+            {network && (
+              <div className="text-xs text-muted-foreground">
+                {network.split("-")[0].charAt(0).toUpperCase() +
+                  network.split("-")[0].slice(1)}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Net Interest Value */}

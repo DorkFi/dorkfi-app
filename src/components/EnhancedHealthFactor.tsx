@@ -1,15 +1,17 @@
 import { Card, CardContent } from "@/components/ui/card";
-import React from "react";
+import React, { type ReactNode } from "react";
 import UnderwaterScene from "./liquidation/UnderwaterScene";
 import PositionStatsGrid from "./liquidation/PositionStatsGrid";
 import HealthFactorActions from "./liquidation/HealthFactorActions";
 import DorkFiButton from "@/components/ui/DorkFiButton";
 import { RefreshCw, HelpCircle } from "lucide-react";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
+  DesktopTooltip,
 } from "@/components/ui/tooltip";
+import { portfolioSectionTitleClassName } from "@/components/portfolio/portfolioSectionTitle";
+import { getHealthFactorStatusPanel } from "@/utils/healthFactorUx";
+import { cn } from "@/lib/utils";
+import type { PortfolioWalletStatus } from "@/components/portfolio/PortfolioWalletStatusBar";
 
 interface EnhancedHealthFactorProps {
   healthFactor: number | null;
@@ -26,6 +28,8 @@ interface EnhancedHealthFactorProps {
   isRefreshingMarkets?: boolean;
   onRepayDebt?: () => void;
   onWithdraw?: () => void;
+  insights?: ReactNode;
+  walletStatus?: PortfolioWalletStatus;
 }
 
 const EnhancedHealthFactor = ({
@@ -42,15 +46,19 @@ const EnhancedHealthFactor = ({
   isRefreshingMarkets,
   onRepayDebt,
   onWithdraw,
+  insights,
+  walletStatus,
 }: EnhancedHealthFactorProps) => {
+  const hfStatusPanel = getHealthFactorStatusPanel(healthFactor);
+
   return (
     <div className="w-full max-w-7xl mx-auto animate-fade-in">
       <Card className="bg-gradient-to-br from-blue-50 via-cyan-50 to-sky-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 border-2 border-gray-200/50 dark:border-ocean-teal/30 overflow-hidden shadow-xl hover:shadow-2xl transition-all duration-500 hover:border-ocean-teal/50">
-        <CardContent className="p-6 md:p-8">
+        <CardContent className="px-4 pt-3 pb-4 sm:p-6 md:p-8">
           {/* Enhanced Responsive Layout */}
-          <div className="grid grid-cols-1 xl:grid-cols-[420px,1fr] gap-8 lg:gap-10">
+          <div className="grid grid-cols-1 items-start gap-4 sm:gap-8 lg:grid-cols-[420px,1fr] lg:gap-10">
             {/* Left Side - Enhanced Health Gauge + Status message */}
-            <div className="xl:border-r-2 xl:border-ocean-teal/20 xl:pr-8 order-2 xl:order-1 space-y-4">
+            <div className="order-2 space-y-4 lg:order-1 lg:border-r-2 lg:border-ocean-teal/20 lg:pr-8">
               <UnderwaterScene
                 healthFactor={healthFactor}
                 marketContextLine={marketContextLine}
@@ -58,101 +66,72 @@ const EnhancedHealthFactor = ({
                 underwaterBg={underwaterBg}
                 onEdit={onEditProfile}
               />
-              {(healthFactor === null || healthFactor <= 1.2) && (
-                <div
-                  className={`rounded-xl border-2 p-4 transition-all duration-300 ${
-                    healthFactor === null
-                      ? "bg-slate-500/10 border-slate-500/30"
-                      : healthFactor <= 1.0
-                        ? "bg-red-500/15 border-red-500/40"
-                        : "bg-amber-500/15 border-amber-500/40"
-                  }`}
-                >
-                  <p className="text-sm font-medium text-foreground">
-                    {healthFactor === null &&
-                      "No collateral yet. Supply assets to earn yield and borrow."}
-                    {healthFactor !== null &&
-                      healthFactor <= 1.0 &&
-                      "Your health factor is at or below 1.0. Withdrawals and new borrows are blocked until you supply collateral or repay debt."}
-                    {healthFactor !== null &&
-                      healthFactor > 1.0 &&
-                      healthFactor <= 1.05 &&
-                      "You are very close to liquidation. Repay debt or add collateral to increase your buffer."}
-                    {healthFactor !== null &&
-                      healthFactor > 1.05 &&
-                      healthFactor <= 1.2 &&
-                      "Warning: limited room before your health factor becomes critical. Consider repaying or supplying more."}
-                  </p>
+              <div
+                className={`rounded-xl border-2 p-4 transition-all duration-300 ${hfStatusPanel.panelClassName}`}
+              >
+                <p className="text-sm font-medium text-foreground">
+                  {hfStatusPanel.message}
+                </p>
+              </div>
+              {insights ? (
+                <div className="border-t border-border/50 pt-4 lg:hidden">
+                  {insights}
                 </div>
-              )}
+              ) : null}
             </div>
 
             {/* Right Side - Stats Panel & CTAs */}
-            <div className="space-y-6 order-1 xl:order-2">
-              {/* Enhanced Header */}
-              <div className="flex items-center justify-between pb-4 border-b-2 border-ocean-teal/20">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-2xl font-bold text-slate-800 dark:text-white">
-                      Position Overview
-                    </h2>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
+            <div className="order-1 space-y-4 sm:space-y-6 lg:order-2">
+              {/* Enhanced Header — hidden on mobile; refresh lives in HealthFactorActions */}
+              <div className="hidden border-b-2 border-ocean-teal/20 pb-4 sm:block">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <h2 className={portfolioSectionTitleClassName}>
+                        Position Overview
+                      </h2>
+                      <DesktopTooltip
+                        className="max-w-xs text-left"
+                        content={
+                          <p>
+                            All collateral contributes to your health factor.
+                            Actions are limited so your position stays above the
+                            liquidation threshold (HF = 1.0).
+                          </p>
+                        }
+                      >
                         <button
                           type="button"
-                          className="text-muted-foreground hover:text-foreground transition-colors rounded-full p-0.5"
+                          className="shrink-0 text-muted-foreground transition-colors hover:text-foreground rounded-full p-0.5"
                           aria-label="About health factor"
                         >
-                          <HelpCircle className="w-4 h-4" />
+                          <HelpCircle className="h-4 w-4" />
                         </button>
-                      </TooltipTrigger>
-                      <TooltipContent className="max-w-xs text-left">
-                        <p>
-                          All collateral contributes to your health factor. Actions are limited so your position stays above the liquidation threshold (HF = 1.0).
-                        </p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Health factor is your main risk number—keep it above 1.0
-                  </p>
-                  {marketContextLine ? (
-                    <p className="text-sm font-medium text-ocean-teal dark:text-cyan-400 mt-1.5">
-                      {marketContextLine}
+                      </DesktopTooltip>
+                    </div>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Health factor is your main risk number—keep it above 1.0
                     </p>
-                  ) : null}
+                  </div>
+                  {onRefreshMarkets && (
+                    <DorkFiButton
+                      onClick={onRefreshMarkets}
+                      disabled={isRefreshingMarkets}
+                      variant="secondary"
+                      size="sm"
+                      className="min-w-0 shrink-0"
+                      title="Refresh all market data"
+                    >
+                      <RefreshCw
+                        className={cn(
+                          "mr-2 h-4 w-4",
+                          isRefreshingMarkets && "animate-spin"
+                        )}
+                      />
+                      Refresh
+                    </DorkFiButton>
+                  )}
                 </div>
-                {onRefreshMarkets && (
-                  <DorkFiButton
-                    onClick={onRefreshMarkets}
-                    disabled={isRefreshingMarkets}
-                    variant="secondary"
-                    size="sm"
-                    className="min-w-0"
-                    title="Refresh all market data"
-                  >
-                    <RefreshCw
-                      className={`w-4 h-4 mr-2 ${
-                        isRefreshingMarkets ? "animate-spin" : ""
-                      }`}
-                    />
-                    Refresh
-                  </DorkFiButton>
-                )}
-                {/*
-<div className={`px-3 py-1 rounded-full text-xs font-semibold ${
-  healthFactor === null ? 'bg-gray-500/20 text-gray-400' :
-  healthFactor <= 1.0 ? 'bg-red-500/20 text-red-400' :
-  healthFactor <= 1.2 ? 'bg-orange-500/20 text-orange-400' :
-  healthFactor <= 1.5 ? 'bg-yellow-500/20 text-yellow-400' :
-  'bg-green-500/20 text-green-400'
-}`}>
-  {healthFactor === null ? 'No Collateral' :
-   healthFactor <= 1.0 ? 'Critical' :
-   healthFactor <= 1.2 ? 'High Risk' :
-   healthFactor <= 1.5 ? 'Moderate' : 'Safe'}
-</div>
-*/}
               </div>
               
               {/* Stats Grid with Tooltips */}
@@ -160,6 +139,7 @@ const EnhancedHealthFactor = ({
                 totalCollateral={totalCollateral}
                 totalBorrowed={totalBorrowed}
                 healthFactor={healthFactor}
+                walletStatus={walletStatus}
               />
               
               {/* Action Buttons and Risk Warning */}
@@ -170,7 +150,15 @@ const EnhancedHealthFactor = ({
                 onRepayDebt={onRepayDebt}
                 onWithdraw={onWithdraw}
                 totalBorrowed={totalBorrowed}
+                onRefreshMarkets={onRefreshMarkets}
+                isRefreshingMarkets={isRefreshingMarkets}
               />
+
+              {insights ? (
+                <div className="hidden border-t border-border/50 pt-4 lg:block">
+                  {insights}
+                </div>
+              ) : null}
             </div>
           </div>
         </CardContent>
