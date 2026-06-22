@@ -26,7 +26,7 @@ interface STokenRowProps {
   onInfoClick: (e: React.MouseEvent, market: OnDemandMarketData) => void;
   onDepositClick: (asset: string) => void;
   onBorrowClick: (asset: string) => void;
-  onMintClick?: (asset: string, poolId?: string) => void;
+  onMintClick?: (asset: string, poolId?: string, marketRowKey?: string) => void;
   isLoadingBalance?: boolean;
   isNested?: boolean;
   marketIndex?: number;

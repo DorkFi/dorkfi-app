@@ -47,6 +47,8 @@ interface MarketCardViewProps {
     onMintMouseEnter?: (e: React.MouseEvent) => void;
   };
   onRowMouseEnter?: (market: OnDemandMarketData) => void;
+  /** WAD Mint market pinned above paginated cards (excluded from sort/filter/page). */
+  pinnedWadMintMarket?: OnDemandMarketData | null;
 }
 
 const MarketCardView = ({ 
@@ -59,6 +61,7 @@ const MarketCardView = ({
   onMigrateClick,
   getMarketActionHoverHandlers,
   onRowMouseEnter,
+  pinnedWadMintMarket,
 }: MarketCardViewProps) => {
   const { currentNetwork } = useNetwork();
   const { activeAccount } = useWallet();
@@ -165,15 +168,51 @@ const MarketCardView = ({
     return Array.from(marketMap.values());
   }, [markets]);
 
-  if (deduplicatedMarkets.length === 0) {
+  if (deduplicatedMarkets.length === 0 && !pinnedWadMintMarket) {
     return (
       <div className="text-center py-8">
         <p className="text-ink-blue">No markets found matching your search criteria.</p>
       </div>
     );
   }
+
+  const renderPinnedWadMintCard = () => {
+    if (!pinnedWadMintMarket) return null;
+    const poolId =
+      pinnedWadMintMarket.marketInfo?.poolId ?? pinnedWadMintMarket.poolId;
+    const marketRowKey = (pinnedWadMintMarket as { _sortKey?: string })
+      ._sortKey;
+    const poolIdForLabel = marketRowPoolIdForFilter(pinnedWadMintMarket) || undefined;
+    const marketLabel = getMarketLabel(currentNetwork, poolIdForLabel);
+    const hoverHandlers = getMarketActionHoverHandlers?.(
+      pinnedWadMintMarket.asset,
+      poolId,
+      marketRowKey
+    );
+    return (
+      <STokenCard
+        key="pinned-wad-mint"
+        market={pinnedWadMintMarket}
+        marketLabel={marketLabel}
+        onRowClick={onRowClick}
+        onInfoClick={onInfoClick}
+        onDepositClick={(asset) =>
+          onDepositClick(asset, poolId, marketRowKey)
+        }
+        onBorrowClick={(asset) =>
+          onBorrowClick(asset, poolId, marketRowKey)
+        }
+        onMintClick={onMintClick}
+        marketRowKey={marketRowKey}
+        onMintMouseEnter={hoverHandlers?.onMintMouseEnter}
+        className="w-full"
+      />
+    );
+  };
+
   return (
     <div className="space-y-4">
+      {renderPinnedWadMintCard()}
       {deduplicatedMarkets.map((market) => {
         const poolIdForLabel = marketRowPoolIdForFilter(market) || undefined;
         const marketLabel = getMarketLabel(currentNetwork, poolIdForLabel);

@@ -808,6 +808,7 @@ const MarketsTable = () => {
     loadVisibleMarkets,
     loadAllMarkets,
     isLoading,
+    wadMintMarket,
     newMarketsCount,
     rewardMarketsCount,
     multiPoolMarketsCount,
@@ -841,33 +842,56 @@ const MarketsTable = () => {
 
   const rewardsAprByBaseUrl = useRewardsAprBonusMap([currentNetwork]);
 
-  const markets = useMemo(() => {
-    return marketsPage.map((m) => ({
+  const applyRewardsBonus = useCallback(
+    (m: (typeof marketsPage)[0]) => ({
       ...m,
       rewardsBonusSupplyAprPercent:
         m.hasRewards && m.rewardsPublicBaseUrlResolved
           ? rewardsAprByBaseUrl[m.rewardsPublicBaseUrlResolved] ?? null
           : undefined,
-    }));
-  }, [marketsPage, rewardsAprByBaseUrl]);
+    }),
+    [rewardsAprByBaseUrl]
+  );
+
+  const markets = useMemo(() => {
+    return marketsPage.map(applyRewardsBonus);
+  }, [marketsPage, applyRewardsBonus]);
+
+  const wadMintMarketDisplay = useMemo(() => {
+    if (!wadMintMarket) return null;
+    return applyRewardsBonus(wadMintMarket);
+  }, [wadMintMarket, applyRewardsBonus]);
+
+  const marketsForLookup = useMemo(() => {
+    if (!wadMintMarketDisplay) return markets;
+    const wadKey = (wadMintMarketDisplay as { _sortKey?: string })._sortKey;
+    if (
+      markets.some(
+        (m) => (m as { _sortKey?: string })._sortKey === wadKey
+      )
+    ) {
+      return markets;
+    }
+    return [wadMintMarketDisplay, ...markets];
+  }, [markets, wadMintMarketDisplay]);
 
   /** Resolve config token row when display `asset` + `poolId` match multiple markets (e.g. Algo vs fALGO). */
   const configSymbolFromMarketRowKey = useCallback(
     (marketRowKey: string | undefined) => {
       if (!marketRowKey) return undefined;
-      const row = markets.find(
+      const row = marketsForLookup.find(
         (m) => (m as { _sortKey?: string })._sortKey === marketRowKey
       );
       const cs = row?.configSymbol;
       return typeof cs === "string" ? cs : undefined;
     },
-    [markets]
+    [marketsForLookup]
   );
 
   const marketContractIdFromMarketRowKey = useCallback(
     (marketRowKey: string | undefined) => {
       if (!marketRowKey) return undefined;
-      const row = markets.find(
+      const row = marketsForLookup.find(
         (m) => (m as { _sortKey?: string })._sortKey === marketRowKey
       );
       const fromInfo = row?.marketInfo?.marketId;
@@ -876,7 +900,7 @@ const MarketsTable = () => {
       }
       return marketContractIdFromRowCacheKey(marketRowKey);
     },
-    [markets]
+    [marketsForLookup]
   );
 
   const resolveTokenForDisplayedAsset = useCallback(
@@ -2994,10 +3018,10 @@ const MarketsTable = () => {
 
   const getAssetData = (asset: string, poolId?: string, marketRowKey?: string) => {
     const poolIdStr = poolId != null && poolId !== "" ? String(poolId) : null;
-    let market: (typeof markets)[0] | undefined;
+    let market: (typeof marketsForLookup)[0] | undefined;
 
     if (marketRowKey) {
-      market = markets.find(
+      market = marketsForLookup.find(
         (m) => (m as { _sortKey?: string })._sortKey === marketRowKey
       );
     }
@@ -3010,7 +3034,7 @@ const MarketsTable = () => {
           poolIdStr,
           marketRowKey
         );
-        market = markets.find((m) => {
+        market = marketsForLookup.find((m) => {
           if (m.asset !== asset) return false;
           const poolMatch =
             String(m.poolId) === poolIdStr ||
@@ -3027,7 +3051,7 @@ const MarketsTable = () => {
       }
       if (!market) {
         // Exact match by asset + poolId (required for 2 WAD markets etc.)
-        market = markets.find(
+        market = marketsForLookup.find(
           (m) =>
             m.asset === asset &&
             (String(m.poolId) === poolIdStr ||
@@ -3041,7 +3065,7 @@ const MarketsTable = () => {
 
     if (!market) {
       // No poolId provided – find by asset only
-      const matchingMarkets = markets.filter((m) => m.asset === asset);
+      const matchingMarkets = marketsForLookup.filter((m) => m.asset === asset);
       if (matchingMarkets.length > 1) {
         market = matchingMarkets.reduce((prev, current) => {
           return (current.totalSupply || 0) > (prev.totalSupply || 0)
@@ -3809,7 +3833,7 @@ const MarketsTable = () => {
             aria-hidden
           />
 
-          {markets.length === 0 && !isLoading ? (
+          {markets.length === 0 && !wadMintMarketDisplay && !isLoading ? (
             <div className="text-center py-8">
               <p className="text-muted-foreground">
                 No markets found. Try adjusting your search criteria.
@@ -3819,6 +3843,7 @@ const MarketsTable = () => {
             <MarketsTableContent
               marketFilter={marketFilter}
               markets={markets}
+              pinnedWadMintMarket={wadMintMarketDisplay}
               sortField={sortField}
               sortOrder={sortOrder}
               onRowClick={handleRowClick}

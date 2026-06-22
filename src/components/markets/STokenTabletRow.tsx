@@ -23,10 +23,20 @@ interface STokenTabletRowProps {
   onInfoClick: (e: React.MouseEvent, market: OnDemandMarketData) => void;
   onDepositClick: (asset: string) => void;
   onBorrowClick: (asset: string) => void;
-  onMintClick?: (asset: string, poolId?: string) => void;
+  onMintClick?: (asset: string, poolId?: string, marketRowKey?: string) => void;
   isLoadingBalance?: boolean;
   isNested?: boolean;
   marketIndex?: number;
+  getMarketActionHoverHandlers?: (
+    asset: string,
+    poolId?: string,
+    marketRowKey?: string
+  ) => {
+    onDepositMouseEnter?: (e: React.MouseEvent) => void;
+    onBorrowMouseEnter?: (e: React.MouseEvent) => void;
+    onMintMouseEnter?: (e: React.MouseEvent) => void;
+  };
+  onRowMouseEnter?: (market: OnDemandMarketData) => void;
 }
 
 const LoadingCell = () => (
@@ -52,18 +62,23 @@ const STokenTabletRow = ({
   isLoadingBalance = false,
   isNested = false,
   marketIndex,
+  getMarketActionHoverHandlers,
+  onRowMouseEnter,
 }: STokenTabletRowProps) => {
   const { currentNetwork } = useNetwork();
   const borrowCapReached = isAtBorrowCap(
     Number(market.totalBorrow ?? 0),
     Number(market.borrowCap ?? 0)
   );
+  const poolId = market.marketInfo?.poolId ?? market.poolId;
+  const marketRowKey = (market as { _sortKey?: string })._sortKey;
 
   return (
     <TableRow
       key={market.asset}
       className="hover:bg-gradient-to-r hover:from-purple-50 hover:to-pink-50 dark:hover:from-purple-900/20 dark:hover:to-pink-900/20 cursor-pointer transition-all duration-300 border-l-4 border-l-purple-500 bg-gradient-to-r from-purple-50/30 to-pink-50/30 dark:from-purple-900/10 dark:to-pink-900/10"
       onClick={() => onRowClick(market)}
+      onMouseEnter={() => onRowMouseEnter?.(market)}
     >
       <TableCell className="text-center">
         <div className="flex items-center justify-center gap-2">
@@ -132,12 +147,35 @@ const STokenTabletRow = ({
       <TableCell className="text-center">
         <MarketsTableActions
           asset={market.asset}
+          poolId={poolId}
+          marketRowKey={marketRowKey}
           onDepositClick={onDepositClick}
           onBorrowClick={onBorrowClick}
           onMintClick={onMintClick}
           isLoadingBalance={isLoadingBalance}
           isSToken={true}
           borrowDisabled={borrowCapReached}
+          onDepositMouseEnter={
+            getMarketActionHoverHandlers?.(
+              market.asset,
+              poolId,
+              marketRowKey
+            )?.onDepositMouseEnter
+          }
+          onBorrowMouseEnter={
+            getMarketActionHoverHandlers?.(
+              market.asset,
+              poolId,
+              marketRowKey
+            )?.onBorrowMouseEnter
+          }
+          onMintMouseEnter={
+            getMarketActionHoverHandlers?.(
+              market.asset,
+              poolId,
+              marketRowKey
+            )?.onMintMouseEnter
+          }
         />
       </TableCell>
     </TableRow>

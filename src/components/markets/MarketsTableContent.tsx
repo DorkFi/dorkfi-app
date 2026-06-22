@@ -33,6 +33,7 @@ interface MarketsTableContentProps {
     onMintMouseEnter?: (e: React.MouseEvent) => void;
   };
   onRowMouseEnter?: (market: OnDemandMarketData) => void;
+  pinnedWadMintMarket?: OnDemandMarketData | null;
 }
 
 const MarketsTableContent = ({
@@ -51,6 +52,7 @@ const MarketsTableContent = ({
   isLoadingBalance = false,
   getMarketActionHoverHandlers,
   onRowMouseEnter,
+  pinnedWadMintMarket,
 }: MarketsTableContentProps) => {
   const breakpoint = useBreakpoint();
 
@@ -67,6 +69,7 @@ const MarketsTableContent = ({
         onMigrateClick={onMigrateClick}
         getMarketActionHoverHandlers={getMarketActionHoverHandlers}
         onRowMouseEnter={onRowMouseEnter}
+        pinnedWadMintMarket={pinnedWadMintMarket}
       />
     );
   }
@@ -86,6 +89,7 @@ const MarketsTableContent = ({
         isLoadingBalance={isLoadingBalance}
         getMarketActionHoverHandlers={getMarketActionHoverHandlers}
         onRowMouseEnter={onRowMouseEnter}
+        pinnedWadMintMarket={pinnedWadMintMarket}
       />
     );
   }
@@ -105,6 +109,7 @@ const MarketsTableContent = ({
       isLoadingBalance={isLoadingBalance}
       getMarketActionHoverHandlers={getMarketActionHoverHandlers}
       onRowMouseEnter={onRowMouseEnter}
+      pinnedWadMintMarket={pinnedWadMintMarket}
     />
   );
 };

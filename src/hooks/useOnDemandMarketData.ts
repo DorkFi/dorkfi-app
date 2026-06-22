@@ -210,6 +210,11 @@ export function marketRowPoolIdForFilter(m: OnDemandMarketData): string {
   return raw != null && String(raw) !== "" ? String(raw) : "";
 }
 
+/** WAD sToken mint market — rendered outside the markets table as a standalone card. */
+export function isWadMintMarket(market: OnDemandMarketData): boolean {
+  return market.isSToken === true && market.asset === "WAD";
+}
+
 export type SortField =
   | "default"
   | "asset"
@@ -934,11 +939,19 @@ export const useOnDemandMarketData = ({
     }).length;
   }, [marketDataArray, multiPoolAssetKeys]);
 
+  const wadMintMarket = useMemo(() => {
+    return (
+      marketDataArray.find(
+        (m) => isWadMintMarket(m) && !m.marketInfo?.isPaused
+      ) ?? null
+    );
+  }, [marketDataArray]);
+
   // Filter and sort data
   const { filteredData, totalPages, paginatedData } = useMemo(() => {
-    // Filter out paused markets
+    // Filter out paused markets and the standalone WAD Mint card market
     let filtered = marketDataArray.filter(
-      (market) => !market.marketInfo?.isPaused
+      (market) => !market.marketInfo?.isPaused && !isWadMintMarket(market)
     );
     // New markets only (config-driven)
     if (newMarketsOnly) {
@@ -1118,6 +1131,7 @@ export const useOnDemandMarketData = ({
     loadAllMarkets,
     isLoading: loadingMarkets.size > 0,
     marketsData,
+    wadMintMarket,
     newMarketsCount,
     rewardMarketsCount,
     multiPoolMarketsCount,
