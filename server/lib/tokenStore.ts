@@ -21,7 +21,7 @@ type PendingOAuth = {
 type PendingDatabase = Record<string, PendingOAuth>;
 
 let tokenDb: TokenDatabase = {};
-let pendingDb: PendingDatabase = {};
+const pendingDb: PendingDatabase = {};
 let loaded = false;
 
 async function ensureLoaded(): Promise<void> {
