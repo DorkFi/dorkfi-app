@@ -33,7 +33,6 @@ import {
   fetchMarketInfo,
   repayOnBehalf,
   liquidateCrossMarket,
-  fetchUserDataFromChain,
   postRefreshMarketDataSnapshot,
 } from "@/services/lendingService";
 import {
@@ -85,10 +84,6 @@ import {
 } from "@/components/portfolio/PortfolioPositionsFilterBar";
 import PortfolioPositionsCardHeader from "@/components/portfolio/PortfolioPositionsCardHeader";
 import { usePortfolioLoader } from "@/hooks/usePortfolioLoader";
-import {
-  applyPortfolioUserComputed,
-  extractUserProfileAvatar,
-} from "@/utils/portfolioUserComputed";
 import { usdPerTokenFromMarketInfoPrice } from "@/utils/assetDecimals";
 import { formatNftHolderClaimableDisplayFromAgent } from "@/utils/nftHolderClaimAgentDisplay";
 import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
@@ -543,10 +538,6 @@ const Portfolio = () => {
   const [userProfileAvatar, setUserProfileAvatar] = useState<string | null>(
     null
   );
-  // Guards for fetchUser: prevent concurrent fetches and stale-address races
-  const fetchUserInFlight = useRef(false);
-  const fetchUserAddressRef = useRef<string | null>(null);
-
   const { reloadPortfolio } = usePortfolioLoader({
     displayAddress,
     setUser,
@@ -3174,7 +3165,7 @@ const Portfolio = () => {
       // Refresh user data after markets are updated (only if not in view-only mode)
       if (displayAddress && refreshedCount > 0 && !isViewOnly) {
         setTimeout(() => {
-          fetchUser(displayAddress);
+          void reloadPortfolio(displayAddress, { soft: true });
         }, 1000);
       } else if (isViewOnly && refreshedCount > 0) {
         // In view-only mode, just refresh the displayed data without triggering user API refresh
@@ -3201,6 +3192,8 @@ const Portfolio = () => {
     isViewOnly,
     signTransactions,
     syncUserMarketsForPriceChange,
+    reloadPortfolio,
+    handleRefreshPositions,
   ]);
 
   // Function to refresh markets for a specific section
@@ -3331,7 +3324,7 @@ const Portfolio = () => {
         // Refresh user data after markets are updated (only if not in view-only mode)
         if (displayAddress && refreshedCount > 0 && !isViewOnly) {
           setTimeout(() => {
-            fetchUser(displayAddress);
+            void reloadPortfolio(displayAddress, { soft: true });
           }, 1000);
         } else if (isViewOnly && refreshedCount > 0) {
           // In view-only mode, refresh positions data without API user refresh
@@ -3362,6 +3355,8 @@ const Portfolio = () => {
       isViewOnly,
       signTransactions,
       syncUserMarketsForPriceChange,
+      reloadPortfolio,
+      handleRefreshPositions,
     ]
   );
 
@@ -3446,7 +3441,7 @@ const Portfolio = () => {
           // Refresh user data after market is updated (only if not in view-only mode)
           if (displayAddress && !isViewOnly) {
             setTimeout(() => {
-              fetchUser(displayAddress);
+              void reloadPortfolio(displayAddress, { soft: true });
             }, 500);
           } else if (isViewOnly) {
             // In view-only mode, refresh positions data without API user refresh
@@ -3557,7 +3552,7 @@ const Portfolio = () => {
 
         if (displayAddress && !isViewOnly) {
           setTimeout(() => {
-            fetchUser(displayAddress);
+            void reloadPortfolio(displayAddress, { soft: true });
           }, 500);
         } else if (isViewOnly) {
           setTimeout(() => {
@@ -3641,7 +3636,7 @@ const Portfolio = () => {
 
         if (displayAddress && !isViewOnly) {
           setTimeout(() => {
-            fetchUser(displayAddress);
+            void reloadPortfolio(displayAddress, { soft: true });
           }, 500);
         } else if (isViewOnly) {
           setTimeout(() => {
@@ -3725,7 +3720,7 @@ const Portfolio = () => {
 
         if (displayAddress && !isViewOnly) {
           setTimeout(() => {
-            fetchUser(displayAddress);
+            void reloadPortfolio(displayAddress, { soft: true });
           }, 500);
         } else if (isViewOnly) {
           setTimeout(() => {
@@ -3806,7 +3801,7 @@ const Portfolio = () => {
 
         if (displayAddress && !isViewOnly) {
           setTimeout(() => {
-            fetchUser(displayAddress);
+            void reloadPortfolio(displayAddress, { soft: true });
           }, 500);
         } else if (isViewOnly) {
           setTimeout(() => {
@@ -3832,81 +3827,6 @@ const Portfolio = () => {
     activeAccount?.address,
     toast,
   ]);
-
-  const fetchUser = async (userAddress: string) => {
-    // Deduplicate concurrent calls for the same address; cancel stale-address results
-    if (fetchUserInFlight.current && fetchUserAddressRef.current === userAddress) return;
-    fetchUserInFlight.current = true;
-    fetchUserAddressRef.current = userAddress;
-
-    const isCurrentFetchUser = () =>
-      fetchUserAddressRef.current === userAddress;
-
-    const applyPortfolioComputed = (user: Record<string, unknown>) => {
-      if (!isCurrentFetchUser()) return;
-      const computedUser = applyPortfolioUserComputed(user);
-      if (!computedUser) return;
-      console.log("[Portfolio] User:", computedUser);
-      setUser(computedUser);
-    };
-
-    try {
-      console.log(
-        `[Portfolio] Attempting to fetch user data from API for ${userAddress}`
-      );
-      const apiResponse = await dorkfiAPIService.getUser(userAddress);
-
-      console.log("[Portfolio] API response:", apiResponse);
-
-      if (apiResponse.success && apiResponse.data) {
-        if (!isCurrentFetchUser()) return;
-        const user = apiResponse.data as Record<string, unknown>;
-        console.log("[Portfolio] User data fetched from API:", user);
-
-        if (user.avatar || user.avatarImage || user.profileImage) {
-          setUserProfileAvatar(extractUserProfileAvatar(user));
-        } else {
-          setUserProfileAvatar(null);
-        }
-
-        applyPortfolioComputed(user);
-        return;
-      }
-
-      console.error("Error fetching user data:", apiResponse);
-
-      console.log(
-        `[Portfolio] API failed; falling back to chain for ${userAddress}`
-      );
-      const chain = await fetchUserDataFromChain(userAddress);
-      if (chain && isCurrentFetchUser()) {
-        setUserProfileAvatar(null);
-        applyPortfolioComputed({
-          address: userAddress,
-          globalUserData: chain.globalUserData,
-          userData: chain.userData,
-          userDataSource: "chain",
-        });
-      }
-    } catch (error) {
-      console.error("Error fetching user global data:", error);
-      const chain = await fetchUserDataFromChain(userAddress);
-      if (chain && isCurrentFetchUser()) {
-        setUserProfileAvatar(null);
-        applyPortfolioComputed({
-          address: userAddress,
-          globalUserData: chain.globalUserData,
-          userData: chain.userData,
-          userDataSource: "chain",
-        });
-      }
-    } finally {
-      // Only clear the in-flight flag if this call is still the current one
-      if (fetchUserAddressRef.current === userAddress) {
-        fetchUserInFlight.current = false;
-      }
-    }
-  };
 
   // Reset supplied list page when filters change
   useEffect(() => {
@@ -4849,7 +4769,7 @@ const Portfolio = () => {
 
       // Refresh user data
       if (displayAddress) {
-        await fetchUser(displayAddress);
+        await reloadPortfolio(displayAddress, { soft: true });
       }
     } catch (error) {
       console.error("Liquidation error:", error);
@@ -4868,7 +4788,7 @@ const Portfolio = () => {
     signTransactions,
     marketData,
     displayAddress,
-    fetchUser,
+    reloadPortfolio,
     toast,
   ]);
 
@@ -8487,7 +8407,10 @@ const Portfolio = () => {
                 <H1 className="text-xl text-red-500 m-0">At Risk Positions</H1>
               </div>
               <button
-                onClick={() => displayAddress && fetchUser(displayAddress)}
+                onClick={() =>
+                  displayAddress &&
+                  void reloadPortfolio(displayAddress, { soft: true })
+                }
                 disabled={isLoadingPositions}
                 className="flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Refresh positions data"
@@ -8735,7 +8658,10 @@ const Portfolio = () => {
           })
         }
         onRefreshWalletBalance={refreshWalletBalance}
-        onRefreshMarket={() => displayAddress && fetchUser(displayAddress)}
+        onRefreshMarket={() =>
+          displayAddress &&
+          void reloadPortfolio(displayAddress, { soft: true })
+        }
       />
 
       <Dialog
@@ -8932,7 +8858,7 @@ const Portfolio = () => {
 
             // Refresh user portfolio data from API
             try {
-              await fetchUser(activeAccount.address);
+              await reloadPortfolio(activeAccount.address, { soft: true });
               console.log("User portfolio refreshed from API");
             } catch (fetchError) {
               console.error("Error refreshing user portfolio:", fetchError);
@@ -9504,7 +9430,7 @@ const Portfolio = () => {
 
                   // Refresh user data
                   if (displayAddress) {
-                    await fetchUser(displayAddress);
+                    await reloadPortfolio(displayAddress, { soft: true });
                   }
                 } catch (error) {
                   console.error("Repay on behalf error:", error);

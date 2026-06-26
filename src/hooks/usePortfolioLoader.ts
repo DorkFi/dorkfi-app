@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   collectPositionMarketKeys,
-  fetchAllMarkets,
   fetchUserDataFromChain,
   postRefreshMarketDataSnapshot,
 } from "@/services/lendingService";
@@ -17,8 +16,14 @@ import {
   applyPortfolioUserComputed,
   extractUserProfileAvatar,
 } from "@/utils/portfolioUserComputed";
+import { invalidateRpcReadCache } from "@/utils/rpcReadCache";
 
 type PortfolioUser = Record<string, unknown>;
+
+export type LoadPortfolioOptions = {
+  /** Keep existing UI visible; refresh in place with position-level loading only. */
+  soft?: boolean;
+};
 
 export interface UsePortfolioLoaderArgs {
   displayAddress: string | undefined;
@@ -113,14 +118,19 @@ export function usePortfolioLoader({
   }, [queryClient]);
 
   const loadPortfolio = useCallback(
-    async (address: string) => {
+    async (address: string, options?: LoadPortfolioOptions) => {
+      const soft = options?.soft ?? false;
       const loadId = ++loadIdRef.current;
 
-      setUser(null);
-      setMarketData([]);
-      setUserProfileAvatar(null);
-      setIsLoadingData(true);
-      setIsLoadingPositions(false);
+      if (!soft) {
+        setUser(null);
+        setMarketData([]);
+        setUserProfileAvatar(null);
+        setIsLoadingData(true);
+        setIsLoadingPositions(false);
+      } else {
+        setIsLoadingPositions(true);
+      }
 
       try {
         const [computedUser, initialMarkets] = await Promise.all([
@@ -132,12 +142,13 @@ export function usePortfolioLoader({
 
         if (computedUser) {
           setUser(computedUser);
-          const avatar = extractUserProfileAvatar(computedUser);
-          setUserProfileAvatar(avatar);
+          setUserProfileAvatar(extractUserProfileAvatar(computedUser));
         }
 
         setMarketData(initialMarkets);
-        setIsLoadingData(false);
+        if (!soft) {
+          setIsLoadingData(false);
+        }
 
         const computed = computedUser?.computed as
           | {
@@ -153,7 +164,9 @@ export function usePortfolioLoader({
 
         if (positionKeys.length === 0) return;
 
-        setIsLoadingPositions(true);
+        if (!soft) {
+          setIsLoadingPositions(true);
+        }
         await refreshPositionMarkets(computed);
         if (loadId !== loadIdRef.current) return;
 
@@ -164,7 +177,7 @@ export function usePortfolioLoader({
         setMarketData(refreshedMarkets);
       } catch (error) {
         console.error("[usePortfolioLoader] load failed:", error);
-        if (loadId === loadIdRef.current) {
+        if (loadId === loadIdRef.current && !soft) {
           setIsLoadingData(false);
         }
       } finally {
@@ -195,6 +208,7 @@ export function usePortfolioLoader({
       return;
     }
 
+    invalidateRpcReadCache();
     void loadPortfolio(displayAddress);
   }, [
     displayAddress,
