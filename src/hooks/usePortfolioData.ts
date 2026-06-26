@@ -15,6 +15,7 @@ import {
   getPortfolioVisibleTokens,
   getAllTokensWithDisplayInfo,
 } from "@/config";
+import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
 import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
 
 export interface PortfolioPosition {
@@ -321,9 +322,8 @@ export const usePortfolioData = () => {
             const accountInfo = await clients.algod
               .accountInformation(activeAccount.address)
               .do();
-            // Convert from micro-units to units (divide by 1,000,000)
-            balance = Number(accountInfo.amount) / 1_000_000;
-            console.log(`Network token balance for ${asset}: ${balance}`);
+            balance = spendableAlgoHumanFromAccount(accountInfo);
+            console.log(`Network token spendable balance for ${asset}: ${balance}`);
           } catch (error) {
             console.error(
               `Error fetching network token balance for ${asset}:`,

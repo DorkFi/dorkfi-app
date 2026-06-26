@@ -42,6 +42,7 @@ import {
   getAnyFolksAdapter,
   getFolksAdapterForPhase,
   tokenAdapterStableId,
+  tokenStandardUsesNativeWalletBalance,
 } from "@/config";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { isRainbowkitXchainWallet } from "@/wallet/xchainSignUi";
@@ -66,6 +67,11 @@ import {
   DEPOSIT_ESTIMATED_HEALTH_CRITICAL_MAX,
   estimatePoolHealthAfterRepay,
 } from "@/utils/depositModalPoolHealthEstimate";
+import {
+  computeMaxRepayHuman,
+  roundRepayHuman6,
+  shouldUseRepayAllPath,
+} from "@/utils/repayMaxAmount";
 
 /** Amount field is in underlying (e.g. ALGO) vs market f-asset; convert to f-asset human for caps / HF. */
 function repayInputToMarketTokenHuman(
@@ -131,7 +137,10 @@ interface RepayModalProps {
    */
   folksMintOneUnderlyingAtomic?: string;
   /** Full token row; used to resolve Folks pool via deposit adapter (stable vs repay-only list). */
-  repayTokenConfig?: Pick<TokenConfig, "adapter" | "adapters"> | null;
+  repayTokenConfig?: Pick<
+    TokenConfig,
+    "adapter" | "adapters" | "tokenStandard"
+  > | null;
   /** When provided, show asset dropdown like Supply/Withdraw modals */
   availableAssets?: {
     asset: string;
@@ -255,6 +264,10 @@ const RepayModal = ({
   const [nativeAlgoWalletHuman, setNativeAlgoWalletHuman] = useState<
     number | undefined
   >(undefined);
+  /** Spendable native L1 balance for market-token repay (e.g. ALGO on Algorand). */
+  const [marketTokenSpendableHuman, setMarketTokenSpendableHuman] = useState<
+    number | undefined
+  >(undefined);
   const [xalgoRepayConsensusState, setXalgoRepayConsensusState] =
     useState<ConsensusState | null>(null);
 
@@ -277,6 +290,13 @@ const RepayModal = ({
   const repayWalletBasis = isXalgoConsensusRepayAlgoRoute
     ? "underlying"
     : (selectedRepayAdapter?.repayWalletBasis ?? "market_token");
+
+  const usesNativeMarketTokenWallet =
+    repayWalletBasis === "market_token" &&
+    repayTokenConfig?.tokenStandard != null &&
+    tokenStandardUsesNativeWalletBalance(repayTokenConfig.tokenStandard);
+
+  const reserveNativeTxnFee = usesNativeMarketTokenWallet;
 
   const walletUnitSymbol = isXalgoConsensusRepayAlgoRoute
     ? "ALGO"
@@ -346,6 +366,7 @@ const RepayModal = ({
       setFolksMintedFAssetPerOneUnderlying(null);
       setFolksMintRatioStatus("idle");
       setNativeAlgoWalletHuman(undefined);
+      setMarketTokenSpendableHuman(undefined);
       setXalgoRepayConsensusState(null);
       setExpandedDetails({
         borrowAPY: false,
@@ -483,6 +504,43 @@ const RepayModal = ({
   }, [isOpen, xalgoRepayRoutesActive, networkToUse]);
 
   useEffect(() => {
+    if (
+      !isOpen ||
+      !usesNativeMarketTokenWallet ||
+      !activeAccount?.address
+    ) {
+      setMarketTokenSpendableHuman(undefined);
+      return;
+    }
+    const aln = getAlgorandNetworkFromNetworkId(networkToUse as NetworkId);
+    if (!aln) {
+      setMarketTokenSpendableHuman(undefined);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { algod } = algorandService.initializeClients(aln as AlgorandNetwork);
+        const accountInfo = await algod
+          .accountInformation(activeAccount.address)
+          .do();
+        const human = spendableAlgoHumanFromAccount(accountInfo);
+        if (!cancelled) setMarketTokenSpendableHuman(human);
+      } catch {
+        if (!cancelled) setMarketTokenSpendableHuman(0);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isOpen,
+    usesNativeMarketTokenWallet,
+    activeAccount?.address,
+    networkToUse,
+  ]);
+
+  useEffect(() => {
     if (!isOpen || repayWalletBasis !== "underlying" || !activeAccount?.address) {
       setNativeAlgoWalletHuman(undefined);
       return;
@@ -618,10 +676,32 @@ const RepayModal = ({
     if (repayWalletBasis === "underlying") {
       return nativeAlgoWalletHuman ?? 0;
     }
+    if (marketTokenSpendableHuman != null) {
+      return marketTokenSpendableHuman;
+    }
     return walletBalance;
-  }, [repayWalletBasis, nativeAlgoWalletHuman, walletBalance]);
+  }, [
+    repayWalletBasis,
+    nativeAlgoWalletHuman,
+    marketTokenSpendableHuman,
+    walletBalance,
+  ]);
 
-  const maxRepayAmount = Math.min(maxDebtInInputUnits, effectiveWalletBalance);
+  const maxRepayAmount = useMemo(
+    () =>
+      computeMaxRepayHuman({
+        debtHuman: maxDebtInInputUnits,
+        spendableWalletHuman: effectiveWalletBalance,
+        decimals: repayTokenDecimals,
+        reserveNativeTxnFee,
+      }),
+    [
+      maxDebtInInputUnits,
+      effectiveWalletBalance,
+      repayTokenDecimals,
+      reserveNativeTxnFee,
+    ]
+  );
 
   /**
    * Repay amount in **input field units** that covers accrued interest (capped by wallet + total debt).
@@ -723,10 +803,19 @@ const RepayModal = ({
   ]);
 
   const handleMaxClick = () => {
-    const roundedMax = Math.round(maxRepayAmount * 1000000) / 1000000;
+    const roundedMax = roundRepayHuman6(maxRepayAmount);
     setAmount(roundedMax);
-    const roundedDebtCap = Math.round(maxDebtInInputUnits * 1000000) / 1000000;
-    setIsRepayAll(roundedMax === roundedDebtCap);
+    const roundedDebtCap = roundRepayHuman6(maxDebtInInputUnits);
+    const shouldMaxUseRepayAll =
+      !isXalgoConsensusRepayAlgoRoute &&
+      shouldUseRepayAllPath({
+        amountHuman: roundedMax,
+        debtHuman: roundedDebtCap,
+        spendableWalletHuman: effectiveWalletBalance,
+        decimals: repayTokenDecimals,
+        reserveNativeTxnFee,
+      });
+    setIsRepayAll(shouldMaxUseRepayAll);
   };
 
   const handleInterestOnlyClick = () => {
@@ -739,10 +828,16 @@ const RepayModal = ({
   };
 
   const handleConfirmRepay = async () => {
-    const roundedAmount = Math.round(numAmount * 1000000) / 1000000;
-    const roundedDebtCap = Math.round(maxDebtInInputUnits * 1000000) / 1000000;
+    const roundedAmount = roundRepayHuman6(numAmount);
     const shouldUseRepayAll =
-      !isXalgoConsensusRepayAlgoRoute && roundedAmount === roundedDebtCap;
+      !isXalgoConsensusRepayAlgoRoute &&
+      shouldUseRepayAllPath({
+        amountHuman: roundedAmount,
+        debtHuman: maxDebtInInputUnits,
+        spendableWalletHuman: effectiveWalletBalance,
+        decimals: repayTokenDecimals,
+        reserveNativeTxnFee,
+      });
 
     const amountStr = amount !== "" ? amount.toString() : "0";
     console.log(`Repay ${amountStr} ${tokenSymbol}${shouldUseRepayAll ? " (repayAll)" : ""}`);
@@ -763,6 +858,7 @@ const RepayModal = ({
         repayAdapterId: repayAdapterIdOpt,
       });
       setTransactionId(txId);
+      setWorkflowStep("amount");
 
       if (isRainbowkitXchainWallet(activeWallet)) {
         toast({
@@ -805,8 +901,8 @@ const RepayModal = ({
     setWorkflowStep("amount");
   };
 
-  const roundedAmount = Math.round(numAmount * 1000000) / 1000000;
-  const roundedMaxRepay = Math.round(maxRepayAmount * 1000000) / 1000000;
+  const roundedAmount = roundRepayHuman6(numAmount);
+  const roundedMaxRepay = roundRepayHuman6(maxRepayAmount);
   const isValidAmount =
     amount !== "" &&
     numAmount > 0 &&
@@ -893,22 +989,26 @@ const RepayModal = ({
   const repayPoolHealthLoading =
     poolGlobalUserData === undefined && Boolean(poolId);
 
+  /** Block Radix dismiss while a repay is in flight (wallet popup steals focus on mobile). */
+  const handleDialogOpenChange = (open: boolean) => {
+    if (open || isLoading) return;
+    onClose();
+  };
+
   return (
     <>
     <Dialog
       open={isOpen && !rainbowkitHostOverlaySuppressed}
-      onOpenChange={onClose}
+      onOpenChange={handleDialogOpenChange}
     >
       <DialogContent
         className={cn(
-          "bg-card dark:bg-slate-900 rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-[95vw] overflow-hidden flex flex-col px-0 py-0",
-          showSuccess
-            ? "md:max-w-md h-auto max-h-[min(90vh,90dvh)]"
-            : "md:max-w-lg lg:max-w-4xl h-[90vh] md:h-auto md:max-h-[85vh]"
+          "bg-card dark:bg-slate-900 rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-[95vw] h-[min(90vh,90dvh)] max-h-[min(90vh,90dvh)] min-h-0 overflow-x-hidden overflow-hidden flex flex-col px-0 py-0 overscroll-contain md:h-auto md:max-h-[min(85vh,85dvh)]",
+          showSuccess ? "md:max-w-md" : "md:max-w-lg lg:max-w-4xl"
         )}
       >
         {showSuccess ? (
-          <div className="p-6 overflow-y-auto">
+          <div className="max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain p-6">
             <SupplyBorrowCongrats
               transactionType="repay"
               asset={tokenSymbol}
@@ -921,8 +1021,8 @@ const RepayModal = ({
             />
           </div>
         ) : (
-          <div className="flex flex-col h-full">
-            <div className="sticky top-0 z-20 bg-card dark:bg-slate-900 pt-6 px-6 md:px-8 lg:px-10 pb-4 border-b border-gray-200/50 dark:border-slate-700/50">
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="sticky top-0 z-20 shrink-0 bg-card dark:bg-slate-900 pt-6 px-6 md:px-8 lg:px-10 pb-4 border-b border-gray-200/50 dark:border-slate-700/50">
               <DialogHeader className="pb-0">
                 {availableAssets &&
                 availableAssets.length > 0 &&
@@ -1019,7 +1119,7 @@ const RepayModal = ({
               </DialogHeader>
             </div>
 
-            <div className="flex-1 overflow-y-auto overscroll-contain pt-2 px-6 md:px-8 lg:px-10 pb-6 md:pb-8 touch-pan-y">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pt-2 px-6 md:px-8 lg:px-10 pb-6 md:pb-8 touch-pan-y [scrollbar-gutter:stable]">
               <div className="flex flex-col lg:flex-row lg:gap-8 space-y-6 lg:space-y-0">
                 {/* Left Column: Input Form */}
                 <div className="flex-1 space-y-6 min-w-0">

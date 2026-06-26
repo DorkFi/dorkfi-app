@@ -77,6 +77,12 @@ import {
   buildTalgoMintUnsignedWithOptionalOptIn,
   fetchMinTalgoOutMintFloorFromChain,
 } from "./tinymanTalgoAdapter";
+import { spendableAlgoMicroAlgosFromAccount } from "@/utils/algorandWalletBalance";
+import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
+import {
+  computeRepayAllArc200Units,
+  repayAllSurplusAtomic,
+} from "@/utils/repayMaxAmount";
 
 export interface MarketData {
   appId: string;
@@ -6519,7 +6525,7 @@ export const repay = async (
         }
       }
       if (!customR.success) {
-        throw new Error("Failed to create repay transaction");
+        throw new Error(repayAllSimulationError(customR));
       }
       return {
         success: true,
@@ -6892,6 +6898,97 @@ export const repayOnBehalf = async (
 };
 
 
+/** Spendable wallet units (atomic) for the asset used to fund a repay / repayAll. */
+async function fetchRepaySpendableWalletAtomic(
+  algod: algosdk.Algodv2,
+  userAddress: string,
+  tokenStandard: TokenStandard,
+  token: {
+    underlyingContractId?: string;
+    underlyingAssetId?: string;
+    decimals: number;
+  }
+): Promise<bigint> {
+  if (tokenStandardUsesNativeWalletBalance(tokenStandard)) {
+    const accountInfo = await algod.accountInformation(userAddress).do();
+    return spendableAlgoMicroAlgosFromAccount(accountInfo);
+  }
+
+  if (tokenStandard === "arc200") {
+    const contractId = String(token.underlyingContractId ?? "").trim();
+    if (contractId === "") return 0n;
+    const bal = await ARC200Service.getBalance(userAddress, contractId);
+    return bal != null ? BigInt(bal) : 0n;
+  }
+
+  if (
+    tokenStandardUsesAsaStyleNt200Txns(tokenStandard) ||
+    tokenStandard === "asa" ||
+    tokenStandard === "arc200-exchange"
+  ) {
+    const assetId = Number(token.underlyingAssetId);
+    if (!Number.isFinite(assetId) || assetId <= 0) return 0n;
+    try {
+      const holding = await algod
+        .accountAssetInformation(userAddress, assetId)
+        .do();
+      const atomic = getAccountAssetHoldingAmountAtomic(holding);
+      return atomic != null ? atomic : 0n;
+    } catch {
+      return 0n;
+    }
+  }
+
+  if (tokenStandardUsesNt200Arc200Balance(tokenStandard)) {
+    const contractId = String(token.underlyingContractId ?? "").trim();
+    if (contractId === "") return 0n;
+    const clients = { algod };
+    ARC200Service.initialize(clients);
+    const bal = await ARC200Service.getBalance(userAddress, contractId);
+    return bal != null ? BigInt(bal) : 0n;
+  }
+
+  return 0n;
+}
+
+async function fetchOnChainBorrowAtomic(
+  poolId: string,
+  userAddress: string,
+  marketId: string,
+  algod: algosdk.Algodv2
+): Promise<bigint> {
+  const ci = new CONTRACT(
+    Number(poolId),
+    algod,
+    undefined,
+    { ...LendingPoolAppSpec.contract, events: [] },
+    {
+      addr: userAddress,
+      sk: new Uint8Array(),
+    }
+  );
+  ci.setFee(2000);
+  const borrowAmountR = await ci.get_user_borrow_amount(
+    userAddress,
+    Number(marketId)
+  );
+  if (
+    borrowAmountR.success &&
+    borrowAmountR.returnValue !== undefined &&
+    borrowAmountR.returnValue !== null
+  ) {
+    return BigInt(String(borrowAmountR.returnValue as bigint));
+  }
+  return 0n;
+}
+
+function repayAllSimulationError(customR: { success: boolean; error?: string }): string {
+  const detail = customR.error?.trim();
+  return detail
+    ? `Failed to create repay transaction: ${detail}`
+    : "Failed to create repay transaction";
+}
+
 /**
  * Repay borrowed tokens to a lending market
  */
@@ -6987,21 +7084,7 @@ export const repayAll = async (
           ? Number(token.underlyingAssetId)
           : NaN;
 
-      // TODO use calculated value based on interest per minute
-      const bigAmountSurplus = BigInt(
-        new BigNumber(amount)
-          .multipliedBy(10 ** token.decimals)
-          .multipliedBy(0.01)
-          .plus(1)
-          .toFixed(0)
-      );
-
-      let repayArc200Units = BigInt(
-        new BigNumber(amount)
-          .multipliedBy(10 ** token.decimals)
-          .plus(bigAmountSurplus)
-          .toFixed(0)
-      );
+      let repayArc200Units = BigInt(0);
 
       let folksMintTxns: algosdk.Transaction[] | null = null;
 
@@ -7073,9 +7156,54 @@ export const repayAll = async (
             underlyingAmount: underlyingAtomic,
             algod: clients.algod,
           });
-          const surplusF = (mintedFAsset * 1n) / 100n + 1n;
-          repayArc200Units = mintedFAsset + surplusF;
+          repayArc200Units =
+            mintedFAsset + repayAllSurplusAtomic(mintedFAsset);
         }
+      }
+
+      const onChainBorrowAtomic = await fetchOnChainBorrowAtomic(
+        poolId,
+        userAddress,
+        marketId,
+        clients.algod
+      );
+      const spendableWalletAtomic = await fetchRepaySpendableWalletAtomic(
+        clients.algod,
+        userAddress,
+        tokenStandard,
+        token
+      );
+      const reserveNativeTxnFee = tokenStandardUsesNativeWalletBalance(
+        tokenStandard
+      );
+
+      if (folksForRepay && folksForRepay.repayWalletBasis !== "market_token") {
+        const fAssetWallet = await fetchRepaySpendableWalletAtomic(
+          clients.algod,
+          userAddress,
+          "arc200",
+          { ...token, underlyingContractId: token.underlyingContractId }
+        );
+        if (repayArc200Units <= 0n) {
+          repayArc200Units = computeRepayAllArc200Units({
+            onChainBorrowAtomic,
+            spendableWalletAtomic: fAssetWallet,
+            reserveNativeTxnFee: false,
+          });
+        } else if (repayArc200Units > fAssetWallet) {
+          repayArc200Units = fAssetWallet;
+        }
+        if (repayArc200Units < onChainBorrowAtomic) {
+          throw new Error(
+            "Insufficient balance to close full debt; try a smaller repay amount"
+          );
+        }
+      } else {
+        repayArc200Units = computeRepayAllArc200Units({
+          onChainBorrowAtomic,
+          spendableWalletAtomic,
+          reserveNativeTxnFee,
+        });
       }
 
       const symbol = token.symbol;
@@ -7344,7 +7472,7 @@ export const repayAll = async (
         }
       }
       if (!customR.success) {
-        throw new Error("Failed to create repay transaction");
+        throw new Error(repayAllSimulationError(customR));
       }
       return {
         success: true,
