@@ -130,6 +130,20 @@ Types, constants, labels, Admin UI, proposal cards, and badge colors (requires c
 
 **Perfect for:** Developers adding or changing governance proposal categories
 
+### 💧 [Lending Supply](LENDING_SUPPLY.md)
+**Developer guide for supplying collateral into lending markets**
+
+End-to-end implementation reference: `SupplyBorrowModal`, `lendingService.deposit()`, Folks/xALGO/tALGO routes, config fields, supplied-position display, supply APY, caps, and transaction-metadata refresh.
+
+**Perfect for:** Developers extending supply UX, adding markets, or debugging deposit transactions
+
+### 🪙 [Voi Mainnet A Market — VOI Supply](VOI_MAINNET_A_MARKET_VOI_SUPPLY.md)
+**Market-specific supply guide for native VOI on Voi Mainnet A market**
+
+Pool `47139778`, market `41877720`, native `network` token standard, transaction legs, wallet balance, API position keys, and legacy pool migration from PreFi.
+
+**Perfect for:** Debugging VOI supply on Voi Mainnet or onboarding to this specific market
+
 ### 🛡️ [Health Factor Calculation](HEALTH_FACTOR_CALCULATION.md)
 **How health factor is computed for lending positions**
 
@@ -174,10 +188,11 @@ Recorded checks for withdraw modal (desktop and mobile), supplied/borrowed actio
 7. **Transaction Updates**: Review [Transaction Metadata Integration](TRANSACTION_METADATA.md) for real-time state updates
 8. **Governance**: Read the [Governance User Guide](governance/GOVERNANCE_USER_GUIDE.md) (see [Governance documentation](governance/index.md)); to add a category, use [Adding a governance proposal category](workflows/ADD_PROPOSAL_CATEGORY_TO_GOVERNANCE.md)
 9. **Achievements**: See [Achievements guide](achievements/ACHIEVEMENTS.md) (see [Achievements documentation](achievements/index.md)) for JSON data, catalog families, and portfolio UI
-10. **Health Factor**: See [Health Factor Calculation](HEALTH_FACTOR_CALCULATION.md) for position safety math
-11. **Asset Decimals & Withdraw Value**: See [Asset Decimals and Display](ASSET_DECIMALS_AND_DISPLAY.md) for balance/amount formatting and withdraw modal USD consistency
-12. **Withdraw flow QA**: See [Portfolio Withdraw Flow – Verification](PORTFOLIO_WITHDRAW_FLOW_VERIFICATION.md) for the recorded verification pass
-13. **Codebase**: Explore the React/TypeScript frontend implementation
+10. **Lending Supply**: See [Lending Supply](LENDING_SUPPLY.md) for deposit transaction flow and portfolio display
+11. **Health Factor**: See [Health Factor Calculation](HEALTH_FACTOR_CALCULATION.md) for position safety math
+12. **Asset Decimals & Withdraw Value**: See [Asset Decimals and Display](ASSET_DECIMALS_AND_DISPLAY.md) for balance/amount formatting and withdraw modal USD consistency
+13. **Withdraw flow QA**: See [Portfolio Withdraw Flow – Verification](PORTFOLIO_WITHDRAW_FLOW_VERIFICATION.md) for the recorded verification pass
+14. **Codebase**: Explore the React/TypeScript frontend implementation
 
 ## Key Features
 

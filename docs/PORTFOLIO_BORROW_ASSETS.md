@@ -61,6 +61,8 @@ If `borrowApyCalculation` is missing, the UI uses the contract’s current borro
 
 `calculateDepositAPY` in the same file: same utilization and `calculateBorrowRate`, then **`supplyRate`** = `borrowRate × utilization × (1 − reserveFactor)`, then **`convertSupplyRateToAPY(supplyRate)`** using the same daily-compounding formula as borrow. Used for supplied-asset displays, not the borrow column.
 
+Full supply flow (deposit tx, config, portfolio rows): see [Lending Supply](LENDING_SUPPLY.md).
+
 ### Labeling: APY vs APR
 
 - The **intended** borrow display number from `calculateBorrowAPY` is **APY** (daily compounded).
