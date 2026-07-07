@@ -3,6 +3,11 @@ import { useAddressName } from "./useAddressName";
 import { ResolverService } from "@/services/resolverService";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { useWallet } from "@txnlab/use-wallet-react";
+import {
+  getCachedAlgorandAvatar,
+  fetchAlgorandAvatarFromApi,
+} from "@/services/algorandProfileAvatarService";
+import { resolveDorkAvatarImageUrl } from "@/services/algorandNftService";
 
 const NFT_INDEXER_BASE_URL = "https://voi-mainnet-mimirapi.nftnavigator.xyz/nft-indexer/v1";
 const PLACEHOLDER_IMAGE = "/lovable-uploads/dork_health_placeholder_v2.png";
@@ -50,6 +55,68 @@ export const useAvatarImage = (address: string | undefined | null) => {
     hasUpdatedRef.current = false;
     isLoadingCustomAvatarRef.current = false;
     fetchedRef.current = null;
+
+    // Algorand: resolve the profile NFT from the stored selection (no enVoi/.voi name required).
+    // Uses the local cache for an instant paint, then falls back to the API so the PFP persists
+    // across devices for the connected user.
+    if (currentNetwork === "algorand-mainnet") {
+      if (!address) {
+        setIsLoading(false);
+        setIsResolved(true);
+        return;
+      }
+
+      let active = true;
+
+      const applyImage = (imageUrl: string | null) => {
+        if (!active) return;
+        if (!imageUrl) {
+          setIsLoading(false);
+          setIsResolved(true);
+          return;
+        }
+        isLoadingCustomAvatarRef.current = true;
+        const img = new Image();
+        img.onload = () => {
+          if (!active || hasUpdatedRef.current) return;
+          hasUpdatedRef.current = true;
+          isLoadingCustomAvatarRef.current = false;
+          setAvatarImage(imageUrl);
+          setIsLoading(false);
+          setIsResolved(true);
+        };
+        img.onerror = () => {
+          isLoadingCustomAvatarRef.current = false;
+          if (active) {
+            setIsLoading(false);
+            setIsResolved(true);
+          }
+        };
+        img.src = imageUrl;
+      };
+
+      const cached = getCachedAlgorandAvatar(address);
+      const cachedUrl =
+        cached?.imageUrl ?? resolveDorkAvatarImageUrl(cached?.avatarValue);
+
+      if (cachedUrl) {
+        applyImage(cachedUrl);
+      } else {
+        setIsLoading(true);
+        fetchAlgorandAvatarFromApi(address)
+          .then((url) => applyImage(url))
+          .catch(() => {
+            if (active) {
+              setIsLoading(false);
+              setIsResolved(true);
+            }
+          });
+      }
+
+      return () => {
+        active = false;
+      };
+    }
 
     // Wait for address name to finish loading before attempting to fetch avatar
     if (isLoadingName) {

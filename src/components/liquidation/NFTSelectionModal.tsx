@@ -9,6 +9,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { useUserNFTs, UserNFT } from '@/hooks/useUserNFTs';
 import { useNameOwnership } from '@/hooks/useNameOwnership';
+import { useNetwork } from '@/contexts/NetworkContext';
 import { useWallet } from '@txnlab/use-wallet-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Loader2, Image as ImageIcon, AlertCircle, ExternalLink, RefreshCw } from 'lucide-react';
@@ -29,15 +30,19 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
   currentImageUrl,
 }) => {
   const { activeAccount } = useWallet();
+  const { currentNetwork } = useNetwork();
   const { nfts, isLoading: isLoadingNFTs, error: nftError, refetch: refetchNFTs } = useUserNFTs(activeAccount?.address || null);
   const { ownsName, isLoading: isLoadingName, refetch: refetchName } = useNameOwnership(activeAccount?.address);
   const [selectedNFT, setSelectedNFT] = useState<UserNFT | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
 
-  const isLoading = isLoadingNFTs || isLoadingName;
+  // Algorand users set a Dork NFT PFP directly from their bridged ASAs — no enVoi (.voi) name required.
+  const isAlgorand = currentNetwork === "algorand-mainnet";
+  const requiresName = !isAlgorand;
+  const isLoading = isLoadingNFTs || (requiresName && isLoadingName);
   const hasNFTs = nfts && nfts.length > 0;
-  const meetsRequirements = ownsName && hasNFTs;
+  const meetsRequirements = (isAlgorand || ownsName) && hasNFTs;
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -116,6 +121,7 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
                 To customize your profile, you need to meet the following requirements:
               </p>
               <div className="space-y-2 text-left max-w-md mx-auto mb-6">
+                {requiresName && (
                 <div className={`p-3 rounded-lg ${
                   ownsName ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'
                 }`}>
@@ -145,6 +151,7 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
                     </div>
                   )}
                 </div>
+                )}
                 <div className={`p-3 rounded-lg ${
                   hasNFTs ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'
                 }`}>

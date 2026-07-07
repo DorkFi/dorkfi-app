@@ -813,6 +813,90 @@ class DorkFiAPIService {
   }
 
   /**
+   * Set a user's profile avatar (e.g. a bridged Dork NFT on Algorand). Lets users pick a PFP
+   * without an enVoi (.voi) name by storing the choice against their address.
+   *
+   * Field names match the API profile schema: `avatar` is the image URL and `avatarDorkfi` is the
+   * canonical `arc72:<contract>:<token>` value.
+   * @param userAddress - User address
+   * @param avatar - Avatar selection: canonical `avatarValue` (`arc72:<contract>:<token>`), image URL, and network
+   * @returns Promise<ApiResponse<any>>
+   */
+  async setUserAvatar(
+    userAddress: string,
+    avatar: { avatarValue: string; imageUrl: string; network: string }
+  ): Promise<ApiResponse<any>> {
+    try {
+      const response = await fetch(`${this.baseUrl}/user-profile`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          address: userAddress,
+          avatar: avatar.imageUrl,
+          avatarDorkfi: avatar.avatarValue,
+          network: avatar.network,
+        }),
+      });
+
+      if (!response.ok) {
+        if (
+          response.status === 400 ||
+          response.status === 404 ||
+          response.status === 500
+        ) {
+          const errorData = await response.json();
+          return errorData;
+        }
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error(
+        `Error setting user avatar for address ${userAddress}:`,
+        error
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Get a user's cached profile avatar image URL by address.
+   * Reads `GET /user-profile/{address}` which returns `data.avatar` (or null when not cached).
+   * @param userAddress - User address
+   * @returns Promise<ApiResponse<{ avatar: string | null }>>
+   */
+  async getUserAvatar(
+    userAddress: string
+  ): Promise<ApiResponse<{ avatar: string | null }>> {
+    try {
+      const response = await fetch(
+        `${this.baseUrl}/user-profile/${encodeURIComponent(userAddress)}`
+      );
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          const errorData = await response.json();
+          return errorData;
+        }
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error(
+        `Error fetching user avatar for address ${userAddress}:`,
+        error
+      );
+      throw error;
+    }
+  }
+
+  /**
    * Fetch fresh user data and update store
    * Fetches fresh user data from the blockchain for a specific user, network, app ID, and market ID, then updates the store
    * @param userAddress - User address
