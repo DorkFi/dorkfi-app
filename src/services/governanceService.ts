@@ -1196,6 +1196,7 @@ export const castVote = async (
       throw new Error("Governance config must be a GovernanceConfig object with storageAppId");
     }
     const storageAppId = governanceConfig.storageAppId;
+    const appStorageId = governanceConfig.appStorageId;
 
     const clients = algorandService.initializeClients(
       networkConfig.walletNetworkId as AlgorandNetwork
@@ -1261,7 +1262,7 @@ export const castVote = async (
         ...txnO,
         note: new TextEncoder().encode(`governance cast vote ${Buffer.from(proposalNode).toString('hex').slice(0, 8)}`),
         payment: 2e5,
-        foreignApps: [storageAppId],
+        foreignApps: [storageAppId, appStorageId],
       });
     }
 
@@ -1337,6 +1338,7 @@ export const castBatchVote = async (
       throw new Error("Governance config must be a GovernanceConfig object with storageAppId");
     }
     const storageAppId = governanceConfig.storageAppId;
+    const appStorageId = governanceConfig.appStorageId;
 
     const clients = algorandService.initializeClients(
       networkConfig.walletNetworkId as AlgorandNetwork
@@ -1408,7 +1410,7 @@ export const castBatchVote = async (
         note: new TextEncoder().encode(`governance cast vote ${Buffer.from(proposalNode).toString('hex').slice(0, 8)}`),
         // Only include payment in the first transaction
         payment: index === 0 ? totalPayment : 0,
-        foreignApps: [storageAppId],
+        foreignApps: [storageAppId, appStorageId],
       });
     }
 

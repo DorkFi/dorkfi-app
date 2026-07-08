@@ -37,6 +37,7 @@ export interface PowerMultiplier {
 
 export interface GovernanceConfig {
   appId: number;
+  appStorageId: number;
   storageAppId: number;
   powerSources?: number[]; // Array of appIds used as sources of voting power
   powerMultipliers?: PowerMultiplier[]; // Array of NFT contracts that provide voting power bonuses
@@ -1393,6 +1394,7 @@ const betaVoiMainnetConfig: NetworkConfig = {
 };
 const prodAMarket = "47139778";
 const prodBMarket = "47139781";
+const prodLendingPools = [prodAMarket, prodBMarket];
 const prodTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
   VOI: {
     assetId: "0",
@@ -1736,27 +1738,36 @@ const prodTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     },
   ],
 };
-const prodLendingPools = [prodAMarket, prodBMarket];
+const prodAppId = "48472636";
+const prodPriceOracle = "47138069";
+const prodMarketController = "47138067";
+const prodSToken = "47138068";
+const prodStorageAppId = "47138065";
+const prodGovernanceStorageAppId = "48458688";
+const prodGovernancePowerSources = [
+  "47148525", // UNIT nToken appId
+];
+const prodGovernancePowerMultipliers = [
+  { id: "dorks_v1", label: "Dorks v1", contractId: 313597, bonus: 0.169 },
+  { id: "dorks_v2", label: "Dorks v2", contractId: 894888, bonus: 0.01 },
+  { id: "chubs_v1", label: "Chubs v1", contractId: 313705, bonus: 0.15 },
+];
+const prodGovernance: GovernanceConfig = {
+  appId: Number(prodAppId),
+  storageAppId: Number(prodGovernanceStorageAppId),
+  appStorageId: Number(prodStorageAppId),
+  powerSources: prodGovernancePowerSources.map(Number),
+  powerMultipliers: prodGovernancePowerMultipliers,
+};
 const prodContracts = {
   lendingPools: [...prodLendingPools],
-  priceOracle: "47138069",
+  priceOracle: prodPriceOracle,
   liquidationEngine: undefined,
-  governance: {
-    appId: 48472636,
-    storageAppId: 48458688,
-    powerSources: [
-      47148525, // UNIT nToken appId
-    ],
-    powerMultipliers: [
-      { id: "dorks_v1", label: "Dorks v1", contractId: 313597, bonus: 0.169 },
-      { id: "dorks_v2", label: "Dorks v2", contractId: 894888, bonus: 0.01 },
-      { id: "chubs_v1", label: "Chubs v1", contractId: 313705, bonus: 0.15 },
-    ],
-  },
+  governance: prodGovernance,
   treasury: undefined,
-  marketController: "47138067",
-  sToken: "47138068",
-  appStorageId: "47138065",
+  marketController: prodMarketController,
+  sToken: prodSToken,
+  appStorageId: prodStorageAppId,
 };
 const voiMainnetConfig: NetworkConfig = {
   ...baseVoiMainnetConfig,
@@ -2112,19 +2123,21 @@ const algorandProdEMarket = "3585829377"; // C WAD Pair LPs
 const algorandProdFMarket = "3589083110"; // C USDC Pair LPs
 const algorandProdPriceOracle = "3333688500";
 const algorandProdLiquidationEngine = undefined;
-const algorandProdGovernance = {
-  appId: 3436627998,
-  storageAppId: 3436628276,
-  powerSources: [
-    3333783429, // UNIT nToken appId
-  ],
-  powerMultipliers: [],
-}
 const algorandProdTreasury = undefined;
 const algorandProdMarketController = "3333688332";
 const algorandProdSToken = "3333688448";
 const algorandProdBeacon = "3209233839";
 const algorandProdAppStorageId = "3333688254";
+const algorandProdGovernance = {
+  appId: 3436627998,
+  storageAppId: 3436628276,
+  appStorageId: 3333688254,
+  powerSources: [
+    3333783429, // UNIT nToken appId
+  ],
+  powerMultipliers: [],
+}
+
 // A, B, C, D lending pools on prod
 const algorandProdLendingPools = [
   algorandProdAMarket,
