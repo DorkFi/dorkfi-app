@@ -40,9 +40,6 @@ const COLLECTION_BY_CONTRACT: Record<number, CollectionMeta> = {
 
 const HIGHFORGE_CDN = "https://prod.cdn.highforge.io/m";
 
-/** Shared reserve address for every bridged Dork ASA (used for wallet discovery). */
-export const DORK_NFT_RESERVE_ADDRESS = registryData.reserve as string;
-
 /** Canonical, chain-agnostic key for a Dork NFT: matches the `arc72:<contract>:<token>` avatar format. */
 export const canonicalDorkKey = (contractId: number, tokenId: number): string =>
   `${contractId}:${tokenId}`;
@@ -80,9 +77,6 @@ for (const [assetId, contractId, tokenId] of registryData.tuples as Array<
 /** All bridged Dork ASA ids, for fast membership checks during wallet discovery. */
 export const DORK_NFT_ASSET_IDS: ReadonlySet<number> = new Set(byAssetId.keys());
 
-export const isDorkNftAssetId = (assetId: number): boolean =>
-  byAssetId.has(assetId);
-
 export const getDorkNftByAssetId = (
   assetId: number
 ): DorkNftEntry | undefined => byAssetId.get(assetId);
@@ -92,6 +86,3 @@ export const getDorkNftByVoi = (
   tokenId: number
 ): DorkNftEntry | undefined =>
   byCanonical.get(canonicalDorkKey(contractId, tokenId));
-
-/** Total number of registered bridged Dork NFTs. */
-export const DORK_NFT_REGISTRY_SIZE = byAssetId.size;

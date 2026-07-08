@@ -94,10 +94,6 @@ export async function fetchOwnedDorkNftsOnAlgorand(
   return owned;
 }
 
-/** Canonical, chain-agnostic avatar value for a Dork NFT (matches the Voi `arc72:...` format). */
-export const dorkAvatarValueForEntry = (entry: DorkNftEntry): string =>
-  `arc72:${entry.voiContractId}:${entry.voiTokenId}`;
-
 /**
  * Resolve a stored avatar value to a Dork registry entry.
  * Accepts the canonical `arc72:<contract>:<token>` form or the Algorand-specific `asa:<assetId>`.
@@ -125,32 +121,3 @@ export function resolveDorkAvatarEntry(
 export const resolveDorkAvatarImageUrl = (
   avatarValue: string | null | undefined
 ): string | null => resolveDorkAvatarEntry(avatarValue)?.imageUrl ?? null;
-
-/**
- * Verify the account still holds the ASA backing the given avatar value.
- * Used to avoid showing a stale PFP after the NFT is transferred or sold.
- */
-export async function ownsDorkAvatar(
-  networkId: NetworkId,
-  address: string,
-  avatarValue: string | null | undefined
-): Promise<boolean> {
-  const entry = resolveDorkAvatarEntry(avatarValue);
-  if (!entry || !address) return false;
-  const algoNet = getAlgorandNetworkFromNetworkId(networkId);
-  if (!algoNet) return false;
-
-  try {
-    const { algod } = await algorandService.initializeClientsForReads(algoNet);
-    const info = await algod
-      .accountAssetInformation(address, entry.assetId)
-      .do();
-    const holding =
-      (info as { assetHolding?: { amount?: unknown } }).assetHolding ??
-      (info as { ["asset-holding"]?: { amount?: unknown } })["asset-holding"];
-    const amount = holding?.amount ?? (info as { amount?: unknown }).amount;
-    return amount != null && BigInt(String(amount)) > 0n;
-  } catch {
-    return false;
-  }
-}
