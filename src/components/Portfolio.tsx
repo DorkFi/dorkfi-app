@@ -125,6 +125,7 @@ import {
 import NFTSelectionModal from "./liquidation/NFTSelectionModal";
 import ProfileUpdateSuccessModal from "./liquidation/ProfileUpdateSuccessModal";
 import { UserNFT } from "@/hooks/useUserNFTs";
+import { saveAlgorandAvatar } from "@/services/algorandProfileAvatarService";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import { H1, Body } from "@/components/ui/Typography";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -5669,7 +5670,8 @@ const Portfolio = () => {
                     : undefined
                 }
                 onEditProfile={
-                  !isViewOnly && !isPeraOrDefly
+                  !isViewOnly &&
+                  (currentNetwork === "algorand-mainnet" || !isPeraOrDefly)
                     ? () => setNftModalOpen(true)
                     : undefined
                 }
@@ -9179,7 +9181,47 @@ const Portfolio = () => {
           // Avatar will be updated via useAvatarImage hook after transaction
         }}
         onConfirmNFT={async (nft: UserNFT) => {
-          if (!activeAccount?.address || !signTransactions || !activeWallet) {
+          if (!activeAccount?.address || !activeWallet) {
+            throw new Error("Wallet not connected");
+          }
+
+          // Algorand: set the profile NFT directly from a bridged Dork ASA — no enVoi (.voi)
+          // name and no transaction required. The choice is stored against the address.
+          if (currentNetwork === "algorand-mainnet") {
+            try {
+              const avatarValue = `arc72:${nft.contractId}:${nft.tokenId}`;
+              const imageUrl = nft.imageUrl;
+
+              // Persists to the API (avatar + avatarDorkfi) and caches locally. Do NOT call the
+              // address-only `updateUserProfile` here: on Algorand it re-derives from Envoi and
+              // would overwrite the avatar we just set with null.
+              await saveAlgorandAvatar(activeAccount.address, {
+                avatarValue,
+                imageUrl,
+              });
+
+              // Optimistically reflect the new PFP immediately.
+              setUserProfileAvatar(imageUrl);
+
+              refetchAvatar();
+              setNftModalOpen(false);
+              setSuccessModalOpen(true);
+            } catch (error) {
+              console.error("Error updating profile NFT:", error);
+              toast({
+                title: "Failed to update profile",
+                description:
+                  error instanceof Error
+                    ? error.message
+                    : "Failed to update profile NFT",
+                variant: "destructive",
+              });
+              throw error;
+            }
+            return;
+          }
+
+          if (!signTransactions) {
             throw new Error("Wallet not connected");
           }
 
