@@ -39,10 +39,11 @@ import { calculateDepositAPY } from "@/utils/apyCalculations";
 import { useTokenPrice } from "@/hooks/useTokenPrice";
 import { useNetwork } from "@/contexts/NetworkContext";
 import {
-  isRainbowkitXchainWallet,
+  isEvmXchainWallet,
   withRainbowkitHostDialogDismissed,
 } from "@/wallet/xchainSignUi";
-import { useWallet } from "@txnlab/use-wallet-react";
+import { isAlgorandMainnetXchainWallet } from "@/wallet/privySyntheticWallet";
+import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
 import {
   fetchUserGlobalDataForPool,
   MAX_WITHDRAW_HEALTH_FACTOR_TARGET,
@@ -301,7 +302,7 @@ const WithdrawModal = ({
 }: WithdrawModalProps) => {
   const withdrawFolksAdapters = folksWithdrawAdapters;
   const { currentNetwork } = useNetwork();
-  const { activeAccount, signTransactions, activeWallet } = useWallet();
+  const { activeAccount, signTransactions, activeWallet } = useDorkFiWalletAdapter();
   const { toast } = useToast();
   const networkToUse = (networkProp || currentNetwork) as NetworkId | undefined;
   const withdrawMultiRoute =
@@ -1189,8 +1190,10 @@ const WithdrawModal = ({
             walletName.includes("pera") || walletName.includes("defly");
         }
 
-        const isXchainRainbowkit =
-          walletId === "rainbowkit" && networkId === "algorand-mainnet";
+        const isXchainRainbowkit = isAlgorandMainnetXchainWallet(
+          activeWallet,
+          networkId
+        );
 
         const isSupported =
           isXchainRainbowkit ||
@@ -1253,7 +1256,7 @@ const WithdrawModal = ({
           : null;
       const atomic = meta?.fAssetToRedeemAtomic?.trim();
       const rainbowkitDismiss =
-        isRainbowkitXchainWallet(activeWallet) && !withdrawTwoStepChainFailed;
+        isEvmXchainWallet(activeWallet) && !withdrawTwoStepChainFailed;
 
       if (
         atomic &&
@@ -1328,7 +1331,7 @@ const WithdrawModal = ({
         }
       }
     } catch (error) {
-      if (isRainbowkitXchainWallet(activeWallet)) {
+      if (isEvmXchainWallet(activeWallet)) {
         setRainbowkitSignDialogSuppressed(false);
       }
       console.error("Withdraw sign failed:", error);

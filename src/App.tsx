@@ -9,6 +9,7 @@ import Admin from "./pages/Admin";
 import Analytics from "./pages/Analytics";
 import Governance from "./pages/Governance";
 import { NetworkProvider } from "./contexts/NetworkContext";
+import { PrivySessionProvider } from "./contexts/PrivySessionProvider";
 import { LocaleSettingsProvider } from "./contexts/LocaleSettingsContext";
 import Index from "./pages/Index";
 import { isFeatureEnabled } from "./config";
@@ -65,6 +66,7 @@ function App() {
       enableSystem
       disableTransitionOnChange
     >
+      <PrivySessionProvider>
       <NetworkProvider>
         <LocaleSettingsProvider>
         <TooltipProvider delayDuration={300} skipDelayDuration={100}>
@@ -149,6 +151,7 @@ function App() {
         </TooltipProvider>
         </LocaleSettingsProvider>
       </NetworkProvider>
+      </PrivySessionProvider>
     </ThemeProvider>
     </QueryClientProvider>
   );

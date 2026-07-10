@@ -1,8 +1,31 @@
+import { isPrivyEasyStartWallet } from "@/wallet/privySyntheticWallet";
+
 /** Active wallet is xChain EVM (RainbowKit) per use-wallet fork. */
 export function isRainbowkitXchainWallet(
   wallet: { id: string } | null | undefined
 ): boolean {
   return (wallet?.id ?? "").toLowerCase() === "rainbowkit";
+}
+
+/** RainbowKit xChain or Privy Easy Start (both use EVM EIP-712 signing). */
+export function isEvmXchainWallet(
+  wallet: { id: string } | null | undefined
+): boolean {
+  return isRainbowkitXchainWallet(wallet) || isPrivyEasyStartWallet(wallet);
+}
+
+/** Privy Easy Start session (email / social) on Algorand xChain. */
+export function isPrivyEasyStartSession(
+  authPath: string | null | undefined
+): boolean {
+  return authPath === "privy";
+}
+
+/** RainbowKit xChain or Privy Easy Start — both sign via EVM EIP-712. */
+export function isEvmXchainAuthPath(
+  authPath: string | null | undefined
+): boolean {
+  return authPath === "rainbowkit" || authPath === "privy";
 }
 
 type SetSuppressed = (value: boolean) => void;
@@ -30,7 +53,7 @@ export async function withRainbowkitHostDialogDismissed<T>(opts: {
     run,
     leaveOverlayDismissedOnSuccess = false,
   } = opts;
-  if (!isRainbowkitXchainWallet(wallet)) {
+  if (!isEvmXchainWallet(wallet)) {
     return run();
   }
   setSuppressed(true);

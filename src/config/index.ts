@@ -1038,6 +1038,8 @@ export interface GlobalConfig {
     enablePools: boolean;
     /** In-app Deposit / Withdraw LP actions on pool cards (off until Tinyman LP flows are production-ready). Supply / Withdraw lending stays enabled. */
     enablePoolDepositWithdraw: boolean;
+    /** Email / social Easy Start onboarding via Privy (Algorand Mainnet xChain path). */
+    enablePrivyOnboarding: boolean;
   };
 }
 
@@ -3552,6 +3554,7 @@ export const config: GlobalConfig = {
     bypassAgentClaimEligibility: false,
     enablePools: true,
     enablePoolDepositWithdraw: false,
+    enablePrivyOnboarding: false,
   },
 };
 
@@ -5207,12 +5210,19 @@ export const getEnvironmentConfig = (): Partial<GlobalConfig> => {
       import.meta.env.VITE_ENABLE_POOL_DEPOSIT_WITHDRAW === "1";
   }
 
+  if (typeof import.meta.env.VITE_ENABLE_PRIVY_ONBOARDING !== "undefined") {
+    envFeatures.enablePrivyOnboarding =
+      import.meta.env.VITE_ENABLE_PRIVY_ONBOARDING === "true" ||
+      import.meta.env.VITE_ENABLE_PRIVY_ONBOARDING === "1";
+  }
+
   if (env === "development") {
     return {
       defaultNetwork: "algorand-mainnet",
       features: {
         ...config.features,
         enableGovernance: true, // Enable governance in development for testing
+        enablePrivyOnboarding: true,
         ...envFeatures,
       },
     };

@@ -8,7 +8,7 @@ import {
 } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useWallet } from "@txnlab/use-wallet-react";
+import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { useAddressName } from "@/hooks/useAddressName";
 import { useAvatarImage } from "@/hooks/useAvatarImage";
@@ -359,7 +359,7 @@ function PortfolioAssetListPagination({
 const Portfolio = () => {
   const { address: routeAddress } = useParams<{ address: string }>();
   const navigate = useNavigate();
-  const { activeAccount, signTransactions, activeWallet } = useWallet();
+  const { activeAccount, signTransactions, activeWallet } = useDorkFiWalletAdapter();
   const { currentNetwork } = useNetwork();
   const { formatNumber, formatCurrency, formatPercent } = useNumberI18n();
   const queryClient = useQueryClient();

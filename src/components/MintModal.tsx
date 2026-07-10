@@ -15,12 +15,13 @@ import SupplyBorrowCongrats from "./SupplyBorrowCongrats";
 import SupplyBorrowHeader from "./SupplyBorrowHeader";
 import SupplyBorrowForm from "./SupplyBorrowForm";
 import SupplyBorrowStats from "./SupplyBorrowStats";
-import { useWallet } from "@txnlab/use-wallet-react";
+import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
 import { useNetwork } from "@/contexts/NetworkContext";
 import {
-  isRainbowkitXchainWallet,
+  isEvmXchainWallet,
   withRainbowkitHostDialogDismissed,
 } from "@/wallet/xchainSignUi";
+import { isAlgorandMainnetXchainWallet } from "@/wallet/privySyntheticWallet";
 import { borrow, fetchUserGlobalData } from "@/services/lendingService";
 import { getTokenConfig, getAllTokensWithDisplayInfo, getAlgorandNetworkFromNetworkId, getNetworkConfig, NetworkId } from "@/config";
 import algorandService from "@/services/algorandService";
@@ -85,7 +86,7 @@ const MintModal = ({
   const [rainbowkitSignDialogSuppressed, setRainbowkitSignDialogSuppressed] =
     useState(false);
 
-  const { activeAccount, signTransactions, activeWallet } = useWallet();
+  const { activeAccount, signTransactions, activeWallet } = useDorkFiWalletAdapter();
   const { currentNetwork } = useNetwork();
   const { toast } = useToast();
 
@@ -363,8 +364,10 @@ const MintModal = ({
             walletName.includes("pera") || walletName.includes("defly");
         }
 
-        const isXchainRainbowkit =
-          walletId === "rainbowkit" && networkId === "algorand-mainnet";
+        const isXchainRainbowkit = isAlgorandMainnetXchainWallet(
+          activeWallet,
+          networkId
+        );
 
         // Check if wallet supports the network
         const isSupported =
@@ -473,7 +476,7 @@ const MintModal = ({
 
         setTransactionId(res.txid || "Unknown");
         setIsLoading(false);
-        if (isRainbowkitXchainWallet(activeWallet)) {
+        if (isEvmXchainWallet(activeWallet)) {
           toast({
             title: "Mint successful",
             description: `Transaction ${(res.txid || "").slice(0, 10)}… submitted.`,
@@ -494,7 +497,7 @@ const MintModal = ({
         throw new Error(errorMsg || "Minting failed");
       }
     } catch (err: unknown) {
-      if (isRainbowkitXchainWallet(activeWallet)) {
+      if (isEvmXchainWallet(activeWallet)) {
         setRainbowkitSignDialogSuppressed(false);
       }
       console.error("Minting error:", err);

@@ -8,6 +8,7 @@ import { LocaleNumberSettings } from "@/components/LocaleNumberSettings";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { getGasStationSymbols, isFeatureEnabled } from "@/config";
 import { useWallet } from "@txnlab/use-wallet-react";
+import { useDorkFiSession } from "@/hooks/useDorkFiSession";
 
 interface HeaderProps {
   activeTab?: string;
@@ -20,6 +21,10 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { currentNetwork } = useNetwork();
   const { activeAccount } = useWallet();
+  const dorkFiSession = useDorkFiSession();
+  const hasPortfolioSession =
+    Boolean(activeAccount?.address) ||
+    (dorkFiSession.authPath === "privy" && Boolean(dorkFiSession.algorandAddress));
 
   // Determine activeTab from location if not provided
   const gasStationEnabled = isFeatureEnabled("enableGasStation");
@@ -114,7 +119,7 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
     ...(isFeatureEnabled("enablePools")
       ? [{ value: "pools", label: "Pools" }]
       : []),
-    ...(activeAccount ? [{ value: "portfolio", label: "Portfolio" }] : []),
+    ...(hasPortfolioSession ? [{ value: "portfolio", label: "Portfolio" }] : []),
     ...(liquidationsEnabled
       ? [{ value: "liquidations", label: "Liquidations" }]
       : []),

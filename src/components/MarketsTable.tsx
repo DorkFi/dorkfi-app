@@ -9,7 +9,7 @@ import {
   Fuel,
   CircleArrowUp,
 } from "lucide-react";
-import { useWallet } from "@txnlab/use-wallet-react";
+import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
 import { useNetwork } from "@/contexts/NetworkContext";
 import {
   getAllTokensWithDisplayInfo,
@@ -424,7 +424,7 @@ const MarketsTable = () => {
   const [marketsToolbarAlgoRefreshNonce, setMarketsToolbarAlgoRefreshNonce] =
     useState(0);
 
-  const { activeAccount, signTransactions, activeWallet } = useWallet();
+  const { activeAccount, signTransactions, activeWallet } = useDorkFiWalletAdapter();
 
   const { currentNetwork, switchNetwork } = useNetwork();
 

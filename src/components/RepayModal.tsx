@@ -43,8 +43,8 @@ import {
   getFolksAdapterForPhase,
   tokenAdapterStableId,
 } from "@/config";
-import { useWallet } from "@txnlab/use-wallet-react";
-import { isRainbowkitXchainWallet } from "@/wallet/xchainSignUi";
+import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
+import { isEvmXchainWallet } from "@/wallet/xchainSignUi";
 import algorandService, { type AlgorandNetwork } from "@/services/algorandService";
 import {
   ALGORAND_MAINNET_NODELY_ALGOD_URL,
@@ -188,7 +188,7 @@ const RepayModal = ({
   xalgoConsensusRepayAlgoOption = false,
   rainbowkitHostOverlaySuppressed = false,
 }: RepayModalProps) => {
-  const { activeAccount, activeWallet } = useWallet();
+  const { activeAccount, activeWallet } = useDorkFiWalletAdapter();
   const { toast } = useToast();
   const [amount, setAmount] = useState<number | "">("");
   const [fiatValue, setFiatValue] = useState(0);
@@ -764,7 +764,7 @@ const RepayModal = ({
       });
       setTransactionId(txId);
 
-      if (isRainbowkitXchainWallet(activeWallet)) {
+      if (isEvmXchainWallet(activeWallet)) {
         toast({
           title: "Repay confirmed",
           description:

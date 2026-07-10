@@ -17,7 +17,7 @@ import SupplyBorrowModal, {
   type SupplyBorrowAvailableAsset,
 } from "./SupplyBorrowModal";
 import MintModal from "./MintModal"; // Added MintModal import
-import { useWallet } from "@txnlab/use-wallet-react";
+import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
 import { useNetwork } from "@/contexts/NetworkContext";
 import {
   withdraw,
@@ -228,7 +228,7 @@ const PortfolioModals = ({
   isLoadingWalletBalance = false,
   isLoadingBorrowGlobalData = false,
 }: PortfolioModalsProps) => {
-  const { activeAccount, signTransactions, activeWallet } = useWallet();
+  const { activeAccount, signTransactions, activeWallet } = useDorkFiWalletAdapter();
   const { currentNetwork } = useNetwork();
   const { toast } = useToast();
   const [repayRainbowkitOverlaySuppressed, setRepayRainbowkitOverlaySuppressed] =
