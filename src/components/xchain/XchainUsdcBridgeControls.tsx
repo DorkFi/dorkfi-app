@@ -21,12 +21,12 @@ export interface XchainUsdcBridgeControlsProps {
 /** When true, xChain bridge controls (direction + Bridge USDC) are shown. */
 export function shouldShowXchainUsdcBridgeControls(
   currentNetwork: string,
-  activeWalletId: string | undefined
+  activeWalletId: string | undefined,
+  privyEasyStartActive = false
 ): boolean {
-  return (
-    currentNetwork === "algorand-mainnet" &&
-    (activeWalletId ?? "").toLowerCase() === "rainbowkit"
-  );
+  if (currentNetwork !== "algorand-mainnet") return false;
+  if ((activeWalletId ?? "").toLowerCase() === "rainbowkit") return true;
+  return privyEasyStartActive;
 }
 
 function XchainUsdcBridgeControlsInner({ className }: XchainUsdcBridgeControlsProps) {

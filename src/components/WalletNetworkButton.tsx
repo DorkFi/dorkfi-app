@@ -14,22 +14,23 @@ import {
   LogOut,
   CheckCircle,
   ChevronDown,
-  Wifi,
-  WifiOff,
   Trash2,
+  Mail,
+  Sparkles,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAddressName } from "@/hooks/useAddressName";
 import WalletModal from "./WalletModal";
 import AccountSelector from "./AccountSelector";
 import {
-  config,
   NetworkId,
   getNetworkConfig,
   getEnabledNetworks,
 } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { getNetworkLogoPath } from "@/utils/tokenImageUtils";
+import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
+import { EasyStartConnectMenu } from "@/components/easy-start/EasyStartAuthControls";
 
 interface WalletNetworkButtonProps {
   currentNetwork?: NetworkId;
@@ -57,6 +58,14 @@ const WalletNetworkButton = ({
     useState<NetworkId>(contextNetwork);
   const { toast } = useToast();
   const { name: addressName } = useAddressName(activeAccount?.address);
+  const privyEasyStart = usePrivyEasyStart();
+  const showEasyStartEntry =
+    privyEasyStart.enabled && privyEasyStart.configured;
+
+  const handlePrivyEmailLogin = () => {
+    if (!privyEasyStart.ready || !privyEasyStart.login) return;
+    privyEasyStart.login();
+  };
 
   // Determine which networks are supported by the connected wallet
   const getSupportedNetworks = (): NetworkId[] => {
@@ -296,6 +305,14 @@ const WalletNetworkButton = ({
   const supportedNetworks = getSupportedNetworks();
   const showNetworkSection = supportedNetworks.length > 1;
 
+  if (
+    !activeAccount &&
+    showEasyStartEntry &&
+    privyEasyStart.authenticated
+  ) {
+    return <EasyStartConnectMenu />;
+  }
+
   if (activeAccount) {
     return (
       <div className="flex items-center space-x-2">
@@ -412,19 +429,52 @@ const WalletNetworkButton = ({
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button className="bg-whale-gold hover:bg-whale-gold/90 text-black font-semibold transition-all hover:scale-105 flex items-center gap-2">
-            <Wallet className="w-4 h-4" />
-            <span className="hidden sm:inline">Connect Wallet</span>
-            <span className="sm:hidden">Connect</span>
+            {showEasyStartEntry ? (
+              <Sparkles className="w-4 h-4" />
+            ) : (
+              <Wallet className="w-4 h-4" />
+            )}
+            <span className="hidden sm:inline">
+              {showEasyStartEntry ? "Get Started" : "Connect Wallet"}
+            </span>
+            <span className="sm:hidden">
+              {showEasyStartEntry ? "Start" : "Connect"}
+            </span>
             <ChevronDown className="w-4 h-4 opacity-70" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-64">
-          {/* Connect Wallet Section */}
-          <div className="px-2 py-1.5">
-            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              Wallet
+          {showEasyStartEntry ? (
+            <>
+              <div className="px-2 py-1.5">
+                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  Get started
+                </div>
+              </div>
+              <DropdownMenuItem
+                onClick={handlePrivyEmailLogin}
+                disabled={!privyEasyStart.ready || !privyEasyStart.login}
+                className="cursor-pointer"
+              >
+                <Mail className="w-4 h-4 mr-2" />
+                Email
+              </DropdownMenuItem>
+
+              <DropdownMenuSeparator />
+
+              <div className="px-2 py-1.5">
+                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  Wallet
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="px-2 py-1.5">
+              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Wallet
+              </div>
             </div>
-          </div>
+          )}
           <DropdownMenuItem
             onClick={handleOpenWalletModal}
             className="cursor-pointer"

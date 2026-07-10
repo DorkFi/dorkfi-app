@@ -42,4 +42,8 @@ interface ImportMetaEnv {
   readonly VITE_X_SHARE_API_BASE?: string;
   /** Local share-server target for the Vite `/api/x-share` proxy (default `http://127.0.0.1:8788`). */
   readonly VITE_X_SHARE_LOCAL_TARGET?: string;
+  /** Privy app id for Easy Start email / social onboarding. */
+  readonly VITE_PRIVY_APP_ID?: string;
+  /** When `true` or `1`, show Get Started (Privy) alongside Connect Wallet. */
+  readonly VITE_ENABLE_PRIVY_ONBOARDING?: string;
 }

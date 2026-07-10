@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { NetworkProvider } from "./contexts/NetworkProvider";
+import { PrivySessionProvider } from "./contexts/PrivySessionProvider";
 import { LocaleSettingsProvider } from "./contexts/LocaleSettingsContext";
 import Index from "./pages/Index";
 import { isFeatureEnabled } from "./config";
@@ -66,6 +67,7 @@ function App() {
       disableTransitionOnChange
     >
       <AppErrorBoundary>
+      <PrivySessionProvider>
       <NetworkProvider>
         <LocaleSettingsProvider>
         <TooltipProvider delayDuration={300} skipDelayDuration={100}>
@@ -181,6 +183,7 @@ function App() {
         </TooltipProvider>
         </LocaleSettingsProvider>
       </NetworkProvider>
+      </PrivySessionProvider>
       </AppErrorBoundary>
     </ThemeProvider>
     </QueryClientProvider>
