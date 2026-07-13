@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { getAlgorandNetworkFromNetworkId } from "@/config";
+import { getVoiNautilusCollectionTradeUrl } from "@/config/dorkNftMarketplaceLinks";
 import type { UnitNftDripCampaignConfig } from "@/config/nftDrips";
 import {
   fetchUserNFTs,
@@ -379,7 +380,7 @@ export function UnitNftDripTool({ config, requiredAddress, compact }: UnitNftDri
     };
   }, [ownerAddress, addressOk, tokens, dripRefreshTrigger, config, getAlgod]);
 
-  const collectionUrl = `https://nautilus.sh/#/collection/${config.nftContractId}/trade`;
+  const collectionUrl = getVoiNautilusCollectionTradeUrl(config.nftContractId);
 
   return (
     <div className={cn(compact ? "px-0 py-0" : "mx-auto max-w-3xl px-4 py-8")}>

@@ -13,6 +13,7 @@ import { useNetwork } from '@/contexts/NetworkContext';
 import { useWallet } from '@txnlab/use-wallet-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Loader2, Image as ImageIcon, AlertCircle, ExternalLink, RefreshCw } from 'lucide-react';
+import { getDorkNftMarketplaceLinks } from '@/config/dorkNftMarketplaceLinks';
 
 interface NFTSelectionModalProps {
   open: boolean;
@@ -43,6 +44,7 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
   const isLoading = isLoadingNFTs || (requiresName && isLoadingName);
   const hasNFTs = nfts && nfts.length > 0;
   const meetsRequirements = (isAlgorand || ownsName) && hasNFTs;
+  const marketplaceLinks = getDorkNftMarketplaceLinks(currentNetwork);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -120,7 +122,7 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
               <p className="text-muted-foreground mb-4">
                 To customize your profile, you need to meet the following requirements:
               </p>
-              <div className="space-y-2 text-left max-w-md mx-auto mb-6">
+              <div className="space-y-2 text-left max-w-2xl mx-auto mb-6">
                 {requiresName && (
                 <div className={`p-3 rounded-lg ${
                   ownsName ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'
@@ -168,34 +170,31 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
                     </span>
                   </div>
                   {!hasNFTs && (
-                    <div className="flex flex-wrap gap-2 mt-3">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="text-xs"
-                        onClick={() => window.open('https://nautilus.sh/#/collection/313597/trade', '_blank', 'noopener,noreferrer')}
-                      >
-                        Dorks
-                        <ExternalLink className="w-3 h-3 ml-1" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="text-xs"
-                        onClick={() => window.open('https://nautilus.sh/#/collection/894888/trade', '_blank', 'noopener,noreferrer')}
-                      >
-                        Dorks V2
-                        <ExternalLink className="w-3 h-3 ml-1" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="text-xs"
-                        onClick={() => window.open('https://nautilus.sh/#/collection/313705/trade', '_blank', 'noopener,noreferrer')}
-                      >
-                        Chubs
-                        <ExternalLink className="w-3 h-3 ml-1" />
-                      </Button>
+                    <div className="mt-3 flex flex-col gap-4 sm:gap-5 md:grid md:grid-cols-3 md:items-stretch md:gap-3 lg:gap-4">
+                      {marketplaceLinks.map(({ id, label, url, imageUrl }) => (
+                        <div
+                          key={id}
+                          className="flex min-w-0 flex-col items-center gap-2 md:h-full"
+                        >
+                          <div className="mx-auto aspect-square w-[min(100%,42vw,10rem)] overflow-hidden rounded-lg border border-border/50 bg-muted/30 sm:w-[min(100%,36vw,11rem)] md:mx-0 md:w-full lg:max-w-none">
+                            <img
+                              src={imageUrl}
+                              alt={`${label} collection`}
+                              className="h-full w-full object-cover"
+                              loading="lazy"
+                            />
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-10 w-[min(100%,42vw,10rem)] whitespace-nowrap px-3 text-xs sm:w-[min(100%,36vw,11rem)] md:mt-auto md:w-full md:px-2"
+                            onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
+                          >
+                            <span className="truncate">{label}</span>
+                            <ExternalLink className="!size-3 shrink-0" />
+                          </Button>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
