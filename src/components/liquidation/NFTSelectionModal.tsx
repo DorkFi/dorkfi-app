@@ -182,6 +182,11 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
                               alt={`${label} collection`}
                               className="h-full w-full object-cover"
                               loading="lazy"
+                              onError={(e) => {
+                                e.currentTarget.onerror = null;
+                                e.currentTarget.src =
+                                  "/lovable-uploads/dork_health_placeholder_v2.png";
+                              }}
                             />
                           </div>
                           <Button

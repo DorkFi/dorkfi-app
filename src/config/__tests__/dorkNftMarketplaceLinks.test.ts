@@ -15,9 +15,11 @@ describe("getDorkNftMarketplaceLinks", () => {
       "https://www.downbad.farm/collection/chub",
       "https://www.downbad.farm/collection/dorks-v2",
     ]);
-    expect(links.every((link) => link.imageUrl.startsWith("https://ipfs.algonode.xyz/"))).toBe(
-      true
-    );
+    expect(links.map((link) => link.imageUrl)).toEqual([
+      "/lovable-uploads/dorks-collection-preview.png",
+      "/lovable-uploads/chubs-collection-preview.png",
+      "/lovable-uploads/dorks-v2-collection-preview.png",
+    ]);
   });
 
   it("returns app.nautilus.sh links in Dorks, Chubs, Dorks V2 order on Voi mainnet", () => {
