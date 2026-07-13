@@ -2,7 +2,7 @@ import type { GovernanceShareResult } from "@/utils/governanceShare/types";
 
 /** Deploy `server/` to Railway and set VITE_X_SHARE_API_BASE to this origin in production builds. */
 export const X_SHARE_API_DEFAULT_ORIGIN =
-  "https://dorkfi-x-share-production.up.railway.app";
+  "https://dorkfi-app-production.up.railway.app";
 
 export type XShareStatus = {
   connected: boolean;

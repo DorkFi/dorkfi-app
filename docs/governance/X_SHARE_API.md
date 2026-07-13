@@ -60,22 +60,25 @@ The Vite proxy forwards `/api/x-share/*` → `http://127.0.0.1:8788/*` so sessio
 
 ## Production deployment
 
-`app.dork.fi` is static hosting — `/api/x-share` on that domain returns the SPA, **not** the share server. Deploy `server/` separately (e.g. Railway using `railway.toml` in the repo root).
+`app.dork.fi` is static hosting — `/api/x-share` on that domain returns the SPA, **not** the share server. Deploy `server/` separately (e.g. Railway using `railway.toml` + `nixpacks.toml` in the repo root).
+
+Nixpacks is forced to **Node 20** and **`npm ci`** (the repo also has `bun.lockb`, which would otherwise break installs).
 
 | Variable | Example |
 |----------|---------|
 | `X_CLIENT_ID` | From X Developer Portal (optional for link-share-only) |
 | `X_CLIENT_SECRET` | From X Developer Portal (optional for link-share-only) |
-| `X_CALLBACK_URL` | `https://your-share-api.example.com/auth/x/callback` |
+| `X_CALLBACK_URL` | `https://dorkfi-app-production.up.railway.app/auth/x/callback` |
 | `X_SHARE_FRONTEND_ORIGIN` | `https://app.dork.fi` |
 | `X_SHARE_SESSION_SECRET` | Long random string |
 | `X_SHARE_PUBLIC_BASE` | Optional — auto-set from `RAILWAY_PUBLIC_DOMAIN` on Railway |
 | `NODE_ENV` | `production` |
+| `NIXPACKS_NODE_VERSION` | `20` (also set in `nixpacks.toml`) |
 
 Build the frontend with the deployed share server origin (or rely on the production default in `xShareService.ts`):
 
 ```bash
-VITE_X_SHARE_API_BASE=https://your-share-api.example.com npm run build
+VITE_X_SHARE_API_BASE=https://dorkfi-app-production.up.railway.app npm run build
 ```
 
 Ensure CORS allows `X_SHARE_FRONTEND_ORIGIN` with credentials. Cookies use `SameSite=None; Secure` in production.

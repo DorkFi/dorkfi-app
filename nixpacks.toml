@@ -1,0 +1,9 @@
+# Share-server deploy: force Node 20 + npm (repo also has bun.lockb which Nixpacks prefers).
+[variables]
+NIXPACKS_NODE_VERSION = "20"
+
+[phases.install]
+cmds = ["npm ci"]
+
+[phases.build]
+cmds = ["echo 'Skipping frontend build; share server only'"]
