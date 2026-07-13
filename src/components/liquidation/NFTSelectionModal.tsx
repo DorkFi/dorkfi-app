@@ -170,9 +170,9 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
                     </span>
                   </div>
                   {!hasNFTs && (
-                    <div className="mt-3 grid min-w-0 grid-cols-3 gap-2 sm:gap-3">
+                    <div className="mt-3 grid min-w-0 grid-cols-3 items-stretch gap-2 sm:gap-3">
                       {marketplaceLinks.map(({ id, label, url, imageUrl }) => (
-                        <div key={id} className="flex min-w-0 flex-col items-center gap-2">
+                        <div key={id} className="flex h-full min-w-0 flex-col items-center gap-2">
                           <div className="w-full aspect-square overflow-hidden rounded-lg border border-border/50 bg-muted/30">
                             <img
                               src={imageUrl}
@@ -184,10 +184,12 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
                           <Button
                             size="sm"
                             variant="outline"
-                            className="h-auto w-full min-w-0 px-2 py-2 text-xs max-[374px]:flex-col max-[374px]:gap-1.5 max-[374px]:whitespace-normal min-[375px]:whitespace-nowrap"
+                            className="mt-auto h-auto w-full min-w-0 px-2 py-2 text-xs max-[374px]:flex-col max-[374px]:gap-1.5 max-[374px]:whitespace-normal min-[375px]:whitespace-nowrap"
                             onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
                           >
-                            <span className="text-center leading-tight">{label}</span>
+                            <span className="flex w-full items-center justify-center text-center leading-tight max-[374px]:h-10">
+                              {label}
+                            </span>
                             <span
                               aria-hidden
                               className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-input bg-background min-[375px]:hidden"
