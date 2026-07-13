@@ -13,6 +13,7 @@ import { useNetwork } from '@/contexts/NetworkContext';
 import { useWallet } from '@txnlab/use-wallet-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Loader2, Image as ImageIcon, AlertCircle, ExternalLink, RefreshCw } from 'lucide-react';
+import { getDorkNftMarketplaceLinks } from '@/config/dorkNftMarketplaceLinks';
 
 interface NFTSelectionModalProps {
   open: boolean;
@@ -43,6 +44,7 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
   const isLoading = isLoadingNFTs || (requiresName && isLoadingName);
   const hasNFTs = nfts && nfts.length > 0;
   const meetsRequirements = (isAlgorand || ownsName) && hasNFTs;
+  const marketplaceLinks = getDorkNftMarketplaceLinks(currentNetwork);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -169,33 +171,18 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
                   </div>
                   {!hasNFTs && (
                     <div className="flex flex-wrap gap-2 mt-3">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="text-xs"
-                        onClick={() => window.open('https://nautilus.sh/#/collection/313597/trade', '_blank', 'noopener,noreferrer')}
-                      >
-                        Dorks
-                        <ExternalLink className="w-3 h-3 ml-1" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="text-xs"
-                        onClick={() => window.open('https://nautilus.sh/#/collection/894888/trade', '_blank', 'noopener,noreferrer')}
-                      >
-                        Dorks V2
-                        <ExternalLink className="w-3 h-3 ml-1" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="text-xs"
-                        onClick={() => window.open('https://nautilus.sh/#/collection/313705/trade', '_blank', 'noopener,noreferrer')}
-                      >
-                        Chubs
-                        <ExternalLink className="w-3 h-3 ml-1" />
-                      </Button>
+                      {marketplaceLinks.map(({ id, label, url }) => (
+                        <Button
+                          key={id}
+                          size="sm"
+                          variant="outline"
+                          className="text-xs"
+                          onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
+                        >
+                          {label}
+                          <ExternalLink className="w-3 h-3 ml-1" />
+                        </Button>
+                      ))}
                     </div>
                   )}
                 </div>
