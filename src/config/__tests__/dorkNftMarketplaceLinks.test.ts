@@ -5,28 +5,33 @@ import {
 } from "../dorkNftMarketplaceLinks";
 
 describe("getDorkNftMarketplaceLinks", () => {
-  it("returns DownBad links on Algorand mainnet", () => {
+  it("returns DownBad links in Dorks, Chubs, Dorks V2 order on Algorand mainnet", () => {
     const links = getDorkNftMarketplaceLinks("algorand-mainnet");
 
     expect(links).toHaveLength(3);
+    expect(links.map((link) => link.label)).toEqual(["Dorks", "Chubs", "Dorks V2"]);
     expect(links.map((link) => link.url)).toEqual([
       "https://www.downbad.farm/collection/dorks",
-      "https://www.downbad.farm/collection/dorks-v2",
       "https://www.downbad.farm/collection/chub",
+      "https://www.downbad.farm/collection/dorks-v2",
     ]);
+    expect(links.every((link) => link.imageUrl.startsWith("https://ipfs.algonode.xyz/"))).toBe(
+      true
+    );
   });
 
-  it("returns app.nautilus.sh links on Voi mainnet", () => {
+  it("returns app.nautilus.sh links in Dorks, Chubs, Dorks V2 order on Voi mainnet", () => {
     const links = getDorkNftMarketplaceLinks("voi-mainnet");
 
     expect(links).toHaveLength(3);
+    expect(links.map((link) => link.label)).toEqual(["Dorks", "Chubs", "Dorks V2"]);
     expect(links.every((link) => link.url.startsWith("https://app.nautilus.sh/"))).toBe(
       true
     );
     expect(links.map((link) => link.url)).toEqual([
       "https://app.nautilus.sh/#/collection/313597/trade",
-      "https://app.nautilus.sh/#/collection/894888/trade",
       "https://app.nautilus.sh/#/collection/313705/trade",
+      "https://app.nautilus.sh/#/collection/894888/trade",
     ]);
   });
 });

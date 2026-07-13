@@ -122,7 +122,7 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
               <p className="text-muted-foreground mb-4">
                 To customize your profile, you need to meet the following requirements:
               </p>
-              <div className="space-y-2 text-left max-w-md mx-auto mb-6">
+              <div className="space-y-2 text-left max-w-2xl mx-auto mb-6">
                 {requiresName && (
                 <div className={`p-3 rounded-lg ${
                   ownsName ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'
@@ -170,18 +170,27 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
                     </span>
                   </div>
                   {!hasNFTs && (
-                    <div className="flex flex-wrap gap-2 mt-3">
-                      {marketplaceLinks.map(({ id, label, url }) => (
-                        <Button
-                          key={id}
-                          size="sm"
-                          variant="outline"
-                          className="text-xs"
-                          onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
-                        >
-                          {label}
-                          <ExternalLink className="w-3 h-3 ml-1" />
-                        </Button>
+                    <div className="grid grid-cols-3 gap-3 mt-3">
+                      {marketplaceLinks.map(({ id, label, url, imageUrl }) => (
+                        <div key={id} className="flex flex-col items-center gap-2">
+                          <div className="w-full aspect-square overflow-hidden rounded-lg border border-border/50 bg-muted/30">
+                            <img
+                              src={imageUrl}
+                              alt={`${label} collection`}
+                              className="h-full w-full object-cover"
+                              loading="lazy"
+                            />
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="w-full text-xs"
+                            onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
+                          >
+                            {label}
+                            <ExternalLink className="w-3 h-3 ml-1" />
+                          </Button>
+                        </div>
                       ))}
                     </div>
                   )}
