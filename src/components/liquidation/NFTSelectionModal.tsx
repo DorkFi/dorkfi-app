@@ -170,10 +170,13 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
                     </span>
                   </div>
                   {!hasNFTs && (
-                    <div className="mt-3 grid min-w-0 grid-cols-3 items-stretch gap-2 sm:gap-3">
+                    <div className="mt-3 grid min-w-0 grid-cols-1 gap-3 md:grid-cols-3 md:items-stretch">
                       {marketplaceLinks.map(({ id, label, url, imageUrl }) => (
-                        <div key={id} className="flex h-full min-w-0 flex-col items-center gap-2">
-                          <div className="w-full aspect-square overflow-hidden rounded-lg border border-border/50 bg-muted/30">
+                        <div
+                          key={id}
+                          className="flex min-w-0 items-center gap-3 rounded-lg border border-border/50 p-3 md:h-full md:flex-col md:items-center md:gap-2 md:border-0 md:p-0"
+                        >
+                          <div className="h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-border/50 bg-muted/30 md:aspect-square md:h-auto md:w-full">
                             <img
                               src={imageUrl}
                               alt={`${label} collection`}
@@ -184,19 +187,11 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
                           <Button
                             size="sm"
                             variant="outline"
-                            className="mt-auto h-auto w-full min-w-0 px-2 py-2 text-xs max-[374px]:flex-col max-[374px]:gap-1.5 max-[374px]:whitespace-normal min-[375px]:whitespace-nowrap"
+                            className="h-10 min-w-0 flex-1 whitespace-nowrap px-3 text-xs md:mt-auto md:w-full md:flex-none md:px-2"
                             onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
                           >
-                            <span className="flex w-full items-center justify-center text-center leading-tight max-[374px]:h-10">
-                              {label}
-                            </span>
-                            <span
-                              aria-hidden
-                              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-input bg-background min-[375px]:hidden"
-                            >
-                              <ExternalLink className="!size-3" />
-                            </span>
-                            <ExternalLink className="!size-3 ml-1 hidden shrink-0 min-[375px]:inline-block" />
+                            <span className="truncate">{label}</span>
+                            <ExternalLink className="!size-3 shrink-0" />
                           </Button>
                         </div>
                       ))}
