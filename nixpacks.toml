@@ -1,9 +1,11 @@
-# Share-server deploy: force Node 20 + npm (repo also has bun.lockb which Nixpacks prefers).
+# Share-server deploy: force Node + npm (repo also has bun.lockb which Nixpacks prefers).
+# Keep npm cache off node_modules/.cache — that mount makes `npm ci` fail with EBUSY.
 [variables]
-NIXPACKS_NODE_VERSION = "20"
+NIXPACKS_NODE_VERSION = "22"
 
 [phases.install]
-cmds = ["npm ci"]
+cmds = ["npm ci --no-audit --no-fund"]
+cacheDirectories = ["/root/.npm"]
 
 [phases.build]
 cmds = ["echo 'Skipping frontend build; share server only'"]
