@@ -170,9 +170,9 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
                     </span>
                   </div>
                   {!hasNFTs && (
-                    <div className="grid grid-cols-3 gap-3 mt-3">
+                    <div className="mt-3 grid min-w-0 grid-cols-3 gap-2 sm:gap-3">
                       {marketplaceLinks.map(({ id, label, url, imageUrl }) => (
-                        <div key={id} className="flex flex-col items-center gap-2">
+                        <div key={id} className="flex min-w-0 flex-col items-center gap-2">
                           <div className="w-full aspect-square overflow-hidden rounded-lg border border-border/50 bg-muted/30">
                             <img
                               src={imageUrl}
@@ -184,11 +184,17 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
                           <Button
                             size="sm"
                             variant="outline"
-                            className="w-full text-xs"
+                            className="h-auto w-full min-w-0 px-2 py-2 text-xs max-[374px]:flex-col max-[374px]:gap-1.5 max-[374px]:whitespace-normal min-[375px]:whitespace-nowrap"
                             onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
                           >
-                            {label}
-                            <ExternalLink className="w-3 h-3 ml-1" />
+                            <span className="text-center leading-tight">{label}</span>
+                            <span
+                              aria-hidden
+                              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-input bg-background min-[375px]:hidden"
+                            >
+                              <ExternalLink className="!size-3" />
+                            </span>
+                            <ExternalLink className="!size-3 ml-1 hidden shrink-0 min-[375px]:inline-block" />
                           </Button>
                         </div>
                       ))}
