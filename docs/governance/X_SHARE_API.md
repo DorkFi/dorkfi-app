@@ -62,7 +62,7 @@ The Vite proxy forwards `/api/x-share/*` → `http://127.0.0.1:8788/*` so sessio
 
 `app.dork.fi` is static hosting — `/api/x-share` on that domain returns the SPA, **not** the share server. Deploy `server/` separately (e.g. Railway using `railway.toml` + `nixpacks.toml` in the repo root).
 
-Nixpacks is forced to **Node 22** and **`npm ci`** (the repo also has `bun.lockb`, which would otherwise break installs).
+Nixpacks is forced to **Node 22** and **`npm install`** (the repo also has `bun.lockb`, which would otherwise break installs; `npm ci` hits an EBUSY cache-mount conflict on Railway).
 
 | Variable | Example |
 |----------|---------|
