@@ -170,13 +170,13 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
                     </span>
                   </div>
                   {!hasNFTs && (
-                    <div className="mt-3 grid min-w-0 grid-cols-1 gap-3 md:grid-cols-3 md:items-stretch">
+                    <div className="mt-3 flex flex-col gap-6 md:grid md:grid-cols-3 md:items-stretch md:gap-3">
                       {marketplaceLinks.map(({ id, label, url, imageUrl }) => (
                         <div
                           key={id}
-                          className="flex min-w-0 items-center gap-3 rounded-lg border border-border/50 p-3 md:h-full md:flex-col md:items-center md:gap-2 md:border-0 md:p-0"
+                          className="flex min-w-0 flex-col items-center gap-2 md:h-full"
                         >
-                          <div className="h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-border/50 bg-muted/30 md:aspect-square md:h-auto md:w-full">
+                          <div className="w-full aspect-square overflow-hidden rounded-lg border border-border/50 bg-muted/30">
                             <img
                               src={imageUrl}
                               alt={`${label} collection`}
@@ -187,7 +187,7 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
                           <Button
                             size="sm"
                             variant="outline"
-                            className="h-10 min-w-0 flex-1 whitespace-nowrap px-3 text-xs md:mt-auto md:w-full md:flex-none md:px-2"
+                            className="h-10 w-full whitespace-nowrap px-3 text-xs md:mt-auto md:px-2"
                             onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
                           >
                             <span className="truncate">{label}</span>
