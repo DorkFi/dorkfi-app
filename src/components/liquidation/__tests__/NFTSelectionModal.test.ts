@@ -30,4 +30,29 @@ describe("filterUserNfts", () => {
     expect(filterUserNfts(sampleNfts, "12")).toEqual([sampleNfts[0]]);
     expect(filterUserNfts(sampleNfts, "dorks v1")).toEqual([sampleNfts[0]]);
   });
+
+  it("is case-insensitive for name and collection search", () => {
+    expect(filterUserNfts(sampleNfts, "CHUB")).toEqual([sampleNfts[1]]);
+    expect(filterUserNfts(sampleNfts, "Chub")).toEqual([sampleNfts[1]]);
+    expect(filterUserNfts(sampleNfts, "cHuB")).toEqual([sampleNfts[1]]);
+    expect(filterUserNfts(sampleNfts, "DORK")).toEqual([sampleNfts[0]]);
+    expect(filterUserNfts(sampleNfts, "dork")).toEqual([sampleNfts[0]]);
+    expect(filterUserNfts(sampleNfts, "DORKS V1")).toEqual([sampleNfts[0]]);
+    expect(filterUserNfts(sampleNfts, "lil chubs")).toEqual([sampleNfts[1]]);
+    expect(filterUserNfts(sampleNfts, "LIL CHUBS")).toEqual([sampleNfts[1]]);
+  });
+
+  it("tolerates missing name or collection fields", () => {
+    const incomplete = [
+      {
+        contractId: 1,
+        tokenId: "99",
+        name: undefined as unknown as string,
+        imageUrl: "",
+        collectionName: undefined,
+      },
+    ];
+    expect(filterUserNfts(incomplete, "99")).toEqual(incomplete);
+    expect(filterUserNfts(incomplete, "missing")).toEqual([]);
+  });
 });

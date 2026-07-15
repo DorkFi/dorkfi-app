@@ -39,6 +39,7 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
   const { ownsName, isLoading: isLoadingName, refetch: refetchName } = useNameOwnership(activeAccount?.address);
   const [selectedNFT, setSelectedNFT] = useState<UserNFT | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
 
@@ -67,8 +68,24 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
     if (!nextOpen) {
       setSearchQuery('');
       setSelectedNFT(null);
+      setSearchFocused(false);
     }
     onOpenChange(nextOpen);
+  };
+
+  const closeModal = () => {
+    setSearchFocused(false);
+    setSearchQuery('');
+    setSelectedNFT(null);
+    onOpenChange(false);
+  };
+
+  const handleSearchKeyDown = (
+    event: React.KeyboardEvent<HTMLInputElement>
+  ) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+    }
   };
 
   const handleRefresh = async () => {
@@ -92,7 +109,7 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
         
         // After transaction is confirmed, update UI optimistically
         onSelectNFT(selectedNFT);
-        handleOpenChange(false);
+        closeModal();
       } catch (error) {
         console.error('Error confirming NFT selection:', error);
         // Don't close modal on error, let user try again
@@ -102,7 +119,7 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
     } else {
       // Fallback to direct selection if no transaction handler
       onSelectNFT(selectedNFT);
-      handleOpenChange(false);
+      closeModal();
     }
   };
 
@@ -186,9 +203,23 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
       <DialogContent
         className={
           showNftPicker
-            ? 'flex max-w-2xl lg:max-w-3xl max-h-[80vh] flex-col overflow-hidden p-0 relative [&>button:has(span.sr-only)]:hidden'
-            : 'max-w-2xl lg:max-w-3xl max-h-[80vh] overflow-y-auto p-6 relative [&>button:has(span.sr-only)]:hidden'
+            ? 'flex max-w-2xl lg:max-w-3xl max-h-[min(85vh,85dvh)] min-h-0 flex-col overflow-hidden p-0 relative max-sm:self-start max-sm:mt-2 [&>button:has(span.sr-only)]:hidden'
+            : 'max-w-2xl lg:max-w-3xl max-h-[min(85vh,85dvh)] min-h-0 overflow-y-auto p-6 relative [&>button:has(span.sr-only)]:hidden'
         }
+        onPointerDownOutside={(event) => {
+          if (searchFocused) {
+            event.preventDefault();
+          }
+        }}
+        onInteractOutside={(event) => {
+          if (searchFocused) {
+            event.preventDefault();
+          }
+        }}
+        onOpenAutoFocus={(event) => {
+          // Keep initial focus off the search field so iOS does not open the keyboard immediately.
+          event.preventDefault();
+        }}
       >
         <DialogHeader className={showNftPicker ? 'shrink-0 px-6 pb-4 pt-6' : 'pb-4'}>
           <DialogTitle>Edit Profile</DialogTitle>
@@ -228,21 +259,31 @@ const NFTSelectionModal: React.FC<NFTSelectionModalProps> = ({
 
             <DialogFooter className="shrink-0 flex-row items-center gap-3 border-t bg-background/95 px-6 py-4 sm:justify-between">
               <Input
+                type="search"
+                enterKeyHint="search"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
+                onFocus={() => setSearchFocused(true)}
+                onBlur={() => setSearchFocused(false)}
+                onKeyDown={handleSearchKeyDown}
                 placeholder="Search by name or ID..."
                 className="h-9 min-w-0 flex-1 sm:max-w-xs"
                 aria-label="Search NFTs by name or ID"
               />
               <div className="ml-auto flex shrink-0 gap-2">
                 <Button
+                  type="button"
                   variant="outline"
-                  onClick={() => handleOpenChange(false)}
+                  onClick={closeModal}
                   disabled={isConfirming}
                 >
                   Cancel
                 </Button>
                 <Button
+                  type="button"
                   onClick={handleSelect}
                   disabled={!selectedNFT || isConfirming}
                 >
