@@ -10,6 +10,7 @@ import Analytics from "./pages/Analytics";
 import Governance from "./pages/Governance";
 import { NetworkProvider } from "./contexts/NetworkContext";
 import { PrivySessionProvider } from "./contexts/PrivySessionProvider";
+import { EasyStartModalsProvider } from "./contexts/EasyStartModalsContext";
 import { LocaleSettingsProvider } from "./contexts/LocaleSettingsContext";
 import Index from "./pages/Index";
 import { isFeatureEnabled } from "./config";
@@ -67,6 +68,7 @@ function App() {
       disableTransitionOnChange
     >
       <PrivySessionProvider>
+      <EasyStartModalsProvider>
       <NetworkProvider>
         <LocaleSettingsProvider>
         <TooltipProvider delayDuration={300} skipDelayDuration={100}>
@@ -151,6 +153,7 @@ function App() {
         </TooltipProvider>
         </LocaleSettingsProvider>
       </NetworkProvider>
+      </EasyStartModalsProvider>
       </PrivySessionProvider>
     </ThemeProvider>
     </QueryClientProvider>

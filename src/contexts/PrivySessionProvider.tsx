@@ -2,7 +2,10 @@ import React, {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
+  useRef,
+  useState,
   type ReactNode,
 } from "react";
 import {
@@ -16,6 +19,7 @@ import { base } from "viem/chains";
 import { isFeatureEnabled } from "@/config";
 import { deriveAlgorandXchainAddress } from "@/services/xchainAddressService";
 import { signPrivyXchainTransactions } from "@/wallet/privyXchainSignTransactions";
+import { getPrivyOriginHint } from "@/utils/privyOrigin";
 
 const PRIVY_APP_ID = import.meta.env.VITE_PRIVY_APP_ID ?? "";
 
@@ -74,19 +78,63 @@ function privyDisplayName(
   );
 }
 
-function PrivyEasyStartStateBridge({ children }: { children: ReactNode }) {
+function PrivyEasyStartStateBridge({
+  children,
+  onReadyStuck,
+}: {
+  children: ReactNode;
+  onReadyStuck?: () => void;
+}) {
   const { ready, authenticated, user, login, logout } = usePrivy();
   const { signTypedData } = useSignTypedData();
   const { wallets } = useWallets();
 
-  const wallet = useMemo(() => {
+  useEffect(() => {
+    const originHint = getPrivyOriginHint();
+    if (originHint) {
+      console.error("[Easy Start] Privy cannot init on this origin:", originHint);
+      return;
+    }
+    if (ready) return;
+    const t = window.setTimeout(() => {
+      console.warn(
+        "[Easy Start] Privy ready is still false after 8s. Use http://localhost:8080 and hard-refresh.",
+        { origin: window.location.origin }
+      );
+      onReadyStuck?.();
+    }, 8000);
+    return () => window.clearTimeout(t);
+  }, [ready, onReadyStuck]);
+
+  /** Survive Privy wallets[] blips (e.g. after Allbridge chain switch). */
+  const [stableEvmAddress, setStableEvmAddress] = useState<string | null>(null);
+  const [stableAlgorandAddress, setStableAlgorandAddress] = useState<
+    string | null
+  >(null);
+
+  const liveWallet = useMemo(() => {
     if (!ready || !authenticated) return null;
     return (
       wallets.find((w) => w.walletClientType === "privy") ?? wallets[0] ?? null
     );
   }, [authenticated, ready, wallets]);
 
-  const evmAddress = wallet?.address ?? null;
+  const liveEvmAddress = liveWallet?.address ?? null;
+
+  useEffect(() => {
+    if (!authenticated) {
+      setStableEvmAddress(null);
+      setStableAlgorandAddress(null);
+      return;
+    }
+    if (liveEvmAddress) {
+      setStableEvmAddress(liveEvmAddress);
+    }
+  }, [authenticated, liveEvmAddress]);
+
+  const evmAddress = authenticated
+    ? liveEvmAddress ?? stableEvmAddress
+    : null;
 
   const signTransactions = useCallback(
     async (txns: Uint8Array[]) => {
@@ -107,6 +155,17 @@ function PrivyEasyStartStateBridge({ children }: { children: ReactNode }) {
     retry: 2,
   });
 
+  useEffect(() => {
+    if (!authenticated) return;
+    if (algorandQuery.data) {
+      setStableAlgorandAddress(algorandQuery.data);
+    }
+  }, [authenticated, algorandQuery.data]);
+
+  const algorandAddress = authenticated
+    ? algorandQuery.data ?? stableAlgorandAddress
+    : null;
+
   const value = useMemo(
     (): PrivyEasyStartState => ({
       enabled: true,
@@ -114,15 +173,16 @@ function PrivyEasyStartStateBridge({ children }: { children: ReactNode }) {
       ready,
       authenticated,
       evmAddress,
-      algorandAddress: algorandQuery.data ?? null,
-      algorandAddressLoading: algorandQuery.isLoading,
+      algorandAddress,
+      algorandAddressLoading:
+        algorandQuery.isLoading && !algorandAddress,
       displayName: privyDisplayName(user),
       login,
       logout,
       signTransactions: authenticated && evmAddress ? signTransactions : null,
     }),
     [
-      algorandQuery.data,
+      algorandAddress,
       algorandQuery.isLoading,
       authenticated,
       evmAddress,
@@ -152,6 +212,9 @@ interface PrivySessionProviderProps {
 export function PrivySessionProvider({ children }: PrivySessionProviderProps) {
   const enabled = isFeatureEnabled("enablePrivyOnboarding");
   const configured = PRIVY_APP_ID.length > 0;
+  /** Remount Privy after HMR / stuck init so `ready` can recover (once). */
+  const [providerKey, setProviderKey] = useState(0);
+  const remountCountRef = useRef(0);
 
   const disabledValue = useMemo(
     (): PrivyEasyStartState => ({
@@ -161,6 +224,12 @@ export function PrivySessionProvider({ children }: PrivySessionProviderProps) {
     }),
     [configured, enabled]
   );
+
+  const handleReadyStuck = useCallback(() => {
+    if (remountCountRef.current >= 1) return;
+    remountCountRef.current += 1;
+    setProviderKey((k) => k + 1);
+  }, []);
 
   if (!enabled || !configured) {
     return (
@@ -172,6 +241,7 @@ export function PrivySessionProvider({ children }: PrivySessionProviderProps) {
 
   return (
     <PrivyProvider
+      key={providerKey}
       appId={PRIVY_APP_ID}
       config={{
         loginMethods: ["email", "google", "apple", "passkey"],
@@ -187,7 +257,9 @@ export function PrivySessionProvider({ children }: PrivySessionProviderProps) {
         supportedChains: [base],
       }}
     >
-      <PrivyEasyStartStateBridge>{children}</PrivyEasyStartStateBridge>
+      <PrivyEasyStartStateBridge onReadyStuck={handleReadyStuck}>
+        {children}
+      </PrivyEasyStartStateBridge>
     </PrivyProvider>
   );
 }

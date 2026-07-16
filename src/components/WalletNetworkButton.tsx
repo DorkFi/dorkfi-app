@@ -31,6 +31,7 @@ import { useNetwork } from "@/contexts/NetworkContext";
 import { getNetworkLogoPath } from "@/utils/tokenImageUtils";
 import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
 import { EasyStartConnectMenu } from "@/components/easy-start/EasyStartAuthControls";
+import { useEasyStartLogin } from "@/hooks/useEasyStartLogin";
 
 interface WalletNetworkButtonProps {
   currentNetwork?: NetworkId;
@@ -61,10 +62,10 @@ const WalletNetworkButton = ({
   const privyEasyStart = usePrivyEasyStart();
   const showEasyStartEntry =
     privyEasyStart.enabled && privyEasyStart.configured;
+  const openEasyStartLogin = useEasyStartLogin();
 
   const handlePrivyEmailLogin = () => {
-    if (!privyEasyStart.ready || !privyEasyStart.login) return;
-    privyEasyStart.login();
+    void openEasyStartLogin();
   };
 
   // Determine which networks are supported by the connected wallet
@@ -452,8 +453,10 @@ const WalletNetworkButton = ({
                 </div>
               </div>
               <DropdownMenuItem
-                onClick={handlePrivyEmailLogin}
-                disabled={!privyEasyStart.ready || !privyEasyStart.login}
+                onSelect={() => {
+                  handlePrivyEmailLogin();
+                }}
+                disabled={!privyEasyStart.login && !privyEasyStart.configured}
                 className="cursor-pointer"
               >
                 <Mail className="w-4 h-4 mr-2" />

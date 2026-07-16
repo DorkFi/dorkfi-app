@@ -30,7 +30,9 @@ export function useDorkFiSession(): DorkFiSession {
       };
     }
 
-    if (privy.authenticated && privy.evmAddress) {
+    // Keep Easy Start session while authenticated even if wallets[] blips
+    // (empty EVM list mid-bridge) — addresses are stabilized in PrivySessionProvider.
+    if (privy.authenticated && (privy.evmAddress || privy.algorandAddress)) {
       return {
         authPath: "privy",
         algorandAddress: privy.algorandAddress,

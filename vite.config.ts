@@ -18,6 +18,8 @@ export default defineConfig(({ mode }) => {
   server: {
     host: "::",
     port: 8080,
+    /** Fail instead of falling back to :8081 — Privy only allowlists localhost:8080. */
+    strictPort: true,
     hmr: {
       protocol: "ws",
     },
