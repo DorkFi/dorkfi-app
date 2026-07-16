@@ -24,7 +24,8 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
   const dorkFiSession = useDorkFiSession();
   const hasPortfolioSession =
     Boolean(activeAccount?.address) ||
-    (dorkFiSession.authPath === "privy" && Boolean(dorkFiSession.algorandAddress));
+    (dorkFiSession.authPath === "privy" &&
+      Boolean(dorkFiSession.algorandAddress || dorkFiSession.evmAddress));
 
   // Determine activeTab from location if not provided
   const gasStationEnabled = isFeatureEnabled("enableGasStation");

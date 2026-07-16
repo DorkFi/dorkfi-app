@@ -9,6 +9,8 @@ import {
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
+import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
+import { EasyStartFundingStrip } from "@/components/portfolio/EasyStartFundingStrip";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { useAddressName } from "@/hooks/useAddressName";
 import { useAvatarImage } from "@/hooks/useAvatarImage";
@@ -528,7 +530,13 @@ function PortfolioAssetListPagination({
 const Portfolio = () => {
   const { address: routeAddress } = useParams<{ address: string }>();
   const navigate = useNavigate();
-  const { activeAccount, signTransactions, activeWallet } = useDorkFiWalletAdapter();
+  const {
+    activeAccount,
+    signTransactions,
+    activeWallet,
+    isPrivyEasyStartSession,
+  } = useDorkFiWalletAdapter();
+  const privyEasyStart = usePrivyEasyStart();
   const { currentNetwork } = useNetwork();
   const { formatNumber, formatCurrency, formatPercent } = useNumberI18n();
   const queryClient = useQueryClient();
@@ -5807,25 +5815,35 @@ const Portfolio = () => {
     );
   }
 
-  // Show no wallet connected state (skip when viewing another address via /portfolio/:address)
+  const easyStartPending =
+    isPrivyEasyStartSession ||
+    (privyEasyStart.authenticated && Boolean(privyEasyStart.evmAddress));
+
+  // Show no wallet connected state (skip when viewing another address via /portfolio/:address).
+  // Easy Start may still show Base USDC while the Algorand address derives.
   if (!displayAddress) {
     return (
       <div className="space-y-6">
-        {/* Connect Wallet Card */}
+        {easyStartPending ? <EasyStartFundingStrip /> : null}
         <DorkFiCard className="text-center p-8">
           <div className="space-y-4">
             <h2 className="text-2xl font-bold text-slate-800 dark:text-white">
-              Connect Your Wallet
+              {easyStartPending
+                ? "Preparing Algorand account"
+                : "Connect Your Wallet"}
             </h2>
             <p className="text-muted-foreground">
-              Connect your wallet to access your portfolio data and manage your
-              lending positions.
+              {easyStartPending
+                ? "Lending positions appear here once your Algorand xChain address is ready. You can still add USDC on Base and bridge in the meantime."
+                : "Connect your wallet to access your portfolio data and manage your lending positions."}
             </p>
-            <div className="pt-4">
-              <p className="text-sm text-muted-foreground">
-                Use the wallet button in the top navigation to connect.
-              </p>
-            </div>
+            {!easyStartPending ? (
+              <div className="pt-4">
+                <p className="text-sm text-muted-foreground">
+                  Use the wallet button in the top navigation to connect.
+                </p>
+              </div>
+            ) : null}
           </div>
         </DorkFiCard>
       </div>
@@ -5873,6 +5891,7 @@ const Portfolio = () => {
           </div>
         </div>
       )}
+      {easyStartPending && <EasyStartFundingStrip />}
 
       {/* Render health factor section after avatar check is complete */}
       {isAvatarResolved &&

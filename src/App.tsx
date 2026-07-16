@@ -7,6 +7,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { NetworkProvider } from "./contexts/NetworkProvider";
 import { PrivySessionProvider } from "./contexts/PrivySessionProvider";
+import { EasyStartModalsProvider } from "./contexts/EasyStartModalsContext";
 import { LocaleSettingsProvider } from "./contexts/LocaleSettingsContext";
 import Index from "./pages/Index";
 import { isFeatureEnabled } from "./config";
@@ -68,6 +69,7 @@ function App() {
     >
       <AppErrorBoundary>
       <PrivySessionProvider>
+      <EasyStartModalsProvider>
       <NetworkProvider>
         <LocaleSettingsProvider>
         <TooltipProvider delayDuration={300} skipDelayDuration={100}>
@@ -183,6 +185,7 @@ function App() {
         </TooltipProvider>
         </LocaleSettingsProvider>
       </NetworkProvider>
+      </EasyStartModalsProvider>
       </PrivySessionProvider>
       </AppErrorBoundary>
     </ThemeProvider>

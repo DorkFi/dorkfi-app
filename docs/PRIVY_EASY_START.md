@@ -37,7 +37,9 @@ In local development, `enablePrivyOnboarding` defaults to `true` in `getEnvironm
 | xChain address derivation | `src/services/xchainAddressService.ts` |
 | Header UI | `WalletNetworkButton` — Get Started dropdown with Email + Connect Wallet |
 | Fiat deposit | `src/components/easy-start/EasyStartDepositSheet.tsx` |
-| Bridge | `src/components/easy-start/EasyStartBridgeSheet.tsx` |
+| Bridge | `src/components/easy-start/EasyStartBridgeSheet.tsx` — Privy `useBridgePanel` adapter (not RainbowKit `useBridgeDialog`) |
+| Bridge adapter | `src/hooks/usePrivyBridgeWalletAdapter.ts` |
+| Portfolio Base USDC | `src/components/portfolio/EasyStartFundingStrip.tsx` |
 
 Native wallet sessions take precedence over Privy when both could apply.
 
