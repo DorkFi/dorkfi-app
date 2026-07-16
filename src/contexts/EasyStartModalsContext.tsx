@@ -44,6 +44,7 @@ export function useEasyStartModals(): EasyStartModalsContextValue {
 /**
  * Single mount point for Easy Start deposit/bridge modals so Portfolio and
  * header do not nest multiple Privy wagmi providers (which breaks Email login).
+ * Must sit under NetworkProvider/WalletProvider — the bridge adapter calls useWallet().
  */
 export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
   const privy = usePrivyEasyStart();
