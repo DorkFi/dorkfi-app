@@ -69,8 +69,9 @@ function App() {
     >
       <AppErrorBoundary>
       <PrivySessionProvider>
-      <EasyStartModalsProvider>
+      {/* Inside NetworkProvider so Easy Start bridge can use useWallet()/algodClient */}
       <NetworkProvider>
+      <EasyStartModalsProvider>
         <LocaleSettingsProvider>
         <TooltipProvider delayDuration={300} skipDelayDuration={100}>
           <Toaster />
@@ -184,8 +185,8 @@ function App() {
           </BrowserRouter>
         </TooltipProvider>
         </LocaleSettingsProvider>
-      </NetworkProvider>
       </EasyStartModalsProvider>
+      </NetworkProvider>
       </PrivySessionProvider>
       </AppErrorBoundary>
     </ThemeProvider>
