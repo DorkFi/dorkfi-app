@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowRightLeft, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { WagmiProvider as PrivyWagmiProvider } from "@privy-io/wagmi";
 import { useSetActiveWallet } from "@privy-io/wagmi";
 import { useWallets } from "@privy-io/react-auth";
@@ -28,9 +28,6 @@ const BRIDGE_CHAIN_ALG = "ALG";
 const BRIDGE_CHAIN_BASE = "BAS";
 const BRIDGE_TOKEN_USDC = "USDC";
 
-const EASY_START_DIALOG_CONTENT_CLASS =
-  "bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-white rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-[95vw] md:max-w-md max-h-[min(90vh,90dvh)] min-h-0 overflow-x-hidden overflow-y-auto flex flex-col p-0 overscroll-contain";
-
 const BRIDGE_PANEL_DIALOG_CLASS =
   "bg-[var(--wui-color-bg,#0f172a)] text-[var(--wui-color-text,#f8fafc)] rounded-3xl border border-[var(--wui-color-border,rgba(148,163,184,0.2))] shadow-xl max-w-[95vw] md:max-w-md max-h-[min(90vh,90dvh)] min-h-0 overflow-x-hidden overflow-y-auto flex flex-col p-0 overscroll-contain";
 
@@ -52,18 +49,9 @@ function EasyStartBridgeSheetInner({
   const [direction, setDirection] = useState<XchainUsdcBridgeDirection>(
     "base-to-algo"
   );
-  /** picker = direction UI; panel = Allbridge. Parent `open` stays true for both. */
-  const [step, setStep] = useState<"picker" | "panel">("picker");
-  const [opening, setOpening] = useState(false);
   const [presetNonce, setPresetNonce] = useState(0);
   const presetPendingRef = useRef(false);
-
-  useEffect(() => {
-    if (open) {
-      setStep("picker");
-      setOpening(false);
-    }
-  }, [open]);
+  const notReadyToastShownRef = useRef(false);
 
   const bridge = useBridgePanel(adapter, { enabled: open });
 
@@ -78,11 +66,20 @@ function EasyStartBridgeSheetInner({
     });
   }, [embeddedWallet, setActiveWallet, wallets]);
 
+  // Open straight into Allbridge with Base→Algorand (Portfolio "Move to Algorand").
   useEffect(() => {
-    if (step !== "panel") {
+    if (!open) {
       presetPendingRef.current = false;
+      notReadyToastShownRef.current = false;
+      setDirection("base-to-algo");
       return;
     }
+    presetPendingRef.current = true;
+    setPresetNonce((n) => n + 1);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
     if (!presetPendingRef.current) return;
     if (!bridge.initialLoadComplete || bridge.chains.length === 0) return;
 
@@ -97,7 +94,7 @@ function EasyStartBridgeSheetInner({
     bridge.setDestinationToken(BRIDGE_TOKEN_USDC);
     presetPendingRef.current = false;
   }, [
-    step,
+    open,
     presetNonce,
     direction,
     bridge.initialLoadComplete,
@@ -108,145 +105,115 @@ function EasyStartBridgeSheetInner({
     bridge.setDestinationToken,
   ]);
 
-  const handleOpenBridge = () => {
-    if (!adapter.ready || !bridge.isAvailable) {
+  useEffect(() => {
+    if (!open) return;
+    if (adapter.ready && bridge.isAvailable) {
+      notReadyToastShownRef.current = false;
+      return;
+    }
+    if (notReadyToastShownRef.current) return;
+    const t = window.setTimeout(() => {
+      if (adapter.ready && bridge.isAvailable) return;
+      notReadyToastShownRef.current = true;
       toast({
         title: "Wallet not ready",
         description:
           "Your Easy Start Algorand account is still deriving. Wait a moment and try again.",
         variant: "destructive",
       });
-      return;
-    }
+    }, 12_000);
+    return () => window.clearTimeout(t);
+  }, [open, adapter.ready, bridge.isAvailable, toast]);
 
-    setOpening(true);
+  const handleDirectionChange = (next: XchainUsdcBridgeDirection) => {
+    setDirection(next);
     presetPendingRef.current = true;
     setPresetNonce((n) => n + 1);
-    setStep("panel");
-    setOpening(false);
   };
 
-  const handleRootOpenChange = (next: boolean) => {
-    if (!next) {
-      setStep("picker");
-      onOpenChange(false);
-      return;
-    }
-    onOpenChange(true);
-  };
+  const panelReady =
+    open &&
+    adapter.ready &&
+    bridge.isAvailable &&
+    bridge.initialLoadComplete;
 
-  const panelProps = mapBridgeToPanelProps(bridge, () =>
-    handleRootOpenChange(false)
-  );
+  const panelProps = mapBridgeToPanelProps(bridge, () => onOpenChange(false));
 
   return (
-    <>
-      <Dialog
-        open={open && step === "picker"}
-        onOpenChange={handleRootOpenChange}
-      >
-        <DialogContent className={EASY_START_DIALOG_CONTENT_CLASS}>
-          <div className="flex flex-col min-h-0">
-            <div className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 px-6 pt-4 pb-2 shrink-0">
-              <DialogHeader className="pb-0 space-y-2">
-                <DialogTitle className="text-2xl font-bold text-center text-slate-800 dark:text-white">
-                  Move to Algorand
-                </DialogTitle>
-                <div className="flex items-center justify-center gap-2 pb-1">
-                  <ArrowRightLeft className="h-5 w-5 text-ocean-teal" />
-                  <span className="text-sm font-medium text-slate-600 dark:text-slate-300">
-                    Base ↔ Algorand USDC
-                  </span>
-                </div>
-                <DialogDescription className="text-center text-sm text-slate-600 dark:text-slate-400">
-                  Bridge USDC to your Algorand account so you can supply to
-                  DorkFi markets and earn yield.
-                </DialogDescription>
-              </DialogHeader>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={BRIDGE_PANEL_DIALOG_CLASS}>
+        <div
+          data-wallet-theme
+          data-wallet-ui
+          data-theme="dark"
+          className="p-4 space-y-3"
+        >
+          <DialogHeader className="space-y-1 text-left">
+            <DialogTitle className="text-lg font-bold leading-none">
+              Bridge
+            </DialogTitle>
+            <DialogDescription className="text-sm text-slate-400">
+              Base ↔ Algorand USDC via Allbridge
+            </DialogDescription>
+          </DialogHeader>
+
+          {evmAddress && adapter.activeAddress ? (
+            <div className="space-y-1 text-[11px] font-mono text-slate-400">
+              <p className="truncate">
+                From {evmAddress.slice(0, 6)}…{evmAddress.slice(-4)}
+              </p>
+              <p className="truncate">
+                To {adapter.activeAddress.slice(0, 6)}…
+                {adapter.activeAddress.slice(-4)}
+              </p>
             </div>
+          ) : null}
 
-            <div className="px-6 pb-6 pt-4 space-y-4">
-              {evmAddress && adapter.activeAddress ? (
-                <div className="space-y-1 text-xs text-center font-mono text-slate-500 dark:text-slate-400">
-                  <p className="truncate">
-                    From {evmAddress.slice(0, 6)}…{evmAddress.slice(-4)}
-                  </p>
-                  <p className="truncate">
-                    To {adapter.activeAddress.slice(0, 6)}…
-                    {adapter.activeAddress.slice(-4)}
-                  </p>
-                </div>
-              ) : (
-                <p className="text-sm text-center text-amber-600 dark:text-amber-400">
-                  {evmAddress
-                    ? "Deriving Algorand account…"
-                    : "Waiting for Easy Start wallet…"}
-                </p>
-              )}
-
-              <Tabs
-                value={direction}
-                onValueChange={(v) =>
-                  setDirection(v as XchainUsdcBridgeDirection)
-                }
-              >
-                <TabsList className="grid w-full grid-cols-2 bg-white/60 dark:bg-slate-900/50">
-                  <TabsTrigger value="base-to-algo">
-                    Base → Algorand
-                  </TabsTrigger>
-                  <TabsTrigger value="algo-to-base">
-                    Algorand → Base
-                  </TabsTrigger>
-                </TabsList>
-              </Tabs>
-
-              <Button
-                type="button"
-                className="w-full bg-ocean-teal hover:bg-ocean-teal/90 text-white font-semibold"
-                disabled={!adapter.ready || !bridge.isAvailable || opening}
-                onClick={handleOpenBridge}
-              >
-                {opening ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Opening bridge…
-                  </>
-                ) : !adapter.ready ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Preparing wallet…
-                  </>
-                ) : (
-                  <>
-                    <ArrowRightLeft className="mr-2 h-4 w-4" />
-                    Open bridge
-                  </>
-                )}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={open && step === "panel"}
-        onOpenChange={handleRootOpenChange}
-      >
-        <DialogContent className={BRIDGE_PANEL_DIALOG_CLASS}>
-          <div
-            data-wallet-theme
-            data-wallet-ui
-            data-theme="dark"
-            className="p-4"
+          <Tabs
+            value={direction}
+            onValueChange={(v) =>
+              handleDirectionChange(v as XchainUsdcBridgeDirection)
+            }
           >
-            <div className="mb-2">
-              <h3 className="text-lg font-bold leading-none">Bridge</h3>
+            <TabsList className="grid w-full grid-cols-2 bg-slate-800/80">
+              <TabsTrigger value="base-to-algo">Base → Algorand</TabsTrigger>
+              <TabsTrigger value="algo-to-base">Algorand → Base</TabsTrigger>
+            </TabsList>
+          </Tabs>
+
+          {!panelReady ? (
+            <div className="flex flex-col items-center justify-center gap-3 py-10 text-sm text-slate-400">
+              <Loader2 className="h-6 w-6 animate-spin text-ocean-teal" />
+              {!adapter.ready
+                ? "Preparing Easy Start wallet…"
+                : !bridge.isAvailable
+                  ? "Loading Allbridge…"
+                  : "Loading chains and balances…"}
+              {!adapter.ready ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-slate-400"
+                  onClick={() => onOpenChange(false)}
+                >
+                  Cancel
+                </Button>
+              ) : null}
             </div>
+          ) : (
             <BridgePanel {...panelProps} hideHeader autoFocusAmount />
-          </div>
-        </DialogContent>
-      </Dialog>
-    </>
+          )}
+
+          {panelReady ? (
+            <p className="text-[11px] leading-relaxed text-slate-500">
+              Bridging needs a little ETH on Base for gas (separate from USDC).
+              If approve/send fails, fund a small amount of ETH on Base and retry.
+            </p>
+          ) : null}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

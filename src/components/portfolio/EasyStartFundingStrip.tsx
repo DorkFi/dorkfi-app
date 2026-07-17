@@ -1,72 +1,27 @@
 import { useQuery } from "@tanstack/react-query";
-import { createPublicClient, formatUnits, http, type Address } from "viem";
-import { base } from "viem/chains";
+import type { Address } from "viem";
 import {
-  ArrowRightLeft,
-  CreditCard,
   Loader2,
   RefreshCw,
+  Sparkles,
+  ArrowDownToLine,
+  ArrowLeftRight,
 } from "lucide-react";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import { Button } from "@/components/ui/button";
 import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
-import { useEasyStartModals } from "@/contexts/EasyStartModalsContext";
+import { useEasyStartModals } from "@/contexts/easyStartModals";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import { cn } from "@/lib/utils";
+import { fetchBaseUsdcBalance } from "@/lib/easyStart/baseBalances";
 
-/** Circle USDC on Base mainnet (MoonPay / Privy fundWallet destination). */
-export const BASE_MAINNET_USDC =
-  "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as const;
+/** Re-export for callers that imported the constant from this module. */
+export { BASE_MAINNET_USDC } from "@/lib/easyStart/baseBalances";
 
-const erc20BalanceOfAbi = [
-  {
-    type: "function",
-    name: "balanceOf",
-    stateMutability: "view",
-    inputs: [{ name: "account", type: "address" }],
-    outputs: [{ name: "", type: "uint256" }],
-  },
-  {
-    type: "function",
-    name: "decimals",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ name: "", type: "uint8" }],
-  },
-] as const;
-
-const basePublicClient = createPublicClient({
-  chain: base,
-  transport: http(),
-});
-
-async function fetchBaseUsdcBalance(address: Address): Promise<{
-  formatted: string;
-  value: bigint;
-}> {
-  const [raw, decimals] = await Promise.all([
-    basePublicClient.readContract({
-      address: BASE_MAINNET_USDC,
-      abi: erc20BalanceOfAbi,
-      functionName: "balanceOf",
-      args: [address],
-    }),
-    basePublicClient.readContract({
-      address: BASE_MAINNET_USDC,
-      abi: erc20BalanceOfAbi,
-      functionName: "decimals",
-    }),
-  ]);
-  return {
-    value: raw,
-    formatted: formatUnits(raw, decimals),
-  };
-}
-
-/** Base USDC balance + fund/bridge CTAs for Privy Easy Start on Portfolio. */
+/** Base USDC staging balance + Deposit / Withdraw / Allbridge CTAs for Privy Easy Start. */
 export function EasyStartFundingStrip() {
   const privy = usePrivyEasyStart();
-  const { openDeposit, openBridge } = useEasyStartModals();
+  const { openDeposit, openWithdraw, openBridge } = useEasyStartModals();
   const { formatNumber, formatCurrency } = useNumberI18n();
 
   const evmAddress = privy.evmAddress as Address | null;
@@ -98,12 +53,12 @@ export function EasyStartFundingStrip() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 space-y-1">
           <p className="text-xs font-semibold uppercase tracking-wide text-ocean-teal">
-            Easy Start · staging funds
+            Easy Start
           </p>
           <p className="text-sm text-muted-foreground">
-            MoonPay deposits land as USDC on{" "}
-            <span className="font-medium text-foreground">Base</span>. Bridge to
-            Algorand before supplying on DorkFi.
+            {hasBalance
+              ? "You have USDC ready to finish depositing to Algorand."
+              : "Deposit with a card — we’ll move USDC to Algorand for you."}
           </p>
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 pt-1">
             <span className="text-2xl font-bold tabular-nums text-slate-800 dark:text-white">
@@ -135,7 +90,7 @@ export function EasyStartFundingStrip() {
                   minimumFractionDigits: 2,
                   maximumFractionDigits: 2,
                 })}{" "}
-                on Base
+                staging
               </span>
             ) : null}
           </div>
@@ -158,23 +113,32 @@ export function EasyStartFundingStrip() {
             />
             Refresh
           </Button>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 sm:justify-end">
+            <Button
+              type="button"
+              className="bg-ocean-teal hover:bg-ocean-teal/90 text-white"
+              onClick={openDeposit}
+            >
+              <Sparkles className="mr-2 h-4 w-4" />
+              Deposit
+            </Button>
             <Button
               type="button"
               variant="outline"
               className="border-ocean-teal/40"
-              onClick={openDeposit}
+              onClick={openWithdraw}
             >
-              <CreditCard className="mr-2 h-4 w-4" />
-              Add USDC
+              <ArrowDownToLine className="mr-2 h-4 w-4" />
+              Withdraw
             </Button>
             <Button
               type="button"
-              className="bg-ocean-teal hover:bg-ocean-teal/90 text-white"
+              variant="outline"
+              className="border-ocean-teal/40"
               onClick={openBridge}
             >
-              <ArrowRightLeft className="mr-2 h-4 w-4" />
-              {hasBalance ? "Move to Algorand" : "Open bridge"}
+              <ArrowLeftRight className="mr-2 h-4 w-4" />
+              Bridge with Allbridge
             </Button>
           </div>
         </div>

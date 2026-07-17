@@ -1,9 +1,21 @@
 import { useCallback, useMemo } from "react";
-import { useWallet } from "@txnlab/use-wallet-react";
+import { Algodv2 } from "algosdk";
 import { useQueryClient } from "@tanstack/react-query";
 import type { BridgeWalletAdapter } from "@d13co/algo-x-evm-ui";
+import { base } from "viem/chains";
 import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
 import { usePrivyEmbeddedWallet } from "@/hooks/usePrivyEmbeddedWallet";
+
+/**
+ * Allbridge Base→Algorand always targets Algorand Mainnet ASA opt-in / receive.
+ * Do not use the app's network-scoped useWallet().algodClient — Easy Start can run
+ * while the saved network is VOI, which would skip or break USDC opt-in checks.
+ */
+const ALGORAND_MAINNET_ALGOD = new Algodv2(
+  "",
+  "https://mainnet-api.4160.nodely.dev",
+  "443"
+);
 
 /**
  * Bridge wallet adapter for Privy Easy Start (separate from RainbowKit xChain).
@@ -14,7 +26,6 @@ export function usePrivyBridgeWalletAdapter(): BridgeWalletAdapter & {
 } {
   const privy = usePrivyEasyStart();
   const { wallet } = usePrivyEmbeddedWallet();
-  const { algodClient } = useWallet();
   const queryClient = useQueryClient();
 
   const signTransactions = useCallback(
@@ -31,12 +42,20 @@ export function usePrivyBridgeWalletAdapter(): BridgeWalletAdapter & {
     if (!wallet) {
       throw new Error("Easy Start EVM wallet is not ready");
     }
+    // Allbridge Base→ALG expects the embedded wallet on Base before approve/send.
+    try {
+      await wallet.switchChain(base.id);
+    } catch (err) {
+      console.warn("Easy Start bridge: switchChain(Base) failed", err);
+    }
     return wallet.getEthereumProvider();
   }, [wallet]);
 
   const onTransactionSuccess = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ["account-info"] });
     void queryClient.invalidateQueries({ queryKey: ["account-balance"] });
+    void queryClient.invalidateQueries({ queryKey: ["easy-start-base-usdc"] });
+    void queryClient.invalidateQueries({ queryKey: ["easy-start-algo-usdc"] });
   }, [queryClient]);
 
   const ready = Boolean(
@@ -51,7 +70,7 @@ export function usePrivyBridgeWalletAdapter(): BridgeWalletAdapter & {
     (): BridgeWalletAdapter & { ready: boolean } => ({
       ready,
       activeAddress: privy.algorandAddress,
-      algodClient: algodClient ?? null,
+      algodClient: ALGORAND_MAINNET_ALGOD,
       signTransactions,
       onTransactionSuccess,
       evmAddress: privy.evmAddress,
@@ -59,7 +78,6 @@ export function usePrivyBridgeWalletAdapter(): BridgeWalletAdapter & {
       getEvmProvider: ready ? getEvmProvider : undefined,
     }),
     [
-      algodClient,
       getEvmProvider,
       onTransactionSuccess,
       privy.algorandAddress,

@@ -102,6 +102,7 @@ import {
   calculateUserHealthFactor,
   normalizeLiquidationThresholdToDecimal,
 } from "@/utils/userHealth";
+import { parsePoolGlobalUsd } from "@/utils/portfolioDisplayHealthFactor";
 import EnhancedHealthFactor from "./EnhancedHealthFactor";
 import DepositsList from "./DepositsList";
 import BorrowsList from "./BorrowsList";
@@ -1926,13 +1927,9 @@ const Portfolio = () => {
               // Global user data values are scaled by 1e12, so divide to get USD
               // This comes from the global user state of the appId (pool)
               poolCollateralValueUSD =
-                Number(
-                  BigInt(poolGlobalData.totalCollateralValue) / BigInt(1e12)
-                ) || 0;
+                parsePoolGlobalUsd(poolGlobalData.totalCollateralValue) || 0;
               poolBorrowsUSD =
-                Number(
-                  BigInt(poolGlobalData.totalBorrowValue) / BigInt(1e12)
-                ) || 0;
+                parsePoolGlobalUsd(poolGlobalData.totalBorrowValue) || 0;
 
               riskRatio =
                 (poolCollateralValueUSD * liquidationFactorNum) /
@@ -2018,12 +2015,8 @@ const Portfolio = () => {
         let collateral = 0;
         let borrow = 0;
         try {
-          collateral = Number(
-            BigInt(String(rec.totalCollateralValue ?? 0)) / BigInt(1e12)
-          );
-          borrow = Number(
-            BigInt(String(rec.totalBorrowValue ?? 0)) / BigInt(1e12)
-          );
+          collateral = parsePoolGlobalUsd(rec.totalCollateralValue);
+          borrow = parsePoolGlobalUsd(rec.totalBorrowValue);
         } catch {
           continue;
         }
@@ -2133,12 +2126,8 @@ const Portfolio = () => {
       let collateral = 0;
       let borrow = 0;
       try {
-        collateral = Number(
-          BigInt(String(rec.totalCollateralValue ?? 0)) / BigInt(1e12)
-        );
-        borrow = Number(
-          BigInt(String(rec.totalBorrowValue ?? 0)) / BigInt(1e12)
-        );
+        collateral = parsePoolGlobalUsd(rec.totalCollateralValue);
+        borrow = parsePoolGlobalUsd(rec.totalBorrowValue);
       } catch {
         continue;
       }
@@ -3910,24 +3899,20 @@ const Portfolio = () => {
         "[Portfolio] User data globalUserData:",
         user.globalUserData
       );
-      const globalCollateralValue =
-        user.globalUserData
-          .map((item: Record<string, unknown>) =>
-            BigInt(item.totalCollateralValue as string | number)
-          )
-          .reduce((acc: bigint, curr: bigint) => acc + curr, BigInt(0)) /
-        BigInt(1e12);
+      const globalCollateralValue = user.globalUserData.reduce(
+        (acc: number, item: Record<string, unknown>) =>
+          acc + parsePoolGlobalUsd(item.totalCollateralValue),
+        0
+      );
       console.log(
         "[Portfolio] Global collateral value:",
         globalCollateralValue
       );
-      const globalBorrowValue =
-        user.globalUserData
-          .map((item: Record<string, unknown>) =>
-            BigInt(item.totalBorrowValue as string | number)
-          )
-          .reduce((acc: bigint, curr: bigint) => acc + curr, BigInt(0)) /
-        BigInt(1e12);
+      const globalBorrowValue = user.globalUserData.reduce(
+        (acc: number, item: Record<string, unknown>) =>
+          acc + parsePoolGlobalUsd(item.totalBorrowValue),
+        0
+      );
       console.log("[Portfolio] Global borrow value:", globalBorrowValue);
       const globalNetPortfolioValue = globalCollateralValue - globalBorrowValue;
       console.log(
@@ -3946,12 +3931,8 @@ const Portfolio = () => {
 
       user.globalUserData.forEach((item: Record<string, unknown>) => {
         const network = String(item.network || "unknown");
-        const collateralValue = Number(
-          BigInt(String(item.totalCollateralValue ?? 0)) / BigInt(1e12)
-        );
-        const borrowValue = Number(
-          BigInt(String(item.totalBorrowValue ?? 0)) / BigInt(1e12)
-        );
+        const collateralValue = parsePoolGlobalUsd(item.totalCollateralValue);
+        const borrowValue = parsePoolGlobalUsd(item.totalBorrowValue);
         const netValue = collateralValue - borrowValue;
 
         if (!networkValues[network]) {
