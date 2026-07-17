@@ -37,6 +37,7 @@ export function EasyStartFundingStrip() {
     queryFn: () => fetchBaseUsdcBalance(evmAddress!),
     enabled: Boolean(evmAddress),
     refetchInterval: 15_000,
+    retry: 2,
   });
 
   const balanceNum =
