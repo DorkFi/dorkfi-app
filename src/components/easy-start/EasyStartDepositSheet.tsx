@@ -29,6 +29,10 @@ import {
   bridgePhaseLabel,
   type EasyStartBridgePhase,
 } from "@/components/easy-start/easyStartBridgePhase";
+import {
+  EasyStartCardProviderPicker,
+  type CardProvider,
+} from "@/components/easy-start/EasyStartCardProviderPicker";
 
 /** Loaded only while bridging so opening Deposit never waits on `@privy-io/wagmi`. */
 const EasyStartHeadlessBridge = lazy(() =>
@@ -84,6 +88,7 @@ export function EasyStartDepositSheet({
   const { toast } = useToast();
 
   const [amount, setAmount] = useState("100");
+  const [cardProvider, setCardProvider] = useState<CardProvider>("moonpay");
   const [phase, setPhase] = useState<DepositPhase>("idle");
   const [bridgePhase, setBridgePhase] =
     useState<EasyStartBridgePhase>("preparing");
@@ -160,7 +165,7 @@ export function EasyStartDepositSheet({
         asset: "native-currency",
         amount: GAS_TOPUP_USD,
         defaultFundingMethod: "card",
-        card: { preferredProvider: "moonpay" },
+        card: { preferredProvider: cardProvider },
       });
       const usdc = bridgeAmount ?? amount;
       await ensureGasThenBridge(usdc);
@@ -217,7 +222,7 @@ export function EasyStartDepositSheet({
         asset: "USDC",
         amount,
         defaultFundingMethod: "card",
-        card: { preferredProvider: "moonpay" },
+        card: { preferredProvider: cardProvider },
       });
       await new Promise((r) => setTimeout(r, 1500));
       await refetchUsdc();
@@ -264,7 +269,7 @@ export function EasyStartDepositSheet({
                 </div>
                 <DialogDescription className="text-center text-sm text-slate-600 dark:text-slate-400">
                   {phase === "idle"
-                    ? "Pay with card or Apple Pay. We’ll move your USDC to Algorand automatically."
+                    ? "Choose MoonPay or Coinbase, then pay with card. We’ll move your USDC to Algorand automatically."
                     : phase === "gas"
                       ? "One quick step: add a little ETH for network fees, then we finish the deposit."
                       : phase === "bridging"
@@ -319,6 +324,10 @@ export function EasyStartDepositSheet({
                     Bridging needs a tiny bit of ETH on Base for gas (separate
                     from your USDC). About ${GAS_TOPUP_USD} is enough.
                   </p>
+                  <EasyStartCardProviderPicker
+                    value={cardProvider}
+                    onChange={setCardProvider}
+                  />
                   {error ? (
                     <p className="text-sm text-destructive" role="alert">
                       {error}
@@ -423,6 +432,13 @@ export function EasyStartDepositSheet({
                         ) — skip card
                       </span>
                     </label>
+                  ) : null}
+
+                  {!skipFiat ? (
+                    <EasyStartCardProviderPicker
+                      value={cardProvider}
+                      onChange={setCardProvider}
+                    />
                   ) : null}
 
                   {!address ? (

@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
+import { offrampApiPlugin } from "./plugins/offrampApiPlugin";
 
 const GOVERNANCE_RAILWAY =
   "https://dorkfi-governance-node-production.up.railway.app";
@@ -9,6 +10,19 @@ const GOVERNANCE_RAILWAY =
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
+  // Expose CDP / MoonPay secrets to the Vite Node process for /api/offramp
+  for (const key of [
+    "CDP_API_KEY_ID",
+    "CDP_API_KEY_SECRET",
+    "COINBASE_CDP_API_KEY_ID",
+    "COINBASE_CDP_API_KEY_SECRET",
+    "CDP_API_KEY",
+    "CDP_API_SECRET",
+    "MOONPAY_SECRET_KEY",
+  ] as const) {
+    if (env[key] && !process.env[key]) process.env[key] = env[key];
+  }
+
   const governanceLocalTarget =
     env.VITE_GOVERNANCE_LOCAL_TARGET || "http://127.0.0.1:8787";
   const governanceNgrokTarget =
@@ -53,6 +67,7 @@ export default defineConfig(({ mode }) => {
   },
   plugins: [
     react(),
+    offrampApiPlugin(),
     mode === 'development' &&
     componentTagger(),
   ].filter(Boolean),

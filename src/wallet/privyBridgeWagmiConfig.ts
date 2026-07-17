@@ -10,7 +10,7 @@ import { base } from "viem/chains";
 export const privyBridgeWagmiConfig = createConfig({
   chains: [base, algorandChain],
   transports: {
-    [base.id]: http(),
+    [base.id]: http("https://mainnet.base.org"),
     [algorandChain.id]: http(),
   },
 });

@@ -1,5 +1,6 @@
 import {
   createPublicClient,
+  fallback,
   formatEther,
   formatUnits,
   http,
@@ -10,7 +11,7 @@ import { Algodv2 } from "algosdk";
 import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
 import { spendableAlgoMicroAlgosFromAccount } from "@/utils/algorandWalletBalance";
 
-/** Circle USDC on Base mainnet (MoonPay / Privy fundWallet destination). */
+/** Circle USDC on Base mainnet (Privy fundWallet / on-ramp destination). */
 export const BASE_MAINNET_USDC =
   "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as const;
 
@@ -35,9 +36,13 @@ const erc20BalanceOfAbi = [
   },
 ] as const;
 
+/** Prefer explicit public Base RPCs over viem's default (often rate-limited). */
 const basePublicClient = createPublicClient({
   chain: base,
-  transport: http(),
+  transport: fallback([
+    http("https://mainnet.base.org"),
+    http("https://base.publicnode.com"),
+  ]),
 });
 
 /** Same mainnet algod as Easy Start bridge adapter (not app network-scoped). */

@@ -17,9 +17,11 @@
   "dependencies": {
     "@agoralabs-sh/avm-web-provider": "^1.7.0",
     "@algorandfoundation/algokit-utils": "^9.1.2",
+    "@coinbase/cdp-sdk": "^1.53.0",
     "@d13co/algo-x-evm-ui": "^0.0.15",
     "@folks-finance/algorand-sdk": "^0.2.4",
     "@hookform/resolvers": "^3.9.0",
+    "@moonpay/moonpay-react": "^1.10.6",
     "@noble/hashes": "^2.0.1",
     "@perawallet/connect": "^1.4.2",
     "@privy-io/react-auth": "^2.25.0",

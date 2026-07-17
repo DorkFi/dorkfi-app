@@ -31,4 +31,10 @@ interface ImportMetaEnv {
   readonly VITE_PRIVY_APP_ID?: string;
   /** When `true` or `1`, show Get Started (Privy) alongside Connect Wallet. */
   readonly VITE_ENABLE_PRIVY_ONBOARDING?: string;
+  /** MoonPay publishable key (`pk_test_…` / `pk_live_…`) for Easy Start sell widget. */
+  readonly VITE_MOONPAY_API_KEY?: string;
+  /** Optional origin for off-ramp API (default `/api/offramp` via Vite plugin). */
+  readonly VITE_OFFRAMP_API_BASE?: string;
+  /** Redirect URL after Coinbase Offramp widget (must be allowlisted in CDP). */
+  readonly VITE_OFFRAMP_REDIRECT_URL?: string;
 }

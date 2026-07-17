@@ -69,8 +69,9 @@ function App() {
     >
       <PrivySessionProvider>
       <NetworkProvider>
+      {/* Locale outside Easy Start modals so deposit/withdraw sheets can use useNumberI18n */}
+      <LocaleSettingsProvider>
       <EasyStartModalsProvider>
-        <LocaleSettingsProvider>
         <TooltipProvider delayDuration={300} skipDelayDuration={100}>
           <Toaster />
           <Sonner />
@@ -151,8 +152,8 @@ function App() {
             </Routes>
           </BrowserRouter>
         </TooltipProvider>
-        </LocaleSettingsProvider>
       </EasyStartModalsProvider>
+      </LocaleSettingsProvider>
       </NetworkProvider>
       </PrivySessionProvider>
     </ThemeProvider>

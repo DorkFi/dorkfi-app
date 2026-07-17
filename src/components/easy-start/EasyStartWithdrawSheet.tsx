@@ -27,6 +27,11 @@ import {
   bridgePhaseLabel,
   type EasyStartBridgePhase,
 } from "@/components/easy-start/easyStartBridgePhase";
+import {
+  EasyStartCardProviderPicker,
+  type CardProvider,
+} from "@/components/easy-start/EasyStartCardProviderPicker";
+import { EasyStartOfframpCashOut } from "@/components/easy-start/EasyStartOfframpCashOut";
 
 /** Loaded only while bridging so opening Withdraw never waits on `@privy-io/wagmi`. */
 const EasyStartHeadlessBridge = lazy(() =>
@@ -54,8 +59,8 @@ interface EasyStartWithdrawSheetProps {
 }
 
 /**
- * Cash Stash–style one-click withdraw: amount → Algorand→Base USDC bridge → done.
- * Bank/card off-ramp is not wired; funds land as USDC on the Easy Start Base wallet.
+ * Cash Stash–style one-click withdraw: amount → Algorand→Base USDC bridge →
+ * optional in-app Coinbase / MoonPay cash-out (Privy USDC transfer).
  */
 export function EasyStartWithdrawSheet({
   open,
@@ -67,6 +72,8 @@ export function EasyStartWithdrawSheet({
   const { formatNumber, formatCurrency } = useNumberI18n();
 
   const [amount, setAmount] = useState("");
+  const [cashOutProvider, setCashOutProvider] =
+    useState<CardProvider>("moonpay");
   const [phase, setPhase] = useState<WithdrawPhase>("idle");
   const [bridgePhase, setBridgePhase] =
     useState<EasyStartBridgePhase>("preparing");
@@ -174,11 +181,11 @@ export function EasyStartWithdrawSheet({
                 </div>
                 <DialogDescription className="text-center text-sm text-slate-600 dark:text-slate-400">
                   {phase === "idle"
-                    ? "We’ll move USDC from Algorand to your Easy Start Base wallet in one step."
+                    ? "We’ll move USDC from Algorand to your Easy Start Base wallet, then you can cash out with MoonPay or Coinbase."
                     : phase === "bridging" || phase === "fee_check"
                       ? bridgePhaseLabel(bridgePhase, "algo-to-base")
                       : phase === "success"
-                        ? "USDC is ready on Base."
+                        ? "USDC is ready on Base — cash out if you like."
                         : phase === "error"
                           ? "Something went wrong — you can retry."
                           : "Working on your withdrawal…"}
@@ -198,13 +205,22 @@ export function EasyStartWithdrawSheet({
                     {evmAddress
                       ? ` (${evmAddress.slice(0, 6)}…${evmAddress.slice(-4)})`
                       : ""}
-                    . You can send it from there with your Easy Start wallet.
+                    . Cash out in-app with MoonPay or Coinbase, or keep it on
+                    Base.
                   </p>
+                  <EasyStartOfframpCashOut
+                    evmAddress={evmAddress}
+                    amount={bridgeAmount ?? amount}
+                    provider={cashOutProvider}
+                    onProviderChange={setCashOutProvider}
+                    onDone={() => handleClose(false)}
+                  />
                   <Button
-                    className="w-full bg-ocean-teal hover:bg-ocean-teal/90 text-white"
+                    variant="outline"
+                    className="w-full border-ocean-teal/40"
                     onClick={() => handleClose(false)}
                   >
-                    Done
+                    Keep on Base · Done
                   </Button>
                 </div>
               ) : phase === "bridging" || phase === "fee_check" ? (
@@ -338,6 +354,12 @@ export function EasyStartWithdrawSheet({
                     </p>
                   ) : null}
 
+                  <EasyStartCardProviderPicker
+                    value={cashOutProvider}
+                    onChange={setCashOutProvider}
+                    label="Cash out with"
+                  />
+
                   <Button
                     className="w-full bg-ocean-teal hover:bg-ocean-teal/90 text-white font-semibold"
                     disabled={
@@ -363,8 +385,9 @@ export function EasyStartWithdrawSheet({
                   </Button>
 
                   <p className="text-[11px] text-center text-slate-500 leading-relaxed">
-                    Funds move to Base USDC (not a bank transfer). Bank/card
-                    cash-out isn’t available in Easy Start yet.
+                    First we move USDC to Base. Then you can cash out in-app
+                    with MoonPay or Coinbase (USDC leaves your Easy Start
+                    wallet to the provider).
                   </p>
 
                   {onOpenAdvancedBridge ? (

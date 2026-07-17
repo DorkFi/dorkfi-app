@@ -153,7 +153,7 @@ export function EasyStartConnectMenu() {
                   minimumFractionDigits: 2,
                   maximumFractionDigits: 2,
                 })}{" "}
-                USDC on the way
+                USDC on Base
                 {baseLoading ? "…" : ""}
               </p>
             ) : null}
