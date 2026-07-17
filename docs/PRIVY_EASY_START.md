@@ -6,9 +6,11 @@ Optional email / social onboarding path for **Algorand Mainnet only**. Existing 
 
 1. **Get Started** → Privy login (email, Google, Apple, passkey)
 2. Embedded EVM wallet created on **Base**
-3. **Add USDC** → fiat on-ramp via Privy `fundWallet` (card / Apple Pay / Google Pay)
-4. **Move to Algorand** → Allbridge Base → Algorand USDC (isolated Privy wagmi bridge UI)
-5. Algorand xChain address derived from EVM wallet → DorkFi markets (supply signing: Phase 5)
+3. **Deposit** → one sheet: amount → card/Apple Pay → (ETH gas top-up if needed) → automatic Base→Algorand USDC bridge
+4. Algorand xChain address derived from EVM wallet → DorkFi markets (supply signing: Phase 5)
+5. **Withdraw** → one sheet: amount → automatic Algorand→Base USDC bridge → USDC on Base wallet
+
+Advanced Allbridge UI remains available as an escape hatch. Bank/card off-ramp is not included yet.
 
 ## Environment variables
 
@@ -36,10 +38,12 @@ In local development, `enablePrivyOnboarding` defaults to `true` in `getEnvironm
 | Unified session | `src/hooks/useDorkFiSession.ts` |
 | xChain address derivation | `src/services/xchainAddressService.ts` |
 | Header UI | `WalletNetworkButton` — Get Started dropdown with Email + Connect Wallet |
-| Fiat deposit | `src/components/easy-start/EasyStartDepositSheet.tsx` |
-| Bridge | `src/components/easy-start/EasyStartBridgeSheet.tsx` — Privy `useBridgePanel` adapter (not RainbowKit `useBridgeDialog`) |
+| Fiat + auto-bridge | `src/components/easy-start/EasyStartDepositSheet.tsx` — Cash Stash–style orchestrated Deposit |
+| Withdraw auto-bridge | `src/components/easy-start/EasyStartWithdrawSheet.tsx` — Algorand→Base USDC |
+| Headless Allbridge | `src/components/easy-start/EasyStartHeadlessBridge.tsx` (supports both directions) |
+| Advanced bridge UI | `src/components/easy-start/EasyStartBridgeSheet.tsx` — escape hatch |
 | Bridge adapter | `src/hooks/usePrivyBridgeWalletAdapter.ts` |
-| Portfolio Base USDC | `src/components/portfolio/EasyStartFundingStrip.tsx` |
+| Portfolio staging strip | `src/components/portfolio/EasyStartFundingStrip.tsx` — Deposit + Withdraw |
 
 Native wallet sessions take precedence over Privy when both could apply.
 

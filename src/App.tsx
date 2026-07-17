@@ -69,7 +69,6 @@ function App() {
     >
       <AppErrorBoundary>
       <PrivySessionProvider>
-      {/* Inside NetworkProvider so Easy Start bridge can use useWallet()/algodClient */}
       <NetworkProvider>
       <EasyStartModalsProvider>
         <LocaleSettingsProvider>

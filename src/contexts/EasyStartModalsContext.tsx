@@ -1,81 +1,155 @@
 import {
-  createContext,
   lazy,
   Suspense,
   useCallback,
-  useContext,
   useMemo,
   useState,
   type ReactNode,
 } from "react";
-import { EasyStartDepositSheet } from "@/components/easy-start/EasyStartDepositSheet";
+import { Loader2 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
+import {
+  EasyStartModalsContext,
+  type EasyStartModalsContextValue,
+} from "@/contexts/easyStartModals";
 
-/** Lazy so `@privy-io/wagmi` is not loaded until the bridge opens (keeps Privy `ready`). */
+/**
+ * Lazy-load all Easy Start sheets so:
+ * - `@privy-io/wagmi` never enters the initial App graph
+ * - Fast Refresh churn on bridge helpers does not remount the whole app
+ * Sheets only mount while open (avoids idle Dialog mounts when signed in).
+ */
+const EasyStartDepositSheet = lazy(() =>
+  import("@/components/easy-start/EasyStartDepositSheet").then((m) => ({
+    default: m.EasyStartDepositSheet,
+  }))
+);
+const EasyStartWithdrawSheet = lazy(() =>
+  import("@/components/easy-start/EasyStartWithdrawSheet").then((m) => ({
+    default: m.EasyStartWithdrawSheet,
+  }))
+);
 const EasyStartBridgeSheet = lazy(() =>
   import("@/components/easy-start/EasyStartBridgeSheet").then((m) => ({
     default: m.EasyStartBridgeSheet,
   }))
 );
 
-type EasyStartModalsContextValue = {
-  openDeposit: () => void;
-  openBridge: () => void;
-};
+const SHEET_FALLBACK_CLASS =
+  "bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-white rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-[95vw] md:max-w-md p-0";
 
-const EasyStartModalsContext =
-  createContext<EasyStartModalsContextValue | null>(null);
-
-export function useEasyStartModals(): EasyStartModalsContextValue {
-  const ctx = useContext(EasyStartModalsContext);
-  if (!ctx) {
-    return {
-      openDeposit: () => {
-        console.warn("EasyStartModalsProvider is not mounted");
-      },
-      openBridge: () => {
-        console.warn("EasyStartModalsProvider is not mounted");
-      },
-    };
-  }
-  return ctx;
+function EasyStartSheetFallback({
+  open,
+  onOpenChange,
+  title,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={SHEET_FALLBACK_CLASS}>
+        <div className="flex flex-col items-center justify-center gap-3 px-6 py-12">
+          <DialogHeader className="sr-only">
+            <DialogTitle>{title}</DialogTitle>
+          </DialogHeader>
+          <Loader2 className="h-6 w-6 animate-spin text-ocean-teal" />
+          <p className="text-sm text-slate-600 dark:text-slate-300">
+            Opening {title.toLowerCase()}…
+          </p>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 /**
- * Single mount point for Easy Start deposit/bridge modals so Portfolio and
- * header do not nest multiple Privy wagmi providers (which breaks Email login).
- * Must sit under NetworkProvider/WalletProvider — the bridge adapter calls useWallet().
+ * Single mount point for Easy Start deposit/withdraw/bridge modals so Portfolio
+ * and header do not nest multiple Privy wagmi providers (which breaks Email login).
  */
 export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
   const privy = usePrivyEasyStart();
   const [depositOpen, setDepositOpen] = useState(false);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [bridgeOpen, setBridgeOpen] = useState(false);
 
   const openDeposit = useCallback(() => setDepositOpen(true), []);
+  const openWithdraw = useCallback(() => setWithdrawOpen(true), []);
   const openBridge = useCallback(() => setBridgeOpen(true), []);
 
   const value = useMemo(
-    () => ({ openDeposit, openBridge }),
-    [openDeposit, openBridge]
+    (): EasyStartModalsContextValue => ({
+      openDeposit,
+      openWithdraw,
+      openBridge,
+    }),
+    [openDeposit, openWithdraw, openBridge]
   );
 
   const showSheets = privy.enabled && privy.configured && privy.authenticated;
+
+  const openAdvancedBridge = useCallback(() => {
+    setDepositOpen(false);
+    setWithdrawOpen(false);
+    setBridgeOpen(true);
+  }, []);
 
   return (
     <EasyStartModalsContext.Provider value={value}>
       {children}
       {showSheets ? (
         <>
-          <EasyStartDepositSheet
-            open={depositOpen}
-            onOpenChange={setDepositOpen}
-            onContinueToBridge={() => {
-              setDepositOpen(false);
-              setBridgeOpen(true);
-            }}
-          />
+          {depositOpen ? (
+            <Suspense
+              fallback={
+                <EasyStartSheetFallback
+                  open={depositOpen}
+                  onOpenChange={setDepositOpen}
+                  title="Deposit"
+                />
+              }
+            >
+              <EasyStartDepositSheet
+                open={depositOpen}
+                onOpenChange={setDepositOpen}
+                onOpenAdvancedBridge={openAdvancedBridge}
+              />
+            </Suspense>
+          ) : null}
+          {withdrawOpen ? (
+            <Suspense
+              fallback={
+                <EasyStartSheetFallback
+                  open={withdrawOpen}
+                  onOpenChange={setWithdrawOpen}
+                  title="Withdraw"
+                />
+              }
+            >
+              <EasyStartWithdrawSheet
+                open={withdrawOpen}
+                onOpenChange={setWithdrawOpen}
+                onOpenAdvancedBridge={openAdvancedBridge}
+              />
+            </Suspense>
+          ) : null}
           {bridgeOpen ? (
-            <Suspense fallback={null}>
+            <Suspense
+              fallback={
+                <EasyStartSheetFallback
+                  open={bridgeOpen}
+                  onOpenChange={setBridgeOpen}
+                  title="Bridge"
+                />
+              }
+            >
               <EasyStartBridgeSheet
                 open={bridgeOpen}
                 onOpenChange={setBridgeOpen}
