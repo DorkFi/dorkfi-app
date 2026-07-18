@@ -19,9 +19,13 @@ import { base } from "viem/chains";
 import { isFeatureEnabled } from "@/config";
 import { deriveAlgorandXchainAddress } from "@/services/xchainAddressService";
 import { signPrivyXchainTransactions } from "@/wallet/privyXchainSignTransactions";
-import { getPrivyOriginHint } from "@/utils/privyOrigin";
+import {
+  getPrivyAppId,
+  getPrivyOriginHint,
+  resolvePrivyOnboardingEnabled,
+} from "@/utils/privyOrigin";
 
-const PRIVY_APP_ID = import.meta.env.VITE_PRIVY_APP_ID ?? "";
+const PRIVY_APP_ID = getPrivyAppId();
 
 export type PrivyEasyStartState = {
   enabled: boolean;
@@ -210,7 +214,9 @@ interface PrivySessionProviderProps {
  * children render unchanged (existing wallet flow only).
  */
 export function PrivySessionProvider({ children }: PrivySessionProviderProps) {
-  const enabled = isFeatureEnabled("enablePrivyOnboarding");
+  const enabled = resolvePrivyOnboardingEnabled(
+    isFeatureEnabled("enablePrivyOnboarding")
+  );
   const configured = PRIVY_APP_ID.length > 0;
   /** Remount Privy after HMR / stuck init so `ready` can recover (once). */
   const [providerKey, setProviderKey] = useState(0);
