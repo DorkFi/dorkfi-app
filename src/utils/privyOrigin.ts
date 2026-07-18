@@ -2,6 +2,7 @@
 export const PRIVY_ALLOWED_ORIGINS = [
   "https://app.dork.fi",
   "https://www.app.dork.fi",
+  "https://beta.dork.fi",
   "http://localhost:8080",
 ] as const;
 
