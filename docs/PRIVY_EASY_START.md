@@ -16,8 +16,8 @@ Advanced Allbridge UI remains available as an escape hatch.
 
 | Variable | Required | Description |
 | --- | --- | --- |
-| `VITE_PRIVY_APP_ID` | Yes (when enabled) | Privy dashboard app ID |
-| `VITE_ENABLE_PRIVY_ONBOARDING` | No | `true` / `1` to enable in production |
+| `VITE_PRIVY_APP_ID` | No | Privy dashboard app ID (falls back to the baked-in DorkFi app id) |
+| `VITE_ENABLE_PRIVY_ONBOARDING` | No | `true` / `1` to enable in production; `false` / `0` to force off. **beta.dork.fi** auto-enables without this. |
 | `VITE_MOONPAY_API_KEY` | For MoonPay sell | Publishable MoonPay key (`pk_test_…` / `pk_live_…`) |
 | `MOONPAY_SECRET_KEY` | For MoonPay sell | Server-only secret for widget URL signing |
 | `CDP_API_KEY_ID` | For Coinbase Offramp | Coinbase Developer Platform secret API key id |
@@ -25,7 +25,7 @@ Advanced Allbridge UI remains available as an escape hatch.
 | `VITE_OFFRAMP_API_BASE` | No | Defaults to `/api/offramp` (Vite plugin in dev). Point at your API in production. |
 | `VITE_OFFRAMP_REDIRECT_URL` | No | Coinbase Offramp redirect (allowlist in CDP). Defaults to `{origin}/portfolio`. |
 
-In local development, `enablePrivyOnboarding` defaults to `true` in `getEnvironmentConfig()` when `NODE_ENV=development`.
+In local development, Easy Start defaults on. On **https://beta.dork.fi** it also auto-enables (see `PRIVY_AUTO_ENABLE_ORIGINS`). Production (`app.dork.fi`) still needs `VITE_ENABLE_PRIVY_ONBOARDING=true` (or the config feature flag) until you choose to roll it out.
 
 ### Off-ramp API (dev)
 
@@ -80,7 +80,7 @@ Native wallet sessions take precedence over Privy when both could apply.
 
 ## Rollback
 
-Set `VITE_ENABLE_PRIVY_ONBOARDING=false` or `enablePrivyOnboarding: false` in config. No migration required.
+Set `VITE_ENABLE_PRIVY_ONBOARDING=false` (forces off even on beta), or remove the origin from `PRIVY_AUTO_ENABLE_ORIGINS` / set `enablePrivyOnboarding: false` in config. No migration required.
 
 ## Phase 5 — On-chain signing (shipped)
 

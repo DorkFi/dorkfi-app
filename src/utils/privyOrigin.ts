@@ -6,7 +6,45 @@ export const PRIVY_ALLOWED_ORIGINS = [
   "http://localhost:8080",
 ] as const;
 
+/** Origins where Easy Start is on without `VITE_ENABLE_PRIVY_ONBOARDING`. */
+export const PRIVY_AUTO_ENABLE_ORIGINS = ["https://beta.dork.fi"] as const;
+
+/**
+ * Public Privy app id (client-safe). Override with `VITE_PRIVY_APP_ID` when needed.
+ * Baked in so beta/production builds still work if the host omits the env var.
+ */
+export const DEFAULT_PRIVY_APP_ID = "cmrfehwv300ix0ci8uh0tnm8q";
+
 const LOCAL_PRIVY_ORIGIN = "http://localhost:8080";
+
+export function getPrivyAppId(): string {
+  const fromEnv = (import.meta.env.VITE_PRIVY_APP_ID ?? "").trim();
+  return fromEnv || DEFAULT_PRIVY_APP_ID;
+}
+
+/**
+ * Whether Easy Start should mount.
+ * - `VITE_ENABLE_PRIVY_ONBOARDING=false|0` always disables
+ * - `true|1` always enables
+ * - DEV defaults on
+ * - `beta.dork.fi` auto-enables for testing without host env
+ * - otherwise uses the config feature flag (default off)
+ */
+export function resolvePrivyOnboardingEnabled(
+  configFeatureEnabled: boolean,
+  origin = typeof window !== "undefined" ? window.location.origin : ""
+): boolean {
+  const flag = import.meta.env.VITE_ENABLE_PRIVY_ONBOARDING;
+  if (flag === "false" || flag === "0") return false;
+  if (flag === "true" || flag === "1") return true;
+  if (import.meta.env.DEV) return true;
+  if (
+    (PRIVY_AUTO_ENABLE_ORIGINS as readonly string[]).includes(origin)
+  ) {
+    return true;
+  }
+  return configFeatureEnabled;
+}
 
 export function isPrivyOriginAllowed(origin = window.location.origin): boolean {
   return (PRIVY_ALLOWED_ORIGINS as readonly string[]).includes(origin);
