@@ -61,31 +61,34 @@ const MarketPagination = ({
   if (totalPages <= 1) return null;
 
   return (
-    <div className="bg-bubble-white dark:bg-deep-sea-navy/20 rounded-xl p-6 border border-ocean-teal/20">
-      <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+    <div className="bg-bubble-white dark:bg-deep-sea-navy/20 rounded-xl p-4 sm:p-6 border border-ocean-teal/20 min-w-0 w-full max-w-full overflow-hidden">
+      <div className="flex flex-col md:flex-row items-center justify-between gap-4 min-w-0">
         <div className="text-sm text-ink-blue">
           Showing {startItem} to {endItem} of {totalItems} markets
         </div>
         
-        <div className="flex items-center gap-2">
+        <div className="flex w-full min-w-0 items-center justify-center gap-1 sm:w-auto sm:gap-2">
           <Button
+            type="button"
             variant="outline"
             size="sm"
             onClick={() => onPageChange(currentPage - 1)}
             disabled={currentPage === 1}
-            className="border-ocean-teal/30 hover:bg-ocean-teal/10"
+            aria-label="Previous page"
+            className="shrink-0 border-ocean-teal/30 px-2 hover:bg-ocean-teal/10 sm:px-3"
           >
             <ChevronLeft className="h-4 w-4" />
-            Previous
+            <span className="hidden sm:inline">Previous</span>
           </Button>
           
-          <div className="flex items-center gap-1">
+          <div className="flex min-w-0 items-center gap-1">
             {getVisiblePages().map((page, index) => (
               <div key={index}>
                 {page === '...' ? (
                   <span className="px-2 py-1 text-ink-blue">...</span>
                 ) : (
                   <Button
+                    type="button"
                     variant={currentPage === page ? "default" : "outline"}
                     size="sm"
                     onClick={() => onPageChange(page as number)}
@@ -103,13 +106,15 @@ const MarketPagination = ({
           </div>
           
           <Button
+            type="button"
             variant="outline"
             size="sm"
             onClick={() => onPageChange(currentPage + 1)}
             disabled={currentPage === totalPages}
-            className="border-ocean-teal/30 hover:bg-ocean-teal/10"
+            aria-label="Next page"
+            className="shrink-0 border-ocean-teal/30 px-2 hover:bg-ocean-teal/10 sm:px-3"
           >
-            Next
+            <span className="hidden sm:inline">Next</span>
             <ChevronRight className="h-4 w-4" />
           </Button>
         </div>
