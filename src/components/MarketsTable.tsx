@@ -67,7 +67,11 @@ import type {
 } from "@/components/market-modal/types";
 import { normalizeWadUsdPerToken, roundUsdToCents, cn } from "@/lib/utils";
 import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
-import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
+import {
+  getCachedAccountInformation,
+  getCachedAsaHoldingAtomic,
+  invalidateWalletBalanceRpc,
+} from "@/utils/walletBalanceRpc";
 import { useToast } from "@/hooks/use-toast";
 import { isAtDepositCap, isAtBorrowCap } from "@/constants/lendingCaps";
 import algosdk, { waitForConfirmation } from "algosdk";
@@ -347,6 +351,58 @@ function marketsTableWalletBalanceCacheKey(
   marketRowKey?: string
 ): string {
   return `${asset}|p=${poolId ?? ""}|rk=${marketRowKey ?? ""}`;
+}
+
+const WALLET_BALANCES_SESSION_TTL_MS = 60_000;
+
+function marketsWalletBalancesSessionKey(
+  networkId: string,
+  address: string
+): string {
+  return `dorkfi:walletBalances:${networkId}:${address}`;
+}
+
+function readMarketsWalletBalancesSession(
+  networkId: string,
+  address: string
+): Record<string, { balance: number; balanceUSD: number }> | null {
+  if (typeof sessionStorage === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(
+      marketsWalletBalancesSessionKey(networkId, address)
+    );
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as {
+      savedAt?: number;
+      data?: Record<string, { balance: number; balanceUSD: number }>;
+    };
+    if (
+      !parsed?.savedAt ||
+      !parsed.data ||
+      Date.now() - parsed.savedAt > WALLET_BALANCES_SESSION_TTL_MS
+    ) {
+      return null;
+    }
+    return parsed.data;
+  } catch {
+    return null;
+  }
+}
+
+function writeMarketsWalletBalancesSession(
+  networkId: string,
+  address: string,
+  data: Record<string, { balance: number; balanceUSD: number }>
+): void {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    sessionStorage.setItem(
+      marketsWalletBalancesSessionKey(networkId, address),
+      JSON.stringify({ savedAt: Date.now(), data })
+    );
+  } catch {
+    // Ignore quota / private-mode failures.
+  }
 }
 
 /** Toolbar gas-style meter: fill hits 100% at this many spendable ALGO. */
@@ -870,6 +926,7 @@ const MarketsTable = () => {
     loadVisibleMarkets,
     loadAllMarkets,
     isLoading,
+    isLoadingVisible,
     marketsData,
     wadMintMarket,
     newMarketsCount,
@@ -1168,33 +1225,46 @@ const MarketsTable = () => {
           : undefined,
     });
 
-    setIsLoadingBalance(true);
+    const balanceCacheKey = marketsTableWalletBalanceCacheKey(
+      asset,
+      poolId,
+      marketRowKey
+    );
+    const hasCachedBalance = walletBalances[balanceCacheKey] !== undefined;
+    // Only show loading if we have nothing to paint yet.
+    if (!hasCachedBalance) {
+      setIsLoadingBalance(true);
+    }
+
     void (async () => {
       try {
         await fetchWalletBalance(asset, poolId, marketRowKey);
-
-        if (activeAccount?.address && poolId != null && poolId !== "") {
-          try {
-            const poolCollateralRows =
-              await fetchPoolCollateralMarketRowsForDeposit(
-                activeAccount.address,
-                currentNetwork as NetworkId,
-                poolId
-              );
-            setDepositPoolCollateralMarkets(poolCollateralRows);
-          } catch (e) {
-            console.error(
-              "Error loading pool collateral markets for deposit:",
-              e
-            );
-          }
-        }
       } catch (error) {
         console.error("Error fetching wallet balance for deposit:", error);
       } finally {
         setIsLoadingBalance(false);
       }
     })();
+
+    // Collateral rows are independent of the wallet-balance spinner.
+    if (activeAccount?.address && poolId != null && poolId !== "") {
+      void (async () => {
+        try {
+          const poolCollateralRows =
+            await fetchPoolCollateralMarketRowsForDeposit(
+              activeAccount.address,
+              currentNetwork as NetworkId,
+              poolId
+            );
+          setDepositPoolCollateralMarkets(poolCollateralRows);
+        } catch (e) {
+          console.error(
+            "Error loading pool collateral markets for deposit:",
+            e
+          );
+        }
+      })();
+    }
   };
 
   const handleWithdrawClick = (asset: string) => {
@@ -1756,18 +1826,23 @@ const MarketsTable = () => {
     marketsForLookup,
   ]);
 
-  // Load all markets when component mounts
-  useEffect(() => {
-    loadAllMarkets();
-  }, [loadAllMarkets]);
+  // Market rows hydrate via useOnDemandMarketData (bulk API + gap-fill).
 
-  // Clear wallet balance cache and user global data when wallet address changes
+  // Restore / clear wallet balance cache when wallet or network changes
   useEffect(() => {
-    setWalletBalances({});
     setUserGlobalData(null);
     setClaimableRewards({});
     setClaimedAmount(null);
-  }, [activeAccount?.address]);
+    if (!activeAccount?.address) {
+      setWalletBalances({});
+      return;
+    }
+    const cached = readMarketsWalletBalancesSession(
+      currentNetwork,
+      activeAccount.address
+    );
+    setWalletBalances(cached ?? {});
+  }, [activeAccount?.address, currentNetwork]);
 
   // Check for rewards using arc200_approval method simulation
   useEffect(() => {
@@ -2645,7 +2720,7 @@ const MarketsTable = () => {
 
   // Handle refresh button click
   const handleRefresh = () => {
-    loadAllMarkets();
+    void loadAllMarkets(true);
     setMarketsToolbarAlgoRefreshNonce((n) => n + 1);
   };
 
@@ -2666,6 +2741,10 @@ const MarketsTable = () => {
       delete newBalances[asset];
       return newBalances;
     });
+
+    if (activeAccount?.address) {
+      invalidateWalletBalanceRpc(activeAccount.address);
+    }
 
     await fetchWalletBalance(asset, poolId, marketRowKey, {
       bypassCache: true,
@@ -2783,6 +2862,28 @@ const MarketsTable = () => {
       // Initialize ARC200Service with current clients
       const clients = await getSyncedClientsForReads();
       ARC200Service.initialize(clients);
+      const bypassRpc = opts?.bypassCache === true;
+
+      // Warm / reuse a single accountInformation snapshot for native + ASA reads.
+      if (
+        useNativeAlgoForFolksAlgoHybridDeposit ||
+        useFolksUnderlyingAsaWalletBalance ||
+        tokenStandardUsesNativeWalletBalance(originalTokenConfig.tokenStandard) ||
+        originalTokenConfig.tokenStandard === "asa-asa" ||
+        originalTokenConfig.tokenStandard === "asa" ||
+        originalTokenConfig.tokenStandard === "network-asa" ||
+        originalTokenConfig.tokenStandard === "arc200-exchange"
+      ) {
+        try {
+          await getCachedAccountInformation(
+            clients.algod,
+            activeAccount.address,
+            { bypassCache: bypassRpc }
+          );
+        } catch {
+          // Individual paths still fall back to their own reads.
+        }
+      }
 
       // Debug: Log token config details
       console.log("[MarketsTable] Token config for balance fetch:", {
@@ -2804,9 +2905,11 @@ const MarketsTable = () => {
           `[MarketsTable] Folks ALGO hybrid deposit market — using native spendable ALGO for ${asset}`
         );
         try {
-          const accountInfo = await clients.algod
-            .accountInformation(activeAccount.address)
-            .do();
+          const accountInfo = await getCachedAccountInformation(
+            clients.algod,
+            activeAccount.address,
+            { bypassCache: bypassRpc }
+          );
           balance = spendableAlgoHumanFromAccount(accountInfo);
         } catch (error) {
           console.error(
@@ -2819,20 +2922,14 @@ const MarketsTable = () => {
         // Standalone f-asset rows (e.g. `tokens.fUSDC`) use f-ASA in config; default deposit route is
         // underlying USDC (`folksParams.assetId`), same as `SupplyBorrowModal` after route selection.
         try {
-          const accAssetInfo = await clients.algod
-            .accountAssetInformation(
-              activeAccount.address,
-              folksUnderlyingAsaIdForWallet
-            )
-            .do();
-          const atomic = getAccountAssetHoldingAmountAtomic(accAssetInfo);
-          if (atomic != null) {
-            balance =
-              Number(atomic) /
-              Math.pow(10, originalTokenConfig.decimals);
-          } else {
-            balance = 0;
-          }
+          const atomic = await getCachedAsaHoldingAtomic(
+            clients.algod,
+            activeAccount.address,
+            folksUnderlyingAsaIdForWallet,
+            { bypassCache: bypassRpc }
+          );
+          balance =
+            Number(atomic) / Math.pow(10, originalTokenConfig.decimals);
         } catch (error) {
           console.error(
             `Error fetching Folks underlying ASA balance for ${asset}:`,
@@ -2848,6 +2945,9 @@ const MarketsTable = () => {
         console.log(
           `Fetching ARC200 balance for ${asset} (contract: ${token.underlyingContractId})`
         );
+        if (bypassRpc) {
+          invalidateWalletBalanceRpc(activeAccount.address);
+        }
         const arc200Balance = await ARC200Service.getBalance(
           activeAccount.address,
           token.underlyingContractId
@@ -2877,10 +2977,11 @@ const MarketsTable = () => {
         });
         console.log(`Fetching network token balance for ${asset}`);
         try {
-          const clients = await getSyncedClientsForReads();
-          const accountInfo = await clients.algod
-            .accountInformation(activeAccount.address)
-            .do();
+          const accountInfo = await getCachedAccountInformation(
+            clients.algod,
+            activeAccount.address,
+            { bypassCache: bypassRpc }
+          );
           console.log(`[MarketsTable] accountInfo for ${asset}:`, accountInfo);
           balance = spendableAlgoHumanFromAccount(accountInfo);
           console.log(`[MarketsTable] Network token balance for ${asset}:`, {
@@ -2905,21 +3006,15 @@ const MarketsTable = () => {
           `Fetching ASA balance for ${asset} (asa-asa asset ID: ${assetId})`
         );
         try {
-          const clients = await getSyncedClientsForReads();
-          const accAssetInfo = await clients.algod
-            .accountAssetInformation(activeAccount.address, assetId)
-            .do();
-
-          const atomic = getAccountAssetHoldingAmountAtomic(accAssetInfo);
-          if (atomic != null) {
-            balance =
-              Number(atomic) /
-              Math.pow(10, originalTokenConfig.decimals);
-            console.log(`ASA balance for ${asset}: ${balance}`);
-          } else {
-            console.log(`No ASA balance found for ${asset}`);
-            balance = 0;
-          }
+          const atomic = await getCachedAsaHoldingAtomic(
+            clients.algod,
+            activeAccount.address,
+            assetId,
+            { bypassCache: bypassRpc }
+          );
+          balance =
+            Number(atomic) / Math.pow(10, originalTokenConfig.decimals);
+          console.log(`ASA balance for ${asset}: ${balance}`);
         } catch (error) {
           console.error(`Error fetching ASA balance for ${asset}:`, error);
           balance = 0;
@@ -2934,23 +3029,16 @@ const MarketsTable = () => {
           `Fetching ASA balance for ${asset} (asset ID: ${token.underlyingAssetId})`
         );
         try {
-          const clients = await getSyncedClientsForReads();
           const assetId = parseInt(token.underlyingAssetId);
-          const accAssetInfo = await clients.algod
-            .accountAssetInformation(activeAccount.address, assetId)
-            .do();
-
-          const atomic = getAccountAssetHoldingAmountAtomic(accAssetInfo);
-          if (atomic != null) {
-            // Convert from smallest units to human readable format
-            balance =
-              Number(atomic) /
-              Math.pow(10, originalTokenConfig.decimals);
-            console.log(`ASA balance for ${asset}: ${balance}`);
-          } else {
-            console.log(`No ASA balance found for ${asset}`);
-            balance = 0;
-          }
+          const atomic = await getCachedAsaHoldingAtomic(
+            clients.algod,
+            activeAccount.address,
+            assetId,
+            { bypassCache: bypassRpc }
+          );
+          balance =
+            Number(atomic) / Math.pow(10, originalTokenConfig.decimals);
+          console.log(`ASA balance for ${asset}: ${balance}`);
         } catch (error) {
           console.error(`Error fetching ASA balance for ${asset}:`, error);
           balance = 0;
@@ -2961,23 +3049,16 @@ const MarketsTable = () => {
           `Fetching ASA balance for ${asset} (asset ID: ${token.underlyingAssetId})`
         );
         try {
-          const clients = await getSyncedClientsForReads();
           const assetId = parseInt(token.underlyingAssetId);
-          const accAssetInfo = await clients.algod
-            .accountAssetInformation(activeAccount.address, assetId)
-            .do();
-
-          const atomic = getAccountAssetHoldingAmountAtomic(accAssetInfo);
-          if (atomic != null) {
-            // Convert from smallest units to human readable format
-            balance =
-              Number(atomic) /
-              Math.pow(10, originalTokenConfig.decimals);
-            console.log(`ASA balance for ${asset}: ${balance}`);
-          } else {
-            console.log(`No ASA balance found for ${asset}`);
-            balance = 0;
-          }
+          const atomic = await getCachedAsaHoldingAtomic(
+            clients.algod,
+            activeAccount.address,
+            assetId,
+            { bypassCache: bypassRpc }
+          );
+          balance =
+            Number(atomic) / Math.pow(10, originalTokenConfig.decimals);
+          console.log(`ASA balance for ${asset}: ${balance}`);
         } catch (error) {
           console.error(`Error fetching ASA balance for ${asset}:`, error);
           balance = 0;
@@ -3013,10 +3094,20 @@ const MarketsTable = () => {
         balanceUSD,
       };
 
-      setWalletBalances((prev) => ({
-        ...prev,
-        [cacheKey]: balanceData,
-      }));
+      setWalletBalances((prev) => {
+        const next = {
+          ...prev,
+          [cacheKey]: balanceData,
+        };
+        if (activeAccount?.address) {
+          writeMarketsWalletBalancesSession(
+            currentNetwork,
+            activeAccount.address,
+            next
+          );
+        }
+        return next;
+      });
 
       console.log(`Final balance data for ${asset}:`, balanceData);
       return balanceData;
@@ -3035,10 +3126,8 @@ const MarketsTable = () => {
       networkId: currentNetwork as NetworkId,
       warmWalletBalance: (p: MarketActionTokenParams) => {
         if (!activeAccount?.address) return;
-        const rowKey = p.configSymbol
-          ? `${p.asset}|${p.configSymbol}|${p.poolId ?? ""}`
-          : undefined;
-        void fetchWalletBalance(p.asset, p.poolId, rowKey);
+        // Use the real markets `_sortKey` so hover cache matches modal open.
+        void fetchWalletBalance(p.asset, p.poolId, p.marketRowKey);
       },
     }),
     [debouncedPrefetch, activeAccount?.address, currentNetwork]
@@ -3793,7 +3882,7 @@ const MarketsTable = () => {
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-4">
               <div className="text-xl md:text-2xl font-bold text-slate-800 dark:text-white">
                 Market Overview
-                {isLoading && (
+                {isLoadingVisible && (
                   <span className="ml-2 text-sm font-normal text-muted-foreground">
                     (Loading...)
                   </span>

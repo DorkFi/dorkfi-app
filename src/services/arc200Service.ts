@@ -8,6 +8,11 @@
 import algosdk, { Algodv2, Indexer } from "algosdk";
 import { AlgorandClients } from "./algorandService";
 import { abi, CONTRACT } from "ulujs";
+import { withRpcReadCache } from "@/utils/rpcReadCache";
+import {
+  WALLET_BALANCE_RPC_TTL_MS,
+  walletArc200RpcCacheKey,
+} from "@/utils/walletBalanceRpc";
 
 export interface ARC200TokenInfo {
   contractId: string;
@@ -144,53 +149,49 @@ export class ARC200Service {
     userAddress: string,
     contractId: string
   ): Promise<string | null> {
-    const cacheKey = `${userAddress}-${contractId}`;
+    const cacheKey = walletArc200RpcCacheKey(userAddress, contractId);
 
-    // Check cache first
-    // if (this.balanceCache.has(cacheKey)) {
-    //   console.log(`Using cached ARC200 balance for ${contractId}`);
-    //   return this.balanceCache.get(cacheKey)!;
-    // }
+    return withRpcReadCache(
+      cacheKey,
+      async () => {
+        if (!this.clients) {
+          throw new Error("ARC200Service not initialized");
+        }
 
-    try {
-      if (!this.clients) {
-        throw new Error("ARC200Service not initialized");
-      }
+        console.log(
+          `Fetching ARC200 balance for contract ${contractId} and address ${userAddress}`
+        );
 
-      console.log(
-        `Fetching ARC200 balance for contract ${contractId} and address ${userAddress}`
-      );
+        const ci = new CONTRACT(
+          Number(contractId),
+          this.clients.algod,
+          undefined,
+          abi.nt200,
+          { addr: userAddress, sk: new Uint8Array() }
+        );
+        const arc200BalanceOfR = await ci.arc200_balanceOf(userAddress);
 
-      const ci = new CONTRACT(
-        Number(contractId),
-        this.clients.algod,
-        undefined,
-        abi.nt200,
-        { addr: userAddress, sk: new Uint8Array() }
-      );
-      const arc200BalanceOfR = await ci.arc200_balanceOf(userAddress);
+        if (!arc200BalanceOfR.success) {
+          throw new Error("Failed to get ARC200 balance");
+        }
 
-      if (!arc200BalanceOfR.success) {
-        throw new Error("Failed to get ARC200 balance");
-      }
+        const arc200BalanceOf = String(arc200BalanceOfR.returnValue);
 
-      const arc200BalanceOf = arc200BalanceOfR.returnValue;
+        console.log(
+          `ARC200 Balance for ${contractId}: ${arc200BalanceOf} base unit tokens`
+        );
 
-      console.log(
-        `ARC200 Balance for ${contractId}: ${arc200BalanceOf} base unit tokens`
-      );
-
-      // Cache the result
-      this.balanceCache.set(cacheKey, arc200BalanceOf);
-
-      return arc200BalanceOf;
-    } catch (error) {
+        this.balanceCache.set(cacheKey, arc200BalanceOf);
+        return arc200BalanceOf;
+      },
+      WALLET_BALANCE_RPC_TTL_MS
+    ).catch((error) => {
       console.error(
         `Error fetching ARC200 balance for contract ${contractId}:`,
         error
       );
       return null;
-    }
+    });
   }
 
   /**

@@ -4293,7 +4293,7 @@ export default function AdminDashboard() {
             pause ? "Market paused successfully" : "Market unpaused successfully",
             { description: `Transaction ID: ${res.txid}` }
           );
-          loadAllMarkets();
+          void loadAllMarkets(true);
         } else if (!result.success) {
           const err = result.error;
           toast.error("Failed to update market pause state", {
@@ -4361,7 +4361,7 @@ export default function AdminDashboard() {
             newPrice: "",
           });
           // Refresh market data
-          loadAllMarkets();
+          void loadAllMarkets(true);
         } else {
           alert(`Failed to update price: ${(result as any).error}`);
         }
@@ -4428,7 +4428,7 @@ export default function AdminDashboard() {
             newMaxDeposits: "",
           });
           // Refresh markets data
-          loadAllMarkets();
+          void loadAllMarkets(true);
         } else {
           alert(`Failed to update max deposits: ${(result as any).error}`);
         }
@@ -4497,7 +4497,7 @@ export default function AdminDashboard() {
             newMaxBorrows: "",
           });
           // Refresh markets data
-          loadAllMarkets();
+          void loadAllMarkets(true);
         } else {
           alert(`Failed to update max borrows: ${(result as any).error}`);
         }
@@ -4512,10 +4512,7 @@ export default function AdminDashboard() {
     }
   };
 
-  // Load all markets when component mounts or network changes
-  React.useEffect(() => {
-    loadAllMarkets();
-  }, [currentNetwork, loadAllMarkets]);
+  // Markets hydrate via useOnDemandMarketData (bulk API). Force-refresh after mutations with loadAllMarkets(true).
 
   const handleApproveOperation = (operationId: number) => {
     console.log("Approving operation:", operationId);

@@ -34,6 +34,7 @@ export function buildMarketHoverHandlers(
     poolId,
     configSymbol: resolvedConfig,
     marketId,
+    marketRowKey,
   };
   const keyBase = [
     bundle.networkId,
@@ -41,6 +42,7 @@ export function buildMarketHoverHandlers(
     poolId ?? "",
     resolvedConfig ?? "",
     marketId ?? "",
+    marketRowKey ?? "",
   ].join(":");
 
   const stop = (e: MouseEvent) => e.stopPropagation();
@@ -49,9 +51,11 @@ export function buildMarketHoverHandlers(
     onDepositMouseEnter: bundle.userAddress
       ? (e: MouseEvent) => {
           stop(e);
+          // Warm immediately so a quick click still hits a hot cache.
+          bundle.warmWalletBalance?.(params);
           bundle.debounced(`deposit:${keyBase}`, () => {
             bundle.warmWalletBalance?.(params);
-          });
+          }, 0);
         }
       : undefined,
     onBorrowMouseEnter: bundle.userAddress

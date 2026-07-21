@@ -39,6 +39,8 @@ export type MarketActionTokenParams = {
   poolId?: string;
   configSymbol?: string;
   marketId?: string;
+  /** Markets table `_sortKey` — must match modal wallet-balance cache keys. */
+  marketRowKey?: string;
 };
 
 function resolveActionToken(params: MarketActionTokenParams) {

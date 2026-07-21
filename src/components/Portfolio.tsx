@@ -94,7 +94,11 @@ import {
   warmRepayModalRpc,
   type MarketActionTokenParams,
 } from "@/utils/modalPrefetch";
-import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
+import {
+  getCachedAccountInformation,
+  getCachedAsaHoldingAtomic,
+  invalidateWalletBalanceRpc,
+} from "@/utils/walletBalanceRpc";
 import { shouldShowConfigSymbolUnderDisplayAsset } from "@/utils/portfolioAssetSubline";
 import {
   calculateUserHealthFactor,
@@ -2758,6 +2762,23 @@ const Portfolio = () => {
       }
       ARC200Service.initialize(clients);
 
+      const bypassRpc = doFetch === true;
+      if (
+        tokenStandardUsesNativeWalletBalance(originalTokenConfig.tokenStandard) ||
+        originalTokenConfig.tokenStandard === "asa-asa" ||
+        originalTokenConfig.tokenStandard === "asa" ||
+        originalTokenConfig.tokenStandard === "network-asa" ||
+        originalTokenConfig.tokenStandard === "arc200-exchange"
+      ) {
+        try {
+          await getCachedAccountInformation(clients.algod, displayAddress, {
+            bypassCache: bypassRpc,
+          });
+        } catch {
+          // Paths below still attempt their own reads.
+        }
+      }
+
       let balance = 0;
 
       // Debug: Log token config details
@@ -2779,6 +2800,9 @@ const Portfolio = () => {
         console.log(
           `Fetching ARC200 balance for ${asset} (contract: ${token.underlyingContractId})`
         );
+        if (bypassRpc) {
+          invalidateWalletBalanceRpc(displayAddress);
+        }
         const arc200Balance = await ARC200Service.getBalance(
           displayAddress,
           token.underlyingContractId
@@ -2809,10 +2833,11 @@ const Portfolio = () => {
         });
         console.log(`Fetching network token balance for ${asset}`);
         try {
-          // Use the same clients we initialized earlier for this network
-          const accountInfo = await clients.algod
-            .accountInformation(displayAddress)
-            .do();
+          const accountInfo = await getCachedAccountInformation(
+            clients.algod,
+            displayAddress,
+            { bypassCache: bypassRpc }
+          );
           console.log("accountInfo", accountInfo);
           balance = spendableAlgoHumanFromAccount(accountInfo);
           console.log(`Network token balance for ${asset}: ${balance}`);
@@ -2834,19 +2859,15 @@ const Portfolio = () => {
           `Fetching ASA balance for ${asset} (asa-asa asset ID: ${assetId})`
         );
         try {
-          const accAssetInfo = await clients.algod
-            .accountAssetInformation(displayAddress, assetId)
-            .do();
-
-          const atomic = getAccountAssetHoldingAmountAtomic(accAssetInfo);
-          if (atomic != null) {
-            balance =
-              Number(atomic) / Math.pow(10, originalTokenConfig.decimals);
-            console.log(`ASA balance for ${asset}: ${balance}`);
-          } else {
-            console.log(`No ASA balance found for ${asset}`);
-            balance = 0;
-          }
+          const atomic = await getCachedAsaHoldingAtomic(
+            clients.algod,
+            displayAddress,
+            assetId,
+            { bypassCache: bypassRpc }
+          );
+          balance =
+            Number(atomic) / Math.pow(10, originalTokenConfig.decimals);
+          console.log(`ASA balance for ${asset}: ${balance}`);
         } catch (error) {
           console.error(`Error fetching ASA balance for ${asset}:`, error);
           balance = 0;
@@ -2861,23 +2882,16 @@ const Portfolio = () => {
           `Fetching ASA balance for ${asset} (asset ID: ${token.underlyingAssetId})`
         );
         try {
-          // Use the same clients we initialized earlier for this network
           const assetId = parseInt(token.underlyingAssetId);
-          const accAssetInfo = await clients.algod
-            .accountAssetInformation(displayAddress, assetId)
-            .do();
-
-          const atomic = getAccountAssetHoldingAmountAtomic(accAssetInfo);
-          if (atomic != null) {
-            // Convert from smallest units to human readable format
-            balance =
-              Number(atomic) /
-              Math.pow(10, originalTokenConfig.decimals);
-            console.log(`ASA balance for ${asset}: ${balance}`);
-          } else {
-            console.log(`No ASA balance found for ${asset}`);
-            balance = 0;
-          }
+          const atomic = await getCachedAsaHoldingAtomic(
+            clients.algod,
+            displayAddress,
+            assetId,
+            { bypassCache: bypassRpc }
+          );
+          balance =
+            Number(atomic) / Math.pow(10, originalTokenConfig.decimals);
+          console.log(`ASA balance for ${asset}: ${balance}`);
         } catch (error) {
           console.error(`Error fetching ASA balance for ${asset}:`, error);
           balance = 0;
@@ -2888,23 +2902,16 @@ const Portfolio = () => {
           `Fetching ASA balance for ${asset} (asset ID: ${token.underlyingAssetId})`
         );
         try {
-          // Use the same clients we initialized earlier for this network
           const assetId = parseInt(token.underlyingAssetId);
-          const accAssetInfo = await clients.algod
-            .accountAssetInformation(displayAddress, assetId)
-            .do();
-
-          const atomic = getAccountAssetHoldingAmountAtomic(accAssetInfo);
-          if (atomic != null) {
-            // Convert from smallest units to human readable format
-            balance =
-              Number(atomic) /
-              Math.pow(10, originalTokenConfig.decimals);
-            console.log(`ASA balance for ${asset}: ${balance}`);
-          } else {
-            console.log(`No ASA balance found for ${asset}`);
-            balance = 0;
-          }
+          const atomic = await getCachedAsaHoldingAtomic(
+            clients.algod,
+            displayAddress,
+            assetId,
+            { bypassCache: bypassRpc }
+          );
+          balance =
+            Number(atomic) / Math.pow(10, originalTokenConfig.decimals);
+          console.log(`ASA balance for ${asset}: ${balance}`);
         } catch (error) {
           console.error(`Error fetching ASA balance for ${asset}:`, error);
           balance = 0;
