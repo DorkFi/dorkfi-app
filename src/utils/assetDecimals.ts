@@ -74,6 +74,50 @@ export function usdPerTokenFromMarketInfoFormattedPrice(
  * Do **not** return the formatted number as-is when it is below 1e9 — values like `7120000`
  * are common and skipping the oracle divisor inflates USD by ~1e6 for 6-decimal assets.
  */
+/**
+ * USD per 1 token from the on-chain price oracle contract (`get_price_with_timestamp`).
+ * Raw integer uses the same 12-decimal scale as `get_market` (÷ 10^(12 − tokenDecimals)).
+ */
+export function usdPerTokenFromOracleContractRaw(
+  rawPrice: string | number | bigint,
+  tokenDecimals: number
+): number {
+  const rawStr =
+    typeof rawPrice === "bigint"
+      ? rawPrice.toString()
+      : String(rawPrice).replace(/,/g, "").trim();
+  if (rawStr === "" || rawStr === "0") return 0;
+  const n = Number(rawStr);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return getTokenPriceFromOracle(n, tokenDecimals);
+}
+
+/** Encode human USD/token as `MarketInfo.price` (post-÷1e18 oracle scale) for existing callers. */
+export function marketInfoFormattedPriceFromUsdPerToken(
+  usdPerToken: number,
+  tokenDecimals: number
+): string {
+  if (!Number.isFinite(usdPerToken) || usdPerToken <= 0) return "0";
+  return new BigNumber(usdPerToken)
+    .multipliedBy(new BigNumber(10).pow(12 - tokenDecimals))
+    .toFixed(12);
+}
+
+/**
+ * Prefer fresher price-oracle USD when `fetchMarketInfo` attached it; otherwise decode
+ * `marketInfo.price` from the lending pool `get_market` field.
+ */
+export function resolveUsdPerTokenFromMarketInfo(
+  marketInfo: { price: string; oracleUsdPerToken?: number },
+  tokenDecimals: number
+): number {
+  const oracle = marketInfo.oracleUsdPerToken;
+  if (typeof oracle === "number" && Number.isFinite(oracle) && oracle > 0) {
+    return oracle;
+  }
+  return usdPerTokenFromMarketInfoPrice(marketInfo.price, tokenDecimals);
+}
+
 export function usdPerTokenFromMarketInfoPrice(
   priceField: string | number | undefined | null,
   tokenDecimals: number

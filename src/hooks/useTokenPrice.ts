@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { fetchMarketInfo } from '@/services/lendingService';
 import { getAllTokensWithDisplayInfo } from '@/config';
 import { useNetwork } from '@/contexts/NetworkContext';
-import { usdPerTokenFromMarketInfoPrice } from '@/utils/assetDecimals';
+import { resolveUsdPerTokenFromMarketInfo } from '@/utils/assetDecimals';
 import { withRpcReadCache } from '@/utils/rpcReadCache';
 
 interface UseTokenPriceResult {
@@ -39,7 +39,7 @@ async function fetchTokenPriceUsd(
         );
         const decimals = otherToken.decimals ?? 6;
         if (marketInfo) {
-          const usd = usdPerTokenFromMarketInfoPrice(marketInfo.price, decimals);
+          const usd = resolveUsdPerTokenFromMarketInfo(marketInfo, decimals);
           const marketPrice = Number.isFinite(usd) && usd > 0 ? usd : null;
           if (marketPrice != null && marketPrice > 0) {
             return marketPrice;
@@ -59,7 +59,7 @@ async function fetchTokenPriceUsd(
 
   const decimals = token.decimals ?? 6;
   if (marketInfo) {
-    const usd = usdPerTokenFromMarketInfoPrice(marketInfo.price, decimals);
+    const usd = resolveUsdPerTokenFromMarketInfo(marketInfo, decimals);
     const marketPrice = Number.isFinite(usd) && usd > 0 ? usd : null;
     if (marketPrice != null && marketPrice > 0) {
       return marketPrice;

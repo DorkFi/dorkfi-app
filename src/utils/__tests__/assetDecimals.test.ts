@@ -9,6 +9,9 @@ import {
   getTokenPriceFromOracle,
   usdPerTokenFromMarketInfoFormattedPrice,
   usdPerTokenFromMarketInfoPrice,
+  usdPerTokenFromOracleContractRaw,
+  marketInfoFormattedPriceFromUsdPerToken,
+  resolveUsdPerTokenFromMarketInfo,
   usdValueForHumanTokenAmount,
 } from "../assetDecimals";
 
@@ -148,5 +151,44 @@ describe("usdValueForHumanTokenAmount", () => {
     expect(usdValueForHumanTokenAmount(1, 0)).toBe(0);
     expect(usdValueForHumanTokenAmount(NaN, 1)).toBe(0);
     expect(usdValueForHumanTokenAmount(1, NaN)).toBe(0);
+  });
+});
+
+describe("usdPerTokenFromOracleContractRaw", () => {
+  it("converts goBTC oracle raw to ~USD (÷10^4 for 8 decimals)", () => {
+    const raw = 643_689_073;
+    expect(usdPerTokenFromOracleContractRaw(raw, 8)).toBeCloseTo(64_368.91, 1);
+  });
+
+  it("converts 6-decimal oracle raw (÷10^6)", () => {
+    expect(usdPerTokenFromOracleContractRaw(7_120_000, 6)).toBe(7.12);
+  });
+});
+
+describe("resolveUsdPerTokenFromMarketInfo", () => {
+  it("prefers oracleUsdPerToken when set", () => {
+    expect(
+      resolveUsdPerTokenFromMarketInfo(
+        { price: "629064979", oracleUsdPerToken: 64_368.91 },
+        8
+      )
+    ).toBe(64_368.91);
+  });
+
+  it("falls back to market price field", () => {
+    expect(
+      resolveUsdPerTokenFromMarketInfo({ price: "7120000" }, 6)
+    ).toBe(7.12);
+  });
+});
+
+describe("marketInfoFormattedPriceFromUsdPerToken", () => {
+  it("round-trips with usdPerTokenFromMarketInfoFormattedPrice", () => {
+    const usd = 64_368.9073;
+    const formatted = marketInfoFormattedPriceFromUsdPerToken(usd, 8);
+    expect(usdPerTokenFromMarketInfoFormattedPrice(formatted, 8)).toBeCloseTo(
+      usd,
+      4
+    );
   });
 });

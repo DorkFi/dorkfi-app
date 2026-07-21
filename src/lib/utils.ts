@@ -11,10 +11,6 @@ function stripTrailingZerosDecimal(s: string): string {
   return s.replace(/(\.\d*?[1-9])0+$/, "$1").replace(/\.$/, "")
 }
 
-/**
- * Format USD price per whole token for UI: 2 decimals when ≥ $0.01; extra decimals
- * when the value would otherwise show as $0.00 (e.g. VOI).
- */
 /** Round a USD amount to the nearest cent (half-up). */
 export function roundUsdToCents(value: number): number {
   if (value == null || !Number.isFinite(value)) return 0;
@@ -50,24 +46,32 @@ export function normalizeWadUsdPerToken(priceUsd: number): number {
   return priceUsd;
 }
 
+/**
+ * Format USD price per whole token for UI.
+ * - ≥ $1: 2 decimals (e.g. USDC, BTC)
+ * - $0.01–$1: 3–4 decimals so mid-priced assets (e.g. UNIT $0.616) are not rounded to cents
+ * - < $0.01: enough decimals to avoid showing $0.00 (e.g. VOI)
+ */
 export function formatUsdPerTokenDisplay(price: number): string {
   if (price == null || !Number.isFinite(price)) return "0.00"
   if (price === 0) return "0.00"
 
   const abs = Math.abs(price)
-  if (abs >= 0.01) {
+  if (abs >= 1) {
     return price.toLocaleString("en-US", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     })
   }
-
-  for (let d = 3; d <= 10; d++) {
-    const s = price.toFixed(d)
-    if (parseFloat(s) !== 0) {
-      return stripTrailingZerosDecimal(s)
-    }
+  if (abs >= 0.01) {
+    return price.toLocaleString("en-US", {
+      minimumFractionDigits: 3,
+      maximumFractionDigits: 4,
+    })
   }
+
+  const dust = stripTrailingZerosDecimal(price.toFixed(8))
+  if (dust !== "0" && dust !== "0.0") return dust
 
   return stripTrailingZerosDecimal(price.toExponential(4))
 }
