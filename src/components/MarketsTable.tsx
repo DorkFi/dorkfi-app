@@ -110,11 +110,57 @@ import {
   type MarketActionTokenParams,
 } from "@/utils/modalPrefetch";
 import { buildMarketHoverHandlers } from "@/utils/modalHoverHandlers";
+import { resolveUsdPerTokenFromMarketInfo } from "@/utils/assetDecimals";
 
 const MAX_CLAIMS_PER_TX = 3;
 
+/** Token decimals for oracle USD math — match `getAssetData` (config wins over stale API rows). */
+function resolveMarketRowTokenDecimals(
+  md: Record<string, unknown>,
+  networkId?: NetworkId
+): number {
+  if (networkId) {
+    const asset = String(md.asset ?? md.symbol ?? "");
+    const poolId =
+      md.poolId != null && String(md.poolId) !== ""
+        ? String(md.poolId)
+        : undefined;
+    const configSymbol =
+      typeof md.configSymbol === "string" ? md.configSymbol : undefined;
+    const rowKey = (md as { _sortKey?: string })._sortKey;
+    const mi = md.marketInfo as { marketId?: string | number } | undefined;
+    const marketContractId =
+      (rowKey ? marketContractIdFromRowCacheKey(rowKey) : undefined) ??
+      (mi?.marketId != null && String(mi.marketId).trim() !== ""
+        ? String(mi.marketId)
+        : undefined);
+
+    const token = resolveTokenForMarketPosition(networkId, {
+      asset,
+      poolId,
+      configSymbol,
+      marketContractId,
+    });
+    const fromConfig = Number(token?.decimals);
+    if (Number.isFinite(fromConfig) && fromConfig > 0) {
+      return fromConfig;
+    }
+  }
+
+  const mi = md.marketInfo as { decimals?: number } | undefined;
+  const fromMi = Number(mi?.decimals);
+  if (Number.isFinite(fromMi) && fromMi > 0) {
+    return fromMi;
+  }
+
+  return 6;
+}
+
 /** Map on-demand market row → PremiumMarketModal `MarketData` (USD fields in whole dollars like the markets table). */
-function normalizeMarketData(md: Record<string, unknown>) {
+function normalizeMarketData(
+  md: Record<string, unknown>,
+  networkId?: NetworkId
+) {
   const totalSupplyUSD = Number(md.totalSupplyUSD ?? 0);
   const totalBorrowUSD = Number(md.totalBorrowUSD ?? 0);
   const supplyUsdWhole = Math.max(0, Math.round(totalSupplyUSD / 1_000_000));
@@ -126,7 +172,9 @@ function normalizeMarketData(md: Record<string, unknown>) {
   const assetSym = String(md.asset ?? md.symbol ?? "").toUpperCase();
   const isWad = assetSym === "WAD";
 
-  let price = 1;
+  const tokenDecimals = resolveMarketRowTokenDecimals(md, networkId);
+
+  let price = 0;
   if (isWad) {
     // WAD-only: oracle is often micro-USD per token; TVL from hook is micro-USD.
     const oracleStr =
@@ -135,28 +183,28 @@ function normalizeMarketData(md: Record<string, unknown>) {
       oracleStr !== "" ? Number.parseFloat(oracleStr) : Number.NaN;
     if (Number.isFinite(oracleUsd) && oracleUsd > 0) {
       price = normalizeWadUsdPerToken(oracleUsd);
-    } else if (
-      supplyTokensHuman > 0 &&
-      Number.isFinite(totalSupplyUSD) &&
-      totalSupplyUSD > 0
-    ) {
-      price = totalSupplyUSD / 1_000_000 / supplyTokensHuman;
     }
-  } else {
-    // All other markets: original TVL + scaled oracle fallback (unchanged).
+  } else if (mi?.price != null) {
+    price = resolveUsdPerTokenFromMarketInfo(
+      {
+        price: String(mi.price),
+        oracleUsdPerToken:
+          typeof mi.oracleUsdPerToken === "number"
+            ? mi.oracleUsdPerToken
+            : undefined,
+      },
+      tokenDecimals
+    );
+  }
+
+  // Fallback: TVL-implied price when oracle field is missing.
+  if (!(price > 0 && Number.isFinite(price))) {
     if (
       supplyTokensHuman > 0 &&
       Number.isFinite(totalSupplyUSD) &&
       totalSupplyUSD > 0
     ) {
       price = totalSupplyUSD / 1_000_000 / supplyTokensHuman;
-    } else if (mi?.price != null) {
-      const tokenPrice = parseFloat(String(mi.price)) || 0;
-      const decimals = Number(mi.decimals ?? 6);
-      if (tokenPrice > 0 && Number.isFinite(decimals)) {
-        price =
-          (tokenPrice * Math.pow(10, decimals + 6)) / Math.pow(10, 12);
-      }
     }
   }
 
@@ -270,6 +318,20 @@ function findMarketRowOnPage(
   }
   const found = pageMarkets.find((m) => String(m.asset) === asset);
   return found ?? null;
+}
+
+/** Prefer full `marketsData` cache (all rows); fall back to current page. */
+function findMarketRow(
+  marketsData: Record<string, Record<string, unknown>>,
+  pageMarkets: Record<string, unknown>[],
+  asset: string,
+  poolId?: string,
+  marketRowKey?: string
+): Record<string, unknown> | null {
+  if (marketRowKey && marketsData[marketRowKey]) {
+    return { ...marketsData[marketRowKey], _sortKey: marketRowKey };
+  }
+  return findMarketRowOnPage(pageMarkets, asset, poolId, marketRowKey);
 }
 
 function networkIdToChainId(
@@ -808,6 +870,7 @@ const MarketsTable = () => {
     loadVisibleMarkets,
     loadAllMarkets,
     isLoading,
+    marketsData,
     wadMintMarket,
     newMarketsCount,
     rewardMarketsCount,
@@ -1605,7 +1668,7 @@ const MarketsTable = () => {
     });
     // Fresh on-chain read for modal (fetchMarketInfo(..., "contract") via useOnDemandMarketData).
     void loadMarketDataWithBypass(
-      marketKeyForOnDemandLoad(poolId, configSymbol, asset)
+      rowKey ?? marketKeyForOnDemandLoad(poolId, configSymbol, asset)
     );
     if (activeAccount?.address) {
       const addr = activeAccount.address;
@@ -1644,15 +1707,17 @@ const MarketsTable = () => {
   // Key off `lastFetched` only — `markets` is remapped often (rewards APR) with new object refs.
   const detailModalRowLastFetched = useMemo(() => {
     if (!detailModal.isOpen || !detailModal.asset) return undefined;
-    const fresh = findMarketRowOnPage(
-      markets as Record<string, unknown>[],
+    const fresh = findMarketRow(
+      marketsData as Record<string, Record<string, unknown>>,
+      marketsForLookup as Record<string, unknown>[],
       detailModal.asset,
       detailModal.poolId,
       detailModal.marketRowKey
     );
     return (fresh as { lastFetched?: number } | undefined)?.lastFetched;
   }, [
-    markets,
+    marketsData,
+    marketsForLookup,
     detailModal.isOpen,
     detailModal.asset,
     detailModal.poolId,
@@ -1662,8 +1727,9 @@ const MarketsTable = () => {
   useEffect(() => {
     if (!detailModal.isOpen || !detailModal.asset) return;
     if (detailModalRowLastFetched === undefined) return;
-    const fresh = findMarketRowOnPage(
-      markets as Record<string, unknown>[],
+    const fresh = findMarketRow(
+      marketsData as Record<string, Record<string, unknown>>,
+      marketsForLookup as Record<string, unknown>[],
       detailModal.asset,
       detailModal.poolId,
       detailModal.marketRowKey
@@ -1686,6 +1752,8 @@ const MarketsTable = () => {
     detailModal.asset,
     detailModal.poolId,
     detailModal.marketRowKey,
+    marketsData,
+    marketsForLookup,
   ]);
 
   // Load all markets when component mounts
@@ -2922,15 +2990,16 @@ const MarketsTable = () => {
       }
 
       // Calculate USD value (same display asset may map to multiple rows)
-      const marketForPrice = marketRowKey
-        ? markets.find(
-            (m) => (m as { _sortKey?: string })._sortKey === marketRowKey
-          )
-        : markets.find((m) => m.asset === asset);
+      const marketForPrice = findMarketRow(
+        marketsData as Record<string, Record<string, unknown>>,
+        marketsForLookup as Record<string, unknown>[],
+        asset,
+        poolId,
+        marketRowKey
+      );
       const tokenPrice = marketForPrice
-        ? (marketForPrice.totalSupplyUSD / marketForPrice.totalSupply || 1) /
-          10 ** 6
-        : 1;
+        ? normalizeMarketData(marketForPrice, currentNetwork as NetworkId).price
+        : 0;
       const balanceUSD = balance * tokenPrice;
 
       console.log({
@@ -3233,7 +3302,7 @@ const MarketsTable = () => {
       portfolioHealthFactor: number | null,
       maxWithdrawUnderlying: number | null
     ): MarketDetailUserPosition => {
-      const norm = normalizeMarketData(row);
+      const norm = normalizeMarketData(row, currentNetwork as NetworkId);
       const price =
         norm.price > 0 && Number.isFinite(norm.price) ? norm.price : 0;
       const assetData = getAssetData(asset, poolId, detailModal.marketRowKey);
@@ -3379,7 +3448,7 @@ const MarketsTable = () => {
             if (maxWithdrawResult?.maxWithdrawUnderlying == null) return;
             setDetailModalUserPosition((prev) => {
               if (!prev) return prev;
-              const norm = normalizeMarketData(row);
+              const norm = normalizeMarketData(row, currentNetwork as NetworkId);
               const price =
                 norm.price > 0 && Number.isFinite(norm.price) ? norm.price : 0;
               const dep =
@@ -3877,7 +3946,10 @@ const MarketsTable = () => {
             chainId={networkIdToChainId(currentNetwork)}
             networkId={currentNetwork}
             rawMarket={detailModal.marketData}
-            marketData={normalizeMarketData(detailModal.marketData)}
+            marketData={normalizeMarketData(
+              detailModal.marketData,
+              currentNetwork as NetworkId
+            )}
             userPosition={detailModalUserPosition ?? undefined}
             userPositionLoadState={detailModalUserPositionLoad}
             onDeposit={() =>

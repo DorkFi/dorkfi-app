@@ -44,6 +44,11 @@ import {
   UserData,
   GlobalUserData,
 } from "@/clients/DorkFiLendingPoolClient";
+import { APP_SPEC as PriceOracleAppSpec } from "@/clients/PriceOracleClient";
+import {
+  marketInfoFormattedPriceFromUsdPerToken,
+  usdPerTokenFromOracleContractRaw,
+} from "@/utils/assetDecimals";
 import algosdk from "algosdk";
 import BigNumber from "bignumber.js";
 import { withRpcReadCache } from "@/utils/rpcReadCache";
@@ -167,6 +172,10 @@ export interface MarketInfo {
   reservesAmount?: string;
   /** Market `lastUpdateTime` from chain as ISO 8601. */
   chainLastUpdateIso?: string;
+  /** USD per token from price-oracle contract when fresher than `get_market.price`. */
+  oracleUsdPerToken?: number;
+  /** Unix seconds from price-oracle `get_price_with_timestamp`. */
+  oraclePriceTimestampSec?: number;
   // APY calculation results
   apyCalculation?: APYCalculationResult;
   borrowApyCalculation?: APYCalculationResult;
@@ -460,6 +469,132 @@ export const enhanceAVMMarketInfo = (
 
 /** Which on-chain read to use for market state in {@link fetchMarketInfoFromContract}. */
 export type FetchMarketInfoContractMethod = "sync_market" | "get_market";
+
+const ORACLE_PRICE_CACHE_TTL_MS = 60_000;
+
+/**
+ * On Pool A, fWBTC's price-oracle feed tracks spot BTC; goBTC's own oracle entry can lag.
+ * When resolving goBTC display price, also consider these reference market contract IDs.
+ */
+const ALGORAND_POOL_BTC_ORACLE_REFERENCE_MARKETS: Partial<
+  Record<string, string[]>
+> = {
+  "3333688282": ["3575837891"],
+};
+
+async function readOracleUsdPerToken(
+  networkId: NetworkId,
+  oracleKey: string,
+  tokenDecimals: number
+): Promise<{ usd: number; timestampSec: number } | null> {
+  if (!oracleKey || !Number.isFinite(Number(oracleKey))) return null;
+  const networkConfig = getNetworkConfig(networkId);
+  const oracleAppId = networkConfig.contracts?.priceOracle;
+  if (!oracleAppId || !isAlgorandCompatibleNetwork(networkId)) return null;
+
+  const cacheKey = `oracleUsd:${networkId}:${oracleKey}:${tokenDecimals}`;
+  return withRpcReadCache(
+    cacheKey,
+    async () => {
+      try {
+        const clients = await algorandService.initializeClientsForReads(
+          networkConfig.walletNetworkId as AlgorandNetwork
+        );
+        const ci = new CONTRACT(
+          Number(oracleAppId),
+          clients.algod,
+          undefined,
+          { ...PriceOracleAppSpec.contract, events: [] },
+          {
+            addr: algosdk.encodeAddress(
+              algosdk.getApplicationAddress(Number(oracleAppId)).publicKey
+            ),
+            sk: new Uint8Array(),
+          }
+        );
+        ci.setFee(5000);
+        const result = await ci.get_price_with_timestamp(Number(oracleKey));
+        if (!result.success || !result.returnValue) return null;
+        const [price, timestamp] = result.returnValue as [bigint, bigint];
+        if (price === 0n || timestamp === 0n) return null;
+        const usd = usdPerTokenFromOracleContractRaw(price, tokenDecimals);
+        if (!Number.isFinite(usd) || usd <= 0) return null;
+        return { usd, timestampSec: Number(timestamp) };
+      } catch (error) {
+        console.warn("readOracleUsdPerToken failed", {
+          networkId,
+          oracleKey,
+          error,
+        });
+        return null;
+      }
+    },
+    ORACLE_PRICE_CACHE_TTL_MS
+  );
+}
+
+/** Prefer price-oracle USD when available (e.g. goBTC oracle tracks spot closer than stale `get_market`). */
+async function applyOraclePriceToMarketInfo(
+  marketInfo: MarketInfo,
+  market: MarketData,
+  token: {
+    underlyingContractId?: string;
+    assetId?: string;
+    underlyingAssetId?: string;
+  },
+  tokenConfig: TokenConfig | undefined,
+  networkId: NetworkId
+): Promise<void> {
+  const tokenDecimals = marketInfo.decimals || 6;
+  const oracleKeys = [
+    marketInfo.marketId,
+    token.underlyingContractId,
+    tokenConfig?.contractId,
+    token.underlyingAssetId,
+    token.assetId,
+    tokenConfig?.assetId,
+  ]
+    .map((k) => (k != null ? String(k).trim() : ""))
+    .filter((k, i, arr) => k !== "" && arr.indexOf(k) === i);
+
+  const candidates: Array<{ usd: number; timestampSec: number }> = [];
+
+  for (const key of oracleKeys) {
+    const oracle = await readOracleUsdPerToken(networkId, key, tokenDecimals);
+    if (oracle) candidates.push(oracle);
+  }
+
+  const sym = marketInfo.symbol.toUpperCase();
+  const btcRefMarkets =
+    ALGORAND_POOL_BTC_ORACLE_REFERENCE_MARKETS[marketInfo.poolId];
+  if (btcRefMarkets && sym === "GOBTC") {
+    for (const refMarketId of btcRefMarkets) {
+      if (oracleKeys.includes(refMarketId)) continue;
+      const refOracle = await readOracleUsdPerToken(
+        networkId,
+        refMarketId,
+        tokenDecimals
+      );
+      if (refOracle) candidates.push(refOracle);
+    }
+  }
+
+  if (candidates.length === 0) return;
+
+  const best = candidates.reduce((a, b) => {
+    if (b.timestampSec !== a.timestampSec) {
+      return b.timestampSec > a.timestampSec ? b : a;
+    }
+    return b.usd > a.usd ? b : a;
+  });
+
+  marketInfo.oracleUsdPerToken = best.usd;
+  marketInfo.oraclePriceTimestampSec = best.timestampSec;
+  marketInfo.price = marketInfoFormattedPriceFromUsdPerToken(
+    best.usd,
+    tokenDecimals
+  );
+}
 
 export const fetchMarketInfoFromContract = async (
   poolId: string,
@@ -850,6 +985,14 @@ export const fetchMarketInfo = async (
         apyCalculation,
         borrowApyCalculation,
       };
+
+      await applyOraclePriceToMarketInfo(
+        marketInfo,
+        market,
+        token,
+        tokenConfig,
+        networkId
+      );
 
       console.log("fetchMarketInfo marketInfo", { marketInfo, marketData });
 
