@@ -473,6 +473,8 @@ const SupplyBorrowModal = ({
   const [maxBorrowError, setMaxBorrowError] = useState<string | null>(null);
   /** Bumps on modal close / new build so stale in-flight builds do not update UI. */
   const buildGenerationRef = useRef(0);
+  /** Bumps when max-borrow deps change so stale in-flight calcs do not update UI. */
+  const maxBorrowGenRef = useRef(0);
   /** Per-pool collateral/borrow (USD) for deposit health estimate; undefined = not loaded */
   const [poolGlobalUserData, setPoolGlobalUserData] = useState<
     | {
@@ -1379,8 +1381,9 @@ const SupplyBorrowModal = ({
   /** Protocol + market liquidity cap in human tokens (always finite in borrow mode). */
   const borrowLiquidityOnlyTokens = useMemo(() => {
     if (mode !== "borrow") return null;
-    const raw =
-      calculatedMaxBorrow !== null ? calculatedMaxBorrow : assetData.liquidity;
+    // Do not fall back to assetData.liquidity when max is unknown/errored — market
+    // liquidity alone can look more permissive than collateral allows.
+    const raw = calculatedMaxBorrow !== null ? calculatedMaxBorrow : 0;
     const safeRaw =
       typeof raw === "number" && Number.isFinite(raw) ? Math.max(0, raw) : 0;
     const borrowCap = assetData.maxTotalBorrows ?? 0;
@@ -1390,7 +1393,6 @@ const SupplyBorrowModal = ({
   }, [
     mode,
     calculatedMaxBorrow,
-    assetData.liquidity,
     assetData.maxTotalBorrows,
     assetData.totalBorrow,
   ]);
@@ -1666,6 +1668,7 @@ const SupplyBorrowModal = ({
     const fetchMaxBorrowAmount = async () => {
       // Only calculate for borrow mode
       if (mode !== "borrow" || !isOpen || !activeAccount?.address) {
+        maxBorrowGenRef.current += 1;
         setCalculatedMaxBorrow(null);
         setIsLoadingMaxBorrow(false);
         setMaxBorrowError(null);
@@ -1680,6 +1683,7 @@ const SupplyBorrowModal = ({
         currentNetwork,
       });
 
+      const gen = ++maxBorrowGenRef.current;
       setIsLoadingMaxBorrow(true);
       setCalculatedMaxBorrow(null);
       setMaxBorrowError(null);
@@ -1762,6 +1766,8 @@ const SupplyBorrowModal = ({
           storageAppId ? Number(storageAppId) : undefined
         );
 
+        if (gen !== maxBorrowGenRef.current) return;
+
         console.log("SupplyBorrowModal: maxBorrowBigInt result", {
           maxBorrowBigInt,
           isZero: maxBorrowBigInt === BigInt(0),
@@ -1824,6 +1830,7 @@ const SupplyBorrowModal = ({
             )
           );
 
+          if (gen !== maxBorrowGenRef.current) return;
           setCalculatedMaxBorrow(finalMaxBorrow);
           console.log("SupplyBorrowModal: Max borrow amount calculated:", {
             maxBorrowNumber,
@@ -1855,15 +1862,17 @@ const SupplyBorrowModal = ({
           });
           const maxBorrowUSD =
             collateralForBorrow * (assetData.collateralFactor / 100);
-          const calculatedMaxBorrow = capByBorrowCap(
+          const nextMaxBorrow = capByBorrowCap(
             tokenPrice != null && tokenPrice > 0
               ? (maxBorrowUSD / tokenPrice) * Math.pow(10, 6) / Math.pow(10, decimals)
               : 0
           );
-          setCalculatedMaxBorrow(calculatedMaxBorrow);
+          if (gen !== maxBorrowGenRef.current) return;
+          setCalculatedMaxBorrow(nextMaxBorrow);
         } else {
           // Even if maxBorrowBigInt is 0, we should still check deposits - borrowed, then cap by borrow cap
           const finalMaxBorrow = capByBorrowCap(Math.max(0, depositsMinusBorrowed));
+          if (gen !== maxBorrowGenRef.current) return;
           setCalculatedMaxBorrow(finalMaxBorrow);
           console.log(
             "SupplyBorrowModal: Max borrow amount (deposits - borrowed):",
@@ -1871,6 +1880,7 @@ const SupplyBorrowModal = ({
           );
         }
       } catch (error) {
+        if (gen !== maxBorrowGenRef.current) return;
         console.error(
           "SupplyBorrowModal: Error calculating max borrow amount:",
           error
@@ -1880,7 +1890,7 @@ const SupplyBorrowModal = ({
         );
         setCalculatedMaxBorrow(null);
       } finally {
-        if (!keepLoadingForPoolData) {
+        if (gen === maxBorrowGenRef.current && !keepLoadingForPoolData) {
           setIsLoadingMaxBorrow(false);
         }
       }
@@ -1938,6 +1948,7 @@ const SupplyBorrowModal = ({
   useEffect(() => {
     if (!isOpen) {
       buildGenerationRef.current += 1;
+      maxBorrowGenRef.current += 1;
       setIsLoading(false);
     }
   }, [isOpen]);
