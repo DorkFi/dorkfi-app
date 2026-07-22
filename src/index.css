@@ -17,7 +17,7 @@
   animation: shimmer 2s infinite;
 }
 
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap');
+/* Poppins is loaded via <link> in index.html (avoids PostCSS @import-order warning) */
 
 /* DorkFi Design System */
 

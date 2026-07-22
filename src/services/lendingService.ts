@@ -6148,7 +6148,7 @@ export const borrow = async (
  * Resolve a `getAllTokensWithDisplayInfo` row for lending ops.
  * Same market contract id can exist on multiple pools (e.g. fALGO on A vs D); match pool first.
  */
-function resolveDisplayTokenForPoolMarket(
+export function resolveDisplayTokenForPoolMarket(
   networkId: NetworkId,
   poolId: string,
   marketId: string

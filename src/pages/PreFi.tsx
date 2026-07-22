@@ -61,6 +61,7 @@ import {
   getNetworkConfig,
   getAllTokens,
   getTokenConfig,
+  asTokenConfig,
   NetworkId,
   isCurrentNetworkEVM,
   isCurrentNetworkAlgorandCompatible,
@@ -1724,7 +1725,16 @@ export default function PreFiDashboard() {
 
   // TODO move this to lending service
   const handleMigrate = async (market: Market) => {
-    const token = getTokenConfig(currentNetwork, market.symbol);
+    const token = asTokenConfig(
+      getTokenConfig(currentNetwork, market.symbol),
+      market.poolId
+    );
+    if (!token) {
+      console.error(
+        `Token config not found for ${market.symbol} (pool ${market.poolId ?? "n/a"})`
+      );
+      return;
+    }
     const remainingBalance = await ARC200Service.getBalance(
       activeAccount?.address || "",
       market.oldNTokenId || ""

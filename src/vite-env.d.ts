@@ -27,4 +27,15 @@ interface ImportMetaEnv {
   readonly VITE_ENABLE_POOLS?: string;
   /** When `true` or `1`, show Deposit / Withdraw LP actions on pool cards (Supply / Withdraw always shown). */
   readonly VITE_ENABLE_POOL_DEPOSIT_WITHDRAW?: string;
+  /**
+   * When `true` or `1`, enable cross-asset repay via Haystack (Algorand mainnet).
+   * Defaults on in Vite DEV; off in production builds unless set (safe beta dark-ship).
+   */
+  readonly VITE_ENABLE_CROSS_ASSET_REPAY?: string;
+  /**
+   * Absolute origin of the Haystack key proxy (no trailing slash), e.g. `https://proxy.example.com`.
+   * Dev default is `/api/haystack` (Vite middleware). Never put HAYSTACK_API_KEY in VITE_*.
+   * Required for beta/prod when enabling cross-asset repay on a static host.
+   */
+  readonly VITE_HAYSTACK_PROXY_URL?: string;
 }

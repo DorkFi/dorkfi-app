@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import BigNumber from "bignumber.js";
 import type { ConsensusState } from "@folks-finance/algorand-sdk";
 import {
@@ -45,7 +45,19 @@ import {
 } from "@/config";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { isRainbowkitXchainWallet } from "@/wallet/xchainSignUi";
-import algorandService, { type AlgorandNetwork } from "@/services/algorandService";
+import algorandService, {
+  type AlgorandNetwork,
+} from "@/services/algorandService";
+import {
+  isCrossAssetRepayFeatureEnabled,
+} from "@/services/haystackRouterService";
+import { executeHaystackSwap } from "@/services/haystackSwapExecute";
+import { useHaystackRepayQuote } from "@/hooks/useHaystackRepayQuote";
+import { CrossAssetRepaySection } from "@/components/repay/CrossAssetRepaySection";
+import {
+  listHaystackPaymentAssets,
+  resolveHaystackDebtAsaId,
+} from "@/utils/haystackAsaIds";
 import {
   ALGORAND_MAINNET_NODELY_ALGOD_URL,
   XALGO_CONSENSUS_REPAY_ALGO_ROUTE_ID,
@@ -131,7 +143,21 @@ interface RepayModalProps {
    */
   folksMintOneUnderlyingAtomic?: string;
   /** Full token row; used to resolve Folks pool via deposit adapter (stable vs repay-only list). */
-  repayTokenConfig?: Pick<TokenConfig, "adapter" | "adapters"> | null;
+  repayTokenConfig?: Pick<
+    TokenConfig,
+    | "adapter"
+    | "adapters"
+    | "assetId"
+    | "tokenStandard"
+    | "isStoken"
+    | "marketOverride"
+    | "decimals"
+    | "symbol"
+  > | null;
+  /** Market contract id (ntoken / underlyingContractId) for atomic Haystack+repay. */
+  repayMarketId?: string;
+  /** Parent can hide Radix overlay while Haystack swap signs (optional). */
+  onRainbowkitHostOverlaySuppressed?: (suppressed: boolean) => void;
   /** When provided, show asset dropdown like Supply/Withdraw modals */
   availableAssets?: {
     asset: string;
@@ -185,10 +211,12 @@ const RepayModal = ({
   repayTokenDecimals = 6,
   folksMintOneUnderlyingAtomic,
   repayTokenConfig,
+  repayMarketId,
   xalgoConsensusRepayAlgoOption = false,
   rainbowkitHostOverlaySuppressed = false,
+  onRainbowkitHostOverlaySuppressed,
 }: RepayModalProps) => {
-  const { activeAccount, activeWallet } = useWallet();
+  const { activeAccount, activeWallet, transactionSigner } = useWallet();
   const { toast } = useToast();
   const [amount, setAmount] = useState<number | "">("");
   const [fiatValue, setFiatValue] = useState(0);
@@ -202,6 +230,17 @@ const RepayModal = ({
   const [workflowStep, setWorkflowStep] = useState<"amount" | "confirm">(
     "amount"
   );
+  /** null = repay with debt asset (default). */
+  const [crossAssetPaymentAsaId, setCrossAssetPaymentAsaId] = useState<
+    number | null
+  >(null);
+  const [crossAssetSlippagePercent, setCrossAssetSlippagePercent] = useState(1);
+  const [haystackSignSuppressed, setHaystackSignSuppressed] = useState(false);
+  /** After a successful Haystack swap, skip re-swapping on repay retry. */
+  const [completedCrossAssetSwapTxId, setCompletedCrossAssetSwapTxId] = useState<
+    string | null
+  >(null);
+  const repaySubmitInFlightRef = useRef(false);
   const [expandedDetails, setExpandedDetails] = useState<{
     borrowAPY: boolean;
     accruedInterest: boolean;
@@ -243,6 +282,16 @@ const RepayModal = ({
   const showMaxButton =
     repayAdapterList.length === 0 && !xalgoRepayRoutesActive;
 
+  const debtHaystackAsaId = useMemo(() => {
+    if (networkToUse !== "algorand-mainnet") return null;
+    return resolveHaystackDebtAsaId({
+      networkId: networkToUse as NetworkId,
+      tokenSymbol,
+      poolId,
+      repayTokenConfig: repayTokenConfig ?? null,
+    });
+  }, [networkToUse, tokenSymbol, poolId, repayTokenConfig]);
+
   const [selectedRepayAdapterId, setSelectedRepayAdapterId] =
     useState<string>("");
   const [repayRoutePickerOpen, setRepayRoutePickerOpen] = useState(false);
@@ -255,6 +304,9 @@ const RepayModal = ({
   const [nativeAlgoWalletHuman, setNativeAlgoWalletHuman] = useState<
     number | undefined
   >(undefined);
+  /** Spendable balance of the selected Haystack payment ASA (human units). */
+  const [crossAssetPaymentWalletHuman, setCrossAssetPaymentWalletHuman] =
+    useState<number | undefined>(undefined);
   const [xalgoRepayConsensusState, setXalgoRepayConsensusState] =
     useState<ConsensusState | null>(null);
 
@@ -273,6 +325,71 @@ const RepayModal = ({
   const isXalgoConsensusRepayAlgoRoute =
     xalgoRepayRoutesActive &&
     selectedRepayAdapterId === XALGO_CONSENSUS_REPAY_ALGO_ROUTE_ID;
+
+  /**
+   * Allow cross-asset on Algorand whenever we can resolve a debt ASA.
+   * Only block while the user is on the xALGO→ALGO consensus mint repay route
+   * (that path already spends native ALGO).
+   */
+  const crossAssetEligible =
+    isCrossAssetRepayFeatureEnabled() &&
+    networkToUse === "algorand-mainnet" &&
+    debtHaystackAsaId != null &&
+    !isXalgoConsensusRepayAlgoRoute;
+
+  const haystackPaymentAssets = useMemo(() => {
+    if (!crossAssetEligible || debtHaystackAsaId == null) return [];
+    return listHaystackPaymentAssets(
+      networkToUse as NetworkId,
+      debtHaystackAsaId
+    );
+  }, [crossAssetEligible, debtHaystackAsaId, networkToUse]);
+
+  const crossAssetActive =
+    crossAssetEligible &&
+    crossAssetPaymentAsaId != null &&
+    crossAssetPaymentAsaId !== debtHaystackAsaId;
+
+  const selectedPaymentAsset = useMemo(
+    () =>
+      haystackPaymentAssets.find((a) => a.asaId === crossAssetPaymentAsaId) ??
+      null,
+    [haystackPaymentAssets, crossAssetPaymentAsaId]
+  );
+
+  const haystackQuote = useHaystackRepayQuote({
+    enabled: Boolean(isOpen && crossAssetActive),
+    debtAsaId: debtHaystackAsaId,
+    paymentAsaId: crossAssetPaymentAsaId,
+    debtAmountHuman: amount === "" ? "" : String(amount),
+    debtDecimals: repayTokenDecimals,
+    chain: "mainnet",
+  });
+
+  useEffect(() => {
+    if (!isOpen) {
+      setCrossAssetPaymentAsaId(null);
+      setHaystackSignSuppressed(false);
+      setCompletedCrossAssetSwapTxId(null);
+      repaySubmitInFlightRef.current = false;
+    }
+  }, [isOpen]);
+
+  // Changing payment asset or amount invalidates a prior partial swap success marker.
+  useEffect(() => {
+    setCompletedCrossAssetSwapTxId(null);
+  }, [crossAssetPaymentAsaId, amount]);
+
+  useEffect(() => {
+    onRainbowkitHostOverlaySuppressed?.(haystackSignSuppressed);
+  }, [haystackSignSuppressed, onRainbowkitHostOverlaySuppressed]);
+
+  // Clear alternate payment asset if user switches onto xALGO consensus ALGO route.
+  useEffect(() => {
+    if (isXalgoConsensusRepayAlgoRoute) {
+      setCrossAssetPaymentAsaId(null);
+    }
+  }, [isXalgoConsensusRepayAlgoRoute]);
 
   const repayWalletBasis = isXalgoConsensusRepayAlgoRoute
     ? "underlying"
@@ -554,6 +671,65 @@ const RepayModal = ({
     repayTokenDecimals,
   ]);
 
+  // Load spendable balance for the selected cross-asset payment ASA (incl. ALGO=0).
+  useEffect(() => {
+    if (
+      !isOpen ||
+      !crossAssetActive ||
+      crossAssetPaymentAsaId == null ||
+      !activeAccount?.address
+    ) {
+      setCrossAssetPaymentWalletHuman(undefined);
+      return;
+    }
+    const aln = getAlgorandNetworkFromNetworkId(networkToUse as NetworkId);
+    if (!aln) {
+      setCrossAssetPaymentWalletHuman(undefined);
+      return;
+    }
+    let cancelled = false;
+    const decimals = selectedPaymentAsset?.decimals ?? 6;
+    (async () => {
+      try {
+        const { algod } = algorandService.initializeClients(aln as AlgorandNetwork);
+        let human = 0;
+        if (crossAssetPaymentAsaId === 0) {
+          const accountInfo = await algod
+            .accountInformation(activeAccount.address)
+            .do();
+          human = spendableAlgoHumanFromAccount(accountInfo);
+        } else {
+          const holding = await algod
+            .accountAssetInformation(
+              activeAccount.address,
+              crossAssetPaymentAsaId
+            )
+            .do();
+          const atomic = getAccountAssetHoldingAmountAtomic(holding);
+          human =
+            atomic != null
+              ? new BigNumber(atomic.toString())
+                  .dividedBy(10 ** decimals)
+                  .toNumber()
+              : 0;
+        }
+        if (!cancelled) setCrossAssetPaymentWalletHuman(human);
+      } catch {
+        if (!cancelled) setCrossAssetPaymentWalletHuman(0);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isOpen,
+    crossAssetActive,
+    crossAssetPaymentAsaId,
+    activeAccount?.address,
+    networkToUse,
+    selectedPaymentAsset?.decimals,
+  ]);
+
   const toggleDetail = (key: keyof typeof expandedDetails) => {
     setExpandedDetails((prev) => ({
       ...prev,
@@ -621,7 +797,14 @@ const RepayModal = ({
     return walletBalance;
   }, [repayWalletBasis, nativeAlgoWalletHuman, walletBalance]);
 
-  const maxRepayAmount = Math.min(maxDebtInInputUnits, effectiveWalletBalance);
+  /**
+   * Cross-asset repay spends the *payment* ASA (e.g. ALGO), not wallet WAD.
+   * Do not cap the repay amount by debt-token wallet balance or the flow
+   * silently forces same-asset repay whenever the user holds enough WAD.
+   */
+  const maxRepayAmount = crossAssetActive
+    ? maxDebtInInputUnits
+    : Math.min(maxDebtInInputUnits, effectiveWalletBalance);
 
   /**
    * Repay amount in **input field units** that covers accrued interest (capped by wallet + total debt).
@@ -739,25 +922,141 @@ const RepayModal = ({
   };
 
   const handleConfirmRepay = async () => {
+    if (repaySubmitInFlightRef.current || isLoading) return;
+
     const roundedAmount = Math.round(numAmount * 1000000) / 1000000;
     const roundedDebtCap = Math.round(maxDebtInInputUnits * 1000000) / 1000000;
     const shouldUseRepayAll =
-      !isXalgoConsensusRepayAlgoRoute && roundedAmount === roundedDebtCap;
+      !isXalgoConsensusRepayAlgoRoute &&
+      !crossAssetActive &&
+      roundedAmount === roundedDebtCap;
 
     const amountStr = amount !== "" ? amount.toString() : "0";
-    console.log(`Repay ${amountStr} ${tokenSymbol}${shouldUseRepayAll ? " (repayAll)" : ""}`);
+    console.log(
+      `Repay ${amountStr} ${tokenSymbol}${shouldUseRepayAll ? " (repayAll)" : ""}${crossAssetActive ? " (cross-asset)" : ""}`
+    );
 
+    repaySubmitInFlightRef.current = true;
     try {
       setIsLoading(true);
 
-      const repayAdapterIdOpt =
-        xalgoRepayRoutesActive
-          ? selectedRepayAdapterId === XALGO_CONSENSUS_REPAY_ALGO_ROUTE_ID
-            ? XALGO_CONSENSUS_REPAY_ALGO_ROUTE_ID
-            : undefined
-          : selectedRepayAdapter != null
-            ? tokenAdapterStableId(selectedRepayAdapter)
+      if (crossAssetActive) {
+        if (!activeAccount?.address || !transactionSigner) {
+          throw new Error("Connect a wallet to repay with another asset.");
+        }
+        if (!haystackQuote.quote?.txnPayload && !completedCrossAssetSwapTxId) {
+          throw new Error(
+            haystackQuote.error || "Haystack quote unavailable. Wait for a quote."
+          );
+        }
+        const algorandNetwork = getAlgorandNetworkFromNetworkId(
+          networkToUse as NetworkId
+        );
+        if (!algorandNetwork) {
+          throw new Error("Cross-asset repay requires Algorand mainnet.");
+        }
+
+        let skipSwap = false;
+        let swapTxIdLocal = completedCrossAssetSwapTxId;
+
+        // Only skip the Haystack swap when a prior swap in *this* modal session
+        // already succeeded (two-step resume after repay failed). Never skip just
+        // because the wallet holds debt ASA — the user explicitly chose another
+        // payment asset (e.g. repay WAD with ALGO) and must spend that asset.
+        if (completedCrossAssetSwapTxId) {
+          skipSwap = true;
+          console.log(
+            "[cross-asset repay] resuming after prior swap in this session",
+            { swapTxId: completedCrossAssetSwapTxId }
+          );
+        }
+
+        const marketTokenFolksAdapter = repayAdapterList.find(
+          (a) => (a.repayWalletBasis ?? "market_token") === "market_token"
+        );
+        const repayAdapterIdOpt =
+          marketTokenFolksAdapter != null
+            ? tokenAdapterStableId(marketTokenFolksAdapter)
             : undefined;
+
+        // Cross-asset repay is presented as two wallet signatures (swap, then repay).
+        // Atomic compose is best-effort elsewhere; here we go straight to the
+        // two-step path so messaging matches what the user is asked to sign.
+        const paySymbol = selectedPaymentAsset?.symbol ?? "asset";
+        const walletName = activeWallet?.metadata?.name || "your wallet";
+
+        if (!skipSwap) {
+          toast({
+            title: "Signature 1 of 2 — swap",
+            description: `Approve swapping ${paySymbol} → ${tokenSymbol} in ${walletName}. Next you’ll sign the repay.`,
+            duration: 14_000,
+          });
+          setHaystackSignSuppressed(true);
+          try {
+            const swapResult = await executeHaystackSwap({
+              address: activeAccount.address,
+              quote: haystackQuote.quote!,
+              slippagePercent: crossAssetSlippagePercent,
+              transactionSigner,
+              activeWallet,
+              setRainbowkitSuppressed: setHaystackSignSuppressed,
+            });
+            swapTxIdLocal = swapResult.txId;
+            setCompletedCrossAssetSwapTxId(swapResult.txId);
+          } finally {
+            setHaystackSignSuppressed(false);
+          }
+        }
+
+        toast({
+          title: "Signature 2 of 2 — repay",
+          description: skipSwap
+            ? `Swap already completed — approve the ${tokenSymbol} repay in ${walletName}.`
+            : `Swap submitted. Now approve the ${tokenSymbol} repay in ${walletName}.`,
+          duration: 14_000,
+        });
+
+        let txId: string;
+        try {
+          txId = await onSubmit(amountStr, {
+            isRepayAll: shouldUseRepayAll,
+            repayAdapterId: repayAdapterIdOpt,
+          });
+        } catch (repayErr) {
+          if (swapTxIdLocal) {
+            throw new Error(
+              `Swap succeeded (${swapTxIdLocal.slice(0, 8)}…), but repay failed: ${
+                repayErr instanceof Error ? repayErr.message : "unknown error"
+              }. Tap Continue again to repay only — you will not be asked to swap again.`
+            );
+          }
+          throw repayErr;
+        }
+
+        setCompletedCrossAssetSwapTxId(null);
+        setTransactionId(txId);
+
+        if (isRainbowkitXchainWallet(activeWallet)) {
+          toast({
+            title: "Repay confirmed",
+            description:
+              "Your transaction was submitted. The portfolio will update shortly.",
+          });
+          onClose();
+        } else {
+          setShowSuccess(true);
+        }
+        return;
+      }
+
+      const repayAdapterIdOpt = xalgoRepayRoutesActive
+        ? selectedRepayAdapterId === XALGO_CONSENSUS_REPAY_ALGO_ROUTE_ID
+          ? XALGO_CONSENSUS_REPAY_ALGO_ROUTE_ID
+          : undefined
+        : selectedRepayAdapter != null
+          ? tokenAdapterStableId(selectedRepayAdapter)
+          : undefined;
+
       const txId = await onSubmit(amountStr, {
         isRepayAll: shouldUseRepayAll,
         repayAdapterId: repayAdapterIdOpt,
@@ -776,9 +1075,20 @@ const RepayModal = ({
       }
     } catch (error) {
       console.error("Repay transaction failed:", error);
-      // You might want to show an error message to the user here
+      setHaystackSignSuppressed(false);
+      const message =
+        error instanceof Error ? error.message : "Transaction failed";
+      toast({
+        title: message.includes("Swap succeeded")
+          ? "Repay incomplete"
+          : "Repay failed",
+        description: message,
+        variant: "destructive",
+        duration: 12_000,
+      });
     } finally {
       setIsLoading(false);
+      repaySubmitInFlightRef.current = false;
     }
   };
 
@@ -807,11 +1117,33 @@ const RepayModal = ({
 
   const roundedAmount = Math.round(numAmount * 1000000) / 1000000;
   const roundedMaxRepay = Math.round(maxRepayAmount * 1000000) / 1000000;
+
+  const crossAssetPaymentAffordable = useMemo(() => {
+    if (!crossAssetActive) return true;
+    if (haystackQuote.paymentAtomicNeeded == null) return false;
+    if (crossAssetPaymentWalletHuman == null) return true; // still loading
+    const neededHuman = new BigNumber(
+      haystackQuote.paymentAtomicNeeded.toString()
+    )
+      .shiftedBy(-(selectedPaymentAsset?.decimals ?? 6))
+      .toNumber();
+    return crossAssetPaymentWalletHuman + 1e-12 >= neededHuman;
+  }, [
+    crossAssetActive,
+    haystackQuote.paymentAtomicNeeded,
+    crossAssetPaymentWalletHuman,
+    selectedPaymentAsset?.decimals,
+  ]);
+
   const isValidAmount =
     amount !== "" &&
     numAmount > 0 &&
     roundedAmount <= roundedMaxRepay &&
-    !repayFolksBlockingSubmit;
+    !repayFolksBlockingSubmit &&
+    (!crossAssetActive ||
+      (!!haystackQuote.quote?.txnPayload &&
+        !haystackQuote.isLoading &&
+        crossAssetPaymentAffordable));
 
   const round6 = (n: number) => Math.round(n * 1e6) / 1e6;
   /** Principal portion of debt; total owed = currentBorrow = principal + accrued (see lendingService index split). */
@@ -896,19 +1228,19 @@ const RepayModal = ({
   return (
     <>
     <Dialog
-      open={isOpen && !rainbowkitHostOverlaySuppressed}
+      open={isOpen && !rainbowkitHostOverlaySuppressed && !haystackSignSuppressed}
       onOpenChange={onClose}
     >
       <DialogContent
         className={cn(
-          "bg-card dark:bg-slate-900 rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-[95vw] overflow-hidden flex flex-col px-0 py-0",
+          "bg-card dark:bg-slate-900 rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-[95vw] overflow-hidden flex flex-col min-h-0 px-0 py-0",
           showSuccess
             ? "md:max-w-md h-auto max-h-[min(90vh,90dvh)]"
-            : "md:max-w-lg lg:max-w-4xl h-[90vh] md:h-auto md:max-h-[85vh]"
+            : "md:max-w-lg lg:max-w-4xl h-[min(90vh,90dvh)] max-h-[min(90vh,90dvh)] md:max-h-[min(85vh,85dvh)]"
         )}
       >
         {showSuccess ? (
-          <div className="p-6 overflow-y-auto">
+          <div className="p-6 overflow-y-auto min-h-0">
             <SupplyBorrowCongrats
               transactionType="repay"
               asset={tokenSymbol}
@@ -921,8 +1253,8 @@ const RepayModal = ({
             />
           </div>
         ) : (
-          <div className="flex flex-col h-full">
-            <div className="sticky top-0 z-20 bg-card dark:bg-slate-900 pt-6 px-6 md:px-8 lg:px-10 pb-4 border-b border-gray-200/50 dark:border-slate-700/50">
+          <div className="flex flex-col min-h-0 flex-1 h-full max-h-full overflow-hidden">
+            <div className="sticky top-0 z-20 shrink-0 bg-card dark:bg-slate-900 pt-6 px-6 md:px-8 lg:px-10 pb-4 border-b border-gray-200/50 dark:border-slate-700/50">
               <DialogHeader className="pb-0">
                 {availableAssets &&
                 availableAssets.length > 0 &&
@@ -1019,7 +1351,7 @@ const RepayModal = ({
               </DialogHeader>
             </div>
 
-            <div className="flex-1 overflow-y-auto overscroll-contain pt-2 px-6 md:px-8 lg:px-10 pb-6 md:pb-8 touch-pan-y">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pt-2 px-6 md:px-8 lg:px-10 pb-4 touch-pan-y">
               <div className="flex flex-col lg:flex-row lg:gap-8 space-y-6 lg:space-y-0">
                 {/* Left Column: Input Form */}
                 <div className="flex-1 space-y-6 min-w-0">
@@ -1063,6 +1395,25 @@ const RepayModal = ({
                               Loading governance xALGO mint rate…
                             </p>
                           )}
+                        {crossAssetEligible && haystackPaymentAssets.length > 0 && (
+                          <CrossAssetRepaySection
+                            paymentAssets={haystackPaymentAssets}
+                            selectedPaymentAsaId={crossAssetPaymentAsaId}
+                            onSelectPaymentAsaId={setCrossAssetPaymentAsaId}
+                            debtSymbol={tokenSymbol}
+                            quote={haystackQuote.quote}
+                            paymentAtomicNeeded={
+                              haystackQuote.paymentAtomicNeeded
+                            }
+                            paymentDecimals={
+                              selectedPaymentAsset?.decimals ?? 6
+                            }
+                            isLoading={haystackQuote.isLoading}
+                            error={haystackQuote.error}
+                            slippagePercent={crossAssetSlippagePercent}
+                            onSlippageChange={setCrossAssetSlippagePercent}
+                          />
+                        )}
                         <div className="relative">
                           <LocaleNumberInput
                             id="amount"
@@ -1132,20 +1483,34 @@ const RepayModal = ({
                             <div className="flex flex-row justify-between gap-2 p-3 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-gray-200 dark:border-slate-700">
                               <div className="flex-1 min-w-0">
                                 <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
-                                  Wallet Balance
+                                  {crossAssetActive
+                                    ? `Pay with ${selectedPaymentAsset?.symbol ?? "asset"}`
+                                    : "Wallet Balance"}
                                 </p>
                                 <p className="text-xs text-slate-700 dark:text-slate-300 font-medium break-words">
-                                  {effectiveWalletBalance.toLocaleString()}{" "}
-                                  {walletUnitSymbol}
-                                  <span className="text-slate-500 dark:text-slate-400 ml-1">
-                                    ($
-                                    {(
-                                      effectiveWalletBalance *
-                                      marketStats.tokenPrice
-                                    ).toLocaleString()}
-                                    )
-                                  </span>
+                                  {crossAssetActive
+                                    ? `${(crossAssetPaymentWalletHuman ?? 0).toLocaleString()} ${selectedPaymentAsset?.symbol ?? ""}`
+                                    : `${effectiveWalletBalance.toLocaleString()} ${walletUnitSymbol}`}
+                                  {!crossAssetActive && (
+                                    <span className="text-slate-500 dark:text-slate-400 ml-1">
+                                      ($
+                                      {(
+                                        effectiveWalletBalance *
+                                        marketStats.tokenPrice
+                                      ).toLocaleString()}
+                                      )
+                                    </span>
+                                  )}
                                 </p>
+                                {crossAssetActive &&
+                                  !crossAssetPaymentAffordable &&
+                                  haystackQuote.paymentAtomicNeeded != null && (
+                                    <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
+                                      Not enough{" "}
+                                      {selectedPaymentAsset?.symbol ?? "asset"}{" "}
+                                      for this quote.
+                                    </p>
+                                  )}
                               </div>
                               <div className="flex-1 min-w-0">
                                 <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
@@ -1231,16 +1596,6 @@ const RepayModal = ({
                         </div>
                       </div>
 
-                      <Button
-                        type="button"
-                        onClick={handleContinueToConfirm}
-                        disabled={
-                          !isValidAmount || isLoading || repayFolksBlockingSubmit
-                        }
-                        className="w-full font-semibold h-12 bg-whale-gold hover:bg-whale-gold/90 text-black disabled:opacity-50 disabled:cursor-not-allowed lg:mt-auto"
-                      >
-                        Continue
-                      </Button>
                     </>
                   ) : (
                     <>
@@ -1304,20 +1659,44 @@ const RepayModal = ({
                               Payment
                             </span>
                             <span className="text-xs font-medium text-slate-800 dark:text-slate-200 text-right tabular-nums">
-                              {numAmount.toLocaleString(undefined, {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 6,
-                              })}{" "}
-                              {walletUnitSymbol}
-                              <span className="block text-[10px] text-slate-500 dark:text-slate-400 font-normal">
-                                ≈ $
-                                {(
-                                  numAmount * marketStats.tokenPrice
-                                ).toLocaleString(undefined, {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}
-                              </span>
+                              {crossAssetActive &&
+                              haystackQuote.paymentAtomicNeeded != null ? (
+                                <>
+                                  {new BigNumber(
+                                    haystackQuote.paymentAtomicNeeded.toString()
+                                  )
+                                    .shiftedBy(
+                                      -(selectedPaymentAsset?.decimals ?? 6)
+                                    )
+                                    .toFixed(
+                                      Math.min(
+                                        6,
+                                        selectedPaymentAsset?.decimals ?? 6
+                                      )
+                                    )}{" "}
+                                  {selectedPaymentAsset?.symbol ?? "asset"}
+                                  <span className="block text-[10px] text-whale-gold font-normal">
+                                    2 signatures: swap → repay {tokenSymbol}
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  {numAmount.toLocaleString(undefined, {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 6,
+                                  })}{" "}
+                                  {walletUnitSymbol}
+                                  <span className="block text-[10px] text-slate-500 dark:text-slate-400 font-normal">
+                                    ≈ $
+                                    {(
+                                      numAmount * marketStats.tokenPrice
+                                    ).toLocaleString(undefined, {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    })}
+                                  </span>
+                                </>
+                              )}
                             </span>
                           </div>
                           <div className="flex justify-between gap-3 px-3 py-2.5 bg-white/60 dark:bg-slate-900/30">
@@ -1348,25 +1727,6 @@ const RepayModal = ({
                         </div>
                       </div>
 
-                      <div className="flex flex-col sm:flex-row gap-2 lg:mt-auto">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setWorkflowStep("amount")}
-                          disabled={isLoading}
-                          className="w-full sm:flex-1 h-12 border-slate-300 dark:border-slate-600"
-                        >
-                          Back
-                        </Button>
-                        <Button
-                          type="button"
-                          onClick={handleConfirmRepay}
-                          disabled={isLoading}
-                          className="w-full sm:flex-1 h-12 font-semibold bg-whale-gold hover:bg-whale-gold/90 text-black disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {isLoading ? "Processing..." : "Confirm repayment"}
-                        </Button>
-                      </div>
                     </>
                   )}
                 </div>
@@ -1816,6 +2176,45 @@ const RepayModal = ({
                   </Card>
                 </div>
               </div>
+            </div>
+
+            <div className="shrink-0 border-t border-gray-200/50 dark:border-slate-700/50 bg-card dark:bg-slate-900 px-6 md:px-8 lg:px-10 py-4">
+              {workflowStep === "amount" ? (
+                <Button
+                  type="button"
+                  onClick={handleContinueToConfirm}
+                  disabled={
+                    !isValidAmount || isLoading || repayFolksBlockingSubmit
+                  }
+                  className="w-full font-semibold h-12 bg-whale-gold hover:bg-whale-gold/90 text-black disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Continue
+                </Button>
+              ) : (
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setWorkflowStep("amount")}
+                    disabled={isLoading}
+                    className="w-full sm:flex-1 h-12 border-slate-300 dark:border-slate-600"
+                  >
+                    Back
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={handleConfirmRepay}
+                    disabled={isLoading || !isValidAmount}
+                    className="w-full sm:flex-1 h-12 font-semibold bg-whale-gold hover:bg-whale-gold/90 text-black disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isLoading
+                      ? "Processing..."
+                      : crossAssetActive
+                        ? `Confirm (2 signatures): swap ${selectedPaymentAsset?.symbol ?? "asset"} → repay`
+                        : "Confirm repayment"}
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
         )}

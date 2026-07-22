@@ -8,7 +8,7 @@ import BorrowForm from "./BorrowForm";
 import BorrowStats from "./BorrowStats";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { getAllTokensWithDisplayInfo, getTokenConfig, getNetworkConfig } from "@/config";
+import { getAllTokensWithDisplayInfo, getTokenConfig, asTokenConfig, getNetworkConfig } from "@/config";
 import { calculateMaxBorrowAmount } from "@/services/adminService";
 import { fetchMarketInfo } from "@/services/lendingService";
 import BigNumber from "bignumber.js";
@@ -70,9 +70,20 @@ const BorrowModal = ({ isOpen, onClose, tokenSymbol, tokenIcon, availableToBorro
           );
         }
 
-        const tokenConfig = getTokenConfig(currentNetwork, tokenSymbol);
+        const configLookupKey =
+          token.configKey ??
+          ("originalSymbol" in token
+            ? (token as { originalSymbol?: string }).originalSymbol
+            : undefined) ??
+          tokenSymbol;
+        const tokenConfig = asTokenConfig(
+          getTokenConfig(currentNetwork, configLookupKey),
+          token.poolId
+        );
         if (!tokenConfig) {
-          throw new Error(`Token config not found for ${tokenSymbol}`);
+          throw new Error(
+            `Token config not found for ${tokenSymbol} (pool ${token.poolId})`
+          );
         }
 
         const poolId = token.poolId;

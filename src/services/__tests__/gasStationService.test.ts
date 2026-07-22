@@ -6,12 +6,15 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import GasStationService, { MintingRequest } from '../gasStationService';
 
 describe('GasStationService', () => {
+  const validAddress =
+    'BRB3JP4LIW5Q755FJCGVAOA4W3THJ7BR3K6F26EVCGMETLEAZOQRHHJNLQ';
+
   describe('validateMintingRequest', () => {
     it('should validate a valid minting request', () => {
       const request: MintingRequest = {
         tokenSymbol: 'VOI',
         amount: '100',
-        recipientAddress: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        recipientAddress: validAddress,
         networkId: 'voi-mainnet',
         tokenStandard: 'network',
         decimals: 6,
@@ -56,7 +59,7 @@ describe('GasStationService', () => {
       const request: MintingRequest = {
         tokenSymbol: 'UNIT',
         amount: '100',
-        recipientAddress: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        recipientAddress: validAddress,
         networkId: 'voi-mainnet',
         tokenStandard: 'arc200',
         decimals: 8,
@@ -71,7 +74,7 @@ describe('GasStationService', () => {
       const request: MintingRequest = {
         tokenSymbol: 'USDC',
         amount: '100',
-        recipientAddress: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        recipientAddress: validAddress,
         networkId: 'algorand-mainnet',
         tokenStandard: 'asa',
         decimals: 6,
@@ -97,7 +100,7 @@ describe('GasStationService', () => {
       expect(info.decimals).toBe(6);
       expect(info.tokenStandard).toBe('network');
       expect(info.isMintable).toBe(true);
-      expect(info.mintingCost).toBe('Free');
+      expect(info.mintingCost).toBe('0.0305 VOI');
       expect(info.description).toContain('Native VOI tokens');
     });
 
@@ -115,7 +118,7 @@ describe('GasStationService', () => {
       expect(info.decimals).toBe(8);
       expect(info.tokenStandard).toBe('arc200');
       expect(info.isMintable).toBe(true);
-      expect(info.mintingCost).toBe('~0.001 ALGO');
+      expect(info.mintingCost).toBe('0.001~0.0305 VOI');
       expect(info.description).toContain('ARC200 smart contract');
       expect(info.contractId).toBe('123456');
     });
@@ -135,7 +138,7 @@ describe('GasStationService', () => {
       expect(info.decimals).toBe(6);
       expect(info.tokenStandard).toBe('asa');
       expect(info.isMintable).toBe(true);
-      expect(info.mintingCost).toBe('~0.001 ALGO');
+      expect(info.mintingCost).toBe('0.0305 VOI');
       expect(info.description).toContain('Algorand Standard Asset');
       expect(info.assetId).toBe('31566704');
     });
@@ -163,17 +166,10 @@ describe('GasStationService', () => {
   });
 
   describe('getAvailableGasStationTokens', () => {
-    it('should return gas station tokens for VOI mainnet', () => {
+    it('should return empty array when VOI mainnet gas station is disabled', () => {
+      // Prod VOI mainnet currently configures `gasStation: []`
       const tokens = GasStationService.getAvailableGasStationTokens('voi-mainnet');
-      expect(tokens.length).toBeGreaterThan(0);
-      expect(tokens.some(token => token.symbol === 'VOI')).toBe(true);
-      expect(tokens.every(token => token.isMintable)).toBe(true);
-    });
-
-    it('should filter out s tokens from gas station', () => {
-      const tokens = GasStationService.getAvailableGasStationTokens('voi-mainnet');
-      // WAD is marked as isStoken: true and should be filtered out
-      expect(tokens.some(token => token.symbol === 'WAD')).toBe(false);
+      expect(tokens).toHaveLength(0);
     });
 
     it('should return empty array for networks without gas station config', () => {
@@ -183,8 +179,8 @@ describe('GasStationService', () => {
   });
 
   describe('isTokenAvailableInGasStation', () => {
-    it('should return true for VOI token on VOI mainnet', () => {
-      expect(GasStationService.isTokenAvailableInGasStation('voi-mainnet', 'VOI')).toBe(true);
+    it('should return false for VOI when gas station list is empty', () => {
+      expect(GasStationService.isTokenAvailableInGasStation('voi-mainnet', 'VOI')).toBe(false);
     });
 
     it('should return false for non-gas station tokens', () => {
@@ -194,10 +190,8 @@ describe('GasStationService', () => {
   });
 
   describe('getGasStationTokenConfig', () => {
-    it('should return token config for gas station tokens', () => {
-      const config = GasStationService.getGasStationTokenConfig('voi-mainnet', 'VOI');
-      expect(config).toBeDefined();
-      expect(config?.symbol).toBe('VOI');
+    it('should return null when token is not on the gas station list', () => {
+      expect(GasStationService.getGasStationTokenConfig('voi-mainnet', 'VOI')).toBeNull();
     });
 
     it('should return null for non-gas station tokens', () => {

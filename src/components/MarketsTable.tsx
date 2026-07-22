@@ -15,6 +15,7 @@ import {
   getAllTokensWithDisplayInfo,
   getFolksAdaptersForPhase,
   getTokenConfig,
+  asTokenConfig,
   resolveTokenConfigFromDisplayToken,
   resolveTokenForMarketPosition,
   getAlgorandNetworkFromNetworkId,
@@ -109,7 +110,6 @@ import {
 import {
   createDebouncedPrefetch,
   warmMarketDetailUserPositionRpc,
-  poolIdFromMarketRow,
   marketRowKeyFromMarket,
   type MarketActionTokenParams,
 } from "@/utils/modalPrefetch";
@@ -1425,7 +1425,10 @@ const MarketsTable = () => {
       // Use originalSymbol to look up the config, as asset might be a display symbol
       const originalSymbol =
         "originalSymbol" in token ? (token as { originalSymbol?: string }).originalSymbol : asset;
-      const tokenConfig = getTokenConfig(currentNetwork, originalSymbol);
+      const tokenConfig = asTokenConfig(
+        getTokenConfig(currentNetwork, originalSymbol ?? asset),
+        (token as { poolId?: string }).poolId
+      );
 
       if (!tokenConfig) {
         throw new Error(`Token config not found for ${asset}`);
@@ -1778,7 +1781,7 @@ const MarketsTable = () => {
   const detailModalRowLastFetched = useMemo(() => {
     if (!detailModal.isOpen || !detailModal.asset) return undefined;
     const fresh = findMarketRow(
-      marketsData as Record<string, Record<string, unknown>>,
+      marketsData as unknown as Record<string, Record<string, unknown>>,
       marketsForLookup as Record<string, unknown>[],
       detailModal.asset,
       detailModal.poolId,
@@ -1798,7 +1801,7 @@ const MarketsTable = () => {
     if (!detailModal.isOpen || !detailModal.asset) return;
     if (detailModalRowLastFetched === undefined) return;
     const fresh = findMarketRow(
-      marketsData as Record<string, Record<string, unknown>>,
+      marketsData as unknown as Record<string, Record<string, unknown>>,
       marketsForLookup as Record<string, unknown>[],
       detailModal.asset,
       detailModal.poolId,
@@ -2606,15 +2609,22 @@ const MarketsTable = () => {
       const decodedStxns = signedTxns.map((txn: Uint8Array) => {
         return algosdk.decodeSignedTransaction(txn);
       });
-      type DecodedAppTxn = { txn: { type: string; applicationCall?: { appIndex: number }; txID(): string } };
-      const poolTxn = decodedStxns
-        .reverse()
-        .find(
-          (txn): txn is DecodedAppTxn =>
-            (txn as DecodedAppTxn).txn?.type === "appl" &&
-            typeof (txn as DecodedAppTxn).txn?.applicationCall?.appIndex === "number" &&
-            Number((txn as DecodedAppTxn).txn.applicationCall!.appIndex) === parseInt(voiToken.poolId || "")
+      type DecodedAppTxn = {
+        txn: {
+          type: string;
+          applicationCall?: { appIndex: number };
+          txID(): string;
+        };
+      };
+      const poolTxn = decodedStxns.reverse().find((raw) => {
+        const txn = raw as unknown as DecodedAppTxn;
+        return (
+          txn.txn?.type === "appl" &&
+          typeof txn.txn?.applicationCall?.appIndex === "number" &&
+          Number(txn.txn.applicationCall.appIndex) ===
+            parseInt(voiToken.poolId || "")
         );
+      }) as DecodedAppTxn | undefined;
       const poolTxnID = poolTxn?.txn?.txID?.();
       if (poolTxnID) {
         await new Promise((resolve) => setTimeout(resolve, 5000));
@@ -3072,7 +3082,7 @@ const MarketsTable = () => {
 
       // Calculate USD value (same display asset may map to multiple rows)
       const marketForPrice = findMarketRow(
-        marketsData as Record<string, Record<string, unknown>>,
+        marketsData as unknown as Record<string, Record<string, unknown>>,
         marketsForLookup as Record<string, unknown>[],
         asset,
         poolId,
