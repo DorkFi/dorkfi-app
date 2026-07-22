@@ -12,6 +12,7 @@ import {
   usdPerTokenFromOracleContractRaw,
   marketInfoFormattedPriceFromUsdPerToken,
   resolveUsdPerTokenFromMarketInfo,
+  usdPerTokenFromPortfolioMarketRow,
   usdValueForHumanTokenAmount,
 } from "../assetDecimals";
 
@@ -179,6 +180,33 @@ describe("resolveUsdPerTokenFromMarketInfo", () => {
     expect(
       resolveUsdPerTokenFromMarketInfo({ price: "7120000" }, 6)
     ).toBe(7.12);
+  });
+});
+
+describe("usdPerTokenFromPortfolioMarketRow", () => {
+  it("returns 0 for missing market instead of inventing $1", () => {
+    expect(usdPerTokenFromPortfolioMarketRow(null, 8)).toBe(0);
+    expect(usdPerTokenFromPortfolioMarketRow(undefined, 8)).toBe(0);
+    expect(usdPerTokenFromPortfolioMarketRow({}, 8)).toBe(0);
+  });
+
+  it("uses oracleUsdPerToken when attached", () => {
+    expect(
+      usdPerTokenFromPortfolioMarketRow(
+        { price: "0", oracleUsdPerToken: 75440.41 },
+        8
+      )
+    ).toBeCloseTo(75440.41, 2);
+  });
+
+  it("normalizes WAD micro-USD (Markets-style)", () => {
+    expect(
+      usdPerTokenFromPortfolioMarketRow(
+        { price: "1000000", symbol: "WAD", oracleUsdPerToken: 1_000_000 },
+        6,
+        { displaySymbol: "WAD" }
+      )
+    ).toBeCloseTo(1, 5);
   });
 });
 

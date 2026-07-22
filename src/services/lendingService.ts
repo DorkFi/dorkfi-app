@@ -38,6 +38,7 @@ import {
 } from "@/config";
 import algorandService, { AlgorandNetwork } from "./algorandService";
 import { ARC200Service } from "./arc200Service";
+import { runWithConcurrency } from "@/utils/runWithConcurrency";
 import { abi, CONTRACT } from "ulujs";
 import {
   APP_SPEC as LendingPoolAppSpec,
@@ -51,7 +52,7 @@ import {
 } from "@/utils/assetDecimals";
 import algosdk from "algosdk";
 import BigNumber from "bignumber.js";
-import { withRpcReadCache } from "@/utils/rpcReadCache";
+import { withRpcReadCache, invalidateRpcReadCache } from "@/utils/rpcReadCache";
 import { calcDepositReturn } from "@folks-finance/algorand-sdk";
 import {
   calculateDepositAPY,
@@ -482,6 +483,9 @@ const ALGORAND_POOL_BTC_ORACLE_REFERENCE_MARKETS: Partial<
   "3333688282": ["3575837891"],
 };
 
+/** Symbols that can use the Pool A fWBTC oracle feed when their own entry is stale/missing. */
+const BTC_ORACLE_REFERENCE_SYMBOLS = new Set(["GOBTC", "WBTC", "BTC"]);
+
 async function readOracleUsdPerToken(
   networkId: NetworkId,
   oracleKey: string,
@@ -557,37 +561,44 @@ async function applyOraclePriceToMarketInfo(
     .map((k) => (k != null ? String(k).trim() : ""))
     .filter((k, i, arr) => k !== "" && arr.indexOf(k) === i);
 
-  const candidates: Array<{ usd: number; timestampSec: number }> = [];
+  const pickBest = (
+    candidates: Array<{ usd: number; timestampSec: number }>
+  ) =>
+    candidates.reduce((a, b) => {
+      if (b.timestampSec !== a.timestampSec) {
+        return b.timestampSec > a.timestampSec ? b : a;
+      }
+      return b.usd > a.usd ? b : a;
+    });
+
+  const collectFromKeys = async (keys: string[]) => {
+    if (keys.length === 0) return [] as Array<{ usd: number; timestampSec: number }>;
+    const oracleResults = await Promise.all(
+      keys.map((key) => readOracleUsdPerToken(networkId, key, tokenDecimals))
+    );
+    return oracleResults.filter(
+      (o): o is { usd: number; timestampSec: number } => o != null
+    );
+  };
+
+  // Primary keys first — avoid BTC-ref RPCs when the market's own feed is live.
+  let candidates = await collectFromKeys(oracleKeys);
 
   const sym = marketInfo.symbol.toUpperCase();
   const btcRefMarkets =
     ALGORAND_POOL_BTC_ORACLE_REFERENCE_MARKETS[marketInfo.poolId];
-  const allOracleKeys = [...oracleKeys];
-  if (btcRefMarkets && sym === "GOBTC") {
-    for (const refMarketId of btcRefMarkets) {
-      if (!allOracleKeys.includes(refMarketId)) {
-        allOracleKeys.push(refMarketId);
-      }
-    }
-  }
-
-  const oracleResults = await Promise.all(
-    allOracleKeys.map((key) =>
-      readOracleUsdPerToken(networkId, key, tokenDecimals)
-    )
-  );
-  for (const oracle of oracleResults) {
-    if (oracle) candidates.push(oracle);
+  if (
+    candidates.length === 0 &&
+    btcRefMarkets &&
+    BTC_ORACLE_REFERENCE_SYMBOLS.has(sym)
+  ) {
+    const refKeys = btcRefMarkets.filter((id) => !oracleKeys.includes(id));
+    candidates = await collectFromKeys(refKeys);
   }
 
   if (candidates.length === 0) return;
 
-  const best = candidates.reduce((a, b) => {
-    if (b.timestampSec !== a.timestampSec) {
-      return b.timestampSec > a.timestampSec ? b : a;
-    }
-    return b.usd > a.usd ? b : a;
-  });
+  const best = pickBest(candidates);
 
   marketInfo.oracleUsdPerToken = best.usd;
   marketInfo.oraclePriceTimestampSec = best.timestampSec;
@@ -1169,126 +1180,121 @@ export async function fetchFreshMarketInfo(
   }
 }
 
+/** Cap parallel per-market fetches to avoid Algod/API stampedes. */
+const FETCH_ALL_MARKETS_CONCURRENCY = 6;
+
+type FetchAllMarketsToken = {
+  symbol: string;
+  poolId?: string | null;
+  underlyingContractId?: string;
+};
+
+async function fetchMarketInfosForTokens(
+  networkId: NetworkId,
+  tokens: FetchAllMarketsToken[],
+  concurrency: number = FETCH_ALL_MARKETS_CONCURRENCY
+): Promise<MarketInfo[]> {
+  const markets: MarketInfo[] = [];
+  await runWithConcurrency(tokens, concurrency, async (token) => {
+    try {
+      const poolId = token.poolId;
+      if (!poolId) {
+        console.warn(
+          `No pool ID configured for token ${token.symbol}, skipping`
+        );
+        return;
+      }
+      const marketId = token.underlyingContractId || token.symbol;
+      const marketInfo = await fetchMarketInfo(poolId, marketId, networkId);
+      if (marketInfo) {
+        markets.push(marketInfo);
+      } else {
+        console.warn(`No market data found for ${token.symbol}, skipping`);
+      }
+    } catch (error) {
+      console.error(`Error fetching market data for ${token.symbol}:`, error);
+    }
+  });
+  return markets;
+}
+
 /**
- * Fetch all markets information
+ * Fetch market rows for specific pool/market keys (position-first Portfolio hydrate).
+ */
+export const fetchMarketsByKeys = async (
+  keys: UserPositionMarketKey[],
+  options?: { concurrency?: number }
+): Promise<MarketInfo[]> => {
+  if (!keys.length) return [];
+  const concurrency = options?.concurrency ?? FETCH_ALL_MARKETS_CONCURRENCY;
+  const markets: MarketInfo[] = [];
+  await runWithConcurrency(keys, concurrency, async (key) => {
+    try {
+      const marketInfo = await fetchMarketInfo(
+        key.poolId,
+        key.marketId,
+        key.networkId
+      );
+      if (marketInfo) markets.push(marketInfo);
+    } catch (error) {
+      console.error(
+        `[fetchMarketsByKeys] failed for ${key.networkId}/${key.poolId}/${key.marketId}:`,
+        error
+      );
+    }
+  });
+  return markets;
+};
+
+/**
+ * Fetch all markets information (capped parallel fetches).
  */
 export const fetchAllMarkets = async (
   networkId: NetworkId,
-  options?: { excludeMarketsTableHidden?: boolean }
+  options?: {
+    excludeMarketsTableHidden?: boolean;
+    concurrency?: number;
+  }
 ): Promise<MarketInfo[]> => {
   try {
-    const networkConfig = getNetworkConfig(networkId);
+    const concurrency = options?.concurrency ?? FETCH_ALL_MARKETS_CONCURRENCY;
 
     if (isAlgorandCompatibleNetwork(networkId)) {
-      // Get markets from config
       const tokens = options?.excludeMarketsTableHidden
         ? getMarketsTableVisibleTokensWithDisplayInfo(networkId)
         : getAllTokensWithDisplayInfo(networkId);
 
-      console.log("Fetching real market data for", tokens.length, "tokens");
+      console.log(
+        "Fetching real market data for",
+        tokens.length,
+        "tokens (concurrency",
+        concurrency,
+        ")"
+      );
 
-      // Fetch real market data for each token
-      const markets: MarketInfo[] = [];
-
-      for (const token of tokens) {
-        try {
-          // Use the token's own poolId from config, not the first lending pool
-          const poolId = token.poolId;
-
-          if (!poolId) {
-            console.warn(
-              `No pool ID configured for token ${token.symbol}, skipping`
-            );
-            continue;
-          }
-
-          const marketId = token.underlyingContractId || token.symbol;
-
-          console.log(
-            `Fetching market data for ${token.symbol} (marketId: ${marketId}, poolId: ${poolId})`
-          );
-
-          const marketInfo = await fetchMarketInfo(poolId, marketId, networkId); // fetch from api
-
-          if (marketInfo) {
-            console.log(
-              `Successfully fetched market data for ${token.symbol}:`,
-              {
-                price: marketInfo.price,
-                totalDeposits: marketInfo.totalDeposits,
-                totalBorrows: marketInfo.totalBorrows,
-                utilizationRate: marketInfo.utilizationRate,
-              }
-            );
-            markets.push(marketInfo);
-          } else {
-            console.warn(`No market data found for ${token.symbol}, skipping`);
-          }
-        } catch (error) {
-          console.error(
-            `Error fetching market data for ${token.symbol}:`,
-            error
-          );
-          // Continue with other tokens even if one fails
-        }
-      }
-
+      const markets = await fetchMarketInfosForTokens(
+        networkId,
+        tokens,
+        concurrency
+      );
       console.log(`Successfully fetched ${markets.length} markets`);
       return markets;
     } else if (isEVMNetwork(networkId)) {
-      // For EVM networks, fetch real market data
       const tokens = getAllTokensWithDisplayInfo(networkId);
 
-      console.log("Fetching real EVM market data for", tokens.length, "tokens");
+      console.log(
+        "Fetching real EVM market data for",
+        tokens.length,
+        "tokens (concurrency",
+        concurrency,
+        ")"
+      );
 
-      // Fetch real market data for each token
-      const markets: MarketInfo[] = [];
-
-      for (const token of tokens) {
-        try {
-          // Use the token's own poolId from config, not the first lending pool
-          const poolId = token.poolId;
-
-          if (!poolId) {
-            console.warn(
-              `No pool ID configured for token ${token.symbol}, skipping`
-            );
-            continue;
-          }
-
-          const marketId = token.underlyingContractId || token.symbol;
-
-          console.log(
-            `Fetching EVM market data for ${token.symbol} (marketId: ${marketId}, poolId: ${poolId})`
-          );
-
-          const marketInfo = await fetchMarketInfo(poolId, marketId, networkId);
-
-          if (marketInfo) {
-            console.log(
-              `Successfully fetched EVM market data for ${token.symbol}:`,
-              {
-                price: marketInfo.price,
-                totalDeposits: marketInfo.totalDeposits,
-                totalBorrows: marketInfo.totalBorrows,
-                utilizationRate: marketInfo.utilizationRate,
-              }
-            );
-            markets.push(marketInfo);
-          } else {
-            console.warn(
-              `No EVM market data found for ${token.symbol}, skipping`
-            );
-          }
-        } catch (error) {
-          console.error(
-            `Error fetching EVM market data for ${token.symbol}:`,
-            error
-          );
-          // Continue with other tokens even if one fails
-        }
-      }
-
+      const markets = await fetchMarketInfosForTokens(
+        networkId,
+        tokens,
+        concurrency
+      );
       console.log(`Successfully fetched ${markets.length} EVM markets`);
       return markets;
     } else {
@@ -5640,6 +5646,142 @@ export const migrate = async (
 };
 
 /**
+ * Detect whether the user already has an nt200/ARC200 balance box on the token app.
+ * Used to avoid blind multi-simulate probe loops when building borrow groups.
+ */
+export async function detectNt200UserBalanceBox(
+  algod: any,
+  tokenAppId: number | string,
+  userAddress: string
+): Promise<"present" | "missing" | "unknown"> {
+  const appId = Number(tokenAppId);
+  if (!Number.isFinite(appId) || appId <= 0 || !userAddress) {
+    return "unknown";
+  }
+  return withRpcReadCache(
+    `nt200UserBox:${appId}:${userAddress}`,
+    async () => {
+      try {
+        const boxName = algosdk.decodeAddress(userAddress).publicKey;
+        await algod.getApplicationBoxByName(appId, boxName).do();
+        return "present" as const;
+      } catch (error: unknown) {
+        const err = error as {
+          response?: { status?: number };
+          status?: number;
+          message?: string;
+        };
+        const status = err?.response?.status ?? err?.status;
+        const msg = String(err?.message ?? error ?? "").toLowerCase();
+        if (
+          status === 404 ||
+          msg.includes("not found") ||
+          msg.includes("no box") ||
+          msg.includes("box does not exist")
+        ) {
+          // Prefer unknown over hard "missing" — wrong box-name schemes must not
+          // lock borrow into createBalanceBox-only probes.
+          try {
+            const ci = new CONTRACT(appId, algod, undefined, abi.nt200, {
+              addr: userAddress,
+              sk: new Uint8Array(),
+            });
+            const r = await ci.arc200_balanceOf(userAddress);
+            if (r.success) return "present" as const;
+            // balanceOf failed after box 404 → likely truly missing
+            return "missing" as const;
+          } catch {
+            return "unknown" as const;
+          }
+        }
+        // Fallback: readable balance implies box exists
+        try {
+          const ci = new CONTRACT(appId, algod, undefined, abi.nt200, {
+            addr: userAddress,
+            sk: new Uint8Array(),
+          });
+          const r = await ci.arc200_balanceOf(userAddress);
+          return r.success ? ("present" as const) : ("missing" as const);
+        } catch {
+          return "unknown" as const;
+        }
+      }
+    },
+    60_000
+  );
+}
+
+/** Order [balanceBox, highFee] probes so the first simulate usually succeeds.
+ * Always keep fallbacks — wrong box detection must not make borrow unusable.
+ */
+export function orderBorrowBuildProbes(
+  needsBalanceBoxProbe: boolean,
+  boxStatus: "present" | "missing" | "unknown"
+): Array<[number, number]> {
+  if (!needsBalanceBoxProbe) {
+    return [
+      [0, 0],
+      [0, 1],
+    ];
+  }
+  if (boxStatus === "present") {
+    // Prefer no createBalanceBox, but keep create variants as fallback
+    return [
+      [0, 0],
+      [0, 1],
+      [1, 0],
+      [1, 1],
+    ];
+  }
+  if (boxStatus === "missing") {
+    // Prefer createBalanceBox first, but keep no-box variants as fallback
+    // (box-name detection can false-negative)
+    return [
+      [1, 0],
+      [1, 1],
+      [0, 0],
+      [0, 1],
+    ];
+  }
+  // Unknown: prefer returning-user path, then first-time box create
+  return [
+    [0, 0],
+    [1, 0],
+    [0, 1],
+    [1, 1],
+  ];
+}
+
+/** Only skip remaining probes on very clear simulate signals. */
+function borrowProbeSkipFromSimulateError(
+  errorText: string
+): { skipP1Zero?: boolean; skipP1One?: boolean; skipP2Zero?: boolean } {
+  const err = errorText.toLowerCase();
+  const out: {
+    skipP1Zero?: boolean;
+    skipP1One?: boolean;
+    skipP2Zero?: boolean;
+  } = {};
+  // Only skip when the node clearly says the box already exists
+  if (
+    err.includes("box already exist") ||
+    err.includes("err box exist") ||
+    err.includes("box exists")
+  ) {
+    out.skipP1One = true;
+  }
+  // Do not skip p1=0 on vague "box" / "assert" errors — those are common on other failures
+  // and caused usable paths to be discarded (FINITE borrow regressions).
+  if (
+    err.includes("overspend") ||
+    err.includes("fee too small")
+  ) {
+    out.skipP2Zero = true;
+  }
+  return out;
+}
+
+/**
  * Borrow tokens from a lending market
  */
 export const borrow = async (
@@ -5705,104 +5847,71 @@ export const borrow = async (
         throw new Error("Token not found");
       }
 
-      // Check if user is opted into the asset (for ASA and arc200-exchange tokens)
-      // Note: If not opted in, the transaction will include an opt-in automatically
-      let optIn = {};
-      if (
-        tokenStandardUsesAsaStyleNt200Txns(tokenStandard) ||
-        tokenStandard === "arc200-exchange"
-      ) {
-        if (token.underlyingAssetId) {
-          try {
-            const accountAssetInfo = await clients.algod
-              .accountAssetInformation(
-                userAddress,
-                Number(token.underlyingAssetId)
-              )
-              .do();
-            console.log(
-              `User is opted into asset ${token.underlyingAssetId} (${token.symbol})`
-            );
-          } catch (error: any) {
-            // If the error indicates the user is not opted in, log a warning
-            // The transaction will handle the opt-in automatically
-            if (
-              error?.response?.status === 404 ||
-              error?.response?.status === 400 ||
-              error?.message?.includes("not found") ||
-              error?.message?.includes("not opted") ||
-              error?.message?.includes("does not exist")
-            ) {
-              console.warn(
-                `User is not opted into asset ${token.underlyingAssetId} (${token.symbol}). Opt-in will be included in the transaction.`
+      // Opt-in check + market info in parallel (single market fetch; pause via marketInfo)
+      const needsAsaOptInCheck =
+        (tokenStandardUsesAsaStyleNt200Txns(tokenStandard) ||
+          tokenStandard === "arc200-exchange") &&
+        !!token.underlyingAssetId;
+
+      const optInCheckPromise = needsAsaOptInCheck
+        ? clients.algod
+            .accountAssetInformation(
+              userAddress,
+              Number(token.underlyingAssetId)
+            )
+            .do()
+            .then(() => {
+              console.log(
+                `User is opted into asset ${token.underlyingAssetId} (${token.symbol})`
               );
-              optIn = {
-                xaid: Number(token.underlyingAssetId),
-                snd: userAddress,
-                arcv: userAddress,
-              };
-            } else {
-              // Re-throw unexpected errors
+              return {} as Record<string, unknown>;
+            })
+            .catch((error: any) => {
+              if (
+                error?.response?.status === 404 ||
+                error?.response?.status === 400 ||
+                error?.message?.includes("not found") ||
+                error?.message?.includes("not opted") ||
+                error?.message?.includes("does not exist")
+              ) {
+                console.warn(
+                  `User is not opted into asset ${token.underlyingAssetId} (${token.symbol}). Opt-in will be included in the transaction.`
+                );
+                return {
+                  xaid: Number(token.underlyingAssetId),
+                  snd: userAddress,
+                  arcv: userAddress,
+                } as Record<string, unknown>;
+              }
               console.error("Error checking asset opt-in status:", error);
               throw error;
-            }
-          }
-        }
-      }
+            })
+        : Promise.resolve({} as Record<string, unknown>);
 
-      // Convert amount to proper units (considering decimals)
-      const bigAmount = BigInt(amount);
+      const [optIn, marketInfo, boxStatusEarly] = await Promise.all([
+        optInCheckPromise,
+        fetchMarketInfo(poolId, marketId, networkId),
+        tokenStandard == "network" ||
+        tokenStandardUsesAsaStyleNt200Txns(tokenStandard)
+          ? detectNt200UserBalanceBox(
+              clients.algod,
+              token.underlyingContractId,
+              userAddress
+            )
+          : Promise.resolve("unknown" as const),
+      ]);
 
-      // Check if market is paused
-      const marketPaused = await isMarketPaused(poolId, marketId, networkId);
-      if (marketPaused) {
-        throw new Error("Market is paused");
-      }
-
-      // Get market info and user global data to check borrowing capacity
-      console.log({
-        fetchMarketInfo: {
-          poolId,
-          marketId,
-          networkId,
-        },
-      });
-      const marketInfo = await fetchMarketInfo(poolId, marketId, networkId);
       if (!marketInfo) {
         throw new Error("Failed to fetch market info");
+      }
+      if (marketInfo.isPaused) {
+        throw new Error("Market is paused");
       }
 
       console.log("marketInfo", { marketInfo });
 
-      // Get user global data to check borrowing capacity
-      const userGlobalData = await fetchUserGlobalData(userAddress, networkId);
-      if (!userGlobalData) {
-        throw new Error("Failed to fetch user global data");
-      }
-
-      console.log("userGlobalData", { userGlobalData });
-
-      const borrowAmount = new BigNumber(amount);
-
-      // Check if borrow would exceed available liquidity in the market
-      const currentTotalDeposits = new BigNumber(marketInfo.totalDeposits);
-      const currentTotalBorrows = new BigNumber(marketInfo.totalBorrows);
-      const availableLiquidity =
-        currentTotalDeposits.minus(currentTotalBorrows);
-
-      if (borrowAmount.isGreaterThan(availableLiquidity)) {
-        //throw new Error("Insufficient liquidity available for borrowing");
-      }
-
-      // Check if borrow would exceed max total borrows for the market
-      const maxTotalBorrows = new BigNumber(marketInfo.maxTotalBorrows);
-      if (
-        currentTotalBorrows.plus(borrowAmount).isGreaterThan(maxTotalBorrows)
-      ) {
-        //throw new Error("Borrow would exceed maximum total borrows");
-      }
-
-      // Collateral-based validation removed
+      // Convert amount to proper units (considering decimals)
+      const bigAmount = BigInt(amount);
 
       const ci = new CONTRACT(
         Number(poolId),
@@ -5814,21 +5923,6 @@ export const borrow = async (
           sk: new Uint8Array(),
         }
       );
-      const ciLending = new CONTRACT(
-        Number(poolId),
-        clients.algod,
-        undefined,
-        { ...LendingPoolAppSpec.contract, events: [] },
-        { addr: userAddress, sk: new Uint8Array() }
-      );
-
-      ciLending.setFee(5000);
-      ciLending.setPaymentAmount(1e5);
-      const fetch_price_feedR = await ciLending.fetch_price_feed(
-        Number(marketId)
-      );
-      console.log("fetch_price_feedR", { fetch_price_feedR });
-      const doFetchPriceFeed = fetch_price_feedR.success;
 
       const builder = {
         lending: new CONTRACT(
@@ -5982,36 +6076,36 @@ export const borrow = async (
           folksMintTxnsToArccjsExtraTxns(burnUnsigned);
       }
 
-      ciLending.setFee(5000);
-
-      // const calculate_user_debt_interestR =
-      //   await ciLending.calculate_user_debt_interest(
-      //     userAddress,
-      //     Number(marketId)
-      //   );
-      // console.log("calculate_user_debt_interestR", {
-      //   calculate_user_debt_interestR,
-      // });
-      // const calculate_user_debt_interest =
-      //   calculate_user_debt_interestR.returnValue;
-      // console.log("calculate_user_debt_interest", {
-      //   calculate_user_debt_interest,
-      // });
-
-      // const sync_marketR = await ciLending.sync_market(Number(marketId));
-      // console.log("sync_marketR", { sync_marketR });
-
       let customTx: any;
 
-      // p1 - create balance box user
-      // p2 - payment to approve spending of token
-      for (const p of [
-        [0, 0], // no balance box, no approve
-        [1, 0], // balance box, no approve
-        [1, 1], // balance box, approve
-        [0, 1], // no balance box, approve
-      ]) {
+      // p1 - create balance box user; p2 - higher payment for inner-txn funding
+      const needsBalanceBoxProbe =
+        tokenStandard == "network" ||
+        tokenStandardUsesAsaStyleNt200Txns(tokenStandard);
+
+      const boxStatus = needsBalanceBoxProbe ? boxStatusEarly : "unknown";
+
+      const buildProbes = orderBorrowBuildProbes(
+        needsBalanceBoxProbe,
+        boxStatus
+      );
+
+      console.log("borrow build probes", {
+        needsBalanceBoxProbe,
+        boxStatus,
+        buildProbes,
+      });
+
+      let skipP1Zero = false;
+      let skipP1One = false;
+      let skipP2Zero = false;
+
+      for (const p of buildProbes) {
         const [p1, p2] = p;
+        if (p1 === 0 && skipP1Zero) continue;
+        if (p1 === 1 && skipP1One) continue;
+        if (p2 === 0 && skipP2Zero) continue;
+
         const buildN = [];
 
         // cond create balance box user if needed and network token
@@ -6092,7 +6186,7 @@ export const borrow = async (
           });
         }
 
-        console.log("buildN", { buildN });
+        console.log("buildN", { buildN, p1, p2 });
 
         // Create borrow transaction
         ci.setFee(20000);
@@ -6104,26 +6198,40 @@ export const borrow = async (
 
         customTx = await ci.custom();
 
-        console.log("customTx", { customTx });
+        console.log("customTx", { customTx, p1, p2 });
 
         if (customTx.success) {
           break;
         }
+
+        const errText = String(customTx?.error ?? "");
+        const skip = borrowProbeSkipFromSimulateError(errText);
+        if (skip.skipP1Zero) skipP1Zero = true;
+        if (skip.skipP1One) skipP1One = true;
+        if (skip.skipP2Zero) skipP2Zero = true;
       }
 
       console.log("customTx", { customTx });
 
-      if (!customTx.success) {
-        if (customTx.error.match(/tried to spend/)) {
-          throw new Error(customTx.error);
+      if (!customTx?.success) {
+        invalidateRpcReadCache(
+          `nt200UserBox:${Number(token.underlyingContractId)}:${userAddress}`
+        );
+        const errText = String(customTx?.error ?? "Borrow transaction failed");
+        if (/tried to spend/i.test(errText)) {
+          throw new Error(errText);
         } else if (
-          customTx.error.match(
-            /logic eval error: assert failed pc=.*opcodes=b[/]; b<=; assert/
+          /logic eval error: assert failed pc=.*opcodes=b[/]; b<=; assert/.test(
+            errText
           )
         ) {
           throw new Error("insufficient collateral for borrow");
         }
-        throw new Error("Borrow transaction failed");
+        throw new Error(
+          errText && errText !== "undefined"
+            ? errText
+            : "Borrow transaction failed"
+        );
       }
 
       return {

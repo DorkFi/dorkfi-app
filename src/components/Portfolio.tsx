@@ -27,6 +27,7 @@ import { signAndSendSyncUserMarketsForPriceChangeTx } from "@/utils/syncUserMark
 import {
   fetchUserGlobalData,
   fetchAllMarkets,
+  collectPositionMarketKeys,
   fetchUserBorrowBalance,
   fetchUserDepositBalance,
   enhanceAVMMarketInfo,
@@ -35,7 +36,17 @@ import {
   liquidateCrossMarket,
   fetchUserDataFromChain,
   postRefreshMarketDataSnapshot,
+  type MarketInfo,
 } from "@/services/lendingService";
+import {
+  hydratePortfolioNetworkMarketsPhaseA,
+  refinePortfolioMarketsPhaseB,
+  gapFillPortfolioMarkets,
+  readPortfolioMarketsSessionCache,
+  writePortfolioMarketsSessionCache,
+  marketInfosFromMarketsTableSession,
+  mergePortfolioMarketRows,
+} from "@/utils/portfolioMarketHydrate";
 import {
   estimateFolksDepositMintedFAssetAmount,
   folksFAssetHumanToUnderlyingHuman,
@@ -84,10 +95,14 @@ import {
   PortfolioPositionsFilteredEmptyState,
 } from "@/components/portfolio/PortfolioPositionsFilterBar";
 import PortfolioPositionsCardHeader from "@/components/portfolio/PortfolioPositionsCardHeader";
-import { usdPerTokenFromMarketInfoPrice } from "@/utils/assetDecimals";
+import { usdPerTokenFromPortfolioMarketRow } from "@/utils/assetDecimals";
 import { formatNftHolderClaimableDisplayFromAgent } from "@/utils/nftHolderClaimAgentDisplay";
 import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
 import { portfolioWalletBalanceCacheKey } from "@/utils/portfolioWalletBalanceCacheKey";
+import {
+  portfolioUsdCacheKey,
+  resolveWithLastGoodPortfolioUsd,
+} from "@/utils/portfolioUsdCache";
 import {
   createDebouncedPrefetch,
   warmBorrowModalMaxAndPool,
@@ -245,9 +260,130 @@ function folksUnderlyingUsdFallbackSamePool(
     marketId: ref.underlyingContractId,
     poolId,
     displaySymbol: ref.symbol,
-  }) as { price?: string | number } | undefined;
-  if (!m?.price) return 0;
-  return usdPerTokenFromMarketInfoPrice(m.price, ref.decimals);
+  });
+  return usdPerTokenFromPortfolioMarketRow(m, ref.decimals, {
+    displaySymbol: ref.symbol,
+  });
+}
+
+/** When wBTC/goBTC market price is missing, reuse a same-pool BTC-family market with a valid price. */
+function btcFamilyUsdFallbackSamePool(
+  marketRows: unknown[],
+  networkId: NetworkId,
+  poolId: string,
+  currentUnderlyingMarketId: string
+): number {
+  const tokens = getAllTokensWithDisplayInfo(networkId);
+  const preferred = tokens.filter((t) => {
+    if (String(t.poolId) !== String(poolId)) return false;
+    if (
+      String(t.underlyingContractId ?? "") === String(currentUnderlyingMarketId)
+    ) {
+      return false;
+    }
+    const key = String(t.configKey ?? t.originalSymbol ?? t.symbol).toUpperCase();
+    return key === "GOBTC" || key === "WBTC" || key === "BTC";
+  });
+  // Prefer goBTC / fWBTC (Folks) rows — fresher BTC oracle feed on Pool A
+  const ordered = [...preferred].sort((a, b) => {
+    const score = (t: (typeof preferred)[number]) => {
+      const id = String(t.underlyingContractId ?? "");
+      if (id === "3575837891") return 0;
+      const key = String(t.configKey ?? t.originalSymbol ?? "").toUpperCase();
+      if (key === "GOBTC") return 1;
+      return 2;
+    };
+    return score(a) - score(b);
+  });
+  for (const ref of ordered) {
+    if (!ref.underlyingContractId) continue;
+    const m = marketRowForPortfolioPosition(marketRows, {
+      marketId: ref.underlyingContractId,
+      poolId,
+      displaySymbol: ref.symbol,
+    });
+    const usd = usdPerTokenFromPortfolioMarketRow(m, ref.decimals, {
+      displaySymbol: ref.symbol,
+    });
+    if (usd > 0) return usd;
+  }
+  return 0;
+}
+
+function resolvePortfolioPositionUsdPerToken(options: {
+  market: unknown;
+  tokenDecimals: number;
+  networkId: NetworkId;
+  poolId?: string | null;
+  marketId?: string | null;
+  configKey?: string;
+  originalSymbol?: string;
+  displaySymbol?: string;
+  marketRows: unknown[];
+}): number {
+  let tokenPrice = usdPerTokenFromPortfolioMarketRow(
+    options.market,
+    options.tokenDecimals,
+    { displaySymbol: options.displaySymbol }
+  );
+
+  const cacheKey =
+    options.poolId != null && options.marketId
+      ? portfolioUsdCacheKey(
+          String(options.networkId),
+          String(options.poolId),
+          String(options.marketId)
+        )
+      : null;
+
+  if (tokenPrice > 0) {
+    return resolveWithLastGoodPortfolioUsd(tokenPrice, cacheKey);
+  }
+
+  const cfgRaw = getTokenConfig(
+    options.networkId,
+    options.configKey ?? options.originalSymbol ?? options.displaySymbol ?? ""
+  );
+  const tc = Array.isArray(cfgRaw)
+    ? cfgRaw.find((c) => String(c.poolId) === String(options.poolId)) ??
+      cfgRaw[0]
+    : cfgRaw;
+  if (
+    getAnyFolksAdapter(tc ?? {}) &&
+    options.poolId != null &&
+    options.marketId
+  ) {
+    tokenPrice = folksUnderlyingUsdFallbackSamePool(
+      options.marketRows,
+      options.networkId,
+      String(options.poolId),
+      String(options.marketId)
+    );
+    if (tokenPrice > 0) {
+      return resolveWithLastGoodPortfolioUsd(tokenPrice, cacheKey);
+    }
+  }
+
+  const sym = String(
+    options.configKey ?? options.originalSymbol ?? options.displaySymbol ?? ""
+  ).toUpperCase();
+  if (
+    (sym === "WBTC" || sym === "GOBTC" || sym === "BTC") &&
+    options.poolId != null &&
+    options.marketId
+  ) {
+    tokenPrice = btcFamilyUsdFallbackSamePool(
+      options.marketRows,
+      options.networkId,
+      String(options.poolId),
+      String(options.marketId)
+    );
+    if (tokenPrice > 0) {
+      return resolveWithLastGoodPortfolioUsd(tokenPrice, cacheKey);
+    }
+  }
+
+  return resolveWithLastGoodPortfolioUsd(0, cacheKey);
 }
 
 function isExcludedPortfolioPositionRow(pos: {
@@ -697,10 +833,13 @@ const Portfolio = () => {
 
   console.log("marketData", marketData);
 
-  // Human USD per 1 underlying token for `MarketInfo` rows (see `usdPerTokenFromMarketInfoPrice`).
+  // Human USD per 1 underlying token for `MarketInfo` rows (oracle-aware).
   const formatPriceFromContract = useCallback(
     (contractPrice: string | number, tokenDecimals: number) =>
-      usdPerTokenFromMarketInfoPrice(contractPrice, tokenDecimals),
+      usdPerTokenFromPortfolioMarketRow(
+        { price: contractPrice },
+        tokenDecimals
+      ),
     []
   );
 
@@ -901,35 +1040,22 @@ const Portfolio = () => {
               networkId
             );
 
-            let tokenPrice = market?.price
-              ? usdPerTokenFromMarketInfoPrice(market.price, token.decimals)
-              : 0;
-            if (!Number.isFinite(tokenPrice) || tokenPrice <= 0) {
-              const cfg = getTokenConfig(
-                networkId as NetworkId,
-                token.configKey ?? token.originalSymbol ?? ""
-              );
-              const tc = Array.isArray(cfg)
-                ? cfg.find((c) => String(c.poolId) === String(token.poolId)) ??
-                cfg[0]
-                : cfg;
-              if (getAnyFolksAdapter(tc ?? {})) {
-                tokenPrice = folksUnderlyingUsdFallbackSamePool(
-                  markets,
-                  networkId as NetworkId,
-                  String(token.poolId),
-                  String(token.underlyingContractId)
-                );
-              }
-            }
-            if (!Number.isFinite(tokenPrice) || tokenPrice <= 0) {
-              tokenPrice = 1;
-            }
+            let tokenPrice = resolvePortfolioPositionUsdPerToken({
+              market,
+              tokenDecimals: token.decimals,
+              networkId: networkId as NetworkId,
+              poolId: token.poolId,
+              marketId: token.underlyingContractId,
+              configKey: token.configKey,
+              originalSymbol: token.originalSymbol,
+              displaySymbol: token.symbol,
+              marketRows: markets,
+            });
 
             console.log(`Deposit position for ${token.symbol}:`, {
               depositBalance,
               nTokenBalance,
-              marketPrice: market?.price,
+              marketPrice: (market as { price?: unknown } | undefined)?.price,
               tokenPrice: tokenPrice,
               calculatedValue: depositBalance * tokenPrice,
               marketFound: !!market,
@@ -957,30 +1083,17 @@ const Portfolio = () => {
 
           // Add borrow position if user has borrows
           if (borrowBalance && borrowBalance > 0) {
-            let tokenPrice = market?.price
-              ? usdPerTokenFromMarketInfoPrice(market.price, token.decimals)
-              : 0;
-            if (!Number.isFinite(tokenPrice) || tokenPrice <= 0) {
-              const cfg = getTokenConfig(
-                networkId as NetworkId,
-                token.configKey ?? token.originalSymbol ?? ""
-              );
-              const tc = Array.isArray(cfg)
-                ? cfg.find((c) => String(c.poolId) === String(token.poolId)) ??
-                cfg[0]
-                : cfg;
-              if (getAnyFolksAdapter(tc ?? {})) {
-                tokenPrice = folksUnderlyingUsdFallbackSamePool(
-                  markets,
-                  networkId as NetworkId,
-                  String(token.poolId),
-                  String(token.underlyingContractId)
-                );
-              }
-            }
-            if (!Number.isFinite(tokenPrice) || tokenPrice <= 0) {
-              tokenPrice = 1;
-            }
+            let tokenPrice = resolvePortfolioPositionUsdPerToken({
+              market,
+              tokenDecimals: token.decimals,
+              networkId: networkId as NetworkId,
+              poolId: token.poolId,
+              marketId: token.underlyingContractId,
+              configKey: token.configKey,
+              originalSymbol: token.originalSymbol,
+              displaySymbol: token.symbol,
+              marketRows: markets,
+            });
 
             console.log(`Borrow position for ${token.symbol}:`, {
               borrowBalance,
@@ -1132,9 +1245,9 @@ const Portfolio = () => {
           // Find token matching marketId and poolId
           const token = tokens.find(
             (t) =>
-              (t.underlyingContractId === marketId ||
-                t.originalContractId === marketId) &&
-              t.poolId === appId
+              (String(t.underlyingContractId ?? "") === String(marketId) ||
+                String(t.originalContractId ?? "") === String(marketId)) &&
+              String(t.poolId ?? "") === String(appId)
           );
 
           if (!token) {
@@ -1238,30 +1351,18 @@ const Portfolio = () => {
             return; // Skip zero balances
           }
 
-          // Get token price (MarketInfo.price is already human USD/token; Folks f-asset may need ALGO oracle fallback)
-          let tokenPrice = market?.price
-            ? usdPerTokenFromMarketInfoPrice(market.price, token.decimals)
-            : 0;
-          if (!Number.isFinite(tokenPrice) || tokenPrice <= 0) {
-            const cfg = getTokenConfig(
-              networkId as NetworkId,
-              token.configKey ?? token.originalSymbol ?? ""
-            );
-            const tc = Array.isArray(cfg)
-              ? cfg.find((c) => String(c.poolId) === String(appId)) ?? cfg[0]
-              : cfg;
-            if (getAnyFolksAdapter(tc ?? {})) {
-              tokenPrice = folksUnderlyingUsdFallbackSamePool(
-                marketData,
-                networkId as NetworkId,
-                appId,
-                marketId
-              );
-            }
-          }
-          if (!Number.isFinite(tokenPrice) || tokenPrice <= 0) {
-            tokenPrice = 1;
-          }
+          // Get token price (oracle-aware; Folks/BTC family fallbacks — never invent $1)
+          const tokenPrice = resolvePortfolioPositionUsdPerToken({
+            market,
+            tokenDecimals: token.decimals,
+            networkId: networkId as NetworkId,
+            poolId: appId,
+            marketId,
+            configKey: token.configKey,
+            originalSymbol: token.originalSymbol,
+            displaySymbol: token.symbol,
+            marketRows: marketData,
+          });
 
           // Get APY
           const apy =
@@ -1386,9 +1487,9 @@ const Portfolio = () => {
           // Find token matching marketId and poolId
           const token = tokens.find(
             (t) =>
-              (t.underlyingContractId === marketId ||
-                t.originalContractId === marketId) &&
-              t.poolId === appId
+              (String(t.underlyingContractId ?? "") === String(marketId) ||
+                String(t.originalContractId ?? "") === String(marketId)) &&
+              String(t.poolId ?? "") === String(appId)
           );
 
           if (!token) {
@@ -1481,30 +1582,18 @@ const Portfolio = () => {
             return; // Skip zero balances
           }
 
-          // Get token price
-          let tokenPrice = market?.price
-            ? usdPerTokenFromMarketInfoPrice(market.price, token.decimals)
-            : 0;
-          if (!Number.isFinite(tokenPrice) || tokenPrice <= 0) {
-            const cfg = getTokenConfig(
-              networkId as NetworkId,
-              token.configKey ?? token.originalSymbol ?? ""
-            );
-            const tc = Array.isArray(cfg)
-              ? cfg.find((c) => String(c.poolId) === String(appId)) ?? cfg[0]
-              : cfg;
-            if (getAnyFolksAdapter(tc ?? {})) {
-              tokenPrice = folksUnderlyingUsdFallbackSamePool(
-                marketData,
-                networkId as NetworkId,
-                appId,
-                marketId
-              );
-            }
-          }
-          if (!Number.isFinite(tokenPrice) || tokenPrice <= 0) {
-            tokenPrice = 1;
-          }
+          // Get token price (oracle-aware; Folks/BTC family fallbacks — never invent $1)
+          const tokenPrice = resolvePortfolioPositionUsdPerToken({
+            market,
+            tokenDecimals: token.decimals,
+            networkId: networkId as NetworkId,
+            poolId: appId,
+            marketId,
+            configKey: token.configKey,
+            originalSymbol: token.originalSymbol,
+            displaySymbol: token.symbol,
+            marketRows: marketData,
+          });
 
           // Get APY
           const apy =
@@ -2930,18 +3019,18 @@ const Portfolio = () => {
         marketId: token.underlyingContractId,
         poolId: token.poolId,
         displaySymbol: asset,
-      }) as { price?: string | number } | undefined;
-      let tokenPrice = 1;
-
-      if (market?.price) {
-        tokenPrice = formatPriceFromContract(market.price, token.decimals);
-      } else if (networkToUse !== currentNetwork) {
-        // If market not found and we're on a different network, try to get price from token config or use default
-        console.warn(
-          `Market data not found for ${asset} on ${networkToUse}, using default price`
-        );
-        tokenPrice = 1;
-      }
+      });
+      const tokenPrice = resolvePortfolioPositionUsdPerToken({
+        market,
+        tokenDecimals: token.decimals,
+        networkId: networkToUse as NetworkId,
+        poolId: token.poolId,
+        marketId: token.underlyingContractId,
+        configKey: (token as { configKey?: string }).configKey,
+        originalSymbol: (token as { originalSymbol?: string }).originalSymbol,
+        displaySymbol: asset,
+        marketRows: marketData,
+      });
 
       //console.log({ market, tokenPrice, marketData, asset });
 
@@ -3075,29 +3164,30 @@ const Portfolio = () => {
       // Fetch user positions from all enabled networks (not just currentNetwork)
       // This ensures VOI items don't disappear when doing Algorand transactions
       const enabledNetworks = getEnabledNetworks();
-      const allPositions = [];
+      const networkPositionResults = await Promise.all(
+        enabledNetworks.map(async (networkId) => {
+          try {
+            const networkMarkets = filterPortfolioVisibleMarketRows(
+              networkId as NetworkId,
+              await fetchAllMarkets(networkId)
+            );
+            return await fetchUserPositions(
+              displayAddress,
+              networkId,
+              networkMarkets
+            );
+          } catch (error) {
+            console.error(
+              `Error fetching positions for network ${networkId}:`,
+              error
+            );
+            return [];
+          }
+        })
+      );
+      const allPositions = networkPositionResults.flat();
 
-      for (const networkId of enabledNetworks) {
-        try {
-          const networkMarkets = filterPortfolioVisibleMarketRows(
-            networkId as NetworkId,
-            await fetchAllMarkets(networkId)
-          );
-          const networkPositions = await fetchUserPositions(
-            displayAddress,
-            networkId,
-            networkMarkets
-          );
-          allPositions.push(...networkPositions);
-        } catch (error) {
-          console.error(
-            `Error fetching positions for network ${networkId}:`,
-            error
-          );
-        }
-      }
-
-      setMarketData(marketData);
+      setMarketData((prev) => mergePortfolioMarketRows(prev, marketData));
       setUserPositions(allPositions);
       setUserGlobalData(freshGlobalData);
     } catch (error) {
@@ -4064,55 +4154,135 @@ const Portfolio = () => {
     fetchUser(displayAddress);
   }, [displayAddress]);
 
-  // Fetch market data for all enabled networks when user data is available.
-  // Also fires after a 6s timeout so markets load even if fetchUser stalls (xChain race).
+  // Fast market hydrate: session cache → bulk Phase A (no oracle) → gap-fill
+  // position keys → background Phase B oracle refine. Avoids N×(GET+oracle)
+  // before Value (USD) / APY can paint.
   useEffect(() => {
-    const fetchMarketDataForAllNetworks = async () => {
-      // Proceed if user data is ready OR address is present (markets don't require user data)
-      if (!displayAddress && !user?.computed) {
-        return;
-      }
+    if (!displayAddress) return;
 
+    let cancelled = false;
+    const isCancelled = () => cancelled;
+
+    const mergeVisible = (incoming: MarketInfo[]) => {
+      if (cancelled || incoming.length === 0) return;
+      setMarketData((prev) => mergePortfolioMarketRows(prev, incoming));
+    };
+
+    const hydrate = async () => {
       try {
-        const enabledNetworks = getEnabledNetworks();
+        const enabledNetworks = getEnabledNetworks() as NetworkId[];
+        const positionKeys = collectPositionMarketKeys([
+          ...((user?.computed?.deposits as Record<string, unknown>[]) ?? []),
+          ...((user?.computed?.borrows as Record<string, unknown>[]) ?? []),
+        ]);
 
-        // Market POST `/market-data/...` for visible table rows is handled in
-        // `usePortfolioVisibleChainLive` (intersection) before user-data fetch.
+        await Promise.all(
+          enabledNetworks.map(async (networkId) => {
+            // Instant remount / after Markets visit
+            mergeVisible(marketInfosFromMarketsTableSession(networkId));
+            const sessionCached = readPortfolioMarketsSessionCache(networkId);
+            if (sessionCached?.length) {
+              mergeVisible(
+                filterPortfolioVisibleMarketRows(networkId, sessionCached)
+              );
+            }
 
-        // GET-backed `fetchAllMarkets` for portfolio display
-        const allMarketData: unknown[] = [];
-        for (const networkId of enabledNetworks) {
-          try {
-            const markets = filterPortfolioVisibleMarketRows(
-              networkId as NetworkId,
-              await fetchAllMarkets(networkId as NetworkId)
+            let phaseAMarkets: MarketInfo[] = [];
+            let refineJobs: Awaited<
+              ReturnType<typeof hydratePortfolioNetworkMarketsPhaseA>
+            >["refineJobs"] = [];
+
+            try {
+              const phaseA =
+                await hydratePortfolioNetworkMarketsPhaseA(networkId);
+              if (cancelled) return;
+              phaseAMarkets = phaseA.markets;
+              refineJobs = phaseA.refineJobs;
+              mergeVisible(phaseAMarkets);
+              // Merge into session so Phase A refresh cannot wipe prior oracle refine.
+              const sessionPrev =
+                readPortfolioMarketsSessionCache(networkId) ?? [];
+              writePortfolioMarketsSessionCache(
+                networkId,
+                mergePortfolioMarketRows(sessionPrev, phaseAMarkets) as MarketInfo[]
+              );
+            } catch (error) {
+              console.error(
+                `[Portfolio] Phase A bulk hydrate failed for ${networkId}:`,
+                error
+              );
+            }
+
+            // Gap-fill only open positions missing from bulk (not the full token list).
+            const phaseAKeySet = new Set(
+              phaseAMarkets.map(
+                (m) => `${m.networkId}|${m.poolId}|${m.marketId}`
+              )
             );
-            allMarketData.push(...markets);
-          } catch (error) {
-            console.error(
-              `Error fetching market data for network ${networkId}:`,
-              error
+            const keysToFill = positionKeys.filter(
+              (k) =>
+                k.networkId === networkId &&
+                !phaseAKeySet.has(`${k.networkId}|${k.poolId}|${k.marketId}`)
             );
-          }
-        }
 
-        console.log("[Portfolio] Fetched market data for all networks:", {
-          count: allMarketData.length,
-          networks: enabledNetworks,
-        });
+            if (keysToFill.length > 0) {
+              try {
+                const filled = await gapFillPortfolioMarkets(keysToFill);
+                if (cancelled) return;
+                mergeVisible(filled);
+                if (filled.length > 0) {
+                  const sessionPrev =
+                    readPortfolioMarketsSessionCache(networkId) ?? [];
+                  writePortfolioMarketsSessionCache(
+                    networkId,
+                    mergePortfolioMarketRows(sessionPrev, [
+                      ...phaseAMarkets,
+                      ...filled,
+                    ]) as MarketInfo[]
+                  );
+                }
+              } catch (error) {
+                console.error(
+                  `[Portfolio] Gap-fill failed for ${networkId}:`,
+                  error
+                );
+              }
+            }
 
-        setMarketData(allMarketData);
+            // Phase B: oracle refine — non-blocking; merge never replaces oracle with bulk
+            if (refineJobs.length > 0) {
+              void refinePortfolioMarketsPhaseB(
+                refineJobs,
+                (market) => {
+                  mergeVisible([market]);
+                  const sessionPrev =
+                    readPortfolioMarketsSessionCache(networkId) ?? [];
+                  writePortfolioMarketsSessionCache(
+                    networkId,
+                    mergePortfolioMarketRows(sessionPrev, [market]) as MarketInfo[]
+                  );
+                },
+                isCancelled
+              );
+            }
+
+            console.log("[Portfolio] Bulk market hydrate:", {
+              networkId,
+              phaseA: phaseAMarkets.length,
+              refineJobs: refineJobs.length,
+              gapFill: keysToFill.length,
+            });
+          })
+        );
       } catch (error) {
         console.error("Error fetching market data:", error);
       }
     };
 
-    fetchMarketDataForAllNetworks();
-    // Fallback: if user data hasn't resolved in 6s (xChain wallet init race), load markets anyway
-    const fallbackTimer = setTimeout(() => {
-      if (displayAddress) void fetchMarketDataForAllNetworks();
-    }, 6000);
-    return () => clearTimeout(fallbackTimer);
+    void hydrate();
+    return () => {
+      cancelled = true;
+    };
   }, [user?.computed, activeAccount?.address, displayAddress]);
 
   // Fetch user global data and market data when wallet connects
@@ -4594,11 +4764,14 @@ const Portfolio = () => {
     void (async () => {
       try {
         if (activeAccount?.address) {
-          const globalData = await fetchUserGlobalData(
-            activeAccount.address,
-            networkToUse
-          );
-          setUserGlobalData(globalData);
+          warmBorrowModalMaxAndPool({
+            userAddress: activeAccount.address,
+            networkId: networkToUse,
+            asset,
+            poolId,
+            configSymbol,
+            marketId,
+          });
 
           const tokens = getAllTokensWithDisplayInfo(networkToUse);
           const token = resolveSupplyBorrowToken(
@@ -4609,17 +4782,20 @@ const Portfolio = () => {
             marketId
           );
 
-          if (token && token.poolId && token.underlyingContractId) {
-            const borrowData = await fetchUserBorrowBalance(
-              activeAccount.address,
-              token.poolId,
-              token.underlyingContractId,
-              networkToUse
-            );
-            setUserBorrowBalance(borrowData?.balance || 0);
-          } else {
-            setUserBorrowBalance(0);
-          }
+          const [globalData, borrowData] = await Promise.all([
+            fetchUserGlobalData(activeAccount.address, networkToUse),
+            token && token.poolId && token.underlyingContractId
+              ? fetchUserBorrowBalance(
+                  activeAccount.address,
+                  token.poolId,
+                  token.underlyingContractId,
+                  networkToUse
+                )
+              : Promise.resolve(null),
+          ]);
+
+          setUserGlobalData(globalData);
+          setUserBorrowBalance(borrowData?.balance || 0);
         } else {
           setUserGlobalData(null);
           setUserBorrowBalance(0);
@@ -5040,17 +5216,16 @@ const Portfolio = () => {
         collateralTokenStandard: collateralTokenConfig?.tokenStandard,
       });
 
-      // Get token price
-      let debtTokenPrice = 0;
-      if (debtMarket.price) {
-        debtTokenPrice = formatPriceFromContract(
-          debtMarket.price,
+      // Get token price (oracle-aware)
+      let debtTokenPrice = usdPerTokenFromPortfolioMarketRow(
+        debtMarket,
+        debtToken.decimals ?? 6
+      );
+      if (!(debtTokenPrice > 0) && debtMarket.marketInfo) {
+        debtTokenPrice = usdPerTokenFromPortfolioMarketRow(
+          debtMarket.marketInfo,
           debtToken.decimals ?? 6
         );
-      } else if (debtMarket.marketInfo?.price) {
-        const rawPrice = parseFloat(debtMarket.marketInfo.price);
-        debtTokenPrice =
-          rawPrice > 1000000 ? rawPrice / Math.pow(10, 6) : rawPrice;
       }
 
       if (debtTokenPrice === 0) {
@@ -5096,17 +5271,16 @@ const Portfolio = () => {
         }
       }
 
-      // Get collateral token price
-      let collateralTokenPrice = 0;
-      if (collateralMarket?.price) {
-        collateralTokenPrice = formatPriceFromContract(
-          collateralMarket.price,
+      // Get collateral token price (oracle-aware)
+      let collateralTokenPrice = usdPerTokenFromPortfolioMarketRow(
+        collateralMarket,
+        collateralToken.decimals ?? 6
+      );
+      if (!(collateralTokenPrice > 0) && collateralMarket?.marketInfo) {
+        collateralTokenPrice = usdPerTokenFromPortfolioMarketRow(
+          collateralMarket.marketInfo,
           collateralToken.decimals ?? 6
         );
-      } else if (collateralMarket?.marketInfo?.price) {
-        const rawPrice = parseFloat(collateralMarket.marketInfo.price);
-        collateralTokenPrice =
-          rawPrice > 1000000 ? rawPrice / Math.pow(10, 6) : rawPrice;
       }
 
       if (collateralTokenPrice === 0) {
@@ -9445,35 +9619,30 @@ const Portfolio = () => {
                   networkId as NetworkId
                 ).find((t) => t.symbol === debtSymbol);
 
-                // Try multiple price sources
-                if (debtMarket.price) {
-                  // Price from contract (needs formatting)
-                  debtTokenPrice = formatPriceFromContract(
-                    debtMarket.price,
+                debtTokenPrice = resolvePortfolioPositionUsdPerToken({
+                  market: debtMarket,
+                  tokenDecimals: token?.decimals || 6,
+                  networkId: networkId as NetworkId,
+                  poolId: debtMarket.appId?.toString?.() ?? debtMarket.poolId,
+                  marketId:
+                    debtMarket.marketId ??
+                    debtMarket.underlyingContractId ??
+                    token?.underlyingContractId,
+                  configKey: token?.configKey,
+                  originalSymbol: token?.originalSymbol,
+                  displaySymbol: debtSymbol,
+                  marketRows: marketData,
+                });
+                if (!(debtTokenPrice > 0) && debtMarket.marketInfo) {
+                  debtTokenPrice = usdPerTokenFromPortfolioMarketRow(
+                    debtMarket.marketInfo,
                     token?.decimals || 6
                   );
-                  console.log("Using market.price:", {
-                    raw: debtMarket.price,
-                    formatted: debtTokenPrice,
-                    decimals: token?.decimals || 6,
-                  });
-                } else if (debtMarket.marketInfo?.price) {
-                  // MarketInfo price is already formatted (scaled by 10^6)
-                  const rawPrice = parseFloat(debtMarket.marketInfo.price);
-                  // If it's a large number, it might still be scaled
-                  if (rawPrice > 1000000) {
-                    debtTokenPrice = rawPrice / Math.pow(10, 6);
-                  } else {
-                    debtTokenPrice = rawPrice;
-                  }
-                  console.log("Using marketInfo.price:", {
-                    raw: debtMarket.marketInfo.price,
-                    parsed: rawPrice,
-                    final: debtTokenPrice,
-                  });
-                } else {
-                  console.warn("No price found in debtMarket:", debtMarket);
                 }
+                console.log("Resolved debt token price:", {
+                  debtTokenPrice,
+                  decimals: token?.decimals || 6,
+                });
               } else {
                 console.warn("Debt market not found:", {
                   debtSymbol,
@@ -9753,19 +9922,23 @@ const Portfolio = () => {
                 token = tokens.find((t) => t.symbol === debtSymbol);
               }
 
-              // Get token price
-              let tokenPrice = 1;
-              if (debtMarket?.price) {
-                tokenPrice =
-                  parseFloat(debtMarket.price) / Math.pow(10, 6);
-              } else if (debtMarket?.marketInfo?.price) {
-                const rawPrice = parseFloat(debtMarket.marketInfo.price);
-                tokenPrice =
-                  rawPrice > 1000000 ? rawPrice / Math.pow(10, 6) : rawPrice;
-              }
+              // Get token price (oracle-aware; never invent $1)
+              const tokenPrice = resolvePortfolioPositionUsdPerToken({
+                market: debtMarket,
+                tokenDecimals: token?.decimals ?? 6,
+                networkId,
+                poolId:
+                  selectedRepayPosition.appId?.toString() ?? token?.poolId,
+                marketId: debtMarketId ?? token?.underlyingContractId,
+                configKey: token?.configKey,
+                originalSymbol: token?.originalSymbol,
+                displaySymbol: debtSymbol,
+                marketRows: marketData,
+              });
 
-              // Calculate token amount from USD value
-              const calculatedTokenAmount = borrowValueUsd / tokenPrice;
+              // Calculate token amount from USD value (0 price → 0 amount; UI disables action)
+              const calculatedTokenAmount =
+                tokenPrice > 0 ? borrowValueUsd / tokenPrice : 0;
 
               // Use minimum of calculated amount and wallet balance
               const tokenAmount = repayWalletBalance !== null

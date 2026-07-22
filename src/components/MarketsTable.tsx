@@ -109,6 +109,7 @@ import {
 import {
   createDebouncedPrefetch,
   warmMarketDetailUserPositionRpc,
+  warmBorrowModalMaxAndPool,
   poolIdFromMarketRow,
   marketRowKeyFromMarket,
   type MarketActionTokenParams,
@@ -1305,11 +1306,15 @@ const MarketsTable = () => {
     void (async () => {
       try {
         if (activeAccount?.address) {
-          const globalData = await fetchUserGlobalData(
-            activeAccount.address,
-            currentNetwork
-          );
-          setUserGlobalData(globalData);
+          warmBorrowModalMaxAndPool({
+            userAddress: activeAccount.address,
+            networkId: currentNetwork as NetworkId,
+            asset,
+            poolId,
+            configSymbol,
+            marketId: marketContractIdFromRowCacheKey(marketRowKey),
+            marketRowKey,
+          });
 
           const token = resolveTokenForDisplayedAsset(
             asset,
@@ -1317,33 +1322,36 @@ const MarketsTable = () => {
             marketRowKey
           );
 
-          if (token && token.poolId && token.underlyingContractId) {
-            const borrowData = await fetchUserBorrowBalance(
-              activeAccount.address,
-              token.poolId,
-              token.underlyingContractId,
-              currentNetwork
-            );
-            setUserBorrowBalance(borrowData?.balance || 0);
-          } else {
-            setUserBorrowBalance(0);
-          }
+          const [globalData, borrowData, poolCollateralRows] =
+            await Promise.all([
+              fetchUserGlobalData(activeAccount.address, currentNetwork),
+              token && token.poolId && token.underlyingContractId
+                ? fetchUserBorrowBalance(
+                    activeAccount.address,
+                    token.poolId,
+                    token.underlyingContractId,
+                    currentNetwork
+                  )
+                : Promise.resolve(null),
+              poolId != null && poolId !== ""
+                ? fetchPoolCollateralMarketRowsForDeposit(
+                    activeAccount.address,
+                    currentNetwork as NetworkId,
+                    poolId
+                  ).catch((e) => {
+                    console.error(
+                      "Error loading pool collateral markets for borrow:",
+                      e
+                    );
+                    return null;
+                  })
+                : Promise.resolve(null),
+            ]);
 
-          if (poolId != null && poolId !== "") {
-            try {
-              const poolCollateralRows =
-                await fetchPoolCollateralMarketRowsForDeposit(
-                  activeAccount.address,
-                  currentNetwork as NetworkId,
-                  poolId
-                );
-              setDepositPoolCollateralMarkets(poolCollateralRows);
-            } catch (e) {
-              console.error(
-                "Error loading pool collateral markets for borrow:",
-                e
-              );
-            }
+          setUserGlobalData(globalData);
+          setUserBorrowBalance(borrowData?.balance || 0);
+          if (poolCollateralRows) {
+            setDepositPoolCollateralMarkets(poolCollateralRows);
           }
         } else {
           setUserGlobalData(null);

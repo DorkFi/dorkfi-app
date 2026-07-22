@@ -19,6 +19,7 @@ import {
   type TokenConfig,
   getAnyFolksAdapter,
 } from "@/config";
+import { runWithConcurrency } from "@/utils/runWithConcurrency";
 import {
   buildMarketInfoFromRawMarketData,
   fetchBulkApiMarketDataMap,
@@ -351,25 +352,6 @@ function writeMarketsSessionCache(
   } catch {
     // Ignore quota / private-mode failures.
   }
-}
-
-async function runWithConcurrency<T>(
-  items: T[],
-  concurrency: number,
-  worker: (item: T) => Promise<void>
-): Promise<void> {
-  if (items.length === 0) return;
-  let nextIndex = 0;
-  const runners = Array.from(
-    { length: Math.min(concurrency, items.length) },
-    async () => {
-      while (nextIndex < items.length) {
-        const index = nextIndex++;
-        await worker(items[index]);
-      }
-    }
-  );
-  await Promise.all(runners);
 }
 
 async function getCachedFolksMintedFAssetPerOneUnderlying(input: {
