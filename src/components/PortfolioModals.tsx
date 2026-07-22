@@ -54,7 +54,6 @@ import algosdk, { waitForConfirmation } from "algosdk";
 import BigNumber from "bignumber.js";
 import { getTokenImagePath } from "@/utils/tokenImageUtils";
 import { useToast } from "@/hooks/use-toast";
-import { getUserFriendlyError } from "@/utils/errorUtils";
 import dorkfiAPIService from "@/services/dorkfiAPIService";
 import { updateTransactionMetadata } from "@/utils/transactionUtils";
 import { CONTRACT } from "ulujs";
@@ -2096,17 +2095,7 @@ const PortfolioModals = ({
     } catch (error) {
       setRepayRainbowkitOverlaySuppressed(false);
       console.error("Repay error:", error);
-      const errorMessage = getUserFriendlyError(error);
-
-      // Show error toast to the user
-      toast({
-        title: "Repay Failed",
-        description: errorMessage,
-        variant: "destructive",
-        duration: 5000,
-      });
-
-      // Re-throw the error so RepayModal can catch it and not show success modal
+      // Re-throw so RepayModal can toast once (avoids duplicate failure toasts).
       throw error;
     }
   };
@@ -2789,8 +2778,19 @@ const PortfolioModals = ({
                 folksMintedOneUnderlyingByKey?.[repayMintKey]
               }
               repayTokenConfig={tcRepayModal ?? undefined}
+              repayMarketId={
+                repayModal.marketId != null &&
+                String(repayModal.marketId).trim() !== ""
+                  ? String(repayModal.marketId)
+                  : repayTokenRow?.underlyingContractId != null
+                    ? String(repayTokenRow.underlyingContractId)
+                    : undefined
+              }
               xalgoConsensusRepayAlgoOption={xalgoConsensusRepayAlgoOption}
               rainbowkitHostOverlaySuppressed={repayRainbowkitOverlaySuppressed}
+              onRainbowkitHostOverlaySuppressed={
+                setRepayRainbowkitOverlaySuppressed
+              }
             />
           );
         })()}

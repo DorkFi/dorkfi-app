@@ -61,6 +61,7 @@ import algorandService from "@/services/algorandService";
 import {
   getAllTokens,
   getTokenConfig,
+  asTokenConfig,
   resolveIntrinsicSupplyApyPercent,
   type LiveIntrinsicSupplyApySnapshot,
   isFeatureEnabled,
@@ -85,6 +86,14 @@ import {
 } from "@/utils/tokenImageUtils";
 import { MarketRowTokenIcon } from "@/components/markets/MarketRowTokenIcon";
 import { marketRowForPortfolioPosition } from "@/utils/marketRowForPortfolioPosition";
+import type {
+  AccruedInterestMarketItem,
+  ItemWithNetwork,
+  PortfolioMarketRow,
+  PortfolioPositionRow,
+  PortfolioUser,
+  PortfolioComputedPosition,
+} from "@/types/portfolio";
 import {
   enabledNetworksHaveDMarket,
   itemMatchesPortfolioPositionFilters,
@@ -217,19 +226,25 @@ function formatUserMarketLine(
   return `${net} · Pool ${poolId}`;
 }
 
-/** Used for portfolio items (deposits, borrows, etc.) that may have network/originalSymbol/interest fields at runtime */
-interface ItemWithNetwork {
-  network?: string;
-  originalSymbol?: string;
-  /** Config `tokens` key when display symbol + pool collide (e.g. fALGO). */
-  configSymbol?: string;
-  /** Lending market app id (underlying ARC200 / nt200 contract). Disambiguates same pool + display symbol. */
-  marketId?: string;
-  accruedInterest?: number;
-  interest?: number;
-  accruedInterestValue?: number;
-  tokenPrice?: number;
+/** Coerce market threshold / factor fields (string | number | unknown) to a finite number. */
+function asFiniteNumber(v: unknown, fallback: number): number {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "bigint") return Number(v);
+  if (typeof v === "string") {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : fallback;
+  }
+  return fallback;
 }
+
+function normalizeBpsOrPercentFactor(raw: number): number {
+  if (raw > 1 && raw <= 100) return raw / 100;
+  if (raw > 100) return raw / 10000;
+  return raw;
+}
+
+/** Used for portfolio items (deposits, borrows, etc.) that may have network/originalSymbol/interest fields at runtime */
+// ItemWithNetwork imported from @/types/portfolio
 
 /** For sorting Accrued Interest columns: prefer stored USD, else token amount × price. */
 function accruedInterestUsdForSort(
@@ -242,7 +257,7 @@ function accruedInterestUsdForSort(
 
 /** Folks f-asset rows show underlying balance; if their market row has no usable price, use native ALGO same pool. */
 function folksUnderlyingUsdFallbackSamePool(
-  marketRows: unknown[],
+  marketRows: PortfolioMarketRow[],
   networkId: NetworkId,
   poolId: string,
   currentUnderlyingMarketId: string
@@ -655,11 +670,11 @@ const Portfolio = () => {
     totalBorrowValue: number;
     lastUpdateTime: number;
   } | null>(null);
-  const [marketData, setMarketData] = useState<unknown[]>([]);
+  const [marketData, setMarketData] = useState<PortfolioMarketRow[]>([]);
   /** Folks: minted f-asset (atomic) for 1.0 underlying; key `networkId|configSymbol|poolId`. */
   const [folksMintedOneUnderlyingByKey, setFolksMintedOneUnderlyingByKey] =
     useState<Record<string, string>>({});
-  const [userPositions, setUserPositions] = useState<unknown[]>([]);
+  const [userPositions, setUserPositions] = useState<PortfolioPositionRow[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [isLoadingPositions, setIsLoadingPositions] = useState(false);
   const [isRefreshingMarkets, setIsRefreshingMarkets] = useState(false);
@@ -675,7 +690,7 @@ const Portfolio = () => {
   const [userBorrowBalance, setUserBorrowBalance] = useState<number>(0);
   const [isLoadingBorrowData, setIsLoadingBorrowData] = useState(false);
   const [isLoadingRepayData, setIsLoadingRepayData] = useState(false);
-  const [user, setUser] = useState<Record<string, unknown> | null>(null);
+  const [user, setUser] = useState<PortfolioUser | null>(null);
   const [userProfileAvatar, setUserProfileAvatar] = useState<string | null>(
     null
   );
@@ -704,7 +719,7 @@ const Portfolio = () => {
       if (!res.ok) {
         throw new Error(`Claim agent HTTP ${res.status}`);
       }
-      return res.json() as {
+      return (await res.json()) as {
         address: string;
         claimable: boolean;
         transactionCount: number;
@@ -801,14 +816,38 @@ const Portfolio = () => {
 
   const [liquidationModalOpen, setLiquidationModalOpen] = useState(false);
   const [selectedLiquidationPosition, setSelectedLiquidationPosition] =
-    useState<unknown | null>(null);
+    useState<{
+      debtTokenInfo?: { data?: { symbol?: string; logo?: string; name?: string } };
+      collateralTokenInfo?: {
+        data?: { symbol?: string; logo?: string; name?: string };
+      };
+      network?: string;
+      user?: string;
+      liquidationAmount?: number;
+      debtMarketId?: string | number;
+      collateralMarketId?: string | number;
+      appId?: string | number;
+      liquidationBonus?: number;
+      borrowValueUsd?: number;
+      collateralValueUsd?: number;
+      [key: string]: unknown;
+    } | null>(null);
   /** USD amount to liquidate (0 to position.liquidationAmount); enables partial liquidation */
   const [partialLiquidationAmountUsd, setPartialLiquidationAmountUsd] =
     useState<number>(0);
   const [isLiquidating, setIsLiquidating] = useState(false);
   const [repayModalOpen, setRepayModalOpen] = useState(false);
-  const [selectedRepayPosition, setSelectedRepayPosition] =
-    useState<unknown | null>(null);
+  const [selectedRepayPosition, setSelectedRepayPosition] = useState<{
+    debtMarketId?: string | number;
+    networkId?: NetworkId | string;
+    debtSymbol?: string;
+    appId?: string | number;
+    borrowValueUsd?: number;
+    debtMarket?: unknown;
+    user?: string;
+    collateralMarketId?: string | number;
+    [key: string]: unknown;
+  } | null>(null);
   const [isRepaying, setIsRepaying] = useState(false);
   const [repayWalletBalance, setRepayWalletBalance] = useState<number | null>(null);
   const [isLoadingRepayBalance, setIsLoadingRepayBalance] = useState(false);
@@ -1223,11 +1262,11 @@ const Portfolio = () => {
 
   // Transform user.computed.deposits and user.computed.borrows into table format
   const transformedDepositsAndBorrows = useMemo(() => {
-    const transformedDeposits: unknown[] = [];
-    const transformedBorrows: unknown[] = [];
+    const transformedDeposits: PortfolioPositionRow[] = [];
+    const transformedBorrows: PortfolioPositionRow[] = [];
 
     if (user?.computed?.deposits && Array.isArray(user.computed.deposits)) {
-      user.computed.deposits.forEach((item: Record<string, unknown>) => {
+      user.computed.deposits.forEach((item: PortfolioComputedPosition) => {
         try {
           const networkId = item.network;
           const marketId =
@@ -1469,7 +1508,7 @@ const Portfolio = () => {
     }
 
     if (user?.computed?.borrows && Array.isArray(user.computed.borrows)) {
-      user.computed.borrows.forEach((item: Record<string, unknown>) => {
+      user.computed.borrows.forEach((item: PortfolioComputedPosition) => {
         try {
           const networkId = item.network;
           const marketId =
@@ -1704,7 +1743,7 @@ const Portfolio = () => {
   // Combine deposits and borrows with accrued interest, grouped by market
   const accruedInterestItems = useMemo(() => {
     // Group by market key: asset + network + poolId
-    const marketMap = new Map<string, unknown>();
+    const marketMap = new Map<string, AccruedInterestMarketItem>();
 
     // Process deposits with accrued interest
     deposits.forEach((deposit) => {
@@ -1719,19 +1758,14 @@ const Portfolio = () => {
           existing.earnedInterestValue +=
             deposit.accruedInterestValue ||
             accruedInterest * (deposit.tokenPrice || 1);
-          if (
-            !(existing as { iconBadgeUrl?: string }).iconBadgeUrl &&
-            (deposit as { iconBadgeUrl?: string }).iconBadgeUrl
-          ) {
-            (existing as { iconBadgeUrl?: string }).iconBadgeUrl = (
-              deposit as { iconBadgeUrl?: string }
-            ).iconBadgeUrl;
+          if (!existing.iconBadgeUrl && deposit.iconBadgeUrl) {
+            existing.iconBadgeUrl = deposit.iconBadgeUrl;
           }
         } else {
           marketMap.set(marketKey, {
             asset: deposit.asset,
             icon: deposit.icon,
-            iconBadgeUrl: (deposit as { iconBadgeUrl?: string }).iconBadgeUrl,
+            iconBadgeUrl: deposit.iconBadgeUrl,
             network: (deposit as ItemWithNetwork).network,
             poolId: deposit.poolId,
             tokenPrice: deposit.tokenPrice || 1,
@@ -1760,19 +1794,14 @@ const Portfolio = () => {
           existing.owedInterestValue +=
             borrow.accruedInterestValue ||
             accruedInterest * (borrow.tokenPrice || 1);
-          if (
-            !(existing as { iconBadgeUrl?: string }).iconBadgeUrl &&
-            (borrow as { iconBadgeUrl?: string }).iconBadgeUrl
-          ) {
-            (existing as { iconBadgeUrl?: string }).iconBadgeUrl = (
-              borrow as { iconBadgeUrl?: string }
-            ).iconBadgeUrl;
+          if (!existing.iconBadgeUrl && borrow.iconBadgeUrl) {
+            existing.iconBadgeUrl = borrow.iconBadgeUrl;
           }
         } else {
           marketMap.set(marketKey, {
             asset: borrow.asset,
             icon: borrow.icon,
-            iconBadgeUrl: (borrow as { iconBadgeUrl?: string }).iconBadgeUrl,
+            iconBadgeUrl: borrow.iconBadgeUrl,
             network: (borrow as ItemWithNetwork).network,
             poolId: borrow.poolId,
             tokenPrice: borrow.tokenPrice || 1,
@@ -1872,7 +1901,9 @@ const Portfolio = () => {
         );
       }
       if (market && borrow.value > 0) {
-        const threshold = market.liquidationThreshold || 0.85;
+        const threshold = normalizeBpsOrPercentFactor(
+          asFiniteNumber(market.liquidationThreshold, 0.85)
+        );
         weightedThreshold += borrow.value * threshold;
         totalBorrowWeight += borrow.value;
         console.log(
@@ -1913,7 +1944,9 @@ const Portfolio = () => {
         displaySymbol: deposit.asset,
       });
       if (market && deposit.value > 0) {
-        const collateralFactor = market.collateralFactor || 0.8;
+        const collateralFactor = normalizeBpsOrPercentFactor(
+          asFiniteNumber(market.collateralFactor, 0.8)
+        );
         weightedCollateralFactor += deposit.value * collateralFactor;
         totalDepositValue += deposit.value;
       }
@@ -2394,7 +2427,7 @@ const Portfolio = () => {
       setIsLoadingRepayBalance(true);
       try {
         // Get token information to get decimals
-        const tokens = getAllTokensWithDisplayInfo(networkId);
+        const tokens = getAllTokensWithDisplayInfo(networkId as NetworkId);
         let token = tokens.find(
           (t) => t.underlyingContractId === debtMarketId?.toString()
         );
@@ -2414,7 +2447,10 @@ const Portfolio = () => {
           "originalSymbol" in token
             ? (token as ItemWithNetwork).originalSymbol
             : debtSymbol;
-        const originalTokenConfigRaw = getTokenConfig(networkId, originalSymbol);
+        const originalTokenConfigRaw = getTokenConfig(
+          networkId as NetworkId,
+          String(originalSymbol ?? "")
+        );
 
         if (!originalTokenConfigRaw) {
           console.error("Token config not found for:", originalSymbol);
@@ -2573,7 +2609,7 @@ const Portfolio = () => {
 
     const networkLiquidationMargins = Object.entries(
       user.computed.networkValues
-    ).map(([network, values]: [string, unknown]) => {
+    ).map(([network, values]) => {
       const networkCollateral = values.collateral || 0;
       const networkBorrow = values.borrow || 0;
 
@@ -2595,17 +2631,13 @@ const Portfolio = () => {
             poolId: deposit.poolId,
             displaySymbol: deposit.asset,
           });
-          const threshold =
-            market?.liquidationThreshold ??
-            (market as { marketInfo?: { liquidationThreshold?: unknown } })
-              ?.marketInfo?.liquidationThreshold ??
-            0.85;
-          const thresholdNum =
-            typeof threshold === "string"
-              ? parseFloat(threshold)
-              : typeof threshold === "bigint"
-                ? Number(threshold)
-                : threshold;
+          const thresholdNum = normalizeBpsOrPercentFactor(
+            asFiniteNumber(
+              market?.liquidationThreshold ??
+                market?.marketInfo?.liquidationThreshold,
+              0.85
+            )
+          );
           liquidationThresholds.push(thresholdNum);
         });
         if (liquidationThresholds.length > 0) {
@@ -2671,7 +2703,7 @@ const Portfolio = () => {
   }, [borrows]);
 
   // Calculate risk factor for each borrow position
-  const calculatePositionRiskFactor = (borrow: Record<string, unknown>) => {
+  const calculatePositionRiskFactor = (borrow: PortfolioPositionRow) => {
     if (!borrow.value || borrow.value <= 0 || totalCollateral === 0) return 0;
 
     // Risk factor = (borrow value / total collateral) * (1 / health factor)
@@ -2818,7 +2850,7 @@ const Portfolio = () => {
       console.log("originalTokenConfigRaw", { originalTokenConfigRaw, token });
       if (!originalTokenConfigRaw) {
         console.error(
-          `Original token config not found for ${asset} (originalSymbol: ${originalSymbol})`
+          `Original token config not found for ${asset} (lookup: ${configLookupKey})`
         );
         return { balance: 0, balanceUSD: 0, lastUpdated: Date.now() };
       }
@@ -6046,41 +6078,23 @@ const Portfolio = () => {
                                     displaySymbol: b.asset,
                                   }
                                 );
-                                let liquidationThresholdA =
+                                let liquidationThresholdA = Number(
                                   marketALF?.liquidationThreshold ??
-                                  (marketALF as { marketInfo?: { liquidationThreshold?: unknown } })
-                                    ?.marketInfo?.liquidationThreshold ??
-                                  0.85;
-                                let liquidationThresholdB =
+                                    marketALF?.marketInfo
+                                      ?.liquidationThreshold ??
+                                    0.85
+                                );
+                                let liquidationThresholdB = Number(
                                   marketBLF?.liquidationThreshold ??
-                                  (marketBLF as { marketInfo?: { liquidationThreshold?: unknown } })
-                                    ?.marketInfo?.liquidationThreshold ??
-                                  0.85;
-                                if (
-                                  typeof liquidationThresholdA === "string"
-                                ) {
-                                  liquidationThresholdA = parseFloat(
-                                    liquidationThresholdA
-                                  );
-                                } else if (
-                                  typeof liquidationThresholdA === "bigint"
-                                ) {
-                                  liquidationThresholdA = Number(
-                                    liquidationThresholdA
-                                  );
+                                    marketBLF?.marketInfo
+                                      ?.liquidationThreshold ??
+                                    0.85
+                                );
+                                if (!Number.isFinite(liquidationThresholdA)) {
+                                  liquidationThresholdA = 0.85;
                                 }
-                                if (
-                                  typeof liquidationThresholdB === "string"
-                                ) {
-                                  liquidationThresholdB = parseFloat(
-                                    liquidationThresholdB
-                                  );
-                                } else if (
-                                  typeof liquidationThresholdB === "bigint"
-                                ) {
-                                  liquidationThresholdB = Number(
-                                    liquidationThresholdB
-                                  );
+                                if (!Number.isFinite(liquidationThresholdB)) {
+                                  liquidationThresholdB = 0.85;
                                 }
                                 if (
                                   liquidationThresholdA > 1 &&
@@ -6610,63 +6624,24 @@ const Portfolio = () => {
                                         displaySymbol: b.asset,
                                       }
                                     );
-                                    let liquidationThresholdA =
-                                      marketALF?.liquidationThreshold ??
-                                      (marketALF as { marketInfo?: { liquidationThreshold?: unknown } })
-                                        ?.marketInfo?.liquidationThreshold ??
-                                      0.85;
-                                    let liquidationThresholdB =
-                                      marketBLF?.liquidationThreshold ??
-                                      (marketBLF as { marketInfo?: { liquidationThreshold?: unknown } })
-                                        ?.marketInfo?.liquidationThreshold ??
-                                      0.85;
-                                    // Convert to number if needed and normalize to decimal format
-                                    if (
-                                      typeof liquidationThresholdA === "string"
-                                    ) {
-                                      liquidationThresholdA = parseFloat(
-                                        liquidationThresholdA
+                                    const liquidationThresholdA =
+                                      normalizeBpsOrPercentFactor(
+                                        asFiniteNumber(
+                                          marketALF?.liquidationThreshold ??
+                                            marketALF?.marketInfo
+                                              ?.liquidationThreshold,
+                                          0.85
+                                        )
                                       );
-                                    } else if (
-                                      typeof liquidationThresholdA === "bigint"
-                                    ) {
-                                      liquidationThresholdA = Number(
-                                        liquidationThresholdA
+                                    const liquidationThresholdB =
+                                      normalizeBpsOrPercentFactor(
+                                        asFiniteNumber(
+                                          marketBLF?.liquidationThreshold ??
+                                            marketBLF?.marketInfo
+                                              ?.liquidationThreshold,
+                                          0.85
+                                        )
                                       );
-                                    }
-                                    if (
-                                      typeof liquidationThresholdB === "string"
-                                    ) {
-                                      liquidationThresholdB = parseFloat(
-                                        liquidationThresholdB
-                                      );
-                                    } else if (
-                                      typeof liquidationThresholdB === "bigint"
-                                    ) {
-                                      liquidationThresholdB = Number(
-                                        liquidationThresholdB
-                                      );
-                                    }
-                                    if (
-                                      liquidationThresholdA > 1 &&
-                                      liquidationThresholdA <= 100
-                                    ) {
-                                      liquidationThresholdA =
-                                        liquidationThresholdA / 100;
-                                    } else if (liquidationThresholdA > 100) {
-                                      liquidationThresholdA =
-                                        liquidationThresholdA / 10000;
-                                    }
-                                    if (
-                                      liquidationThresholdB > 1 &&
-                                      liquidationThresholdB <= 100
-                                    ) {
-                                      liquidationThresholdB =
-                                        liquidationThresholdB / 100;
-                                    } else if (liquidationThresholdB > 100) {
-                                      liquidationThresholdB =
-                                        liquidationThresholdB / 10000;
-                                    }
                                     comparison =
                                       liquidationThresholdB -
                                       liquidationThresholdA;

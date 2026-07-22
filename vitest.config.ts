@@ -17,13 +17,6 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
-    // Exclude service tests that depend on runtime config (gas station, envoi API).
-    // Re-enable when those tests are updated or run in integration CI.
-    exclude: [
-      "**/node_modules/**",
-      "**/dist/**",
-      "**/gasStationService.test.ts",
-      "**/envoiService.test.ts",
-    ],
+    exclude: ["**/node_modules/**", "**/dist/**"],
   },
 });

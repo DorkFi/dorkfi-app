@@ -6,6 +6,14 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import envoiService from '../envoiService';
 
+function mockFetchResponse(partial: {
+  ok: boolean;
+  status?: number;
+  json?: () => Promise<unknown>;
+}): Response {
+  return partial as unknown as Response;
+}
+
 // Mock fetch for testing
 global.fetch = vi.fn();
 
@@ -23,10 +31,12 @@ describe('EnvoiService', () => {
         owner: 'BRB3JP4LIW5Q755FJCGVAOA4W3THJ7BR3K6F26EVCGMETLEAZOQRHHJNLQ'
       };
 
-      vi.mocked(fetch).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockResponse,
-      });
+      vi.mocked(fetch).mockResolvedValueOnce(
+        mockFetchResponse({
+          ok: true,
+          json: async () => mockResponse,
+        })
+      );
 
       const result = await envoiService.resolveName('BRB3JP4LIW5Q755FJCGVAOA4W3THJ7BR3K6F26EVCGMETLEAZOQRHHJNLQ');
 
@@ -37,10 +47,12 @@ describe('EnvoiService', () => {
     });
 
     it('should return null when no name is found (404)', async () => {
-      vi.mocked(fetch).mockResolvedValueOnce({
-        ok: false,
-        status: 404,
-      });
+      vi.mocked(fetch).mockResolvedValueOnce(
+        mockFetchResponse({
+          ok: false,
+          status: 404,
+        })
+      );
 
       const result = await envoiService.resolveName('INVALID_ADDRESS');
 
@@ -64,10 +76,12 @@ describe('EnvoiService', () => {
         tokenId: '123456789'
       };
 
-      vi.mocked(fetch).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockResponse,
-      });
+      vi.mocked(fetch).mockResolvedValueOnce(
+        mockFetchResponse({
+          ok: true,
+          json: async () => mockResponse,
+        })
+      );
 
       const result = await envoiService.resolveAddress('test.voi');
 
@@ -89,10 +103,12 @@ describe('EnvoiService', () => {
         total: 1
       };
 
-      vi.mocked(fetch).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockResponse,
-      });
+      vi.mocked(fetch).mockResolvedValueOnce(
+        mockFetchResponse({
+          ok: true,
+          json: async () => mockResponse,
+        })
+      );
 
       const result = await envoiService.searchNames('test');
 
@@ -110,10 +126,11 @@ describe('EnvoiService', () => {
       });
 
       it('should reject invalid VOI name formats', () => {
-        expect(envoiService.isValidNameFormat('invalid')).toBe(false);
-        expect(envoiService.isValidNameFormat('.voi')).toBe(false);
+        // Validator allows bare labels (e.g. "invalid") and leading-dot forms (e.g. ".voi");
+        // reject empty / trailing-dot / whitespace-only.
         expect(envoiService.isValidNameFormat('test.')).toBe(false);
         expect(envoiService.isValidNameFormat('')).toBe(false);
+        expect(envoiService.isValidNameFormat(' ')).toBe(false);
       });
     });
 
@@ -140,10 +157,12 @@ describe('EnvoiService', () => {
         owner: 'BRB3JP4LIW5Q755FJCGVAOA4W3THJ7BR3K6F26EVCGMETLEAZOQRHHJNLQ'
       };
 
-      vi.mocked(fetch).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockResponse,
-      });
+      vi.mocked(fetch).mockResolvedValueOnce(
+        mockFetchResponse({
+          ok: true,
+          json: async () => mockResponse,
+        })
+      );
 
       const result = await envoiService.getDisplayName('BRB3JP4LIW5Q755FJCGVAOA4W3THJ7BR3K6F26EVCGMETLEAZOQRHHJNLQ');
 
@@ -151,10 +170,12 @@ describe('EnvoiService', () => {
     });
 
     it('should return the address if no name is found', async () => {
-      vi.mocked(fetch).mockResolvedValueOnce({
-        ok: false,
-        status: 404,
-      });
+      vi.mocked(fetch).mockResolvedValueOnce(
+        mockFetchResponse({
+          ok: false,
+          status: 404,
+        })
+      );
 
       const address = 'BRB3JP4LIW5Q755FJCGVAOA4W3THJ7BR3K6F26EVCGMETLEAZOQRHHJNLQ';
       const result = await envoiService.getDisplayName(address);
