@@ -19,6 +19,11 @@ import {
   estimateFolksDepositMintedFAssetAmount,
   folksFAssetHumanToUnderlyingHuman,
 } from "@/services/folksDepositAdapter";
+import { usdPerTokenFromPortfolioMarketRow } from "@/utils/assetDecimals";
+import {
+  portfolioUsdCacheKey,
+  resolveWithLastGoodPortfolioUsd,
+} from "@/utils/portfolioUsdCache";
 import { marketRowForPortfolioPosition } from "@/utils/marketRowForPortfolioPosition";
 
 export type PortfolioChainLiveOverride = {
@@ -293,8 +298,8 @@ export function usePortfolioVisibleChainLive(opts: {
     enabled =
       import.meta.env.VITE_PORTFOLIO_CHAIN_POLL !== "false" &&
       import.meta.env.VITE_PORTFOLIO_CHAIN_POLL !== "0",
-    formatPriceFromContract,
   } = opts;
+  void opts.formatPriceFromContract;
 
   const useApiUserData =
     import.meta.env.VITE_PORTFOLIO_CHAIN_USE_API_USER_DATA !== "false" &&
@@ -360,13 +365,17 @@ export function usePortfolioVisibleChainLive(opts: {
         marketId: token.underlyingContractId,
         poolId: token.poolId,
         displaySymbol: token.symbol,
-      }) as { price?: string | number } | undefined;
-      const tp = mkt?.price
-        ? formatPriceFromContract(
-            mkt.price as string | number,
-            token.decimals
-          )
-        : 1;
+      });
+      const tp = resolveWithLastGoodPortfolioUsd(
+        usdPerTokenFromPortfolioMarketRow(mkt, token.decimals, {
+          displaySymbol: token.symbol,
+        }),
+        portfolioUsdCacheKey(
+          String(networkId),
+          String(token.poolId),
+          String(token.underlyingContractId)
+        )
+      );
 
       try {
         if (kind === "deposit") {
@@ -415,7 +424,7 @@ export function usePortfolioVisibleChainLive(opts: {
     if (Object.keys(batch).length > 0) {
       setOverrides((prev) => ({ ...prev, ...batch }));
     }
-  }, [address, marketData, formatPriceFromContract]);
+  }, [address, marketData]);
 
   const fetchVisibleWithApiPost = useCallback(async () => {
     if (!address) return;
@@ -494,12 +503,21 @@ export function usePortfolioVisibleChainLive(opts: {
         );
       }
 
-      const tokenPrice = group.market?.price
-        ? formatPriceFromContract(
-            group.market.price as string | number,
-            group.tokenDecimals
-          )
-        : 1;
+      const tokenPrice = resolveWithLastGoodPortfolioUsd(
+        usdPerTokenFromPortfolioMarketRow(
+          group.market,
+          group.tokenDecimals,
+          {
+            displaySymbol:
+              (group.market as { symbol?: string } | null)?.symbol ?? undefined,
+          }
+        ),
+        portfolioUsdCacheKey(
+          String(group.network),
+          String(group.appId),
+          String(group.marketId)
+        )
+      );
 
       let groupDepositMinted: bigint | null = null;
       const firstKey = group.rows[0]?.portfolioKey;
@@ -594,13 +612,17 @@ export function usePortfolioVisibleChainLive(opts: {
           marketId: token.underlyingContractId,
           poolId: token.poolId,
           displaySymbol: token.symbol,
-        }) as { price?: string | number } | undefined;
-        const tp = mkt?.price
-          ? formatPriceFromContract(
-              mkt.price as string | number,
-              token.decimals
-            )
-          : 1;
+        });
+        const tp = resolveWithLastGoodPortfolioUsd(
+        usdPerTokenFromPortfolioMarketRow(mkt, token.decimals, {
+          displaySymbol: token.symbol,
+        }),
+        portfolioUsdCacheKey(
+          String(networkId),
+          String(token.poolId),
+          String(token.underlyingContractId)
+        )
+      );
 
         try {
           if (row.kind === "deposit") {
@@ -652,7 +674,7 @@ export function usePortfolioVisibleChainLive(opts: {
         }
       }
     }
-  }, [address, marketData, formatPriceFromContract, useApiUserData]);
+  }, [address, marketData, useApiUserData]);
 
   const fetchVisible = useCallback(
     async (mode: FetchMode) => {

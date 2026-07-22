@@ -19,6 +19,7 @@ import {
   fetchUserGlobalDataForPool,
   fetchMarketInfoFromContract,
   getMaxWithdrawableForMarket,
+  detectNt200UserBalanceBox,
 } from "@/services/lendingService";
 import { estimateFolksDepositMintedFAssetAmount } from "@/services/folksDepositAdapter";
 import { fetchPoolCollateralMarketRowsForDeposit } from "@/utils/poolCollateralMarketRows";
@@ -136,6 +137,25 @@ export function warmBorrowModalMaxAndPool(params: MarketActionTokenParams): void
     token.underlyingContractId,
     storageAppId ? Number(storageAppId) : undefined
   ).catch(() => undefined);
+
+  // Warm nt200 balance-box detection so borrow() can pick a single simulate path
+  const algodNet = getAlgorandNetworkFromNetworkId(params.networkId);
+  if (algodNet) {
+    void (async () => {
+      try {
+        const clients = algorandService.initializeClients(
+          algodNet as AlgorandNetwork
+        );
+        await detectNt200UserBalanceBox(
+          clients.algod,
+          token.underlyingContractId,
+          params.userAddress
+        );
+      } catch {
+        /* ignore */
+      }
+    })();
+  }
 }
 
 /** Repay modal: global user data + current borrow balance. */

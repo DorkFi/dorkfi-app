@@ -30,7 +30,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
+import { cn, formatUsdPerTokenDisplay } from "@/lib/utils";
+import { usdValueForHumanTokenAmount } from "@/utils/assetDecimals";
 import type { PoolCollateralMarketRow } from "@/utils/poolCollateralMarketRows";
 import type {
   FolksTokenAdapterConfig,
@@ -561,13 +562,38 @@ const RepayModal = ({
     }));
   };
 
+  /** Single USD/token for header, fiat lines, and HF — oracle first, then marketStats. */
+  const displayTokenPrice = useMemo(() => {
+    if (oracleTokenPrice > 0 && Number.isFinite(oracleTokenPrice)) {
+      return oracleTokenPrice;
+    }
+    return marketStats.tokenPrice > 0 &&
+      Number.isFinite(marketStats.tokenPrice)
+      ? marketStats.tokenPrice
+      : 0;
+  }, [oracleTokenPrice, marketStats.tokenPrice]);
+
+  const formatRepayUsd = (usd: number): string => {
+    if (!Number.isFinite(usd) || usd <= 0) return "0.00";
+    if (usd >= 0.01) {
+      return usd.toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+    }
+    return usd.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 6,
+    });
+  };
+
   useEffect(() => {
     if (amount !== "" && typeof amount === "number") {
-      setFiatValue(amount * marketStats.tokenPrice);
+      setFiatValue(usdValueForHumanTokenAmount(amount, displayTokenPrice));
     } else {
       setFiatValue(0);
     }
-  }, [amount, marketStats.tokenPrice]);
+  }, [amount, displayTokenPrice]);
 
   const numAmount = amount !== "" && typeof amount === "number" ? amount : 0;
 
@@ -832,16 +858,6 @@ const RepayModal = ({
     setWorkflowStep("confirm");
   };
 
-  const hfTokenPrice = useMemo(() => {
-    if (oracleTokenPrice > 0 && Number.isFinite(oracleTokenPrice)) {
-      return oracleTokenPrice;
-    }
-    return marketStats.tokenPrice > 0 &&
-      Number.isFinite(marketStats.tokenPrice)
-      ? marketStats.tokenPrice
-      : 0;
-  }, [oracleTokenPrice, marketStats.tokenPrice]);
-
   const liquidationSummaryForRepay = useMemo(
     () =>
       buildLiquidationThresholdSummaryForDeposit(
@@ -863,7 +879,7 @@ const RepayModal = ({
       poolGlobalUserData,
       liquidationSummaryForRepay,
       repayAmountMarketHuman,
-      hfTokenPrice
+      displayTokenPrice
     );
     if (!meta) {
       return {
@@ -876,7 +892,7 @@ const RepayModal = ({
     poolGlobalUserData,
     liquidationSummaryForRepay,
     repayAmountMarketHuman,
-    hfTokenPrice,
+    displayTokenPrice,
   ]);
 
   const showPoolHealthEstimate =
@@ -901,10 +917,10 @@ const RepayModal = ({
     >
       <DialogContent
         className={cn(
-          "bg-card dark:bg-slate-900 rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-[95vw] overflow-hidden flex flex-col px-0 py-0",
+          "bg-card dark:bg-slate-900 rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-[95vw] overflow-hidden flex flex-col px-0 py-0 min-h-0",
           showSuccess
             ? "md:max-w-md h-auto max-h-[min(90vh,90dvh)]"
-            : "md:max-w-lg lg:max-w-4xl h-[90vh] md:h-auto md:max-h-[85vh]"
+            : "md:max-w-lg lg:max-w-4xl h-[min(90vh,90dvh)] max-h-[min(90vh,90dvh)] md:h-[min(85vh,85dvh)] md:max-h-[min(85vh,85dvh)]"
         )}
       >
         {showSuccess ? (
@@ -921,8 +937,8 @@ const RepayModal = ({
             />
           </div>
         ) : (
-          <div className="flex flex-col h-full">
-            <div className="sticky top-0 z-20 bg-card dark:bg-slate-900 pt-6 px-6 md:px-8 lg:px-10 pb-4 border-b border-gray-200/50 dark:border-slate-700/50">
+          <div className="flex flex-col h-full min-h-0">
+            <div className="sticky top-0 z-20 shrink-0 bg-card dark:bg-slate-900 pt-6 px-6 md:px-8 lg:px-10 pb-4 border-b border-gray-200/50 dark:border-slate-700/50">
               <DialogHeader className="pb-0">
                 {availableAssets &&
                 availableAssets.length > 0 &&
@@ -989,10 +1005,7 @@ const RepayModal = ({
                     </div>
                     <span className="text-sm text-slate-500 dark:text-slate-400">
                       $
-                      {marketStats.tokenPrice.toLocaleString(undefined, {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 4,
-                      })}
+                      {formatUsdPerTokenDisplay(displayTokenPrice)}
                     </span>
                   </div>
                 ) : (
@@ -1008,10 +1021,7 @@ const RepayModal = ({
                       </DialogTitle>
                       <span className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
                         $
-                        {marketStats.tokenPrice.toLocaleString(undefined, {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 4,
-                        })}
+                        {formatUsdPerTokenDisplay(displayTokenPrice)}
                       </span>
                     </div>
                   </div>
@@ -1019,13 +1029,12 @@ const RepayModal = ({
               </DialogHeader>
             </div>
 
-            <div className="flex-1 overflow-y-auto overscroll-contain pt-2 px-6 md:px-8 lg:px-10 pb-6 md:pb-8 touch-pan-y">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pt-2 px-6 md:px-8 lg:px-10 pb-4 touch-pan-y">
               <div className="flex flex-col lg:flex-row lg:gap-8 space-y-6 lg:space-y-0">
                 {/* Left Column: Input Form */}
                 <div className="flex-1 space-y-6 min-w-0">
                   {workflowStep === "amount" ? (
-                    <>
-                      <div className="space-y-3">
+                    <div className="space-y-3">
                         <Label
                           htmlFor="amount"
                           className="text-sm font-medium text-slate-600 dark:text-slate-300"
@@ -1121,10 +1130,7 @@ const RepayModal = ({
                         {fiatValue > 0 && (
                           <p className="text-sm text-slate-500 dark:text-slate-400">
                             ≈ $
-                            {fiatValue.toLocaleString(undefined, {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}
+                            {formatRepayUsd(fiatValue)}
                           </p>
                         )}
                         <div className="pt-2">
@@ -1139,10 +1145,12 @@ const RepayModal = ({
                                   {walletUnitSymbol}
                                   <span className="text-slate-500 dark:text-slate-400 ml-1">
                                     ($
-                                    {(
-                                      effectiveWalletBalance *
-                                      marketStats.tokenPrice
-                                    ).toLocaleString()}
+                                    {formatRepayUsd(
+                                      usdValueForHumanTokenAmount(
+                                        effectiveWalletBalance,
+                                        displayTokenPrice
+                                      )
+                                    )}
                                     )
                                   </span>
                                 </p>
@@ -1156,9 +1164,12 @@ const RepayModal = ({
                                   {tokenSymbol}
                                   <span className="text-slate-500 dark:text-slate-400 ml-1">
                                     ($
-                                    {(
-                                      currentBorrow * marketStats.tokenPrice
-                                    ).toLocaleString()}
+                                    {formatRepayUsd(
+                                      usdValueForHumanTokenAmount(
+                                        currentBorrow,
+                                        displayTokenPrice
+                                      )
+                                    )}
                                     )
                                   </span>
                                 </p>
@@ -1177,12 +1188,12 @@ const RepayModal = ({
                                   {tokenSymbol}
                                   <span className="text-amber-600 dark:text-amber-400 ml-1">
                                     ($
-                                    {(
-                                      accruedInterest * marketStats.tokenPrice
-                                    ).toLocaleString(undefined, {
-                                      minimumFractionDigits: 2,
-                                      maximumFractionDigits: 2,
-                                    })}
+                                    {formatRepayUsd(
+                                      usdValueForHumanTokenAmount(
+                                        accruedInterest,
+                                        displayTokenPrice
+                                      )
+                                    )}
                                     )
                                   </span>
                                 </p>
@@ -1229,22 +1240,9 @@ const RepayModal = ({
                             )}
                           </div>
                         </div>
-                      </div>
-
-                      <Button
-                        type="button"
-                        onClick={handleContinueToConfirm}
-                        disabled={
-                          !isValidAmount || isLoading || repayFolksBlockingSubmit
-                        }
-                        className="w-full font-semibold h-12 bg-whale-gold hover:bg-whale-gold/90 text-black disabled:opacity-50 disabled:cursor-not-allowed lg:mt-auto"
-                      >
-                        Continue
-                      </Button>
-                    </>
+                    </div>
                   ) : (
-                    <>
-                      <div className="space-y-3">
+                    <div className="space-y-3">
                         <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">
                           Confirm repayment
                         </h3>
@@ -1268,13 +1266,12 @@ const RepayModal = ({
                               {tokenSymbol}
                               <span className="block text-[10px] text-slate-500 dark:text-slate-400 font-normal">
                                 ≈ $
-                                {(
-                                  principalBorrowExclInterest *
-                                  marketStats.tokenPrice
-                                ).toLocaleString(undefined, {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}
+                                {formatRepayUsd(
+                                  usdValueForHumanTokenAmount(
+                                    principalBorrowExclInterest,
+                                    displayTokenPrice
+                                  )
+                                )}
                               </span>
                             </span>
                           </div>
@@ -1290,12 +1287,12 @@ const RepayModal = ({
                               {tokenSymbol}
                               <span className="block text-[10px] text-amber-600/90 dark:text-amber-400/90 font-normal">
                                 ≈ $
-                                {(
-                                  accruedInterest * marketStats.tokenPrice
-                                ).toLocaleString(undefined, {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}
+                                {formatRepayUsd(
+                                  usdValueForHumanTokenAmount(
+                                    accruedInterest,
+                                    displayTokenPrice
+                                  )
+                                )}
                               </span>
                             </span>
                           </div>
@@ -1311,12 +1308,12 @@ const RepayModal = ({
                               {walletUnitSymbol}
                               <span className="block text-[10px] text-slate-500 dark:text-slate-400 font-normal">
                                 ≈ $
-                                {(
-                                  numAmount * marketStats.tokenPrice
-                                ).toLocaleString(undefined, {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}
+                                {formatRepayUsd(
+                                  usdValueForHumanTokenAmount(
+                                    numAmount,
+                                    displayTokenPrice
+                                  )
+                                )}
                               </span>
                             </span>
                           </div>
@@ -1335,39 +1332,17 @@ const RepayModal = ({
                               {tokenSymbol}
                               <span className="block text-[10px] text-slate-500 dark:text-slate-400 font-normal">
                                 ≈ $
-                                {(
-                                  estimatedRemainingBorrow *
-                                  marketStats.tokenPrice
-                                ).toLocaleString(undefined, {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}
+                                {formatRepayUsd(
+                                  usdValueForHumanTokenAmount(
+                                    estimatedRemainingBorrow,
+                                    displayTokenPrice
+                                  )
+                                )}
                               </span>
                             </span>
                           </div>
                         </div>
-                      </div>
-
-                      <div className="flex flex-col sm:flex-row gap-2 lg:mt-auto">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setWorkflowStep("amount")}
-                          disabled={isLoading}
-                          className="w-full sm:flex-1 h-12 border-slate-300 dark:border-slate-600"
-                        >
-                          Back
-                        </Button>
-                        <Button
-                          type="button"
-                          onClick={handleConfirmRepay}
-                          disabled={isLoading}
-                          className="w-full sm:flex-1 h-12 font-semibold bg-whale-gold hover:bg-whale-gold/90 text-black disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {isLoading ? "Processing..." : "Confirm repayment"}
-                        </Button>
-                      </div>
-                    </>
+                    </div>
                   )}
                 </div>
 
@@ -1509,12 +1484,12 @@ const RepayModal = ({
                                 </p>
                                 <p className="text-slate-500 dark:text-slate-400">
                                   USD Value: $
-                                  {(
-                                    accruedInterest * marketStats.tokenPrice
-                                  ).toLocaleString(undefined, {
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
-                                  })}
+                                  {formatRepayUsd(
+                                    usdValueForHumanTokenAmount(
+                                      accruedInterest,
+                                      displayTokenPrice
+                                    )
+                                  )}
                                 </p>
                                 {lastUpdateTime && (
                                   <p className="text-slate-500 dark:text-slate-400 mt-1 text-xs">
@@ -1816,6 +1791,41 @@ const RepayModal = ({
                   </Card>
                 </div>
               </div>
+            </div>
+
+            <div className="shrink-0 border-t border-gray-200/50 dark:border-slate-700/50 bg-card dark:bg-slate-900 px-6 md:px-8 lg:px-10 py-4">
+              {workflowStep === "amount" ? (
+                <Button
+                  type="button"
+                  onClick={handleContinueToConfirm}
+                  disabled={
+                    !isValidAmount || isLoading || repayFolksBlockingSubmit
+                  }
+                  className="w-full font-semibold h-12 bg-whale-gold hover:bg-whale-gold/90 text-black disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Continue
+                </Button>
+              ) : (
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setWorkflowStep("amount")}
+                    disabled={isLoading}
+                    className="w-full sm:flex-1 h-12 border-slate-300 dark:border-slate-600"
+                  >
+                    Back
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={handleConfirmRepay}
+                    disabled={isLoading}
+                    className="w-full sm:flex-1 h-12 font-semibold bg-whale-gold hover:bg-whale-gold/90 text-black disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isLoading ? "Processing..." : "Confirm repayment"}
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
         )}
