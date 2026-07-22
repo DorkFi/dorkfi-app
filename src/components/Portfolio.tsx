@@ -1040,7 +1040,7 @@ const Portfolio = () => {
               networkId
             );
 
-            let tokenPrice = resolvePortfolioPositionUsdPerToken({
+            const tokenPrice = resolvePortfolioPositionUsdPerToken({
               market,
               tokenDecimals: token.decimals,
               networkId: networkId as NetworkId,
@@ -1083,7 +1083,7 @@ const Portfolio = () => {
 
           // Add borrow position if user has borrows
           if (borrowBalance && borrowBalance > 0) {
-            let tokenPrice = resolvePortfolioPositionUsdPerToken({
+            const tokenPrice = resolvePortfolioPositionUsdPerToken({
               market,
               tokenDecimals: token.decimals,
               networkId: networkId as NetworkId,
