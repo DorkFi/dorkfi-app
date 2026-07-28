@@ -30,7 +30,7 @@ Static SPA hosts (`vite build`) do **not** include the Vite Haystack middleware.
 | `VITE_HAYSTACK_PROXY_URL` | omit |
 | `HAYSTACK_API_KEY` | **do not set** on the SPA host |
 
-Feature stays hidden; no key exposure; no broken quote calls.
+On hosts other than `https://beta.dork.fi`, the feature stays hidden when the flag is unset. `beta.dork.fi` auto-enables the UI; set `VITE_ENABLE_CROSS_ASSET_REPAY=false` to force it off.
 
 ### Option B — Enable cross-asset repay on beta
 
@@ -68,7 +68,7 @@ Feature stays hidden; no key exposure; no broken quote calls.
 
    | Build env | Value |
    |-----------|-------|
-   | `VITE_ENABLE_CROSS_ASSET_REPAY` | `true` |
+   | `VITE_ENABLE_CROSS_ASSET_REPAY` | omit on beta (auto-on for `beta.dork.fi`); `true` elsewhere |
    | `VITE_HAYSTACK_PROXY_URL` | `https://your-proxy-host` (no trailing slash) |
    | `HAYSTACK_API_KEY` | **must not** be present |
 

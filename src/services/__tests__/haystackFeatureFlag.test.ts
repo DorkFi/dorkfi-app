@@ -9,6 +9,7 @@ describe("isCrossAssetRepayFeatureEnabled", () => {
   it("is off when explicitly disabled", () => {
     vi.stubEnv("VITE_ENABLE_CROSS_ASSET_REPAY", "false");
     expect(isCrossAssetRepayFeatureEnabled()).toBe(false);
+    expect(isCrossAssetRepayFeatureEnabled("https://beta.dork.fi")).toBe(false);
     vi.stubEnv("VITE_ENABLE_CROSS_ASSET_REPAY", "0");
     expect(isCrossAssetRepayFeatureEnabled()).toBe(false);
   });
@@ -20,9 +21,16 @@ describe("isCrossAssetRepayFeatureEnabled", () => {
     expect(isCrossAssetRepayFeatureEnabled()).toBe(true);
   });
 
-  it("defaults to DEV when unset (prod builds stay dark)", () => {
+  it("auto-enables on beta.dork.fi when unset", () => {
+    vi.stubEnv("VITE_ENABLE_CROSS_ASSET_REPAY", "");
+    expect(isCrossAssetRepayFeatureEnabled("https://beta.dork.fi")).toBe(true);
+  });
+
+  it("defaults to DEV when unset on other origins", () => {
     vi.stubEnv("VITE_ENABLE_CROSS_ASSET_REPAY", "");
     // Vitest runs with import.meta.env.DEV === true; production builds set DEV false.
-    expect(isCrossAssetRepayFeatureEnabled()).toBe(import.meta.env.DEV === true);
+    expect(isCrossAssetRepayFeatureEnabled("https://app.dork.fi")).toBe(
+      import.meta.env.DEV === true
+    );
   });
 });

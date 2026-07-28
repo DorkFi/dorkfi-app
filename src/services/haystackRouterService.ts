@@ -57,16 +57,32 @@ export function getHaystackProxyBaseUrl(): string {
   return "/api/haystack";
 }
 
+/** Origins where cross-asset repay is on without `VITE_ENABLE_CROSS_ASSET_REPAY`. */
+export const CROSS_ASSET_REPAY_AUTO_ENABLE_ORIGINS = [
+  "https://beta.dork.fi",
+] as const;
+
 /**
  * Cross-asset repay UI gate.
- * - Explicit `true`/`1` → on (beta/prod need a deployed proxy + `VITE_HAYSTACK_PROXY_URL`)
+ * - Explicit `true`/`1` → on (needs a deployed proxy + `VITE_HAYSTACK_PROXY_URL` in prod)
  * - Explicit `false`/`0` → off
- * - Unset → on in Vite DEV only; **off in production builds** (safe dark ship to beta)
+ * - `beta.dork.fi` auto-enables for testing without host build env
+ * - Unset → on in Vite DEV only; **off on other production hosts**
  */
-export function isCrossAssetRepayFeatureEnabled(): boolean {
+export function isCrossAssetRepayFeatureEnabled(
+  origin = typeof window !== "undefined" ? window.location.origin : ""
+): boolean {
   const flag = import.meta.env.VITE_ENABLE_CROSS_ASSET_REPAY;
   if (flag === "false" || flag === "0") return false;
   if (flag === "true" || flag === "1") return true;
+  if (
+    origin &&
+    (CROSS_ASSET_REPAY_AUTO_ENABLE_ORIGINS as readonly string[]).includes(
+      origin
+    )
+  ) {
+    return true;
+  }
   return import.meta.env.DEV === true;
 }
 
