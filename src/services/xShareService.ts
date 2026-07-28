@@ -90,9 +90,10 @@ async function parseJson<T>(response: Response): Promise<T> {
 
 export async function getShareServerHealth(): Promise<XShareHealth> {
   try {
+    // No credentials — this is a public health check; credentialed
+    // cross-origin fetches are stricter and can fail unnecessarily.
     const response = await fetch(buildUrl("/health"), {
       method: "GET",
-      credentials: "include",
     });
     if (!response.ok) {
       return { ok: false, linkShareEnabled: false };

@@ -50,7 +50,7 @@ Flow:
 | Variable | Example |
 |----------|---------|
 | `NODE_ENV` | `production` |
-| `X_SHARE_FRONTEND_ORIGIN` | `https://app.dork.fi` or `https://beta.dork.fi` |
+| `X_SHARE_FRONTEND_ORIGIN` | `https://beta.dork.fi` or comma-separated `https://beta.dork.fi,https://app.dork.fi` |
 | `X_SHARE_PUBLIC_BASE` | `https://dorkfi-app-repay-share-production.up.railway.app` (required if `RAILWAY_PUBLIC_DOMAIN` is unset) |
 
 ### Optional

@@ -16,16 +16,28 @@ function resolveSharePublicBase(): string {
   return DEFAULT_DEV_SHARE_PUBLIC_BASE;
 }
 
-function resolveFrontendOrigin(): string {
+function resolveFrontendOrigins(): string[] {
   const explicit = process.env.X_SHARE_FRONTEND_ORIGIN?.trim();
-  if (explicit) return explicit.replace(/\/+$/, "");
-  if (process.env.RAILWAY_PUBLIC_DOMAIN) return "https://app.dork.fi";
-  return "http://localhost:8080";
+  if (explicit) {
+    return explicit
+      .split(",")
+      .map((part) => part.trim().replace(/\/+$/, ""))
+      .filter(Boolean);
+  }
+  if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+    return ["https://app.dork.fi", "https://beta.dork.fi"];
+  }
+  return ["http://localhost:8080"];
 }
+
+const frontendOrigins = resolveFrontendOrigins();
 
 export const config = {
   port: Number(process.env.PORT || optional("X_SHARE_PORT", "8788")),
-  frontendOrigin: resolveFrontendOrigin(),
+  /** Allowed browser origins for CORS (supports comma-separated env). */
+  frontendOrigins,
+  /** Primary origin for human redirects after opening a share permalink. */
+  frontendOrigin: frontendOrigins[0] ?? "https://app.dork.fi",
   repayShareStorePath: optional(
     "X_REPAY_SHARE_STORE_PATH",
     ".data/repay-shares"

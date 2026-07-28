@@ -32,7 +32,7 @@ export function getRepayShareHelperText(
   linkShareServerOk = true
 ): string {
   if (!linkShareServerOk) {
-    return "Share link service is unavailable. Save the image and attach it manually, or try again later.";
+    return "Share link service is unavailable. Try again in a moment.";
   }
   if (canNativeShare) {
     return "Share on X opens compose with a link — your repay card appears as a preview when you post. On mobile you can also share the image file.";

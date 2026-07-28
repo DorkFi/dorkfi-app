@@ -20,8 +20,9 @@ const app = new Hono();
 app.use(
   "*",
   cors({
-    origin: config.frontendOrigin,
-    credentials: true,
+    origin: config.frontendOrigins,
+    // Repay link share does not use cookies; keep CORS simple for beta/app.
+    credentials: false,
   })
 );
 
@@ -30,7 +31,7 @@ app.get("/health", (c) =>
     ok: true,
     linkShareEnabled: true,
     sharePublicBase: config.sharePublicBase,
-    frontendOrigin: config.frontendOrigin,
+    frontendOrigins: config.frontendOrigins,
   })
 );
 
