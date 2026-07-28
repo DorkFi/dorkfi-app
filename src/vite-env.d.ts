@@ -33,9 +33,9 @@ interface ImportMetaEnv {
    */
   readonly VITE_ENABLE_CROSS_ASSET_REPAY?: string;
   /**
-   * Absolute origin of the Haystack key proxy (no trailing slash), e.g. `https://proxy.example.com`.
-   * Dev default is `/api/haystack` (Vite middleware). Never put HAYSTACK_API_KEY in VITE_*.
-   * Required for beta/prod when enabling cross-asset repay on a static host.
+   * Absolute origin of the Haystack key proxy (no trailing slash).
+   * Dev default is `/api/haystack` (Vite middleware). Production builds fall
+   * back to the baked Railway proxy. Never put HAYSTACK_API_KEY in VITE_*.
    */
   readonly VITE_HAYSTACK_PROXY_URL?: string;
 }

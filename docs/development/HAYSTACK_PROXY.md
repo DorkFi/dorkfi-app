@@ -69,7 +69,7 @@ On hosts other than `https://beta.dork.fi`, the feature stays hidden when the fl
    | Build env | Value |
    |-----------|-------|
    | `VITE_ENABLE_CROSS_ASSET_REPAY` | omit on beta (auto-on for `beta.dork.fi`); `true` elsewhere |
-   | `VITE_HAYSTACK_PROXY_URL` | `https://your-proxy-host` (no trailing slash) |
+   | `VITE_HAYSTACK_PROXY_URL` | omit (SPA falls back to `https://profound-bravery-production-418a.up.railway.app`) or override |
    | `HAYSTACK_API_KEY` | **must not** be present |
 
 4. Wallet QA on mainnet with a tiny repay (quote → swap → repay, cancel mid-flow, Folks debt if applicable).

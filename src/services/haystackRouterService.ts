@@ -41,10 +41,18 @@ export type HaystackExecuteResponse = {
 };
 
 /**
+ * Deployed Haystack key proxy (Railway). Used when `VITE_HAYSTACK_PROXY_URL` is
+ * unset outside Vite DEV so beta builds work without host env. Override with
+ * `VITE_HAYSTACK_PROXY_URL` when needed. Never put `HAYSTACK_API_KEY` in VITE_*.
+ */
+export const DEFAULT_HAYSTACK_PROXY_URL =
+  "https://profound-bravery-production-418a.up.railway.app";
+
+/**
  * Base URL for the Haystack proxy (no trailing slash).
- * - Dev default: `/api/haystack` (Vite middleware injects the API key)
- * - Prod: set `VITE_HAYSTACK_PROXY_URL` to your deployed proxy origin
- *   (e.g. `https://api.example.com` serving `/api/fetchQuote`)
+ * - Env `VITE_HAYSTACK_PROXY_URL` wins when set
+ * - Vite DEV default: `/api/haystack` (middleware injects the API key)
+ * - Other builds: baked Railway proxy origin
  */
 export function getHaystackProxyBaseUrl(): string {
   const raw = (
@@ -53,8 +61,10 @@ export function getHaystackProxyBaseUrl(): string {
   if (raw) {
     return raw.replace(/\/$/, "");
   }
-  // Vite plugin mounts at /api/haystack and forwards /api/fetchQuote…
-  return "/api/haystack";
+  if (import.meta.env.DEV === true) {
+    return "/api/haystack";
+  }
+  return DEFAULT_HAYSTACK_PROXY_URL;
 }
 
 /** Origins where cross-asset repay is on without `VITE_ENABLE_CROSS_ASSET_REPAY`. */
