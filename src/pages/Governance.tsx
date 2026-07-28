@@ -1,10 +1,11 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { GovernanceHero } from "@/components/governance/GovernanceHero";
 import { GovernanceDashboardCard } from "@/components/governance/GovernanceDashboardCard";
 import { GovernanceVotingInfoCard } from "@/components/governance/GovernanceVotingInfoCard";
 import { ProposalCard } from "@/components/governance/ProposalCard";
+import { VoteSuccessModal } from "@/components/governance/VoteSuccessModal";
 import { BatchVoteConfirmationModal } from "@/components/governance/BatchVoteConfirmationModal";
 import { useGovernanceData } from "@/hooks/useGovernanceData";
 import { ProposalStatus, Proposal } from "@/types/governanceTypes";
@@ -35,6 +36,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { GovernanceApiProposalsPanel } from "@/components/governance/GovernanceApiProposalsPanel";
 import { Input } from "@/components/ui/input";
 import { proposalMatchesSearch } from "@/utils/proposalSearchMatch";
+import { clearOAuthReturnQueryParams } from "@/utils/governanceShare/xShareOAuthReturn";
+import { createMockGovernanceProposal } from "@/data/mockGovernanceProposal";
+import { getGovernanceDevPreview } from "@/utils/governanceDevPreview";
 
 const MAX_SELECTION_LIMIT = 8;
 
@@ -63,6 +67,17 @@ const Governance = () => {
   const [selectedVotes, setSelectedVotes] = useState<Map<string, boolean>>(new Map());
   const [isBatchVoting, setIsBatchVoting] = useState(false);
   const [showBatchConfirmation, setShowBatchConfirmation] = useState(false);
+  const devPreview = useMemo(() => getGovernanceDevPreview(), []);
+  const mockProposal = useMemo(() => {
+    if (!devPreview.enabled) return null;
+    return createMockGovernanceProposal(
+      effectiveGovernanceNetwork ?? governanceNetworks[0] ?? "voi-mainnet"
+    );
+  }, [devPreview.enabled, effectiveGovernanceNetwork, governanceNetworks]);
+  const mockVotingPower = devPreview.mockVotingPower;
+  const [showMockVoteSuccess, setShowMockVoteSuccess] = useState(
+    devPreview.mode === "vote-success"
+  );
   const nftBoostEnabled = isFeatureEnabled("enableNFTBoost");
   const { userNFTs } = useUserNFTs();
 
@@ -97,6 +112,23 @@ const Governance = () => {
   const handleVote = async (proposalId: string, support: boolean, networkId?: NetworkId) => {
     await vote(proposalId, support, effectiveVotingPower, networkId);
   };
+
+  const handleMockVote = async () => {
+    // Dev preview only — ProposalCard opens the success modal after this resolves.
+  };
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const xError = params.get("x_error");
+    if (!xError) return;
+
+    toast({
+      title: "X connection failed",
+      description: xError,
+      variant: "destructive",
+    });
+    clearOAuthReturnQueryParams();
+  }, []);
 
   const handleSelectProposal = (proposalId: string, selected: boolean) => {
     setSelectedProposals((prev) => {
@@ -368,6 +400,17 @@ const Governance = () => {
           </div>
         )}
 
+        {devPreview.enabled && (
+          <div className="mb-4 rounded-xl border border-dashed border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm text-foreground">
+            <p className="font-medium text-amber-700 dark:text-amber-300">Dev preview</p>
+            <p className="mt-1 text-muted-foreground">
+              Mock proposal data only — no on-chain transactions. Remove{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">?mock=...</code> from the URL
+              for live proposals.
+            </p>
+          </div>
+        )}
+
         <Tabs
           value={sourceTab}
           onValueChange={(v) => setSourceTab(v as "onchain" | "api")}
@@ -385,10 +428,26 @@ const Governance = () => {
           <TabsContent value="onchain" className="mt-4">
             {effectiveGovernanceNetwork && <GovernanceHero stats={stats} />}
 
-            {!effectiveGovernanceNetwork ? (
-              <div className="flex flex-col items-center justify-center py-20 gap-4 text-muted-foreground">
-                <p>Switch to a governance-enabled network above to view proposals.</p>
+            {devPreview.mode === "proposal" && mockProposal && (
+              <div className="mt-6 space-y-3">
+                <H2 className="text-xl sm:text-2xl m-0">Mock Proposal</H2>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 lg:gap-6">
+                  <ProposalCard
+                    proposal={mockProposal}
+                    onVote={handleMockVote}
+                    votingPower={mockVotingPower}
+                    voteNetworkId={mockProposal.networkId}
+                  />
+                </div>
               </div>
+            )}
+
+            {!effectiveGovernanceNetwork ? (
+              devPreview.mode === "proposal" ? null : (
+                <div className="flex flex-col items-center justify-center py-20 gap-4 text-muted-foreground">
+                  <p>Switch to a governance-enabled network above to view proposals.</p>
+                </div>
+              )
             ) : loading ? (
               <div className="flex items-center justify-center py-20">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -549,6 +608,16 @@ const Governance = () => {
             <GovernanceApiProposalsPanel queriesEnabled={sourceTab === "api"} />
           </TabsContent>
         </Tabs>
+
+        {devPreview.mode === "vote-success" && mockProposal && (
+          <VoteSuccessModal
+            open={showMockVoteSuccess}
+            onOpenChange={setShowMockVoteSuccess}
+            proposal={mockProposal}
+            support={devPreview.voteSupport}
+            votingPower={mockVotingPower}
+          />
+        )}
 
         {/* Batch Vote Confirmation Modal */}
         {canBatchVote && (

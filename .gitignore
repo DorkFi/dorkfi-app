@@ -25,5 +25,6 @@ dist-ssr
 *.sln
 *.sw?
 .env
+.data/
 COMMIT_MSG.txt
 DISCORD_SUMMARY.txt

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Proposal, ProposalCategory } from "@/types/governanceTypes";
 import { PROPOSAL_CATEGORY_DISPLAY_NAMES } from "@/constants/governanceConstants";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +15,10 @@ import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import { getNetworkConfig } from "@/config";
 import { getNetworkLogoPath } from "@/utils/tokenImageUtils";
 import type { NetworkId } from "@/config";
+import {
+  clearOAuthReturnQueryParams,
+  consumeVoteSuccessRestore,
+} from "@/utils/governanceShare/xShareOAuthReturn";
 
 interface ProposalCardProps {
   proposal: Proposal;
@@ -133,6 +137,24 @@ export const ProposalCard = ({
       onSelectVote?.(proposal.id, support);
     }
   };
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const xError = params.get("x_error");
+    if (xError) {
+      clearOAuthReturnQueryParams();
+      return;
+    }
+
+    if (params.get("x_connected") !== "1") return;
+
+    const restore = consumeVoteSuccessRestore(proposal.id);
+    clearOAuthReturnQueryParams();
+    if (!restore) return;
+
+    setPendingVoteSupport(restore.support);
+    setShowSuccess(true);
+  }, [proposal.id]);
 
   return (
     <>

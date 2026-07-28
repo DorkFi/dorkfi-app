@@ -1,0 +1,12 @@
+# Share-server deploy: force Node + npm (repo also has bun.lockb which Nixpacks prefers).
+# Use `npm install` (not `npm ci`) — npm ci deletes node_modules and hits EBUSY on
+# Nixpacks' /app/node_modules/.cache mount.
+[variables]
+NIXPACKS_NODE_VERSION = "22"
+
+[phases.install]
+cmds = ["npm install --no-audit --no-fund"]
+cacheDirectories = ["/root/.npm"]
+
+[phases.build]
+cmds = ["echo 'Skipping frontend build; share server only'"]
