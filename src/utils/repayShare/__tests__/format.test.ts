@@ -92,19 +92,55 @@ describe("buildRepayShareTweetText", () => {
       amount: "100",
       assetSymbol: "USDC",
     });
-    expect(text).toContain("100 USDC");
-    expect(text).toContain("@Dork_Fi");
+    expect(text).toContain("I just repaid 100 USDC on @Dork_Fi.");
     expect(text).toContain("https://app.dork.fi");
     expect(text).toContain("#DorkFi");
   });
 
-  it("includes network when provided", () => {
+  it("adds #Algorand for Algorand networks", () => {
     const text = buildRepayShareTweetText({
       amount: "50",
       assetSymbol: "ALGO",
-      network: "Algorand",
+      network: "algorand-mainnet",
     });
-    expect(text).toContain("on Algorand");
+    expect(text).toContain("I just repaid 50 ALGO on @Dork_Fi.");
+    expect(text).not.toContain("on algorand-mainnet");
+    expect(text).toContain("#DorkFi #Algorand");
+  });
+
+  it("adds #VoiNetwork for Voi networks", () => {
+    const text = buildRepayShareTweetText({
+      amount: "10",
+      assetSymbol: "VOI",
+      network: "voi-mainnet",
+    });
+    expect(text).toContain("#DorkFi #VoiNetwork");
+  });
+
+  it("adds paid-with and Haystack lines for cross-asset repay", () => {
+    const text = buildRepayShareTweetText({
+      amount: "100",
+      assetSymbol: "USDC",
+      paidWithSymbol: "ALGO",
+      network: "algorand-mainnet",
+    });
+    expect(text).toContain(
+      "I just repaid 100 USDC with ALGO on @Dork_Fi."
+    );
+    expect(text).toContain("Swap powered by @haydotapp");
+    expect(text).not.toContain("Paid with");
+    expect(text).toContain("#DorkFi #Algorand");
+  });
+
+  it("omits paid-with lines when payment matches debt", () => {
+    const text = buildRepayShareTweetText({
+      amount: "100",
+      assetSymbol: "USDC",
+      paidWithSymbol: "USDC",
+    });
+    expect(text).toContain("I just repaid 100 USDC on @Dork_Fi.");
+    expect(text).not.toContain(" with USDC ");
+    expect(text).not.toContain("@haydotapp");
   });
 });
 

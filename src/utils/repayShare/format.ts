@@ -75,31 +75,55 @@ export const DEFAULT_REPAY_SHARE_LINK = "https://app.dork.fi";
 export type RepayShareTweetTextInput = {
   amount: string;
   assetSymbol: string;
+  /** Payment token when cross-asset repay (different from debt). */
+  paidWithSymbol?: string;
   network?: string;
   shareUrl?: string;
 };
+
+/** Map app network id / label to an X hashtag (without #). */
+export function resolveRepayShareNetworkHashtag(
+  network?: string
+): string | null {
+  const raw = network?.trim().toLowerCase();
+  if (!raw) return null;
+  if (raw.includes("algorand") || raw === "algo") return "Algorand";
+  if (raw.includes("voi")) return "VoiNetwork";
+  return null;
+}
+
+export function buildRepayShareHashtagLine(network?: string): string {
+  const tags = ["#DorkFi"];
+  const networkTag = resolveRepayShareNetworkHashtag(network);
+  if (networkTag) tags.push(`#${networkTag}`);
+  return tags.join(" ");
+}
 
 export function buildRepayShareTweetText(input: RepayShareTweetTextInput): string {
   const link = input.shareUrl?.trim() || DEFAULT_REPAY_SHARE_LINK;
   const amount = input.amount.trim() || "0";
   const asset = input.assetSymbol.trim() || "ASSET";
-  const network = input.network?.trim();
+  const paidWith = shouldShowPaidWithRow(asset, input.paidWithSymbol)
+    ? input.paidWithSymbol!.trim().toUpperCase()
+    : null;
 
-  const openingLine = network
-    ? `I just repaid ${amount} ${asset} on ${network} with @Dork_Fi.`
-    : `I just repaid ${amount} ${asset} with @Dork_Fi.`;
+  const opening = paidWith
+    ? `I just repaid ${amount} ${asset} with ${paidWith} on @Dork_Fi.`
+    : `I just repaid ${amount} ${asset} on @Dork_Fi.`;
 
-  return [
-    openingLine,
-    "",
-    "Keep your health factor happy 👇",
-    link,
-    "",
-    "#DorkFi",
-  ].join("\n");
+  const lines = [opening];
+  if (paidWith) {
+    lines.push("", "Swap powered by @haydotapp");
+  }
+  lines.push("", "Keep your health factor happy 👇", link, "");
+  lines.push(buildRepayShareHashtagLine(input.network));
+  return lines.join("\n");
 }
 
-export function buildGenericRepayShareTweetText(shareUrl?: string): string {
+export function buildGenericRepayShareTweetText(
+  shareUrl?: string,
+  network?: string
+): string {
   const link = shareUrl?.trim() || DEFAULT_REPAY_SHARE_LINK;
   return [
     "I just repaid a loan on @Dork_Fi.",
@@ -107,7 +131,7 @@ export function buildGenericRepayShareTweetText(shareUrl?: string): string {
     "Keep your health factor happy 👇",
     link,
     "",
-    "#DorkFi",
+    buildRepayShareHashtagLine(network),
   ].join("\n");
 }
 

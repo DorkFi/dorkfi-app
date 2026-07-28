@@ -140,11 +140,12 @@ function resolveShareTweetText(
     return buildRepayShareTweetText({
       amount: options.amount!,
       assetSymbol: options.assetSymbol!,
+      paidWithSymbol: options.paidWithSymbol,
       network: options.network,
       shareUrl,
     });
   }
-  return buildGenericRepayShareTweetText(shareUrl);
+  return buildGenericRepayShareTweetText(shareUrl, options.network);
 }
 
 async function resolveLinkShare(
