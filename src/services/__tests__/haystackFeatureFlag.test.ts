@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { isCrossAssetRepayFeatureEnabled } from "@/services/haystackRouterService";
+import {
+  DEFAULT_HAYSTACK_PROXY_URL,
+  getHaystackProxyBaseUrl,
+  isCrossAssetRepayFeatureEnabled,
+} from "@/services/haystackRouterService";
 
 describe("isCrossAssetRepayFeatureEnabled", () => {
   afterEach(() => {
@@ -31,6 +35,38 @@ describe("isCrossAssetRepayFeatureEnabled", () => {
     // Vitest runs with import.meta.env.DEV === true; production builds set DEV false.
     expect(isCrossAssetRepayFeatureEnabled("https://app.dork.fi")).toBe(
       import.meta.env.DEV === true
+    );
+  });
+});
+
+describe("getHaystackProxyBaseUrl", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("prefers absolute VITE_HAYSTACK_PROXY_URL", () => {
+    vi.stubEnv(
+      "VITE_HAYSTACK_PROXY_URL",
+      "https://custom-proxy.example.com/"
+    );
+    expect(getHaystackProxyBaseUrl("https://beta.dork.fi")).toBe(
+      "https://custom-proxy.example.com"
+    );
+  });
+
+  it("uses Railway proxy on beta even if env is a relative path", () => {
+    vi.stubEnv("VITE_HAYSTACK_PROXY_URL", "/api/haystack");
+    expect(getHaystackProxyBaseUrl("https://beta.dork.fi")).toBe(
+      DEFAULT_HAYSTACK_PROXY_URL
+    );
+  });
+
+  it("uses Vite middleware path in DEV on non-beta origins", () => {
+    vi.stubEnv("VITE_HAYSTACK_PROXY_URL", "");
+    expect(getHaystackProxyBaseUrl("http://localhost:8080")).toBe(
+      import.meta.env.DEV === true
+        ? "/api/haystack"
+        : DEFAULT_HAYSTACK_PROXY_URL
     );
   });
 });

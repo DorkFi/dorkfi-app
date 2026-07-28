@@ -48,29 +48,47 @@ export type HaystackExecuteResponse = {
 export const DEFAULT_HAYSTACK_PROXY_URL =
   "https://profound-bravery-production-418a.up.railway.app";
 
-/**
- * Base URL for the Haystack proxy (no trailing slash).
- * - Env `VITE_HAYSTACK_PROXY_URL` wins when set
- * - Vite DEV default: `/api/haystack` (middleware injects the API key)
- * - Other builds: baked Railway proxy origin
- */
-export function getHaystackProxyBaseUrl(): string {
-  const raw = (
-    import.meta.env.VITE_HAYSTACK_PROXY_URL as string | undefined
-  )?.trim();
-  if (raw) {
-    return raw.replace(/\/$/, "");
-  }
-  if (import.meta.env.DEV === true) {
-    return "/api/haystack";
-  }
-  return DEFAULT_HAYSTACK_PROXY_URL;
-}
-
 /** Origins where cross-asset repay is on without `VITE_ENABLE_CROSS_ASSET_REPAY`. */
 export const CROSS_ASSET_REPAY_AUTO_ENABLE_ORIGINS = [
   "https://beta.dork.fi",
 ] as const;
+
+function isAbsoluteHttpUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value);
+}
+
+/**
+ * Base URL for the Haystack proxy (no trailing slash).
+ * - Absolute `VITE_HAYSTACK_PROXY_URL` wins when set
+ * - `beta.dork.fi` always uses the Railway proxy (never same-origin `/api/…`)
+ * - Vite DEV default: `/api/haystack` (middleware injects the API key)
+ * - Other builds: baked Railway proxy origin
+ */
+export function getHaystackProxyBaseUrl(
+  origin = typeof window !== "undefined" ? window.location.origin : ""
+): string {
+  const raw = (
+    import.meta.env.VITE_HAYSTACK_PROXY_URL as string | undefined
+  )?.trim();
+  if (raw && isAbsoluteHttpUrl(raw)) {
+    return raw.replace(/\/$/, "");
+  }
+  if (
+    origin &&
+    (CROSS_ASSET_REPAY_AUTO_ENABLE_ORIGINS as readonly string[]).includes(
+      origin
+    )
+  ) {
+    return DEFAULT_HAYSTACK_PROXY_URL;
+  }
+  if (import.meta.env.DEV === true) {
+    return "/api/haystack";
+  }
+  if (raw) {
+    return raw.replace(/\/$/, "");
+  }
+  return DEFAULT_HAYSTACK_PROXY_URL;
+}
 
 /**
  * Cross-asset repay UI gate.
