@@ -43,6 +43,18 @@ Feature stays hidden; no key exposure; no broken quote calls.
    | `HAYSTACK_PROXY_PORT` | e.g. `8791` (or platform `$PORT`) |
    | `HAYSTACK_PROXY_CORS_ORIGINS` | `https://beta.dork.fi` (comma-separate more origins) |
 
+   **Railway tip:** Railpack detects `bun.lockb` and runs
+   `bun install --frozen-lockfile`, which fails when that lockfile is stale.
+   For the **proxy service only**, use the Dockerfile (no install):
+
+   | Setting | Value |
+   |---------|-------|
+   | Config-as-code path | `railway.haystack.toml` |
+   | or Dockerfile path | `Dockerfile.haystack` |
+   | Start command | `node scripts/haystack-proxy.mjs` (optional; Dockerfile `CMD` already sets it) |
+
+   Do **not** rely on `NIXPACKS_INSTALL_CMD` — this builder is Railpack, not Nixpacks.
+
    ```bash
    HAYSTACK_API_KEY=… \
    HAYSTACK_PROXY_HOST=0.0.0.0 \
