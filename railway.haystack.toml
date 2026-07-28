@@ -1,0 +1,12 @@
+# Point ONLY the Haystack proxy Railway service at this file:
+# Settings → Config-as-code → Config File Path → railway.haystack.toml
+#
+# Do not use this for the SPA (dorkfi-app) service.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile.haystack"
+
+[deploy]
+startCommand = "node scripts/haystack-proxy.mjs"
+restartPolicyType = "ON_FAILURE"
