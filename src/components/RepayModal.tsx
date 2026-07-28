@@ -1267,23 +1267,25 @@ const RepayModal = ({
               onGoToPortfolio={handleGoToPortfolio}
               onMakeAnother={handleMakeAnother}
               onClose={onClose}
-            />
-            <RepaySharePanel
-              active={showSuccess}
-              amount={amount !== "" ? amount.toString() : ""}
-              assetSymbol={tokenSymbol}
-              assetIconSrc={tokenIcon}
-              paidWithSymbol={
-                crossAssetActive
-                  ? selectedPaymentAsset?.symbol
-                  : undefined
+              aboveActions={
+                <RepaySharePanel
+                  active={showSuccess}
+                  amount={amount !== "" ? amount.toString() : ""}
+                  assetSymbol={tokenSymbol}
+                  assetIconSrc={tokenIcon}
+                  paidWithSymbol={
+                    crossAssetActive
+                      ? selectedPaymentAsset?.symbol
+                      : undefined
+                  }
+                  paidWithIconSrc={
+                    crossAssetActive
+                      ? selectedPaymentAsset?.logoPath
+                      : undefined
+                  }
+                  network={network}
+                />
               }
-              paidWithIconSrc={
-                crossAssetActive
-                  ? selectedPaymentAsset?.logoPath
-                  : undefined
-              }
-              network={network}
             />
           </div>
         ) : (

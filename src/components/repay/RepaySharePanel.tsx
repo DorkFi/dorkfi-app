@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Download, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
   generateRepayShareImage,
   revokeRepayShareResult,
 } from "@/utils/repayShare/generateRepayShareImage";
 import {
-  downloadRepayShareImage,
   getRepayShareHelperText,
   getShareOutcomeMessage,
   shareRepayConfirmation,
@@ -148,7 +146,7 @@ export function RepaySharePanel({
         description:
           error instanceof Error
             ? error.message
-            : "Please try again or save the image manually.",
+            : "Please try again in a moment.",
         variant: "destructive",
       });
     } finally {
@@ -164,44 +162,13 @@ export function RepaySharePanel({
     network,
   ]);
 
-  const handleSaveImage = useCallback(() => {
-    if (!shareImage) return;
-    downloadRepayShareImage(shareImage.blob);
-    toast({
-      title: "Image saved",
-      description: "Your repay share image was downloaded.",
-    });
-  }, [shareImage, toast]);
-
   if (!active) return null;
 
   return (
     <div className="w-full space-y-3 pt-2">
-      <div className="relative w-full aspect-video overflow-hidden rounded-lg border border-border bg-muted/40">
-        {isGeneratingShare && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-muted/60">
-            <Loader2 className="h-6 w-6 animate-spin text-primary" />
-            <span className="text-xs text-muted-foreground">
-              Creating your share image...
-            </span>
-          </div>
-        )}
-        {!isGeneratingShare && shareImage && (
-          <img
-            src={shareImage.objectUrl}
-            alt="Your repay confirmation share preview"
-            className="h-full w-full object-cover"
-          />
-        )}
-        {!isGeneratingShare && shareError && (
-          <div className="absolute inset-0 flex items-center justify-center px-4 text-center">
-            <span className="text-xs text-destructive">{shareError}</span>
-          </div>
-        )}
-      </div>
-
       <p className="text-center text-xs text-muted-foreground">
-        {getRepayShareHelperText(canNativeShare, linkShareServerOk)}
+        {shareError ??
+          getRepayShareHelperText(canNativeShare, linkShareServerOk)}
       </p>
 
       <button
@@ -210,7 +177,7 @@ export function RepaySharePanel({
         disabled={!shareImage || isGeneratingShare || isSharing}
         className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-border bg-black px-6 py-3 text-center text-base font-semibold text-white transition hover:bg-gray-900 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-gray-100"
       >
-        {isSharing ? (
+        {isSharing || isGeneratingShare ? (
           <Loader2 className="h-5 w-5 animate-spin" />
         ) : (
           <svg
@@ -224,17 +191,6 @@ export function RepaySharePanel({
         )}
         Share on X
       </button>
-
-      <Button
-        type="button"
-        variant="outline"
-        onClick={handleSaveImage}
-        disabled={!shareImage || isGeneratingShare}
-        className="min-h-[44px] w-full"
-      >
-        <Download className="mr-2 h-4 w-4" />
-        Save image
-      </Button>
     </div>
   );
 }

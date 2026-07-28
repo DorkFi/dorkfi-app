@@ -43,7 +43,7 @@ Flow:
 3. Generate a public domain
 4. Set variables (see below)
 5. Confirm `GET https://<domain>/health` returns `ok: true`
-6. Build/deploy the frontend with `VITE_X_SHARE_API_BASE=https://<domain>` (or rely on the default in `xShareService.ts` if it matches)
+6. Build/deploy the frontend with `VITE_X_SHARE_API_BASE=https://dorkfi-app-repay-share-production.up.railway.app` (or rely on the default in `xShareService.ts` if it matches)
 
 ### Required Railway variables
 
@@ -51,7 +51,7 @@ Flow:
 |----------|---------|
 | `NODE_ENV` | `production` |
 | `X_SHARE_FRONTEND_ORIGIN` | `https://app.dork.fi` or `https://beta.dork.fi` |
-| `X_SHARE_PUBLIC_BASE` | optional — auto from `RAILWAY_PUBLIC_DOMAIN` |
+| `X_SHARE_PUBLIC_BASE` | `https://dorkfi-app-repay-share-production.up.railway.app` (required if `RAILWAY_PUBLIC_DOMAIN` is unset) |
 
 ### Optional
 
