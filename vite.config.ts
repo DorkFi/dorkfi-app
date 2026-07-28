@@ -14,6 +14,8 @@ export default defineConfig(({ mode }) => {
     env.VITE_GOVERNANCE_LOCAL_TARGET || "http://127.0.0.1:8787";
   const governanceNgrokTarget =
     env.VITE_GOVERNANCE_NGROK_TARGET || "http://127.0.0.1:8787";
+  const xShareLocalTarget =
+    env.VITE_X_SHARE_LOCAL_TARGET || "http://127.0.0.1:8788";
 
   return {
   server: {
@@ -47,6 +49,11 @@ export default defineConfig(({ mode }) => {
             proxyReq.setHeader("ngrok-skip-browser-warning", "true");
           });
         },
+      },
+      "/api/x-share": {
+        target: xShareLocalTarget,
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/api\/x-share/, "") || "/",
       },
     },
   },

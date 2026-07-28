@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/select";
 import { InfoIcon, ChevronDown, ChevronUp, Check } from "lucide-react";
 import SupplyBorrowCongrats from "./SupplyBorrowCongrats";
+import { RepaySharePanel } from "@/components/repay/RepaySharePanel";
 import { formatRelativeTime } from "@/utils/timeUtils";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { calculateBorrowAPY } from "@/utils/apyCalculations";
@@ -1256,7 +1257,7 @@ const RepayModal = ({
         )}
       >
         {showSuccess ? (
-          <div className="p-6 overflow-y-auto min-h-0">
+          <div className="p-6 overflow-y-auto min-h-0 space-y-4">
             <SupplyBorrowCongrats
               transactionType="repay"
               asset={tokenSymbol}
@@ -1266,6 +1267,23 @@ const RepayModal = ({
               onGoToPortfolio={handleGoToPortfolio}
               onMakeAnother={handleMakeAnother}
               onClose={onClose}
+            />
+            <RepaySharePanel
+              active={showSuccess}
+              amount={amount !== "" ? amount.toString() : ""}
+              assetSymbol={tokenSymbol}
+              assetIconSrc={tokenIcon}
+              paidWithSymbol={
+                crossAssetActive
+                  ? selectedPaymentAsset?.symbol
+                  : undefined
+              }
+              paidWithIconSrc={
+                crossAssetActive
+                  ? selectedPaymentAsset?.logoPath
+                  : undefined
+              }
+              network={network}
             />
           </div>
         ) : (

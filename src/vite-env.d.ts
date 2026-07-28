@@ -38,4 +38,8 @@ interface ImportMetaEnv {
    * back to the baked Railway proxy. Never put HAYSTACK_API_KEY in VITE_*.
    */
   readonly VITE_HAYSTACK_PROXY_URL?: string;
+  /** Absolute origin of the repay/X share server (Railway). Dev defaults to `/api/x-share`. */
+  readonly VITE_X_SHARE_API_BASE?: string;
+  /** Local share-server target for the Vite `/api/x-share` proxy (default `http://127.0.0.1:8788`). */
+  readonly VITE_X_SHARE_LOCAL_TARGET?: string;
 }
