@@ -314,21 +314,18 @@ export async function generateRepayShareImage(
 
   await ensureFontsLoaded();
 
-  const dpr = Math.min(
-    typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1,
-    2
-  );
-
+  // Export at exactly REPAY_SHARE_WIDTH×REPAY_SHARE_HEIGHT: the share permalink
+  // declares these values in og:image:width/height, and X drops the card image
+  // when the real file disagrees. Scaling by devicePixelRatio also produced
+  // fractional sizes (e.g. 2159×1214) on scaled Retina displays.
   const canvas = document.createElement("canvas");
-  canvas.width = REPAY_SHARE_WIDTH * dpr;
-  canvas.height = REPAY_SHARE_HEIGHT * dpr;
+  canvas.width = REPAY_SHARE_WIDTH;
+  canvas.height = REPAY_SHARE_HEIGHT;
 
   const ctx = canvas.getContext("2d");
   if (!ctx) {
     throw new Error("Canvas 2D context is not available");
   }
-
-  ctx.scale(dpr, dpr);
 
   const ticker = (input.assetSymbol.trim() || "ASSET").toUpperCase();
   const debtLoanLabel = formatRepayDebtLoanLabel(ticker);
