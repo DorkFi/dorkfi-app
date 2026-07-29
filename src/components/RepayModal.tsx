@@ -32,7 +32,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn, formatUsdPerTokenDisplay } from "@/lib/utils";
-import { usdValueForHumanTokenAmount } from "@/utils/assetDecimals";
+import { usdValueForHumanTokenAmount, resolveUsdPerTokenFromMarketInfo } from "@/utils/assetDecimals";
 import type { PoolCollateralMarketRow } from "@/utils/poolCollateralMarketRows";
 import type {
   FolksTokenAdapterConfig,
@@ -42,6 +42,7 @@ import type {
 import {
   getAlgorandNetworkFromNetworkId,
   getAnyFolksAdapter,
+  getAllTokensWithDisplayInfo,
   getFolksAdapterForPhase,
   tokenAdapterStableId,
 } from "@/config";
@@ -56,6 +57,7 @@ import {
 import { executeHaystackSwap } from "@/services/haystackSwapExecute";
 import { useHaystackRepayQuote } from "@/hooks/useHaystackRepayQuote";
 import { CrossAssetRepaySection } from "@/components/repay/CrossAssetRepaySection";
+import { RepayAmountRows } from "@/components/repay/RepayAmountRows";
 import {
   listHaystackPaymentAssets,
   resolveHaystackDebtAsaId,
@@ -74,6 +76,12 @@ import {
 } from "@/services/folksDepositAdapter";
 import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
 import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
+import {
+  asaAmountFromAccountInfo,
+  getCachedAccountInformation,
+} from "@/utils/walletBalanceRpc";
+import { withRpcReadCache } from "@/utils/rpcReadCache";
+import { fetchMarketInfo } from "@/services/lendingService";
 import { getExplorerTransactionUrl } from "@/utils/explorerLinks";
 import {
   buildLiquidationThresholdSummaryForDeposit,
@@ -309,6 +317,14 @@ const RepayModal = ({
   /** Spendable balance of the selected Haystack payment ASA (human units). */
   const [crossAssetPaymentWalletHuman, setCrossAssetPaymentWalletHuman] =
     useState<number | undefined>(undefined);
+  /** One account snapshot provides balances for every cross-asset dropdown row. */
+  const [crossAssetPaymentBalances, setCrossAssetPaymentBalances] = useState<
+    Record<number, number> | null
+  >(null);
+  /** USD/token for payment ASAs (lending oracle); missing keys show $0.00. */
+  const [crossAssetPaymentUsdPrices, setCrossAssetPaymentUsdPrices] = useState<
+    Record<number, number> | null
+  >(null);
   const [xalgoRepayConsensusState, setXalgoRepayConsensusState] =
     useState<ConsensusState | null>(null);
 
@@ -732,6 +748,117 @@ const RepayModal = ({
     selectedPaymentAsset?.decimals,
   ]);
 
+  // Load all dropdown balances from one cached account snapshot.
+  useEffect(() => {
+    if (
+      !isOpen ||
+      !crossAssetEligible ||
+      !activeAccount?.address ||
+      haystackPaymentAssets.length === 0
+    ) {
+      setCrossAssetPaymentBalances(null);
+      return;
+    }
+    const aln = getAlgorandNetworkFromNetworkId(networkToUse as NetworkId);
+    if (!aln) {
+      setCrossAssetPaymentBalances(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { algod } = algorandService.initializeClients(
+          aln as AlgorandNetwork
+        );
+        const accountInfo = await getCachedAccountInformation(
+          algod,
+          activeAccount.address
+        );
+        const balances: Record<number, number> = {
+          0: spendableAlgoHumanFromAccount(accountInfo),
+        };
+        for (const asset of haystackPaymentAssets) {
+          if (asset.asaId === 0) continue;
+          const atomic = asaAmountFromAccountInfo(accountInfo, asset.asaId) ?? 0n;
+          balances[asset.asaId] = new BigNumber(atomic.toString())
+            .shiftedBy(-asset.decimals)
+            .toNumber();
+        }
+        if (!cancelled) setCrossAssetPaymentBalances(balances);
+      } catch {
+        if (!cancelled) setCrossAssetPaymentBalances({});
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isOpen,
+    crossAssetEligible,
+    activeAccount?.address,
+    networkToUse,
+    haystackPaymentAssets,
+  ]);
+
+  // Lending-oracle USD prices for dropdown rows (cached 60s, shared with Markets).
+  useEffect(() => {
+    if (!isOpen || !crossAssetEligible || haystackPaymentAssets.length === 0) {
+      setCrossAssetPaymentUsdPrices(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const displayTokens = getAllTokensWithDisplayInfo(
+        networkToUse as NetworkId
+      );
+      const prices: Record<number, number> = {};
+      await Promise.all(
+        haystackPaymentAssets.map(async (asset) => {
+          const cacheKey = `tokenPrice:${networkToUse}:${asset.symbol}`;
+          try {
+            const price = await withRpcReadCache(
+              cacheKey,
+              async () => {
+                const match =
+                  displayTokens.find(
+                    (t) =>
+                      t.symbol === asset.symbol &&
+                      t.poolId &&
+                      t.underlyingContractId
+                  ) ??
+                  displayTokens.find(
+                    (t) => t.symbol === asset.symbol
+                  );
+                if (!match?.poolId || !match.underlyingContractId) {
+                  return 0;
+                }
+                const marketInfo = await fetchMarketInfo(
+                  match.poolId,
+                  match.underlyingContractId,
+                  networkToUse
+                );
+                if (!marketInfo) return 0;
+                const usd = resolveUsdPerTokenFromMarketInfo(
+                  marketInfo,
+                  match.decimals ?? asset.decimals
+                );
+                return Number.isFinite(usd) && usd > 0 ? usd : 0;
+              },
+              60_000
+            );
+            prices[asset.asaId] = price;
+          } catch {
+            prices[asset.asaId] = 0;
+          }
+        })
+      );
+      if (!cancelled) setCrossAssetPaymentUsdPrices(prices);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, crossAssetEligible, networkToUse, haystackPaymentAssets]);
+
   const toggleDetail = (key: keyof typeof expandedDetails) => {
     setExpandedDetails((prev) => ({
       ...prev,
@@ -763,6 +890,21 @@ const RepayModal = ({
       maximumFractionDigits: 6,
     });
   };
+
+  const crossAssetPaymentNeededDisplay = useMemo(() => {
+    if (!crossAssetActive || haystackQuote.paymentAtomicNeeded == null) {
+      return null;
+    }
+    const decimals = selectedPaymentAsset?.decimals ?? 6;
+    return new BigNumber(haystackQuote.paymentAtomicNeeded.toString())
+      .shiftedBy(-decimals)
+      .decimalPlaces(Math.min(6, decimals), BigNumber.ROUND_UP)
+      .toFixed();
+  }, [
+    crossAssetActive,
+    haystackQuote.paymentAtomicNeeded,
+    selectedPaymentAsset?.decimals,
+  ]);
 
   useEffect(() => {
     if (amount !== "" && typeof amount === "number") {
@@ -914,6 +1056,27 @@ const RepayModal = ({
     isXalgoConsensusRepayAlgoRoute,
     xalgoRepayConsensusState,
   ]);
+
+  /** Routes whose amount unit differs from the other side get the pay/debt rows. */
+  const dualUnitRepay = crossAssetActive || repayWalletBasis === "underlying";
+  /**
+   * Cross-asset quotes fixed-output, so its field is debt-denominated; the Folks
+   * and xALGO consensus fields are in the spend asset and submit in those units.
+   */
+  const repayEditableSide: "pay" | "debt" = crossAssetActive ? "debt" : "pay";
+
+  const derivedDebtAmountDisplay = useMemo(() => {
+    if (numAmount <= 0 || numAmountMarketTokenHuman == null) return null;
+    return numAmountMarketTokenHuman.toLocaleString(undefined, {
+      maximumFractionDigits: 6,
+    });
+  }, [numAmount, numAmountMarketTokenHuman]);
+
+  const repayDerivedPending =
+    numAmount > 0 &&
+    (repayEditableSide === "debt"
+      ? haystackQuote.isLoading || crossAssetPaymentNeededDisplay == null
+      : numAmountMarketTokenHuman == null);
 
   const repayFolksBlockingSubmit = useMemo(() => {
     if (repayWalletBasis !== "underlying") return false;
@@ -1242,6 +1405,74 @@ const RepayModal = ({
   const repayPoolHealthLoading =
     poolGlobalUserData === undefined && Boolean(poolId);
 
+  const repayPaySide = {
+    label: "You pay",
+    symbol: crossAssetActive
+      ? selectedPaymentAsset?.symbol ?? "asset"
+      : walletUnitSymbol,
+    iconSrc: crossAssetActive
+      ? selectedPaymentAsset?.logoPath ?? undefined
+      : undefined,
+    derivedAmount: crossAssetPaymentNeededDisplay,
+    usdValue: crossAssetActive ? haystackQuote.quote?.usdIn ?? null : null,
+    footnote: `Balance: ${(crossAssetActive
+      ? crossAssetPaymentWalletHuman ?? 0
+      : effectiveWalletBalance
+    ).toLocaleString(undefined, { maximumFractionDigits: 6 })}`,
+    warning:
+      crossAssetActive &&
+      !crossAssetPaymentAffordable &&
+      haystackQuote.paymentAtomicNeeded != null
+        ? `Not enough ${selectedPaymentAsset?.symbol ?? "asset"} for this quote.`
+        : undefined,
+  };
+
+  const repayDebtSide = {
+    label: repayEditableSide === "debt" ? "Debt to repay" : "Repays",
+    symbol: tokenSymbol,
+    iconSrc: tokenIcon,
+    derivedAmount: derivedDebtAmountDisplay,
+    usdValue: usdValueForHumanTokenAmount(
+      repayEditableSide === "debt" ? numAmount : repayAmountMarketHuman,
+      displayTokenPrice
+    ),
+    footnote: `Owed: ${currentBorrow.toLocaleString(undefined, {
+      maximumFractionDigits: 6,
+    })}`,
+  };
+
+  const repayEditableActions =
+    repayMultiRoute || showMaxButton ? (
+      <>
+        {repayMultiRoute && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setRepayRoutePickerOpen(true)}
+            className="h-6 max-w-[7rem] gap-0.5 px-1.5 text-whale-gold hover:bg-whale-gold/10"
+            title="Choose repay route"
+          >
+            <span className="truncate text-xs font-medium">
+              {repayRouteButtonLabel}
+            </span>
+            <ChevronDown className="h-3 w-3 shrink-0 opacity-80" aria-hidden />
+          </Button>
+        )}
+        {showMaxButton && (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={handleMaxClick}
+            className="h-6 px-1.5 text-xs font-medium text-whale-gold hover:bg-whale-gold/10"
+          >
+            MAX
+          </Button>
+        )}
+      </>
+    ) : undefined;
+
   return (
     <>
     <Dialog
@@ -1387,12 +1618,14 @@ const RepayModal = ({
                 <div className="flex-1 space-y-6 min-w-0">
                   {workflowStep === "amount" ? (
                     <div className="space-y-3">
-                        <Label
-                          htmlFor="amount"
-                          className="text-sm font-medium text-slate-600 dark:text-slate-300"
-                        >
-                          Amount
-                        </Label>
+                        {!dualUnitRepay && (
+                          <Label
+                            htmlFor="amount"
+                            className="text-sm font-medium text-slate-600 dark:text-slate-300"
+                          >
+                            Amount
+                          </Label>
+                        )}
                         {repayAdapterList.length === 1 && selectedRepayAdapter && (
                           <div className="space-y-1 rounded-lg border border-slate-200/80 bg-white/60 p-3 dark:border-slate-600 dark:bg-slate-800/60">
                             <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
@@ -1430,12 +1663,14 @@ const RepayModal = ({
                             selectedPaymentAsaId={crossAssetPaymentAsaId}
                             onSelectPaymentAsaId={setCrossAssetPaymentAsaId}
                             debtSymbol={tokenSymbol}
+                            debtIcon={tokenIcon}
+                            debtBalance={walletBalance}
+                            debtUsdPrice={displayTokenPrice}
+                            paymentBalances={crossAssetPaymentBalances}
+                            paymentUsdPrices={crossAssetPaymentUsdPrices}
                             quote={haystackQuote.quote}
                             paymentAtomicNeeded={
                               haystackQuote.paymentAtomicNeeded
-                            }
-                            paymentDecimals={
-                              selectedPaymentAsset?.decimals ?? 6
                             }
                             isLoading={haystackQuote.isLoading}
                             error={haystackQuote.error}
@@ -1443,81 +1678,99 @@ const RepayModal = ({
                             onSlippageChange={setCrossAssetSlippagePercent}
                           />
                         )}
-                        <div className="relative">
-                          <LocaleNumberInput
-                            id="amount"
-                            placeholder="0.0"
-                            autoFocus
-                            value={amount}
-                            onChange={(v) => {
-                              setAmount(v ?? "");
+                        {dualUnitRepay ? (
+                          <RepayAmountRows
+                            editableSide={repayEditableSide}
+                            amount={amount}
+                            onAmountChange={(v) => {
+                              setAmount(v);
                               setIsRepayAll(false);
                             }}
-                            formatOptions={{ maximumFractionDigits: 6 }}
-                            className={cn(
-                              "bg-white/80 dark:bg-slate-800 border-gray-300 dark:border-slate-600 text-slate-800 dark:text-white text-lg h-12",
-                              repayMultiRoute && showMaxButton
-                                ? "pr-40"
-                                : repayMultiRoute
-                                  ? "pr-28"
-                                  : showMaxButton
-                                    ? "pr-16"
-                                    : "pr-4"
-                            )}
+                            pay={repayPaySide}
+                            debt={repayDebtSide}
+                            derivedPending={repayDerivedPending}
+                            editableActions={repayEditableActions}
+                            formatUsd={formatRepayUsd}
+                            autoFocus
                           />
-                          {(repayMultiRoute || showMaxButton) && (
-                            <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
-                              {repayMultiRoute && (
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => setRepayRoutePickerOpen(true)}
-                                  className="h-8 max-w-[7rem] gap-0.5 px-2 text-whale-gold hover:bg-whale-gold/10"
-                                  title="Choose repay route"
-                                >
-                                  <span className="truncate text-xs font-medium">
-                                    {repayRouteButtonLabel}
-                                  </span>
-                                  <ChevronDown
-                                    className="h-3 w-3 shrink-0 opacity-80"
-                                    aria-hidden
-                                  />
-                                </Button>
-                              )}
-                              {showMaxButton && (
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={handleMaxClick}
-                                  className="text-whale-gold hover:bg-whale-gold/10 h-8 px-3"
-                                >
-                                  MAX
-                                </Button>
+                        ) : (
+                          <>
+                            <div className="relative">
+                              <LocaleNumberInput
+                                id="amount"
+                                placeholder="0.0"
+                                autoFocus
+                                value={amount}
+                                onChange={(v) => {
+                                  setAmount(v ?? "");
+                                  setIsRepayAll(false);
+                                }}
+                                formatOptions={{ maximumFractionDigits: 6 }}
+                                className={cn(
+                                  "bg-white/80 dark:bg-slate-800 border-gray-300 dark:border-slate-600 text-slate-800 dark:text-white text-lg h-12",
+                                  repayMultiRoute && showMaxButton
+                                    ? "pr-40"
+                                    : repayMultiRoute
+                                      ? "pr-28"
+                                      : showMaxButton
+                                        ? "pr-16"
+                                        : "pr-4"
+                                )}
+                              />
+                              {(repayMultiRoute || showMaxButton) && (
+                                <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
+                                  {repayMultiRoute && (
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() =>
+                                        setRepayRoutePickerOpen(true)
+                                      }
+                                      className="h-8 max-w-[7rem] gap-0.5 px-2 text-whale-gold hover:bg-whale-gold/10"
+                                      title="Choose repay route"
+                                    >
+                                      <span className="truncate text-xs font-medium">
+                                        {repayRouteButtonLabel}
+                                      </span>
+                                      <ChevronDown
+                                        className="h-3 w-3 shrink-0 opacity-80"
+                                        aria-hidden
+                                      />
+                                    </Button>
+                                  )}
+                                  {showMaxButton && (
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={handleMaxClick}
+                                      className="text-whale-gold hover:bg-whale-gold/10 h-8 px-3"
+                                    >
+                                      MAX
+                                    </Button>
+                                  )}
+                                </div>
                               )}
                             </div>
-                          )}
-                        </div>
-                        {fiatValue > 0 && (
-                          <p className="text-sm text-slate-500 dark:text-slate-400">
-                            ≈ $
-                            {formatRepayUsd(fiatValue)}
-                          </p>
+                            {fiatValue > 0 && (
+                              <p className="text-sm text-slate-500 dark:text-slate-400">
+                                ≈ $
+                                {formatRepayUsd(fiatValue)}
+                              </p>
+                            )}
+                          </>
                         )}
                         <div className="pt-2">
                           <div className="flex flex-col gap-3">
-                            <div className="flex flex-row justify-between gap-2 p-3 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-gray-200 dark:border-slate-700">
-                              <div className="flex-1 min-w-0">
-                                <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
-                                  {crossAssetActive
-                                    ? `Pay with ${selectedPaymentAsset?.symbol ?? "asset"}`
-                                    : "Wallet Balance"}
-                                </p>
-                                <p className="text-xs text-slate-700 dark:text-slate-300 font-medium break-words">
-                                  {crossAssetActive
-                                    ? `${(crossAssetPaymentWalletHuman ?? 0).toLocaleString()} ${selectedPaymentAsset?.symbol ?? ""}`
-                                    : `${effectiveWalletBalance.toLocaleString()} ${walletUnitSymbol}`}
-                                  {!crossAssetActive && (
+                            {!dualUnitRepay && (
+                              <div className="flex flex-row justify-between gap-2 p-3 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-gray-200 dark:border-slate-700">
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
+                                    Wallet Balance
+                                  </p>
+                                  <p className="text-xs text-slate-700 dark:text-slate-300 font-medium break-words">
+                                    {effectiveWalletBalance.toLocaleString()}{" "}
+                                    {walletUnitSymbol}
                                     <span className="text-slate-500 dark:text-slate-400 ml-1">
                                       ($
                                       {formatRepayUsd(
@@ -1528,38 +1781,29 @@ const RepayModal = ({
                                       )}
                                       )
                                     </span>
-                                  )}
-                                </p>
-                                {crossAssetActive &&
-                                  !crossAssetPaymentAffordable &&
-                                  haystackQuote.paymentAtomicNeeded != null && (
-                                    <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
-                                      Not enough{" "}
-                                      {selectedPaymentAsset?.symbol ?? "asset"}{" "}
-                                      for this quote.
-                                    </p>
-                                  )}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
-                                  Total owed
-                                </p>
-                                <p className="text-xs text-slate-700 dark:text-slate-300 font-medium break-words">
-                                  {currentBorrow.toLocaleString()}{" "}
-                                  {tokenSymbol}
-                                  <span className="text-slate-500 dark:text-slate-400 ml-1">
-                                    ($
-                                    {formatRepayUsd(
-                                      usdValueForHumanTokenAmount(
-                                        currentBorrow,
-                                        displayTokenPrice
+                                  </p>
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
+                                    Total owed
+                                  </p>
+                                  <p className="text-xs text-slate-700 dark:text-slate-300 font-medium break-words">
+                                    {currentBorrow.toLocaleString()}{" "}
+                                    {tokenSymbol}
+                                    <span className="text-slate-500 dark:text-slate-400 ml-1">
+                                      ($
+                                      {formatRepayUsd(
+                                        usdValueForHumanTokenAmount(
+                                          currentBorrow,
+                                          displayTokenPrice
+                                        )
+                                      )}
                                       )
-                                    )}
-                                    )
-                                  </span>
-                                </p>
+                                    </span>
+                                  </p>
+                                </div>
                               </div>
-                            </div>
+                            )}
                             {accruedInterest > 0 && (
                               <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50">
                                 <p className="text-xs font-medium text-amber-700 dark:text-amber-400 mb-1">
@@ -1683,7 +1927,7 @@ const RepayModal = ({
                           </div>
                           <div className="flex justify-between gap-3 px-3 py-2.5">
                             <span className="text-xs text-slate-500 dark:text-slate-400">
-                              Payment
+                              You pay
                             </span>
                             <span className="text-xs font-medium text-slate-800 dark:text-slate-200 text-right tabular-nums">
                               {crossAssetActive &&
@@ -1702,6 +1946,13 @@ const RepayModal = ({
                                       )
                                     )}{" "}
                                   {selectedPaymentAsset?.symbol ?? "asset"}
+                                  <span className="block text-[10px] text-slate-500 dark:text-slate-400 font-normal">
+                                    clears{" "}
+                                    {numAmount.toLocaleString(undefined, {
+                                      maximumFractionDigits: 6,
+                                    })}{" "}
+                                    {tokenSymbol}
+                                  </span>
                                   <span className="block text-[10px] text-whale-gold font-normal">
                                     2 signatures: swap → repay {tokenSymbol}
                                   </span>
@@ -1713,11 +1964,23 @@ const RepayModal = ({
                                     maximumFractionDigits: 6,
                                   })}{" "}
                                   {walletUnitSymbol}
+                                  {repayWalletBasis === "underlying" && (
+                                    <span className="block text-[10px] text-slate-500 dark:text-slate-400 font-normal">
+                                      clears{" "}
+                                      {repayAmountMarketHuman.toLocaleString(
+                                        undefined,
+                                        { maximumFractionDigits: 6 }
+                                      )}{" "}
+                                      {tokenSymbol}
+                                    </span>
+                                  )}
                                   <span className="block text-[10px] text-slate-500 dark:text-slate-400 font-normal">
                                     ≈ $
                                     {formatRepayUsd(
                                       usdValueForHumanTokenAmount(
-                                        numAmount,
+                                        repayWalletBasis === "underlying"
+                                          ? repayAmountMarketHuman
+                                          : numAmount,
                                         displayTokenPrice
                                       )
                                     )}
@@ -1726,6 +1989,21 @@ const RepayModal = ({
                               )}
                             </span>
                           </div>
+                          {crossAssetActive && (
+                            <div className="flex items-center justify-between gap-3 px-3 py-2.5">
+                              <span className="text-xs text-slate-500 dark:text-slate-400">
+                                Provider
+                              </span>
+                              <span className="flex items-center gap-1.5 text-xs font-medium text-slate-800 dark:text-slate-200">
+                                <img
+                                  src="/images/hay-router.png"
+                                  alt=""
+                                  className="h-4 w-4 rounded-sm bg-black object-contain"
+                                />
+                                Hay Router
+                              </span>
+                            </div>
+                          )}
                           <div className="flex justify-between gap-3 px-3 py-2.5 bg-white/60 dark:bg-slate-900/30">
                             <span className="text-xs font-medium text-slate-600 dark:text-slate-300">
                               Est. remaining borrow

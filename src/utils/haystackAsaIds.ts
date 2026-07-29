@@ -79,13 +79,35 @@ export function resolveHaystackDebtAsaId(args: {
 export type HaystackPaymentAssetOption = {
   asaId: number;
   symbol: string;
+  /** Human-readable name for dropdown primary label. */
+  name: string;
   label: string;
   decimals: number;
   logoPath: string;
 };
 
+/** Symbols excluded from cross-asset repay payment picker. */
+const HAYSTACK_PAYMENT_EXCLUDED_SYMBOLS = new Set([
+  "TMPOOL2",
+  "PEPE",
+  "COMPX",
+  "SOL",
+  "AVAX",
+  "LINK",
+  "xUSD",
+]);
+
+/** ASA ids excluded from cross-asset repay payment picker. */
+const HAYSTACK_PAYMENT_EXCLUDED_ASA_IDS = new Set([
+  1058926737,
+  887406851,
+]);
+
 /**
  * Distinct ASA payment options for cross-asset repay on a network.
+ * Tinyman LP (TMPOOL2), selected tickers, and specific ASA ids are omitted.
+ * Folks f-assets keep their real name/ticker (e.g. Folks V2 USDC / fUSDC)
+ * instead of the Markets table override that collapses them to "USDC".
  */
 export function listHaystackPaymentAssets(
   networkId: NetworkId,
@@ -95,14 +117,30 @@ export function listHaystackPaymentAssets(
   const seen = new Set<number>();
   const rows: HaystackPaymentAssetOption[] = [];
   for (const t of tokens) {
+    const keepFolksIdentity =
+      t.iconBadgeFromSymbol === "FOLKS" || /^Folks\b/i.test(t.name ?? "");
+    const sym = keepFolksIdentity
+      ? t.symbol
+      : (t.marketOverride?.displaySymbol ?? t.symbol);
+    if (
+      HAYSTACK_PAYMENT_EXCLUDED_SYMBOLS.has(sym) ||
+      HAYSTACK_PAYMENT_EXCLUDED_SYMBOLS.has(t.symbol)
+    ) {
+      continue;
+    }
+    if (/^TinymanPool2/i.test(t.name ?? "")) continue;
     const id = resolveHaystackAsaId(t);
     if (id == null || seen.has(id)) continue;
     if (excludeAsaId != null && id === excludeAsaId) continue;
+    if (HAYSTACK_PAYMENT_EXCLUDED_ASA_IDS.has(id)) continue;
     seen.add(id);
-    const sym = t.marketOverride?.displaySymbol ?? t.symbol;
+    const name = keepFolksIdentity
+      ? (t.name ?? t.symbol)
+      : (t.marketOverride?.displayName ?? t.name ?? sym);
     rows.push({
       asaId: id,
       symbol: sym,
+      name,
       label: id === 0 ? `${sym} (ALGO)` : `${sym}`,
       decimals: t.decimals,
       logoPath: t.logoPath,

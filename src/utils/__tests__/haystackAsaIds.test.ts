@@ -116,4 +116,34 @@ describe("listHaystackPaymentAssets", () => {
     const ids = rows.map((r) => r.asaId);
     expect(new Set(ids).size).toBe(ids.length);
   });
+
+  it("omits TMPOOL2 / Tinyman LP tokens", () => {
+    const rows = listHaystackPaymentAssets("algorand-mainnet");
+    expect(rows.some((r) => r.symbol === "TMPOOL2")).toBe(false);
+    // Known UNIT-ALGO TMPOOL2 ASA from config
+    expect(rows.some((r) => r.asaId === 3157974960)).toBe(false);
+  });
+
+  it("omits PEPE, COMPX, SOL, AVAX, LINK, and xUSD", () => {
+    const rows = listHaystackPaymentAssets("algorand-mainnet");
+    for (const sym of ["PEPE", "COMPX", "SOL", "AVAX", "LINK", "xUSD"]) {
+      expect(rows.some((r) => r.symbol === sym)).toBe(false);
+    }
+  });
+
+  it("omits excluded ASA ids 1058926737 and 887406851", () => {
+    const rows = listHaystackPaymentAssets("algorand-mainnet");
+    expect(rows.some((r) => r.asaId === 1058926737)).toBe(false);
+    expect(rows.some((r) => r.asaId === 887406851)).toBe(false);
+  });
+
+  it("labels Folks fUSDC distinctly from native USDC", () => {
+    const rows = listHaystackPaymentAssets("algorand-mainnet");
+    const native = rows.find((r) => r.asaId === 31566704);
+    const folks = rows.find((r) => r.asaId === 971384592);
+    expect(native?.symbol).toBe("USDC");
+    expect(native?.name).toBe("USD Coin");
+    expect(folks?.symbol).toBe("fUSDC");
+    expect(folks?.name).toMatch(/Folks/i);
+  });
 });
