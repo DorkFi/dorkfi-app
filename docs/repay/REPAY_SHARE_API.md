@@ -51,7 +51,40 @@ Flow:
 |----------|---------|
 | `NODE_ENV` | `production` |
 | `X_SHARE_FRONTEND_ORIGIN` | `https://beta.dork.fi` or comma-separated `https://beta.dork.fi,https://app.dork.fi` |
-| `X_SHARE_PUBLIC_BASE` | `https://dorkfi-app-repay-share-production.up.railway.app` (required if `RAILWAY_PUBLIC_DOMAIN` is unset) |
+| `X_SHARE_PUBLIC_BASE` | `https://share.dork.fi` (custom domain — see below) |
+
+### Custom domain (required for X to render the card)
+
+X (Twitter) suppresses link-preview cards for shared free-hosting domains such as
+`*.up.railway.app`. The OG/Twitter tags served from a `*.up.railway.app` URL are
+valid and pass every third-party validator, but X quietly renders the tweet as a
+plain link instead of a `summary_large_image` card. The fix is to serve the share
+permalink from a custom domain:
+
+1. In Railway, add a custom domain to the share service (e.g. `share.dork.fi`) and
+   create the DNS `CNAME` it gives you.
+2. Set `X_SHARE_PUBLIC_BASE=https://share.dork.fi` on the share service. Railway
+   leaves `RAILWAY_PUBLIC_DOMAIN` pointed at the `*.up.railway.app` host even after
+   a custom domain is added, so this must be set explicitly — otherwise
+   `og:url`/`og:image` fall back to the suppressed domain (see
+   `resolveSharePublicBase` in `server/config.ts`).
+3. Rebuild the frontend with `VITE_X_SHARE_API_BASE=https://share.dork.fi` so the
+   POST and the resulting tweet URL both use the custom domain.
+4. Because the tweet URL is derived server-side from `X_SHARE_PUBLIC_BASE`, changing
+   only that variable is enough to change the permalink X sees.
+
+**Validation:** X's own card validator (`cards.twitter.com/validator`) was retired
+in 2022. Use `opengraph.xyz` or `socialsharepreview.com`, or fetch as the crawler
+directly (the `/repay/:id` route only serves OG HTML to crawler user-agents and
+302-redirects everyone else, so a plain browser fetch shows no card):
+
+```bash
+curl -A "Twitterbot/1.0" -L "https://share.dork.fi/repay/<id>"
+```
+
+X also negatively caches URLs it failed to build a card for, and the manual
+re-scrape tool is gone — so always verify with a **freshly generated** share link
+after any change.
 
 ### Optional
 
