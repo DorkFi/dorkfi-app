@@ -87,14 +87,22 @@ describe("splitRepayTitleLines", () => {
 });
 
 describe("buildRepayShareTweetText", () => {
-  it("includes amount, asset, and default link", () => {
+  it("includes asset and default link without amount", () => {
     const text = buildRepayShareTweetText({
       amount: "100",
       assetSymbol: "USDC",
     });
-    expect(text).toContain("I just repaid 100 USDC on @Dork_Fi.");
-    expect(text).toContain("https://app.dork.fi");
-    expect(text).toContain("#DorkFi");
+    expect(text).toBe(
+      [
+        "I just repaid USDC on @Dork_Fi.",
+        "",
+        "#DorkFi",
+        "",
+        "https://app.dork.fi",
+      ].join("\n")
+    );
+    expect(text).not.toContain("100");
+    expect(text).not.toContain("Keep your health factor happy");
   });
 
   it("adds #Algorand for Algorand networks", () => {
@@ -103,7 +111,7 @@ describe("buildRepayShareTweetText", () => {
       assetSymbol: "ALGO",
       network: "algorand-mainnet",
     });
-    expect(text).toContain("I just repaid 50 ALGO on @Dork_Fi.");
+    expect(text).toContain("I just repaid ALGO on @Dork_Fi.");
     expect(text).not.toContain("on algorand-mainnet");
     expect(text).toContain("#DorkFi #Algorand");
   });
@@ -120,16 +128,24 @@ describe("buildRepayShareTweetText", () => {
   it("adds paid-with and Haystack lines for cross-asset repay", () => {
     const text = buildRepayShareTweetText({
       amount: "100",
-      assetSymbol: "USDC",
+      assetSymbol: "WAD",
       paidWithSymbol: "ALGO",
       network: "algorand-mainnet",
+      shareUrl: "https://share.dork.fi/repay/RXoZeL216VXe",
     });
-    expect(text).toContain(
-      "I just repaid 100 USDC with ALGO on @Dork_Fi."
+    expect(text).toBe(
+      [
+        "I just repaid WAD with ALGO on @Dork_Fi.",
+        "",
+        "Swap powered by @haydotapp",
+        "",
+        "#DorkFi #Algorand",
+        "",
+        "https://share.dork.fi/repay/RXoZeL216VXe",
+      ].join("\n")
     );
-    expect(text).toContain("Swap powered by @haydotapp");
-    expect(text).not.toContain("Paid with");
-    expect(text).toContain("#DorkFi #Algorand");
+    expect(text).not.toContain("100");
+    expect(text).not.toContain("Keep your health factor happy");
   });
 
   it("omits paid-with lines when payment matches debt", () => {
@@ -138,7 +154,7 @@ describe("buildRepayShareTweetText", () => {
       assetSymbol: "USDC",
       paidWithSymbol: "USDC",
     });
-    expect(text).toContain("I just repaid 100 USDC on @Dork_Fi.");
+    expect(text).toContain("I just repaid USDC on @Dork_Fi.");
     expect(text).not.toContain(" with USDC ");
     expect(text).not.toContain("@haydotapp");
   });
@@ -146,8 +162,14 @@ describe("buildRepayShareTweetText", () => {
 
 describe("buildGenericRepayShareTweetText", () => {
   it("uses custom share URL when provided", () => {
-    expect(buildGenericRepayShareTweetText("https://example.com")).toContain(
-      "https://example.com"
+    expect(buildGenericRepayShareTweetText("https://example.com")).toBe(
+      [
+        "I just repaid a loan on @Dork_Fi.",
+        "",
+        "#DorkFi",
+        "",
+        "https://example.com",
+      ].join("\n")
     );
   });
 });

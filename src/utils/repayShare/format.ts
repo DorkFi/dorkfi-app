@@ -101,22 +101,20 @@ export function buildRepayShareHashtagLine(network?: string): string {
 
 export function buildRepayShareTweetText(input: RepayShareTweetTextInput): string {
   const link = input.shareUrl?.trim() || DEFAULT_REPAY_SHARE_LINK;
-  const amount = input.amount.trim() || "0";
   const asset = input.assetSymbol.trim() || "ASSET";
   const paidWith = shouldShowPaidWithRow(asset, input.paidWithSymbol)
     ? input.paidWithSymbol!.trim().toUpperCase()
     : null;
 
   const opening = paidWith
-    ? `I just repaid ${amount} ${asset} with ${paidWith} on @Dork_Fi.`
-    : `I just repaid ${amount} ${asset} on @Dork_Fi.`;
+    ? `I just repaid ${asset} with ${paidWith} on @Dork_Fi.`
+    : `I just repaid ${asset} on @Dork_Fi.`;
 
   const lines = [opening];
   if (paidWith) {
     lines.push("", "Swap powered by @haydotapp");
   }
-  lines.push("", "Keep your health factor happy 👇", link, "");
-  lines.push(buildRepayShareHashtagLine(input.network));
+  lines.push("", buildRepayShareHashtagLine(input.network), "", link);
   return lines.join("\n");
 }
 
@@ -128,10 +126,9 @@ export function buildGenericRepayShareTweetText(
   return [
     "I just repaid a loan on @Dork_Fi.",
     "",
-    "Keep your health factor happy 👇",
-    link,
-    "",
     buildRepayShareHashtagLine(network),
+    "",
+    link,
   ].join("\n");
 }
 
