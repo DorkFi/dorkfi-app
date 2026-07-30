@@ -138,14 +138,18 @@ export function CrossAssetRepaySection({
         : null;
 
   const sortedPaymentAssets = useMemo(() => {
-    return [...paymentAssets].sort((a, b) => {
-      const ba = paymentBalances?.[a.asaId] ?? 0;
-      const bb = paymentBalances?.[b.asaId] ?? 0;
-      if (ba !== bb) return bb - ba;
-      if (a.asaId === 0) return -1;
-      if (b.asaId === 0) return 1;
-      return a.symbol.localeCompare(b.symbol);
-    });
+    if (paymentBalances == null) return [];
+
+    return paymentAssets
+      .filter((asset) => (paymentBalances[asset.asaId] ?? 0) > 0)
+      .sort((a, b) => {
+        const ba = paymentBalances[a.asaId] ?? 0;
+        const bb = paymentBalances[b.asaId] ?? 0;
+        if (ba !== bb) return bb - ba;
+        if (a.asaId === 0) return -1;
+        if (b.asaId === 0) return 1;
+        return a.symbol.localeCompare(b.symbol);
+      });
   }, [paymentAssets, paymentBalances]);
 
   return (
