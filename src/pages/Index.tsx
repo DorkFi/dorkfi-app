@@ -6,6 +6,7 @@ import SwapHeroSection from "@/components/SwapHeroSection";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { isFeatureEnabled } from "@/config";
 import { cn } from "@/lib/utils";
+import { LazyRouteFallback } from "@/components/LazySuspenseFallback";
 
 const MarketsTable = lazy(() => import("@/components/MarketsTable"));
 const Dashboard = lazy(() => import("@/components/Dashboard"));
@@ -67,38 +68,38 @@ const Index = ({ activeTab, onTabChange }: IndexProps) => {
     switch (activeTab) {
       case "dashboard":
         return (
-          <Suspense fallback={null}>
+          <Suspense fallback={<LazyRouteFallback />}>
             <Dashboard onTabChange={onTabChange} />
           </Suspense>
         );
       case "markets":
         return (
-          <Suspense fallback={null}>
+          <Suspense fallback={<LazyRouteFallback />}>
             <MarketsTable />
           </Suspense>
         );
       case "portfolio":
         return (
-          <Suspense fallback={null}>
+          <Suspense fallback={<LazyRouteFallback />}>
             <Portfolio />
           </Suspense>
         );
       case "liquidations":
         if (isFeatureEnabled("enableLiquidations")) {
           return (
-            <Suspense fallback={null}>
+            <Suspense fallback={<LazyRouteFallback />}>
               <LiquidationMonitor accounts={[]} />
             </Suspense>
           );
         }
         return (
-          <Suspense fallback={null}>
+          <Suspense fallback={<LazyRouteFallback />}>
             <Dashboard onTabChange={onTabChange} />
           </Suspense>
         );
       case "swap":
         return (
-          <Suspense fallback={null}>
+          <Suspense fallback={<LazyRouteFallback />}>
             <SwapHeroSection />
             <div className="grid grid-cols-1 md:grid-cols-12 gap-3 sm:gap-4 lg:gap-6 w-full">
               <div className="md:col-span-7 order-1 md:order-none">
@@ -120,19 +121,19 @@ const Index = ({ activeTab, onTabChange }: IndexProps) => {
       case "prefi":
         if (isFeatureEnabled("enablePreFi")) {
           return (
-            <Suspense fallback={null}>
+            <Suspense fallback={<LazyRouteFallback />}>
               <PreFi />
             </Suspense>
           );
         }
         return (
-          <Suspense fallback={null}>
+          <Suspense fallback={<LazyRouteFallback />}>
             <Dashboard onTabChange={onTabChange} />
           </Suspense>
         );
       default:
         return (
-          <Suspense fallback={null}>
+          <Suspense fallback={<LazyRouteFallback />}>
             <Dashboard onTabChange={onTabChange} />
           </Suspense>
         );

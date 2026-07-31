@@ -3,7 +3,9 @@ import type { NetworkId } from "@/config";
 import {
   configSymbolFromMarketRowKey,
   createDebouncedPrefetch,
-  warmBorrowModalMaxAndPool,
+  prefetchMintModalChunk,
+  prefetchSupplyBorrowModalChunk,
+  prefetchWithdrawModalChunk,
   warmMintModalRpc,
   warmRepayModalRpc,
   type MarketActionTokenParams,
@@ -16,6 +18,19 @@ export type ModalHoverPrefetchBundle = {
   /** Portfolio / Markets: warm wallet balance via parent fetcher. */
   warmWalletBalance?: (params: MarketActionTokenParams) => void;
 };
+
+function warmBorrowHeavy(params: MarketActionTokenParams): void {
+  // Dynamic import keeps adminService / max-borrow simulate out of Markets chunk.
+  void import("@/utils/modalPrefetchHeavy").then((m) => {
+    m.warmBorrowModalMaxAndPool(params);
+  });
+}
+
+function warmWithdrawHeavy(params: MarketActionTokenParams): void {
+  void import("@/utils/modalPrefetchHeavy").then((m) => {
+    m.warmWithdrawModalRpc(params);
+  });
+}
 
 export function buildMarketHoverHandlers(
   bundle: ModalHoverPrefetchBundle,
@@ -51,6 +66,7 @@ export function buildMarketHoverHandlers(
     onDepositMouseEnter: bundle.userAddress
       ? (e: MouseEvent) => {
           stop(e);
+          prefetchSupplyBorrowModalChunk();
           // Warm immediately so a quick click still hits a hot cache.
           bundle.warmWalletBalance?.(params);
           bundle.debounced(`deposit:${keyBase}`, () => {
@@ -61,14 +77,16 @@ export function buildMarketHoverHandlers(
     onBorrowMouseEnter: bundle.userAddress
       ? (e: MouseEvent) => {
           stop(e);
+          prefetchSupplyBorrowModalChunk();
           bundle.debounced(`borrow:${keyBase}`, () => {
-            warmBorrowModalMaxAndPool(params);
+            warmBorrowHeavy(params);
           });
         }
       : undefined,
     onMintMouseEnter: bundle.userAddress
       ? (e: MouseEvent) => {
           stop(e);
+          prefetchMintModalChunk();
           bundle.debounced(`mint:${keyBase}`, () => {
             warmMintModalRpc(params);
           });
@@ -100,6 +118,7 @@ export function buildRepayHoverHandler(
   );
   return (e: MouseEvent) => {
     e.stopPropagation();
+    prefetchSupplyBorrowModalChunk();
     bundle.debounced(`repay:${keyBase}`, () => {
       warmRepayModalRpc(params);
       bundle.warmWalletBalance?.(params);
@@ -131,8 +150,13 @@ export function buildWithdrawHoverHandler(
   );
   return (e: MouseEvent) => {
     e.stopPropagation();
+    prefetchWithdrawModalChunk();
     bundle.debounced(`withdraw:${keyBase}`, () => {
-      onWithdrawWarm?.(params);
+      if (onWithdrawWarm) {
+        onWithdrawWarm(params);
+      } else {
+        warmWithdrawHeavy(params);
+      }
     });
   };
 }

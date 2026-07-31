@@ -1,37 +1,18 @@
 /**
- * Debounced hover prefetch for supply / borrow / withdraw / repay modals.
- * Warms RPC read cache (see rpcReadCache) before the user clicks.
+ * Light hover/RPC warm helpers for the Markets critical path.
+ * Heavy warmers (admin max-borrow, withdraw ulujs/Folks) live in
+ * `modalPrefetchHeavy.ts` and should be dynamically imported from hover handlers.
  */
 
-import {
-  getAllTokensWithDisplayInfo,
-  getNetworkConfig,
-  getAlgorandNetworkFromNetworkId,
-  getFolksAdapterForPhase,
-  getTokenConfig,
-  type NetworkId,
-} from "@/config";
-import { calculateMaxBorrowAmount } from "@/services/adminService";
+import { getAllTokensWithDisplayInfo, type NetworkId } from "@/config";
 import {
   fetchUserBorrowBalance,
   fetchUserDepositBalance,
   fetchUserGlobalData,
-  fetchUserGlobalDataForPool,
-  fetchMarketInfoFromContract,
   getMaxWithdrawableForMarket,
-  detectNt200UserBalanceBox,
 } from "@/services/lendingService";
-import { estimateFolksDepositMintedFAssetAmount } from "@/services/folksDepositAdapter";
 import { fetchPoolCollateralMarketRowsForDeposit } from "@/utils/poolCollateralMarketRows";
 import { resolveSupplyBorrowToken } from "@/utils/resolveSupplyBorrowToken";
-import algorandService, { type AlgorandNetwork } from "@/services/algorandService";
-import { CONTRACT } from "ulujs";
-import {
-  APP_SPEC as LendingPoolAppSpec,
-  UserData,
-} from "@/clients/DorkFiLendingPoolClient";
-import algosdk from "algosdk";
-import BigNumber from "bignumber.js";
 
 export type MarketActionTokenParams = {
   userAddress: string;
@@ -44,7 +25,7 @@ export type MarketActionTokenParams = {
   marketRowKey?: string;
 };
 
-function resolveActionToken(params: MarketActionTokenParams) {
+export function resolveActionToken(params: MarketActionTokenParams) {
   const tokens = getAllTokensWithDisplayInfo(params.networkId);
   return resolveSupplyBorrowToken(
     tokens,
@@ -74,6 +55,19 @@ export function createDebouncedPrefetch(cooldownMs = 2_500) {
       }, delayMs)
     );
   };
+}
+
+/** Prefetch lazy modal JS chunks so first click does not wait on download/parse. */
+export function prefetchSupplyBorrowModalChunk(): void {
+  void import("@/components/SupplyBorrowModal");
+}
+
+export function prefetchWithdrawModalChunk(): void {
+  void import("@/components/WithdrawModal");
+}
+
+export function prefetchMintModalChunk(): void {
+  void import("@/components/MintModal");
 }
 
 /** Global user + per-asset borrow + pool collateral rows (fully parallel). */
@@ -108,47 +102,6 @@ export function warmBorrowModalRpc(params: MarketActionTokenParams): void {
 /** Same reads as borrow; used for sToken mint modal. */
 export const warmMintModalRpc = warmBorrowModalRpc;
 
-/** Per-pool global data + max borrow (SupplyBorrowModal mount). */
-export function warmBorrowModalMaxAndPool(params: MarketActionTokenParams): void {
-  warmBorrowModalRpc(params);
-  const token = resolveActionToken(params);
-  if (!token?.poolId || !token.underlyingContractId || !params.userAddress) {
-    return;
-  }
-  void fetchUserGlobalDataForPool(
-    params.userAddress,
-    params.networkId,
-    token.poolId
-  ).catch(() => undefined);
-  const storageAppId = getNetworkConfig(params.networkId)?.contracts
-    ?.appStorageId;
-  void calculateMaxBorrowAmount(
-    token.poolId,
-    params.userAddress,
-    token.underlyingContractId,
-    storageAppId ? Number(storageAppId) : undefined
-  ).catch(() => undefined);
-
-  // Warm nt200 balance-box detection so borrow() can pick a single simulate path
-  const algodNet = getAlgorandNetworkFromNetworkId(params.networkId);
-  if (algodNet) {
-    void (async () => {
-      try {
-        const clients = algorandService.initializeClients(
-          algodNet as AlgorandNetwork
-        );
-        await detectNt200UserBalanceBox(
-          clients.algod,
-          token.underlyingContractId,
-          params.userAddress
-        );
-      } catch {
-        /* ignore */
-      }
-    })();
-  }
-}
-
 /** Repay modal: global user data + current borrow balance. */
 export function warmRepayModalRpc(params: MarketActionTokenParams): void {
   if (!params.userAddress) return;
@@ -163,102 +116,6 @@ export function warmRepayModalRpc(params: MarketActionTokenParams): void {
     token.underlyingContractId,
     params.networkId
   ).catch(() => undefined);
-}
-
-/** Withdraw indices (market + user deposit index). */
-export async function warmWithdrawIndicesRpc(
-  params: MarketActionTokenParams
-): Promise<void> {
-  if (!params.userAddress) return;
-  const token = resolveActionToken(params);
-  if (!token?.poolId || !token.underlyingContractId) return;
-
-  try {
-    await fetchMarketInfoFromContract(
-      token.poolId,
-      token.underlyingContractId,
-      params.networkId
-    );
-  } catch {
-    /* ignore */
-  }
-
-  const networkConfig = getNetworkConfig(params.networkId);
-  const algodNet = getAlgorandNetworkFromNetworkId(params.networkId);
-  if (!algodNet) return;
-
-  try {
-    const clients = algorandService.initializeClients(algodNet as AlgorandNetwork);
-    const ci = new CONTRACT(
-      Number(token.poolId),
-      clients.algod,
-      undefined,
-      { ...LendingPoolAppSpec.contract, events: [] },
-      {
-        addr: algosdk.encodeAddress(
-          algosdk.getApplicationAddress(Number(token.poolId)).publicKey
-        ),
-        sk: new Uint8Array(),
-      }
-    );
-    ci.setFee(2000);
-    await ci.get_user(
-      params.userAddress,
-      Number(token.underlyingContractId)
-    );
-  } catch {
-    /* ignore */
-  }
-  void networkConfig;
-}
-
-/** Max withdraw + optional Folks mint ratio (RPC cache). */
-export function warmMaxWithdrawRpc(params: MarketActionTokenParams): void {
-  if (!params.userAddress) return;
-  const token = resolveActionToken(params);
-  if (!token?.poolId || !token.underlyingContractId) return;
-
-  void getMaxWithdrawableForMarket(
-    token.poolId,
-    token.underlyingContractId,
-    params.userAddress,
-    params.networkId,
-    token.decimals
-  ).catch(() => undefined);
-
-  const cfgSym = token.configKey ?? token.originalSymbol ?? token.symbol;
-  const rawTc = getTokenConfig(params.networkId, cfgSym);
-  const tc = Array.isArray(rawTc)
-    ? rawTc.find((c) => String(c.poolId) === String(token.poolId)) ?? rawTc[0]
-    : rawTc;
-  const folksSide = tc
-    ? getFolksAdapterForPhase(tc, "withdraw") ??
-      getFolksAdapterForPhase(tc, "deposit")
-    : undefined;
-  if (!folksSide || params.networkId !== "algorand-mainnet") return;
-
-  const algodNet = getAlgorandNetworkFromNetworkId(params.networkId);
-  if (!algodNet) return;
-  void (async () => {
-    try {
-      const clients = algorandService.initializeClients(algodNet as AlgorandNetwork);
-      const oneUnderlyingAtomic = BigInt(
-        new BigNumber(1).shiftedBy(token.decimals).toFixed(0)
-      );
-      await estimateFolksDepositMintedFAssetAmount({
-        poolName: folksSide.folksParams.pool,
-        underlyingAmount: oneUnderlyingAtomic,
-        algod: clients.algod,
-      });
-    } catch {
-      /* ignore */
-    }
-  })();
-}
-
-export function warmWithdrawModalRpc(params: MarketActionTokenParams): void {
-  void warmWithdrawIndicesRpc(params);
-  warmMaxWithdrawRpc(params);
 }
 
 /** Markets detail sheet user position strip. */
@@ -287,7 +144,7 @@ export function warmMarketDetailUserPositionRpc(
       token.underlyingContractId,
       params.userAddress,
       params.networkId,
-      token.decimals
+      token.decimals ?? 6
     ),
   ]).catch(() => undefined);
 }

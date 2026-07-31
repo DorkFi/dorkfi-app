@@ -12,6 +12,7 @@ export type SupplyBorrowTokenRow = {
   underlyingContractId?: string;
   /** Config `contractId` when it differs from `underlyingContractId` (display ASA). */
   originalContractId?: string;
+  decimals?: number;
 };
 
 /**

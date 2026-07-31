@@ -69,7 +69,7 @@ import { useTokenPrice } from "@/hooks/useTokenPrice";
 import { calculateMaxBorrowAmount } from "@/services/adminService";
 import dorkfiAPIService from "@/services/dorkfiAPIService";
 import { updateTransactionMetadata } from "@/utils/transactionUtils";
-import { warmBorrowModalMaxAndPool } from "@/utils/modalPrefetch";
+import { warmBorrowModalMaxAndPool } from "@/utils/modalPrefetchHeavy";
 import type { PoolCollateralMarketRow } from "@/utils/poolCollateralMarketRows";
 import {
   buildLiquidationThresholdSummaryForDeposit,

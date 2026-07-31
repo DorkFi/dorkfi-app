@@ -10,6 +10,7 @@ import { LocaleSettingsProvider } from "./contexts/LocaleSettingsContext";
 import Index from "./pages/Index";
 import { isFeatureEnabled } from "./config";
 import CountdownPage from "./pages/Countdown";
+import { LazyRouteFallback } from "@/components/LazySuspenseFallback";
 //const LAUNCH_TIMESTAMP = Date.UTC(2025, 10, 21, 2, 0, 0); // Nov 20, 2025 6:00 PM PST (Nov 21, 2025 2:00 AM UTC)
 const LAUNCH_TIMESTAMP = Date.now();
 
@@ -91,7 +92,7 @@ function App() {
               <Route
                 path="/admin"
                 element={
-                  <Suspense fallback={null}>
+                  <Suspense fallback={<LazyRouteFallback />}>
                     <Admin />
                   </Suspense>
                 }
@@ -100,7 +101,7 @@ function App() {
                 <Route
                   path="/gas-station"
                   element={
-                    <Suspense fallback={null}>
+                    <Suspense fallback={<LazyRouteFallback />}>
                       <GasStationPage />
                     </Suspense>
                   }
@@ -111,7 +112,7 @@ function App() {
                 <Route
                   path="/liquidation-markets"
                   element={
-                    <Suspense fallback={null}>
+                    <Suspense fallback={<LazyRouteFallback />}>
                       <LiquidationMarketsPage
                         activeTab={activeTab}
                         onTabChange={setActiveTab}
@@ -123,7 +124,7 @@ function App() {
               <Route
                 path="/analytics"
                 element={
-                  <Suspense fallback={null}>
+                  <Suspense fallback={<LazyRouteFallback />}>
                     <Analytics
                       activeTab={activeTab}
                       onTabChange={setActiveTab}
@@ -135,7 +136,7 @@ function App() {
                 <Route
                   path="/governance"
                   element={
-                    <Suspense fallback={null}>
+                    <Suspense fallback={<LazyRouteFallback />}>
                       <Governance />
                     </Suspense>
                   }
@@ -145,7 +146,7 @@ function App() {
                 <Route
                   path="/pools"
                   element={
-                    <Suspense fallback={null}>
+                    <Suspense fallback={<LazyRouteFallback />}>
                       <PoolsPage
                         activeTab={activeTab}
                         onTabChange={setActiveTab}
@@ -157,7 +158,7 @@ function App() {
               <Route
                 path="/portfolio"
                 element={
-                  <Suspense fallback={null}>
+                  <Suspense fallback={<LazyRouteFallback />}>
                     <PortfolioPage />
                   </Suspense>
                 }
@@ -165,7 +166,7 @@ function App() {
               <Route
                 path="/portfolio/:address"
                 element={
-                  <Suspense fallback={null}>
+                  <Suspense fallback={<LazyRouteFallback />}>
                     <PortfolioPage />
                   </Suspense>
                 }
