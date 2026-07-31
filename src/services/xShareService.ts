@@ -16,11 +16,20 @@ export type RepayShareLinkInput = {
   image: Blob;
 };
 
+export type BorrowShareLinkInput = {
+  amount: string;
+  assetSymbol: string;
+  network?: string;
+  image: Blob;
+};
+
 export type RepayShareLinkResult = {
   shareId: string;
   shareUrl: string;
   imageUrl: string;
 };
+
+export type BorrowShareLinkResult = RepayShareLinkResult;
 
 export class XShareApiError extends Error {
   status: number;
@@ -129,6 +138,41 @@ export async function createRepayShareLink(
   }
 
   const response = await fetch(buildUrl("/share/repay-confirmation/link"), {
+    method: "POST",
+    body: form,
+  });
+
+  const json = await parseJson<{
+    ok: boolean;
+    shareId: string;
+    shareUrl: string;
+    imageUrl: string;
+  }>(response);
+
+  return {
+    shareId: json.shareId,
+    shareUrl: json.shareUrl,
+    imageUrl: json.imageUrl,
+  };
+}
+
+export async function createBorrowShareLink(
+  input: BorrowShareLinkInput
+): Promise<BorrowShareLinkResult> {
+  const form = new FormData();
+  form.append(
+    "image",
+    new File([input.image], "dorkfi-borrow-confirmation.png", {
+      type: "image/png",
+    })
+  );
+  form.append("amount", input.amount);
+  form.append("assetSymbol", input.assetSymbol);
+  if (input.network) {
+    form.append("network", input.network);
+  }
+
+  const response = await fetch(buildUrl("/share/borrow-confirmation/link"), {
     method: "POST",
     body: form,
   });

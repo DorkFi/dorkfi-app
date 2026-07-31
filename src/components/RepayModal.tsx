@@ -2000,7 +2000,7 @@ const RepayModal = ({
                                   alt=""
                                   className="h-4 w-4 rounded-sm bg-black object-contain"
                                 />
-                                Hay Router
+                                Haystack Router
                               </span>
                             </div>
                           )}

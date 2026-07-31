@@ -45,6 +45,22 @@ export const config = {
   /** Default 90 days. */
   repayShareTtlMs:
     Number(optional("X_REPAY_SHARE_TTL_DAYS", "90")) * 24 * 60 * 60 * 1000,
+  borrowShareStorePath: optional(
+    "X_BORROW_SHARE_STORE_PATH",
+    ".data/borrow-shares"
+  ),
+  /** Default 90 days (falls back to repay TTL env when unset). */
+  borrowShareTtlMs:
+    Number(
+      optional(
+        "X_BORROW_SHARE_TTL_DAYS",
+        optional("X_REPAY_SHARE_TTL_DAYS", "90")
+      )
+    ) *
+    24 *
+    60 *
+    60 *
+    1000,
   sharePublicBase: resolveSharePublicBase(),
   isProduction: process.env.NODE_ENV === "production",
 };
