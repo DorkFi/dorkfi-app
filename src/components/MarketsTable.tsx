@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,13 +41,18 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import MarketSearchFilters from "@/components/markets/MarketSearchFilters";
 import MarketsPageGuidance from "@/components/markets/MarketsPageGuidance";
 import MarketPagination from "@/components/markets/MarketPagination";
-import SupplyBorrowModal from "@/components/SupplyBorrowModal";
-import WithdrawModal from "@/components/WithdrawModal";
-import { PremiumMarketModal } from "@/components/market-modal/PremiumMarketModal";
-import MintModal from "@/components/MintModal";
 import MarketsHeroSection from "@/components/markets/MarketsHeroSection";
 import MarketsTableContent from "@/components/markets/MarketsTableContent";
-import TinymanSwapModal from "@/components/TinymanSwapModal";
+
+const SupplyBorrowModal = lazy(() => import("@/components/SupplyBorrowModal"));
+const WithdrawModal = lazy(() => import("@/components/WithdrawModal"));
+const PremiumMarketModal = lazy(() =>
+  import("@/components/market-modal/PremiumMarketModal").then((m) => ({
+    default: m.PremiumMarketModal,
+  }))
+);
+const MintModal = lazy(() => import("@/components/MintModal"));
+const TinymanSwapModal = lazy(() => import("@/components/TinymanSwapModal"));
 import {
   fetchUserGlobalData,
   fetchUserBorrowBalance,
@@ -72,6 +77,11 @@ import {
   getCachedAsaHoldingAtomic,
   invalidateWalletBalanceRpc,
 } from "@/utils/walletBalanceRpc";
+import {
+  getRpcReadCache,
+  invalidateUserPositionRpcCache,
+} from "@/utils/rpcReadCache";
+import { LazyModalFallback } from "@/components/LazySuspenseFallback";
 import { useToast } from "@/hooks/use-toast";
 import { isAtDepositCap, isAtBorrowCap } from "@/constants/lendingCaps";
 import algosdk, { waitForConfirmation } from "algosdk";
@@ -109,7 +119,6 @@ import {
 import {
   createDebouncedPrefetch,
   warmMarketDetailUserPositionRpc,
-  warmBorrowModalMaxAndPool,
   poolIdFromMarketRow,
   marketRowKeyFromMarket,
   type MarketActionTokenParams,
@@ -1272,7 +1281,7 @@ const MarketsTable = () => {
     setWithdrawModal({ isOpen: true, asset });
   };
 
-  const handleBorrowClick = async (
+  const handleBorrowClick = (
     asset: string,
     poolId?: string,
     marketRowKey?: string
@@ -1294,6 +1303,40 @@ const MarketsTable = () => {
     }
 
     const configSymbol = configSymbolFromMarketRowKey(marketRowKey);
+    // Hover/warm owns the RPC waterfall. Seed from cache if hot; the open
+    // effect below refreshes (and hits cache) without a second warm kick.
+    if (activeAccount?.address) {
+      const cachedGlobal = getRpcReadCache<{
+        totalCollateralValue: number;
+        totalBorrowValue: number;
+        lastUpdateTime: number;
+        healthFactorIndex?: number;
+      } | null>(`userGlobal:${currentNetwork}:${activeAccount.address}`);
+      const token = resolveTokenForDisplayedAsset(asset, poolId, marketRowKey);
+      const cachedBorrow =
+        token?.poolId && token.underlyingContractId
+          ? getRpcReadCache<{ balance: number; interest: number } | null>(
+              `userBorrow:${currentNetwork}:${activeAccount.address}:${token.poolId}:${token.underlyingContractId}`
+            )
+          : undefined;
+      if (cachedGlobal !== undefined) {
+        setUserGlobalData(cachedGlobal);
+      }
+      if (cachedBorrow !== undefined) {
+        setUserBorrowBalance(cachedBorrow?.balance || 0);
+      }
+      setIsLoadingGlobalData(
+        cachedGlobal === undefined ||
+          (token?.poolId != null &&
+            token.underlyingContractId != null &&
+            cachedBorrow === undefined)
+      );
+    } else {
+      setUserGlobalData(null);
+      setUserBorrowBalance(0);
+      setIsLoadingGlobalData(false);
+    }
+
     setBorrowModal({
       isOpen: true,
       asset,
@@ -1301,68 +1344,6 @@ const MarketsTable = () => {
       marketRowKey,
       configSymbol,
     });
-
-    setIsLoadingGlobalData(true);
-    void (async () => {
-      try {
-        if (activeAccount?.address) {
-          warmBorrowModalMaxAndPool({
-            userAddress: activeAccount.address,
-            networkId: currentNetwork as NetworkId,
-            asset,
-            poolId,
-            configSymbol,
-            marketId: marketContractIdFromRowCacheKey(marketRowKey),
-            marketRowKey,
-          });
-
-          const token = resolveTokenForDisplayedAsset(
-            asset,
-            poolId,
-            marketRowKey
-          );
-
-          const [globalData, borrowData, poolCollateralRows] =
-            await Promise.all([
-              fetchUserGlobalData(activeAccount.address, currentNetwork),
-              token && token.poolId && token.underlyingContractId
-                ? fetchUserBorrowBalance(
-                    activeAccount.address,
-                    token.poolId,
-                    token.underlyingContractId,
-                    currentNetwork
-                  )
-                : Promise.resolve(null),
-              poolId != null && poolId !== ""
-                ? fetchPoolCollateralMarketRowsForDeposit(
-                    activeAccount.address,
-                    currentNetwork as NetworkId,
-                    poolId
-                  ).catch((e) => {
-                    console.error(
-                      "Error loading pool collateral markets for borrow:",
-                      e
-                    );
-                    return null;
-                  })
-                : Promise.resolve(null),
-            ]);
-
-          setUserGlobalData(globalData);
-          setUserBorrowBalance(borrowData?.balance || 0);
-          if (poolCollateralRows) {
-            setDepositPoolCollateralMarkets(poolCollateralRows);
-          }
-        } else {
-          setUserGlobalData(null);
-          setUserBorrowBalance(0);
-        }
-      } catch (error) {
-        console.error("Error fetching user data for borrow:", error);
-      } finally {
-        setIsLoadingGlobalData(false);
-      }
-    })();
   };
 
   const handleMintClick = async (
@@ -1594,62 +1575,74 @@ const MarketsTable = () => {
     }
   };
 
-  // Fetch user data when wallet connects while borrow modal is open (or when switching asset in-modal)
+  // Single owner for borrow-open position reads (wallet connect / asset switch).
+  // Hover warms rpcReadCache; click seeds from cache; this effect only fetches
+  // (cache hit is sync-fast via withRpcReadCache) — no second warmBorrow kick.
   useEffect(() => {
-    if (borrowModal.isOpen && borrowModal.asset && activeAccount?.address) {
-      const fetchData = async () => {
-        try {
-          const globalData = await fetchUserGlobalData(
-            activeAccount.address,
-            currentNetwork
-          );
-          setUserGlobalData(globalData);
+    if (!borrowModal.isOpen || !borrowModal.asset || !activeAccount?.address) {
+      return;
+    }
+    let cancelled = false;
+    const fetchData = async () => {
+      try {
+        const token = resolveTokenForDisplayedAsset(
+          borrowModal.asset,
+          borrowModal.poolId,
+          borrowModal.marketRowKey
+        );
+        const globalKey = `userGlobal:${currentNetwork}:${activeAccount.address}`;
+        const borrowKey =
+          token?.poolId && token.underlyingContractId
+            ? `userBorrow:${currentNetwork}:${activeAccount.address}:${token.poolId}:${token.underlyingContractId}`
+            : null;
+        const needsFetch =
+          getRpcReadCache(globalKey) === undefined ||
+          (borrowKey != null && getRpcReadCache(borrowKey) === undefined);
+        if (needsFetch) {
+          setIsLoadingGlobalData(true);
+        }
 
-          const token = resolveTokenForDisplayedAsset(
-            borrowModal.asset,
-            borrowModal.poolId,
-            borrowModal.marketRowKey
-          );
-
-          if (token && token.poolId && token.underlyingContractId) {
-            const borrowData = await fetchUserBorrowBalance(
-              activeAccount.address,
-              token.poolId,
-              token.underlyingContractId,
-              currentNetwork
-            );
-            setUserBorrowBalance(borrowData?.balance || 0);
-          } else {
-            setUserBorrowBalance(0);
-          }
-
-          let poolCollateralRows: PoolCollateralMarketRow[] = [];
-          if (
-            borrowModal.poolId != null &&
-            borrowModal.poolId !== ""
-          ) {
-            try {
-              poolCollateralRows =
-                await fetchPoolCollateralMarketRowsForDeposit(
-                  activeAccount.address,
-                  currentNetwork as NetworkId,
-                  borrowModal.poolId
+        const [globalData, borrowData, poolCollateralRows] = await Promise.all([
+          fetchUserGlobalData(activeAccount.address, currentNetwork),
+          token && token.poolId && token.underlyingContractId
+            ? fetchUserBorrowBalance(
+                activeAccount.address,
+                token.poolId,
+                token.underlyingContractId,
+                currentNetwork
+              )
+            : Promise.resolve(null),
+          borrowModal.poolId != null && borrowModal.poolId !== ""
+            ? fetchPoolCollateralMarketRowsForDeposit(
+                activeAccount.address,
+                currentNetwork as NetworkId,
+                borrowModal.poolId
+              ).catch((e) => {
+                console.error(
+                  "Error loading pool collateral markets for borrow:",
+                  e
                 );
-            } catch (e) {
-              console.error(
-                "Error loading pool collateral markets for borrow:",
-                e
-              );
-            }
-          }
-          setDepositPoolCollateralMarkets(poolCollateralRows);
-        } catch (error) {
+                return [] as PoolCollateralMarketRow[];
+              })
+            : Promise.resolve([] as PoolCollateralMarketRow[]),
+        ]);
+        if (cancelled) return;
+        setUserGlobalData(globalData);
+        setUserBorrowBalance(borrowData?.balance || 0);
+        setDepositPoolCollateralMarkets(poolCollateralRows);
+      } catch (error) {
+        if (!cancelled) {
           console.error("Error fetching user data:", error);
         }
-      };
+      } finally {
+        if (!cancelled) setIsLoadingGlobalData(false);
+      }
+    };
 
-      fetchData();
-    }
+    void fetchData();
+    return () => {
+      cancelled = true;
+    };
   }, [
     activeAccount?.address,
     borrowModal.isOpen,
@@ -4034,6 +4027,8 @@ const MarketsTable = () => {
           onPageChange={setCurrentPage}
         />
 
+        {/* Lazy-loaded action modals — keep Markets chunk free of txn/signing stacks */}
+        <Suspense fallback={<LazyModalFallback />}>
         {/* Market Detail Modal */}
         {detailModal.isOpen && detailModal.asset && detailModal.marketData && (
           <PremiumMarketModal
@@ -4136,6 +4131,12 @@ const MarketsTable = () => {
                   : undefined
               }
               onTransactionSuccess={async () => {
+                if (activeAccount?.address) {
+                  invalidateUserPositionRpcCache(
+                    currentNetwork,
+                    activeAccount.address
+                  );
+                }
                 // Refresh wallet balance immediately after successful transaction
                 if (depositModal.asset) {
                   void refreshWalletBalance(
@@ -4189,6 +4190,14 @@ const MarketsTable = () => {
                   totalBorrows: assetData.totalBorrow,
                   apyParameters: assetData.apyParameters,
                 }}
+                onTransactionSuccess={() => {
+                  if (activeAccount?.address) {
+                    invalidateUserPositionRpcCache(
+                      currentNetwork,
+                      activeAccount.address
+                    );
+                  }
+                }}
               />
             ) : null;
           })()}
@@ -4227,6 +4236,12 @@ const MarketsTable = () => {
               isLoadingBorrowGlobalData={isLoadingGlobalData}
               poolCollateralMarkets={depositPoolCollateralMarkets}
               onTransactionSuccess={() => {
+                if (activeAccount?.address) {
+                  invalidateUserPositionRpcCache(
+                    currentNetwork,
+                    activeAccount.address
+                  );
+                }
                 // Refresh market data after successful borrow
                 if (borrowModal.asset) {
                   loadMarketDataWithBypass(
@@ -4263,6 +4278,12 @@ const MarketsTable = () => {
               userGlobalData={userGlobalData}
               userBorrowBalance={userBorrowBalance}
               onTransactionSuccess={() => {
+                if (activeAccount?.address) {
+                  invalidateUserPositionRpcCache(
+                    currentNetwork,
+                    activeAccount.address
+                  );
+                }
                 // Refresh market data after successful mint
                 if (mintModal.asset) {
                   loadMarketDataWithBypass(
@@ -4290,6 +4311,7 @@ const MarketsTable = () => {
             setMarketsToolbarAlgoRefreshNonce((n) => n + 1)
           }
         />
+        </Suspense>
 
         {/* Claim Rewards Modal */}
         {showClaimModal && (

@@ -70,7 +70,7 @@ import {
 import { marketRowForPortfolioPosition } from "@/utils/marketRowForPortfolioPosition";
 import { usdPerTokenFromPortfolioMarketRow } from "@/utils/assetDecimals";
 import { portfolioWalletBalanceCacheKey } from "@/utils/portfolioWalletBalanceCacheKey";
-import { warmWithdrawModalRpc } from "@/utils/modalPrefetch";
+import { warmWithdrawModalRpc } from "@/utils/modalPrefetchHeavy";
 import { withRainbowkitHostDialogDismissed } from "@/wallet/xchainSignUi";
 
 /**
