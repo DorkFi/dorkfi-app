@@ -83,6 +83,10 @@ import {
   buildTalgoMintUnsignedWithOptionalOptIn,
   fetchMinTalgoOutMintFloorFromChain,
 } from "./tinymanTalgoAdapter";
+import {
+  classifyNt200CreateBalanceBoxSimulateResult,
+  isNt200CreateBalanceBoxAlreadyExistsError,
+} from "@/utils/nt200BalanceBox";
 
 export interface MarketData {
   appId: string;
@@ -5647,7 +5651,9 @@ export const migrate = async (
 
 /**
  * Detect whether the user already has an nt200/ARC200 balance box on the token app.
- * Used to avoid blind multi-simulate probe loops when building borrow groups.
+ * Simulates createBalanceBox alone (non-builder CONTRACT + abi.nt200) — do not
+ * construct box names or call getApplicationBoxByName with guessed keys.
+ * success → missing; already-exists assert → present; else → unknown.
  */
 export async function detectNt200UserBalanceBox(
   algod: any,
@@ -5662,58 +5668,31 @@ export async function detectNt200UserBalanceBox(
     `nt200UserBox:${appId}:${userAddress}`,
     async () => {
       try {
-        const boxName = algosdk.decodeAddress(userAddress).publicKey;
-        await algod.getApplicationBoxByName(appId, boxName).do();
-        return "present" as const;
+        const ci = new CONTRACT(appId, algod, undefined, abi.nt200, {
+          addr: userAddress,
+          sk: new Uint8Array(),
+        });
+        // Box MBR payment so a truly missing box can succeed in simulate
+        ci.setPaymentAmount(28500);
+        const result = await ci.createBalanceBox(userAddress);
+        return classifyNt200CreateBalanceBoxSimulateResult(result);
       } catch (error: unknown) {
-        const err = error as {
-          response?: { status?: number };
-          status?: number;
-          message?: string;
-        };
-        const status = err?.response?.status ?? err?.status;
-        const msg = String(err?.message ?? error ?? "").toLowerCase();
-        if (
-          status === 404 ||
-          msg.includes("not found") ||
-          msg.includes("no box") ||
-          msg.includes("box does not exist")
-        ) {
-          // Prefer unknown over hard "missing" — wrong box-name schemes must not
-          // lock borrow into createBalanceBox-only probes.
-          try {
-            const ci = new CONTRACT(appId, algod, undefined, abi.nt200, {
-              addr: userAddress,
-              sk: new Uint8Array(),
-            });
-            const r = await ci.arc200_balanceOf(userAddress);
-            if (r.success) return "present" as const;
-            // balanceOf failed after box 404 → likely truly missing
-            return "missing" as const;
-          } catch {
-            return "unknown" as const;
-          }
+        if (isNt200CreateBalanceBoxAlreadyExistsError(error)) {
+          return "present" as const;
         }
-        // Fallback: readable balance implies box exists
-        try {
-          const ci = new CONTRACT(appId, algod, undefined, abi.nt200, {
-            addr: userAddress,
-            sk: new Uint8Array(),
-          });
-          const r = await ci.arc200_balanceOf(userAddress);
-          return r.success ? ("present" as const) : ("missing" as const);
-        } catch {
-          return "unknown" as const;
-        }
+        console.warn("detectNt200UserBalanceBox: unexpected error", {
+          appId,
+          userAddress,
+          error,
+        });
+        return "unknown" as const;
       }
     },
     60_000
   );
 }
 
-/** Order [balanceBox, highFee] probes so the first simulate usually succeeds.
- * Always keep fallbacks — wrong box detection must not make borrow unusable.
- */
+/** Order [balanceBox, highFee] probes so the first simulate usually succeeds. */
 export function orderBorrowBuildProbes(
   needsBalanceBoxProbe: boolean,
   boxStatus: "present" | "missing" | "unknown"
@@ -5725,17 +5704,15 @@ export function orderBorrowBuildProbes(
     ];
   }
   if (boxStatus === "present") {
-    // Prefer no createBalanceBox, but keep create variants as fallback
+    // Never include createBalanceBox — dryrun can miss existing boxes and
+    // succeed, then algod rejects with intc_0 // 0; ==; assert.
     return [
       [0, 0],
       [0, 1],
-      [1, 0],
-      [1, 1],
     ];
   }
   if (boxStatus === "missing") {
     // Prefer createBalanceBox first, but keep no-box variants as fallback
-    // (box-name detection can false-negative)
     return [
       [1, 0],
       [1, 1],
@@ -5762,12 +5739,8 @@ function borrowProbeSkipFromSimulateError(
     skipP1One?: boolean;
     skipP2Zero?: boolean;
   } = {};
-  // Only skip when the node clearly says the box already exists
-  if (
-    err.includes("box already exist") ||
-    err.includes("err box exist") ||
-    err.includes("box exists")
-  ) {
+  // createBalanceBox when box already exists (TEAL assert or explicit text)
+  if (isNt200CreateBalanceBoxAlreadyExistsError(errorText)) {
     out.skipP1One = true;
   }
   // Do not skip p1=0 on vague "box" / "assert" errors — those are common on other failures
@@ -6226,6 +6199,10 @@ export const borrow = async (
           )
         ) {
           throw new Error("insufficient collateral for borrow");
+        } else if (isNt200CreateBalanceBoxAlreadyExistsError(customTx.error)) {
+          throw new Error(
+            "Token balance account already exists. Please retry the borrow."
+          );
         }
         throw new Error(
           errText && errText !== "undefined"

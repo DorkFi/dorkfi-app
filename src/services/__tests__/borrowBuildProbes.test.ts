@@ -9,12 +9,10 @@ describe("orderBorrowBuildProbes", () => {
     ]);
   });
 
-  it("prefers no-create path when the box is already present, with create fallbacks", () => {
+  it("omits createBalanceBox when the box is already present", () => {
     expect(orderBorrowBuildProbes(true, "present")).toEqual([
       [0, 0],
       [0, 1],
-      [1, 0],
-      [1, 1],
     ]);
   });
 
