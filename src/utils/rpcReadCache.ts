@@ -40,13 +40,51 @@ export function invalidateRpcReadCache(prefix?: string): void {
   }
 }
 
+/** Delete keys matching a predicate (for mid-key patterns like userGlobalPool). */
+export function invalidateRpcReadCacheWhere(
+  predicate: (key: string) => boolean
+): void {
+  for (const key of cache.keys()) {
+    if (predicate(key)) cache.delete(key);
+  }
+}
+
+/**
+ * Clear deposit/borrow/global-user position reads after a successful txn so
+ * the next modal open does not show stale 30s-cached balances.
+ */
+export function invalidateUserPositionRpcCache(
+  networkId: string,
+  userAddress: string
+): void {
+  if (!userAddress) return;
+  invalidateRpcReadCache(`userDeposit:${networkId}:${userAddress}:`);
+  invalidateRpcReadCache(`userBorrow:${networkId}:${userAddress}:`);
+  invalidateRpcReadCache(`userGlobal:${networkId}:${userAddress}`);
+  // Key shape: userGlobalPool:${networkId}:${poolId}:${userAddress}
+  invalidateRpcReadCacheWhere(
+    (key) =>
+      key.startsWith(`userGlobalPool:${networkId}:`) &&
+      key.endsWith(`:${userAddress}`)
+  );
+}
+
 /** Deduplicate concurrent in-flight requests for the same key. */
 const inflight = new Map<string, Promise<unknown>>();
+
+export type WithRpcReadCacheOptions<T> = {
+  /**
+   * Return false to skip caching (e.g. failed `null` reads).
+   * Defaults to caching everything except `null`.
+   */
+  shouldCache?: (value: T) => boolean;
+};
 
 export async function withRpcReadCache<T>(
   key: string,
   fetcher: () => Promise<T>,
-  ttlMs: number = DEFAULT_TTL_MS
+  ttlMs: number = DEFAULT_TTL_MS,
+  options?: WithRpcReadCacheOptions<T>
 ): Promise<T> {
   const cached = getRpcReadCache<T>(key);
   if (cached !== undefined) return cached;
@@ -54,9 +92,14 @@ export async function withRpcReadCache<T>(
   const pending = inflight.get(key) as Promise<T> | undefined;
   if (pending) return pending;
 
+  const shouldCache =
+    options?.shouldCache ?? ((value: T) => value !== null);
+
   const promise = fetcher()
     .then((value) => {
-      setRpcReadCache(key, value, ttlMs);
+      if (shouldCache(value)) {
+        setRpcReadCache(key, value, ttlMs);
+      }
       return value;
     })
     .finally(() => {
@@ -65,4 +108,10 @@ export async function withRpcReadCache<T>(
 
   inflight.set(key, promise);
   return promise;
+}
+
+/** Test helper — clear cache + inflight. */
+export function __resetRpcReadCacheForTests(): void {
+  cache.clear();
+  inflight.clear();
 }

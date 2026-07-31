@@ -114,10 +114,10 @@ import {
 } from "@/utils/portfolioUsdCache";
 import {
   createDebouncedPrefetch,
-  warmBorrowModalMaxAndPool,
   warmRepayModalRpc,
   type MarketActionTokenParams,
 } from "@/utils/modalPrefetch";
+import { warmBorrowModalMaxAndPool } from "@/utils/modalPrefetchHeavy";
 import {
   getCachedAccountInformation,
   getCachedAsaHoldingAtomic,

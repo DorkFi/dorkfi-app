@@ -69,7 +69,7 @@ import { useTokenPrice } from "@/hooks/useTokenPrice";
 import { calculateMaxBorrowAmount } from "@/services/adminService";
 import dorkfiAPIService from "@/services/dorkfiAPIService";
 import { updateTransactionMetadata } from "@/utils/transactionUtils";
-import { warmBorrowModalMaxAndPool } from "@/utils/modalPrefetch";
+import { warmBorrowModalMaxAndPool } from "@/utils/modalPrefetchHeavy";
 import type { PoolCollateralMarketRow } from "@/utils/poolCollateralMarketRows";
 import {
   buildLiquidationThresholdSummaryForDeposit,
@@ -86,6 +86,7 @@ import {
 } from "@/wallet/xchainSignUi";
 import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
 import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
+import { getUserFriendlyError } from "@/utils/errorUtils";
 import {
   ALGORAND_MAINNET_NODELY_ALGOD_URL,
   MainnetConsensusConfig,
@@ -109,6 +110,13 @@ import {
 } from "@/services/tinymanTalgoAdapter";
 import { buildXalgoConsensusBorrowAndBurnSingleGroup } from "@/services/xalgoBorrowBurnSingleGroup";
 import type { ConsensusState } from "@folks-finance/algorand-sdk";
+import {
+  resolveSupplyBorrowToken,
+  supplyBorrowTokenConfigLookupKey,
+  type SupplyBorrowTokenRow,
+} from "@/utils/resolveSupplyBorrowToken";
+
+export { resolveSupplyBorrowToken } from "@/utils/resolveSupplyBorrowToken";
 
 /** Built transaction group ready for wallet signature (review step). */
 interface PendingSupplyBorrowSign {
@@ -147,33 +155,6 @@ interface PendingSupplyBorrowSign {
   fAssetIdForFolksStep2?: string;
 }
 
-type SupplyBorrowTokenRow = {
-  symbol: string;
-  poolId?: string;
-  configKey?: string;
-  originalSymbol?: string;
-  underlyingContractId?: string;
-  /** Config `contractId` when it differs from `underlyingContractId` (display ASA). */
-  originalContractId?: string;
-};
-
-/**
- * `getAllTokensWithDisplayInfo` sets `configKey` to the `tokens` map key (e.g. `USDC` for every
- * `tokens.USDC[]` row). Prefer `originalSymbol` (`fiUSDC`, `fUSDC`) so {@link getTokenConfig} hits
- * the correct row or standalone key.
- */
-function supplyBorrowTokenConfigLookupKey(
-  tok: SupplyBorrowTokenRow | null | undefined,
-  fallbackAsset: string
-): string {
-  if (!tok) return fallbackAsset;
-  const orig = String(tok.originalSymbol ?? "").trim();
-  if (orig !== "") return orig;
-  const ck = String(tok.configKey ?? "").trim();
-  if (ck !== "") return ck;
-  return fallbackAsset;
-}
-
 /** Pick one `TokenConfig` from `getTokenConfig` when the symbol maps to an array (e.g. several USDC pools). */
 function pickTokenConfigForSupplyBorrowRow(
   raw: TokenConfig | TokenConfig[] | undefined,
@@ -193,73 +174,6 @@ function pickTokenConfigForSupplyBorrowRow(
     if (byContract) return byContract;
   }
   return raw.find(poolOk) ?? raw[0] ?? null;
-}
-
-/** When display `asset` + `poolId` match multiple config rows (e.g. Algo vs fALGO), pass the tokens map key from the market row (`configSymbol`). */
-export function resolveSupplyBorrowToken<T extends SupplyBorrowTokenRow>(
-  tokens: T[],
-  asset: string,
-  poolId: string | undefined,
-  configSymbol: string | undefined,
-  marketId?: string | null
-): T | undefined {
-  const poolOk = (t: T) =>
-    poolId == null || poolId === "" || String(t.poolId) === String(poolId);
-
-  // Prefer market contract + pool first (e.g. legacy vs V2 wBTC share `wBTC` + pool id).
-  if (marketId != null && marketId !== "" && poolId != null && poolId !== "") {
-    const byContract = tokens.find(
-      (t) =>
-        String(t.underlyingContractId ?? "") === String(marketId) &&
-        String(t.poolId ?? "") === String(poolId)
-    );
-    if (byContract) return byContract;
-    const byOriginal = tokens.find(
-      (t) =>
-        String(t.originalContractId ?? "") === String(marketId) &&
-        String(t.poolId ?? "") === String(poolId)
-    );
-    if (byOriginal) return byOriginal;
-  }
-
-  if (configSymbol) {
-    const keyHits = tokens.filter(
-      (t) =>
-        poolOk(t) &&
-        (t.configKey === configSymbol ||
-          t.originalSymbol === configSymbol ||
-          t.symbol === configSymbol)
-    );
-    if (keyHits.length === 1) return keyHits[0];
-    if (keyHits.length > 1 && marketId != null && String(marketId) !== "") {
-      const mid = String(marketId);
-      const byMid = keyHits.find(
-        (t) =>
-          String(t.underlyingContractId ?? "") === mid ||
-          String(t.originalContractId ?? "") === mid
-      );
-      if (byMid) return byMid;
-    }
-    if (keyHits.length > 0) return keyHits[0];
-  }
-
-  if (poolId != null && poolId !== "") {
-    const poolHits = tokens.filter((t) => t.symbol === asset && poolOk(t));
-    if (poolHits.length <= 1) return poolHits[0];
-    if (marketId != null && String(marketId) !== "") {
-      const mid = String(marketId);
-      const byMid = poolHits.find(
-        (t) => String(t.underlyingContractId ?? "") === mid
-      );
-      if (byMid) return byMid;
-      const byOrig = poolHits.find(
-        (t) => String(t.originalContractId ?? "") === mid
-      );
-      if (byOrig) return byOrig;
-    }
-    return poolHits[0];
-  }
-  return tokens.find((t) => t.symbol === asset);
 }
 
 /** Row in the optional supply/borrow asset picker (same disambiguation idea as Withdraw modal). */
@@ -2418,8 +2332,10 @@ const SupplyBorrowModal = ({
           errorMessage =
             "Transaction failed due to insufficient gas fees. Please ensure you have enough tokens for gas.";
         } else {
-          errorMessage = error.message;
+          errorMessage = getUserFriendlyError(error);
         }
+      } else {
+        errorMessage = getUserFriendlyError(error);
       }
       setError(errorMessage);
     } finally {
@@ -3305,8 +3221,7 @@ const SupplyBorrowModal = ({
         ) {
           errorMessage = "Transaction was rejected or cancelled by user.";
         } else {
-          // Prefer the real simulate/RPC message so we can debug slow builds
-          errorMessage = message || `${mode} failed`;
+          errorMessage = getUserFriendlyError(error);
         }
       }
 
