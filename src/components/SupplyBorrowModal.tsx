@@ -86,6 +86,7 @@ import {
 } from "@/wallet/xchainSignUi";
 import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
 import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
+import { getUserFriendlyError } from "@/utils/errorUtils";
 import {
   ALGORAND_MAINNET_NODELY_ALGOD_URL,
   MainnetConsensusConfig,
@@ -2331,8 +2332,10 @@ const SupplyBorrowModal = ({
           errorMessage =
             "Transaction failed due to insufficient gas fees. Please ensure you have enough tokens for gas.";
         } else {
-          errorMessage = error.message;
+          errorMessage = getUserFriendlyError(error);
         }
+      } else {
+        errorMessage = getUserFriendlyError(error);
       }
       setError(errorMessage);
     } finally {
@@ -3218,8 +3221,7 @@ const SupplyBorrowModal = ({
         ) {
           errorMessage = "Transaction was rejected or cancelled by user.";
         } else {
-          // Prefer the real simulate/RPC message so we can debug slow builds
-          errorMessage = message || `${mode} failed`;
+          errorMessage = getUserFriendlyError(error);
         }
       }
 
