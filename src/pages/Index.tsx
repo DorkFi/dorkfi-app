@@ -2,18 +2,20 @@ import { useLocation } from "react-router-dom";
 import { lazy, Suspense, useState } from "react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
-import Dashboard from "@/components/Dashboard";
-import Portfolio from "@/components/Portfolio";
-import SwapWidget from "@/components/SwapWidget";
 import SwapHeroSection from "@/components/SwapHeroSection";
-import CandlestickChart from "@/components/CandlestickChart";
-import PreFi from "@/pages/PreFi";
 import { useIsMobile } from "@/hooks/use-mobile";
-import LiquidationMonitor from "@/components/liquidation/LiquidationMonitor";
 import { isFeatureEnabled } from "@/config";
 import { cn } from "@/lib/utils";
 
 const MarketsTable = lazy(() => import("@/components/MarketsTable"));
+const Dashboard = lazy(() => import("@/components/Dashboard"));
+const Portfolio = lazy(() => import("@/components/Portfolio"));
+const SwapWidget = lazy(() => import("@/components/SwapWidget"));
+const CandlestickChart = lazy(() => import("@/components/CandlestickChart"));
+const PreFi = lazy(() => import("@/pages/PreFi"));
+const LiquidationMonitor = lazy(
+  () => import("@/components/liquidation/LiquidationMonitor")
+);
 
 interface Token {
   symbol: string;
@@ -64,7 +66,11 @@ const Index = ({ activeTab, onTabChange }: IndexProps) => {
     console.log("Rendering content for tab:", activeTab);
     switch (activeTab) {
       case "dashboard":
-        return <Dashboard onTabChange={onTabChange} />;
+        return (
+          <Suspense fallback={null}>
+            <Dashboard onTabChange={onTabChange} />
+          </Suspense>
+        );
       case "markets":
         return (
           <Suspense fallback={null}>
@@ -72,15 +78,27 @@ const Index = ({ activeTab, onTabChange }: IndexProps) => {
           </Suspense>
         );
       case "portfolio":
-        return <Portfolio />;
+        return (
+          <Suspense fallback={null}>
+            <Portfolio />
+          </Suspense>
+        );
       case "liquidations":
         if (isFeatureEnabled("enableLiquidations")) {
-          return <LiquidationMonitor accounts={[]} />;
+          return (
+            <Suspense fallback={null}>
+              <LiquidationMonitor accounts={[]} />
+            </Suspense>
+          );
         }
-        return <Dashboard onTabChange={onTabChange} />;
+        return (
+          <Suspense fallback={null}>
+            <Dashboard onTabChange={onTabChange} />
+          </Suspense>
+        );
       case "swap":
         return (
-          <>
+          <Suspense fallback={null}>
             <SwapHeroSection />
             <div className="grid grid-cols-1 md:grid-cols-12 gap-3 sm:gap-4 lg:gap-6 w-full">
               <div className="md:col-span-7 order-1 md:order-none">
@@ -97,15 +115,27 @@ const Index = ({ activeTab, onTabChange }: IndexProps) => {
                 />
               </div>
             </div>
-          </>
+          </Suspense>
         );
       case "prefi":
         if (isFeatureEnabled("enablePreFi")) {
-          return <PreFi />;
+          return (
+            <Suspense fallback={null}>
+              <PreFi />
+            </Suspense>
+          );
         }
-        return <Dashboard onTabChange={onTabChange} />;
+        return (
+          <Suspense fallback={null}>
+            <Dashboard onTabChange={onTabChange} />
+          </Suspense>
+        );
       default:
-        return <Dashboard onTabChange={onTabChange} />;
+        return (
+          <Suspense fallback={null}>
+            <Dashboard onTabChange={onTabChange} />
+          </Suspense>
+        );
     }
   };
 

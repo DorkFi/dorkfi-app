@@ -23,7 +23,7 @@ import {
 } from "@/services/lendingService";
 import { estimateFolksDepositMintedFAssetAmount } from "@/services/folksDepositAdapter";
 import { fetchPoolCollateralMarketRowsForDeposit } from "@/utils/poolCollateralMarketRows";
-import { resolveSupplyBorrowToken } from "@/components/SupplyBorrowModal";
+import { resolveSupplyBorrowToken } from "@/utils/resolveSupplyBorrowToken";
 import algorandService, { type AlgorandNetwork } from "@/services/algorandService";
 import { CONTRACT } from "ulujs";
 import {
@@ -76,42 +76,33 @@ export function createDebouncedPrefetch(cooldownMs = 2_500) {
   };
 }
 
-function prefetchKey(prefix: string, params: MarketActionTokenParams): string {
-  return [
-    prefix,
-    params.networkId,
-    params.userAddress,
-    params.asset,
-    params.poolId ?? "",
-    params.configSymbol ?? "",
-    params.marketId ?? "",
-  ].join(":");
-}
-
-/** Global user + per-asset borrow + pool collateral rows. */
+/** Global user + per-asset borrow + pool collateral rows (fully parallel). */
 export function warmBorrowModalRpc(params: MarketActionTokenParams): void {
   if (!params.userAddress) return;
-  const key = prefetchKey("borrow", params);
-  void Promise.all([
+  const token = resolveActionToken(params);
+  const tasks: Promise<unknown>[] = [
     fetchUserGlobalData(params.userAddress, params.networkId),
-    (async () => {
-      const token = resolveActionToken(params);
-      if (!token?.poolId || !token.underlyingContractId) return;
-      await fetchUserBorrowBalance(
+  ];
+  if (token?.poolId && token.underlyingContractId) {
+    tasks.push(
+      fetchUserBorrowBalance(
         params.userAddress,
         token.poolId,
         token.underlyingContractId,
         params.networkId
-      );
-      if (params.poolId) {
-        await fetchPoolCollateralMarketRowsForDeposit(
-          params.userAddress,
-          params.networkId,
-          params.poolId
-        );
-      }
-    })(),
-  ]).catch(() => undefined);
+      )
+    );
+  }
+  if (params.poolId) {
+    tasks.push(
+      fetchPoolCollateralMarketRowsForDeposit(
+        params.userAddress,
+        params.networkId,
+        params.poolId
+      )
+    );
+  }
+  void Promise.all(tasks).catch(() => undefined);
 }
 
 /** Same reads as borrow; used for sToken mint modal. */

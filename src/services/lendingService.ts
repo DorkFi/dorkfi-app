@@ -1854,6 +1854,25 @@ export const fetchUserBorrowBalance = async (
   marketId: string,
   networkId: NetworkId
 ): Promise<{ balance: number; interest: number } | null> => {
+  return withRpcReadCache(
+    `userBorrow:${networkId}:${userAddress}:${poolId}:${marketId}`,
+    () =>
+      fetchUserBorrowBalanceUncached(
+        userAddress,
+        poolId,
+        marketId,
+        networkId
+      ),
+    30_000
+  );
+};
+
+const fetchUserBorrowBalanceUncached = async (
+  userAddress: string,
+  poolId: string,
+  marketId: string,
+  networkId: NetworkId
+): Promise<{ balance: number; interest: number } | null> => {
   try {
     const networkConfig = getNetworkConfig(networkId);
 
@@ -2253,6 +2272,25 @@ export async function fetchBorrowPositionApiSnapshot(
  * This gets the user's scaled deposits from the lending pool contract
  */
 export const fetchUserDepositBalance = async (
+  userAddress: string,
+  poolId: string,
+  marketId: string,
+  networkId: NetworkId
+): Promise<number | null> => {
+  return withRpcReadCache(
+    `userDeposit:${networkId}:${userAddress}:${poolId}:${marketId}`,
+    () =>
+      fetchUserDepositBalanceUncached(
+        userAddress,
+        poolId,
+        marketId,
+        networkId
+      ),
+    30_000
+  );
+};
+
+const fetchUserDepositBalanceUncached = async (
   userAddress: string,
   poolId: string,
   marketId: string,

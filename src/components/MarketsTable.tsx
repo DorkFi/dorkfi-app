@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,13 +41,18 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import MarketSearchFilters from "@/components/markets/MarketSearchFilters";
 import MarketsPageGuidance from "@/components/markets/MarketsPageGuidance";
 import MarketPagination from "@/components/markets/MarketPagination";
-import SupplyBorrowModal from "@/components/SupplyBorrowModal";
-import WithdrawModal from "@/components/WithdrawModal";
-import { PremiumMarketModal } from "@/components/market-modal/PremiumMarketModal";
-import MintModal from "@/components/MintModal";
 import MarketsHeroSection from "@/components/markets/MarketsHeroSection";
 import MarketsTableContent from "@/components/markets/MarketsTableContent";
-import TinymanSwapModal from "@/components/TinymanSwapModal";
+
+const SupplyBorrowModal = lazy(() => import("@/components/SupplyBorrowModal"));
+const WithdrawModal = lazy(() => import("@/components/WithdrawModal"));
+const PremiumMarketModal = lazy(() =>
+  import("@/components/market-modal/PremiumMarketModal").then((m) => ({
+    default: m.PremiumMarketModal,
+  }))
+);
+const MintModal = lazy(() => import("@/components/MintModal"));
+const TinymanSwapModal = lazy(() => import("@/components/TinymanSwapModal"));
 import {
   fetchUserGlobalData,
   fetchUserBorrowBalance,
@@ -4034,6 +4039,8 @@ const MarketsTable = () => {
           onPageChange={setCurrentPage}
         />
 
+        {/* Lazy-loaded action modals — keep Markets chunk free of txn/signing stacks */}
+        <Suspense fallback={null}>
         {/* Market Detail Modal */}
         {detailModal.isOpen && detailModal.asset && detailModal.marketData && (
           <PremiumMarketModal
@@ -4290,6 +4297,7 @@ const MarketsTable = () => {
             setMarketsToolbarAlgoRefreshNonce((n) => n + 1)
           }
         />
+        </Suspense>
 
         {/* Claim Rewards Modal */}
         {showClaimModal && (

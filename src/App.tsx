@@ -5,21 +5,19 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import Admin from "./pages/Admin";
-import Analytics from "./pages/Analytics";
-import Governance from "./pages/Governance";
 import { NetworkProvider } from "./contexts/NetworkContext";
 import { LocaleSettingsProvider } from "./contexts/LocaleSettingsContext";
 import Index from "./pages/Index";
 import { isFeatureEnabled } from "./config";
 import CountdownPage from "./pages/Countdown";
-import Dashboard from "./components/Dashboard";
-import Portfolio from "./components/Portfolio";
-import PoolsPage from "./pages/Pools";
-import PortfolioPage from "./pages/PortfolioPage";
 //const LAUNCH_TIMESTAMP = Date.UTC(2025, 10, 21, 2, 0, 0); // Nov 20, 2025 6:00 PM PST (Nov 21, 2025 2:00 AM UTC)
 const LAUNCH_TIMESTAMP = Date.now();
 
+const Admin = lazy(() => import("./pages/Admin"));
+const Analytics = lazy(() => import("./pages/Analytics"));
+const Governance = lazy(() => import("./pages/Governance"));
+const PoolsPage = lazy(() => import("./pages/Pools"));
+const PortfolioPage = lazy(() => import("./pages/PortfolioPage"));
 const GasStationPage = lazy(() => import("./pages/GasStation"));
 const LiquidationMarketsPage = lazy(() => import("./pages/LiquidationMarkets"));
 
@@ -90,7 +88,14 @@ function App() {
                   />
                 }
               />
-              <Route path="/admin" element={<Admin />} />
+              <Route
+                path="/admin"
+                element={
+                  <Suspense fallback={null}>
+                    <Admin />
+                  </Suspense>
+                }
+              />
               {isFeatureEnabled("enableGasStation") && (
                 <Route
                   path="/gas-station"
@@ -118,31 +123,53 @@ function App() {
               <Route
                 path="/analytics"
                 element={
-                  <Analytics
-                    activeTab={activeTab}
-                    onTabChange={setActiveTab}
-                  />
+                  <Suspense fallback={null}>
+                    <Analytics
+                      activeTab={activeTab}
+                      onTabChange={setActiveTab}
+                    />
+                  </Suspense>
                 }
               />
               {isFeatureEnabled("enableGovernance") && (
                 <Route
                   path="/governance"
-                  element={<Governance />}
+                  element={
+                    <Suspense fallback={null}>
+                      <Governance />
+                    </Suspense>
+                  }
                 />
               )}
               {isFeatureEnabled("enablePools") && (
                 <Route
                   path="/pools"
                   element={
-                    <PoolsPage
-                      activeTab={activeTab}
-                      onTabChange={setActiveTab}
-                    />
+                    <Suspense fallback={null}>
+                      <PoolsPage
+                        activeTab={activeTab}
+                        onTabChange={setActiveTab}
+                      />
+                    </Suspense>
                   }
                 />
               )}
-              <Route path="/portfolio" element={<PortfolioPage />} />
-              <Route path="/portfolio/:address" element={<PortfolioPage />} />
+              <Route
+                path="/portfolio"
+                element={
+                  <Suspense fallback={null}>
+                    <PortfolioPage />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="/portfolio/:address"
+                element={
+                  <Suspense fallback={null}>
+                    <PortfolioPage />
+                  </Suspense>
+                }
+              />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </BrowserRouter>

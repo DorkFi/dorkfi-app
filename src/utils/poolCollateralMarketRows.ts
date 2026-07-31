@@ -9,6 +9,7 @@ import {
   fetchUserDepositBalance,
 } from "@/services/lendingService";
 import { marketRowForPortfolioPosition } from "@/utils/marketRowForPortfolioPosition";
+import { runWithConcurrency } from "@/utils/runWithConcurrency";
 
 export type PoolCollateralMarketRow = {
   symbol: string;
@@ -134,16 +135,15 @@ export async function fetchPoolCollateralMarketRowsForDeposit(
 
     if (tokens.length === 0) return [];
 
-    const balances = await Promise.all(
-      tokens.map((t) =>
-        fetchUserDepositBalance(
-          userAddress,
-          t.poolId!,
-          t.underlyingContractId!,
-          networkId
-        )
-      )
-    );
+    const balances: Array<number | null> = new Array(tokens.length).fill(null);
+    await runWithConcurrency(tokens, 6, async (t, i) => {
+      balances[i] = await fetchUserDepositBalance(
+        userAddress,
+        t.poolId!,
+        t.underlyingContractId!,
+        networkId
+      );
+    });
 
     const supplied = tokens.filter((_, i) => (balances[i] ?? 0) > 0);
     if (supplied.length === 0) return [];
