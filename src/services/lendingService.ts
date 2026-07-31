@@ -84,8 +84,8 @@ import {
   fetchMinTalgoOutMintFloorFromChain,
 } from "./tinymanTalgoAdapter";
 import {
+  classifyNt200CreateBalanceBoxSimulateResult,
   isNt200CreateBalanceBoxAlreadyExistsError,
-  nt200UserBalanceBoxName,
 } from "@/utils/nt200BalanceBox";
 
 export interface MarketData {
@@ -5651,7 +5651,9 @@ export const migrate = async (
 
 /**
  * Detect whether the user already has an nt200/ARC200 balance box on the token app.
- * Box key is `0x00 || publicKey` (see on-chain UNIT/nt200 boxes).
+ * Simulates createBalanceBox alone (non-builder CONTRACT + abi.nt200) — do not
+ * construct box names or call getApplicationBoxByName with guessed keys.
+ * success → missing; already-exists assert → present; else → unknown.
  */
 export async function detectNt200UserBalanceBox(
   algod: any,
@@ -5666,25 +5668,17 @@ export async function detectNt200UserBalanceBox(
     `nt200UserBox:${appId}:${userAddress}`,
     async () => {
       try {
-        await algod
-          .getApplicationBoxByName(appId, nt200UserBalanceBoxName(userAddress))
-          .do();
-        return "present" as const;
+        const ci = new CONTRACT(appId, algod, undefined, abi.nt200, {
+          addr: userAddress,
+          sk: new Uint8Array(),
+        });
+        // Box MBR payment so a truly missing box can succeed in simulate
+        ci.setPaymentAmount(28500);
+        const result = await ci.createBalanceBox(userAddress);
+        return classifyNt200CreateBalanceBoxSimulateResult(result);
       } catch (error: unknown) {
-        const err = error as {
-          response?: { status?: number };
-          status?: number;
-          message?: string;
-        };
-        const status = err?.response?.status ?? err?.status;
-        const msg = String(err?.message ?? error ?? "").toLowerCase();
-        if (
-          status === 404 ||
-          msg.includes("not found") ||
-          msg.includes("no box") ||
-          msg.includes("box does not exist")
-        ) {
-          return "missing" as const;
+        if (isNt200CreateBalanceBoxAlreadyExistsError(error)) {
+          return "present" as const;
         }
         console.warn("detectNt200UserBalanceBox: unexpected error", {
           appId,
@@ -5746,12 +5740,7 @@ function borrowProbeSkipFromSimulateError(
     skipP2Zero?: boolean;
   } = {};
   // createBalanceBox when box already exists (TEAL assert or explicit text)
-  if (
-    isNt200CreateBalanceBoxAlreadyExistsError(errorText) ||
-    err.includes("box already exist") ||
-    err.includes("err box exist") ||
-    err.includes("box exists")
-  ) {
+  if (isNt200CreateBalanceBoxAlreadyExistsError(errorText)) {
     out.skipP1One = true;
   }
   // Do not skip p1=0 on vague "box" / "assert" errors — those are common on other failures
