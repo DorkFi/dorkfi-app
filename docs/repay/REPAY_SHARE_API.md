@@ -1,4 +1,4 @@
-# Repay confirmation share links (OG / X link preview)
+# Repay / Borrow confirmation share links (OG / X link preview)
 
 ## Architecture
 
@@ -6,16 +6,18 @@
 |-------|------|
 | Share server | `server/index.ts` (Hono, port `8788`) |
 | Frontend client | `src/services/xShareService.ts` |
-| Share flow | `src/utils/repayShare/shareRepayConfirmation.ts` |
-| Canvas card | `src/utils/repayShare/generateRepayShareImage.ts` |
+| Repay share flow | `src/utils/repayShare/shareRepayConfirmation.ts` |
+| Repay canvas card | `src/utils/repayShare/generateRepayShareImage.ts` |
+| Borrow share flow | `src/utils/borrowShare/shareBorrowConfirmation.ts` |
+| Borrow canvas card | `src/utils/borrowShare/generateBorrowShareImage.ts` |
 
 Flow:
 
-1. Browser draws the repay PNG on canvas
-2. `POST /share/repay-confirmation/link` uploads the PNG + metadata
-3. Server returns a public permalink (`/repay/:id`)
+1. Browser draws the confirmation PNG on canvas
+2. `POST /share/repay-confirmation/link` or `POST /share/borrow-confirmation/link` uploads the PNG + metadata
+3. Server returns a public permalink (`/repay/:id` or `/borrow/:id`)
 4. X compose opens with that URL in the tweet text
-5. X’s crawler fetches `/repay/:id` → OG HTML with `twitter:card=summary_large_image` and `og:image` → `/repay/:id/image.png`
+5. X’s crawler fetches the permalink → OG HTML with `twitter:card=summary_large_image` and `og:image` → `…/image.png`
 
 ## Local development
 
@@ -34,7 +36,10 @@ Flow:
 | `GET` | `/health` | Server health + `linkShareEnabled` |
 | `POST` | `/share/repay-confirmation/link` | `multipart/form-data`: `image`, `amount`, `assetSymbol`, optional `paidWithSymbol`, `network` |
 | `GET` | `/repay/:id` | OG HTML for crawlers; humans redirect to the app |
-| `GET` | `/repay/:id/image.png` | Stored share PNG |
+| `GET` | `/repay/:id/image.png` | Stored repay share PNG |
+| `POST` | `/share/borrow-confirmation/link` | `multipart/form-data`: `image`, `amount`, `assetSymbol`, optional `network` |
+| `GET` | `/borrow/:id` | OG HTML for crawlers; humans redirect to the app |
+| `GET` | `/borrow/:id/image.png` | Stored borrow share PNG |
 
 ## Railway production
 
@@ -75,11 +80,12 @@ permalink from a custom domain:
 
 **Validation:** X's own card validator (`cards.twitter.com/validator`) was retired
 in 2022. Use `opengraph.xyz` or `socialsharepreview.com`, or fetch as the crawler
-directly (the `/repay/:id` route only serves OG HTML to crawler user-agents and
-302-redirects everyone else, so a plain browser fetch shows no card):
+directly (the `/repay/:id` and `/borrow/:id` routes only serve OG HTML to crawler
+user-agents and 302-redirect everyone else, so a plain browser fetch shows no card):
 
 ```bash
 curl -A "Twitterbot/1.0" -L "https://share.dork.fi/repay/<id>"
+curl -A "Twitterbot/1.0" -L "https://share.dork.fi/borrow/<id>"
 ```
 
 X also negatively caches URLs it failed to build a card for, and the manual
@@ -90,8 +96,10 @@ after any change.
 
 | Variable | Purpose |
 |----------|---------|
-| `X_REPAY_SHARE_STORE_PATH` | Image/index store (default `.data/repay-shares`) |
-| `X_REPAY_SHARE_TTL_DAYS` | Link TTL (default `90`) |
+| `X_REPAY_SHARE_STORE_PATH` | Repay image/index store (default `.data/repay-shares`) |
+| `X_BORROW_SHARE_STORE_PATH` | Borrow image/index store (default `.data/borrow-shares`) |
+| `X_REPAY_SHARE_TTL_DAYS` | Repay link TTL (default `90`) |
+| `X_BORROW_SHARE_TTL_DAYS` | Borrow link TTL (default: same as repay TTL) |
 | `NIXPACKS_NODE_VERSION` | `22` (also in `nixpacks.toml`) |
 
 `PORT` is injected by Railway.

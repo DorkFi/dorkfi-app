@@ -14,6 +14,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import SupplyBorrowCongrats from "./SupplyBorrowCongrats";
+import { BorrowSharePanel } from "@/components/borrow/BorrowSharePanel";
 import { MarketRowTokenIcon } from "@/components/markets/MarketRowTokenIcon";
 import SupplyBorrowHeader from "./SupplyBorrowHeader";
 import SupplyBorrowForm from "./SupplyBorrowForm";
@@ -3322,6 +3323,17 @@ const SupplyBorrowModal = ({
               onMakeAnother={handleMakeAnother}
               onClose={onClose}
               viewTransactionDisabled={!transactionId}
+              aboveActions={
+                mode === "borrow" ? (
+                  <BorrowSharePanel
+                    active={showSuccess}
+                    amount={amount}
+                    assetSymbol={asset}
+                    assetIconSrc={assetData.icon}
+                    network={networkToUse}
+                  />
+                ) : undefined
+              }
             />
           </div>
         ) : (

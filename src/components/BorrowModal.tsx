@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import SupplyBorrowCongrats from "./SupplyBorrowCongrats";
+import { BorrowSharePanel } from "@/components/borrow/BorrowSharePanel";
 import BorrowHeader from "./BorrowHeader";
 import BorrowForm from "./BorrowForm";
 import BorrowStats from "./BorrowStats";
@@ -214,6 +215,15 @@ const BorrowModal = ({ isOpen, onClose, tokenSymbol, tokenIcon, availableToBorro
                 onGoToPortfolio={handleGoToPortfolio}
                 onMakeAnother={handleMakeAnother}
                 onClose={onClose}
+                aboveActions={
+                  <BorrowSharePanel
+                    active={showSuccess}
+                    amount={amount}
+                    assetSymbol={tokenSymbol}
+                    assetIconSrc={tokenIcon}
+                    network={currentNetwork}
+                  />
+                }
               />
             </div>
           ) : (
