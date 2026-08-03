@@ -22,17 +22,17 @@ The browser must **never** receive `HAYSTACK_API_KEY`. Quotes and execute calls 
 
 Static SPA hosts (`vite build`) do **not** include the Vite Haystack middleware.
 
-### Option A — Ship code dark (safest first merge)
+### Feature flag (SPA)
 
 | Build env (SPA) | Value |
 |-----------------|-------|
-| `VITE_ENABLE_CROSS_ASSET_REPAY` | **omit** (or `false`) |
-| `VITE_HAYSTACK_PROXY_URL` | omit |
+| `VITE_ENABLE_CROSS_ASSET_REPAY` | **true** in committed `.env.production` (production builds on by default). Override with `false` to kill-switch. |
+| `VITE_HAYSTACK_PROXY_URL` | omit (SPA falls back to baked Railway proxy) or set absolute proxy origin |
 | `HAYSTACK_API_KEY` | **do not set** on the SPA host |
 
-On hosts other than `https://beta.dork.fi`, the feature stays hidden when the flag is unset. `beta.dork.fi` auto-enables the UI; set `VITE_ENABLE_CROSS_ASSET_REPAY=false` to force it off.
+DEV defaults the UI on when the flag is unset. `beta.dork.fi` also auto-enables when unset. Explicit `false`/`0` always forces the UI off.
 
-### Option B — Enable cross-asset repay on beta
+### Deploy the Haystack proxy
 
 1. **Deploy** `scripts/haystack-proxy.mjs` as its own service (Railway, Fly, etc.):
 
@@ -64,13 +64,7 @@ On hosts other than `https://beta.dork.fi`, the feature stays hidden when the fl
 
 2. Confirm `GET /health` → `{ "ok": true }`.
 
-3. **SPA build** env (frontend CI / host):
-
-   | Build env | Value |
-   |-----------|-------|
-   | `VITE_ENABLE_CROSS_ASSET_REPAY` | omit on beta (auto-on for `beta.dork.fi`); `true` elsewhere |
-   | `VITE_HAYSTACK_PROXY_URL` | omit (SPA falls back to `https://profound-bravery-production-418a.up.railway.app`) or override |
-   | `HAYSTACK_API_KEY` | **must not** be present |
+3. **SPA build** — production uses committed `.env.production` (`VITE_ENABLE_CROSS_ASSET_REPAY=true`). Host CI can still override. Never set `HAYSTACK_API_KEY` on the SPA.
 
 4. Wallet QA on mainnet with a tiny repay (quote → swap → repay, cancel mid-flow, Folks debt if applicable).
 
