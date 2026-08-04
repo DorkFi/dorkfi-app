@@ -89,6 +89,7 @@ export function useHaystackRepayQuote(
     }
 
     let cancelled = false;
+    const abort = new AbortController();
     const timer = window.setTimeout(() => {
       void (async () => {
         setIsLoading(true);
@@ -103,6 +104,7 @@ export function useHaystackRepayQuote(
             // Compact routes so SwapComposer can append repay in one atomic group.
             maxGroupSize: haystackRepayMaxGroupSize(),
             disabledProtocols: ["Humble"],
+            signal: abort.signal,
           });
           if (cancelled) return;
           if (!q.txnPayload) {
@@ -116,7 +118,15 @@ export function useHaystackRepayQuote(
           setPaymentAtomicNeeded(BigInt(Math.floor(Number(q.quote))));
           setLastUpdated(new Date());
         } catch (e) {
+          // Ignore only true cancellations (amount change / unmount), not quote timeouts.
           if (cancelled) return;
+          if (
+            e instanceof Error &&
+            e.name === "AbortError" &&
+            abort.signal.aborted
+          ) {
+            return;
+          }
           setQuote(null);
           setPaymentAtomicNeeded(null);
           setError(e instanceof Error ? e.message : "Quote failed");
@@ -128,6 +138,7 @@ export function useHaystackRepayQuote(
 
     return () => {
       cancelled = true;
+      abort.abort();
       window.clearTimeout(timer);
     };
   }, [

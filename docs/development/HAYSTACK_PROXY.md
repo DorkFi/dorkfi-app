@@ -62,11 +62,27 @@ DEV defaults the UI on when the flag is unset. `beta.dork.fi` also auto-enables 
    npm run haystack-proxy
    ```
 
-2. Confirm `GET /health` → `{ "ok": true }`.
+2. Confirm `GET /health` → `{ "ok": true }` in under a second. If TCP hangs, the Railway service is down/misbound (not a SPA bug).
 
-3. **SPA build** — production uses committed `.env.production` (`VITE_ENABLE_CROSS_ASSET_REPAY=true`). Host CI can still override. Never set `HAYSTACK_API_KEY` on the SPA.
+3. **SPA build** — production uses committed `.env.production` (`VITE_ENABLE_CROSS_ASSET_REPAY=true`). Host CI can still override. Never set `HAYSTACK_API_KEY` on the SPA. Proxy URL defaults to the baked Railway origin (`DEFAULT_HAYSTACK_PROXY_URL`); override with `VITE_HAYSTACK_PROXY_URL` if the Railway hostname changes.
 
 4. Wallet QA on mainnet with a tiny repay (quote → swap → repay, cancel mid-flow, Folks debt if applicable).
+
+## Troubleshooting slow / hanging quotes
+
+Symptoms: repay UI shows “Fetching Haystack quote…” for a long time, then fails.
+
+1. **Proxy reachability** — from any machine:
+
+   ```bash
+   curl -sS --max-time 8 https://<proxy-host>/health
+   ```
+
+   Expect `{ "ok": true }` quickly. Connection timeout ⇒ redeploy/restart the Railway Haystack service (`railway.haystack.toml` / `Dockerfile.haystack`). Confirm `HAYSTACK_PROXY_HOST=0.0.0.0`, platform `PORT`, `HAYSTACK_API_KEY`, and `HAYSTACK_PROXY_CORS_ORIGINS` includes `https://app.dork.fi` and `https://beta.dork.fi`.
+
+2. **Upstream Haystack** — if `/health` is up but quotes 502/504, check logs for `fetchQuote failed` / upstream timeout (default 20s via `HAYSTACK_PROXY_UPSTREAM_TIMEOUT_MS`).
+
+3. **Client deadline** — the SPA aborts hung quote `fetch` calls after **12s** (`HAYSTACK_QUOTE_TIMEOUT_MS`) so a dead proxy fails visibly instead of waiting on the OS TCP timeout (~60–75s).
 
 ## Security notes
 

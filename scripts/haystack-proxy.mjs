@@ -23,6 +23,7 @@
  *   HAYSTACK_PROXY_HOST         (default 127.0.0.1; use 0.0.0.0 to bind publicly)
  *   HAYSTACK_PROXY_CORS_ORIGINS (comma-separated; required when host is not loopback)
  *   HAYSTACK_API_BASE           (default https://hayrouter.txnlab.dev)
+ *   HAYSTACK_PROXY_UPSTREAM_TIMEOUT_MS (default 20000 — cap hung hayrouter calls)
  */
 
 import http from "node:http";
@@ -36,6 +37,9 @@ const HOST = (process.env.HAYSTACK_PROXY_HOST || "127.0.0.1").trim();
 const UPSTREAM = (
   process.env.HAYSTACK_API_BASE || "https://hayrouter.txnlab.dev"
 ).replace(/\/$/, "");
+const UPSTREAM_TIMEOUT_MS = Number(
+  process.env.HAYSTACK_PROXY_UPSTREAM_TIMEOUT_MS || 20_000
+);
 
 const LOCAL_DEV_ORIGINS = [
   "http://127.0.0.1:8080",
@@ -111,6 +115,55 @@ async function readBody(req) {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+function upstreamAbortSignal() {
+  if (typeof AbortSignal !== "undefined" && "timeout" in AbortSignal) {
+    return AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
+  }
+  const c = new AbortController();
+  setTimeout(() => c.abort(), UPSTREAM_TIMEOUT_MS);
+  return c.signal;
+}
+
+/**
+ * @param {string} label
+ * @param {string} url
+ * @param {RequestInit} [init]
+ */
+async function proxyUpstream(label, url, init) {
+  const started = Date.now();
+  try {
+    const r = await fetch(url, {
+      ...init,
+      signal: init?.signal ?? upstreamAbortSignal(),
+    });
+    const text = await r.text();
+    const ms = Date.now() - started;
+    console.log(
+      `[haystack-proxy] ${label} → ${r.status} ${ms}ms (${text.length}b)`
+    );
+    return { status: r.status, contentType: r.headers.get("content-type"), text };
+  } catch (e) {
+    const ms = Date.now() - started;
+    const timedOut =
+      e instanceof Error &&
+      (e.name === "TimeoutError" ||
+        e.name === "AbortError" ||
+        /aborted|timeout/i.test(e.message));
+    console.error(
+      `[haystack-proxy] ${label} failed after ${ms}ms:`,
+      e instanceof Error ? e.message : e
+    );
+    if (timedOut) {
+      const err = new Error(
+        `Upstream Haystack timed out after ${UPSTREAM_TIMEOUT_MS}ms`
+      );
+      err.code = "UPSTREAM_TIMEOUT";
+      throw err;
+    }
+    throw e;
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   const hostHdr = req.headers.host || `${HOST}:${PORT}`;
   const url = new URL(req.url || "/", `http://${hostHdr}`);
@@ -118,7 +171,13 @@ const server = http.createServer(async (req, res) => {
   // Health is unauthenticated and CORS-open for load balancers.
   if (req.method === "GET" && url.pathname === "/health") {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true }));
+    res.end(
+      JSON.stringify({
+        ok: true,
+        upstream: UPSTREAM,
+        upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS,
+      })
+    );
     return;
   }
 
@@ -139,12 +198,11 @@ const server = http.createServer(async (req, res) => {
       params.delete("apiKey");
       params.set("apiKey", API_KEY);
       const upstream = `${UPSTREAM}/api/fetchQuote?${params.toString()}`;
-      const r = await fetch(upstream);
-      const text = await r.text();
+      const r = await proxyUpstream("fetchQuote", upstream);
       res.writeHead(r.status, {
-        "Content-Type": r.headers.get("content-type") || "application/json",
+        "Content-Type": r.contentType || "application/json",
       });
-      res.end(text);
+      res.end(r.text);
       return;
     }
 
@@ -162,24 +220,29 @@ const server = http.createServer(async (req, res) => {
         delete body.apiKey;
         body.apiKey = API_KEY;
       }
-      const r = await fetch(`${UPSTREAM}/api/fetchExecuteSwapTxns`, {
+      const r = await proxyUpstream("fetchExecuteSwapTxns", `${UPSTREAM}/api/fetchExecuteSwapTxns`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const text = await r.text();
       res.writeHead(r.status, {
-        "Content-Type": r.headers.get("content-type") || "application/json",
+        "Content-Type": r.contentType || "application/json",
       });
-      res.end(text);
+      res.end(r.text);
       return;
     }
 
     res.writeHead(404, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Not found" }));
   } catch (e) {
+    const timedOut =
+      e &&
+      typeof e === "object" &&
+      "code" in e &&
+      e.code === "UPSTREAM_TIMEOUT";
+    const status = timedOut ? 504 : 502;
     console.error("[haystack-proxy]", e instanceof Error ? e.message : e);
-    res.writeHead(502, { "Content-Type": "application/json" });
+    res.writeHead(status, { "Content-Type": "application/json" });
     res.end(
       JSON.stringify({
         error: e instanceof Error ? e.message : "Proxy upstream error",
@@ -188,11 +251,15 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+// Fail hung client connections instead of letting TCP sit forever.
+server.requestTimeout = Math.max(UPSTREAM_TIMEOUT_MS + 5_000, 30_000);
+server.headersTimeout = Math.max(UPSTREAM_TIMEOUT_MS + 5_000, 30_000);
+
 server.listen(PORT, HOST, () => {
   console.log(
     `[haystack-proxy] listening on http://${HOST}:${PORT} → ${UPSTREAM}`
   );
   console.log(
-    `[haystack-proxy] CORS allowlist: ${EFFECTIVE_CORS.join(", ") || "(none — Origin required for browser)"}`
+    `[haystack-proxy] upstream timeout ${UPSTREAM_TIMEOUT_MS}ms; CORS: ${EFFECTIVE_CORS.join(", ") || "(none — Origin required for browser)"}`
   );
 });

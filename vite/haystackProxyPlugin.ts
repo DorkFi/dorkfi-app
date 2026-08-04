@@ -2,6 +2,8 @@ import type { Plugin, Connect } from "vite";
 import type { IncomingMessage } from "node:http";
 
 const UPSTREAM_DEFAULT = "https://hayrouter.txnlab.dev";
+/** Cap hung hayrouter calls in local Vite middleware (ms). */
+const UPSTREAM_TIMEOUT_MS = 20_000;
 
 async function readBody(req: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
@@ -9,6 +11,15 @@ async function readBody(req: IncomingMessage): Promise<string> {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
   return Buffer.concat(chunks).toString("utf8");
+}
+
+function upstreamSignal(): AbortSignal {
+  if (typeof AbortSignal !== "undefined" && "timeout" in AbortSignal) {
+    return AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
+  }
+  const c = new AbortController();
+  setTimeout(() => c.abort(), UPSTREAM_TIMEOUT_MS);
+  return c.signal;
 }
 
 function createHaystackMiddleware(apiKey: string, upstreamBase: string) {
@@ -39,7 +50,7 @@ function createHaystackMiddleware(apiKey: string, upstreamBase: string) {
         params.delete("apiKey");
         params.set("apiKey", apiKey);
         const target = `${upstream}/api/fetchQuote?${params.toString()}`;
-        const r = await fetch(target);
+        const r = await fetch(target, { signal: upstreamSignal() });
         const text = await r.text();
         res.statusCode = r.status;
         res.setHeader(
@@ -70,6 +81,7 @@ function createHaystackMiddleware(apiKey: string, upstreamBase: string) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
+          signal: upstreamSignal(),
         });
         const text = await r.text();
         res.statusCode = r.status;
@@ -86,11 +98,20 @@ function createHaystackMiddleware(apiKey: string, upstreamBase: string) {
       res.end(JSON.stringify({ error: "Not found" }));
     } catch (e) {
       console.error("[haystack-proxy]", e);
-      res.statusCode = 502;
+      const timedOut =
+        e instanceof Error &&
+        (e.name === "TimeoutError" ||
+          e.name === "AbortError" ||
+          /aborted|timeout/i.test(e.message));
+      res.statusCode = timedOut ? 504 : 502;
       res.setHeader("Content-Type", "application/json");
       res.end(
         JSON.stringify({
-          error: e instanceof Error ? e.message : "Proxy upstream error",
+          error: timedOut
+            ? `Upstream Haystack timed out after ${UPSTREAM_TIMEOUT_MS}ms`
+            : e instanceof Error
+              ? e.message
+              : "Proxy upstream error",
         })
       );
     }
