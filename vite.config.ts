@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
 import { offrampApiPlugin } from "./plugins/offrampApiPlugin";
+import { xoSwapApiPlugin } from "./plugins/xoSwapApiPlugin";
 
 const GOVERNANCE_RAILWAY =
   "https://dorkfi-governance-node-production.up.railway.app";
@@ -19,6 +20,10 @@ export default defineConfig(({ mode }) => {
     "CDP_API_KEY",
     "CDP_API_SECRET",
     "MOONPAY_SECRET_KEY",
+    "XO_SWAP_APP_NAME",
+    "XO_SWAP_APP_VERSION",
+    "XO_SWAP_API_KEY",
+    "XO_SWAP_API_BASE",
   ] as const) {
     if (env[key] && !process.env[key]) process.env[key] = env[key];
   }
@@ -68,6 +73,7 @@ export default defineConfig(({ mode }) => {
   plugins: [
     react(),
     offrampApiPlugin(),
+    xoSwapApiPlugin(),
     mode === 'development' &&
     componentTagger(),
   ].filter(Boolean),

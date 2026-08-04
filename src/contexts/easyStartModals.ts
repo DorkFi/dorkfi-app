@@ -3,7 +3,7 @@ import { createContext, useContext } from "react";
 export type EasyStartModalsContextValue = {
   openDeposit: () => void;
   openWithdraw: () => void;
-  /** Advanced Allbridge UI (escape hatch). */
+  /** Advanced Base ↔ Algorand USDC move via XO Swap (escape hatch). */
   openBridge: () => void;
 };
 

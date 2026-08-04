@@ -110,7 +110,7 @@ function PrivyEasyStartStateBridge({
     return () => window.clearTimeout(t);
   }, [ready, onReadyStuck]);
 
-  /** Survive Privy wallets[] blips (e.g. after Allbridge chain switch). */
+  /** Survive Privy wallets[] blips (e.g. after Base chain switch). */
   const [stableEvmAddress, setStableEvmAddress] = useState<string | null>(null);
   const [stableAlgorandAddress, setStableAlgorandAddress] = useState<
     string | null

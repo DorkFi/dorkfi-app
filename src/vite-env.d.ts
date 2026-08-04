@@ -37,4 +37,6 @@ interface ImportMetaEnv {
   readonly VITE_OFFRAMP_API_BASE?: string;
   /** Redirect URL after Coinbase Offramp widget (must be allowlisted in CDP). */
   readonly VITE_OFFRAMP_REDIRECT_URL?: string;
+  /** Optional origin for XO Swap proxy (default `/api/xo-swap` via Vite plugin). */
+  readonly VITE_XO_SWAP_API_BASE?: string;
 }
