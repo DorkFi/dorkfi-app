@@ -1,4 +1,3 @@
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -18,7 +17,6 @@
 }
 
 /* Poppins is loaded via <link> in index.html (avoids PostCSS @import-order warning) */
-
 /* DorkFi Design System */
 
 @layer base {
