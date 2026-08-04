@@ -15,7 +15,7 @@ import { spendableAlgoMicroAlgosFromAccount } from "@/utils/algorandWalletBalanc
 export const BASE_MAINNET_USDC =
   "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as const;
 
-/** Native USDC ASA on Algorand mainnet (Allbridge receive asset). */
+/** Native USDC ASA on Algorand mainnet (XO Swap / Easy Start receive asset). */
 export const ALGORAND_MAINNET_USDC_ASA = 31566704;
 const ALGORAND_USDC_DECIMALS = 6;
 
@@ -52,7 +52,7 @@ const ALGORAND_MAINNET_ALGOD = new Algodv2(
   "443"
 );
 
-/** ~enough for USDC approve + Allbridge send on Base with margin. */
+/** ~enough for a Base USDC transfer (XO Swap pay-in) with margin. */
 export const MIN_BASE_ETH_WEI = 50_000_000_000_000n; // 0.00005 ETH
 
 export async function fetchBaseEthBalance(address: Address): Promise<{
@@ -116,7 +116,7 @@ export function hasEnoughBaseEth(balanceWei: bigint): boolean {
   return balanceWei >= MIN_BASE_ETH_WEI;
 }
 
-/** ~enough for Allbridge ALG→EVM group fees + MBR cushion (microAlgos). */
+/** ~enough for USDC opt-in / send fees + MBR cushion (microAlgos). */
 export const MIN_ALGORAND_ALGO_MICRO = 100_000n; // 0.1 ALGO
 
 export async function fetchAlgorandAlgoBalance(address: string): Promise<{

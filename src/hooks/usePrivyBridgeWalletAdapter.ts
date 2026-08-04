@@ -18,6 +18,9 @@ const ALGORAND_MAINNET_ALGOD = new Algodv2(
 );
 
 /**
+ * @deprecated Easy Start deposit/withdraw now use XO Swap (`runXoUsdcSwap`).
+ * Kept for possible RainbowKit / Allbridge cleanup; not mounted by Easy Start UI.
+ *
  * Bridge wallet adapter for Privy Easy Start (separate from RainbowKit xChain).
  * Feeds Allbridge `useBridgePanel` with Privy EVM provider + EIP-712 Algorand signing.
  */

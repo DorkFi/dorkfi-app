@@ -7,7 +7,10 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
-/** Allbridge chain symbols (see @d13co/algo-x-evm-ui bridgeSdk DEFAULT_RPC_URLS). */
+/**
+ * Legacy Allbridge chain symbols (see @d13co/algo-x-evm-ui bridgeSdk).
+ * Easy Start now uses XO Swap; this RainbowKit control still opens Allbridge UI.
+ */
 const BRIDGE_CHAIN_ALG = "ALG";
 const BRIDGE_CHAIN_BASE = "BAS";
 const BRIDGE_TOKEN_USDC = "USDC";

@@ -43,7 +43,7 @@ const EasyStartHeadlessBridge = lazy(() =>
 
 const PRESET_AMOUNTS = ["50", "100", "250", "500"];
 const PRIVY_MODAL_HANDOFF_MS = 200;
-/** Small USD native top-up so Allbridge can pay Base gas. */
+/** Small USD native top-up so Base can pay gas for the XO Swap send. */
 const GAS_TOPUP_USD = "3";
 
 const EASY_START_DIALOG_CONTENT_CLASS =
@@ -60,7 +60,7 @@ type DepositPhase =
 interface EasyStartDepositSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Optional escape hatch to the advanced Allbridge UI. */
+  /** Optional escape hatch to the advanced XO Swap UI. */
   onOpenAdvancedBridge?: () => void;
 }
 

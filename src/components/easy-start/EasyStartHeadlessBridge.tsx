@@ -1,25 +1,15 @@
 import { useEffect, useRef } from "react";
-import { WagmiProvider as PrivyWagmiProvider } from "@privy-io/wagmi";
-import { useSetActiveWallet } from "@privy-io/wagmi";
-import { useWallets } from "@privy-io/react-auth";
+import { useSendTransaction } from "@privy-io/react-auth";
 import { useQueryClient } from "@tanstack/react-query";
-import { useBridgePanel } from "@d13co/algo-x-evm-ui";
-import { WalletUIProvider } from "@txnlab/use-wallet-ui-react";
-import { privyBridgeWagmiConfig } from "@/wallet/privyBridgeWagmiConfig";
-import { usePrivyEmbeddedWallet } from "@/hooks/usePrivyEmbeddedWallet";
-import { usePrivyBridgeWalletAdapter } from "@/hooks/usePrivyBridgeWalletAdapter";
+import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
 import {
-  mapBridgeStatusToPhase,
   type EasyStartBridgeDirection,
   type EasyStartBridgePhase,
 } from "@/components/easy-start/easyStartBridgePhase";
-
-const BRIDGE_CHAIN_ALG = "ALG";
-const BRIDGE_CHAIN_BASE = "BAS";
-const BRIDGE_TOKEN_USDC = "USDC";
+import { runXoUsdcSwap } from "@/lib/easyStart/xoSwap/runUsdcSwap";
 
 interface EasyStartHeadlessBridgeProps {
-  /** USDC amount to bridge (human units, e.g. "100"). */
+  /** USDC amount to swap (human units, e.g. "100"). */
   amount: string;
   enabled: boolean;
   /** Default Base → Algorand (deposit). Use algo-to-base for withdraw. */
@@ -28,137 +18,109 @@ interface EasyStartHeadlessBridgeProps {
   onComplete?: () => void;
 }
 
-function EasyStartHeadlessBridgeInner({
+/**
+ * Invisible XO Swap runner for Easy Start orchestrated deposit/withdraw.
+ * Mount only while swapping; uses Privy sendTransaction + xChain Algorand signing.
+ */
+export function EasyStartHeadlessBridge({
   amount,
   enabled,
   direction = "base-to-algo",
   onPhaseChange,
   onComplete,
 }: EasyStartHeadlessBridgeProps) {
-  const { wallets } = useWallets();
-  const { setActiveWallet } = useSetActiveWallet();
-  const { wallet: embeddedWallet } = usePrivyEmbeddedWallet();
-  const adapter = usePrivyBridgeWalletAdapter();
-  const bridge = useBridgePanel(adapter, { enabled });
+  const { sendTransaction } = useSendTransaction();
+  const {
+    evmAddress,
+    algorandAddress,
+    signTransactions,
+    authenticated,
+  } = usePrivyEasyStart();
+  const queryClient = useQueryClient();
 
   const startedRef = useRef(false);
   const completedRef = useRef(false);
-  const presetDoneRef = useRef(false);
-
-  useEffect(() => {
-    if (!embeddedWallet) return;
-    const match =
-      wallets.find(
-        (w) => w.address.toLowerCase() === embeddedWallet.address.toLowerCase()
-      ) ?? embeddedWallet;
-    void setActiveWallet(match).catch((err: unknown) => {
-      console.warn("Easy Start headless bridge: setActiveWallet failed", err);
-    });
-  }, [embeddedWallet, setActiveWallet, wallets]);
-
-  useEffect(() => {
-    if (!enabled || presetDoneRef.current) return;
-    if (!bridge.initialLoadComplete || bridge.chains.length === 0) return;
-
-    if (direction === "algo-to-base") {
-      bridge.setSourceChain(BRIDGE_CHAIN_ALG);
-      bridge.setDestinationChain(BRIDGE_CHAIN_BASE);
-    } else {
-      bridge.setSourceChain(BRIDGE_CHAIN_BASE);
-      bridge.setDestinationChain(BRIDGE_CHAIN_ALG);
-    }
-    bridge.setSourceToken(BRIDGE_TOKEN_USDC);
-    bridge.setDestinationToken(BRIDGE_TOKEN_USDC);
-    bridge.setAmount(amount);
-    presetDoneRef.current = true;
-  }, [
-    enabled,
-    amount,
-    direction,
-    bridge.initialLoadComplete,
-    bridge.chains.length,
-    bridge.setSourceChain,
-    bridge.setDestinationChain,
-    bridge.setSourceToken,
-    bridge.setDestinationToken,
-    bridge.setAmount,
-  ]);
-
-  useEffect(() => {
-    if (!enabled || startedRef.current) return;
-    if (!adapter.ready || !bridge.isAvailable) return;
-    if (!bridge.initialLoadComplete || !presetDoneRef.current) return;
-    if (!amount || Number(amount) <= 0) return;
-    if (bridge.gasFeeLoading) return;
-    if (bridge.amount !== amount) {
-      bridge.setAmount(amount);
-      return;
-    }
-
-    startedRef.current = true;
-    void bridge.handleBridge();
-  }, [
-    enabled,
-    adapter.ready,
-    bridge.isAvailable,
-    bridge.initialLoadComplete,
-    bridge.gasFeeLoading,
-    bridge.amount,
-    bridge.handleBridge,
-    bridge.setAmount,
-    amount,
-  ]);
-
-  useEffect(() => {
-    if (!enabled) return;
-    const phase = mapBridgeStatusToPhase(
-      bridge.status,
-      adapter.ready && bridge.isAvailable && bridge.initialLoadComplete
-    );
-    onPhaseChange?.(phase, bridge.error);
-
-    if (phase === "success" && !completedRef.current) {
-      completedRef.current = true;
-      onComplete?.();
-    }
-  }, [
-    enabled,
-    bridge.status,
-    bridge.error,
-    adapter.ready,
-    bridge.isAvailable,
-    bridge.initialLoadComplete,
-    onPhaseChange,
-    onComplete,
-  ]);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!enabled) {
       startedRef.current = false;
       completedRef.current = false;
-      presetDoneRef.current = false;
-      bridge.reset();
+      abortRef.current?.abort();
+      abortRef.current = null;
+      return;
     }
+
+    if (startedRef.current) return;
+    if (!authenticated || !evmAddress || !algorandAddress || !signTransactions) {
+      onPhaseChange?.("preparing");
+      return;
+    }
+    if (!amount || Number(amount) <= 0) {
+      onPhaseChange?.("error", "Invalid amount");
+      return;
+    }
+
+    startedRef.current = true;
+    const ac = new AbortController();
+    abortRef.current = ac;
+
+    void (async () => {
+      try {
+        await runXoUsdcSwap({
+          direction,
+          amount,
+          evmAddress,
+          algorandAddress,
+          sendTransaction,
+          signTransactions,
+          signal: ac.signal,
+          onPhase: (phase, detail) => {
+            if (phase === "error") {
+              onPhaseChange?.(phase, detail ?? "Swap failed");
+            } else {
+              onPhaseChange?.(phase, null);
+            }
+          },
+        });
+
+        if (ac.signal.aborted || completedRef.current) return;
+        completedRef.current = true;
+        onPhaseChange?.("success");
+        void queryClient.invalidateQueries({
+          queryKey: ["easy-start-base-usdc"],
+        });
+        void queryClient.invalidateQueries({
+          queryKey: ["easy-start-algo-usdc"],
+        });
+        void queryClient.invalidateQueries({ queryKey: ["account-info"] });
+        void queryClient.invalidateQueries({ queryKey: ["account-balance"] });
+        onComplete?.();
+      } catch (err) {
+        if (ac.signal.aborted) return;
+        const message =
+          err instanceof Error ? err.message : "XO Swap failed";
+        if (message === "Aborted" || (err as { name?: string })?.name === "AbortError") {
+          return;
+        }
+        onPhaseChange?.("error", message);
+      }
+    })();
+
+    return () => {
+      ac.abort();
+    };
+    // Intentionally run once per enabled mount with the given amount/direction.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled]);
+  }, [
+    enabled,
+    authenticated,
+    evmAddress,
+    algorandAddress,
+    signTransactions,
+    amount,
+    direction,
+  ]);
 
   return null;
-}
-
-/**
- * Invisible Allbridge runner for Easy Start orchestrated deposit/withdraw.
- * Mount only while bridging; keeps Privy wagmi isolated from RainbowKit.
- */
-export function EasyStartHeadlessBridge(props: EasyStartHeadlessBridgeProps) {
-  const queryClient = useQueryClient();
-
-  if (!props.enabled) return null;
-
-  return (
-    <PrivyWagmiProvider config={privyBridgeWagmiConfig}>
-      <WalletUIProvider theme="dark" queryClient={queryClient}>
-        <EasyStartHeadlessBridgeInner {...props} />
-      </WalletUIProvider>
-    </PrivyWagmiProvider>
-  );
 }
