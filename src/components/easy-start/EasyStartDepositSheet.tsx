@@ -29,6 +29,7 @@ import {
   bridgePhaseLabel,
   type EasyStartBridgePhase,
 } from "@/components/easy-start/easyStartBridgePhase";
+import { isXoGeoRestricted } from "@/lib/easyStart/xoSwap/errors";
 import {
   EasyStartCardProviderPicker,
   type CardProvider,
@@ -43,7 +44,7 @@ const EasyStartHeadlessBridge = lazy(() =>
 
 const PRESET_AMOUNTS = ["50", "100", "250", "500"];
 const PRIVY_MODAL_HANDOFF_MS = 200;
-/** Small USD native top-up so Allbridge can pay Base gas. */
+/** Small USD native top-up so Base can pay gas for the XO Swap send. */
 const GAS_TOPUP_USD = "3";
 
 const EASY_START_DIALOG_CONTENT_CLASS =
@@ -60,7 +61,7 @@ type DepositPhase =
 interface EasyStartDepositSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Optional escape hatch to the advanced Allbridge UI. */
+  /** Optional escape hatch to the advanced XO Swap UI. */
   onOpenAdvancedBridge?: () => void;
 }
 
@@ -277,7 +278,9 @@ export function EasyStartDepositSheet({
                         : phase === "success"
                           ? "Your funds are ready on Algorand."
                           : phase === "error"
-                            ? "Something went wrong — you can retry."
+                            ? isXoGeoRestricted(error)
+                              ? "This swap provider isn’t available in your region."
+                              : "Something went wrong — you can retry."
                             : "Working on your deposit…"}
                 </DialogDescription>
               </DialogHeader>

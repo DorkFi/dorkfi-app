@@ -1,14 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
-import { WagmiProvider as PrivyWagmiProvider } from "@privy-io/wagmi";
-import { useSetActiveWallet } from "@privy-io/wagmi";
-import { useWallets } from "@privy-io/react-auth";
-import { useQueryClient } from "@tanstack/react-query";
-import { BridgePanel, useBridgePanel } from "@d13co/algo-x-evm-ui";
-import {
-  WalletUIProvider,
-  mapBridgeToPanelProps,
-} from "@txnlab/use-wallet-ui-react";
+import { lazy, Suspense, useState } from "react";
+import { ArrowLeftRight, Loader2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -18,219 +9,225 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { privyBridgeWagmiConfig } from "@/wallet/privyBridgeWagmiConfig";
-import { usePrivyEmbeddedWallet } from "@/hooks/usePrivyEmbeddedWallet";
-import { usePrivyBridgeWalletAdapter } from "@/hooks/usePrivyBridgeWalletAdapter";
+import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
 import { useToast } from "@/hooks/use-toast";
-import type { XchainUsdcBridgeDirection } from "@/components/xchain/XchainUsdcBridgeControls";
+import { cn } from "@/lib/utils";
+import {
+  bridgePhaseLabel,
+  type EasyStartBridgeDirection,
+  type EasyStartBridgePhase,
+} from "@/components/easy-start/easyStartBridgePhase";
 
-const BRIDGE_CHAIN_ALG = "ALG";
-const BRIDGE_CHAIN_BASE = "BAS";
-const BRIDGE_TOKEN_USDC = "USDC";
+const EasyStartHeadlessBridge = lazy(() =>
+  import("@/components/easy-start/EasyStartHeadlessBridge").then((m) => ({
+    default: m.EasyStartHeadlessBridge,
+  }))
+);
 
-const BRIDGE_PANEL_DIALOG_CLASS =
-  "bg-[var(--wui-color-bg,#0f172a)] text-[var(--wui-color-text,#f8fafc)] rounded-3xl border border-[var(--wui-color-border,rgba(148,163,184,0.2))] shadow-xl max-w-[95vw] md:max-w-md max-h-[min(90vh,90dvh)] min-h-0 overflow-x-hidden overflow-y-auto flex flex-col p-0 overscroll-contain";
+const PRESET_AMOUNTS = ["25", "50", "100", "250"];
+
+const DIALOG_CLASS =
+  "bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-white rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-[95vw] md:max-w-md max-h-[min(90vh,90dvh)] min-h-0 overflow-x-hidden overflow-y-auto flex flex-col p-0 overscroll-contain";
 
 interface EasyStartBridgeSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
-function EasyStartBridgeSheetInner({
+/**
+ * Advanced Easy Start USDC move: Base ↔ Algorand via Exodus XO Swap.
+ * Escape hatch when Deposit / Withdraw orchestration is not enough.
+ */
+export function EasyStartBridgeSheet({
   open,
   onOpenChange,
 }: EasyStartBridgeSheetProps) {
-  const { wallets } = useWallets();
-  const { setActiveWallet } = useSetActiveWallet();
-  const { wallet: embeddedWallet, evmAddress } = usePrivyEmbeddedWallet();
-  const adapter = usePrivyBridgeWalletAdapter();
+  const { evmAddress, algorandAddress } = usePrivyEasyStart();
   const { toast } = useToast();
 
-  const [direction, setDirection] = useState<XchainUsdcBridgeDirection>(
-    "base-to-algo"
-  );
-  const [presetNonce, setPresetNonce] = useState(0);
-  const presetPendingRef = useRef(false);
-  const notReadyToastShownRef = useRef(false);
+  const [direction, setDirection] =
+    useState<EasyStartBridgeDirection>("base-to-algo");
+  const [amount, setAmount] = useState("100");
+  const [running, setRunning] = useState(false);
+  const [bridgePhase, setBridgePhase] =
+    useState<EasyStartBridgePhase>("preparing");
+  const [error, setError] = useState<string | null>(null);
 
-  const bridge = useBridgePanel(adapter, { enabled: open });
+  const ready = Boolean(evmAddress && algorandAddress);
+  const busy = running;
 
-  useEffect(() => {
-    if (!embeddedWallet) return;
-    const match =
-      wallets.find(
-        (w) => w.address.toLowerCase() === embeddedWallet.address.toLowerCase()
-      ) ?? embeddedWallet;
-    void setActiveWallet(match).catch((err: unknown) => {
-      console.warn("Easy Start bridge: setActiveWallet failed", err);
-    });
-  }, [embeddedWallet, setActiveWallet, wallets]);
-
-  // Open straight into Allbridge with Base→Algorand (Portfolio "Move to Algorand").
-  useEffect(() => {
-    if (!open) {
-      presetPendingRef.current = false;
-      notReadyToastShownRef.current = false;
-      setDirection("base-to-algo");
-      return;
-    }
-    presetPendingRef.current = true;
-    setPresetNonce((n) => n + 1);
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    if (!presetPendingRef.current) return;
-    if (!bridge.initialLoadComplete || bridge.chains.length === 0) return;
-
-    if (direction === "algo-to-base") {
-      bridge.setSourceChain(BRIDGE_CHAIN_ALG);
-      bridge.setDestinationChain(BRIDGE_CHAIN_BASE);
-    } else {
-      bridge.setSourceChain(BRIDGE_CHAIN_BASE);
-      bridge.setDestinationChain(BRIDGE_CHAIN_ALG);
-    }
-    bridge.setSourceToken(BRIDGE_TOKEN_USDC);
-    bridge.setDestinationToken(BRIDGE_TOKEN_USDC);
-    presetPendingRef.current = false;
-  }, [
-    open,
-    presetNonce,
-    direction,
-    bridge.initialLoadComplete,
-    bridge.chains.length,
-    bridge.setSourceChain,
-    bridge.setDestinationChain,
-    bridge.setSourceToken,
-    bridge.setDestinationToken,
-  ]);
-
-  useEffect(() => {
-    if (!open) return;
-    if (adapter.ready && bridge.isAvailable) {
-      notReadyToastShownRef.current = false;
-      return;
-    }
-    if (notReadyToastShownRef.current) return;
-    const t = window.setTimeout(() => {
-      if (adapter.ready && bridge.isAvailable) return;
-      notReadyToastShownRef.current = true;
-      toast({
-        title: "Wallet not ready",
-        description:
-          "Your Easy Start Algorand account is still deriving. Wait a moment and try again.",
-        variant: "destructive",
-      });
-    }, 12_000);
-    return () => window.clearTimeout(t);
-  }, [open, adapter.ready, bridge.isAvailable, toast]);
-
-  const handleDirectionChange = (next: XchainUsdcBridgeDirection) => {
-    setDirection(next);
-    presetPendingRef.current = true;
-    setPresetNonce((n) => n + 1);
+  const reset = () => {
+    setRunning(false);
+    setBridgePhase("preparing");
+    setError(null);
   };
 
-  const panelReady =
-    open &&
-    adapter.ready &&
-    bridge.isAvailable &&
-    bridge.initialLoadComplete;
+  const handleClose = (next: boolean) => {
+    if (!next) {
+      if (!running) reset();
+    }
+    onOpenChange(next);
+  };
 
-  const panelProps = mapBridgeToPanelProps(bridge, () => onOpenChange(false));
+  const start = () => {
+    if (!ready || !amount || Number(amount) <= 0) return;
+    setError(null);
+    setBridgePhase("preparing");
+    setRunning(true);
+  };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={BRIDGE_PANEL_DIALOG_CLASS}>
-        <div
-          data-wallet-theme
-          data-wallet-ui
-          data-theme="dark"
-          className="p-4 space-y-3"
-        >
-          <DialogHeader className="space-y-1 text-left">
-            <DialogTitle className="text-lg font-bold leading-none">
-              Bridge
+    <>
+      <Dialog open={open} onOpenChange={handleClose}>
+        <DialogContent className={DIALOG_CLASS}>
+          <DialogHeader className="px-5 pt-5 pb-2 space-y-1">
+            <DialogTitle className="flex items-center gap-2 text-lg">
+              <ArrowLeftRight className="h-5 w-5 text-ocean-teal" />
+              Move USDC
             </DialogTitle>
-            <DialogDescription className="text-sm text-slate-400">
-              Base ↔ Algorand USDC via Allbridge
+            <DialogDescription className="text-slate-600 dark:text-slate-300">
+              Base ↔ Algorand USDC via XO Swap
             </DialogDescription>
           </DialogHeader>
 
-          {evmAddress && adapter.activeAddress ? (
-            <div className="space-y-1 text-[11px] font-mono text-slate-400">
-              <p className="truncate">
-                From {evmAddress.slice(0, 6)}…{evmAddress.slice(-4)}
-              </p>
-              <p className="truncate">
-                To {adapter.activeAddress.slice(0, 6)}…
-                {adapter.activeAddress.slice(-4)}
-              </p>
-            </div>
-          ) : null}
-
-          <Tabs
-            value={direction}
-            onValueChange={(v) =>
-              handleDirectionChange(v as XchainUsdcBridgeDirection)
-            }
-          >
-            <TabsList className="grid w-full grid-cols-2 bg-slate-800/80">
-              <TabsTrigger value="base-to-algo">Base → Algorand</TabsTrigger>
-              <TabsTrigger value="algo-to-base">Algorand → Base</TabsTrigger>
-            </TabsList>
-          </Tabs>
-
-          {!panelReady ? (
-            <div className="flex flex-col items-center justify-center gap-3 py-10 text-sm text-slate-400">
-              <Loader2 className="h-6 w-6 animate-spin text-ocean-teal" />
-              {!adapter.ready
-                ? "Preparing Easy Start wallet…"
-                : !bridge.isAvailable
-                  ? "Loading Allbridge…"
-                  : "Loading chains and balances…"}
-              {!adapter.ready ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="text-slate-400"
-                  onClick={() => onOpenChange(false)}
+          <div className="px-5 pb-5 space-y-4">
+            <Tabs
+              value={direction}
+              onValueChange={(v) => {
+                if (running) return;
+                setDirection(v as EasyStartBridgeDirection);
+              }}
+              className="w-full"
+            >
+              <TabsList className="grid h-9 w-full grid-cols-2 rounded-xl border border-border bg-muted/40 p-1">
+                <TabsTrigger
+                  value="base-to-algo"
+                  className="rounded-lg text-xs"
+                  disabled={running}
                 >
-                  Cancel
+                  Base → Algorand
+                </TabsTrigger>
+                <TabsTrigger
+                  value="algo-to-base"
+                  className="rounded-lg text-xs"
+                  disabled={running}
+                >
+                  Algorand → Base
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+
+            {!running ? (
+              <>
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                    Amount (USDC)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    className="w-full rounded-xl border border-border bg-white/80 dark:bg-slate-950/40 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ocean-teal/40"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    {PRESET_AMOUNTS.map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        className={cn(
+                          "rounded-lg border px-2.5 py-1 text-xs",
+                          amount === p
+                            ? "border-ocean-teal bg-ocean-teal/10 text-ocean-teal"
+                            : "border-border text-slate-600 dark:text-slate-300"
+                        )}
+                        onClick={() => setAmount(p)}
+                      >
+                        ${p}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {!ready ? (
+                  <p className="text-xs text-amber-700 dark:text-amber-300">
+                    Easy Start wallet is still preparing…
+                  </p>
+                ) : null}
+
+                {error ? (
+                  <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
+                ) : null}
+
+                <Button
+                  className="w-full bg-ocean-teal hover:bg-ocean-teal/90 text-white font-semibold"
+                  disabled={!ready || !amount || Number(amount) <= 0}
+                  onClick={start}
+                >
+                  Swap USDC
                 </Button>
-              ) : null}
-            </div>
-          ) : (
-            <BridgePanel {...panelProps} hideHeader autoFocusAmount />
-          )}
+              </>
+            ) : (
+              <div className="flex flex-col items-center gap-3 py-6 text-center">
+                {bridgePhase === "success" ? null : (
+                  <Loader2 className="h-8 w-8 animate-spin text-ocean-teal" />
+                )}
+                <p className="text-sm font-medium">
+                  {bridgePhaseLabel(bridgePhase, direction)}
+                </p>
+                {error ? (
+                  <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
+                ) : (
+                  <p className="text-xs text-slate-500">
+                    Keep this window open until the swap finishes.
+                  </p>
+                )}
+                {error ? (
+                  <Button
+                    variant="outline"
+                    className="mt-2"
+                    onClick={() => {
+                      reset();
+                    }}
+                  >
+                    Try again
+                  </Button>
+                ) : null}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
-          {panelReady ? (
-            <p className="text-[11px] leading-relaxed text-slate-500">
-              Bridging needs a little ETH on Base for gas (separate from USDC).
-              If approve/send fails, fund a small amount of ETH on Base and retry.
-            </p>
-          ) : null}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-/**
- * Privy Easy Start bridge host — isolated from RainbowKit/WalletConnect.
- * Mount only once via EasyStartModalsProvider (not from Portfolio + header).
- */
-export function EasyStartBridgeSheet(props: EasyStartBridgeSheetProps) {
-  const queryClient = useQueryClient();
-
-  if (!props.open) return null;
-
-  return (
-    <PrivyWagmiProvider config={privyBridgeWagmiConfig}>
-      <WalletUIProvider theme="dark" queryClient={queryClient}>
-        <EasyStartBridgeSheetInner {...props} />
-      </WalletUIProvider>
-    </PrivyWagmiProvider>
+      {running && amount ? (
+        <Suspense fallback={null}>
+          <EasyStartHeadlessBridge
+            enabled
+            amount={amount}
+            direction={direction}
+            onPhaseChange={(p, err) => {
+              setBridgePhase(p);
+              if (p === "error") {
+                setError(err ?? "Swap failed");
+              }
+            }}
+            onComplete={() => {
+              setBridgePhase("success");
+              setRunning(false);
+              toast({
+                title: "Swap complete",
+                description:
+                  direction === "algo-to-base"
+                    ? "USDC is ready on your Base wallet."
+                    : "USDC is ready on your Algorand account.",
+              });
+              onOpenChange(false);
+              reset();
+            }}
+          />
+        </Suspense>
+      ) : null}
+    </>
   );
 }
