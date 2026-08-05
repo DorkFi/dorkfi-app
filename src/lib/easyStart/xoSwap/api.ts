@@ -1,5 +1,6 @@
 /** Browser client for Easy Start XO Swap proxy (`/api/xo-swap`). */
 
+import { formatXoSwapError } from "@/lib/easyStart/xoSwap/errors";
 import type {
   XoCreateOrderInput,
   XoOrder,
@@ -27,12 +28,7 @@ async function parseJson<T>(res: Response): Promise<T> {
     status?: number;
   };
   if (!res.ok) {
-    const msg =
-      (typeof data.error === "string" && data.error) ||
-      (typeof data.details === "string" && data.details) ||
-      (typeof data.code === "string" && data.code) ||
-      `XO Swap API ${res.status}`;
-    throw new Error(msg);
+    throw new Error(formatXoSwapError(data, `XO Swap API ${res.status}`));
   }
   return data;
 }

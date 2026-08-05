@@ -56,7 +56,23 @@ function sendJson(
   res.end(payload);
 }
 
-function xoHeaders(env: XoSwapEnv): Record<string, string> {
+function clientIp(req: IncomingMessage): string | undefined {
+  const forwarded = req.headers["x-forwarded-for"];
+  if (typeof forwarded === "string" && forwarded.trim()) {
+    return forwarded.split(",")[0]?.trim();
+  }
+  if (Array.isArray(forwarded) && forwarded[0]) {
+    return forwarded[0].split(",")[0]?.trim();
+  }
+  const raw = req.socket.remoteAddress?.replace(/^::ffff:/, "");
+  if (!raw || raw === "127.0.0.1" || raw === "::1") return undefined;
+  return raw;
+}
+
+function xoHeaders(
+  env: XoSwapEnv,
+  req?: IncomingMessage
+): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: "application/json",
     "Content-Type": "application/json",
@@ -66,11 +82,16 @@ function xoHeaders(env: XoSwapEnv): Record<string, string> {
   if (env.apiKey) {
     headers.Authorization = `Bearer ${env.apiKey}`;
   }
+  const ip = req ? clientIp(req) : undefined;
+  if (ip) {
+    headers.Forwarded = `for=${ip}`;
+  }
   return headers;
 }
 
 async function proxyXo(
   env: XoSwapEnv,
+  req: IncomingMessage,
   method: string,
   path: string,
   body?: unknown
@@ -78,7 +99,7 @@ async function proxyXo(
   const url = `${env.apiBase}${path.startsWith("/") ? path : `/${path}`}`;
   const res = await fetch(url, {
     method,
-    headers: xoHeaders(env),
+    headers: xoHeaders(env, req),
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await res.text();
@@ -137,6 +158,7 @@ export async function routeXoSwapRequest(
       const pairId = decodeURIComponent(m[1]!);
       const { status, data } = await proxyXo(
         env,
+        req,
         "GET",
         `/v3/pairs/${encodeURIComponent(pairId)}`
       );
@@ -150,6 +172,7 @@ export async function routeXoSwapRequest(
       const pairId = decodeURIComponent(m[1]!);
       const { status, data } = await proxyXo(
         env,
+        req,
         "GET",
         `/v3/pairs/${encodeURIComponent(pairId)}/rates`
       );
@@ -164,6 +187,7 @@ export async function routeXoSwapRequest(
       const query = m[2] || "";
       const { status, data } = await proxyXo(
         env,
+        req,
         "GET",
         `/v3/pairs/${encodeURIComponent(pairId)}/quotes${query}`
       );
@@ -177,6 +201,7 @@ export async function routeXoSwapRequest(
       const orderId = decodeURIComponent(m[1]!);
       const { status, data } = await proxyXo(
         env,
+        req,
         "GET",
         `/v3/orders/${encodeURIComponent(orderId)}`
       );
@@ -191,6 +216,7 @@ export async function routeXoSwapRequest(
       const body = await readJsonBody(req);
       const { status, data } = await proxyXo(
         env,
+        req,
         "PATCH",
         `/v3/orders/${encodeURIComponent(orderId)}`,
         body
@@ -202,7 +228,7 @@ export async function routeXoSwapRequest(
     // POST /orders  (fixed) | POST /orders/float
     if (method === "POST" && (path === "/orders" || path.startsWith("/orders?"))) {
       const body = await readJsonBody(req);
-      const { status, data } = await proxyXo(env, "POST", "/v3/orders", body);
+      const { status, data } = await proxyXo(env, req, "POST", "/v3/orders", body);
       sendJson(res, status, data);
       return true;
     }
@@ -213,6 +239,7 @@ export async function routeXoSwapRequest(
       const body = await readJsonBody(req);
       const { status, data } = await proxyXo(
         env,
+        req,
         "POST",
         "/v3/orders/float",
         body

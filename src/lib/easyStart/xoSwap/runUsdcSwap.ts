@@ -15,6 +15,7 @@ import {
   XO_SWAP_MAX_POLLS,
   XO_SWAP_POLL_MS,
 } from "@/lib/easyStart/xoSwap/constants";
+import { isXoGeoRestricted } from "@/lib/easyStart/xoSwap/errors";
 import { selectBestXoRate } from "@/lib/easyStart/xoSwap/selectRate";
 import {
   ensureAlgorandUsdcOptIn,
@@ -125,6 +126,11 @@ export async function runXoUsdcSwap(
     }
     toAmount = best.toAmount;
   } catch (err) {
+    if (isXoGeoRestricted(err)) {
+      throw err instanceof Error
+        ? err
+        : new Error("USDC moves aren’t available in your region yet.");
+    }
     // Fall back to floating quote when fixed rates unavailable / amount too large.
     console.warn("XO Swap fixed rates unavailable, trying quote", err);
     const quote = await fetchXoPairQuote(pairId, fromAmount);
