@@ -29,6 +29,7 @@ import {
   bridgePhaseLabel,
   type EasyStartBridgePhase,
 } from "@/components/easy-start/easyStartBridgePhase";
+import { isXoGeoRestricted } from "@/lib/easyStart/xoSwap/errors";
 import {
   EasyStartCardProviderPicker,
   type CardProvider,
@@ -277,7 +278,9 @@ export function EasyStartDepositSheet({
                         : phase === "success"
                           ? "Your funds are ready on Algorand."
                           : phase === "error"
-                            ? "Something went wrong — you can retry."
+                            ? isXoGeoRestricted(error)
+                              ? "This swap provider isn’t available in your region."
+                              : "Something went wrong — you can retry."
                             : "Working on your deposit…"}
                 </DialogDescription>
               </DialogHeader>

@@ -60,6 +60,8 @@ Confirm with Exodus that Direct Swap pairs exist for:
 - Base → Algorand: `USDCbasemainnetB5A52617_USDCALGO`
 - Algorand → Base: `USDCALGO_USDCbasemainnetB5A52617`
 
+`/pairs`, `/rates`, and `/orders` are geo-gated. Local `npm run dev` uses your machine’s IP, so a `RESTRICTED_GEOLOCATION` response means Exodus is blocking this region — retrying will not help. Test from an allowed network or ask Exodus to enable the pair for `XO_SWAP_APP_NAME`.
+
 ## Privy dashboard setup
 
 - Enable login methods: email, Google, Apple, passkey
