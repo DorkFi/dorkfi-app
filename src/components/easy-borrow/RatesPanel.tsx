@@ -45,7 +45,7 @@ function RateBlock({
 
 const RatesPanel = ({ borrow, supply, borrowHint }: RatesPanelProps) => {
   return (
-    <aside className="rounded-[28px] bg-zinc-950 p-5 sm:p-6 space-y-8 h-full">
+    <aside className="rounded-[28px] bg-[#0c1927] p-5 sm:p-6 space-y-8 h-full">
       <RateBlock title="Borrow Rate" row={borrow} hint={borrowHint} />
       <RateBlock title="Supply Rate" row={supply} />
     </aside>

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useWallet } from "@txnlab/use-wallet-react";
+import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
 import { getNetworkConfig, type NetworkId } from "@/config";
 import { calculateMaxBorrowAmount } from "@/services/adminService";
 import {
@@ -90,7 +90,7 @@ function humanFromMarketCap(
 export function useEasyBorrowQuote(
   input: EasyBorrowQuoteInput
 ): EasyBorrowQuote {
-  const { activeAccount } = useWallet();
+  const { activeAccount } = useDorkFiWalletAdapter();
   const address = activeAccount?.address;
   const route = input.route;
   const networkId = input.networkId;
@@ -149,7 +149,7 @@ export function useEasyBorrowQuote(
     staleTime: 30_000,
     queryFn: async () => {
       if (!route || !address) return null;
-      const [poolGlobal, existingDeposit] = await Promise.all([
+      const [poolGlobal, depositData] = await Promise.all([
         fetchUserGlobalDataForPool(address, networkId, route.poolId),
         fetchUserDepositBalance(
           address,
@@ -158,7 +158,10 @@ export function useEasyBorrowQuote(
           networkId
         ),
       ]);
-      return { poolGlobal, existingDeposit };
+      return {
+        poolGlobal,
+        existingDeposit: depositData?.balance ?? null,
+      };
     },
   });
 

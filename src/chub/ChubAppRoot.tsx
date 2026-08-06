@@ -2,6 +2,8 @@ import { useState, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "@/components/theme-provider";
 import { NetworkProvider } from "@/contexts/NetworkContext";
+import { PrivySessionProvider } from "@/contexts/PrivySessionProvider";
+import { EasyStartModalsProvider } from "@/contexts/EasyStartModalsContext";
 import { LocaleSettingsProvider } from "@/contexts/LocaleSettingsContext";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/toaster";
@@ -23,6 +25,7 @@ type ChubAppRootProps = {
 /**
  * Shared provider stack for Chub (and similar thin UIs).
  * Lives in @dorkfi/app so wallet/network/query deps resolve here.
+ * Mirrors main DorkFi ordering so Easy Start + XO USDC bridge modals work.
  */
 export function ChubAppRoot({ children }: ChubAppRootProps) {
   return (
@@ -34,15 +37,19 @@ export function ChubAppRoot({ children }: ChubAppRootProps) {
         storageKey="simplfi-theme"
         disableTransitionOnChange
       >
-        <NetworkProvider>
-          <LocaleSettingsProvider>
-            <TooltipProvider delayDuration={300} skipDelayDuration={100}>
-              <Toaster />
-              <Sonner />
-              {children}
-            </TooltipProvider>
-          </LocaleSettingsProvider>
-        </NetworkProvider>
+        <PrivySessionProvider>
+          <NetworkProvider>
+            <LocaleSettingsProvider>
+              <EasyStartModalsProvider>
+                <TooltipProvider delayDuration={300} skipDelayDuration={100}>
+                  <Toaster />
+                  <Sonner />
+                  {children}
+                </TooltipProvider>
+              </EasyStartModalsProvider>
+            </LocaleSettingsProvider>
+          </NetworkProvider>
+        </PrivySessionProvider>
       </ThemeProvider>
     </QueryClientProvider>
   );

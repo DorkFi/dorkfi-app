@@ -22,6 +22,20 @@ export function getLiquidityPoolDisplayAprPercent(
   return apr.totalAprPercent ?? apr.feeAprPercent ?? null;
 }
 
+/** Prefer Tinyman APY; fall back to APR when APY is missing. */
+export function getLiquidityPoolDisplayApyPercent(
+  apr: LiquidityPoolApr | null | undefined
+): number | null {
+  if (!apr) return null;
+  return (
+    apr.totalApyPercent ??
+    apr.feeApyPercent ??
+    apr.totalAprPercent ??
+    apr.feeAprPercent ??
+    null
+  );
+}
+
 export function useLiquidityPoolsOrderedByApr(
   pairs: LiquidityPoolPairConfig[]
 ) {
@@ -202,7 +216,7 @@ export function usePoolPairSuppliedBalance(
         lendingMarket!.poolId,
         lendingMarket!.marketId,
         networkId
-      ),
+      ).then((data) => data?.balance ?? null),
     enabled:
       enabled &&
       Boolean(userAddress) &&

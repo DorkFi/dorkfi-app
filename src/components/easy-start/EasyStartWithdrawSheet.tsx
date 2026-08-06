@@ -359,7 +359,9 @@ export function EasyStartWithdrawSheet({
 
                   <EasyStartCardProviderPicker
                     value={cashOutProvider}
-                    onChange={setCashOutProvider}
+                    onChange={(p) =>
+                      setCashOutProvider(p as "moonpay" | "coinbase")
+                    }
                     label="Cash out with"
                   />
 

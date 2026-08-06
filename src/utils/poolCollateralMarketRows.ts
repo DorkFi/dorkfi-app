@@ -145,7 +145,7 @@ export async function fetchPoolCollateralMarketRowsForDeposit(
       )
     );
 
-    const supplied = tokens.filter((_, i) => (balances[i] ?? 0) > 0);
+    const supplied = tokens.filter((_, i) => (balances[i]?.balance ?? 0) > 0);
     if (supplied.length === 0) return [];
 
     const infos = await Promise.all(

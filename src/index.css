@@ -22,26 +22,29 @@
 
 @layer base {
   :root {
+    /* Near-black ink: #0c1927 */
+    --ink: 211 53% 10%;
+
     --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --foreground: 211 53% 10%;
 
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 211 53% 10%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover-foreground: 211 53% 10%;
 
     --primary: 178 100% 32%;
     --primary-foreground: 0 0% 100%;
 
     --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --secondary-foreground: 211 53% 10%;
 
     --muted: 210 40% 96.1%;
     --muted-foreground: 215.4 16.3% 46.9%;
 
     --accent: 46 100% 47%;
-    --accent-foreground: 0 0% 0%;
+    --accent-foreground: 211 53% 10%;
 
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
@@ -54,7 +57,7 @@
 
     /* DorkFi Custom Colors */
     --ocean-teal: 178 100% 32%;
-    --deep-sea-navy: 218 76% 12%;
+    --deep-sea-navy: 211 53% 10%;
     --whale-gold: 46 100% 47%;
     --warning-orange: 25 95% 60%;
     --bubble-white: 0 0% 100%;
@@ -63,7 +66,7 @@
     --sky-blue: 203 100% 73%;
     
     /* Header Navy Color */
-    --header-navy: 220 50% 12%;
+    --header-navy: 211 53% 10%;
     
     /* Ocean Gradient Colors */
     --ocean-surface: 194 100% 51%;
@@ -72,20 +75,21 @@
     --aqua-glow: 194 100% 50%;
     
     /* PreFi Gradients */
-    --prefi-gradient-start: 218 76% 12%;
+    --prefi-gradient-start: 211 53% 10%;
     --prefi-gradient-end: 194 100% 21%;
     --progress-gradient-start: 178 100% 32%;
     --progress-gradient-end: 46 100% 47%;
   }
 
   .dark {
-    --background: 218 76% 9%;
+    /* Page surface: #0c1927 */
+    --background: 211 53% 10%;
     --foreground: 0 0% 100%;
 
-    --card: 218 76% 9%;
+    --card: 211 53% 10%;
     --card-foreground: 0 0% 100%;
 
-    --popover: 218 76% 9%;
+    --popover: 211 53% 10%;
     --popover-foreground: 0 0% 100%;
 
     --primary: 178 100% 32%;
@@ -98,7 +102,7 @@
     --muted-foreground: 215 20.2% 65.1%;
 
     --accent: 46 100% 47%;
-    --accent-foreground: 0 0% 0%;
+    --accent-foreground: 211 53% 10%;
 
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 210 40% 98%;
@@ -110,7 +114,8 @@
     --ring: 178 100% 32%;
     
     /* Header Navy Color for Dark Mode */
-    --header-navy: 220 50% 9%;
+    --header-navy: 211 53% 10%;
+    --deep-sea-navy: 211 53% 10%;
   }
 }
 
@@ -121,6 +126,15 @@
 
   body {
     @apply bg-background text-foreground font-poppins;
+  }
+
+  /* SimplFi wordmark: solid ink #0c1927 in light mode; original art in dark. */
+  .simplfi-logo-mark {
+    filter: brightness(0) saturate(100%) invert(7%) sepia(28%) saturate(1200%)
+      hue-rotate(176deg) brightness(95%) contrast(96%);
+  }
+  .dark .simplfi-logo-mark {
+    filter: none;
   }
 
   /* Smooth scrolling */

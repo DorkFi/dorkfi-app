@@ -1,12 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
-import { useWallet } from "@txnlab/use-wallet-react";
+import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
 import type { NetworkId } from "@/config";
+import { useWadUsdcTinymanApyPercent } from "@/hooks/useWadUsdcTinymanApyPercent";
 import {
   fetchMarketInfo,
   fetchUserDepositBalance,
   fetchUserWalletBalance,
   type MarketInfo,
 } from "@/services/lendingService";
+import { isLeveragedWadUsdcRoute } from "@/services/leveragedWadLpService";
 import type { SavingsRoute } from "@/types/easySavings";
 import { usdPerTokenFromMarketInfoPrice } from "@/utils/assetDecimals";
 import { floorTokenAmount } from "@/utils/easyBorrowMath";
@@ -21,6 +23,8 @@ export type EasySavingsQuote = {
   price: number | null;
   walletBalance: number | null;
   existingDeposit: number | null;
+  /** Accrued supply interest on the deposited position (token units). */
+  earnedInterest: number | null;
   market: MarketInfo | null;
   supplyApyPercent: number | null;
   supplyCapHuman: number | null;
@@ -28,6 +32,7 @@ export type EasySavingsQuote = {
   remainingSupplyCap: number | null;
   amountUsd: number;
   existingDepositUsd: number;
+  earnedInterestUsd: number;
   isLoading: boolean;
   error: string | null;
 };
@@ -53,7 +58,7 @@ function parseHuman(cap: string | undefined): number | null {
 export function useEasySavingsQuote(
   input: EasySavingsQuoteInput
 ): EasySavingsQuote {
-  const { activeAccount } = useWallet();
+  const { activeAccount } = useDorkFiWalletAdapter();
   const address = activeAccount?.address;
   const route = input.route;
   const networkId = input.networkId;
@@ -120,10 +125,14 @@ export function useEasySavingsQuote(
     },
   });
 
+  const isWadUsdc = isLeveragedWadUsdcRoute(route?.asset.configKey);
+  const tinymanApy = useWadUsdcTinymanApyPercent(networkId, isWadUsdc);
+
   const market = marketQuery.data ?? null;
   const price = marketUsdPrice(market, route?.asset.decimals ?? 6);
   const amountNum = parseFloat(input.amount) || 0;
-  const existingDeposit = positionQuery.data ?? null;
+  const existingDeposit = positionQuery.data?.balance ?? null;
+  const earnedInterest = positionQuery.data?.interest ?? null;
 
   const supplyCapHuman = market
     ? parseHuman(market.maxTotalDeposits)
@@ -142,15 +151,22 @@ export function useEasySavingsQuote(
   }
 
   const apy = market?.apyCalculation?.apy;
-  const supplyApyPercent =
+  const marketSupplyApyPercent =
     apy != null && Number.isFinite(apy)
       ? apy
       : market?.supplyRate != null && Number.isFinite(market.supplyRate)
         ? market.supplyRate * 100
         : null;
 
+  // WAD/USDC Higher Yield earn is dominated by Tinyman pool fees; prefer live pool APY.
+  const supplyApyPercent = isWadUsdc
+    ? tinymanApy.apyPercent ??
+      (tinymanApy.isLoading ? null : marketSupplyApyPercent)
+    : marketSupplyApyPercent;
+
   const isLoading =
     marketQuery.isLoading ||
+    (isWadUsdc && tinymanApy.isLoading) ||
     (Boolean(address) &&
       (balanceQuery.isLoading || positionQuery.isLoading));
 
@@ -164,6 +180,7 @@ export function useEasySavingsQuote(
     price,
     walletBalance: balanceQuery.data ?? null,
     existingDeposit,
+    earnedInterest,
     market,
     supplyApyPercent,
     supplyCapHuman,
@@ -173,6 +190,10 @@ export function useEasySavingsQuote(
     existingDepositUsd:
       price != null && existingDeposit != null
         ? existingDeposit * price
+        : 0,
+    earnedInterestUsd:
+      price != null && earnedInterest != null
+        ? earnedInterest * price
         : 0,
     isLoading,
     error,

@@ -3315,7 +3315,7 @@ const MarketsTable = () => {
 
     const load = async () => {
       try {
-        const [depositBal, borrowData, globalData] = await Promise.all([
+        const [depositData, borrowData, globalData] = await Promise.all([
           fetchUserDepositBalance(
             userAddress,
             rpcPoolId,
@@ -3334,7 +3334,7 @@ const MarketsTable = () => {
         if (loadId !== detailPositionLoadIdRef.current) return;
 
         const position = buildPosition(
-          depositBal,
+          depositData?.balance ?? null,
           borrowData,
           globalData,
           null,

@@ -370,13 +370,14 @@ export function usePortfolioVisibleChainLive(opts: {
 
       try {
         if (kind === "deposit") {
-          const bal = await fetchUserDepositBalance(
+          const balData = await fetchUserDepositBalance(
             address,
             token.poolId,
             token.underlyingContractId,
             networkId
           );
-          if (bal == null) continue;
+          if (balData == null) continue;
+          const bal = balData.balance;
           const minted = await folksMintedFAssetForOneUnderlyingAtomic(
             networkId,
             token,
@@ -604,13 +605,14 @@ export function usePortfolioVisibleChainLive(opts: {
 
         try {
           if (row.kind === "deposit") {
-            const bal = await fetchUserDepositBalance(
+            const balData = await fetchUserDepositBalance(
               address,
               token.poolId,
               token.underlyingContractId,
               networkId
             );
-            if (bal == null) continue;
+            if (balData == null) continue;
+            const bal = balData.balance;
             const minted = await folksMintedFAssetForOneUnderlyingAtomic(
               networkId,
               token,

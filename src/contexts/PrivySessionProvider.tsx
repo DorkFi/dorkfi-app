@@ -36,7 +36,7 @@ export type PrivyEasyStartState = {
   algorandAddress: string | null;
   algorandAddressLoading: boolean;
   displayName: string | null;
-  login: (() => void) | null;
+  login: ((options?: { loginMethods?: string[] }) => void) | null;
   logout: (() => Promise<void>) | null;
   /** xChain EIP-712 signing for Algorand txn groups (Privy embedded wallet). */
   signTransactions: ((txns: Uint8Array[]) => Promise<Uint8Array[]>) | null;
@@ -89,9 +89,21 @@ function PrivyEasyStartStateBridge({
   children: ReactNode;
   onReadyStuck?: () => void;
 }) {
-  const { ready, authenticated, user, login, logout } = usePrivy();
+  const { ready, authenticated, user, login: privyLogin, logout } = usePrivy();
   const { signTypedData } = useSignTypedData();
   const { wallets } = useWallets();
+
+  const login = useCallback(
+    (options?: { loginMethods?: string[] }) => {
+      if (options?.loginMethods?.length) {
+        // Privy v3 LoginModalOptions accepts loginMethods when provided by dashboard support.
+        (privyLogin as (opts?: { loginMethods?: string[] }) => void)(options);
+      } else {
+        privyLogin();
+      }
+    },
+    [privyLogin]
+  );
 
   useEffect(() => {
     const originHint = getPrivyOriginHint();
@@ -102,7 +114,7 @@ function PrivyEasyStartStateBridge({
     if (ready) return;
     const t = window.setTimeout(() => {
       console.warn(
-        "[Easy Start] Privy ready is still false after 8s. Use http://localhost:8080 and hard-refresh.",
+        "[Easy Start] Privy ready is still false after 8s. Use http://localhost:8080 or http://localhost:5173 and hard-refresh.",
         { origin: window.location.origin }
       );
       onReadyStuck?.();
@@ -256,8 +268,9 @@ export function PrivySessionProvider({ children }: PrivySessionProviderProps) {
           accentColor: "#2d8b78",
         },
         embeddedWallets: {
-          createOnLogin: "users-without-wallets",
-          requireUserPasswordOnCreate: false,
+          ethereum: {
+            createOnLogin: "users-without-wallets",
+          },
         },
         defaultChain: base,
         supportedChains: [base],

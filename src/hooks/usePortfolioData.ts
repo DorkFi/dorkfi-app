@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useWallet } from "@txnlab/use-wallet-react";
+import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
 import { useNetwork } from "@/contexts/NetworkContext";
 import {
   fetchUserGlobalData,
@@ -14,8 +14,28 @@ import {
   tokenStandardUsesNativeWalletBalance,
   getPortfolioVisibleTokens,
   getAllTokensWithDisplayInfo,
+  type TokenConfig,
 } from "@/config";
 import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
+
+/** Wallet symbols we always check so undeposited cash (esp. USDC) can surface. */
+const PRIORITY_WALLET_ASSETS = [
+  "USDC",
+  "ALGO",
+  "WAD",
+  "UNIT",
+  "goBTC",
+  "goETH",
+  "tALGO",
+  "xALGO",
+] as const;
+
+function resolveTokenConfigEntry(
+  raw: TokenConfig | TokenConfig[] | undefined
+): TokenConfig | undefined {
+  if (!raw) return undefined;
+  return Array.isArray(raw) ? raw[0] : raw;
+}
 
 export interface PortfolioPosition {
   asset: string;
@@ -26,7 +46,8 @@ export interface PortfolioPosition {
   apy: number;
   tokenPrice: number;
   type: "deposit" | "borrow";
-  interest?: number; // Accrued interest for borrow positions
+  /** Accrued interest: earned on deposits, owed on borrows */
+  interest?: number;
 }
 
 export interface PortfolioData {
@@ -46,7 +67,7 @@ export interface PortfolioData {
 }
 
 export const usePortfolioData = () => {
-  const { activeAccount } = useWallet();
+  const { activeAccount } = useDorkFiWalletAdapter();
   const { currentNetwork } = useNetwork();
 
   const [userGlobalData, setUserGlobalData] = useState<{
@@ -111,68 +132,51 @@ export const usePortfolioData = () => {
           networkId,
           marketsCount: markets.length,
         });
-        const tokens = getPortfolioVisibleTokens(networkId as any);
-        const positions: PortfolioPosition[] = [];
+        const tokens = getPortfolioVisibleTokens(networkId as any).filter(
+          (token) => token.underlyingContractId && token.poolId
+        );
 
-        for (const token of tokens) {
-          if (token.underlyingContractId && token.poolId) {
+        const positionLists = await Promise.all(
+          tokens.map(async (token) => {
+            const positions: PortfolioPosition[] = [];
             const market = markets.find((m) => m.symbol === token.symbol);
 
-            // Fetch both deposit and borrow balances for this token
-            const [depositBalance, borrowData] = await Promise.all([
+            const [depositData, borrowData] = await Promise.all([
               fetchUserDepositBalance(
                 userAddress,
-                token.poolId,
-                token.underlyingContractId,
+                token.poolId!,
+                token.underlyingContractId!,
                 networkId as any
               ),
               fetchUserBorrowBalance(
                 userAddress,
-                token.poolId,
-                token.underlyingContractId,
+                token.poolId!,
+                token.underlyingContractId!,
                 networkId as any
               ),
             ]);
 
-            // Extract borrow balance and interest from the new return type
+            const depositBalance = depositData?.balance || 0;
+            const depositInterest = depositData?.interest || 0;
             const borrowBalance = borrowData?.balance || 0;
             const borrowInterest = borrowData?.interest || 0;
 
-            // Add deposit position if user has deposits
             if (depositBalance && depositBalance > 0) {
-              // Get the original token config to access nTokenId
-              // For multi-market tokens (array), find the one matching the token's poolId
               const originalTokenConfigRaw = getTokenConfig(
                 networkId as any,
                 token.symbol
               );
-              
-              // Handle array of token configs (multiple markets)
-              // Compare poolIds as strings to ensure exact match
               const originalTokenConfig = Array.isArray(originalTokenConfigRaw)
-                ? originalTokenConfigRaw.find((tc) => String(tc.poolId) === String(token.poolId)) || originalTokenConfigRaw[0]
+                ? originalTokenConfigRaw.find(
+                    (tc) => String(tc.poolId) === String(token.poolId)
+                  ) || originalTokenConfigRaw[0]
                 : originalTokenConfigRaw;
 
-              // Fetch ntoken balance for this deposit
               const nTokenBalance = await fetchNTokenBalance(
                 userAddress,
                 originalTokenConfig?.nTokenId || "",
                 networkId
               );
-
-              console.log(`Deposit position for ${token.symbol}:`, {
-                depositBalance,
-                nTokenBalance,
-                marketPrice: market?.price,
-                tokenPrice: market?.price
-                  ? parseFloat(market.price) / Math.pow(10, 6)
-                  : 1,
-                calculatedValue:
-                  (depositBalance *
-                    (market?.price ? parseFloat(market.price) : 1)) /
-                  Math.pow(10, 6),
-                marketFound: !!market,
-              });
 
               positions.push({
                 asset: token.symbol,
@@ -190,25 +194,11 @@ export const usePortfolioData = () => {
                   ? parseFloat(market.price) / Math.pow(10, 6)
                   : 1,
                 type: "deposit",
+                interest: depositInterest,
               });
             }
 
-            // Add borrow position if user has borrows
             if (borrowBalance && borrowBalance > 0) {
-              console.log(`Borrow position for ${token.symbol}:`, {
-                borrowBalance,
-                borrowInterest,
-                marketPrice: market?.price,
-                tokenPrice: market?.price
-                  ? parseFloat(market.price) / Math.pow(10, 6)
-                  : 1,
-                calculatedValue:
-                  (borrowBalance *
-                    (market?.price ? parseFloat(market.price) : 1)) /
-                  Math.pow(10, 6),
-                marketFound: !!market,
-              });
-
               positions.push({
                 asset: token.symbol,
                 icon: token.logoPath,
@@ -229,9 +219,12 @@ export const usePortfolioData = () => {
                 interest: borrowInterest,
               });
             }
-          }
-        }
 
+            return positions;
+          })
+        );
+
+        const positions = positionLists.flat();
         console.log("fetchUserPositions returning:", positions);
         return positions;
       } catch (error) {
@@ -242,34 +235,37 @@ export const usePortfolioData = () => {
     [fetchNTokenBalance]
   );
 
-  // Fetch wallet balance for a specific asset
+  // Fetch wallet balance for a specific asset (config key or display symbol).
   const fetchWalletBalance = useCallback(
-    async (asset: string) => {
+    async (asset: string, opts?: { force?: boolean }) => {
       if (!activeAccount?.address) {
         return { balance: 0, balanceUSD: 0 };
       }
 
       // Check if we already have this balance cached
-      if (walletBalances[asset]) {
+      if (!opts?.force && walletBalances[asset]) {
         return walletBalances[asset];
       }
 
       try {
         const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-        const token = tokens.find((t) => t.symbol === asset);
+        const token =
+          tokens.find((t) => t.configKey === asset) ??
+          tokens.find((t) => t.originalSymbol === asset) ??
+          tokens.find((t) => t.symbol === asset);
 
         if (!token) {
           console.error(`Token ${asset} not found in network config`);
           return { balance: 0, balanceUSD: 0 };
         }
 
-        // Get the original token config to access tokenStandard
-        // Use originalSymbol to look up the config, as asset might be a display symbol
+        // Prefer config key so multi-market USDC resolves reliably.
         const originalSymbol =
-          "originalSymbol" in token ? (token as any).originalSymbol : asset;
-        const originalTokenConfig = getTokenConfig(
-          currentNetwork,
-          originalSymbol
+          token.configKey ||
+          ("originalSymbol" in token ? token.originalSymbol : undefined) ||
+          asset;
+        const originalTokenConfig = resolveTokenConfigEntry(
+          getTokenConfig(currentNetwork, originalSymbol)
         );
         if (!originalTokenConfig) {
           console.error(
@@ -283,6 +279,7 @@ export const usePortfolioData = () => {
         ARC200Service.initialize(clients);
 
         let balance = 0;
+        const balanceKey = token.symbol || asset;
 
         // Handle different token standards
         if (
@@ -317,7 +314,6 @@ export const usePortfolioData = () => {
           // For network tokens (like VOI), fetch native balance
           console.log(`Fetching network token balance for ${asset}`);
           try {
-            const clients = await algorandService.getCurrentClientsForReads();
             const accountInfo = await clients.algod
               .accountInformation(activeAccount.address)
               .do();
@@ -344,7 +340,6 @@ export const usePortfolioData = () => {
             `Fetching ASA balance for ${asset} (asa-asa asset ID: ${assetId})`
           );
           try {
-            const clients = await algorandService.getCurrentClientsForReads();
             const accAssetInfo = await clients.algod
               .accountAssetInformation(activeAccount.address, assetId)
               .do();
@@ -366,15 +361,16 @@ export const usePortfolioData = () => {
         } else if (
           (originalTokenConfig.tokenStandard === "asa" ||
             originalTokenConfig.tokenStandard === "network-asa") &&
-          token.underlyingAssetId
+          (token.underlyingAssetId || originalTokenConfig.assetId)
         ) {
           // For ASA and Folks network-asa (e.g. fALGO): wallet holds the f-ASA.
+          const assetIdStr =
+            token.underlyingAssetId || String(originalTokenConfig.assetId);
           console.log(
-            `Fetching ASA balance for ${asset} (asset ID: ${token.underlyingAssetId})`
+            `Fetching ASA balance for ${asset} (asset ID: ${assetIdStr})`
           );
           try {
-            const clients = await algorandService.getCurrentClientsForReads();
-            const assetId = parseInt(token.underlyingAssetId);
+            const assetId = parseInt(String(assetIdStr), 10);
             const accAssetInfo = await clients.algod
               .accountAssetInformation(activeAccount.address, assetId)
               .do();
@@ -401,12 +397,19 @@ export const usePortfolioData = () => {
           balance = 0;
         }
 
-        // Calculate USD value using market data
-        const market = marketData.find((m) => m.symbol === asset);
+        // Calculate USD value using market data (oracle micro-USD scale).
+        const market = marketData.find(
+          (m) =>
+            m.symbol === balanceKey ||
+            m.symbol === asset ||
+            m.asset === balanceKey
+        );
         const tokenPrice = market?.price
-          ? parseFloat(market.price) / 10 ** 6
-          : 1;
-        const balanceUSD = balance * tokenPrice;
+          ? parseFloat(String(market.price)) / Math.pow(10, 6)
+          : balanceKey === "USDC" || asset === "USDC"
+            ? 1
+            : 0;
+        const balanceUSD = balance * (Number.isFinite(tokenPrice) ? tokenPrice : 0);
         const balanceData = {
           balance,
           balanceUSD,
@@ -414,7 +417,9 @@ export const usePortfolioData = () => {
 
         setWalletBalances((prev) => ({
           ...prev,
-          [asset]: balanceData, // Store the full balance object with balance and balanceUSD
+          // Key by display symbol so Portfolio UI can merge with deposit rows.
+          [balanceKey]: balanceData,
+          ...(balanceKey !== asset ? { [asset]: balanceData } : {}),
         }));
 
         console.log(`Final balance data for ${asset}:`, balanceData);
@@ -441,7 +446,7 @@ export const usePortfolioData = () => {
         });
 
         // Fetch fresh balance
-        await fetchWalletBalance(asset);
+        await fetchWalletBalance(asset, { force: true });
       } catch (error) {
         console.error("Error refreshing wallet balance:", error);
       }
@@ -457,24 +462,20 @@ export const usePortfolioData = () => {
 
     setIsLoadingPositions(true);
     try {
-      // Fetch fresh market data and global data first
+      // Markets + global in parallel; positions need market rows for APY/price.
       const [freshMarketData, freshGlobalData] = await Promise.all([
         fetchAllMarkets(currentNetwork),
         fetchUserGlobalData(activeAccount.address, currentNetwork),
       ]);
+      setMarketData(freshMarketData);
+      setUserGlobalData(freshGlobalData);
 
-      // Then fetch fresh user positions with market data
       const freshPositions = await fetchUserPositions(
         activeAccount.address,
         currentNetwork,
         freshMarketData
       );
-
-      console.log("freshGlobalData", freshGlobalData);
-
-      setMarketData(freshMarketData);
       setUserPositions(freshPositions);
-      setUserGlobalData(freshGlobalData);
     } catch (error) {
       console.error("Error refreshing positions:", error);
       setError("Failed to refresh positions data");
@@ -495,6 +496,7 @@ export const usePortfolioData = () => {
       }
 
       setIsLoading(true);
+      setIsLoadingPositions(true);
       setError(null);
 
       try {
@@ -505,44 +507,22 @@ export const usePortfolioData = () => {
           currentNetwork
         );
 
-        // Fetch markets first, then global data (so we can pass marketData for healthFactorIndex calculation)
-        const markets = await fetchAllMarkets(currentNetwork);
-        const globalData = await fetchUserGlobalData(
-          activeAccount.address,
-          currentNetwork,
-          markets
-        );
+        // Global does not need markets — fetch both in parallel, then positions.
+        const [markets, globalData] = await Promise.all([
+          fetchAllMarkets(currentNetwork),
+          fetchUserGlobalData(activeAccount.address, currentNetwork),
+        ]);
 
-        // Then fetch user positions with market data
+        setMarketData(markets ?? []);
+        setUserGlobalData(globalData ?? null);
+        setIsLoading(false);
+
         const positions = await fetchUserPositions(
           activeAccount.address,
           currentNetwork,
-          markets
+          markets ?? []
         );
-
-        if (globalData) {
-          console.log("User global data fetched:", globalData);
-          setUserGlobalData(globalData);
-        } else {
-          console.log("No user global data found");
-          setUserGlobalData(null);
-        }
-
-        if (markets) {
-          console.log("Market data fetched:", markets);
-          setMarketData(markets);
-        } else {
-          console.log("No market data found");
-          setMarketData([]);
-        }
-
-        if (positions) {
-          console.log("User positions fetched:", positions);
-          setUserPositions(positions);
-        } else {
-          console.log("No user positions found");
-          setUserPositions([]);
-        }
+        setUserPositions(positions ?? []);
       } catch (error) {
         console.error("Error fetching data:", error);
         setError(
@@ -551,13 +531,78 @@ export const usePortfolioData = () => {
         setUserGlobalData(null);
         setMarketData([]);
         setUserPositions([]);
-      } finally {
         setIsLoading(false);
+      } finally {
+        setIsLoadingPositions(false);
       }
     };
 
     fetchData();
   }, [activeAccount?.address, currentNetwork, fetchUserPositions]);
+
+  // Always load wallet holdings (including undeposited USDC) for Supply / My Wallet.
+  useEffect(() => {
+    if (!activeAccount?.address || !currentNetwork) {
+      setWalletBalances({});
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadWalletBalances = async () => {
+      setIsLoadingWalletBalance(true);
+      try {
+        const assets = new Set<string>(PRIORITY_WALLET_ASSETS);
+        for (const p of userPositions) {
+          if (p.asset) assets.add(p.asset);
+        }
+        // Include a few more visible ASA keys without loading every LP row.
+        for (const t of getPortfolioVisibleTokens(currentNetwork as any)) {
+          const key = t.configKey || t.symbol;
+          if (
+            key &&
+            !key.startsWith("LP_") &&
+            !String(t.symbol || "").startsWith("LP_")
+          ) {
+            // Prefer liquid singles only
+            if (
+              PRIORITY_WALLET_ASSETS.includes(
+                key as (typeof PRIORITY_WALLET_ASSETS)[number]
+              ) ||
+              PRIORITY_WALLET_ASSETS.includes(
+                t.symbol as (typeof PRIORITY_WALLET_ASSETS)[number]
+              )
+            ) {
+              assets.add(key);
+            }
+          }
+        }
+
+        await Promise.all(
+          [...assets].map((asset) =>
+            fetchWalletBalance(asset, { force: true }).catch((err) => {
+              console.error(`Wallet balance fetch failed for ${asset}:`, err);
+              return { balance: 0, balanceUSD: 0 };
+            })
+          )
+        );
+      } finally {
+        if (!cancelled) setIsLoadingWalletBalance(false);
+      }
+    };
+
+    void loadWalletBalances();
+    return () => {
+      cancelled = true;
+    };
+    // Re-run when positions/markets refresh so prices and inventory stay current.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchWalletBalance identity changes with cache; force path is intentional
+  }, [
+    activeAccount?.address,
+    currentNetwork,
+    userPositions,
+    marketData,
+  ]);
 
   // Separate deposits and borrows from user positions
   const deposits = userPositions.filter((pos) => pos.type === "deposit");

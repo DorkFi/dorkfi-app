@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useState } from "react";
-import { useFundWallet } from "@privy-io/react-auth";
+import { useFiatOnramp, useFundWallet } from "@privy-io/react-auth";
 import { useQuery } from "@tanstack/react-query";
 import { base } from "viem/chains";
 import type { Address } from "viem";
@@ -21,6 +21,7 @@ import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import {
+  BASE_MAINNET_USDC,
   fetchBaseEthBalance,
   fetchBaseUsdcBalance,
   hasEnoughBaseEth,
@@ -31,8 +32,11 @@ import {
 } from "@/components/easy-start/easyStartBridgePhase";
 import { isXoGeoRestricted } from "@/lib/easyStart/xoSwap/errors";
 import {
+  CARD_PROVIDERS,
+  DEPOSIT_CARD_PROVIDERS,
   EasyStartCardProviderPicker,
-  type CardProvider,
+  type DepositCardProvider,
+  type PrivyCardProvider,
 } from "@/components/easy-start/EasyStartCardProviderPicker";
 
 /** Loaded only while bridging so opening Deposit never waits on `@privy-io/wagmi`. */
@@ -85,11 +89,13 @@ export function EasyStartDepositSheet({
   onOpenAdvancedBridge,
 }: EasyStartDepositSheetProps) {
   const { fundWallet } = useFundWallet();
+  const { fund: fundFiatOnramp } = useFiatOnramp();
   const { evmAddress, algorandAddress } = usePrivyEasyStart();
   const { toast } = useToast();
 
   const [amount, setAmount] = useState("100");
-  const [cardProvider, setCardProvider] = useState<CardProvider>("moonpay");
+  const [cardProvider, setCardProvider] =
+    useState<DepositCardProvider>("moonpay");
   const [phase, setPhase] = useState<DepositPhase>("idle");
   const [bridgePhase, setBridgePhase] =
     useState<EasyStartBridgePhase>("preparing");
@@ -155,19 +161,70 @@ export function EasyStartDepositSheet({
     }
   };
 
+  /** MoonPay / Coinbase card on-ramp via fundWallet (does not surface Stripe). */
+  const fundWithCardProvider = async (
+    options: {
+      asset: "USDC" | "native-currency";
+      amount: string;
+      preferredProvider?: PrivyCardProvider;
+    }
+  ) => {
+    if (!address) return;
+    await fundWallet({
+      address,
+      options: {
+        chain: base,
+        asset: options.asset,
+        amount: options.amount,
+        defaultFundingMethod: "card",
+        ...(options.preferredProvider
+          ? { card: { preferredProvider: options.preferredProvider } }
+          : {}),
+      },
+    });
+  };
+
+  /**
+   * Stripe + multi-provider fiat on-ramp (Privy useFiatOnramp).
+   * Requires Stripe On-ramp enabled in Privy dashboard + @stripe/crypto.
+   */
+  const fundWithStripeOnramp = async (usdAmount: string) => {
+    if (!address) return;
+    await fundFiatOnramp({
+      source: {
+        assets: ["usd"],
+        defaultAsset: "usd",
+      },
+      destination: {
+        asset: BASE_MAINNET_USDC,
+        chain: "eip155:8453",
+        address,
+      },
+      environment: import.meta.env.DEV ? "sandbox" : "production",
+      defaultAmount: usdAmount,
+    });
+  };
+
   const handleFundGas = async () => {
     if (!address) return;
     setError(null);
     onOpenChange(false);
     await new Promise((r) => setTimeout(r, PRIVY_MODAL_HANDOFF_MS));
     try {
-      await fundWallet(address, {
-        chain: base,
-        asset: "native-currency",
-        amount: GAS_TOPUP_USD,
-        defaultFundingMethod: "card",
-        card: { preferredProvider: cardProvider },
-      });
+      if (cardProvider === "stripe") {
+        // Stripe path funds USDC primarily; for gas use MoonPay/Coinbase fallback.
+        await fundWithCardProvider({
+          asset: "native-currency",
+          amount: GAS_TOPUP_USD,
+          preferredProvider: "moonpay",
+        });
+      } else {
+        await fundWithCardProvider({
+          asset: "native-currency",
+          amount: GAS_TOPUP_USD,
+          preferredProvider: cardProvider,
+        });
+      }
       const usdc = bridgeAmount ?? amount;
       await ensureGasThenBridge(usdc);
     } catch (e: unknown) {
@@ -218,13 +275,15 @@ export function EasyStartDepositSheet({
     await new Promise((r) => setTimeout(r, PRIVY_MODAL_HANDOFF_MS));
 
     try {
-      await fundWallet(address, {
-        chain: base,
-        asset: "USDC",
-        amount,
-        defaultFundingMethod: "card",
-        card: { preferredProvider: cardProvider },
-      });
+      if (cardProvider === "stripe") {
+        await fundWithStripeOnramp(amount);
+      } else {
+        await fundWithCardProvider({
+          asset: "USDC",
+          amount,
+          preferredProvider: cardProvider,
+        });
+      }
       await new Promise((r) => setTimeout(r, 1500));
       await refetchUsdc();
       await ensureGasThenBridge(amount);
@@ -270,7 +329,7 @@ export function EasyStartDepositSheet({
                 </div>
                 <DialogDescription className="text-center text-sm text-slate-600 dark:text-slate-400">
                   {phase === "idle"
-                    ? "Choose MoonPay or Coinbase, then pay with card. We’ll move your USDC to Algorand automatically."
+                    ? "Choose MoonPay, Coinbase, or Stripe, then pay with card. We’ll move your USDC to Algorand automatically."
                     : phase === "gas"
                       ? "One quick step: add a little ETH for network fees, then we finish the deposit."
                       : phase === "bridging"
@@ -328,8 +387,14 @@ export function EasyStartDepositSheet({
                     from your USDC). About ${GAS_TOPUP_USD} is enough.
                   </p>
                   <EasyStartCardProviderPicker
-                    value={cardProvider}
-                    onChange={setCardProvider}
+                    value={
+                      cardProvider === "stripe" ? "moonpay" : cardProvider
+                    }
+                    onChange={(p) =>
+                      setCardProvider(p as DepositCardProvider)
+                    }
+                    providers={CARD_PROVIDERS}
+                    label="Fee payment method"
                   />
                   {error ? (
                     <p className="text-sm text-destructive" role="alert">
@@ -440,7 +505,10 @@ export function EasyStartDepositSheet({
                   {!skipFiat ? (
                     <EasyStartCardProviderPicker
                       value={cardProvider}
-                      onChange={setCardProvider}
+                      onChange={(p) =>
+                        setCardProvider(p as DepositCardProvider)
+                      }
+                      providers={DEPOSIT_CARD_PROVIDERS}
                     />
                   ) : null}
 

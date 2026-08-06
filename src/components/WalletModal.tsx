@@ -6,11 +6,21 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Wallet, CheckCircle, ExternalLink } from "lucide-react";
+import { Wallet, ExternalLink, Mail, Sparkles } from "lucide-react";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { useToast } from "@/hooks/use-toast";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { getNetworkConfig, isAVMNetwork, isEVMNetwork } from "@/config";
+import {
+  getEnabledNetworks,
+  getNetworkConfig,
+  isAVMNetwork,
+  isEVMNetwork,
+  type NetworkId,
+} from "@/config";
+import { getNetworkLogoPath } from "@/utils/tokenImageUtils";
+import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
+import { useEasyStartLogin } from "@/hooks/useEasyStartLogin";
+import { cn } from "@/lib/utils";
 
 interface WalletModalProps {
   isOpen: boolean;
@@ -30,17 +40,54 @@ interface WalletProvider {
 const CONNECTION_TIMEOUT = 60000;
 
 const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
-  const { wallets, activeAccount } = useWallet();
+  const { wallets } = useWallet();
   const { toast } = useToast();
-  const { currentNetwork } = useNetwork();
+  const { currentNetwork, switchNetwork, isSwitchingNetwork } = useNetwork();
   const [isConnecting, setIsConnecting] = useState<string | null>(null);
+  const [pendingNetworkId, setPendingNetworkId] = useState<NetworkId | null>(
+    null
+  );
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const connectionAbortRef = useRef<AbortController | null>(null);
+  const privyEasyStart = usePrivyEasyStart();
+  const openEasyStartLogin = useEasyStartLogin();
+  const [isEasyStartLoading, setIsEasyStartLoading] = useState(false);
+
+  const showGetStarted =
+    privyEasyStart.enabled &&
+    privyEasyStart.configured &&
+    !privyEasyStart.authenticated;
 
   // Get network configuration
   const networkConfig = getNetworkConfig(currentNetwork);
   const isAVM = isAVMNetwork(currentNetwork);
   const isEVM = isEVMNetwork(currentNetwork);
+  const enabledNetworks = getEnabledNetworks();
+  const showNetworkSelector = enabledNetworks.length > 1;
+
+  const handleNetworkSelect = async (networkId: NetworkId) => {
+    if (isSwitchingNetwork || pendingNetworkId || networkId === currentNetwork) {
+      return;
+    }
+    setPendingNetworkId(networkId);
+    try {
+      await switchNetwork(networkId);
+      const next = getNetworkConfig(networkId);
+      toast({
+        title: "Network Switched",
+        description: `Switched to ${next.name}. Choose a wallet to connect.`,
+      });
+    } catch (error) {
+      console.error("Failed to switch network:", error);
+      toast({
+        title: "Network Switch Failed",
+        description: "Failed to switch network. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setPendingNetworkId(null);
+    }
+  };
 
   // Define wallet providers based on network type
   const getWalletProviders = (): WalletProvider[] => {
@@ -201,6 +248,7 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
     if (!isOpen) {
       // Clear any ongoing connection state when modal closes
       setIsConnecting(null);
+      setPendingNetworkId(null);
       // Clear timeout if it exists
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
@@ -379,37 +427,159 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
     window.open(downloadUrl, "_blank");
   };
 
+  const handleEasyStartEmail = async () => {
+    setIsEasyStartLoading(true);
+    try {
+      onClose();
+      await openEasyStartLogin();
+    } finally {
+      setIsEasyStartLoading(false);
+    }
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="w-full max-w-[98vw] sm:max-w-md rounded-t-2xl sm:rounded-xl p-4 sm:p-6 max-h-[90vh] overflow-y-auto relative">
         <button
           onClick={onClose}
-          className="absolute top-3 right-3 sm:top-4 sm:right-4 z-20 p-2 rounded-full bg-white/90 hover:bg-white"
+          className="absolute top-3 right-3 sm:top-4 sm:right-4 z-20 p-2 rounded-full bg-white/90 hover:bg-white dark:bg-zinc-900/90 dark:hover:bg-zinc-900"
           aria-label="Close"
         >
-          <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+          <svg className="w-6 h-6 text-gray-600 dark:text-gray-300" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
         <DialogHeader className="pb-4">
           <DialogTitle className="text-xl font-semibold text-center">
-            Connect Wallet
+            {showGetStarted ? "Get Started" : "Connect Wallet"}
           </DialogTitle>
           <p className="text-sm text-muted-foreground text-center">
-            Choose a wallet to connect to DorkFi on {networkConfig.name}
+            {showGetStarted
+              ? "Create an account with email, or connect an existing wallet."
+              : `Choose a wallet to connect on ${networkConfig.name}`}
           </p>
-          <div className="flex items-center justify-center mt-2">
-            <div className="px-3 py-1 rounded-full bg-ocean-teal/20 text-ocean-teal text-xs font-medium">
-              {isAVM
-                ? "AVM Network"
-                : isEVM
-                ? "EVM Network"
-                : "Unknown Network"}
-            </div>
-          </div>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
+          {showNetworkSelector ? (
+            <div>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Network
+              </p>
+              <div className="grid gap-2">
+                {enabledNetworks.map((networkId) => {
+                  const config = getNetworkConfig(networkId);
+                  const isCurrent = networkId === currentNetwork;
+                  const isPending = pendingNetworkId === networkId;
+                  const busy =
+                    isSwitchingNetwork || pendingNetworkId != null;
+                  return (
+                    <button
+                      key={networkId}
+                      type="button"
+                      onClick={() => void handleNetworkSelect(networkId)}
+                      disabled={busy}
+                      className={cn(
+                        "flex w-full items-center justify-between gap-3 rounded-lg border p-3 text-left transition-colors",
+                        isCurrent
+                          ? "border-ocean-teal/50 bg-ocean-teal/10"
+                          : "border-gray-200/50 dark:border-gray-700/50 hover:border-ocean-teal/40",
+                        busy && "cursor-wait",
+                        busy && !isCurrent && !isPending && "opacity-50"
+                      )}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <img
+                          src={getNetworkLogoPath(networkId)}
+                          alt={`${config.name} logo`}
+                          className="w-8 h-8 rounded-full shrink-0"
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            target.src = "/placeholder.svg";
+                          }}
+                        />
+                        <div className="min-w-0">
+                          <p className="font-medium text-sm">
+                            {config.name}
+                            {isPending ? " (Switching…)" : ""}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {config.networkType.toUpperCase()}
+                          </p>
+                        </div>
+                      </div>
+                      {isPending ? (
+                        <div className="w-4 h-4 shrink-0 border-2 border-ocean-teal border-t-transparent rounded-full animate-spin" />
+                      ) : isCurrent ? (
+                        <div className="w-2 h-2 shrink-0 bg-green-500 rounded-full" />
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center">
+              <div className="px-3 py-1 rounded-full bg-ocean-teal/20 text-ocean-teal text-xs font-medium">
+                {networkConfig.name}
+                {" · "}
+                {isAVM ? "AVM" : isEVM ? "EVM" : "Network"}
+              </div>
+            </div>
+          )}
+
+          {showGetStarted ? (
+            <>
+              <div>
+                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Get started
+                </p>
+                <div className="flex items-center justify-between gap-3 p-4 rounded-lg border border-ocean-teal/30 bg-ocean-teal/5 hover:border-ocean-teal/50 transition-colors">
+                  <div className="flex items-center space-x-3 min-w-0">
+                    <div className="w-10 h-10 shrink-0 rounded-full flex items-center justify-center bg-ocean-teal/15 text-ocean-teal">
+                      <Sparkles className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="font-medium text-sm">Continue with email</h3>
+                      <p className="text-xs text-muted-foreground">
+                        Easy Start — no browser wallet required
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    onClick={() => void handleEasyStartEmail()}
+                    disabled={
+                      isEasyStartLoading ||
+                      (!privyEasyStart.login && !privyEasyStart.configured)
+                    }
+                    className="bg-ocean-teal hover:bg-ocean-teal/90 text-white font-semibold shrink-0"
+                    size="sm"
+                  >
+                    {isEasyStartLoading ? (
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <Mail className="w-4 h-4 mr-1" />
+                        Email
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="relative py-1">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-border" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase tracking-wide">
+                  <span className="bg-background px-2 text-muted-foreground">
+                    Or connect a wallet
+                  </span>
+                </div>
+              </div>
+            </>
+          ) : null}
+
           {walletProviders.map((provider) => (
             <div
               key={provider.id}
@@ -479,8 +649,7 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
 
         <div className="pt-6 mt-4 border-t border-gray-200/50 dark:border-gray-700/50">
           <p className="text-xs text-muted-foreground text-center">
-            By connecting a wallet, you agree to our Terms of Service and
-            Privacy Policy.
+            By connecting, you agree to our Terms of Service and Privacy Policy.
           </p>
         </div>
       </DialogContent>

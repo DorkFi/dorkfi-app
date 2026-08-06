@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
 import { waitForConfirmation } from "algosdk";
-import BigNumber from "bignumber.js";
-import { ChevronDown, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -13,7 +12,6 @@ import {
 } from "@/components/ui/dialog";
 import DorkFiButton from "@/components/ui/DorkFiButton";
 import AssetSelector from "@/components/easy-borrow/AssetSelector";
-import SavingsSummary from "@/components/easy-savings/SavingsSummary";
 import SupplyBorrowCongrats from "@/components/SupplyBorrowCongrats";
 import { useEasySavingsQuote } from "@/hooks/useEasySavingsQuote";
 import { useToast } from "@/hooks/use-toast";
@@ -21,13 +19,14 @@ import {
   getAlgorandNetworkFromNetworkId,
   type NetworkId,
 } from "@/config";
-import { deposit } from "@/services/lendingService";
-import algorandService from "@/services/algorandService";
 import {
-  savingsAccountDisplayLabel,
-} from "@/services/savingsRouteResolver";
+  getMaxWithdrawableForMarket,
+  withdraw,
+} from "@/services/lendingService";
+import algorandService from "@/services/algorandService";
+import { savingsAccountDisplayLabel } from "@/services/savingsRouteResolver";
 import type { SavingsRoute } from "@/types/easySavings";
-import { formatUsdAmount, cn } from "@/lib/utils";
+import { formatUsdAmount } from "@/lib/utils";
 import { getExplorerTransactionUrl } from "@/utils/explorerLinks";
 import {
   isRainbowkitXchainWallet,
@@ -41,9 +40,9 @@ const MODAL_SHELL =
 type CtaState =
   | "connect"
   | "enter_amount"
-  | "insufficient_balance"
-  | "cap_exceeded"
-  | "supply";
+  | "no_position"
+  | "insufficient"
+  | "withdraw";
 
 export type SavingsTxSuccessPayload = {
   txId: string;
@@ -52,12 +51,11 @@ export type SavingsTxSuccessPayload = {
   symbol: string;
 };
 
-type EasySavingsDepositModalProps = {
+type EasySavingsWithdrawModalProps = {
   isOpen: boolean;
   onClose: () => void;
   route: SavingsRoute | null;
   networkId: NetworkId;
-  isHighYield?: boolean;
   onConnectWallet?: () => void;
   onSuccess?: (payload: SavingsTxSuccessPayload) => void;
 };
@@ -67,22 +65,20 @@ function formatToken(n: number | null | undefined, digits = 4): string {
   return n.toLocaleString(undefined, { maximumFractionDigits: digits });
 }
 
-const EasySavingsDepositModal = ({
+const EasySavingsWithdrawModal = ({
   isOpen,
   onClose,
   route,
   networkId,
-  isHighYield = false,
   onConnectWallet,
   onSuccess,
-}: EasySavingsDepositModalProps) => {
+}: EasySavingsWithdrawModalProps) => {
   const { activeAccount, signTransactions, activeWallet } =
     useDorkFiWalletAdapter();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
   const [amount, setAmount] = useState("");
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [txId, setTxId] = useState<string | null>(null);
@@ -95,14 +91,46 @@ const EasySavingsDepositModal = ({
     amount,
   });
 
+  const maxWithdrawQuery = useQuery({
+    queryKey: [
+      "easySavings",
+      "maxWithdraw",
+      networkId,
+      activeAccount?.address,
+      route?.poolId,
+      route?.asset.contractId,
+    ],
+    enabled: Boolean(
+      isOpen && route && activeAccount?.address
+    ),
+    staleTime: 15_000,
+    queryFn: async () => {
+      if (!route || !activeAccount?.address) return null;
+      return getMaxWithdrawableForMarket(
+        route.poolId,
+        route.asset.contractId,
+        activeAccount.address,
+        networkId,
+        route.asset.decimals
+      );
+    },
+  });
+
   const symbol = route ? savingsAccountDisplayLabel(route) : "—";
   const logo = route?.asset.logoPath || "/placeholder.svg";
   const amountNum = parseFloat(amount) || 0;
 
+  const maxWithdrawable = (() => {
+    const fromChain = maxWithdrawQuery.data?.maxWithdrawUnderlying;
+    if (fromChain != null && Number.isFinite(fromChain) && fromChain >= 0) {
+      return fromChain;
+    }
+    return quote.existingDeposit ?? 0;
+  })();
+
   useEffect(() => {
     if (!isOpen) return;
     setAmount("");
-    setAdvancedOpen(false);
     setIsSubmitting(false);
     setShowSuccess(false);
     setTxId(null);
@@ -111,46 +139,36 @@ const EasySavingsDepositModal = ({
 
   const ctaState: CtaState = (() => {
     if (!activeAccount) return "connect";
+    if (maxWithdrawable <= 1e-12) return "no_position";
     if (!route || amountNum <= 0) return "enter_amount";
-    if (
-      quote.walletBalance != null &&
-      amountNum > quote.walletBalance + 1e-12
-    ) {
-      return "insufficient_balance";
-    }
-    if (
-      quote.remainingSupplyCap != null &&
-      amountNum > quote.remainingSupplyCap + 1e-12
-    ) {
-      return "cap_exceeded";
-    }
-    return "supply";
+    if (amountNum > maxWithdrawable + 1e-8) return "insufficient";
+    return "withdraw";
   })();
 
   const ctaLabel: Record<CtaState, string> = {
     connect: "Connect Wallet",
     enter_amount: "Enter Amount",
-    insufficient_balance: "Insufficient Balance",
-    cap_exceeded: "Supply Cap Reached",
-    supply: isSubmitting ? "Supplying…" : "Supply",
+    no_position: "Nothing to Withdraw",
+    insufficient: "Exceeds Withdrawable",
+    withdraw: isSubmitting ? "Withdrawing…" : "Withdraw",
   };
 
   const ctaDisabled =
-    isSubmitting || (ctaState !== "connect" && ctaState !== "supply");
+    isSubmitting || (ctaState !== "connect" && ctaState !== "withdraw");
 
   const invalidateQuotes = () => {
     void queryClient.invalidateQueries({ queryKey: ["easySavings"] });
   };
 
-  const handleSupply = async () => {
+  const handleWithdraw = async () => {
     if (ctaState === "connect") {
       onConnectWallet?.();
       return;
     }
-    if (ctaState !== "supply" || !route || !activeAccount?.address) return;
+    if (ctaState !== "withdraw" || !route || !activeAccount?.address) return;
     if (!signTransactions) {
       toast({
-        title: "Cannot deposit",
+        title: "Cannot withdraw",
         description: "Connected wallet does not support signing.",
         variant: "destructive",
       });
@@ -169,39 +187,47 @@ const EasySavingsDepositModal = ({
 
     setIsSubmitting(true);
     try {
-      const amountInAtomicUnits = new BigNumber(amount)
-        .multipliedBy(10 ** route.asset.decimals)
-        .integerValue(BigNumber.ROUND_DOWN)
-        .toFixed(0);
-
-      if (amountInAtomicUnits === "0") {
-        throw new Error("Amount is too small after decimal conversion.");
+      // `withdraw()` multiplies by token decimals internally (human amount).
+      // Unlike `deposit()`, which expects atomic units — do not convert here.
+      const amountHuman = amount.trim();
+      if (!amountHuman || !(parseFloat(amountHuman) > 0)) {
+        throw new Error("Enter a positive withdraw amount.");
       }
 
-      const result = await deposit(
+      const withdrawAll =
+        amountNum >= maxWithdrawable * 0.999 ||
+        Math.abs(amountNum - maxWithdrawable) < 1e-8;
+
+      const result = await withdraw(
         route.poolId,
         route.asset.contractId,
         route.asset.tokenStandard,
-        amountInAtomicUnits,
+        amountHuman,
         activeAccount.address,
-        networkId
+        networkId,
+        {
+          withdrawAll,
+          maxWithdrawScaled: withdrawAll
+            ? maxWithdrawQuery.data?.maxWithdrawScaled
+            : undefined,
+        }
       );
 
       if (!result.success) {
         throw new Error(
           "error" in result && result.error
             ? String(result.error)
-            : "Deposit failed to build."
+            : "Withdraw failed to build."
         );
       }
       if (!("txns" in result) || !result.txns?.length) {
-        throw new Error("No transactions returned for deposit.");
+        throw new Error("No transactions returned for withdraw.");
       }
 
       const walletName = activeWallet?.metadata?.name || "your wallet";
       toast({
         title: "Please Sign Transaction",
-        description: `Approve the deposit in ${walletName}.`,
+        description: `Approve the withdraw in ${walletName}.`,
         duration: 12_000,
       });
 
@@ -228,13 +254,13 @@ const EasySavingsDepositModal = ({
       invalidateQuotes();
       onSuccess?.({
         txId: res.txid,
-        kind: "deposit",
+        kind: "withdraw",
         amount,
         symbol,
       });
       toast({
-        title: "Deposit confirmed",
-        description: `Supplied ${amount} ${symbol}.`,
+        title: "Withdraw confirmed",
+        description: `Withdrew ${amount} ${symbol}.`,
       });
     } catch (e: unknown) {
       if (isRainbowkitXchainWallet(activeWallet)) {
@@ -242,10 +268,9 @@ const EasySavingsDepositModal = ({
       }
       const { userRejected, message } = getTransactionErrorFeedback(e);
       toast({
-        title: userRejected ? "Deposit cancelled" : "Deposit failed",
+        title: userRejected ? "Withdraw cancelled" : "Withdraw failed",
         description: message,
         variant: "destructive",
-        duration: 14_000,
       });
     } finally {
       setIsSubmitting(false);
@@ -256,7 +281,6 @@ const EasySavingsDepositModal = ({
     setShowSuccess(false);
     setTxId(null);
     setAmount("");
-    setAdvancedOpen(false);
   };
 
   if (!route) return null;
@@ -272,7 +296,7 @@ const EasySavingsDepositModal = ({
         <div className="max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain px-5 pt-10 pb-6 sm:px-7 sm:pb-7">
           {showSuccess ? (
             <SupplyBorrowCongrats
-              transactionType="deposit"
+              transactionType="withdraw"
               asset={symbol}
               assetIcon={logo}
               amount={amount}
@@ -296,14 +320,10 @@ const EasySavingsDepositModal = ({
             <>
               <DialogHeader className="space-y-2 text-center pr-6">
                 <DialogTitle className="text-2xl font-bold">
-                  Deposit
+                  Withdraw
                 </DialogTitle>
                 <DialogDescription className="text-sm text-muted-foreground">
-                  Supply {symbol} to earn{" "}
-                  {quote.supplyApyPercent != null
-                    ? `${quote.supplyApyPercent.toFixed(2)}%`
-                    : "—"}{" "}
-                  APY in {route.marketLabel}.
+                  Withdraw {symbol} from your savings in {route.marketLabel}.
                 </DialogDescription>
                 <div className="flex items-center justify-center gap-3 pt-2">
                   <img
@@ -317,20 +337,17 @@ const EasySavingsDepositModal = ({
 
               <div className="mt-6 space-y-4">
                 <AssetSelector
-                  label={`Supply ${symbol}`}
+                  label={`Withdraw ${symbol}`}
                   options={[
                     {
                       configKey: route.asset.configKey,
                       symbol,
                       logoPath: route.asset.logoPath,
-                      balance: quote.walletBalance,
+                      balance: maxWithdrawable,
                       balanceUsd:
-                        quote.walletBalance != null && quote.price != null
-                          ? quote.walletBalance * quote.price
+                        quote.price != null
+                          ? maxWithdrawable * quote.price
                           : null,
-                      subtitle: isHighYield
-                        ? "Pooled · higher risk"
-                        : undefined,
                     },
                   ]}
                   value={route.asset.configKey}
@@ -341,82 +358,70 @@ const EasySavingsDepositModal = ({
                   amountDisabled={isSubmitting}
                   showMax
                   onMax={() => {
-                    if (
-                      quote.walletBalance != null &&
-                      quote.walletBalance > 0
-                    ) {
-                      let max = quote.walletBalance;
-                      if (
-                        quote.remainingSupplyCap != null &&
-                        quote.remainingSupplyCap < max
-                      ) {
-                        max = quote.remainingSupplyCap;
-                      }
-                      setAmount(String(max));
+                    if (maxWithdrawable > 0) {
+                      setAmount(String(maxWithdrawable));
                     }
                   }}
                   footer={
                     <span>
-                      Wallet: {formatToken(quote.walletBalance)} {symbol}
-                      {quote.walletBalance != null && quote.price != null
-                        ? ` · ${formatUsdAmount(quote.walletBalance * quote.price)}`
+                      Withdrawable: {formatToken(maxWithdrawable)} {symbol}
+                      {quote.price != null && maxWithdrawable > 0
+                        ? ` · ${formatUsdAmount(maxWithdrawable * quote.price)}`
                         : ""}
                       {quote.existingDeposit != null &&
                       quote.existingDeposit > 0
                         ? ` · Supplied ${formatToken(quote.existingDeposit)}`
                         : ""}
-                      {isHighYield ? " · Pooled asset" : ""}
                     </span>
                   }
                 />
 
-                <SavingsSummary route={route} amount={amount} quote={quote} />
-
-                <button
-                  type="button"
-                  className="flex w-full items-center justify-between text-sm text-muted-foreground hover:text-foreground"
-                  onClick={() => setAdvancedOpen((v) => !v)}
-                >
-                  Advanced details
-                  <ChevronDown
-                    className={cn(
-                      "size-4 transition-transform",
-                      advancedOpen && "rotate-180"
-                    )}
-                  />
-                </button>
-                {advancedOpen ? (
-                  <dl className="space-y-1.5 rounded-xl border border-border/50 p-3 text-xs">
-                    <div className="flex justify-between gap-2">
-                      <dt className="text-muted-foreground">Market</dt>
-                      <dd>
-                        {route.marketLabel} · {route.asset.symbol}
-                      </dd>
-                    </div>
-                    <div className="flex justify-between gap-2">
-                      <dt className="text-muted-foreground">Pool ID</dt>
-                      <dd className="font-mono">{route.poolId}</dd>
-                    </div>
-                    <div className="flex justify-between gap-2">
-                      <dt className="text-muted-foreground">Supply cap</dt>
-                      <dd>{formatToken(quote.supplyCapHuman)}</dd>
-                    </div>
-                    <div className="flex justify-between gap-2">
-                      <dt className="text-muted-foreground">Remaining cap</dt>
-                      <dd>{formatToken(quote.remainingSupplyCap)}</dd>
-                    </div>
-                  </dl>
-                ) : null}
+                <div className="rounded-2xl border border-border/60 divide-y divide-border/50 text-sm">
+                  <div className="flex items-start justify-between gap-3 px-4 py-2.5">
+                    <span className="text-muted-foreground shrink-0">
+                      You withdraw
+                    </span>
+                    <span className="font-medium text-right">
+                      {amountNum > 0
+                        ? `${formatToken(amountNum, 6)} ${symbol}${
+                            quote.amountUsd > 0
+                              ? ` · ${formatUsdAmount(quote.amountUsd)}`
+                              : ""
+                          }`
+                        : `— ${symbol}`}
+                    </span>
+                  </div>
+                  <div className="flex items-start justify-between gap-3 px-4 py-2.5">
+                    <span className="text-muted-foreground shrink-0">
+                      Your position
+                    </span>
+                    <span className="font-medium text-right">
+                      {quote.existingDeposit != null &&
+                      quote.existingDeposit > 0
+                        ? `${formatToken(quote.existingDeposit, 6)} ${symbol}`
+                        : "None"}
+                    </span>
+                  </div>
+                  <div className="flex items-start justify-between gap-3 px-4 py-2.5">
+                    <span className="text-muted-foreground shrink-0">
+                      Market
+                    </span>
+                    <span className="font-medium text-right">
+                      {route.marketLabel} · {route.asset.symbol}
+                    </span>
+                  </div>
+                </div>
 
                 {quote.error ? (
                   <p className="text-xs text-destructive">{quote.error}</p>
                 ) : null}
 
                 <DorkFiButton
+                  variant="withdraw"
                   className="w-full h-12"
                   disabled={ctaDisabled}
                   onClick={() => {
-                    void handleSupply();
+                    void handleWithdraw();
                   }}
                 >
                   {isSubmitting ? (
@@ -437,4 +442,4 @@ const EasySavingsDepositModal = ({
   );
 };
 
-export default EasySavingsDepositModal;
+export default EasySavingsWithdrawModal;

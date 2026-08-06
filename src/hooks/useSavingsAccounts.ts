@@ -1,11 +1,16 @@
 import { useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
 import type { NetworkId } from "@/config";
+import { useWadUsdcTinymanApyPercent } from "@/hooks/useWadUsdcTinymanApyPercent";
 import {
   listCoreSavingsAssetConfigKeys,
   listHighYieldSavingsAssetConfigKeys,
   resolveSavingsRoute,
 } from "@/services/savingsRouteResolver";
+import {
+  isLeveragedWadUsdcRoute,
+  LEVERAGED_WAD_USDC_SAVINGS_KEY,
+} from "@/services/leveragedWadLpService";
 import type { SavingsRoute } from "@/types/easySavings";
 import { fetchMarketInfo, type MarketInfo } from "@/services/lendingService";
 import { usdPerTokenFromMarketInfoPrice } from "@/utils/assetDecimals";
@@ -56,7 +61,8 @@ function toRows(
   routes: SavingsRoute[],
   queries: Array<{ data?: MarketInfo; isLoading?: boolean }>,
   offset: number,
-  isHighYield: boolean
+  isHighYield: boolean,
+  wadUsdcTinyman?: { apyPercent: number | null; isLoading: boolean }
 ): SavingsAccountRow[] {
   return routes.map((route, i) => {
     const q = queries[offset + i];
@@ -76,14 +82,23 @@ function toRows(
     const tvlUsd =
       totalDeposits != null && price != null ? totalDeposits * price : null;
 
+    const marketApy = apyFromMarket(market);
+    const isWadUsdc = isLeveragedWadUsdcRoute(route.asset.configKey);
+    const apy = isWadUsdc
+      ? wadUsdcTinyman?.apyPercent ??
+        (wadUsdcTinyman?.isLoading ? null : marketApy)
+      : marketApy;
+
     return {
       route,
-      apy: apyFromMarket(market),
+      apy,
       totalDeposits,
       supplyCap,
       price,
       tvlUsd,
-      isLoading: Boolean(q?.isLoading),
+      isLoading:
+        Boolean(q?.isLoading) ||
+        Boolean(isWadUsdc && wadUsdcTinyman?.isLoading),
       isHighYield,
     };
   });
@@ -112,6 +127,14 @@ export function useSavingsAccounts(networkId: NetworkId): {
     [coreRoutes, highYieldRoutes]
   );
 
+  const needsWadUsdcTinyman = highYieldRoutes.some(
+    (r) => r.asset.configKey === LEVERAGED_WAD_USDC_SAVINGS_KEY
+  );
+  const wadUsdcTinyman = useWadUsdcTinymanApyPercent(
+    networkId,
+    needsWadUsdcTinyman
+  );
+
   const queries = useQueries({
     queries: allRoutes.map((route) => ({
       queryKey: [
@@ -132,7 +155,8 @@ export function useSavingsAccounts(networkId: NetworkId): {
     highYieldRoutes,
     queries,
     coreRoutes.length,
-    true
+    true,
+    wadUsdcTinyman
   );
 
   return {
