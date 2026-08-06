@@ -1086,7 +1086,7 @@ const Portfolio = () => {
           }
 
           // Fetch both deposit and borrow balances for this token
-          const [depositBalance, borrowData] = await Promise.all([
+          const [depositData, borrowData] = await Promise.all([
             fetchUserDepositBalance(
               userAddress,
               token.poolId,
@@ -1101,7 +1101,8 @@ const Portfolio = () => {
             ),
           ]);
 
-          // Extract borrow balance and interest from the new return type
+          // Extract deposit / borrow balance and interest
+          const depositBalance = depositData?.balance || 0;
           const borrowBalance = borrowData?.balance || 0;
           const borrowInterest = borrowData?.interest || 0;
 

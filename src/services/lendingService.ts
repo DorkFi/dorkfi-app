@@ -60,6 +60,7 @@ import {
 import algosdk from "algosdk";
 import BigNumber from "bignumber.js";
 import { withRpcReadCache, invalidateRpcReadCache } from "@/utils/rpcReadCache";
+import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
 import { calcDepositReturn } from "@folks-finance/algorand-sdk";
 import {
   calculateDepositAPY,
@@ -2522,13 +2523,14 @@ export async function fetchBorrowPositionApiSnapshot(
 /**
  * Fetch user deposit balance for a specific market
  * This gets the user's scaled deposits from the lending pool contract
+ * Returns both the current deposit balance and accrued (earned) interest
  */
 export const fetchUserDepositBalance = async (
   userAddress: string,
   poolId: string,
   marketId: string,
   networkId: NetworkId
-): Promise<number | null> => {
+): Promise<{ balance: number; interest: number } | null> => {
   return withRpcReadCache(
     `userDeposit:${networkId}:${userAddress}:${poolId}:${marketId}`,
     () =>
@@ -2547,7 +2549,7 @@ const fetchUserDepositBalanceUncached = async (
   poolId: string,
   marketId: string,
   networkId: NetworkId
-): Promise<number | null> => {
+): Promise<{ balance: number; interest: number } | null> => {
   try {
     const networkConfig = getNetworkConfig(networkId);
 
@@ -2596,7 +2598,7 @@ const fetchUserDepositBalanceUncached = async (
           console.log(
             `No deposits found for user ${userAddress} in market ${marketId}`
           );
-          return 0; // Return 0 instead of null for no deposits
+          return { balance: 0, interest: 0 }; // Return 0 instead of null for no deposits
         }
 
         // Get current market data to access deposit index (sync_market = accrued supply index)
@@ -2612,33 +2614,30 @@ const fetchUserDepositBalanceUncached = async (
           return null;
         }
 
-        // Convert scaled deposits to actual token amount using deposit index scaling
+        // Convert scaled deposits to actual token amount using deposit index scaling.
+        // Accrued = (scaled × (I_market − I_user)) / SCALE — same index split as borrows.
         const scaledDeposits = userData.scaledDeposits.toString();
         const userDepositIndex = userData.depositIndex.toString();
         const currentDepositIndex = marketInfo.depositIndex;
 
-        // Calculate actual deposits using the formula:
-        // actual_deposits = (scaled_deposits * current_deposit_index) / SCALE
-        const actualDepositsRaw =
-          BigInt(scaledDeposits) === 0n
-            ? 0n
-            : (BigInt(scaledDeposits) * BigInt(currentDepositIndex)) /
-            BigInt(1e18);
-
-        // Convert to human-readable format by accounting for token decimals
-        const actualDepositAmount =
-          Number(actualDepositsRaw) / Math.pow(10, token.decimals);
+        const { totalDebt: balance, indexIncrementAccrued: interest } =
+          borrowDebtFromScaledAndIndices(
+            scaledDeposits,
+            userDepositIndex,
+            currentDepositIndex,
+            token.decimals
+          );
 
         console.log(`User deposit balance for ${token.symbol}:`, {
           scaledDeposits: scaledDeposits.toString(),
           userDepositIndex: userDepositIndex.toString(),
           currentDepositIndex: currentDepositIndex.toString(),
-          actualDepositsRaw: actualDepositsRaw.toString(),
-          actualDepositAmount,
+          balance,
+          interest,
           tokenDecimals: token.decimals,
         });
 
-        return actualDepositAmount;
+        return { balance, interest };
       } else {
         console.warn(
           `Failed to get user data for market ${marketId}:`,
@@ -2714,11 +2713,13 @@ export const fetchUserWalletBalance = async (
         tokenConfig.tokenStandard === "asa" ||
         tokenConfig.tokenStandard === "asa-asa"
       ) {
-        // For ASA tokens, get balance from account asset information
+        // For ASA tokens, get balance from account asset information.
+        // algosdk v3 nests amount under assetHolding / asset-holding.
         const accountAssetInfo = await clients.algod
           .accountAssetInformation(userAddress, Number(tokenConfig.assetId))
           .do();
-        balance = BigInt(accountAssetInfo?.amount || 0)
+        balance =
+          getAccountAssetHoldingAmountAtomic(accountAssetInfo) ?? 0n;
       } else if (
         tokenConfig.tokenStandard === "arc200" &&
         (tokenConfig.contractId || token.underlyingContractId)
@@ -3460,14 +3461,24 @@ export const withdraw = async (
       {
         const token_balanceR = await ciToken.arc200_balanceOf(userAddress);
         console.log("withdraw:token_balanceR (user)", { token_balanceR });
-        token_balance = BigInt(token_balanceR.returnValue);
+        if (
+          token_balanceR?.success &&
+          token_balanceR.returnValue != null
+        ) {
+          token_balance = BigInt(token_balanceR.returnValue);
+        }
       }
 
       let ntoken_balance = BigInt(0);
       {
         const ntoken_balanceR = await ciNToken.arc200_balanceOf(userAddress);
         console.log("withdraw:ntoken_balanceR (user)", { ntoken_balanceR });
-        ntoken_balance = BigInt(ntoken_balanceR.returnValue);
+        if (
+          ntoken_balanceR?.success &&
+          ntoken_balanceR.returnValue != null
+        ) {
+          ntoken_balance = BigInt(ntoken_balanceR.returnValue);
+        }
       }
 
       let folksDepositInterestIndex: bigint | null = null;
@@ -3598,6 +3609,18 @@ export const withdraw = async (
         );
 
         console.log("withdraw:initialUnderlyingR", { initialUnderlyingR });
+
+        if (
+          !initialUnderlyingR?.success ||
+          initialUnderlyingR.returnValue == null
+        ) {
+          throw new Error(
+            typeof initialUnderlyingR?.error === "string"
+              ? initialUnderlyingR.error
+              : initialUnderlyingR?.error?.message ||
+                  "Withdraw simulation failed (no underlying amount). Check amount and try again."
+          );
+        }
 
         underlying_amount = BigInt(initialUnderlyingR.returnValue);
         bestUnderlyingAmount = underlying_amount;
@@ -5546,10 +5569,22 @@ export const deposit = async (
       }
 
       if (!customTx.success) {
-        if (customTx.error.match(/tried to spend/)) {
-          throw new Error(customTx.error);
-        }
-        throw new Error("Deposit transaction failed");
+        // arccjs may set `error` to a simulation failureMessage string or an Error.
+        // Never swallow it — the opaque "Deposit transaction failed" hid root causes.
+        const raw = customTx?.error;
+        const errMsg =
+          typeof raw === "string"
+            ? raw
+            : raw instanceof Error
+              ? raw.message
+              : raw != null &&
+                  typeof (raw as { message?: unknown }).message === "string"
+                ? String((raw as { message: string }).message)
+                : raw != null
+                  ? String(raw)
+                  : "";
+        console.error("Deposit simulation failed:", errMsg || customTx);
+        throw new Error(errMsg || "Deposit transaction failed");
       }
 
       console.log("=== DEPOSIT SUCCESS ===");

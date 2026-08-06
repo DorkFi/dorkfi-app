@@ -1,11 +1,32 @@
 import { useCallback, useMemo } from "react";
 import { useWallet } from "@txnlab/use-wallet-react";
+import algosdk from "algosdk";
 import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
 import { privyEasyStartSyntheticWallet } from "@/wallet/privySyntheticWallet";
 
 type WalletAccount = NonNullable<
   ReturnType<typeof useWallet>["activeAccount"]
 >;
+
+/**
+ * Normalize wallet / xChain addresses to plain strings.
+ * Dual algosdk copies turn Address objects into `Not an address` via instanceof.
+ */
+function asAddressString(address: unknown): string | undefined {
+  if (address == null) return undefined;
+  let value: string | undefined;
+  if (typeof address === "string") {
+    value = address.trim();
+  } else if (
+    typeof address === "object" &&
+    typeof (address as { toString?: () => string }).toString === "function"
+  ) {
+    const s = (address as { toString: () => string }).toString().trim();
+    if (s && s !== "[object Object]") value = s;
+  }
+  if (!value) return undefined;
+  return algosdk.isValidAddress(value) ? value : undefined;
+}
 
 /**
  * Extends `useWallet()` with Privy Easy Start: Algorand xChain address + EIP-712 signing
@@ -15,17 +36,15 @@ export function useDorkFiWalletAdapter() {
   const wallet = useWallet();
   const privy = usePrivyEasyStart();
 
+  const walletAddress = asAddressString(wallet.activeAccount?.address);
+  const privyAlgoAddress = asAddressString(privy.algorandAddress);
+
   const isPrivySession = useMemo(
     () =>
-      !wallet.activeAccount?.address &&
+      !walletAddress &&
       privy.authenticated &&
-      Boolean(privy.evmAddress || privy.algorandAddress),
-    [
-      privy.algorandAddress,
-      privy.authenticated,
-      privy.evmAddress,
-      wallet.activeAccount?.address,
-    ]
+      Boolean(privy.evmAddress || privyAlgoAddress),
+    [privy.authenticated, privy.evmAddress, privyAlgoAddress, walletAddress]
   );
 
   /** Full Easy Start (can sign + load Algorand portfolio). */
@@ -33,21 +52,28 @@ export function useDorkFiWalletAdapter() {
     () =>
       isPrivySession &&
       Boolean(privy.evmAddress) &&
-      Boolean(privy.algorandAddress) &&
+      Boolean(privyAlgoAddress) &&
       Boolean(privy.signTransactions),
     [
       isPrivySession,
-      privy.algorandAddress,
       privy.evmAddress,
+      privyAlgoAddress,
       privy.signTransactions,
     ]
   );
 
   const activeAccount = useMemo((): WalletAccount | undefined => {
-    if (wallet.activeAccount) return wallet.activeAccount;
-    if (!isPrivySession || !privy.algorandAddress) return undefined;
-    return { address: privy.algorandAddress } as WalletAccount;
-  }, [isPrivySession, privy.algorandAddress, wallet.activeAccount]);
+    if (wallet.activeAccount && walletAddress) {
+      return { ...wallet.activeAccount, address: walletAddress };
+    }
+    if (!isPrivySession || !privyAlgoAddress) return undefined;
+    return { address: privyAlgoAddress } as WalletAccount;
+  }, [
+    isPrivySession,
+    privyAlgoAddress,
+    wallet.activeAccount,
+    walletAddress,
+  ]);
 
   const activeWallet = useMemo(() => {
     if (wallet.activeWallet) return wallet.activeWallet;
@@ -57,7 +83,7 @@ export function useDorkFiWalletAdapter() {
 
   const signTransactions = useCallback(
     (txns: Uint8Array[]) => {
-      if (wallet.activeAccount?.address) {
+      if (walletAddress) {
         return wallet.signTransactions(txns);
       }
       if (isPrivyActive && privy.signTransactions) {
@@ -68,8 +94,8 @@ export function useDorkFiWalletAdapter() {
     [
       isPrivyActive,
       privy.signTransactions,
-      wallet.activeAccount?.address,
       wallet.signTransactions,
+      walletAddress,
     ]
   );
 

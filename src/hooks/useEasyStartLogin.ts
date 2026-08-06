@@ -39,7 +39,7 @@ export function useEasyStartLogin() {
       toast({
         title: "Easy Start unavailable",
         description:
-          "Privy did not initialize. Confirm VITE_PRIVY_APP_ID, then hard-refresh on http://localhost:8080.",
+          "Privy did not initialize. Confirm VITE_PRIVY_APP_ID, then hard-refresh on an allowlisted origin (http://localhost:8080 or http://localhost:5173).",
         variant: "destructive",
       });
       return;
@@ -62,7 +62,7 @@ export function useEasyStartLogin() {
       toast({
         title: "Privy failed to load",
         description: alreadyReloaded
-          ? "Hard-refresh (Cmd+Shift+R) on http://localhost:8080. If it persists, check the browser console for blocked requests to auth.privy.io."
+          ? "Hard-refresh (Cmd+Shift+R) on http://localhost:8080 or http://localhost:5173. If it persists, check the browser console for blocked requests to auth.privy.io."
           : "Reloading once to recover Privy after hot-reload…",
         variant: "destructive",
       });

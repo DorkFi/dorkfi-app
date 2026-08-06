@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { useWallet } from "@txnlab/use-wallet-react";
+import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
 import { ChevronDown, Info } from "lucide-react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import type { NetworkId } from "@/config";
 import {
+  EASY_BORROW_POOL_D_USDC_UI_KEY,
   easyBorrowUiConfigKey,
   listBorrowAssetOptionsForCollateral,
   listCollateralConfigKeys,
@@ -39,6 +40,24 @@ function formatApr(n: number | null | undefined): string {
   return `${n.toFixed(2)}%`;
 }
 
+/** Prefer Pool D USDC, then plain USDC, then first available borrow option. */
+function preferredBorrowUiKey(
+  options: { uiKey: string }[]
+): string | undefined {
+  if (options.length === 0) return undefined;
+  return (
+    options.find((o) => o.uiKey === EASY_BORROW_POOL_D_USDC_UI_KEY)?.uiKey ??
+    options.find((o) => o.uiKey === "USDC")?.uiKey ??
+    options[0]?.uiKey
+  );
+}
+
+function pickDefaultCollateralKey(collateralKeys: string[]): string {
+  if (collateralKeys.includes("USDC")) return "USDC";
+  if (collateralKeys.includes("ALGO")) return "ALGO";
+  return collateralKeys[0] ?? "";
+}
+
 type CtaState =
   | "connect"
   | "enter_amount"
@@ -53,7 +72,7 @@ type CtaState =
 const BorrowCard = () => {
   const { currentNetwork } = useNetwork();
   const networkId = currentNetwork as NetworkId;
-  const { activeAccount } = useWallet();
+  const { activeAccount } = useDorkFiWalletAdapter();
   const [walletModalOpen, setWalletModalOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -63,10 +82,16 @@ const BorrowCard = () => {
     [networkId]
   );
 
-  const [collateralKey, setCollateralKey] = useState<string>(
-    () => (collateralKeys.includes("ALGO") ? "ALGO" : collateralKeys[0] ?? "")
+  const [collateralKey, setCollateralKey] = useState<string>(() =>
+    pickDefaultCollateralKey(collateralKeys)
   );
-  const [borrowUiKey, setBorrowUiKey] = useState("WAD");
+  const [borrowUiKey, setBorrowUiKey] = useState(() => {
+    const key = pickDefaultCollateralKey(collateralKeys);
+    const opts = key
+      ? listBorrowAssetOptionsForCollateral(networkId, key)
+      : [];
+    return preferredBorrowUiKey(opts) ?? EASY_BORROW_POOL_D_USDC_UI_KEY;
+  });
   const [collateralAmount, setCollateralAmount] = useState("");
   const [borrowAmount, setBorrowAmount] = useState("");
   const [collateralSource, setCollateralSource] =
@@ -79,6 +104,14 @@ const BorrowCard = () => {
         : [],
     [networkId, collateralKey]
   );
+
+  // Prefer Pool D USDC (then USDC) when available for the selected collateral.
+  useEffect(() => {
+    if (borrowOptions.length === 0) return;
+    if (borrowOptions.some((o) => o.uiKey === borrowUiKey)) return;
+    const preferred = preferredBorrowUiKey(borrowOptions);
+    if (preferred) setBorrowUiKey(preferred);
+  }, [borrowOptions, borrowUiKey]);
 
   const selectedBorrowOption =
     borrowOptions.find((o) => o.uiKey === borrowUiKey) ??
@@ -404,6 +437,12 @@ const BorrowCard = () => {
                 setCollateralKey(key);
                 setCollateralAmount("");
                 setBorrowAmount("");
+                const opts = listBorrowAssetOptionsForCollateral(
+                  networkId,
+                  key
+                );
+                const preferred = preferredBorrowUiKey(opts);
+                if (preferred) setBorrowUiKey(preferred);
               }}
               amount={
                 collateralSource === "existing"

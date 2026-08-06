@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useWallet } from "@txnlab/use-wallet-react";
+import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
 import { waitForConfirmation } from "algosdk";
 import BigNumber from "bignumber.js";
 import { ChevronDown, Loader2 } from "lucide-react";
@@ -33,6 +33,7 @@ import {
   isRainbowkitXchainWallet,
   withRainbowkitHostDialogDismissed,
 } from "@/wallet/xchainSignUi";
+import { getTransactionErrorFeedback } from "@/utils/errorUtils";
 
 const MODAL_SHELL =
   "w-full max-w-[98vw] sm:max-w-md rounded-t-2xl sm:rounded-xl p-0 max-h-[min(90vh,90dvh)] overflow-hidden flex flex-col";
@@ -44,6 +45,13 @@ type CtaState =
   | "cap_exceeded"
   | "supply";
 
+export type SavingsTxSuccessPayload = {
+  txId: string;
+  kind: "deposit" | "withdraw";
+  amount: string;
+  symbol: string;
+};
+
 type EasySavingsDepositModalProps = {
   isOpen: boolean;
   onClose: () => void;
@@ -51,7 +59,7 @@ type EasySavingsDepositModalProps = {
   networkId: NetworkId;
   isHighYield?: boolean;
   onConnectWallet?: () => void;
-  onSuccess?: (txId: string) => void;
+  onSuccess?: (payload: SavingsTxSuccessPayload) => void;
 };
 
 function formatToken(n: number | null | undefined, digits = 4): string {
@@ -68,7 +76,8 @@ const EasySavingsDepositModal = ({
   onConnectWallet,
   onSuccess,
 }: EasySavingsDepositModalProps) => {
-  const { activeAccount, signTransactions, activeWallet } = useWallet();
+  const { activeAccount, signTransactions, activeWallet } =
+    useDorkFiWalletAdapter();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -217,7 +226,12 @@ const EasySavingsDepositModal = ({
       setShowSuccess(true);
       setRainbowkitSignDialogSuppressed(false);
       invalidateQuotes();
-      onSuccess?.(res.txid);
+      onSuccess?.({
+        txId: res.txid,
+        kind: "deposit",
+        amount,
+        symbol,
+      });
       toast({
         title: "Deposit confirmed",
         description: `Supplied ${amount} ${symbol}.`,
@@ -226,11 +240,12 @@ const EasySavingsDepositModal = ({
       if (isRainbowkitXchainWallet(activeWallet)) {
         setRainbowkitSignDialogSuppressed(false);
       }
-      const msg = e instanceof Error ? e.message : "Deposit failed.";
+      const { userRejected, message } = getTransactionErrorFeedback(e);
       toast({
-        title: "Deposit failed",
-        description: msg,
+        title: userRejected ? "Deposit cancelled" : "Deposit failed",
+        description: message,
         variant: "destructive",
+        duration: 14_000,
       });
     } finally {
       setIsSubmitting(false);

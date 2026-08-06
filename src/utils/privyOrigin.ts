@@ -1,9 +1,16 @@
-/** Privy dashboard allowlist for DorkFi (keep in sync with dashboard). */
+/**
+ * Privy dashboard allowlist for DorkFi / Chub (keep in sync with dashboard).
+ * - dorkfi-app dev: :8080
+ * - chub-hub Vite default: :5173 (strictPort)
+ * - :5174 when 5173 is already taken
+ */
 export const PRIVY_ALLOWED_ORIGINS = [
   "https://app.dork.fi",
   "https://www.app.dork.fi",
   "https://beta.dork.fi",
   "http://localhost:8080",
+  "http://localhost:5173",
+  "http://localhost:5174",
 ] as const;
 
 /** Origins where Easy Start is on without `VITE_ENABLE_PRIVY_ONBOARDING`. */
@@ -15,7 +22,12 @@ export const PRIVY_AUTO_ENABLE_ORIGINS = ["https://beta.dork.fi"] as const;
  */
 export const DEFAULT_PRIVY_APP_ID = "cmrfehwv300ix0ci8uh0tnm8q";
 
-const LOCAL_PRIVY_ORIGIN = "http://localhost:8080";
+const LOCAL_PRIVY_ORIGINS = [
+  "http://localhost:8080",
+  "http://localhost:5173",
+  "http://localhost:5174",
+] as const;
+const LOCAL_PRIVY_HINT = LOCAL_PRIVY_ORIGINS.join(" or ");
 
 export function getPrivyAppId(): string {
   const fromEnv = (import.meta.env.VITE_PRIVY_APP_ID ?? "").trim();
@@ -55,19 +67,19 @@ export function getPrivyOriginHint(origin = window.location.origin): string | nu
   if (isPrivyOriginAllowed(origin)) return null;
 
   if (import.meta.env.DEV) {
-    if (origin === "http://localhost:8081") {
-      return `Privy only allowlists port 8080 locally. Open ${LOCAL_PRIVY_ORIGIN} (not :8081).`;
+    if (origin.startsWith("http://localhost:") && !isPrivyOriginAllowed(origin)) {
+      return `This local port is not allowlisted. Use ${LOCAL_PRIVY_HINT}, or add ${origin} to PRIVY_ALLOWED_ORIGINS and the Privy dashboard.`;
     }
     if (
       origin.startsWith("http://127.0.0.1:") ||
       origin.startsWith("http://[::1]:")
     ) {
-      return `Privy allowlists localhost, not the numeric IP. Open ${LOCAL_PRIVY_ORIGIN}.`;
+      return `Privy allowlists localhost, not the numeric IP. Open ${LOCAL_PRIVY_HINT}.`;
     }
     if (origin.startsWith("http://10.") || origin.startsWith("http://192.168.")) {
-      return `LAN URLs are not allowlisted. On this machine use ${LOCAL_PRIVY_ORIGIN}.`;
+      return `LAN URLs are not allowlisted. On this machine use ${LOCAL_PRIVY_HINT}.`;
     }
   }
 
-  return `Add ${origin} to Allowed origins in the Privy dashboard, then hard-refresh.`;
+  return `Add ${origin} to Allowed origins in the Privy dashboard and PRIVY_ALLOWED_ORIGINS, then hard-refresh.`;
 }

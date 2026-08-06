@@ -19,21 +19,15 @@ import type {
 
 /**
  * Core savings deposit assets (single-asset markets).
- * `fUSDC` is included only for Pool D (see {@link isFusdcSavingsEligible}).
  * Pass `null` to {@link listSavingsRoutes} `assetConfigKeys` for every depositable asset.
  */
-export const EASY_SAVINGS_CORE_ASSET_CONFIG_KEYS = [
-  "USDC",
-  "ALGO",
-  "fUSDC",
-] as const;
+export const EASY_SAVINGS_CORE_ASSET_CONFIG_KEYS = ["USDC"] as const;
 
 /**
  * Higher-yield pooled LP markets (elevated risk vs core savings).
  */
 export const EASY_SAVINGS_HIGH_YIELD_ASSET_CONFIG_KEYS = [
   "LP_TMPOOL2_WAD_USDC",
-  "LP_TMPOOL2_UNIT_ALGO",
 ] as const;
 
 /** All curated Easy Savings deposit keys (core + high-yield). */

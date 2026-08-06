@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useWallet } from "@txnlab/use-wallet-react";
+import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
 import { Info, Loader2 } from "lucide-react";
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
 import { usePortfolioData } from "@/hooks/usePortfolioData";
@@ -237,6 +237,8 @@ type SupplyRow = {
   walletUsd: number;
   supplied: number;
   suppliedUsd: number;
+  earned: number;
+  earnedUsd: number;
   apy: number | null;
   asCollateral: boolean;
 };
@@ -256,7 +258,7 @@ const WALLET_COLORS = [
  * Simple Spark-style portfolio for Chub — position, health, supply, wallet.
  */
 const PortfolioDashboard = () => {
-  const { activeAccount } = useWallet();
+  const { activeAccount } = useDorkFiWalletAdapter();
   const navigate = useNavigate();
   const [walletModalOpen, setWalletModalOpen] = useState(false);
   const [includeSupplied, setIncludeSupplied] = useState(true);
@@ -273,10 +275,14 @@ const PortfolioDashboard = () => {
     error,
   } = usePortfolioData();
 
+  // Progressive: show shell once markets/global path starts resolving; table may still spin.
+  const shellLoading = isLoading && deposits.length === 0 && borrows.length === 0;
+
   const supplyRows: SupplyRow[] = useMemo(() => {
     const byAsset = new Map<string, SupplyRow>();
 
     for (const d of deposits) {
+      const earned = d.interest ?? 0;
       byAsset.set(d.asset, {
         key: d.asset,
         symbol: d.asset,
@@ -285,6 +291,8 @@ const PortfolioDashboard = () => {
         walletUsd: 0,
         supplied: d.balance,
         suppliedUsd: d.value,
+        earned,
+        earnedUsd: earned * (d.tokenPrice || 1),
         apy: d.apy,
         asCollateral: true,
       });
@@ -304,6 +312,8 @@ const PortfolioDashboard = () => {
           walletUsd: bal.balanceUSD,
           supplied: 0,
           suppliedUsd: 0,
+          earned: 0,
+          earnedUsd: 0,
           apy: null,
           asCollateral: false,
         });
@@ -365,14 +375,12 @@ const PortfolioDashboard = () => {
     );
   }
 
-  const loading = isLoading || isLoadingPositions;
-
   return (
     <section className="w-full max-w-6xl mx-auto space-y-4">
       {error ? (
         <p className="text-sm text-destructive text-center">{error}</p>
       ) : null}
-      {loading ? (
+      {shellLoading ? (
         <p className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="size-4 animate-spin" />
           Loading portfolio…
@@ -393,6 +401,12 @@ const PortfolioDashboard = () => {
         {/* Supply table */}
         <div className="rounded-[24px] border border-border/60 bg-card p-5 sm:p-6 shadow-sm overflow-x-auto">
           <h2 className="text-lg font-semibold tracking-tight mb-4">Supply</h2>
+          {isLoadingPositions && supplyRows.length === 0 ? (
+            <p className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" />
+              Loading supplies…
+            </p>
+          ) : (
           <table className="w-full text-sm min-w-[640px]">
             <thead>
               <tr className="text-left text-muted-foreground border-b border-border/50">
@@ -447,6 +461,12 @@ const PortfolioDashboard = () => {
                           <div className="text-xs text-muted-foreground">
                             {formatUsd(row.suppliedUsd)}
                           </div>
+                          {row.earned > 0 ? (
+                            <div className="text-xs text-ocean-teal mt-0.5">
+                              Earned {formatTokenAmt(row.earned)} ·{" "}
+                              {formatUsd(row.earnedUsd)}
+                            </div>
+                          ) : null}
                         </>
                       ) : (
                         "—"
@@ -488,6 +508,7 @@ const PortfolioDashboard = () => {
               )}
             </tbody>
           </table>
+          )}
 
           {borrows.length > 0 ? (
             <div className="mt-6 pt-4 border-t border-border/50">
@@ -510,8 +531,18 @@ const PortfolioDashboard = () => {
                       />
                       {b.asset}
                     </span>
-                    <span className="tabular-nums text-muted-foreground">
-                      {formatTokenAmt(b.balance)} · {formatUsd(b.value)}
+                    <span className="tabular-nums text-right text-muted-foreground">
+                      <div>
+                        {formatTokenAmt(b.balance)} · {formatUsd(b.value)}
+                      </div>
+                      {(b.interest ?? 0) > 0 ? (
+                        <div className="text-xs">
+                          Accrued {formatTokenAmt(b.interest)} ·{" "}
+                          {formatUsd(
+                            (b.interest ?? 0) * (b.tokenPrice || 1)
+                          )}
+                        </div>
+                      ) : null}
                     </span>
                   </li>
                 ))}

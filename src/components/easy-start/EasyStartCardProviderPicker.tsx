@@ -1,5 +1,27 @@
 import { cn } from "@/lib/utils";
 
+/** Card providers for Easy Start Deposit (on-ramp). Includes Stripe via useFiatOnramp. */
+export const DEPOSIT_CARD_PROVIDERS = [
+  {
+    id: "moonpay" as const,
+    name: "MoonPay",
+    description: "Card · Apple Pay",
+  },
+  {
+    id: "coinbase" as const,
+    name: "Coinbase",
+    description: "Card · Coinbase account",
+  },
+  {
+    id: "stripe" as const,
+    name: "Stripe",
+    description: "Card · Apple / Google Pay",
+  },
+] as const;
+
+export type DepositCardProvider = (typeof DEPOSIT_CARD_PROVIDERS)[number]["id"];
+
+/** Off-ramp / cash-out providers (MoonPay + Coinbase only). */
 export const CARD_PROVIDERS = [
   {
     id: "moonpay" as const,
@@ -15,29 +37,45 @@ export const CARD_PROVIDERS = [
 
 export type CardProvider = (typeof CARD_PROVIDERS)[number]["id"];
 
-/** Privy `fundWallet` preferred card/on-ramp provider. */
-export type PrivyCardProvider = CardProvider;
+/** Privy `fundWallet` preferred card/on-ramp provider (not Stripe — use useFiatOnramp). */
+export type PrivyCardProvider = Extract<
+  DepositCardProvider,
+  "moonpay" | "coinbase"
+>;
 
 export function EasyStartCardProviderPicker({
   value,
   onChange,
   label = "Pay with",
+  providers = CARD_PROVIDERS,
 }: {
-  value: CardProvider;
-  onChange: (provider: CardProvider) => void;
+  value: string;
+  onChange: (provider: string) => void;
   label?: string;
+  providers?: ReadonlyArray<{
+    id: string;
+    name: string;
+    description: string;
+  }>;
 }) {
+  const cols =
+    providers.length >= 3
+      ? "grid-cols-3"
+      : providers.length === 1
+        ? "grid-cols-1"
+        : "grid-cols-2";
+
   return (
     <div>
       <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-3">
         {label}
       </p>
       <div
-        className="grid grid-cols-2 gap-2"
+        className={cn("grid gap-2", cols)}
         role="radiogroup"
         aria-label={label}
       >
-        {CARD_PROVIDERS.map((provider) => {
+        {providers.map((provider) => {
           const selected = value === provider.id;
           return (
             <button

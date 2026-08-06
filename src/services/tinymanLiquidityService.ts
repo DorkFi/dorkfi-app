@@ -420,6 +420,115 @@ function encodeSignerTxnsForWallet(txGroup: SignerTransaction[]): Uint8Array[] {
   );
 }
 
+/**
+ * Flexible (dual-asset) Tinyman v2 add-liquidity.
+ * Amounts are paired in pool asset1/asset2 space (by asset id), not pair config order.
+ */
+export async function buildFlexibleAddLiquidityTransactions(params: {
+  pair: LiquidityPoolPairConfig;
+  userAddress: string;
+  /** Human units for pair.asset1Id (e.g. WAD on wad-usdc). */
+  asset1AmountHuman: string;
+  /** Human units for pair.asset2Id (e.g. USDC on wad-usdc). */
+  asset2AmountHuman: string;
+  slippage?: number;
+}): Promise<{
+  txGroup: SignerTransaction[];
+  minPoolTokenOutAtomic: bigint;
+  poolTokenOutAtomic: bigint;
+  poolTokenId: number;
+}> {
+  const {
+    pair,
+    userAddress,
+    asset1AmountHuman,
+    asset2AmountHuman,
+  } = params;
+  const slippage = params.slippage ?? DEFAULT_SLIPPAGE;
+  const tinymanNet = tinymanNetworkFromNetworkId(pair.networkId);
+  const algodNetwork = getAlgorandNetworkFromNetworkId(pair.networkId);
+  if (!tinymanNet || !algodNetwork) {
+    throw new Error("Liquidity pools are only available on Algorand networks.");
+  }
+
+  tinymanJSSDKConfig.setClientName("DorkFi-PreFi");
+  const snapshot = await fetchLiquidityPoolSnapshot(pair);
+  if (!snapshot) throw new Error("Pool is not ready for deposits.");
+
+  const amountByAssetId = new Map<number, bigint>([
+    [pair.asset1Id, toAtomic(asset1AmountHuman, 6)],
+    [pair.asset2Id, toAtomic(asset2AmountHuman, 6)],
+  ]);
+
+  const poolAsset1Amount = amountByAssetId.get(snapshot.pool.asset1ID) ?? 0n;
+  const poolAsset2Amount = amountByAssetId.get(snapshot.pool.asset2ID) ?? 0n;
+  if (poolAsset1Amount <= 0n || poolAsset2Amount <= 0n) {
+    throw new Error("Enter positive amounts for both assets.");
+  }
+
+  const { algod } = await algorandService.initializeClientsForTransactions(
+    algodNetwork
+  );
+
+  const quote = AddLiquidity.v2.flexible.getQuote({
+    pool: snapshot.pool,
+    asset1: {
+      amount: poolAsset1Amount,
+      decimals: snapshot.pool.asset1ID === pair.asset1Id
+        ? 6
+        : 6,
+    },
+    asset2: {
+      amount: poolAsset2Amount,
+      decimals: 6,
+    },
+    slippage,
+  });
+
+  let txGroup = await AddLiquidity.v2.flexible.generateTxns({
+    network: tinymanNet,
+    client: algod,
+    initiatorAddr: userAddress,
+    poolAddress: snapshot.pool.account.address().toString(),
+    asset1In: {
+      id: snapshot.pool.asset1ID,
+      amount: poolAsset1Amount,
+    },
+    asset2In: {
+      id: snapshot.pool.asset2ID,
+      amount: poolAsset2Amount,
+    },
+    poolTokenOut: {
+      id: snapshot.poolTokenId,
+      amount: quote.poolTokenOut.amount,
+    },
+    minPoolTokenAssetAmount: quote.minPoolTokenAssetAmountWithSlippage,
+  });
+
+  const optedIn = await isAccountOptedIntoAsset(
+    algod,
+    userAddress,
+    snapshot.poolTokenId
+  );
+  if (!optedIn) {
+    txGroup = combineAndRegroupSignerTxns(
+      await generateOptIntoAssetTxns({
+        client: algod,
+        assetID: snapshot.poolTokenId,
+        initiatorAddr: userAddress,
+      }),
+      txGroup
+    );
+  }
+
+  return {
+    txGroup,
+    minPoolTokenOutAtomic: quote.minPoolTokenAssetAmountWithSlippage,
+    poolTokenOutAtomic: quote.poolTokenOut.amount,
+    poolTokenId: snapshot.poolTokenId,
+  };
+}
+
 export async function buildAddLiquidityTransactions(params: {
   pair: LiquidityPoolPairConfig;
   userAddress: string;

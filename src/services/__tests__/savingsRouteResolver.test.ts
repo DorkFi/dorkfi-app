@@ -17,19 +17,13 @@ import { getNetworkConfig } from "@/config";
 const NETWORK = "algorand-mainnet" as const;
 const POOL_A = "3333688282";
 const POOL_B = "3345940978";
-const POOL_C = "3578814346";
 const POOL_E = "3585829377";
 
 describe("savingsRouteResolver (core + high-yield)", () => {
   it("includes core singles and high-yield LP keys", () => {
-    expect(EASY_SAVINGS_CORE_ASSET_CONFIG_KEYS).toEqual([
-      "USDC",
-      "ALGO",
-      "fUSDC",
-    ]);
+    expect(EASY_SAVINGS_CORE_ASSET_CONFIG_KEYS).toEqual(["USDC"]);
     expect(EASY_SAVINGS_HIGH_YIELD_ASSET_CONFIG_KEYS).toEqual([
       "LP_TMPOOL2_WAD_USDC",
-      "LP_TMPOOL2_UNIT_ALGO",
     ]);
     expect(EASY_SAVINGS_V1_ASSET_CONFIG_KEYS).toEqual([
       ...EASY_SAVINGS_CORE_ASSET_CONFIG_KEYS,
@@ -37,35 +31,33 @@ describe("savingsRouteResolver (core + high-yield)", () => {
     ]);
   });
 
-  it("lists core keys with USDC first including Pool D USDC", () => {
+  it("lists core keys with USDC only (no ALGO or Pool D USDC)", () => {
     const keys = listCoreSavingsAssetConfigKeys(NETWORK);
-    expect(keys[0]).toBe("USDC");
-    expect(keys).toEqual(expect.arrayContaining(["USDC", "ALGO", "fUSDC"]));
+    expect(keys).toEqual(["USDC"]);
     expect(keys).not.toEqual(
-      expect.arrayContaining(["WAD", "tALGO", "goBTC", "goETH"])
+      expect.arrayContaining(["ALGO", "fUSDC", "WAD", "tALGO", "goBTC", "goETH"])
     );
   });
 
-  it("resolves fUSDC savings to Pool D only", () => {
+  it("can still resolve fUSDC to Pool D when requested (not in curated list)", () => {
     const route = resolveSavingsRoute({
       networkId: NETWORK,
       assetConfigKey: "fUSDC",
     });
-    expect(route).not.toBeNull();
-    expect(route!.marketLabel).toBe("D");
-    expect(route!.poolId).toBe("3526240577");
-    expect(savingsAccountDisplayLabel(route!)).toBe("Pool D USDC");
-    expect(route!.asset.symbol).toBe("USDC");
+    // Curated listSavingsRoutes filters by V1 keys; resolve uses that graph.
+    // fUSDC is only available when listing the full graph (or explicit key if eligible).
+    expect(route).toBeNull();
+    const full = listSavingsRoutes(NETWORK, { assetConfigKeys: ["fUSDC"] });
+    expect(full.some((r) => r.marketLabel === "D")).toBe(true);
+    const poolD = full.find((r) => r.marketLabel === "D");
+    expect(poolD).toBeTruthy();
+    expect(savingsAccountDisplayLabel(poolD!)).toBe("Pool D USDC");
   });
 
   it("lists high-yield LP pairs", () => {
     const keys = listHighYieldSavingsAssetConfigKeys(NETWORK);
-    expect(keys).toEqual(
-      expect.arrayContaining([
-        "LP_TMPOOL2_WAD_USDC",
-        "LP_TMPOOL2_UNIT_ALGO",
-      ])
-    );
+    expect(keys).toEqual(["LP_TMPOOL2_WAD_USDC"]);
+    expect(keys).not.toContain("LP_TMPOOL2_UNIT_ALGO");
   });
 
   it("labels LP accounts with pair names", () => {
@@ -73,27 +65,23 @@ describe("savingsRouteResolver (core + high-yield)", () => {
       networkId: NETWORK,
       assetConfigKey: "LP_TMPOOL2_WAD_USDC",
     });
-    const unitAlgo = resolveSavingsRoute({
-      networkId: NETWORK,
-      assetConfigKey: "LP_TMPOOL2_UNIT_ALGO",
-    });
     expect(usdcWad).not.toBeNull();
-    expect(unitAlgo).not.toBeNull();
     expect(savingsAccountDisplayLabel(usdcWad!)).toBe("USDC / WAD");
-    expect(savingsAccountDisplayLabel(unitAlgo!)).toBe("UNIT / ALGO");
     expect(usdcWad!.poolId).toBe(POOL_E);
-    expect(unitAlgo!.poolId).toBe(POOL_C);
   });
 
-  it("resolves native ALGO (not fALGO) onto Pool A by default", () => {
+  it("resolves native ALGO when listed explicitly (not in curated core)", () => {
     const route = resolveSavingsRoute({
       networkId: NETWORK,
       assetConfigKey: "ALGO",
     });
-    expect(route).not.toBeNull();
-    expect(route!.poolId).toBe(POOL_A);
-    expect(route!.asset.symbol.toUpperCase()).toBe("ALGO");
-    expect(route!.asset.configKey).toBe("ALGO");
+    // ALGO is off the curated V1 list, so default resolve is null.
+    expect(route).toBeNull();
+    const explicit = listSavingsRoutes(NETWORK, { assetConfigKeys: ["ALGO"] });
+    expect(explicit.length).toBeGreaterThan(0);
+    expect(explicit[0]!.poolId).toBe(POOL_A);
+    expect(explicit[0]!.asset.symbol.toUpperCase()).toBe("ALGO");
+    expect(explicit[0]!.asset.configKey).toBe("ALGO");
   });
 
   it("resolves USDC onto Pool A by default", () => {
