@@ -1,5 +1,5 @@
 import DorkFiCard from "@/components/ui/DorkFiCard";
-import { Body } from "@/components/ui/Typography";
+import { H1, Body } from "@/components/ui/Typography";
 import { GovernanceVotingInfoDropdown } from "./GovernanceVotingInfoDropdown";
 import VoteChubImage from "@/assets/VoteChub1.png";
 
@@ -19,14 +19,15 @@ export const GovernanceVotingInfoCard = () => {
         
         {/* Text on the right - 2/3 width */}
         <div className="w-full sm:w-2/3 text-center sm:text-left">
+          <H1 className="m-0 text-3xl md:text-4xl">
+            <span className="hero-header">Governance</span>
+          </H1>
+          <Body className="mt-2 mb-3 text-base md:text-lg text-muted-foreground">
+            Vote on protocol changes using your UNIT.
+          </Body>
           <Body className="text-base md:text-lg leading-relaxed">
-            <span className="text-xl md:text-2xl font-bold text-white bg-black inline-block px-2 py-1 rounded-sm">
-              Welcome to the DorkFi Governance Portal.
-            </span>
-            <br />
-            This is where UNIT holders shape the future of the protocol—voting on upgrades, risk parameters, market listings, and treasury decisions. Governance at DorkFi is transparent, on-chain, and driven by the community that supplies, borrows, and builds here.
-            <br /><br />
-            <span className="italic">Your voice matters. Your UNIT defines your influence.</span>
+            UNIT holders shape upgrades, risk parameters, market listings, and treasury decisions
+            on-chain. Your UNIT defines your influence.
           </Body>
         </div>
       </div>

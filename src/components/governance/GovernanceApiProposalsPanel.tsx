@@ -10,8 +10,6 @@ import { H2, Body, Caption } from "@/components/ui/Typography";
 import { Button } from "@/components/ui/button";
 import {
   Loader2,
-  Activity,
-  Archive,
   RefreshCw,
   Clock,
   CheckCircle2,
@@ -37,6 +35,7 @@ import {
   PROPOSAL_CATEGORY_DISPLAY_NAMES,
 } from "@/constants/governanceConstants";
 import { ProposalDetailsModal } from "@/components/governance/ProposalDetailsModal";
+import { GovernanceProposalCountCards } from "@/components/governance/GovernanceProposalCountCards";
 import { formatDistanceToNow } from "date-fns";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import { Input } from "@/components/ui/input";
@@ -302,38 +301,10 @@ export function GovernanceApiProposalsPanel({
 
   return (
     <div className="space-y-4 mt-4">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-        <DorkFiCard className="p-4 sm:p-5" hoverable={false}>
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-primary/15 text-primary">
-              <Activity className="h-5 w-5 sm:h-6 sm:w-6" />
-            </div>
-            <div>
-              <Caption className="text-muted-foreground uppercase tracking-wide text-[10px] sm:text-xs">
-                Active proposals
-              </Caption>
-              <div className="text-3xl sm:text-4xl font-bold text-primary tabular-nums">
-                {proposalsQuery.isLoading ? "—" : displayActive}
-              </div>
-            </div>
-          </div>
-        </DorkFiCard>
-        <DorkFiCard className="p-4 sm:p-5" hoverable={false}>
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-green-500/15 text-green-600 dark:text-green-400">
-              <Archive className="h-5 w-5 sm:h-6 sm:w-6" />
-            </div>
-            <div>
-              <Caption className="text-muted-foreground uppercase tracking-wide text-[10px] sm:text-xs">
-                Closed proposals
-              </Caption>
-              <div className="text-3xl sm:text-4xl font-bold text-green-600 dark:text-green-400 tabular-nums">
-                {proposalsQuery.isLoading ? "—" : displayClosed}
-              </div>
-            </div>
-          </div>
-        </DorkFiCard>
-      </div>
+      <GovernanceProposalCountCards
+        activeCount={proposalsQuery.isLoading ? null : displayActive}
+        closedCount={proposalsQuery.isLoading ? null : displayClosed}
+      />
 
       <DorkFiCard className="p-0 overflow-hidden" hoverable={false}>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between px-4 pt-4 pb-2 sm:px-5 border-b border-border/60">
