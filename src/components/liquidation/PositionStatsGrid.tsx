@@ -8,15 +8,11 @@ import {
 } from "@/utils/healthFactorUx";
 import { H1 } from "@/components/ui/Typography";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
-import PortfolioWalletStatusBar, {
-  type PortfolioWalletStatus,
-} from "@/components/portfolio/PortfolioWalletStatusBar";
 
 interface PositionStatsGridProps {
   totalCollateral: number;
   totalBorrowed: number;
   healthFactor: number | null;
-  walletStatus?: PortfolioWalletStatus;
 }
 
 const usdOptions = {
@@ -36,7 +32,6 @@ const PositionStatsGrid = ({
   totalCollateral,
   totalBorrowed,
   healthFactor,
-  walletStatus,
 }: PositionStatsGridProps) => {
   const { formatCurrency } = useNumberI18n();
   const formatUsd = (value: number) =>
@@ -61,9 +56,6 @@ const PositionStatsGrid = ({
           <H1 className="m-0 text-2xl font-semibold leading-none tracking-tight">
             <span className="hero-header">Portfolio Overview</span>
           </H1>
-          {walletStatus ? (
-            <PortfolioWalletStatusBar className="mt-2" {...walletStatus} />
-          ) : null}
         </div>
         <div className="overflow-hidden rounded-xl border border-border/60 bg-muted/20 px-4 pb-4 pt-3 dark:bg-muted/10">
           <div className="text-sm text-muted-foreground">Net Portfolio Value</div>

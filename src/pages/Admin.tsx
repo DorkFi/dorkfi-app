@@ -16838,7 +16838,7 @@ export default function AdminDashboard() {
           <NonCustodialComplianceStrip />
           <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-center sm:text-left">
             <div className="text-muted-foreground text-sm">
-              <p>© 2025 DorkFi Protocol. Admin Panel - Operator Controls.</p>
+              <p>© 2026 DorkFi Protocol. Admin Panel - Operator Controls.</p>
             </div>
             <VersionDisplay />
           </div>

@@ -41,7 +41,6 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import MarketSearchFilters from "@/components/markets/MarketSearchFilters";
 import MarketsPageGuidance from "@/components/markets/MarketsPageGuidance";
 import MarketPagination from "@/components/markets/MarketPagination";
-import MarketsHeroSection from "@/components/markets/MarketsHeroSection";
 import MarketsTableContent from "@/components/markets/MarketsTableContent";
 
 const SupplyBorrowModal = lazy(() => import("@/components/SupplyBorrowModal"));
@@ -3870,9 +3869,6 @@ const MarketsTable = () => {
             </div>
           </section>
         )}
-
-        {/* Hero Section */}
-        <MarketsHeroSection />
 
         {/* Markets Table */}
         <div

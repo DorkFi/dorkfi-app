@@ -6,6 +6,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import { GOVERNANCE_PASS_THRESHOLD_DISPLAY } from "@/constants/governanceConstants";
 
 export const GovernanceVotingInfoDropdown = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -50,6 +51,10 @@ export const GovernanceVotingInfoDropdown = () => {
                   </ul>
                   <p>
                     UNIT governance is fully on-chain and transparent. Voting power is calculated based on your UNIT balance, with optional boosts from Dork NFTs through the NFT Power Multiplier system.
+                  </p>
+                  <p>
+                    Proposals pass when yes votes reach at least {GOVERNANCE_PASS_THRESHOLD_DISPLAY} of the
+                    voting power cast (in addition to any quorum requirements).
                   </p>
                 </div>
               </div>
