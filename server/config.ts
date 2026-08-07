@@ -61,6 +61,22 @@ export const config = {
     60 *
     60 *
     1000,
+  profileShareStorePath: optional(
+    "X_PROFILE_SHARE_STORE_PATH",
+    ".data/profile-shares"
+  ),
+  /** Default 90 days (falls back to repay TTL env when unset). */
+  profileShareTtlMs:
+    Number(
+      optional(
+        "X_PROFILE_SHARE_TTL_DAYS",
+        optional("X_REPAY_SHARE_TTL_DAYS", "90")
+      )
+    ) *
+    24 *
+    60 *
+    60 *
+    1000,
   sharePublicBase: resolveSharePublicBase(),
   isProduction: process.env.NODE_ENV === "production",
 };

@@ -23,6 +23,13 @@ export type BorrowShareLinkInput = {
   image: Blob;
 };
 
+export type ProfileShareLinkInput = {
+  nftName: string;
+  contractId?: number;
+  collectionId?: string;
+  image: Blob;
+};
+
 export type RepayShareLinkResult = {
   shareId: string;
   shareUrl: string;
@@ -30,6 +37,7 @@ export type RepayShareLinkResult = {
 };
 
 export type BorrowShareLinkResult = RepayShareLinkResult;
+export type ProfileShareLinkResult = RepayShareLinkResult;
 
 export class XShareApiError extends Error {
   status: number;
@@ -173,6 +181,43 @@ export async function createBorrowShareLink(
   }
 
   const response = await fetch(buildUrl("/share/borrow-confirmation/link"), {
+    method: "POST",
+    body: form,
+  });
+
+  const json = await parseJson<{
+    ok: boolean;
+    shareId: string;
+    shareUrl: string;
+    imageUrl: string;
+  }>(response);
+
+  return {
+    shareId: json.shareId,
+    shareUrl: json.shareUrl,
+    imageUrl: json.imageUrl,
+  };
+}
+
+export async function createProfileShareLink(
+  input: ProfileShareLinkInput
+): Promise<ProfileShareLinkResult> {
+  const form = new FormData();
+  form.append(
+    "image",
+    new File([input.image], "dorkfi-profile-update.png", {
+      type: "image/png",
+    })
+  );
+  form.append("nftName", input.nftName);
+  if (input.contractId !== undefined) {
+    form.append("contractId", String(input.contractId));
+  }
+  if (input.collectionId) {
+    form.append("collectionId", input.collectionId);
+  }
+
+  const response = await fetch(buildUrl("/share/profile-update/link"), {
     method: "POST",
     body: form,
   });
