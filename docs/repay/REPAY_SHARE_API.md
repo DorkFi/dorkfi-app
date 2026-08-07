@@ -55,7 +55,7 @@ Flow:
 | Variable | Example |
 |----------|---------|
 | `NODE_ENV` | `production` |
-| `X_SHARE_FRONTEND_ORIGIN` | `https://beta.dork.fi` or comma-separated `https://beta.dork.fi,https://app.dork.fi` |
+| `X_SHARE_FRONTEND_ORIGIN` | `https://app.dork.fi` or comma-separated `https://app.dork.fi,https://beta.dork.fi` (redirects always prefer `app.dork.fi`) |
 | `X_SHARE_PUBLIC_BASE` | `https://share.dork.fi` (custom domain — see below) |
 
 ### Custom domain (required for X to render the card)
