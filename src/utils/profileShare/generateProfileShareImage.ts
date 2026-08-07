@@ -97,21 +97,25 @@ export async function generateProfileShareImage(
   ctx.fillRect(0, 0, PROFILE_SHARE_WIDTH, 280);
 
   const itemName = formatProfileNftItemName(input.nftName);
-  const padX = 40;
-  const padY = 36;
+  // Equal outer margin for the pill so X's rounded crop doesn't look tighter on top.
+  const margin = 40;
+  const pillPadX = 16;
+  const pillPadY = 14;
   const lineGap = 8;
   const headlineSize = 42;
   const nameSize = 36;
+  const textX = margin + pillPadX;
+  const textY = margin + pillPadY;
 
   ctx.font = `800 ${headlineSize}px Poppins, sans-serif`;
   const headlineWidth = ctx.measureText(PROFILE_SHARE_OVERLAY_HEADLINE).width;
   ctx.font = `700 ${nameSize}px Poppins, sans-serif`;
   const nameWidth = ctx.measureText(itemName).width;
-  const pillW = Math.max(headlineWidth, nameWidth) + 40;
-  const pillH = headlineSize + lineGap + nameSize + 32;
+  const pillW = Math.max(headlineWidth, nameWidth) + pillPadX * 2;
+  const pillH = pillPadY * 2 + headlineSize + lineGap + nameSize;
 
   ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
-  drawRoundedRect(ctx, padX - 16, padY - 14, pillW, pillH, 16);
+  drawRoundedRect(ctx, margin, margin, pillW, pillH, 16);
   ctx.fill();
 
   ctx.textAlign = "left";
@@ -121,11 +125,11 @@ export async function generateProfileShareImage(
   ctx.fillStyle = "#ffffff";
 
   ctx.font = `800 ${headlineSize}px Poppins, sans-serif`;
-  ctx.fillText(PROFILE_SHARE_OVERLAY_HEADLINE, padX, padY);
+  ctx.fillText(PROFILE_SHARE_OVERLAY_HEADLINE, textX, textY);
 
   ctx.font = `700 ${nameSize}px Poppins, sans-serif`;
   ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
-  ctx.fillText(itemName, padX, padY + headlineSize + lineGap);
+  ctx.fillText(itemName, textX, textY + headlineSize + lineGap);
   ctx.shadowBlur = 0;
 
   const blob = await new Promise<Blob>((resolve, reject) => {
