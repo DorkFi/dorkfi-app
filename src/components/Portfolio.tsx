@@ -855,6 +855,10 @@ const Portfolio = () => {
   // NFT selection state
   const [nftModalOpen, setNftModalOpen] = useState(false);
   const [successModalOpen, setSuccessModalOpen] = useState(false);
+  /** NFT chosen in the latest profile-picture flow (for Share on X copy/card). */
+  const [selectedProfileNft, setSelectedProfileNft] = useState<UserNFT | null>(
+    null
+  );
   const [nftHolderRewardsClaimModalOpen, setNftHolderRewardsClaimModalOpen] =
     useState(false);
   const [nftClaimSuccessOpen, setNftClaimSuccessOpen] = useState(false);
@@ -9219,6 +9223,7 @@ const Portfolio = () => {
 
               // Optimistically reflect the new PFP immediately.
               setUserProfileAvatar(imageUrl);
+              setSelectedProfileNft(nft);
 
               refetchAvatar();
               setNftModalOpen(false);
@@ -9349,6 +9354,7 @@ const Portfolio = () => {
             refetchAvatar();
 
             // Close NFT selection modal and show success modal
+            setSelectedProfileNft(nft);
             setNftModalOpen(false);
             setSuccessModalOpen(true);
           } catch (error) {
@@ -9370,8 +9376,16 @@ const Portfolio = () => {
       {/* Profile Update Success Modal */}
       <ProfileUpdateSuccessModal
         open={successModalOpen}
-        onOpenChange={setSuccessModalOpen}
-        avatarImage={displayAvatar || undefined}
+        onOpenChange={(open) => {
+          setSuccessModalOpen(open);
+          if (!open) setSelectedProfileNft(null);
+        }}
+        avatarImage={
+          selectedProfileNft?.imageUrl || displayAvatar || undefined
+        }
+        nftName={selectedProfileNft?.name}
+        nftContractId={selectedProfileNft?.contractId}
+        collectionName={selectedProfileNft?.collectionName}
         healthFactor={displayHealthFactor}
         deposits={modalDeposits}
         borrows={modalBorrows}

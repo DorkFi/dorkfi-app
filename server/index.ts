@@ -24,6 +24,20 @@ import {
   getRepayShare,
   getRepayShareImage,
 } from "./lib/repayShareStore.js";
+import {
+  buildProfileRedirectUrl,
+  buildProfileShareOgHtml,
+  buildProfileSharePublicUrls,
+} from "./lib/profileSharePage.js";
+import {
+  createProfileShare,
+  getProfileShare,
+  getProfileShareImage,
+} from "./lib/profileShareStore.js";
+import {
+  contentTypeForImageUrl,
+  isAllowedImageProxyUrl,
+} from "./lib/imageProxy.js";
 
 const app = new Hono();
 
@@ -44,6 +58,46 @@ app.get("/health", (c) =>
     frontendOrigins: config.frontendOrigins,
   })
 );
+
+/**
+ * Proxies allowlisted NFT CDN images so the browser canvas can draw them
+ * with CORS (Highforge does not send Access-Control-Allow-Origin).
+ */
+app.get("/share/image-proxy", async (c) => {
+  const raw = c.req.query("url")?.trim() || "";
+  if (!raw || !isAllowedImageProxyUrl(raw)) {
+    return c.json({ error: "URL not allowed" }, 400);
+  }
+
+  try {
+    const upstream = await fetch(raw, {
+      headers: { Accept: "image/*,*/*" },
+    });
+    if (!upstream.ok) {
+      return c.json(
+        { error: `Upstream image failed (${upstream.status})` },
+        502
+      );
+    }
+
+    const buffer = Buffer.from(await upstream.arrayBuffer());
+    const upstreamType = upstream.headers.get("content-type") || "";
+    const contentType = contentTypeForImageUrl(raw, upstreamType);
+
+    return new Response(buffer, {
+      headers: {
+        "Content-Type": contentType,
+        "Cache-Control": "public, max-age=86400",
+        // Explicit for canvas consumers behind the Vite proxy.
+        "Access-Control-Allow-Origin": "*",
+      },
+    });
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Failed to proxy image";
+    return c.json({ error: message }, 502);
+  }
+});
 
 app.post("/share/repay-confirmation/link", async (c) => {
   const form = await c.req.parseBody();
@@ -196,6 +250,89 @@ app.get("/borrow/:id", async (c) => {
 
   const urls = buildBorrowSharePublicUrls(record.id);
   const html = buildBorrowShareOgHtml({
+    record,
+    shareUrl: urls.shareUrl,
+    imageUrl: urls.imageUrl,
+  });
+
+  return c.html(html);
+});
+
+app.post("/share/profile-update/link", async (c) => {
+  const form = await c.req.parseBody();
+  const image = form.image;
+  const nftName = typeof form.nftName === "string" ? form.nftName.trim() : "";
+  const collectionId =
+    typeof form.collectionId === "string" ? form.collectionId.trim() : undefined;
+  const contractIdRaw =
+    typeof form.contractId === "string" ? form.contractId.trim() : "";
+  const contractId = contractIdRaw ? Number(contractIdRaw) : undefined;
+
+  if (!(image instanceof File)) {
+    return c.json({ error: "Missing image file" }, 400);
+  }
+  if (!nftName) {
+    return c.json({ error: "Missing nftName" }, 400);
+  }
+
+  try {
+    const buffer = Buffer.from(await image.arrayBuffer());
+    const record = await createProfileShare({
+      nftName,
+      contractId:
+        contractId !== undefined && Number.isFinite(contractId)
+          ? contractId
+          : undefined,
+      collectionId: collectionId || undefined,
+      imageBuffer: buffer,
+    });
+    const urls = buildProfileSharePublicUrls(record.id);
+
+    return c.json({
+      ok: true,
+      shareId: record.id,
+      shareUrl: urls.shareUrl,
+      imageUrl: urls.imageUrl,
+      expiresAt: record.expiresAt,
+    });
+  } catch (err) {
+    const message =
+      err instanceof Error
+        ? err.message
+        : "Failed to create profile share link";
+    return c.json({ error: message }, 502);
+  }
+});
+
+app.get("/profile/:id/image.png", async (c) => {
+  const id = c.req.param("id");
+  const result = await getProfileShareImage(id);
+  if (!result) {
+    return c.text("Share not found", 404);
+  }
+
+  return new Response(new Uint8Array(result.buffer), {
+    headers: {
+      "Content-Type": "image/png",
+      "Cache-Control": "public, max-age=86400, immutable",
+    },
+  });
+});
+
+app.get("/profile/:id", async (c) => {
+  const id = c.req.param("id");
+  const record = await getProfileShare(id);
+  if (!record) {
+    return c.text("Share not found", 404);
+  }
+
+  const userAgent = c.req.header("user-agent");
+  if (!isSocialCrawler(userAgent)) {
+    return c.redirect(buildProfileRedirectUrl(), 302);
+  }
+
+  const urls = buildProfileSharePublicUrls(record.id);
+  const html = buildProfileShareOgHtml({
     record,
     shareUrl: urls.shareUrl,
     imageUrl: urls.imageUrl,
