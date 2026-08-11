@@ -288,14 +288,6 @@ function normalizeMarketData(
   };
 }
 
-function poolIdFromMarketRow(market: Record<string, unknown>): string | undefined {
-  const direct = market.poolId;
-  if (direct != null && String(direct) !== "") return String(direct);
-  const mi = market.marketInfo as { poolId?: string } | undefined;
-  if (mi?.poolId != null && String(mi.poolId) !== "") return String(mi.poolId);
-  return undefined;
-}
-
 /** Matches `useOnDemandMarketData` cache keys (canonical symbol + optional pool id). */
 function marketKeyForOnDemandLoad(
   poolId: string | undefined,
