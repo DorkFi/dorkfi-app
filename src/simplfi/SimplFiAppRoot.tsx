@@ -18,16 +18,16 @@ const queryClient = new QueryClient({
   },
 });
 
-type ChubAppRootProps = {
+type SimplFiAppRootProps = {
   children: ReactNode;
 };
 
 /**
- * Shared provider stack for Chub (and similar thin UIs).
+ * Shared provider stack for SimplFi (and similar thin UIs).
  * Lives in @dorkfi/app so wallet/network/query deps resolve here.
  * Mirrors main DorkFi ordering so Easy Start + XO USDC bridge modals work.
  */
-export function ChubAppRoot({ children }: ChubAppRootProps) {
+export function SimplFiAppRoot({ children }: SimplFiAppRootProps) {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider
@@ -56,6 +56,6 @@ export function ChubAppRoot({ children }: ChubAppRootProps) {
 }
 
 /** Optional helper if a thin app wants tab state without re-implementing it. */
-export function useChubTabState(initial = "savings") {
+export function useSimplFiTabState(initial = "savings") {
   return useState(initial);
 }

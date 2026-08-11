@@ -32,6 +32,7 @@ import { getNetworkLogoPath } from "@/utils/tokenImageUtils";
 import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
 import { EasyStartConnectMenu } from "@/components/easy-start/EasyStartAuthControls";
 import { useEasyStartLogin } from "@/hooks/useEasyStartLogin";
+import { AppSettingsMenuSection } from "@/components/AppSettingsMenuSection";
 
 interface WalletNetworkButtonProps {
   currentNetwork?: NetworkId;
@@ -485,6 +486,8 @@ const WalletNetworkButton = ({
             <Wallet className="w-4 h-4 mr-2" />
             Connect Wallet
           </DropdownMenuItem>
+
+          <AppSettingsMenuSection />
 
           <DropdownMenuSeparator />
           <DropdownMenuItem

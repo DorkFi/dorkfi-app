@@ -22,6 +22,7 @@ import { useEasyStartLogin } from "@/hooks/useEasyStartLogin";
 import { useEasyStartUserProfile } from "@/hooks/useEasyStartUserProfile";
 import { useEasyStartPortfolioTotal } from "@/hooks/useEasyStartPortfolioTotal";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
+import { AppSettingsMenuSection } from "@/components/AppSettingsMenuSection";
 
 export function EasyStartButton() {
   const openEasyStartLogin = useEasyStartLogin();
@@ -124,6 +125,8 @@ export function EasyStartConnectMenu() {
           <UserRound className="mr-2 h-4 w-4" />
           Account
         </DropdownMenuItem>
+
+        <AppSettingsMenuSection />
 
         <DropdownMenuSeparator />
 
