@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +15,7 @@ import {
   getAllTokensWithDisplayInfo,
   getFolksAdaptersForPhase,
   getTokenConfig,
+  asTokenConfig,
   resolveTokenConfigFromDisplayToken,
   resolveTokenForMarketPosition,
   getAlgorandNetworkFromNetworkId,
@@ -41,13 +42,17 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import MarketSearchFilters from "@/components/markets/MarketSearchFilters";
 import MarketsPageGuidance from "@/components/markets/MarketsPageGuidance";
 import MarketPagination from "@/components/markets/MarketPagination";
-import SupplyBorrowModal from "@/components/SupplyBorrowModal";
-import WithdrawModal from "@/components/WithdrawModal";
-import { PremiumMarketModal } from "@/components/market-modal/PremiumMarketModal";
-import MintModal from "@/components/MintModal";
-import MarketsHeroSection from "@/components/markets/MarketsHeroSection";
 import MarketsTableContent from "@/components/markets/MarketsTableContent";
-import TinymanSwapModal from "@/components/TinymanSwapModal";
+
+const SupplyBorrowModal = lazy(() => import("@/components/SupplyBorrowModal"));
+const WithdrawModal = lazy(() => import("@/components/WithdrawModal"));
+const PremiumMarketModal = lazy(() =>
+  import("@/components/market-modal/PremiumMarketModal").then((m) => ({
+    default: m.PremiumMarketModal,
+  }))
+);
+const MintModal = lazy(() => import("@/components/MintModal"));
+const TinymanSwapModal = lazy(() => import("@/components/TinymanSwapModal"));
 import {
   fetchUserGlobalData,
   fetchUserBorrowBalance,
@@ -67,7 +72,16 @@ import type {
 } from "@/components/market-modal/types";
 import { normalizeWadUsdPerToken, roundUsdToCents, cn } from "@/lib/utils";
 import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
-import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
+import {
+  getCachedAccountInformation,
+  getCachedAsaHoldingAtomic,
+  invalidateWalletBalanceRpc,
+} from "@/utils/walletBalanceRpc";
+import {
+  getRpcReadCache,
+  invalidateUserPositionRpcCache,
+} from "@/utils/rpcReadCache";
+import { LazyModalFallback } from "@/components/LazySuspenseFallback";
 import { useToast } from "@/hooks/use-toast";
 import { isAtDepositCap, isAtBorrowCap } from "@/constants/lendingCaps";
 import algosdk, { waitForConfirmation } from "algosdk";
@@ -110,11 +124,57 @@ import {
   type MarketActionTokenParams,
 } from "@/utils/modalPrefetch";
 import { buildMarketHoverHandlers } from "@/utils/modalHoverHandlers";
+import { resolveUsdPerTokenFromMarketInfo } from "@/utils/assetDecimals";
 
 const MAX_CLAIMS_PER_TX = 3;
 
+/** Token decimals for oracle USD math — match `getAssetData` (config wins over stale API rows). */
+function resolveMarketRowTokenDecimals(
+  md: Record<string, unknown>,
+  networkId?: NetworkId
+): number {
+  if (networkId) {
+    const asset = String(md.asset ?? md.symbol ?? "");
+    const poolId =
+      md.poolId != null && String(md.poolId) !== ""
+        ? String(md.poolId)
+        : undefined;
+    const configSymbol =
+      typeof md.configSymbol === "string" ? md.configSymbol : undefined;
+    const rowKey = (md as { _sortKey?: string })._sortKey;
+    const mi = md.marketInfo as { marketId?: string | number } | undefined;
+    const marketContractId =
+      (rowKey ? marketContractIdFromRowCacheKey(rowKey) : undefined) ??
+      (mi?.marketId != null && String(mi.marketId).trim() !== ""
+        ? String(mi.marketId)
+        : undefined);
+
+    const token = resolveTokenForMarketPosition(networkId, {
+      asset,
+      poolId,
+      configSymbol,
+      marketContractId,
+    });
+    const fromConfig = Number(token?.decimals);
+    if (Number.isFinite(fromConfig) && fromConfig > 0) {
+      return fromConfig;
+    }
+  }
+
+  const mi = md.marketInfo as { decimals?: number } | undefined;
+  const fromMi = Number(mi?.decimals);
+  if (Number.isFinite(fromMi) && fromMi > 0) {
+    return fromMi;
+  }
+
+  return 6;
+}
+
 /** Map on-demand market row → PremiumMarketModal `MarketData` (USD fields in whole dollars like the markets table). */
-function normalizeMarketData(md: Record<string, unknown>) {
+function normalizeMarketData(
+  md: Record<string, unknown>,
+  networkId?: NetworkId
+) {
   const totalSupplyUSD = Number(md.totalSupplyUSD ?? 0);
   const totalBorrowUSD = Number(md.totalBorrowUSD ?? 0);
   const supplyUsdWhole = Math.max(0, Math.round(totalSupplyUSD / 1_000_000));
@@ -126,7 +186,9 @@ function normalizeMarketData(md: Record<string, unknown>) {
   const assetSym = String(md.asset ?? md.symbol ?? "").toUpperCase();
   const isWad = assetSym === "WAD";
 
-  let price = 1;
+  const tokenDecimals = resolveMarketRowTokenDecimals(md, networkId);
+
+  let price = 0;
   if (isWad) {
     // WAD-only: oracle is often micro-USD per token; TVL from hook is micro-USD.
     const oracleStr =
@@ -135,28 +197,28 @@ function normalizeMarketData(md: Record<string, unknown>) {
       oracleStr !== "" ? Number.parseFloat(oracleStr) : Number.NaN;
     if (Number.isFinite(oracleUsd) && oracleUsd > 0) {
       price = normalizeWadUsdPerToken(oracleUsd);
-    } else if (
-      supplyTokensHuman > 0 &&
-      Number.isFinite(totalSupplyUSD) &&
-      totalSupplyUSD > 0
-    ) {
-      price = totalSupplyUSD / 1_000_000 / supplyTokensHuman;
     }
-  } else {
-    // All other markets: original TVL + scaled oracle fallback (unchanged).
+  } else if (mi?.price != null) {
+    price = resolveUsdPerTokenFromMarketInfo(
+      {
+        price: String(mi.price),
+        oracleUsdPerToken:
+          typeof mi.oracleUsdPerToken === "number"
+            ? mi.oracleUsdPerToken
+            : undefined,
+      },
+      tokenDecimals
+    );
+  }
+
+  // Fallback: TVL-implied price when oracle field is missing.
+  if (!(price > 0 && Number.isFinite(price))) {
     if (
       supplyTokensHuman > 0 &&
       Number.isFinite(totalSupplyUSD) &&
       totalSupplyUSD > 0
     ) {
       price = totalSupplyUSD / 1_000_000 / supplyTokensHuman;
-    } else if (mi?.price != null) {
-      const tokenPrice = parseFloat(String(mi.price)) || 0;
-      const decimals = Number(mi.decimals ?? 6);
-      if (tokenPrice > 0 && Number.isFinite(decimals)) {
-        price =
-          (tokenPrice * Math.pow(10, decimals + 6)) / Math.pow(10, 12);
-      }
     }
   }
 
@@ -272,6 +334,20 @@ function findMarketRowOnPage(
   return found ?? null;
 }
 
+/** Prefer full `marketsData` cache (all rows); fall back to current page. */
+function findMarketRow(
+  marketsData: Record<string, Record<string, unknown>>,
+  pageMarkets: Record<string, unknown>[],
+  asset: string,
+  poolId?: string,
+  marketRowKey?: string
+): Record<string, unknown> | null {
+  if (marketRowKey && marketsData[marketRowKey]) {
+    return { ...marketsData[marketRowKey], _sortKey: marketRowKey };
+  }
+  return findMarketRowOnPage(pageMarkets, asset, poolId, marketRowKey);
+}
+
 function networkIdToChainId(
   networkId: string
 ): "voi" | "algorand" {
@@ -285,6 +361,58 @@ function marketsTableWalletBalanceCacheKey(
   marketRowKey?: string
 ): string {
   return `${asset}|p=${poolId ?? ""}|rk=${marketRowKey ?? ""}`;
+}
+
+const WALLET_BALANCES_SESSION_TTL_MS = 60_000;
+
+function marketsWalletBalancesSessionKey(
+  networkId: string,
+  address: string
+): string {
+  return `dorkfi:walletBalances:${networkId}:${address}`;
+}
+
+function readMarketsWalletBalancesSession(
+  networkId: string,
+  address: string
+): Record<string, { balance: number; balanceUSD: number }> | null {
+  if (typeof sessionStorage === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(
+      marketsWalletBalancesSessionKey(networkId, address)
+    );
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as {
+      savedAt?: number;
+      data?: Record<string, { balance: number; balanceUSD: number }>;
+    };
+    if (
+      !parsed?.savedAt ||
+      !parsed.data ||
+      Date.now() - parsed.savedAt > WALLET_BALANCES_SESSION_TTL_MS
+    ) {
+      return null;
+    }
+    return parsed.data;
+  } catch {
+    return null;
+  }
+}
+
+function writeMarketsWalletBalancesSession(
+  networkId: string,
+  address: string,
+  data: Record<string, { balance: number; balanceUSD: number }>
+): void {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    sessionStorage.setItem(
+      marketsWalletBalancesSessionKey(networkId, address),
+      JSON.stringify({ savedAt: Date.now(), data })
+    );
+  } catch {
+    // Ignore quota / private-mode failures.
+  }
 }
 
 /** Toolbar gas-style meter: fill hits 100% at this many spendable ALGO. */
@@ -808,6 +936,8 @@ const MarketsTable = () => {
     loadVisibleMarkets,
     loadAllMarkets,
     isLoading,
+    isLoadingVisible,
+    marketsData,
     wadMintMarket,
     newMarketsCount,
     rewardMarketsCount,
@@ -1105,40 +1235,53 @@ const MarketsTable = () => {
           : undefined,
     });
 
-    setIsLoadingBalance(true);
+    const balanceCacheKey = marketsTableWalletBalanceCacheKey(
+      asset,
+      poolId,
+      marketRowKey
+    );
+    const hasCachedBalance = walletBalances[balanceCacheKey] !== undefined;
+    // Only show loading if we have nothing to paint yet.
+    if (!hasCachedBalance) {
+      setIsLoadingBalance(true);
+    }
+
     void (async () => {
       try {
         await fetchWalletBalance(asset, poolId, marketRowKey);
-
-        if (activeAccount?.address && poolId != null && poolId !== "") {
-          try {
-            const poolCollateralRows =
-              await fetchPoolCollateralMarketRowsForDeposit(
-                activeAccount.address,
-                currentNetwork as NetworkId,
-                poolId
-              );
-            setDepositPoolCollateralMarkets(poolCollateralRows);
-          } catch (e) {
-            console.error(
-              "Error loading pool collateral markets for deposit:",
-              e
-            );
-          }
-        }
       } catch (error) {
         console.error("Error fetching wallet balance for deposit:", error);
       } finally {
         setIsLoadingBalance(false);
       }
     })();
+
+    // Collateral rows are independent of the wallet-balance spinner.
+    if (activeAccount?.address && poolId != null && poolId !== "") {
+      void (async () => {
+        try {
+          const poolCollateralRows =
+            await fetchPoolCollateralMarketRowsForDeposit(
+              activeAccount.address,
+              currentNetwork as NetworkId,
+              poolId
+            );
+          setDepositPoolCollateralMarkets(poolCollateralRows);
+        } catch (e) {
+          console.error(
+            "Error loading pool collateral markets for deposit:",
+            e
+          );
+        }
+      })();
+    }
   };
 
   const handleWithdrawClick = (asset: string) => {
     setWithdrawModal({ isOpen: true, asset });
   };
 
-  const handleBorrowClick = async (
+  const handleBorrowClick = (
     asset: string,
     poolId?: string,
     marketRowKey?: string
@@ -1160,6 +1303,40 @@ const MarketsTable = () => {
     }
 
     const configSymbol = configSymbolFromMarketRowKey(marketRowKey);
+    // Hover/warm owns the RPC waterfall. Seed from cache if hot; the open
+    // effect below refreshes (and hits cache) without a second warm kick.
+    if (activeAccount?.address) {
+      const cachedGlobal = getRpcReadCache<{
+        totalCollateralValue: number;
+        totalBorrowValue: number;
+        lastUpdateTime: number;
+        healthFactorIndex?: number;
+      } | null>(`userGlobal:${currentNetwork}:${activeAccount.address}`);
+      const token = resolveTokenForDisplayedAsset(asset, poolId, marketRowKey);
+      const cachedBorrow =
+        token?.poolId && token.underlyingContractId
+          ? getRpcReadCache<{ balance: number; interest: number } | null>(
+              `userBorrow:${currentNetwork}:${activeAccount.address}:${token.poolId}:${token.underlyingContractId}`
+            )
+          : undefined;
+      if (cachedGlobal !== undefined) {
+        setUserGlobalData(cachedGlobal);
+      }
+      if (cachedBorrow !== undefined) {
+        setUserBorrowBalance(cachedBorrow?.balance || 0);
+      }
+      setIsLoadingGlobalData(
+        cachedGlobal === undefined ||
+          (token?.poolId != null &&
+            token.underlyingContractId != null &&
+            cachedBorrow === undefined)
+      );
+    } else {
+      setUserGlobalData(null);
+      setUserBorrowBalance(0);
+      setIsLoadingGlobalData(false);
+    }
+
     setBorrowModal({
       isOpen: true,
       asset,
@@ -1167,61 +1344,6 @@ const MarketsTable = () => {
       marketRowKey,
       configSymbol,
     });
-
-    setIsLoadingGlobalData(true);
-    void (async () => {
-      try {
-        if (activeAccount?.address) {
-          const globalData = await fetchUserGlobalData(
-            activeAccount.address,
-            currentNetwork
-          );
-          setUserGlobalData(globalData);
-
-          const token = resolveTokenForDisplayedAsset(
-            asset,
-            poolId,
-            marketRowKey
-          );
-
-          if (token && token.poolId && token.underlyingContractId) {
-            const borrowData = await fetchUserBorrowBalance(
-              activeAccount.address,
-              token.poolId,
-              token.underlyingContractId,
-              currentNetwork
-            );
-            setUserBorrowBalance(borrowData?.balance || 0);
-          } else {
-            setUserBorrowBalance(0);
-          }
-
-          if (poolId != null && poolId !== "") {
-            try {
-              const poolCollateralRows =
-                await fetchPoolCollateralMarketRowsForDeposit(
-                  activeAccount.address,
-                  currentNetwork as NetworkId,
-                  poolId
-                );
-              setDepositPoolCollateralMarkets(poolCollateralRows);
-            } catch (e) {
-              console.error(
-                "Error loading pool collateral markets for borrow:",
-                e
-              );
-            }
-          }
-        } else {
-          setUserGlobalData(null);
-          setUserBorrowBalance(0);
-        }
-      } catch (error) {
-        console.error("Error fetching user data for borrow:", error);
-      } finally {
-        setIsLoadingGlobalData(false);
-      }
-    })();
   };
 
   const handleMintClick = async (
@@ -1292,7 +1414,10 @@ const MarketsTable = () => {
       // Use originalSymbol to look up the config, as asset might be a display symbol
       const originalSymbol =
         "originalSymbol" in token ? (token as { originalSymbol?: string }).originalSymbol : asset;
-      const tokenConfig = getTokenConfig(currentNetwork, originalSymbol);
+      const tokenConfig = asTokenConfig(
+        getTokenConfig(currentNetwork, originalSymbol ?? asset),
+        (token as { poolId?: string }).poolId
+      );
 
       if (!tokenConfig) {
         throw new Error(`Token config not found for ${asset}`);
@@ -1453,62 +1578,74 @@ const MarketsTable = () => {
     }
   };
 
-  // Fetch user data when wallet connects while borrow modal is open (or when switching asset in-modal)
+  // Single owner for borrow-open position reads (wallet connect / asset switch).
+  // Hover warms rpcReadCache; click seeds from cache; this effect only fetches
+  // (cache hit is sync-fast via withRpcReadCache) — no second warmBorrow kick.
   useEffect(() => {
-    if (borrowModal.isOpen && borrowModal.asset && activeAccount?.address) {
-      const fetchData = async () => {
-        try {
-          const globalData = await fetchUserGlobalData(
-            activeAccount.address,
-            currentNetwork
-          );
-          setUserGlobalData(globalData);
+    if (!borrowModal.isOpen || !borrowModal.asset || !activeAccount?.address) {
+      return;
+    }
+    let cancelled = false;
+    const fetchData = async () => {
+      try {
+        const token = resolveTokenForDisplayedAsset(
+          borrowModal.asset,
+          borrowModal.poolId,
+          borrowModal.marketRowKey
+        );
+        const globalKey = `userGlobal:${currentNetwork}:${activeAccount.address}`;
+        const borrowKey =
+          token?.poolId && token.underlyingContractId
+            ? `userBorrow:${currentNetwork}:${activeAccount.address}:${token.poolId}:${token.underlyingContractId}`
+            : null;
+        const needsFetch =
+          getRpcReadCache(globalKey) === undefined ||
+          (borrowKey != null && getRpcReadCache(borrowKey) === undefined);
+        if (needsFetch) {
+          setIsLoadingGlobalData(true);
+        }
 
-          const token = resolveTokenForDisplayedAsset(
-            borrowModal.asset,
-            borrowModal.poolId,
-            borrowModal.marketRowKey
-          );
-
-          if (token && token.poolId && token.underlyingContractId) {
-            const borrowData = await fetchUserBorrowBalance(
-              activeAccount.address,
-              token.poolId,
-              token.underlyingContractId,
-              currentNetwork
-            );
-            setUserBorrowBalance(borrowData?.balance || 0);
-          } else {
-            setUserBorrowBalance(0);
-          }
-
-          let poolCollateralRows: PoolCollateralMarketRow[] = [];
-          if (
-            borrowModal.poolId != null &&
-            borrowModal.poolId !== ""
-          ) {
-            try {
-              poolCollateralRows =
-                await fetchPoolCollateralMarketRowsForDeposit(
-                  activeAccount.address,
-                  currentNetwork as NetworkId,
-                  borrowModal.poolId
+        const [globalData, borrowData, poolCollateralRows] = await Promise.all([
+          fetchUserGlobalData(activeAccount.address, currentNetwork),
+          token && token.poolId && token.underlyingContractId
+            ? fetchUserBorrowBalance(
+                activeAccount.address,
+                token.poolId,
+                token.underlyingContractId,
+                currentNetwork
+              )
+            : Promise.resolve(null),
+          borrowModal.poolId != null && borrowModal.poolId !== ""
+            ? fetchPoolCollateralMarketRowsForDeposit(
+                activeAccount.address,
+                currentNetwork as NetworkId,
+                borrowModal.poolId
+              ).catch((e) => {
+                console.error(
+                  "Error loading pool collateral markets for borrow:",
+                  e
                 );
-            } catch (e) {
-              console.error(
-                "Error loading pool collateral markets for borrow:",
-                e
-              );
-            }
-          }
-          setDepositPoolCollateralMarkets(poolCollateralRows);
-        } catch (error) {
+                return [] as PoolCollateralMarketRow[];
+              })
+            : Promise.resolve([] as PoolCollateralMarketRow[]),
+        ]);
+        if (cancelled) return;
+        setUserGlobalData(globalData);
+        setUserBorrowBalance(borrowData?.balance || 0);
+        setDepositPoolCollateralMarkets(poolCollateralRows);
+      } catch (error) {
+        if (!cancelled) {
           console.error("Error fetching user data:", error);
         }
-      };
+      } finally {
+        if (!cancelled) setIsLoadingGlobalData(false);
+      }
+    };
 
-      fetchData();
-    }
+    void fetchData();
+    return () => {
+      cancelled = true;
+    };
   }, [
     activeAccount?.address,
     borrowModal.isOpen,
@@ -1605,7 +1742,7 @@ const MarketsTable = () => {
     });
     // Fresh on-chain read for modal (fetchMarketInfo(..., "contract") via useOnDemandMarketData).
     void loadMarketDataWithBypass(
-      marketKeyForOnDemandLoad(poolId, configSymbol, asset)
+      rowKey ?? marketKeyForOnDemandLoad(poolId, configSymbol, asset)
     );
     if (activeAccount?.address) {
       const addr = activeAccount.address;
@@ -1644,15 +1781,17 @@ const MarketsTable = () => {
   // Key off `lastFetched` only — `markets` is remapped often (rewards APR) with new object refs.
   const detailModalRowLastFetched = useMemo(() => {
     if (!detailModal.isOpen || !detailModal.asset) return undefined;
-    const fresh = findMarketRowOnPage(
-      markets as Record<string, unknown>[],
+    const fresh = findMarketRow(
+      marketsData as unknown as Record<string, Record<string, unknown>>,
+      marketsForLookup as Record<string, unknown>[],
       detailModal.asset,
       detailModal.poolId,
       detailModal.marketRowKey
     );
     return (fresh as { lastFetched?: number } | undefined)?.lastFetched;
   }, [
-    markets,
+    marketsData,
+    marketsForLookup,
     detailModal.isOpen,
     detailModal.asset,
     detailModal.poolId,
@@ -1662,8 +1801,9 @@ const MarketsTable = () => {
   useEffect(() => {
     if (!detailModal.isOpen || !detailModal.asset) return;
     if (detailModalRowLastFetched === undefined) return;
-    const fresh = findMarketRowOnPage(
-      markets as Record<string, unknown>[],
+    const fresh = findMarketRow(
+      marketsData as unknown as Record<string, Record<string, unknown>>,
+      marketsForLookup as Record<string, unknown>[],
       detailModal.asset,
       detailModal.poolId,
       detailModal.marketRowKey
@@ -1686,20 +1826,27 @@ const MarketsTable = () => {
     detailModal.asset,
     detailModal.poolId,
     detailModal.marketRowKey,
+    marketsData,
+    marketsForLookup,
   ]);
 
-  // Load all markets when component mounts
-  useEffect(() => {
-    loadAllMarkets();
-  }, [loadAllMarkets]);
+  // Market rows hydrate via useOnDemandMarketData (bulk API + gap-fill).
 
-  // Clear wallet balance cache and user global data when wallet address changes
+  // Restore / clear wallet balance cache when wallet or network changes
   useEffect(() => {
-    setWalletBalances({});
     setUserGlobalData(null);
     setClaimableRewards({});
     setClaimedAmount(null);
-  }, [activeAccount?.address]);
+    if (!activeAccount?.address) {
+      setWalletBalances({});
+      return;
+    }
+    const cached = readMarketsWalletBalancesSession(
+      currentNetwork,
+      activeAccount.address
+    );
+    setWalletBalances(cached ?? {});
+  }, [activeAccount?.address, currentNetwork]);
 
   // Check for rewards using arc200_approval method simulation
   useEffect(() => {
@@ -2463,15 +2610,22 @@ const MarketsTable = () => {
       const decodedStxns = signedTxns.map((txn: Uint8Array) => {
         return algosdk.decodeSignedTransaction(txn);
       });
-      type DecodedAppTxn = { txn: { type: string; applicationCall?: { appIndex: number }; txID(): string } };
-      const poolTxn = decodedStxns
-        .reverse()
-        .find(
-          (txn): txn is DecodedAppTxn =>
-            (txn as DecodedAppTxn).txn?.type === "appl" &&
-            typeof (txn as DecodedAppTxn).txn?.applicationCall?.appIndex === "number" &&
-            Number((txn as DecodedAppTxn).txn.applicationCall!.appIndex) === parseInt(voiToken.poolId || "")
+      type DecodedAppTxn = {
+        txn: {
+          type: string;
+          applicationCall?: { appIndex: number };
+          txID(): string;
+        };
+      };
+      const poolTxn = decodedStxns.reverse().find((raw) => {
+        const txn = raw as unknown as DecodedAppTxn;
+        return (
+          txn.txn?.type === "appl" &&
+          typeof txn.txn?.applicationCall?.appIndex === "number" &&
+          Number(txn.txn.applicationCall.appIndex) ===
+            parseInt(voiToken.poolId || "")
         );
+      }) as DecodedAppTxn | undefined;
       const poolTxnID = poolTxn?.txn?.txID?.();
       if (poolTxnID) {
         await new Promise((resolve) => setTimeout(resolve, 5000));
@@ -2577,7 +2731,7 @@ const MarketsTable = () => {
 
   // Handle refresh button click
   const handleRefresh = () => {
-    loadAllMarkets();
+    void loadAllMarkets(true);
     setMarketsToolbarAlgoRefreshNonce((n) => n + 1);
   };
 
@@ -2598,6 +2752,10 @@ const MarketsTable = () => {
       delete newBalances[asset];
       return newBalances;
     });
+
+    if (activeAccount?.address) {
+      invalidateWalletBalanceRpc(activeAccount.address);
+    }
 
     await fetchWalletBalance(asset, poolId, marketRowKey, {
       bypassCache: true,
@@ -2715,6 +2873,28 @@ const MarketsTable = () => {
       // Initialize ARC200Service with current clients
       const clients = await getSyncedClientsForReads();
       ARC200Service.initialize(clients);
+      const bypassRpc = opts?.bypassCache === true;
+
+      // Warm / reuse a single accountInformation snapshot for native + ASA reads.
+      if (
+        useNativeAlgoForFolksAlgoHybridDeposit ||
+        useFolksUnderlyingAsaWalletBalance ||
+        tokenStandardUsesNativeWalletBalance(originalTokenConfig.tokenStandard) ||
+        originalTokenConfig.tokenStandard === "asa-asa" ||
+        originalTokenConfig.tokenStandard === "asa" ||
+        originalTokenConfig.tokenStandard === "network-asa" ||
+        originalTokenConfig.tokenStandard === "arc200-exchange"
+      ) {
+        try {
+          await getCachedAccountInformation(
+            clients.algod,
+            activeAccount.address,
+            { bypassCache: bypassRpc }
+          );
+        } catch {
+          // Individual paths still fall back to their own reads.
+        }
+      }
 
       // Debug: Log token config details
       console.log("[MarketsTable] Token config for balance fetch:", {
@@ -2736,9 +2916,11 @@ const MarketsTable = () => {
           `[MarketsTable] Folks ALGO hybrid deposit market — using native spendable ALGO for ${asset}`
         );
         try {
-          const accountInfo = await clients.algod
-            .accountInformation(activeAccount.address)
-            .do();
+          const accountInfo = await getCachedAccountInformation(
+            clients.algod,
+            activeAccount.address,
+            { bypassCache: bypassRpc }
+          );
           balance = spendableAlgoHumanFromAccount(accountInfo);
         } catch (error) {
           console.error(
@@ -2751,20 +2933,14 @@ const MarketsTable = () => {
         // Standalone f-asset rows (e.g. `tokens.fUSDC`) use f-ASA in config; default deposit route is
         // underlying USDC (`folksParams.assetId`), same as `SupplyBorrowModal` after route selection.
         try {
-          const accAssetInfo = await clients.algod
-            .accountAssetInformation(
-              activeAccount.address,
-              folksUnderlyingAsaIdForWallet
-            )
-            .do();
-          const atomic = getAccountAssetHoldingAmountAtomic(accAssetInfo);
-          if (atomic != null) {
-            balance =
-              Number(atomic) /
-              Math.pow(10, originalTokenConfig.decimals);
-          } else {
-            balance = 0;
-          }
+          const atomic = await getCachedAsaHoldingAtomic(
+            clients.algod,
+            activeAccount.address,
+            folksUnderlyingAsaIdForWallet,
+            { bypassCache: bypassRpc }
+          );
+          balance =
+            Number(atomic) / Math.pow(10, originalTokenConfig.decimals);
         } catch (error) {
           console.error(
             `Error fetching Folks underlying ASA balance for ${asset}:`,
@@ -2780,6 +2956,9 @@ const MarketsTable = () => {
         console.log(
           `Fetching ARC200 balance for ${asset} (contract: ${token.underlyingContractId})`
         );
+        if (bypassRpc) {
+          invalidateWalletBalanceRpc(activeAccount.address);
+        }
         const arc200Balance = await ARC200Service.getBalance(
           activeAccount.address,
           token.underlyingContractId
@@ -2809,10 +2988,11 @@ const MarketsTable = () => {
         });
         console.log(`Fetching network token balance for ${asset}`);
         try {
-          const clients = await getSyncedClientsForReads();
-          const accountInfo = await clients.algod
-            .accountInformation(activeAccount.address)
-            .do();
+          const accountInfo = await getCachedAccountInformation(
+            clients.algod,
+            activeAccount.address,
+            { bypassCache: bypassRpc }
+          );
           console.log(`[MarketsTable] accountInfo for ${asset}:`, accountInfo);
           balance = spendableAlgoHumanFromAccount(accountInfo);
           console.log(`[MarketsTable] Network token balance for ${asset}:`, {
@@ -2837,21 +3017,15 @@ const MarketsTable = () => {
           `Fetching ASA balance for ${asset} (asa-asa asset ID: ${assetId})`
         );
         try {
-          const clients = await getSyncedClientsForReads();
-          const accAssetInfo = await clients.algod
-            .accountAssetInformation(activeAccount.address, assetId)
-            .do();
-
-          const atomic = getAccountAssetHoldingAmountAtomic(accAssetInfo);
-          if (atomic != null) {
-            balance =
-              Number(atomic) /
-              Math.pow(10, originalTokenConfig.decimals);
-            console.log(`ASA balance for ${asset}: ${balance}`);
-          } else {
-            console.log(`No ASA balance found for ${asset}`);
-            balance = 0;
-          }
+          const atomic = await getCachedAsaHoldingAtomic(
+            clients.algod,
+            activeAccount.address,
+            assetId,
+            { bypassCache: bypassRpc }
+          );
+          balance =
+            Number(atomic) / Math.pow(10, originalTokenConfig.decimals);
+          console.log(`ASA balance for ${asset}: ${balance}`);
         } catch (error) {
           console.error(`Error fetching ASA balance for ${asset}:`, error);
           balance = 0;
@@ -2866,23 +3040,16 @@ const MarketsTable = () => {
           `Fetching ASA balance for ${asset} (asset ID: ${token.underlyingAssetId})`
         );
         try {
-          const clients = await getSyncedClientsForReads();
           const assetId = parseInt(token.underlyingAssetId);
-          const accAssetInfo = await clients.algod
-            .accountAssetInformation(activeAccount.address, assetId)
-            .do();
-
-          const atomic = getAccountAssetHoldingAmountAtomic(accAssetInfo);
-          if (atomic != null) {
-            // Convert from smallest units to human readable format
-            balance =
-              Number(atomic) /
-              Math.pow(10, originalTokenConfig.decimals);
-            console.log(`ASA balance for ${asset}: ${balance}`);
-          } else {
-            console.log(`No ASA balance found for ${asset}`);
-            balance = 0;
-          }
+          const atomic = await getCachedAsaHoldingAtomic(
+            clients.algod,
+            activeAccount.address,
+            assetId,
+            { bypassCache: bypassRpc }
+          );
+          balance =
+            Number(atomic) / Math.pow(10, originalTokenConfig.decimals);
+          console.log(`ASA balance for ${asset}: ${balance}`);
         } catch (error) {
           console.error(`Error fetching ASA balance for ${asset}:`, error);
           balance = 0;
@@ -2893,23 +3060,16 @@ const MarketsTable = () => {
           `Fetching ASA balance for ${asset} (asset ID: ${token.underlyingAssetId})`
         );
         try {
-          const clients = await getSyncedClientsForReads();
           const assetId = parseInt(token.underlyingAssetId);
-          const accAssetInfo = await clients.algod
-            .accountAssetInformation(activeAccount.address, assetId)
-            .do();
-
-          const atomic = getAccountAssetHoldingAmountAtomic(accAssetInfo);
-          if (atomic != null) {
-            // Convert from smallest units to human readable format
-            balance =
-              Number(atomic) /
-              Math.pow(10, originalTokenConfig.decimals);
-            console.log(`ASA balance for ${asset}: ${balance}`);
-          } else {
-            console.log(`No ASA balance found for ${asset}`);
-            balance = 0;
-          }
+          const atomic = await getCachedAsaHoldingAtomic(
+            clients.algod,
+            activeAccount.address,
+            assetId,
+            { bypassCache: bypassRpc }
+          );
+          balance =
+            Number(atomic) / Math.pow(10, originalTokenConfig.decimals);
+          console.log(`ASA balance for ${asset}: ${balance}`);
         } catch (error) {
           console.error(`Error fetching ASA balance for ${asset}:`, error);
           balance = 0;
@@ -2922,15 +3082,16 @@ const MarketsTable = () => {
       }
 
       // Calculate USD value (same display asset may map to multiple rows)
-      const marketForPrice = marketRowKey
-        ? markets.find(
-            (m) => (m as { _sortKey?: string })._sortKey === marketRowKey
-          )
-        : markets.find((m) => m.asset === asset);
+      const marketForPrice = findMarketRow(
+        marketsData as unknown as Record<string, Record<string, unknown>>,
+        marketsForLookup as Record<string, unknown>[],
+        asset,
+        poolId,
+        marketRowKey
+      );
       const tokenPrice = marketForPrice
-        ? (marketForPrice.totalSupplyUSD / marketForPrice.totalSupply || 1) /
-          10 ** 6
-        : 1;
+        ? normalizeMarketData(marketForPrice, currentNetwork as NetworkId).price
+        : 0;
       const balanceUSD = balance * tokenPrice;
 
       console.log({
@@ -2944,10 +3105,20 @@ const MarketsTable = () => {
         balanceUSD,
       };
 
-      setWalletBalances((prev) => ({
-        ...prev,
-        [cacheKey]: balanceData,
-      }));
+      setWalletBalances((prev) => {
+        const next = {
+          ...prev,
+          [cacheKey]: balanceData,
+        };
+        if (activeAccount?.address) {
+          writeMarketsWalletBalancesSession(
+            currentNetwork,
+            activeAccount.address,
+            next
+          );
+        }
+        return next;
+      });
 
       console.log(`Final balance data for ${asset}:`, balanceData);
       return balanceData;
@@ -2966,10 +3137,8 @@ const MarketsTable = () => {
       networkId: currentNetwork as NetworkId,
       warmWalletBalance: (p: MarketActionTokenParams) => {
         if (!activeAccount?.address) return;
-        const rowKey = p.configSymbol
-          ? `${p.asset}|${p.configSymbol}|${p.poolId ?? ""}`
-          : undefined;
-        void fetchWalletBalance(p.asset, p.poolId, rowKey);
+        // Use the real markets `_sortKey` so hover cache matches modal open.
+        void fetchWalletBalance(p.asset, p.poolId, p.marketRowKey);
       },
     }),
     [debouncedPrefetch, activeAccount?.address, currentNetwork]
@@ -3233,7 +3402,7 @@ const MarketsTable = () => {
       portfolioHealthFactor: number | null,
       maxWithdrawUnderlying: number | null
     ): MarketDetailUserPosition => {
-      const norm = normalizeMarketData(row);
+      const norm = normalizeMarketData(row, currentNetwork as NetworkId);
       const price =
         norm.price > 0 && Number.isFinite(norm.price) ? norm.price : 0;
       const assetData = getAssetData(asset, poolId, detailModal.marketRowKey);
@@ -3379,7 +3548,7 @@ const MarketsTable = () => {
             if (maxWithdrawResult?.maxWithdrawUnderlying == null) return;
             setDetailModalUserPosition((prev) => {
               if (!prev) return prev;
-              const norm = normalizeMarketData(row);
+              const norm = normalizeMarketData(row, currentNetwork as NetworkId);
               const price =
                 norm.price > 0 && Number.isFinite(norm.price) ? norm.price : 0;
               const dep =
@@ -3712,9 +3881,6 @@ const MarketsTable = () => {
           </section>
         )}
 
-        {/* Hero Section */}
-        <MarketsHeroSection />
-
         {/* Markets Table */}
         <div
           ref={marketsListRef}
@@ -3724,7 +3890,7 @@ const MarketsTable = () => {
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-4">
               <div className="text-xl md:text-2xl font-bold text-slate-800 dark:text-white">
                 Market Overview
-                {isLoading && (
+                {isLoadingVisible && (
                   <span className="ml-2 text-sm font-normal text-muted-foreground">
                     (Loading...)
                   </span>
@@ -3868,6 +4034,8 @@ const MarketsTable = () => {
           onPageChange={setCurrentPage}
         />
 
+        {/* Lazy-loaded action modals — keep Markets chunk free of txn/signing stacks */}
+        <Suspense fallback={<LazyModalFallback />}>
         {/* Market Detail Modal */}
         {detailModal.isOpen && detailModal.asset && detailModal.marketData && (
           <PremiumMarketModal
@@ -3877,7 +4045,10 @@ const MarketsTable = () => {
             chainId={networkIdToChainId(currentNetwork)}
             networkId={currentNetwork}
             rawMarket={detailModal.marketData}
-            marketData={normalizeMarketData(detailModal.marketData)}
+            marketData={normalizeMarketData(
+              detailModal.marketData,
+              currentNetwork as NetworkId
+            )}
             userPosition={detailModalUserPosition ?? undefined}
             userPositionLoadState={detailModalUserPositionLoad}
             onDeposit={() =>
@@ -3967,6 +4138,12 @@ const MarketsTable = () => {
                   : undefined
               }
               onTransactionSuccess={async () => {
+                if (activeAccount?.address) {
+                  invalidateUserPositionRpcCache(
+                    currentNetwork,
+                    activeAccount.address
+                  );
+                }
                 // Refresh wallet balance immediately after successful transaction
                 if (depositModal.asset) {
                   void refreshWalletBalance(
@@ -4020,6 +4197,14 @@ const MarketsTable = () => {
                   totalBorrows: assetData.totalBorrow,
                   apyParameters: assetData.apyParameters,
                 }}
+                onTransactionSuccess={() => {
+                  if (activeAccount?.address) {
+                    invalidateUserPositionRpcCache(
+                      currentNetwork,
+                      activeAccount.address
+                    );
+                  }
+                }}
               />
             ) : null;
           })()}
@@ -4058,6 +4243,12 @@ const MarketsTable = () => {
               isLoadingBorrowGlobalData={isLoadingGlobalData}
               poolCollateralMarkets={depositPoolCollateralMarkets}
               onTransactionSuccess={() => {
+                if (activeAccount?.address) {
+                  invalidateUserPositionRpcCache(
+                    currentNetwork,
+                    activeAccount.address
+                  );
+                }
                 // Refresh market data after successful borrow
                 if (borrowModal.asset) {
                   loadMarketDataWithBypass(
@@ -4094,6 +4285,12 @@ const MarketsTable = () => {
               userGlobalData={userGlobalData}
               userBorrowBalance={userBorrowBalance}
               onTransactionSuccess={() => {
+                if (activeAccount?.address) {
+                  invalidateUserPositionRpcCache(
+                    currentNetwork,
+                    activeAccount.address
+                  );
+                }
                 // Refresh market data after successful mint
                 if (mintModal.asset) {
                   loadMarketDataWithBypass(
@@ -4121,6 +4318,7 @@ const MarketsTable = () => {
             setMarketsToolbarAlgoRefreshNonce((n) => n + 1)
           }
         />
+        </Suspense>
 
         {/* Claim Rewards Modal */}
         {showClaimModal && (

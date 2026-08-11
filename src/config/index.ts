@@ -4392,6 +4392,31 @@ export const getTokenConfig = (
 };
 
 /**
+ * Unwrap `TokenConfig | TokenConfig[]` to a single row.
+ *
+ * - Single config → returned as-is.
+ * - Array + matching `poolId` → that row.
+ * - Array of length 1 (no pool / unmatched pool) → that row.
+ * - Array of length > 1 without a matching `poolId` → `undefined`
+ *   (never silently pick the wrong market).
+ */
+export function asTokenConfig(
+  raw: TokenConfig | TokenConfig[] | undefined | null,
+  poolId?: string | null
+): TokenConfig | undefined {
+  if (!raw) return undefined;
+  if (!Array.isArray(raw)) return raw;
+  if (raw.length === 0) return undefined;
+  if (raw.length === 1) return raw[0];
+
+  const poolStr =
+    poolId != null && String(poolId) !== "" ? String(poolId) : "";
+  if (poolStr === "") return undefined;
+
+  return raw.find((c) => String(c.poolId ?? "") === poolStr);
+}
+
+/**
  * Map key for {@link getTokenConfig} from a {@link getAllTokensWithDisplayInfo} row.
  * Prefer `originalSymbol` (`fiUSDC`, `fUSDC`) over `configKey` (`USDC` for every `tokens.USDC[]` entry).
  */

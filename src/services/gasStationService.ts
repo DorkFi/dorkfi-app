@@ -16,6 +16,7 @@ import {
   getGasStationSymbols,
   getAllTokens,
   getTokenConfig,
+  asTokenConfig,
 } from "@/config";
 import algorandService, { AlgorandNetwork } from "@/services/algorandService";
 import { APP_SPEC } from "@/clients/ATokenClient";
@@ -464,7 +465,7 @@ export class GasStationService {
     if (!this.isTokenAvailableInGasStation(networkId, tokenSymbol)) {
       return null;
     }
-    return getTokenConfig(networkId, tokenSymbol);
+    return asTokenConfig(getTokenConfig(networkId, tokenSymbol));
   }
 }
 

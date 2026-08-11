@@ -54,7 +54,6 @@ import algosdk, { waitForConfirmation } from "algosdk";
 import BigNumber from "bignumber.js";
 import { getTokenImagePath } from "@/utils/tokenImageUtils";
 import { useToast } from "@/hooks/use-toast";
-import { getUserFriendlyError } from "@/utils/errorUtils";
 import dorkfiAPIService from "@/services/dorkfiAPIService";
 import { updateTransactionMetadata } from "@/utils/transactionUtils";
 import { CONTRACT } from "ulujs";
@@ -68,8 +67,9 @@ import {
   liquidationThresholdToPercent,
 } from "@/utils/poolCollateralMarketRows";
 import { marketRowForPortfolioPosition } from "@/utils/marketRowForPortfolioPosition";
+import { usdPerTokenFromPortfolioMarketRow } from "@/utils/assetDecimals";
 import { portfolioWalletBalanceCacheKey } from "@/utils/portfolioWalletBalanceCacheKey";
-import { warmWithdrawModalRpc } from "@/utils/modalPrefetch";
+import { warmWithdrawModalRpc } from "@/utils/modalPrefetchHeavy";
 import { withRainbowkitHostDialogDismissed } from "@/wallet/xchainSignUi";
 
 /**
@@ -788,36 +788,31 @@ const PortfolioModals = ({
     // Use the deposit's network so we get the correct token config (e.g. 8 decimals for goBTC on Algorand)
     // and match the Supplied Assets table USD value.
     const depositNetwork = depositAny?.network || currentNetwork;
-    let tokenPrice = deposit?.tokenPrice || 1;
-    if (market?.price) {
-      try {
-        // Get token config from the deposit's network (not currentNetwork)
-        const tokens = getAllTokensWithDisplayInfo(depositNetwork);
-        const token = resolveSupplyBorrowToken(
-          tokens,
-          asset,
-          poolId,
-          (depositAny as { configSymbol?: string })?.configSymbol,
-          marketId
-        );
-
-        const tokenDecimals = token?.decimals ?? 6; // Default to 6 if not found
-
-        // Oracle stores price in 12-decimal scale; convert to human price using token decimals
-        const targetAdjustment = 12 - tokenDecimals;
-        const divisor = Math.pow(10, targetAdjustment);
-
-        const price = parseFloat(market.price);
-        if (price && price > 0) {
-          tokenPrice = price / divisor;
-        }
-      } catch (error) {
-        console.error("Error calculating tokenPrice:", error);
-        // Fallback: use deposit.tokenPrice if available, else 10^6 divisor
-        tokenPrice =
-          deposit?.tokenPrice ||
-          parseFloat(market.price) / Math.pow(10, 6);
-      }
+    let tokenPrice = 0;
+    try {
+      const tokens = getAllTokensWithDisplayInfo(depositNetwork);
+      const token = resolveSupplyBorrowToken(
+        tokens,
+        asset,
+        poolId,
+        (depositAny as { configSymbol?: string })?.configSymbol,
+        marketId
+      );
+      const tokenDecimals = token?.decimals ?? 6;
+      tokenPrice = usdPerTokenFromPortfolioMarketRow(market, tokenDecimals, {
+        displaySymbol: asset,
+      });
+    } catch (error) {
+      console.error("Error calculating tokenPrice:", error);
+    }
+    if (!(tokenPrice > 0)) {
+      const fromDeposit = deposit?.tokenPrice;
+      tokenPrice =
+        typeof fromDeposit === "number" &&
+        Number.isFinite(fromDeposit) &&
+        fromDeposit > 0
+          ? fromDeposit
+          : 0;
     }
 
     // Safely resolve APY - avoid NaN when rates are undefined
@@ -1048,6 +1043,39 @@ const PortfolioModals = ({
       return Number.isFinite(n) && n >= 0 ? n : undefined;
     };
 
+    // Same oracle-aware USD/token path as Portfolio — never invent $1 or hardcode ÷1e6.
+    const borrowNetwork =
+      (borrow as { network?: string } | undefined)?.network || currentNetwork;
+    let tokenPrice = 0;
+    try {
+      const tokens = getAllTokensWithDisplayInfo(borrowNetwork as NetworkId);
+      const token = resolveSupplyBorrowToken(
+        tokens,
+        asset,
+        poolId,
+        (borrow as { configSymbol?: string } | undefined)?.configSymbol,
+        marketId
+      );
+      const tokenDecimals = token?.decimals ?? 6;
+      tokenPrice = usdPerTokenFromPortfolioMarketRow(market, tokenDecimals, {
+        displaySymbol: asset,
+      });
+    } catch (error) {
+      console.error(
+        "[PortfolioModals] getMarketStatsForBorrow tokenPrice:",
+        error
+      );
+    }
+    if (!(tokenPrice > 0)) {
+      const fromBorrow = borrow?.tokenPrice;
+      tokenPrice =
+        typeof fromBorrow === "number" &&
+        Number.isFinite(fromBorrow) &&
+        fromBorrow > 0
+          ? fromBorrow
+          : 0;
+    }
+
     const stats = {
       borrowAPY:
         market?.borrowApyCalculation?.apy ||
@@ -1057,9 +1085,7 @@ const PortfolioModals = ({
       liquidationMargin: liquidationMargin,
       healthFactor: healthFactor,
       currentLTV: currentLTV,
-      tokenPrice: market?.price
-        ? parseFloat(market.price) / Math.pow(10, 6)
-        : borrow?.tokenPrice || 1,
+      tokenPrice,
       collateralFactor: market?.collateralFactor
         ? market.collateralFactor * 100
         : undefined,
@@ -2069,17 +2095,7 @@ const PortfolioModals = ({
     } catch (error) {
       setRepayRainbowkitOverlaySuppressed(false);
       console.error("Repay error:", error);
-      const errorMessage = getUserFriendlyError(error);
-
-      // Show error toast to the user
-      toast({
-        title: "Repay Failed",
-        description: errorMessage,
-        variant: "destructive",
-        duration: 5000,
-      });
-
-      // Re-throw the error so RepayModal can catch it and not show success modal
+      // Re-throw so RepayModal can toast once (avoids duplicate failure toasts).
       throw error;
     }
   };
@@ -2762,8 +2778,19 @@ const PortfolioModals = ({
                 folksMintedOneUnderlyingByKey?.[repayMintKey]
               }
               repayTokenConfig={tcRepayModal ?? undefined}
+              repayMarketId={
+                repayModal.marketId != null &&
+                String(repayModal.marketId).trim() !== ""
+                  ? String(repayModal.marketId)
+                  : repayTokenRow?.underlyingContractId != null
+                    ? String(repayTokenRow.underlyingContractId)
+                    : undefined
+              }
               xalgoConsensusRepayAlgoOption={xalgoConsensusRepayAlgoOption}
               rainbowkitHostOverlaySuppressed={repayRainbowkitOverlaySuppressed}
+              onRainbowkitHostOverlaySuppressed={
+                setRepayRainbowkitOverlaySuppressed
+              }
             />
           );
         })()}

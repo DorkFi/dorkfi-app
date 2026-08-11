@@ -39,4 +39,19 @@ interface ImportMetaEnv {
   readonly VITE_OFFRAMP_REDIRECT_URL?: string;
   /** Optional origin for XO Swap proxy (default `/api/xo-swap` via Vite plugin). */
   readonly VITE_XO_SWAP_API_BASE?: string;
+  /**
+   * When `true` or `1`, enable cross-asset repay via Haystack (Algorand mainnet).
+   * Defaults on in Vite DEV; off in production builds unless set (safe beta dark-ship).
+   */
+  readonly VITE_ENABLE_CROSS_ASSET_REPAY?: string;
+  /**
+   * Absolute origin of the Haystack key proxy (no trailing slash).
+   * Dev default is `/api/haystack` (Vite middleware). Production builds fall
+   * back to the baked Railway proxy. Never put HAYSTACK_API_KEY in VITE_*.
+   */
+  readonly VITE_HAYSTACK_PROXY_URL?: string;
+  /** Absolute origin of the repay/X share server (Railway). Dev defaults to `/api/x-share`. */
+  readonly VITE_X_SHARE_API_BASE?: string;
+  /** Local share-server target for the Vite `/api/x-share` proxy (default `http://127.0.0.1:8788`). */
+  readonly VITE_X_SHARE_LOCAL_TARGET?: string;
 }

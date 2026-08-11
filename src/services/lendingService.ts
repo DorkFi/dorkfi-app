@@ -38,15 +38,21 @@ import {
 } from "@/config";
 import algorandService, { AlgorandNetwork } from "./algorandService";
 import { ARC200Service } from "./arc200Service";
+import { runWithConcurrency } from "@/utils/runWithConcurrency";
 import { abi, CONTRACT } from "ulujs";
 import {
   APP_SPEC as LendingPoolAppSpec,
   UserData,
   GlobalUserData,
 } from "@/clients/DorkFiLendingPoolClient";
+import { APP_SPEC as PriceOracleAppSpec } from "@/clients/PriceOracleClient";
+import {
+  marketInfoFormattedPriceFromUsdPerToken,
+  usdPerTokenFromOracleContractRaw,
+} from "@/utils/assetDecimals";
 import algosdk from "algosdk";
 import BigNumber from "bignumber.js";
-import { withRpcReadCache } from "@/utils/rpcReadCache";
+import { withRpcReadCache, invalidateRpcReadCache } from "@/utils/rpcReadCache";
 import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
 import { calcDepositReturn } from "@folks-finance/algorand-sdk";
 import {
@@ -78,6 +84,10 @@ import {
   buildTalgoMintUnsignedWithOptionalOptIn,
   fetchMinTalgoOutMintFloorFromChain,
 } from "./tinymanTalgoAdapter";
+import {
+  classifyNt200CreateBalanceBoxSimulateResult,
+  isNt200CreateBalanceBoxAlreadyExistsError,
+} from "@/utils/nt200BalanceBox";
 
 export interface MarketData {
   appId: string;
@@ -168,6 +178,10 @@ export interface MarketInfo {
   reservesAmount?: string;
   /** Market `lastUpdateTime` from chain as ISO 8601. */
   chainLastUpdateIso?: string;
+  /** USD per token from price-oracle contract when fresher than `get_market.price`. */
+  oracleUsdPerToken?: number;
+  /** Unix seconds from price-oracle `get_price_with_timestamp`. */
+  oraclePriceTimestampSec?: number;
   // APY calculation results
   apyCalculation?: APYCalculationResult;
   borrowApyCalculation?: APYCalculationResult;
@@ -462,6 +476,143 @@ export const enhanceAVMMarketInfo = (
 /** Which on-chain read to use for market state in {@link fetchMarketInfoFromContract}. */
 export type FetchMarketInfoContractMethod = "sync_market" | "get_market";
 
+const ORACLE_PRICE_CACHE_TTL_MS = 60_000;
+
+/**
+ * On Pool A, fWBTC's price-oracle feed tracks spot BTC; goBTC's own oracle entry can lag.
+ * When resolving goBTC display price, also consider these reference market contract IDs.
+ */
+const ALGORAND_POOL_BTC_ORACLE_REFERENCE_MARKETS: Partial<
+  Record<string, string[]>
+> = {
+  "3333688282": ["3575837891"],
+};
+
+/** Symbols that can use the Pool A fWBTC oracle feed when their own entry is stale/missing. */
+const BTC_ORACLE_REFERENCE_SYMBOLS = new Set(["GOBTC", "WBTC", "BTC"]);
+
+async function readOracleUsdPerToken(
+  networkId: NetworkId,
+  oracleKey: string,
+  tokenDecimals: number
+): Promise<{ usd: number; timestampSec: number } | null> {
+  if (!oracleKey || !Number.isFinite(Number(oracleKey))) return null;
+  const networkConfig = getNetworkConfig(networkId);
+  const oracleAppId = networkConfig.contracts?.priceOracle;
+  if (!oracleAppId || !isAlgorandCompatibleNetwork(networkId)) return null;
+
+  const cacheKey = `oracleUsd:${networkId}:${oracleKey}:${tokenDecimals}`;
+  return withRpcReadCache(
+    cacheKey,
+    async () => {
+      try {
+        const clients = await algorandService.initializeClientsForReads(
+          networkConfig.walletNetworkId as AlgorandNetwork
+        );
+        const ci = new CONTRACT(
+          Number(oracleAppId),
+          clients.algod,
+          undefined,
+          { ...PriceOracleAppSpec.contract, events: [] },
+          {
+            addr: algosdk.encodeAddress(
+              algosdk.getApplicationAddress(Number(oracleAppId)).publicKey
+            ),
+            sk: new Uint8Array(),
+          }
+        );
+        ci.setFee(5000);
+        const result = await ci.get_price_with_timestamp(Number(oracleKey));
+        if (!result.success || !result.returnValue) return null;
+        const [price, timestamp] = result.returnValue as [bigint, bigint];
+        if (price === 0n || timestamp === 0n) return null;
+        const usd = usdPerTokenFromOracleContractRaw(price, tokenDecimals);
+        if (!Number.isFinite(usd) || usd <= 0) return null;
+        return { usd, timestampSec: Number(timestamp) };
+      } catch (error) {
+        console.warn("readOracleUsdPerToken failed", {
+          networkId,
+          oracleKey,
+          error,
+        });
+        return null;
+      }
+    },
+    ORACLE_PRICE_CACHE_TTL_MS
+  );
+}
+
+/** Prefer price-oracle USD when available (e.g. goBTC oracle tracks spot closer than stale `get_market`). */
+async function applyOraclePriceToMarketInfo(
+  marketInfo: MarketInfo,
+  market: MarketData,
+  token: {
+    underlyingContractId?: string;
+    assetId?: string;
+    underlyingAssetId?: string;
+  },
+  tokenConfig: TokenConfig | undefined,
+  networkId: NetworkId
+): Promise<void> {
+  const tokenDecimals = marketInfo.decimals || 6;
+  const oracleKeys = [
+    marketInfo.marketId,
+    token.underlyingContractId,
+    tokenConfig?.contractId,
+    token.underlyingAssetId,
+    token.assetId,
+    tokenConfig?.assetId,
+  ]
+    .map((k) => (k != null ? String(k).trim() : ""))
+    .filter((k, i, arr) => k !== "" && arr.indexOf(k) === i);
+
+  const pickBest = (
+    candidates: Array<{ usd: number; timestampSec: number }>
+  ) =>
+    candidates.reduce((a, b) => {
+      if (b.timestampSec !== a.timestampSec) {
+        return b.timestampSec > a.timestampSec ? b : a;
+      }
+      return b.usd > a.usd ? b : a;
+    });
+
+  const collectFromKeys = async (keys: string[]) => {
+    if (keys.length === 0) return [] as Array<{ usd: number; timestampSec: number }>;
+    const oracleResults = await Promise.all(
+      keys.map((key) => readOracleUsdPerToken(networkId, key, tokenDecimals))
+    );
+    return oracleResults.filter(
+      (o): o is { usd: number; timestampSec: number } => o != null
+    );
+  };
+
+  // Primary keys first — avoid BTC-ref RPCs when the market's own feed is live.
+  let candidates = await collectFromKeys(oracleKeys);
+
+  const sym = marketInfo.symbol.toUpperCase();
+  const btcRefMarkets =
+    ALGORAND_POOL_BTC_ORACLE_REFERENCE_MARKETS[marketInfo.poolId];
+  if (
+    candidates.length === 0 &&
+    btcRefMarkets &&
+    BTC_ORACLE_REFERENCE_SYMBOLS.has(sym)
+  ) {
+    const refKeys = btcRefMarkets.filter((id) => !oracleKeys.includes(id));
+    candidates = await collectFromKeys(refKeys);
+  }
+
+  if (candidates.length === 0) return;
+
+  const best = pickBest(candidates);
+
+  marketInfo.oracleUsdPerToken = best.usd;
+  marketInfo.oraclePriceTimestampSec = best.timestampSec;
+  marketInfo.price = marketInfoFormattedPriceFromUsdPerToken(
+    best.usd,
+    tokenDecimals
+  );
+}
+
 export const fetchMarketInfoFromContract = async (
   poolId: string,
   marketId: string,
@@ -544,6 +695,248 @@ export const fetchMarketInfoFromContract = async (
   }
 };
 
+/** Map key for bulk API market rows: `appId:marketId` (stringified). */
+export function marketDataLookupKey(
+  appId: string | number,
+  marketId: string | number
+): string {
+  return `${String(appId)}:${String(marketId)}`;
+}
+
+/**
+ * One network-wide GET of market snapshots (avoids N+1 per-market requests).
+ */
+export async function fetchBulkApiMarketDataMap(
+  networkId: NetworkId
+): Promise<Map<string, MarketData>> {
+  const map = new Map<string, MarketData>();
+  if (!isAlgorandCompatibleNetwork(networkId)) {
+    return map;
+  }
+  const response = await dorkfiAPIService.getMarketDataByNetwork(networkId);
+  if (!response?.success || !Array.isArray(response.data)) {
+    throw new Error(
+      `Bulk market-data fetch failed for ${networkId}: ${
+        (response as { error?: string })?.error ?? "empty response"
+      }`
+    );
+  }
+  for (const row of response.data) {
+    const raw = row as unknown as MarketData & {
+      appId?: string | number;
+      marketId?: string | number;
+    };
+    const appId = raw.appId ?? (raw as { poolId?: string | number }).poolId;
+    const marketId = raw.marketId;
+    if (appId == null || marketId == null) continue;
+    map.set(marketDataLookupKey(appId, marketId), raw as MarketData);
+  }
+  return map;
+}
+
+function resolveDisplayTokenForMarket(
+  networkId: NetworkId,
+  poolId: string,
+  marketId: string
+) {
+  let token = getAllTokensWithDisplayInfo(networkId).find(
+    (t) =>
+      String(t.underlyingContractId) === String(marketId) &&
+      String(t.poolId) === String(poolId)
+  );
+  if (!token) {
+    token = getAllTokensWithDisplayInfo(networkId).find(
+      (t) => String(t.underlyingContractId) === String(marketId)
+    );
+  }
+  return token;
+}
+
+function resolveTokenConfigForMarket(
+  networkId: NetworkId,
+  poolId: string,
+  marketId: string,
+  token: {
+    configKey?: string;
+    originalSymbol?: string;
+    symbol: string;
+  }
+): TokenConfig | undefined {
+  const networkConfig = getNetworkConfig(networkId);
+  const tokenConfigKey =
+    token.configKey ?? token.originalSymbol ?? token.symbol;
+  const tokenConfigRaw = networkConfig.tokens[tokenConfigKey];
+  if (Array.isArray(tokenConfigRaw)) {
+    const poolStr = String(poolId);
+    const marketStr = String(marketId).trim();
+    return (
+      (marketStr !== ""
+        ? tokenConfigRaw.find(
+            (config) =>
+              String(config.poolId) === poolStr &&
+              String(config.contractId ?? "").trim() === marketStr
+          )
+        : undefined) ??
+      tokenConfigRaw.find((config) => String(config.poolId) === poolStr) ??
+      tokenConfigRaw[0]
+    );
+  }
+  return tokenConfigRaw;
+}
+
+/**
+ * Build {@link MarketInfo} from a raw API/contract market snapshot (no HTTP).
+ */
+export async function buildMarketInfoFromRawMarketData(
+  marketData: MarketData,
+  poolId: string,
+  marketId: string,
+  networkId: NetworkId,
+  options?: { applyOracle?: boolean }
+): Promise<MarketInfo | null> {
+  const token = resolveDisplayTokenForMarket(networkId, poolId, marketId);
+  if (!token) {
+    console.error(
+      `Token not found for marketId ${marketId} on network ${networkId}`
+    );
+    return null;
+  }
+  if (!token.underlyingContractId) {
+    console.error(`Token ${token.symbol} missing underlyingContractId`);
+    return null;
+  }
+
+  const tokenConfig = resolveTokenConfigForMarket(
+    networkId,
+    poolId,
+    marketId,
+    token
+  );
+  const market = marketData;
+  const tokenDecimals = token.decimals ?? 6;
+
+  const utilizationRate =
+    market.totalScaledDeposits == "0"
+      ? 0
+      : new BigNumber(market.totalScaledBorrows)
+          .div(market.totalScaledDeposits)
+          .toNumber();
+
+  const supplyRate = new BigNumber(market.borrowRate)
+    .multipliedBy(utilizationRate)
+    .multipliedBy(10000 - Number(market.reserveFactor))
+    .dividedBy(10000)
+    .toNumber();
+
+  const formatPrice = (price: string) => {
+    return new BigNumber(price).div(new BigNumber(10).pow(18)).toFixed(12);
+  };
+
+  const totalDeposits = totalDepositsIncludingInterest(
+    market.totalScaledDeposits.toString(),
+    market.depositIndex.toString(),
+    tokenDecimals
+  );
+
+  const totalBorrows = totalBorrowsIncludingInterest(
+    market.totalScaledBorrows.toString(),
+    market.borrowIndex.toString(),
+    tokenDecimals
+  );
+
+  const baseBorrowRateBps =
+    poolId === "47139781" ? 200 : parseFloat(market.borrowRate);
+
+  const apyCalculation = calculateDepositAPY(
+    {
+      borrowRate: baseBorrowRateBps,
+      slope: parseFloat(market.slope),
+      reserveFactor: parseFloat(market.reserveFactor),
+    },
+    {
+      totalScaledDeposits: market.totalScaledDeposits,
+      totalScaledBorrows: market.totalScaledBorrows,
+      lastUpdateTime: Number(market.lastUpdateTime),
+    }
+  );
+
+  const borrowApyCalculation = calculateBorrowAPY(
+    {
+      borrowRate: baseBorrowRateBps,
+      slope: parseFloat(market.slope),
+      reserveFactor: parseFloat(market.reserveFactor),
+    },
+    {
+      totalScaledDeposits: market.totalScaledDeposits,
+      totalScaledBorrows: market.totalScaledBorrows,
+      lastUpdateTime: Number(market.lastUpdateTime),
+    },
+    tokenConfig?.isStoken || false
+  );
+
+  const marketInfo: MarketInfo = {
+    networkId: networkId,
+    poolId: poolId,
+    marketId: marketId,
+    tokenId: market.ntokenId,
+    tokenContractId: market.ntokenId,
+    name: token?.name || "",
+    symbol: token?.symbol || "",
+    decimals: token?.decimals || 0,
+    collateralFactor: parseFloat(market.collateralFactor) / 10000,
+    liquidationThreshold: parseFloat(market.liquidationThreshold) / 10000,
+    reserveFactor: parseFloat(market.reserveFactor) / 10000,
+    borrowRate: parseFloat(market.borrowRate) / 10000,
+    slope: parseFloat(market.slope) / 10000,
+    maxTotalDeposits: formatMarketCapHuman(
+      market.maxTotalDeposits,
+      tokenDecimals
+    ),
+    maxTotalBorrows: formatMarketCapHuman(
+      market.maxTotalBorrows,
+      tokenDecimals
+    ),
+    liquidationBonus: parseFloat(market.liquidationBonus) / 10000,
+    closeFactor: parseFloat(market.closeFactor) / 10000,
+    totalDeposits,
+    totalBorrows,
+    utilizationRate,
+    supplyRate,
+    borrowRateCurrent: parseFloat(market.borrowRate) / 10000,
+    price: formatPrice(market.price),
+    isActive: true,
+    isPaused: market.paused,
+    ntokenId: market.ntokenId,
+    lastUpdated: new Date().toISOString(),
+    depositIndex: market.depositIndex,
+    borrowIndex: market.borrowIndex,
+    priceRaw: String(market.price),
+    reservesAmount: new BigNumber(market.reserves.toString())
+      .dividedBy(new BigNumber(10).pow(tokenDecimals))
+      .toFixed(2),
+    chainLastUpdateIso: (() => {
+      const t = Number(market.lastUpdateTime);
+      if (!Number.isFinite(t) || t <= 0) return "";
+      const ms = t < 1e12 ? t * 1000 : t;
+      return new Date(ms).toISOString();
+    })(),
+    apyCalculation,
+    borrowApyCalculation,
+  };
+
+  if (options?.applyOracle !== false) {
+    await applyOraclePriceToMarketInfo(
+      marketInfo,
+      market,
+      token,
+      tokenConfig,
+      networkId
+    );
+  }
+
+  return marketInfo;
+}
+
 /**
  * Fetch market information for a specific market.
  * @param contractReadMethod — When reading from chain (`source === "contract"` or API fallback), which ABI method to use. Use `"sync_market"` for index-based accrued interest / position math; `"get_market"` is lighter (default).
@@ -577,8 +970,6 @@ export const fetchMarketInfo = async (
       throw new Error(`Invalid marketId: ${marketId}. Must be a number.`);
     }
 
-    const networkConfig = getNetworkConfig(networkId);
-
     if (isAlgorandCompatibleNetwork(networkId)) {
       let marketData: MarketData | null = null;
       if (source === "contract") {
@@ -602,7 +993,6 @@ export const fetchMarketInfo = async (
             contractReadMethod
           );
         } else {
-          // Convert API Market to local MarketData format
           const apiMarket = getMarketResponse.data;
           console.log({ apiMarket });
           marketData = apiMarket as unknown as MarketData;
@@ -614,243 +1004,16 @@ export const fetchMarketInfo = async (
         { marketData }
       );
 
-      // const clients = await algorandService.initializeClientsForReads(
-      //   networkConfig.walletNetworkId as AlgorandNetwork
-      // );
-
-      // const ci = new CONTRACT(
-      //   Number(poolId),
-      //   clients.algod,
-      //   undefined,
-      //   { ...LendingPoolAppSpec.contract, events: [] },
-      //   {
-      //     addr: algosdk.encodeAddress(
-      //       algosdk.getApplicationAddress(Number(poolId)).publicKey
-      //     ),
-      //     sk: new Uint8Array(),
-      //   }
-      // );
-
-      // Find token matching both marketId and poolId to handle tokens with multiple markets (e.g., WAD)
-      // First try to match by both poolId and underlyingContractId for accuracy
-      let token = getAllTokensWithDisplayInfo(networkId).find(
-        (token) =>
-          token.underlyingContractId === marketId &&
-          String(token.poolId) === String(poolId)
-      );
-
-      // Fallback to matching by marketId only if no match found (for backward compatibility)
-      if (!token) {
-        token = getAllTokensWithDisplayInfo(networkId).find(
-          (token) => token.underlyingContractId === marketId
-        );
+      if (!marketData) {
+        return null;
       }
 
-      console.log("fetchMarketInfo token", { token, poolId, marketId });
-
-      if (!token) {
-        console.error(
-          `Token not found for marketId ${marketId} on network ${networkId}`
-        );
-        throw new Error(`Token not found for marketId ${marketId}`);
-      }
-
-      if (!token.underlyingContractId) {
-        console.error(`Token ${token.symbol} missing underlyingContractId`);
-        throw new Error(`Token ${token.symbol} missing underlyingContractId`);
-      }
-
-      // Config map is keyed by `tokens` object keys (e.g. `fALGO`), not display `symbol` (`Algo`).
-      const tokenConfigKey =
-        (token as { configKey?: string }).configKey ??
-        token.originalSymbol ??
-        token.symbol;
-      const tokenConfigRaw = networkConfig.tokens[tokenConfigKey];
-      console.log("fetchMarketInfo tokenConfigRaw", { tokenConfigRaw, token });
-      let tokenConfig: TokenConfig | undefined;
-      if (Array.isArray(tokenConfigRaw)) {
-        const poolStr = String(poolId);
-        const marketStr = String(marketId).trim();
-        tokenConfig =
-          (marketStr !== ""
-            ? tokenConfigRaw.find(
-                (config) =>
-                  String(config.poolId) === poolStr &&
-                  String(config.contractId ?? "").trim() === marketStr
-              )
-            : undefined) ??
-          tokenConfigRaw.find((config) => String(config.poolId) === poolStr) ??
-          tokenConfigRaw[0];
-      } else {
-        tokenConfig = tokenConfigRaw;
-      }
-      console.log("fetchMarketInfo tokenConfig", { tokenConfig });
-
-      // const marketR = await ci.get_market(Number(marketId));
-
-      // console.log("marketR", { marketR });
-
-      // if (!marketR.success) {
-      //   console.error(`Contract call failed for market ${marketId}:`, marketR);
-      //   throw new Error(`Failed to get market info for market ${marketId}`);
-      // }
-
-      // if (!marketR.returnValue || !Array.isArray(marketR.returnValue)) {
-      //   console.error(
-      //     `Invalid market data structure for market ${marketId}:`,
-      //     marketR.returnValue
-      //   );
-      //   throw new Error(`Invalid market data structure for market ${marketId}`);
-      // }
-
-      // // Debug: Log raw market data to verify field order
-      // console.log("Raw market data:", marketR.returnValue);
-      // console.log("Field count:", marketR.returnValue.length);
-
-      // if (marketR.returnValue.length < 18) {
-      //   console.error(
-      //     `Insufficient market data fields for market ${marketId}. Expected 18, got ${marketR.returnValue.length}`
-      //   );
-      //   throw new Error(
-      //     `Insufficient market data fields for market ${marketId}`
-      //   );
-      // }
-
-      // const market = decodeMarket(marketR.returnValue);
-
-      const market = marketData as MarketData;
-
-      // Debug: Log decoded market data
-      // console.log("Decoded market data:", {
-      //   depositIndex: market.depositIndex.toString(),
-      //   borrowIndex: market.borrowIndex.toString(),
-      //   maxTotalDeposits: market.maxTotalDeposits.toString(),
-      //   maxTotalBorrows: market.maxTotalBorrows.toString(),
-      // });
-
-      const utilizationRate =
-        market.totalScaledDeposits == "0"
-          ? 0
-          : new BigNumber(market.totalScaledBorrows)
-            .div(market.totalScaledDeposits)
-            .toNumber();
-
-      const supplyRate = new BigNumber(market.borrowRate)
-        .multipliedBy(utilizationRate)
-        .multipliedBy(10000 - Number(market.reserveFactor))
-        .dividedBy(10000)
-        .toNumber();
-
-      const formatPrice = (price: string) => {
-        return new BigNumber(price).div(new BigNumber(10).pow(18)).toFixed(12);
-      };
-
-      const tokenDecimals = token?.decimals ?? 6;
-      const formatDeposit = (deposit: string) => {
-        return new BigNumber(deposit)
-          .div(new BigNumber(10).pow(tokenDecimals))
-          .toFixed(4);
-      };
-      // Include accrued interest so deposit cap validation matches contract (see issue #246)
-      const totalDeposits = totalDepositsIncludingInterest(
-        market.totalScaledDeposits.toString(),
-        market.depositIndex.toString(),
-        tokenDecimals
+      const marketInfo = await buildMarketInfoFromRawMarketData(
+        marketData,
+        poolId,
+        marketId,
+        networkId
       );
-
-      // Include accrued interest so borrow cap validation matches contract (see issue #248)
-      const totalBorrows = totalBorrowsIncludingInterest(
-        market.totalScaledBorrows.toString(),
-        market.borrowIndex.toString(),
-        tokenDecimals
-      );
-
-      // For b market (poolId 47139781), use 2% (200 basis points) as base borrow rate
-      // Otherwise use the borrow rate from the contract
-      const baseBorrowRateBps =
-        poolId === "47139781"
-          ? 200 // 2% = 200 basis points for b market
-          : parseFloat(market.borrowRate);
-
-      // Calculate APY using the new utility function
-      const apyCalculation = calculateDepositAPY(
-        {
-          borrowRate: baseBorrowRateBps,
-          slope: parseFloat(market.slope),
-          reserveFactor: parseFloat(market.reserveFactor),
-        },
-        {
-          totalScaledDeposits: market.totalScaledDeposits,
-          totalScaledBorrows: market.totalScaledBorrows,
-          lastUpdateTime: Number(market.lastUpdateTime),
-        }
-      );
-
-      // Calculate borrow APY using the new utility function
-      const borrowApyCalculation = calculateBorrowAPY(
-        {
-          borrowRate: baseBorrowRateBps,
-          slope: parseFloat(market.slope),
-          reserveFactor: parseFloat(market.reserveFactor),
-        },
-        {
-          totalScaledDeposits: market.totalScaledDeposits,
-          totalScaledBorrows: market.totalScaledBorrows,
-          lastUpdateTime: Number(market.lastUpdateTime),
-        },
-        tokenConfig?.isStoken || false // Pass isSToken flag
-      );
-
-      const marketInfo: MarketInfo = {
-        networkId: networkId,
-        poolId: poolId,
-        marketId: marketId,
-        tokenId: market.ntokenId,
-        tokenContractId: market.ntokenId,
-        name: token?.name || "",
-        symbol: token?.symbol || "",
-        decimals: token?.decimals || 0,
-        collateralFactor: parseFloat(market.collateralFactor) / 10000,
-        liquidationThreshold: parseFloat(market.liquidationThreshold) / 10000,
-        reserveFactor: parseFloat(market.reserveFactor) / 10000,
-        borrowRate: parseFloat(market.borrowRate) / 10000,
-        slope: parseFloat(market.slope) / 10000,
-        maxTotalDeposits: formatMarketCapHuman(
-          market.maxTotalDeposits,
-          tokenDecimals
-        ),
-        maxTotalBorrows: formatMarketCapHuman(
-          market.maxTotalBorrows,
-          tokenDecimals
-        ),
-        liquidationBonus: parseFloat(market.liquidationBonus) / 10000,
-        closeFactor: parseFloat(market.closeFactor) / 10000,
-        totalDeposits,
-        totalBorrows,
-        utilizationRate,
-        supplyRate,
-        borrowRateCurrent: parseFloat(market.borrowRate) / 10000,
-        price: formatPrice(market.price),
-        isActive: true,
-        isPaused: market.paused,
-        ntokenId: market.ntokenId,
-        lastUpdated: new Date().toISOString(),
-        // Current market indices (for accurate position calculations)
-        depositIndex: market.depositIndex,
-        borrowIndex: market.borrowIndex,
-        priceRaw: String(market.price),
-        reservesAmount: new BigNumber(market.reserves.toString())
-          .dividedBy(new BigNumber(10).pow(tokenDecimals))
-          .toFixed(2),
-        chainLastUpdateIso: (() => {
-          const t = Number(market.lastUpdateTime);
-          if (!Number.isFinite(t) || t <= 0) return "";
-          const ms = t < 1e12 ? t * 1000 : t;
-          return new Date(ms).toISOString();
-        })(),
-        apyCalculation,
-        borrowApyCalculation,
-      };
 
       console.log("fetchMarketInfo marketInfo", { marketInfo, marketData });
 
@@ -1022,106 +1185,121 @@ export async function fetchFreshMarketInfo(
   }
 }
 
+/** Cap parallel per-market fetches to avoid Algod/API stampedes. */
+const FETCH_ALL_MARKETS_CONCURRENCY = 6;
+
+type FetchAllMarketsToken = {
+  symbol: string;
+  poolId?: string | null;
+  underlyingContractId?: string;
+};
+
+async function fetchMarketInfosForTokens(
+  networkId: NetworkId,
+  tokens: FetchAllMarketsToken[],
+  concurrency: number = FETCH_ALL_MARKETS_CONCURRENCY
+): Promise<MarketInfo[]> {
+  const markets: MarketInfo[] = [];
+  await runWithConcurrency(tokens, concurrency, async (token) => {
+    try {
+      const poolId = token.poolId;
+      if (!poolId) {
+        console.warn(
+          `No pool ID configured for token ${token.symbol}, skipping`
+        );
+        return;
+      }
+      const marketId = token.underlyingContractId || token.symbol;
+      const marketInfo = await fetchMarketInfo(poolId, marketId, networkId);
+      if (marketInfo) {
+        markets.push(marketInfo);
+      } else {
+        console.warn(`No market data found for ${token.symbol}, skipping`);
+      }
+    } catch (error) {
+      console.error(`Error fetching market data for ${token.symbol}:`, error);
+    }
+  });
+  return markets;
+}
+
 /**
- * Fetch all markets information
+ * Fetch market rows for specific pool/market keys (position-first Portfolio hydrate).
+ */
+export const fetchMarketsByKeys = async (
+  keys: UserPositionMarketKey[],
+  options?: { concurrency?: number }
+): Promise<MarketInfo[]> => {
+  if (!keys.length) return [];
+  const concurrency = options?.concurrency ?? FETCH_ALL_MARKETS_CONCURRENCY;
+  const markets: MarketInfo[] = [];
+  await runWithConcurrency(keys, concurrency, async (key) => {
+    try {
+      const marketInfo = await fetchMarketInfo(
+        key.poolId,
+        key.marketId,
+        key.networkId
+      );
+      if (marketInfo) markets.push(marketInfo);
+    } catch (error) {
+      console.error(
+        `[fetchMarketsByKeys] failed for ${key.networkId}/${key.poolId}/${key.marketId}:`,
+        error
+      );
+    }
+  });
+  return markets;
+};
+
+/**
+ * Fetch all markets information (capped parallel fetches).
  */
 export const fetchAllMarkets = async (
   networkId: NetworkId,
-  options?: { excludeMarketsTableHidden?: boolean }
+  options?: {
+    excludeMarketsTableHidden?: boolean;
+    concurrency?: number;
+  }
 ): Promise<MarketInfo[]> => {
   try {
-    const networkConfig = getNetworkConfig(networkId);
+    const concurrency = options?.concurrency ?? FETCH_ALL_MARKETS_CONCURRENCY;
 
     if (isAlgorandCompatibleNetwork(networkId)) {
-      // Get markets from config
       const tokens = options?.excludeMarketsTableHidden
         ? getMarketsTableVisibleTokensWithDisplayInfo(networkId)
         : getAllTokensWithDisplayInfo(networkId);
 
-      console.log("Fetching real market data for", tokens.length, "tokens");
+      console.log(
+        "Fetching real market data for",
+        tokens.length,
+        "tokens (concurrency",
+        concurrency,
+        ")"
+      );
 
-      const markets = (
-        await Promise.all(
-          tokens.map(async (token) => {
-            try {
-              const poolId = token.poolId;
-              if (!poolId) {
-                console.warn(
-                  `No pool ID configured for token ${token.symbol}, skipping`
-                );
-                return null;
-              }
-
-              const marketId = token.underlyingContractId || token.symbol;
-              const marketInfo = await fetchMarketInfo(
-                poolId,
-                marketId,
-                networkId
-              );
-
-              if (!marketInfo) {
-                console.warn(
-                  `No market data found for ${token.symbol}, skipping`
-                );
-                return null;
-              }
-              return marketInfo;
-            } catch (error) {
-              console.error(
-                `Error fetching market data for ${token.symbol}:`,
-                error
-              );
-              return null;
-            }
-          })
-        )
-      ).filter((m): m is MarketInfo => m != null);
-
+      const markets = await fetchMarketInfosForTokens(
+        networkId,
+        tokens,
+        concurrency
+      );
       console.log(`Successfully fetched ${markets.length} markets`);
       return markets;
     } else if (isEVMNetwork(networkId)) {
-      // For EVM networks, fetch real market data
       const tokens = getAllTokensWithDisplayInfo(networkId);
 
-      console.log("Fetching real EVM market data for", tokens.length, "tokens");
+      console.log(
+        "Fetching real EVM market data for",
+        tokens.length,
+        "tokens (concurrency",
+        concurrency,
+        ")"
+      );
 
-      const markets = (
-        await Promise.all(
-          tokens.map(async (token) => {
-            try {
-              const poolId = token.poolId;
-              if (!poolId) {
-                console.warn(
-                  `No pool ID configured for token ${token.symbol}, skipping`
-                );
-                return null;
-              }
-
-              const marketId = token.underlyingContractId || token.symbol;
-              const marketInfo = await fetchMarketInfo(
-                poolId,
-                marketId,
-                networkId
-              );
-
-              if (!marketInfo) {
-                console.warn(
-                  `No EVM market data found for ${token.symbol}, skipping`
-                );
-                return null;
-              }
-              return marketInfo;
-            } catch (error) {
-              console.error(
-                `Error fetching EVM market data for ${token.symbol}:`,
-                error
-              );
-              return null;
-            }
-          })
-        )
-      ).filter((m): m is MarketInfo => m != null);
-
+      const markets = await fetchMarketInfosForTokens(
+        networkId,
+        tokens,
+        concurrency
+      );
       console.log(`Successfully fetched ${markets.length} EVM markets`);
       return markets;
     } else {
@@ -1681,6 +1859,25 @@ export const fetchUserBorrowBalance = async (
   marketId: string,
   networkId: NetworkId
 ): Promise<{ balance: number; interest: number } | null> => {
+  return withRpcReadCache(
+    `userBorrow:${networkId}:${userAddress}:${poolId}:${marketId}`,
+    () =>
+      fetchUserBorrowBalanceUncached(
+        userAddress,
+        poolId,
+        marketId,
+        networkId
+      ),
+    30_000
+  );
+};
+
+const fetchUserBorrowBalanceUncached = async (
+  userAddress: string,
+  poolId: string,
+  marketId: string,
+  networkId: NetworkId
+): Promise<{ balance: number; interest: number } | null> => {
   try {
     const networkConfig = getNetworkConfig(networkId);
 
@@ -2081,6 +2278,25 @@ export async function fetchBorrowPositionApiSnapshot(
  * Returns both the current deposit balance and accrued (earned) interest
  */
 export const fetchUserDepositBalance = async (
+  userAddress: string,
+  poolId: string,
+  marketId: string,
+  networkId: NetworkId
+): Promise<{ balance: number; interest: number } | null> => {
+  return withRpcReadCache(
+    `userDeposit:${networkId}:${userAddress}:${poolId}:${marketId}`,
+    () =>
+      fetchUserDepositBalanceUncached(
+        userAddress,
+        poolId,
+        marketId,
+        networkId
+      ),
+    30_000
+  );
+};
+
+const fetchUserDepositBalanceUncached = async (
   userAddress: string,
   poolId: string,
   marketId: string,
@@ -5507,6 +5723,111 @@ export const migrate = async (
 };
 
 /**
+ * Detect whether the user already has an nt200/ARC200 balance box on the token app.
+ * Simulates createBalanceBox alone (non-builder CONTRACT + abi.nt200) — do not
+ * construct box names or call getApplicationBoxByName with guessed keys.
+ * success → missing; already-exists assert → present; else → unknown.
+ */
+export async function detectNt200UserBalanceBox(
+  algod: any,
+  tokenAppId: number | string,
+  userAddress: string
+): Promise<"present" | "missing" | "unknown"> {
+  const appId = Number(tokenAppId);
+  if (!Number.isFinite(appId) || appId <= 0 || !userAddress) {
+    return "unknown";
+  }
+  return withRpcReadCache(
+    `nt200UserBox:${appId}:${userAddress}`,
+    async () => {
+      try {
+        const ci = new CONTRACT(appId, algod, undefined, abi.nt200, {
+          addr: userAddress,
+          sk: new Uint8Array(),
+        });
+        // Box MBR payment so a truly missing box can succeed in simulate
+        ci.setPaymentAmount(28500);
+        const result = await ci.createBalanceBox(userAddress);
+        return classifyNt200CreateBalanceBoxSimulateResult(result);
+      } catch (error: unknown) {
+        if (isNt200CreateBalanceBoxAlreadyExistsError(error)) {
+          return "present" as const;
+        }
+        console.warn("detectNt200UserBalanceBox: unexpected error", {
+          appId,
+          userAddress,
+          error,
+        });
+        return "unknown" as const;
+      }
+    },
+    60_000
+  );
+}
+
+/** Order [balanceBox, highFee] probes so the first simulate usually succeeds. */
+export function orderBorrowBuildProbes(
+  needsBalanceBoxProbe: boolean,
+  boxStatus: "present" | "missing" | "unknown"
+): Array<[number, number]> {
+  if (!needsBalanceBoxProbe) {
+    return [
+      [0, 0],
+      [0, 1],
+    ];
+  }
+  if (boxStatus === "present") {
+    // Never include createBalanceBox — dryrun can miss existing boxes and
+    // succeed, then algod rejects with intc_0 // 0; ==; assert.
+    return [
+      [0, 0],
+      [0, 1],
+    ];
+  }
+  if (boxStatus === "missing") {
+    // Prefer createBalanceBox first, but keep no-box variants as fallback
+    return [
+      [1, 0],
+      [1, 1],
+      [0, 0],
+      [0, 1],
+    ];
+  }
+  // Unknown: prefer returning-user path, then first-time box create
+  return [
+    [0, 0],
+    [1, 0],
+    [0, 1],
+    [1, 1],
+  ];
+}
+
+/** Only skip remaining probes on very clear simulate signals. */
+function borrowProbeSkipFromSimulateError(
+  errorText: string
+): { skipP1Zero?: boolean; skipP1One?: boolean; skipP2Zero?: boolean } {
+  const err = errorText.toLowerCase();
+  const out: {
+    skipP1Zero?: boolean;
+    skipP1One?: boolean;
+    skipP2Zero?: boolean;
+  } = {};
+  // createBalanceBox when box already exists (TEAL assert or explicit text)
+  if (isNt200CreateBalanceBoxAlreadyExistsError(errorText)) {
+    out.skipP1One = true;
+  }
+  // Do not skip p1=0 on vague "box" / "assert" errors — those are common on other failures
+  // and caused usable paths to be discarded (FINITE borrow regressions).
+  if (
+    err.includes("overspend") ||
+    err.includes("fee too small")
+  ) {
+    out.skipP2Zero = true;
+  }
+  return out;
+}
+
+/**
  * Borrow tokens from a lending market
  */
 export const borrow = async (
@@ -5572,104 +5893,71 @@ export const borrow = async (
         throw new Error("Token not found");
       }
 
-      // Check if user is opted into the asset (for ASA and arc200-exchange tokens)
-      // Note: If not opted in, the transaction will include an opt-in automatically
-      let optIn = {};
-      if (
-        tokenStandardUsesAsaStyleNt200Txns(tokenStandard) ||
-        tokenStandard === "arc200-exchange"
-      ) {
-        if (token.underlyingAssetId) {
-          try {
-            const accountAssetInfo = await clients.algod
-              .accountAssetInformation(
-                userAddress,
-                Number(token.underlyingAssetId)
-              )
-              .do();
-            console.log(
-              `User is opted into asset ${token.underlyingAssetId} (${token.symbol})`
-            );
-          } catch (error: any) {
-            // If the error indicates the user is not opted in, log a warning
-            // The transaction will handle the opt-in automatically
-            if (
-              error?.response?.status === 404 ||
-              error?.response?.status === 400 ||
-              error?.message?.includes("not found") ||
-              error?.message?.includes("not opted") ||
-              error?.message?.includes("does not exist")
-            ) {
-              console.warn(
-                `User is not opted into asset ${token.underlyingAssetId} (${token.symbol}). Opt-in will be included in the transaction.`
+      // Opt-in check + market info in parallel (single market fetch; pause via marketInfo)
+      const needsAsaOptInCheck =
+        (tokenStandardUsesAsaStyleNt200Txns(tokenStandard) ||
+          tokenStandard === "arc200-exchange") &&
+        !!token.underlyingAssetId;
+
+      const optInCheckPromise = needsAsaOptInCheck
+        ? clients.algod
+            .accountAssetInformation(
+              userAddress,
+              Number(token.underlyingAssetId)
+            )
+            .do()
+            .then(() => {
+              console.log(
+                `User is opted into asset ${token.underlyingAssetId} (${token.symbol})`
               );
-              optIn = {
-                xaid: Number(token.underlyingAssetId),
-                snd: userAddress,
-                arcv: userAddress,
-              };
-            } else {
-              // Re-throw unexpected errors
+              return {} as Record<string, unknown>;
+            })
+            .catch((error: any) => {
+              if (
+                error?.response?.status === 404 ||
+                error?.response?.status === 400 ||
+                error?.message?.includes("not found") ||
+                error?.message?.includes("not opted") ||
+                error?.message?.includes("does not exist")
+              ) {
+                console.warn(
+                  `User is not opted into asset ${token.underlyingAssetId} (${token.symbol}). Opt-in will be included in the transaction.`
+                );
+                return {
+                  xaid: Number(token.underlyingAssetId),
+                  snd: userAddress,
+                  arcv: userAddress,
+                } as Record<string, unknown>;
+              }
               console.error("Error checking asset opt-in status:", error);
               throw error;
-            }
-          }
-        }
-      }
+            })
+        : Promise.resolve({} as Record<string, unknown>);
 
-      // Convert amount to proper units (considering decimals)
-      const bigAmount = BigInt(amount);
+      const [optIn, marketInfo, boxStatusEarly] = await Promise.all([
+        optInCheckPromise,
+        fetchMarketInfo(poolId, marketId, networkId),
+        tokenStandard == "network" ||
+        tokenStandardUsesAsaStyleNt200Txns(tokenStandard)
+          ? detectNt200UserBalanceBox(
+              clients.algod,
+              token.underlyingContractId,
+              userAddress
+            )
+          : Promise.resolve("unknown" as const),
+      ]);
 
-      // Check if market is paused
-      const marketPaused = await isMarketPaused(poolId, marketId, networkId);
-      if (marketPaused) {
-        throw new Error("Market is paused");
-      }
-
-      // Get market info and user global data to check borrowing capacity
-      console.log({
-        fetchMarketInfo: {
-          poolId,
-          marketId,
-          networkId,
-        },
-      });
-      const marketInfo = await fetchMarketInfo(poolId, marketId, networkId);
       if (!marketInfo) {
         throw new Error("Failed to fetch market info");
+      }
+      if (marketInfo.isPaused) {
+        throw new Error("Market is paused");
       }
 
       console.log("marketInfo", { marketInfo });
 
-      // Get user global data to check borrowing capacity
-      const userGlobalData = await fetchUserGlobalData(userAddress, networkId);
-      if (!userGlobalData) {
-        throw new Error("Failed to fetch user global data");
-      }
-
-      console.log("userGlobalData", { userGlobalData });
-
-      const borrowAmount = new BigNumber(amount);
-
-      // Check if borrow would exceed available liquidity in the market
-      const currentTotalDeposits = new BigNumber(marketInfo.totalDeposits);
-      const currentTotalBorrows = new BigNumber(marketInfo.totalBorrows);
-      const availableLiquidity =
-        currentTotalDeposits.minus(currentTotalBorrows);
-
-      if (borrowAmount.isGreaterThan(availableLiquidity)) {
-        //throw new Error("Insufficient liquidity available for borrowing");
-      }
-
-      // Check if borrow would exceed max total borrows for the market
-      const maxTotalBorrows = new BigNumber(marketInfo.maxTotalBorrows);
-      if (
-        currentTotalBorrows.plus(borrowAmount).isGreaterThan(maxTotalBorrows)
-      ) {
-        //throw new Error("Borrow would exceed maximum total borrows");
-      }
-
-      // Collateral-based validation removed
+      // Convert amount to proper units (considering decimals)
+      const bigAmount = BigInt(amount);
 
       const ci = new CONTRACT(
         Number(poolId),
@@ -5681,21 +5969,6 @@ export const borrow = async (
           sk: new Uint8Array(),
         }
       );
-      const ciLending = new CONTRACT(
-        Number(poolId),
-        clients.algod,
-        undefined,
-        { ...LendingPoolAppSpec.contract, events: [] },
-        { addr: userAddress, sk: new Uint8Array() }
-      );
-
-      ciLending.setFee(5000);
-      ciLending.setPaymentAmount(1e5);
-      const fetch_price_feedR = await ciLending.fetch_price_feed(
-        Number(marketId)
-      );
-      console.log("fetch_price_feedR", { fetch_price_feedR });
-      const doFetchPriceFeed = fetch_price_feedR.success;
 
       const builder = {
         lending: new CONTRACT(
@@ -5849,36 +6122,36 @@ export const borrow = async (
           folksMintTxnsToArccjsExtraTxns(burnUnsigned);
       }
 
-      ciLending.setFee(5000);
-
-      // const calculate_user_debt_interestR =
-      //   await ciLending.calculate_user_debt_interest(
-      //     userAddress,
-      //     Number(marketId)
-      //   );
-      // console.log("calculate_user_debt_interestR", {
-      //   calculate_user_debt_interestR,
-      // });
-      // const calculate_user_debt_interest =
-      //   calculate_user_debt_interestR.returnValue;
-      // console.log("calculate_user_debt_interest", {
-      //   calculate_user_debt_interest,
-      // });
-
-      // const sync_marketR = await ciLending.sync_market(Number(marketId));
-      // console.log("sync_marketR", { sync_marketR });
-
       let customTx: any;
 
-      // p1 - create balance box user
-      // p2 - payment to approve spending of token
-      for (const p of [
-        [0, 0], // no balance box, no approve
-        [1, 0], // balance box, no approve
-        [1, 1], // balance box, approve
-        [0, 1], // no balance box, approve
-      ]) {
+      // p1 - create balance box user; p2 - higher payment for inner-txn funding
+      const needsBalanceBoxProbe =
+        tokenStandard == "network" ||
+        tokenStandardUsesAsaStyleNt200Txns(tokenStandard);
+
+      const boxStatus = needsBalanceBoxProbe ? boxStatusEarly : "unknown";
+
+      const buildProbes = orderBorrowBuildProbes(
+        needsBalanceBoxProbe,
+        boxStatus
+      );
+
+      console.log("borrow build probes", {
+        needsBalanceBoxProbe,
+        boxStatus,
+        buildProbes,
+      });
+
+      let skipP1Zero = false;
+      let skipP1One = false;
+      let skipP2Zero = false;
+
+      for (const p of buildProbes) {
         const [p1, p2] = p;
+        if (p1 === 0 && skipP1Zero) continue;
+        if (p1 === 1 && skipP1One) continue;
+        if (p2 === 0 && skipP2Zero) continue;
+
         const buildN = [];
 
         // cond create balance box user if needed and network token
@@ -5959,7 +6232,7 @@ export const borrow = async (
           });
         }
 
-        console.log("buildN", { buildN });
+        console.log("buildN", { buildN, p1, p2 });
 
         // Create borrow transaction
         ci.setFee(20000);
@@ -5971,26 +6244,44 @@ export const borrow = async (
 
         customTx = await ci.custom();
 
-        console.log("customTx", { customTx });
+        console.log("customTx", { customTx, p1, p2 });
 
         if (customTx.success) {
           break;
         }
+
+        const errText = String(customTx?.error ?? "");
+        const skip = borrowProbeSkipFromSimulateError(errText);
+        if (skip.skipP1Zero) skipP1Zero = true;
+        if (skip.skipP1One) skipP1One = true;
+        if (skip.skipP2Zero) skipP2Zero = true;
       }
 
       console.log("customTx", { customTx });
 
-      if (!customTx.success) {
-        if (customTx.error.match(/tried to spend/)) {
-          throw new Error(customTx.error);
+      if (!customTx?.success) {
+        invalidateRpcReadCache(
+          `nt200UserBox:${Number(token.underlyingContractId)}:${userAddress}`
+        );
+        const errText = String(customTx?.error ?? "Borrow transaction failed");
+        if (/tried to spend/i.test(errText)) {
+          throw new Error(errText);
         } else if (
-          customTx.error.match(
-            /logic eval error: assert failed pc=.*opcodes=b[/]; b<=; assert/
+          /logic eval error: assert failed pc=.*opcodes=b[/]; b<=; assert/.test(
+            errText
           )
         ) {
           throw new Error("insufficient collateral for borrow");
+        } else if (isNt200CreateBalanceBoxAlreadyExistsError(customTx.error)) {
+          throw new Error(
+            "Token balance account already exists. Please retry the borrow."
+          );
         }
-        throw new Error("Borrow transaction failed");
+        throw new Error(
+          errText && errText !== "undefined"
+            ? errText
+            : "Borrow transaction failed"
+        );
       }
 
       return {
@@ -6015,7 +6306,7 @@ export const borrow = async (
  * Resolve a `getAllTokensWithDisplayInfo` row for lending ops.
  * Same market contract id can exist on multiple pools (e.g. fALGO on A vs D); match pool first.
  */
-function resolveDisplayTokenForPoolMarket(
+export function resolveDisplayTokenForPoolMarket(
   networkId: NetworkId,
   poolId: string,
   marketId: string

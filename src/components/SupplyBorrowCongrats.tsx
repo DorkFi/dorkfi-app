@@ -16,6 +16,8 @@ interface SupplyBorrowCongratsProps {
   onClose: () => void;
   /** When true, disables “View transaction” (e.g. no tx id yet). */
   viewTransactionDisabled?: boolean;
+  /** Rendered above the primary action buttons (e.g. share CTA). */
+  aboveActions?: React.ReactNode;
 }
 
 const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
@@ -29,6 +31,7 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
   onMakeAnother,
   onClose,
   viewTransactionDisabled = false,
+  aboveActions,
 }) => {
   const getTransactionMessage = () => {
     switch (transactionType) {
@@ -86,6 +89,8 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
         </span>{" "}
         {preposition} the protocol.
       </div>
+
+      {aboveActions}
 
       <div className="flex flex-col gap-2 w-full mt-2">
         <DorkFiButton

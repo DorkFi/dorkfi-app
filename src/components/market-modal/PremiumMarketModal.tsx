@@ -1,7 +1,6 @@
 import React, { useMemo } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { getAllTokensWithDisplayInfo, getMarketLabel, type NetworkId } from '@/config';
-import { useMimirTokenPrice24h } from '@/hooks/useMimirTokenPrice24h';
 import { MarketData, UserPosition, UserPositionLoadState } from './types';
 import { MarketHeader } from './MarketHeader';
 import { UserPositionBar } from './UserPositionBar';
@@ -64,34 +63,6 @@ export const PremiumMarketModal = ({
     return getMarketLabel(networkId, poolId);
   }, [rawMarket, networkId]);
 
-  const mimirPriceSymbol = useMemo(() => {
-    const cs = rawMarket?.configSymbol;
-    return typeof cs === "string" && cs.trim() !== ""
-      ? cs.trim()
-      : marketData.symbol;
-  }, [rawMarket, marketData.symbol]);
-
-  const {
-    priceChange24h: mimirChange24h,
-    priceHistory: mimirHistory,
-  } = useMimirTokenPrice24h(mimirPriceSymbol, isOpen, {
-    networkId,
-    configSymbol:
-      typeof rawMarket?.configSymbol === "string"
-        ? rawMarket.configSymbol
-        : undefined,
-  });
-
-  const headerMarketData = useMemo((): MarketData => {
-    const mergedHistory =
-      mimirHistory.length > 0 ? mimirHistory : (marketData.priceHistory ?? []);
-    return {
-      ...marketData,
-      priceChange24h: mimirChange24h,
-      priceHistory: mergedHistory,
-    };
-  }, [marketData, mimirChange24h, mimirHistory]);
-
   const explorerIds = useMemo(() => {
     if (!networkId) {
       return { poolAppId: undefined as string | undefined, underlyingAssetId: undefined as string | undefined };
@@ -118,13 +89,13 @@ export const PremiumMarketModal = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl w-full min-w-0 min-h-0 max-h-[min(90dvh,90vh)] flex flex-col overflow-hidden px-0 py-0 dorkfi-dark-bg-modal rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl card-hover hover:shadow-lg hover:border-ocean-teal/40 transition-all">
+      <DialogContent className="max-w-2xl w-full min-w-0 min-h-0 max-h-[min(90dvh,90vh)] flex flex-col overflow-hidden px-0 py-0 bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-white rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl card-hover hover:shadow-lg hover:border-ocean-teal/40 transition-all">
         <DialogTitle className="sr-only">{marketData.symbol} Market Details</DialogTitle>
         <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain rounded-xl">
           <div className="flex flex-col gap-3 sm:gap-4 px-3 pb-4 pt-10 pr-11 sm:px-4 sm:pt-4 sm:pr-10 min-w-0 w-full max-w-full box-border">
 
             <MarketHeader
-              marketData={headerMarketData}
+              marketData={marketData}
               chainId={chainId}
               marketLabel={marketLabel}
             />

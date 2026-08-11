@@ -11,10 +11,10 @@ import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
 import {
   getTokenConfig,
+  asTokenConfig,
   tokenStandardUsesNativeWalletBalance,
   getPortfolioVisibleTokens,
   getAllTokensWithDisplayInfo,
-  type TokenConfig,
 } from "@/config";
 import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
 
@@ -29,13 +29,6 @@ const PRIORITY_WALLET_ASSETS = [
   "tALGO",
   "xALGO",
 ] as const;
-
-function resolveTokenConfigEntry(
-  raw: TokenConfig | TokenConfig[] | undefined
-): TokenConfig | undefined {
-  if (!raw) return undefined;
-  return Array.isArray(raw) ? raw[0] : raw;
-}
 
 export interface PortfolioPosition {
   asset: string;
@@ -59,7 +52,7 @@ export interface PortfolioData {
   } | null;
   marketData: any[];
   userPositions: PortfolioPosition[];
-  walletBalances: Record<string, number>;
+  walletBalances: Record<string, { balance: number; balanceUSD: number }>;
   isLoading: boolean;
   isLoadingPositions: boolean;
   isLoadingWalletBalance: boolean;
@@ -262,10 +255,13 @@ export const usePortfolioData = () => {
         // Prefer config key so multi-market USDC resolves reliably.
         const originalSymbol =
           token.configKey ||
-          ("originalSymbol" in token ? token.originalSymbol : undefined) ||
+          ("originalSymbol" in token
+            ? (token as { originalSymbol?: string }).originalSymbol
+            : undefined) ||
           asset;
-        const originalTokenConfig = resolveTokenConfigEntry(
-          getTokenConfig(currentNetwork, originalSymbol)
+        const originalTokenConfig = asTokenConfig(
+          getTokenConfig(currentNetwork, originalSymbol ?? asset),
+          token.poolId
         );
         if (!originalTokenConfig) {
           console.error(
