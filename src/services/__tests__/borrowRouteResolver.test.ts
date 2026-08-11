@@ -6,12 +6,14 @@ import {
   getUsdcLpLendingCollateralContractIds,
 } from "@/config";
 import {
+  EASY_BORROW_POOL_B_USDC_UI_KEY,
   EASY_BORROW_POOL_D_USDC_UI_KEY,
   EASY_BORROW_V1_BORROW_CONFIG_KEYS,
   listBorrowAssetOptionsForCollateral,
   listBorrowConfigKeysForCollateral,
   listBorrowRoutes,
   listCollateralConfigKeys,
+  listUsdcCollateralSupplyOptions,
   resolveBorrowRoute,
   resolveBorrowRoutes,
 } from "@/services/borrowRouteResolver";
@@ -212,6 +214,19 @@ describe("borrowRouteResolver (v1 WAD/USDC)", () => {
     });
     expect(route!.poolId).toBe(POOL_D);
     expect(route!.marketLabel).toBe("D");
+  });
+
+  it("lists only A/B/D USDC markets in the curated supply dropdown", () => {
+    const options = listUsdcCollateralSupplyOptions(NETWORK);
+    expect(options.map((o) => o.uiKey)).toEqual([
+      "USDC",
+      EASY_BORROW_POOL_B_USDC_UI_KEY,
+      EASY_BORROW_POOL_D_USDC_UI_KEY,
+    ]);
+    expect(options[0]!.collateralPoolId).toBe(POOL_A);
+    expect(options[1]!.collateralPoolId).toBe(POOL_B);
+    expect(options[2]!.collateralPoolId).toBe(POOL_D);
+    expect(options[2]!.symbol).toBe("Pool D USDC");
   });
 
   it("lists only WAD/USDC as borrow assets from ALGO on Pool A", () => {

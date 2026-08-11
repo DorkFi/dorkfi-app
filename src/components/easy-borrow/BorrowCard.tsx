@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
+import { useEasyStartLogin } from "@/hooks/useEasyStartLogin";
 import { ChevronDown, Info } from "lucide-react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import type { NetworkId } from "@/config";
 import {
   EASY_BORROW_POOL_D_USDC_UI_KEY,
-  easyBorrowUiConfigKey,
   listBorrowAssetOptionsForCollateral,
-  listCollateralConfigKeys,
-  listCollateralMarketRefs,
+  listUsdcCollateralSupplyOptions,
   resolveBorrowRoute,
   resolveBorrowRoutes,
+  type EasyBorrowCollateralOption,
 } from "@/services/borrowRouteResolver";
 import type { BorrowRoute } from "@/types/easyBorrow";
 import {
@@ -20,7 +20,6 @@ import {
 import { previewHealthBand } from "@/utils/easyBorrowMath";
 import { formatUsdAmount } from "@/lib/utils";
 import DorkFiButton from "@/components/ui/DorkFiButton";
-import WalletModal from "@/components/WalletModal";
 import AssetSelector, {
   type AssetSelectorOption,
 } from "@/components/easy-borrow/AssetSelector";
@@ -52,10 +51,15 @@ function preferredBorrowUiKey(
   );
 }
 
-function pickDefaultCollateralKey(collateralKeys: string[]): string {
-  if (collateralKeys.includes("USDC")) return "USDC";
-  if (collateralKeys.includes("ALGO")) return "ALGO";
-  return collateralKeys[0] ?? "";
+function pickDefaultCollateralOption(
+  options: EasyBorrowCollateralOption[]
+): EasyBorrowCollateralOption | null {
+  return (
+    options.find((o) => o.uiKey === "USDC") ??
+    options.find((o) => o.uiKey === EASY_BORROW_POOL_D_USDC_UI_KEY) ??
+    options[0] ??
+    null
+  );
 }
 
 type CtaState =
@@ -73,44 +77,68 @@ const BorrowCard = () => {
   const { currentNetwork } = useNetwork();
   const networkId = currentNetwork as NetworkId;
   const { activeAccount } = useDorkFiWalletAdapter();
-  const [walletModalOpen, setWalletModalOpen] = useState(false);
+  const openEasyStartLogin = useEasyStartLogin();
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
 
-  const collateralKeys = useMemo(
-    () => listCollateralConfigKeys(networkId),
+  const supplyOptions = useMemo(
+    () => listUsdcCollateralSupplyOptions(networkId),
     [networkId]
   );
 
-  const [collateralKey, setCollateralKey] = useState<string>(() =>
-    pickDefaultCollateralKey(collateralKeys)
+  const [collateralUiKey, setCollateralUiKey] = useState(
+    () => pickDefaultCollateralOption(listUsdcCollateralSupplyOptions(networkId))?.uiKey ?? "USDC"
   );
+  const selectedCollateral =
+    supplyOptions.find((o) => o.uiKey === collateralUiKey) ??
+    pickDefaultCollateralOption(supplyOptions);
+
+  useEffect(() => {
+    if (supplyOptions.length === 0) return;
+    if (supplyOptions.some((o) => o.uiKey === collateralUiKey)) return;
+    const preferred = pickDefaultCollateralOption(supplyOptions);
+    if (preferred) setCollateralUiKey(preferred.uiKey);
+  }, [supplyOptions, collateralUiKey]);
+
   const [borrowUiKey, setBorrowUiKey] = useState(() => {
-    const key = pickDefaultCollateralKey(collateralKeys);
-    const opts = key
-      ? listBorrowAssetOptionsForCollateral(networkId, key)
-      : [];
-    return preferredBorrowUiKey(opts) ?? EASY_BORROW_POOL_D_USDC_UI_KEY;
+    const collateral = pickDefaultCollateralOption(
+      listUsdcCollateralSupplyOptions(networkId)
+    );
+    if (!collateral) return EASY_BORROW_POOL_D_USDC_UI_KEY;
+    const opts = listBorrowAssetOptionsForCollateral(
+      networkId,
+      collateral.collateralConfigKey,
+      {
+        collateralPoolId: collateral.collateralPoolId,
+        preferredPoolIds: collateral.preferredPoolIds,
+      }
+    );
+    return preferredBorrowUiKey(opts) ?? opts[0]?.uiKey ?? "WAD";
   });
   const [collateralAmount, setCollateralAmount] = useState("");
   const [borrowAmount, setBorrowAmount] = useState("");
   const [collateralSource, setCollateralSource] =
     useState<CollateralSource>("wallet");
 
-  const borrowOptions = useMemo(
-    () =>
-      collateralKey
-        ? listBorrowAssetOptionsForCollateral(networkId, collateralKey)
-        : [],
-    [networkId, collateralKey]
-  );
+  const borrowOptions = useMemo(() => {
+    if (!selectedCollateral) return [];
+    return listBorrowAssetOptionsForCollateral(
+      networkId,
+      selectedCollateral.collateralConfigKey,
+      {
+        collateralPoolId: selectedCollateral.collateralPoolId,
+        preferredPoolIds: selectedCollateral.preferredPoolIds,
+      }
+    );
+  }, [networkId, selectedCollateral]);
 
-  // Prefer Pool D USDC (then USDC) when available for the selected collateral.
+  // Keep borrow selection valid for the selected USDC supply market.
   useEffect(() => {
     if (borrowOptions.length === 0) return;
     if (borrowOptions.some((o) => o.uiKey === borrowUiKey)) return;
     const preferred = preferredBorrowUiKey(borrowOptions);
     if (preferred) setBorrowUiKey(preferred);
+    else setBorrowUiKey(borrowOptions[0]!.uiKey);
   }, [borrowOptions, borrowUiKey]);
 
   const selectedBorrowOption =
@@ -119,27 +147,34 @@ const BorrowCard = () => {
     null;
 
   const effectiveBorrowUiKey = selectedBorrowOption?.uiKey ?? "";
-  const effectiveBorrowKey = selectedBorrowOption?.borrowConfigKey ?? "";
 
   const route: BorrowRoute | null = useMemo(() => {
-    if (!collateralKey || !selectedBorrowOption) return null;
+    if (!selectedCollateral || !selectedBorrowOption) return null;
     return resolveBorrowRoute({
       networkId,
-      collateralConfigKey: collateralKey,
+      collateralConfigKey: selectedCollateral.collateralConfigKey,
       borrowConfigKey: selectedBorrowOption.borrowConfigKey,
-      preferredPoolIds: selectedBorrowOption.preferredPoolIds,
+      collateralPoolId: selectedCollateral.collateralPoolId,
+      preferredPoolIds: [
+        ...selectedCollateral.preferredPoolIds,
+        ...(selectedBorrowOption.preferredPoolIds ?? []),
+      ],
     });
-  }, [networkId, collateralKey, selectedBorrowOption]);
+  }, [networkId, selectedCollateral, selectedBorrowOption]);
 
   const alternateRoutes = useMemo(() => {
-    if (!collateralKey || !selectedBorrowOption) return [];
+    if (!selectedCollateral || !selectedBorrowOption) return [];
     return resolveBorrowRoutes({
       networkId,
-      collateralConfigKey: collateralKey,
+      collateralConfigKey: selectedCollateral.collateralConfigKey,
       borrowConfigKey: selectedBorrowOption.borrowConfigKey,
-      preferredPoolIds: selectedBorrowOption.preferredPoolIds,
+      collateralPoolId: selectedCollateral.collateralPoolId,
+      preferredPoolIds: [
+        ...selectedCollateral.preferredPoolIds,
+        ...(selectedBorrowOption.preferredPoolIds ?? []),
+      ],
     });
-  }, [networkId, collateralKey, selectedBorrowOption]);
+  }, [networkId, selectedCollateral, selectedBorrowOption]);
   const quote = useEasyBorrowQuote({
     networkId,
     route,
@@ -149,7 +184,7 @@ const BorrowCard = () => {
     collateralSource,
   });
 
-  // Prefer existing DorkFi collateral when the user already has a deposit.
+  // Prefer existing collateral when the user already has a deposit.
   useEffect(() => {
     if (
       quote.existingDeposit != null &&
@@ -160,48 +195,31 @@ const BorrowCard = () => {
     }
   }, [quote.existingDeposit, quote.poolGlobal?.totalCollateralValue]);
 
-  const collateralOptions: AssetSelectorOption[] = useMemo(() => {
-    const refs = listCollateralMarketRefs(networkId);
-    const byKey = new Map<string, AssetSelectorOption>();
-    for (const ref of refs) {
-      const uiKey = easyBorrowUiConfigKey(networkId, ref.configKey, ref.poolId);
-      const marketLabel =
-        ref.poolId === route?.poolId ? route.marketLabel : "…";
-      const existing = byKey.get(uiKey);
-      if (existing) {
-        existing.subtitle = `${existing.subtitle ?? ""}, ${marketLabel}`.replace(
-          /^, /,
-          ""
-        );
-        continue;
-      }
-      byKey.set(uiKey, {
-        configKey: uiKey,
-        symbol: ref.symbol,
-        logoPath: ref.logoPath,
-        balance: uiKey === collateralKey ? quote.walletBalance : null,
+  const collateralOptions: AssetSelectorOption[] = useMemo(
+    () =>
+      supplyOptions.map((option) => ({
+        configKey: option.uiKey,
+        symbol: option.symbol,
+        logoPath: option.logoPath,
+        balance:
+          option.uiKey === selectedCollateral?.uiKey
+            ? quote.walletBalance
+            : null,
         balanceUsd:
-          uiKey === collateralKey &&
+          option.uiKey === selectedCollateral?.uiKey &&
           quote.walletBalance != null &&
           quote.collateralPrice != null
             ? quote.walletBalance * quote.collateralPrice
             : null,
-        subtitle: `→ ${listBorrowAssetOptionsForCollateral(networkId, uiKey)
-          .map((o) => o.symbol)
-          .join(" / ")}`,
-      });
-    }
-    return [...byKey.values()].sort((a, b) =>
-      a.symbol.localeCompare(b.symbol)
-    );
-  }, [
-    networkId,
-    collateralKey,
-    quote.walletBalance,
-    quote.collateralPrice,
-    route?.poolId,
-    route?.marketLabel,
-  ]);
+        subtitle: option.subtitle,
+      })),
+    [
+      supplyOptions,
+      selectedCollateral?.uiKey,
+      quote.walletBalance,
+      quote.collateralPrice,
+    ]
+  );
 
   const borrowAssetOptions: AssetSelectorOption[] = useMemo(
     () =>
@@ -308,7 +326,7 @@ const BorrowCard = () => {
   })();
 
   const ctaLabel: Record<CtaState, string> = {
-    connect: "Connect Wallet",
+    connect: "Get Started",
     enter_amount: "Enter Amount",
     insufficient_balance: "Insufficient Balance",
     limit_exceeded: "Borrow Limit Exceeded",
@@ -371,7 +389,7 @@ const BorrowCard = () => {
                   : "border-border"
               }`}
             >
-              <div className="font-medium">Existing DorkFi collateral</div>
+              <div className="font-medium">Existing collateral</div>
               <div className="text-xs text-muted-foreground">
                 {formatToken(quote.existingDeposit)} {route?.collateral.symbol}{" "}
                 supplied
@@ -432,17 +450,24 @@ const BorrowCard = () => {
                 </div>
               }
               options={collateralOptions}
-              value={collateralKey}
+              value={selectedCollateral?.uiKey ?? collateralUiKey}
               onChange={(key) => {
-                setCollateralKey(key);
+                setCollateralUiKey(key);
                 setCollateralAmount("");
                 setBorrowAmount("");
+                const collateral = supplyOptions.find((o) => o.uiKey === key);
+                if (!collateral) return;
                 const opts = listBorrowAssetOptionsForCollateral(
                   networkId,
-                  key
+                  collateral.collateralConfigKey,
+                  {
+                    collateralPoolId: collateral.collateralPoolId,
+                    preferredPoolIds: collateral.preferredPoolIds,
+                  }
                 );
                 const preferred = preferredBorrowUiKey(opts);
                 if (preferred) setBorrowUiKey(preferred);
+                else if (opts[0]) setBorrowUiKey(opts[0].uiKey);
               }}
               amount={
                 collateralSource === "existing"
@@ -529,7 +554,10 @@ const BorrowCard = () => {
             rateLabel: formatApr(quote.borrowAprPercent),
           }}
           supply={{
-            symbol: route?.collateral.symbol ?? collateralKey ?? "—",
+            symbol:
+              route?.collateral.symbol ??
+              selectedCollateral?.symbol ??
+              "—",
             logoPath: route?.collateral.logoPath,
             rateLabel: formatApr(quote.supplyAprPercent),
           }}
@@ -671,7 +699,7 @@ const BorrowCard = () => {
         disabled={ctaDisabled && ctaState !== "connect"}
         onClick={() => {
           if (ctaState === "connect") {
-            setWalletModalOpen(true);
+            void openEasyStartLogin();
             return;
           }
           // Signing orchestration lands in the next increment.
@@ -688,11 +716,6 @@ const BorrowCard = () => {
       ) : quote.error ? (
         <p className="text-center text-xs text-destructive">{quote.error}</p>
       ) : null}
-
-      <WalletModal
-        isOpen={walletModalOpen}
-        onClose={() => setWalletModalOpen(false)}
-      />
     </section>
   );
 };

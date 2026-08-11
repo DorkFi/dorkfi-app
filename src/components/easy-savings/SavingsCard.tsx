@@ -29,9 +29,7 @@ import WalletModal from "@/components/WalletModal";
 import EasySavingsDepositModal from "@/components/easy-savings/EasySavingsDepositModal";
 import EasySavingsWithdrawModal from "@/components/easy-savings/EasySavingsWithdrawModal";
 import LeveragedWadLpDepositModal from "@/components/easy-savings/LeveragedWadLpDepositModal";
-import SavingsRateChart, {
-  buildSavingsRateHistory,
-} from "@/components/easy-savings/SavingsRateChart";
+import SimpleSavingsCalculator from "@/components/easy-savings/SimpleSavingsCalculator";
 import SavingsPositionCard, {
   type PortfolioChartSeries,
 } from "@/components/easy-savings/SavingsPositionCard";
@@ -88,18 +86,9 @@ function txKindLabel(kind: SavingsTxRecord["kind"]): string {
   return "Activity";
 }
 
-const CHART_TABS = [
-  "Savings Rate",
-  "Collateral Composition",
-  "Liquidity",
-  "Risk Rating",
-] as const;
-
-const CHART_RANGES = ["1M", "3M", "1Y", "All"] as const;
-
 /**
- * Easy Savings — account sidebar; empty-state hero CTA or funded balance summary,
- * plus market charts until funded. Deposit opens a signed supply modal.
+ * Easy Savings — account sidebar; empty-state hero CTA with savings calculator,
+ * or funded balance summary with position charts. Deposit opens a signed supply modal.
  */
 const SavingsCard = () => {
   const { currentNetwork } = useNetwork();
@@ -111,10 +100,6 @@ const SavingsCard = () => {
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   /** USDC/WAD: false = leveraged mint+supply, true = plain LP supply */
   const [plainLpSupply, setPlainLpSupply] = useState(false);
-  const [chartTab, setChartTab] =
-    useState<(typeof CHART_TABS)[number]>("Savings Rate");
-  const [chartRange, setChartRange] =
-    useState<(typeof CHART_RANGES)[number]>("3M");
 
   const { core: coreAccounts, highYield: highYieldAccounts, all: accounts } =
     useSavingsAccounts(networkId);
@@ -490,8 +475,6 @@ const SavingsCard = () => {
     getTokenImagePath(route?.asset.symbol ?? "USDC") ||
     "/placeholder.svg";
 
-  const rateHistory = useMemo(() => buildSavingsRateHistory(apy), [apy]);
-
   const balanceLabel = !activeAccount
     ? "—"
     : isWalletAccount
@@ -703,7 +686,10 @@ const SavingsCard = () => {
 
   const renderAccountRow = (row: SavingsAccountRow) => {
     const active = row.route.asset.configKey === effectiveAssetKey;
-    const label = savingsAccountDisplayLabel(row.route);
+    const label =
+      row.route.asset.configKey === "USDC"
+        ? "Earn"
+        : savingsAccountDisplayLabel(row.route);
     const isWadUsdc = isLeveragedWadUsdcRoute(row.route.asset.configKey);
     const rowLogo =
       row.route.asset.logoPath ||
@@ -832,44 +818,13 @@ const SavingsCard = () => {
                     : activeQuote.earnedInterestUsd
                 }
               />
-              {isWalletAccount ? (
-                <p className="text-sm text-muted-foreground -mt-2 px-1">
-                  {hasBaseUsdc ? (
-                    <>
-                      Undeposited USDC:{" "}
-                      <span className="font-medium text-foreground tabular-nums">
-                        {formatToken(walletUsdcAlgo ?? 0)}
-                      </span>{" "}
-                      on Algorand
-                      {walletUsdcAlgoUsd > 0
-                        ? ` (${formatUsdAmount(walletUsdcAlgoUsd)})`
-                        : ""}
-                      {" · "}
-                      <span className="font-medium text-foreground tabular-nums">
-                        {formatToken(walletUsdcBase)}
-                      </span>{" "}
-                      on Base
-                      {walletUsdcBaseUsd > 0
-                        ? ` (${formatUsdAmount(walletUsdcBaseUsd)})`
-                        : ""}
-                      . Use “Move to Algorand” on Base USDC below, then deposit
-                      into a savings market.
-                    </>
-                  ) : (
-                    <>
-                      Undeposited USDC in your Algorand wallet. Deposit into a
-                      savings market to start earning yield.
-                    </>
-                  )}
-                </p>
-              ) : null}
               <div className="grid grid-cols-2 gap-3 sm:gap-4">
                 <DorkFiButton
                   className="rounded-full h-12 w-full min-w-0 text-base"
                   onClick={() => openDeposit()}
                 >
                   {isWalletAccount
-                    ? "Deposit to Savings"
+                    ? "Deposit to Earn"
                     : isLeveragedWadUsdc
                       ? "Open position"
                       : "Deposit"}
@@ -1081,6 +1036,35 @@ const SavingsCard = () => {
                       </tbody>
                     </table>
                   </div>
+                  <p className="mt-5 text-sm text-muted-foreground leading-relaxed">
+                    {hasBaseUsdc ? (
+                      <>
+                        Undeposited USDC:{" "}
+                        <span className="font-medium text-foreground tabular-nums">
+                          {formatToken(walletUsdcAlgo ?? 0)}
+                        </span>{" "}
+                        on Algorand
+                        {walletUsdcAlgoUsd > 0
+                          ? ` (${formatUsdAmount(walletUsdcAlgoUsd)})`
+                          : ""}
+                        {" · "}
+                        <span className="font-medium text-foreground tabular-nums">
+                          {formatToken(walletUsdcBase)}
+                        </span>{" "}
+                        on Base
+                        {walletUsdcBaseUsd > 0
+                          ? ` (${formatUsdAmount(walletUsdcBaseUsd)})`
+                          : ""}
+                        . Use “Move to Algorand” on Base USDC above, then deposit
+                        into a savings market.
+                      </>
+                    ) : (
+                      <>
+                        Undeposited USDC in your Algorand wallet. Deposit into a
+                        savings market to start earning yield.
+                      </>
+                    )}
+                  </p>
                 </section>
               ) : null}
 
@@ -1215,9 +1199,9 @@ const SavingsCard = () => {
                         </>
                       ) : (
                         <>
-                          Deposit your cash into SimplFi Savings to earn a
-                          transparent APY. The rate updates automatically as
-                          markets evolve.{" "}
+                          Deposit into SimplFi Savings to earn a transparent
+                          APY. The rate updates automatically as markets
+                          evolve.{" "}
                           <span className="text-ocean-teal">Learn more</span>
                         </>
                       )}
@@ -1244,7 +1228,7 @@ const SavingsCard = () => {
                         ? isLeveragedWadUsdc
                           ? "Open position"
                           : "Deposit"
-                        : "Deposit Cash"}
+                        : "Deposit"}
                     </DorkFiButton>
                     {activeAccount ? (
                       <button
@@ -1268,101 +1252,7 @@ const SavingsCard = () => {
                 </div>
               </section>
 
-              <section className="rounded-[28px] border border-border/60 bg-card p-5 sm:p-6 shadow-sm">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex flex-wrap gap-1 rounded-xl bg-muted/60 p-1">
-                    {CHART_TABS.map((item) => (
-                      <button
-                        key={item}
-                        type="button"
-                        onClick={() => setChartTab(item)}
-                        className={cn(
-                          "rounded-lg px-3 sm:px-4 py-2 text-sm font-medium transition-colors",
-                          chartTab === item
-                            ? "bg-card shadow-sm text-foreground"
-                            : "text-muted-foreground hover:text-foreground"
-                        )}
-                      >
-                        {item}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex gap-1 rounded-xl bg-muted/60 p-1">
-                    {CHART_RANGES.map((item) => (
-                      <button
-                        key={item}
-                        type="button"
-                        onClick={() => setChartRange(item)}
-                        className={cn(
-                          "rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
-                          chartRange === item
-                            ? "bg-card shadow-sm text-foreground"
-                            : "text-muted-foreground hover:text-foreground"
-                        )}
-                      >
-                        {item}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="mt-8">
-                  {chartTab === "Savings Rate" ? (
-                    <SavingsRateChart data={rateHistory} />
-                  ) : (
-                    <div className="flex h-72 items-center justify-center rounded-2xl bg-muted/40 text-sm text-muted-foreground">
-                      {chartTab} data is unavailable yet.
-                    </div>
-                  )}
-                </div>
-              </section>
-
-              <section className="rounded-[28px] border border-border/60 bg-card p-5 sm:p-6 shadow-sm">
-                <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight">
-                  Supported assets
-                </h2>
-                <div className="mt-6 overflow-x-auto">
-                  <table className="w-full text-sm min-w-[520px]">
-                    <thead>
-                      <tr className="border-b border-border text-left text-muted-foreground">
-                        <th className="pb-3 font-medium">Asset</th>
-                        <th className="pb-3 font-medium">Balance</th>
-                        <th className="pb-3 font-medium">Deposit amount</th>
-                        <th className="pb-3 font-medium">Earned</th>
-                        <th className="pb-3" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td className="py-4">
-                          <span className="flex items-center gap-2 font-medium">
-                            <img src={logo} alt="" className="size-6 rounded-full" />
-                            {symbol}
-                          </span>
-                        </td>
-                        <td className="py-4 text-muted-foreground tabular-nums">
-                          {balanceLabel}
-                        </td>
-                        <td className="py-4 tabular-nums">
-                          {depositAmountLabel}
-                        </td>
-                        <td className="py-4 tabular-nums text-ocean-teal">
-                          {earnedLabel}
-                        </td>
-                        <td className="py-4 text-right">
-                          <button
-                            type="button"
-                            onClick={() => openDeposit()}
-                            className="rounded-xl bg-muted px-4 py-2 text-sm font-semibold hover:bg-muted/80 transition-colors"
-                          >
-                            Deposit
-                          </button>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </section>
+              <SimpleSavingsCalculator apyPercent={marketApy} />
             </>
           ) : (
             <div className="rounded-[28px] border border-border/60 bg-card p-10 sm:p-12 text-center text-sm text-muted-foreground">

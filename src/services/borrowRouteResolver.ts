@@ -411,8 +411,14 @@ export function listCollateralConfigKeys(networkId: NetworkId): string[] {
   return [...keys].sort();
 }
 
-/** Synthetic UI key for Pool D Folks USDC (own row in the borrow dropdown). */
+/** Synthetic UI key for Pool B USDC (own row in the supply dropdown). */
+export const EASY_BORROW_POOL_B_USDC_UI_KEY = "USDC_B";
+
+/** Synthetic UI key for Pool D Folks USDC (own row in the supply/borrow dropdown). */
 export const EASY_BORROW_POOL_D_USDC_UI_KEY = "USDC_D";
+
+/** Curated Easy Borrow supply markets: A, B, and Pool D USDC only. */
+const EASY_BORROW_USDC_SUPPLY_MARKET_LABELS = ["A", "B", "D"] as const;
 
 export type EasyBorrowAssetOption = {
   /** Stable id used by AssetSelector. */
@@ -424,6 +430,125 @@ export type EasyBorrowAssetOption = {
   borrowConfigKey: string;
   preferredPoolIds?: readonly string[];
 };
+
+/**
+ * USDC supply (collateral) row for the Easy Borrow AssetSelector.
+ * Pins a pool so A/B/D USDC listings stay distinct.
+ */
+export type EasyBorrowCollateralOption = {
+  uiKey: string;
+  symbol: string;
+  subtitle: string;
+  logoPath?: string;
+  /** Passed to {@link resolveBorrowRoute} as `collateralConfigKey` (always `USDC`). */
+  collateralConfigKey: string;
+  collateralPoolId: string;
+  preferredPoolIds: readonly string[];
+};
+
+function usdcCollateralListingRank(configKey: string): number {
+  if (configKey === "USDC") return 0;
+  if (configKey === "fUSDC") return 1;
+  if (configKey === "fiUSDC") return 2;
+  return 9;
+}
+
+function isUsdcCollateralRef(
+  networkId: NetworkId,
+  ref: EasyBorrowMarketRef
+): boolean {
+  if (
+    ref.configKey === "USDC" ||
+    ref.configKey === "fUSDC" ||
+    ref.configKey === "fiUSDC"
+  ) {
+    return true;
+  }
+  return isEasyBorrowUsdcEquivalentConfigKey(
+    networkId,
+    ref.configKey,
+    ref.poolId
+  );
+}
+
+/**
+ * Curated Supply dropdown: one USDC row per market A, B, and D.
+ * Prefers native `USDC` listings over Folks f-/fi- rows on the same pool.
+ */
+export function listUsdcCollateralSupplyOptions(
+  networkId: NetworkId
+): EasyBorrowCollateralOption[] {
+  type Ranked = EasyBorrowMarketRef & { marketLabel: string };
+  const bestByLabel = new Map<string, Ranked>();
+
+  for (const route of listBorrowRoutes(networkId)) {
+    const ref = route.collateral;
+    if (!isUsdcCollateralRef(networkId, ref)) continue;
+    if (
+      !(
+        EASY_BORROW_USDC_SUPPLY_MARKET_LABELS as readonly string[]
+      ).includes(route.marketLabel)
+    ) {
+      continue;
+    }
+
+    const existing = bestByLabel.get(route.marketLabel);
+    if (
+      !existing ||
+      usdcCollateralListingRank(ref.configKey) <
+        usdcCollateralListingRank(existing.configKey)
+    ) {
+      bestByLabel.set(route.marketLabel, {
+        ...ref,
+        marketLabel: route.marketLabel,
+      });
+    }
+  }
+
+  const out: EasyBorrowCollateralOption[] = [];
+  for (const label of EASY_BORROW_USDC_SUPPLY_MARKET_LABELS) {
+    const ref = bestByLabel.get(label);
+    if (!ref) continue;
+
+    if (label === "D") {
+      out.push({
+        uiKey: EASY_BORROW_POOL_D_USDC_UI_KEY,
+        symbol: "Pool D USDC",
+        subtitle: "Folks USDC market",
+        logoPath: ref.logoPath || "/lovable-uploads/USDC.webp",
+        collateralConfigKey: "USDC",
+        collateralPoolId: ref.poolId,
+        preferredPoolIds: [ref.poolId],
+      });
+      continue;
+    }
+
+    if (label === "B") {
+      out.push({
+        uiKey: EASY_BORROW_POOL_B_USDC_UI_KEY,
+        symbol: "USDC",
+        subtitle: "Market B",
+        logoPath: ref.logoPath || "/lovable-uploads/USDC.webp",
+        collateralConfigKey: "USDC",
+        collateralPoolId: ref.poolId,
+        preferredPoolIds: [ref.poolId],
+      });
+      continue;
+    }
+
+    out.push({
+      uiKey: "USDC",
+      symbol: "USDC",
+      subtitle: "Market A",
+      logoPath: ref.logoPath || "/lovable-uploads/USDC.webp",
+      collateralConfigKey: "USDC",
+      collateralPoolId: ref.poolId,
+      preferredPoolIds: [ref.poolId],
+    });
+  }
+
+  return out;
+}
 
 /**
  * Borrow dropdown rows for a collateral selection.
