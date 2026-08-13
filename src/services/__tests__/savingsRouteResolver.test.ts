@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   EASY_SAVINGS_CORE_ASSET_CONFIG_KEYS,
   EASY_SAVINGS_HIGH_YIELD_ASSET_CONFIG_KEYS,
+  EASY_SAVINGS_HIGH_YIELD_ENABLED,
   EASY_SAVINGS_V1_ASSET_CONFIG_KEYS,
   isWadSavingsEligible,
   listCoreSavingsAssetConfigKeys,
@@ -54,20 +55,31 @@ describe("savingsRouteResolver (core + high-yield)", () => {
     expect(savingsAccountDisplayLabel(poolD!)).toBe("Pool D USDC");
   });
 
-  it("lists high-yield LP pairs", () => {
-    const keys = listHighYieldSavingsAssetConfigKeys(NETWORK);
-    expect(keys).toEqual(["LP_TMPOOL2_WAD_USDC"]);
-    expect(keys).not.toContain("LP_TMPOOL2_UNIT_ALGO");
+  it("hides high-yield USDC/WAD from curated listings when disabled", () => {
+    expect(EASY_SAVINGS_HIGH_YIELD_ENABLED).toBe(false);
+    expect(listHighYieldSavingsAssetConfigKeys(NETWORK)).toEqual([]);
+    expect(listSavingsAssetConfigKeys(NETWORK)).toEqual(["USDC"]);
+    expect(
+      resolveSavingsRoute({
+        networkId: NETWORK,
+        assetConfigKey: "LP_TMPOOL2_WAD_USDC",
+      })
+    ).toBeNull();
   });
 
-  it("labels LP accounts with pair names", () => {
-    const usdcWad = resolveSavingsRoute({
-      networkId: NETWORK,
-      assetConfigKey: "LP_TMPOOL2_WAD_USDC",
+  it("still resolves high-yield LP when listed explicitly", () => {
+    const routes = listSavingsRoutes(NETWORK, {
+      assetConfigKeys: ["LP_TMPOOL2_WAD_USDC"],
     });
-    expect(usdcWad).not.toBeNull();
+    const usdcWad = routes.find(
+      (r) => r.asset.configKey === "LP_TMPOOL2_WAD_USDC"
+    );
+    expect(usdcWad).toBeTruthy();
     expect(savingsAccountDisplayLabel(usdcWad!)).toBe("USDC / WAD");
     expect(usdcWad!.poolId).toBe(POOL_E);
+    expect(routes.some((r) => r.asset.configKey === "LP_TMPOOL2_UNIT_ALGO")).toBe(
+      false
+    );
   });
 
   it("resolves native ALGO when listed explicitly (not in curated core)", () => {
@@ -141,12 +153,10 @@ describe("savingsRouteResolver (core + high-yield)", () => {
     expect(full.some((r) => r.asset.configKey === "ALGO")).toBe(true);
   });
 
-  it("orders curated keys with core before high-yield", () => {
+  it("orders curated keys as core-only while high-yield is hidden", () => {
     const keys = listSavingsAssetConfigKeys(NETWORK);
-    const usdc = keys.indexOf("USDC");
-    const lp = keys.indexOf("LP_TMPOOL2_WAD_USDC");
-    expect(usdc).toBeGreaterThanOrEqual(0);
-    expect(lp).toBeGreaterThan(usdc);
+    expect(keys).toEqual(["USDC"]);
+    expect(keys).not.toContain("LP_TMPOOL2_WAD_USDC");
   });
 
   it("returns null for unknown assets", () => {

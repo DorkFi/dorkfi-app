@@ -25,16 +25,31 @@ export const EASY_SAVINGS_CORE_ASSET_CONFIG_KEYS = ["USDC"] as const;
 
 /**
  * Higher-yield pooled LP markets (elevated risk vs core savings).
+ * Implementation stays in tree; UI listing is gated by
+ * {@link EASY_SAVINGS_HIGH_YIELD_ENABLED} (parked on `higher-yield-opps`).
  */
 export const EASY_SAVINGS_HIGH_YIELD_ASSET_CONFIG_KEYS = [
   "LP_TMPOOL2_WAD_USDC",
 ] as const;
+
+/**
+ * Easy Savings Higher Yield (USDC/WAD LP). False on MVP launch branches so
+ * the sidebar and default routes hide the opportunity without deleting the
+ * leveraged deposit path. Re-enable on `higher-yield-opps`.
+ */
+export const EASY_SAVINGS_HIGH_YIELD_ENABLED = false;
 
 /** All curated Easy Savings deposit keys (core + high-yield). */
 export const EASY_SAVINGS_V1_ASSET_CONFIG_KEYS = [
   ...EASY_SAVINGS_CORE_ASSET_CONFIG_KEYS,
   ...EASY_SAVINGS_HIGH_YIELD_ASSET_CONFIG_KEYS,
 ] as const;
+
+function curatedEasySavingsAssetConfigKeys(): readonly string[] {
+  return EASY_SAVINGS_HIGH_YIELD_ENABLED
+    ? EASY_SAVINGS_V1_ASSET_CONFIG_KEYS
+    : EASY_SAVINGS_CORE_ASSET_CONFIG_KEYS;
+}
 
 export type EasySavingsCoreAssetConfigKey =
   (typeof EASY_SAVINGS_CORE_ASSET_CONFIG_KEYS)[number];
@@ -75,7 +90,8 @@ export function savingsAccountDisplayLabel(route: SavingsRoute): string {
 
 export type ListSavingsRoutesOptions = {
   /**
-   * Defaults to {@link EASY_SAVINGS_V1_ASSET_CONFIG_KEYS}.
+   * Defaults to core keys, plus high-yield when
+   * {@link EASY_SAVINGS_HIGH_YIELD_ENABLED} is true.
    * Pass `null` for every depositable listing on active pools.
    */
   assetConfigKeys?: readonly string[] | null;
@@ -199,7 +215,9 @@ export function listSavingsRoutes(
   const keyFilter =
     options?.assetConfigKeys === null
       ? null
-      : new Set(options?.assetConfigKeys ?? EASY_SAVINGS_V1_ASSET_CONFIG_KEYS);
+      : new Set(
+          options?.assetConfigKeys ?? curatedEasySavingsAssetConfigKeys()
+        );
 
   const tokens = getNetworkConfig(networkId).tokens ?? {};
   const routes: SavingsRoute[] = [];
@@ -305,6 +323,7 @@ export function listCoreSavingsAssetConfigKeys(networkId: NetworkId): string[] {
 export function listHighYieldSavingsAssetConfigKeys(
   networkId: NetworkId
 ): string[] {
+  if (!EASY_SAVINGS_HIGH_YIELD_ENABLED) return [];
   return listSavingsAssetConfigKeys(networkId, {
     assetConfigKeys: EASY_SAVINGS_HIGH_YIELD_ASSET_CONFIG_KEYS,
   });
