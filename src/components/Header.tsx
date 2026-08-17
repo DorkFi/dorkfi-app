@@ -39,6 +39,7 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
     }
     if (location.pathname === "/governance") return "governance";
     if (location.pathname === "/portfolio" || location.pathname.startsWith("/portfolio/")) return "portfolio";
+    if (location.pathname === "/bets") return "bets";
     if (location.pathname === "/market") return "markets";
     return "markets";
   })();
@@ -63,6 +64,8 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
       navigate("/portfolio");
     } else if (value === "markets") {
       navigate("/market");
+    } else if (value === "bets") {
+      navigate("/bets");
     } else {
       navigate("/");
     }
@@ -97,6 +100,8 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
         onTabChange("portfolio");
       } else if (location.pathname === "/market") {
         onTabChange("markets");
+      } else if (location.pathname === "/bets") {
+        onTabChange("bets");
       }
     }
   }, [gasStationEnabled, liquidationsEnabled, location.pathname, onTabChange]);
@@ -124,6 +129,8 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
       : []),
     //{ value: 'swap', label: 'Swap' },
     ...(hasGasStation ? [{ value: "gas-station", label: "Gas Station" }] : []),
+    // Prototype desk — farthest right; content served from localhost:8503
+    { value: "bets", label: "Bets" },
   ];
 
   // Hide tabs navigation when only one tab is visible
@@ -165,7 +172,7 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
 
           {/* Desktop and Tablet Navigation */}
           {shouldShowTabs && (
-            <div className="hidden md:flex flex-1 justify-center max-w-2xl mx-4 md:mx-6 lg:mx-8">
+            <div className="hidden md:flex flex-1 justify-center max-w-3xl lg:max-w-4xl mx-4 md:mx-6 lg:mx-8">
               <div className="inline-flex h-9 md:h-10 items-center justify-center rounded-md bg-gray-100 dark:bg-muted p-1 text-gray-700 dark:text-muted-foreground w-full">
                 {tabs.map((tab, i) => (
                   <Button

@@ -21,6 +21,7 @@ const PoolsPage = lazy(() => import("./pages/Pools"));
 const PortfolioPage = lazy(() => import("./pages/PortfolioPage"));
 const GasStationPage = lazy(() => import("./pages/GasStation"));
 const LiquidationMarketsPage = lazy(() => import("./pages/LiquidationMarkets"));
+const BetsPage = lazy(() => import("./pages/BetsPage"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -168,6 +169,14 @@ function App() {
                 element={
                   <Suspense fallback={<LazyRouteFallback />}>
                     <PortfolioPage />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="/bets"
+                element={
+                  <Suspense fallback={<LazyRouteFallback />}>
+                    <BetsPage />
                   </Suspense>
                 }
               />
