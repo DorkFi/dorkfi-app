@@ -2,6 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Area, AreaChart, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import ChartCard from './ChartCard';
 import { dorkfiAPIService } from '@/services/dorkfiAPIService';
+import {
+  analyticsSummaryToUsd,
+  analyticsValueToUsd,
+} from '@/utils/analyticsActivityUsd';
 import { useTheme } from 'next-themes';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
@@ -42,10 +46,12 @@ const DepositsChart = () => {
             // Group by date and sum amounts (matching demo page approach)
             const dailyDeposits: { [key: string]: number } = {};
             
-            deposits.forEach((deposit: any) => {
+            deposits.forEach((deposit) => {
               const date = new Date(deposit.timestamp).toISOString().split('T')[0];
-              // Convert from micro-units to USD (divide by 1e12, matching demo page)
-              const value = parseFloat(deposit.depositValueUSD || '0') / 1e12;
+              const value = analyticsValueToUsd(
+                deposit.depositValueUSD,
+                deposit.amount
+              );
               dailyDeposits[date] = (dailyDeposits[date] || 0) + value;
             });
 
@@ -56,8 +62,14 @@ const DepositsChart = () => {
             setDepositsData(transformed);
             
             // Calculate total from summary if available, otherwise sum the daily amounts
-            const totalFromSummary = response.data.summary?.totalDepositValueUSD 
-              ? parseFloat(response.data.summary.totalDepositValueUSD) / 1e12
+            const totalFromSummary = response.data.summary?.totalDepositValueUSD
+              ? analyticsSummaryToUsd(
+                  response.data.summary.totalDepositValueUSD,
+                  deposits.map((d) => ({
+                    valueUsd: d.depositValueUSD,
+                    amount: d.amount,
+                  }))
+                )
               : transformed.reduce((sum, d) => sum + d.amount, 0);
             setTotalDeposits(totalFromSummary);
           } else {

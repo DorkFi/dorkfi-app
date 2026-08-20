@@ -2,6 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Area, AreaChart, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import ChartCard from './ChartCard';
 import { dorkfiAPIService } from '@/services/dorkfiAPIService';
+import {
+  analyticsSummaryToUsd,
+  analyticsValueToUsd,
+} from '@/utils/analyticsActivityUsd';
 import { useTheme } from 'next-themes';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
@@ -42,10 +46,12 @@ const RepaysChart = () => {
             // Group by date and sum amounts (matching demo page approach)
             const dailyRepays: { [key: string]: number } = {};
             
-            repays.forEach((repay: any) => {
+            repays.forEach((repay) => {
               const date = new Date(repay.timestamp).toISOString().split('T')[0];
-              // Convert from micro-units to USD (divide by 1e12, matching demo page)
-              const value = parseFloat(repay.repayValueUSD || '0') / 1e12;
+              const value = analyticsValueToUsd(
+                repay.repayValueUSD,
+                repay.amount
+              );
               dailyRepays[date] = (dailyRepays[date] || 0) + value;
             });
 
@@ -56,8 +62,14 @@ const RepaysChart = () => {
             setRepaysData(transformed);
             
             // Calculate total from summary if available, otherwise sum the daily amounts
-            const totalFromSummary = response.data.summary?.totalRepayValueUSD 
-              ? parseFloat(response.data.summary.totalRepayValueUSD) / 1e12
+            const totalFromSummary = response.data.summary?.totalRepayValueUSD
+              ? analyticsSummaryToUsd(
+                  response.data.summary.totalRepayValueUSD,
+                  repays.map((r) => ({
+                    valueUsd: r.repayValueUSD,
+                    amount: r.amount,
+                  }))
+                )
               : transformed.reduce((sum, d) => sum + d.amount, 0);
             setTotalRepays(totalFromSummary);
           } else {

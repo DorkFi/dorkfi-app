@@ -4,12 +4,21 @@ import ChartCard from './ChartCard';
 import { dorkfiAPIService } from '@/services/dorkfiAPIService';
 import { formatNumber } from '@/utils/analyticsUtils';
 import { useTheme } from 'next-themes';
+import { buildHealthFactorDistribution } from '@/utils/analyticsHealthFactorDistribution';
 
 interface HealthFactorDataPoint {
   range: string;
   count: number;
   color: string;
 }
+
+const RANGE_COLORS: Record<string, string> = {
+  '<1.0': 'hsl(var(--destructive))',
+  '1.0-1.1': 'hsl(var(--warning-orange))',
+  '1.1-1.2': 'hsl(var(--whale-gold))',
+  '1.2-1.5': 'hsl(var(--highlight-aqua))',
+  '>1.5': 'hsl(var(--ocean-teal))',
+};
 
 const HealthFactorChart = () => {
   const { theme } = useTheme();
@@ -20,110 +29,19 @@ const HealthFactorChart = () => {
     const fetchHealthFactorData = async () => {
       setLoading(true);
       try {
-        // Orca API — always call the origin directly (no Vite dev proxy).
-        const orcaApiUrl = "https://orca-api.nautilus.sh/api/opportunities";
-        const limit = 1000; // Try to get more in one request
-        const response = await fetch(`${orcaApiUrl}?limit=${limit}`, {
-          method: 'GET',
-          headers: {
-            'Accept': 'application/json',
-          },
-        });
-        
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const data = await response.json();
-        
-        console.log('Orca API response:', { count: data.count, total: data.total, opportunitiesLength: data.opportunities?.length });
+        const response = await dorkfiAPIService.getAllUserHealth();
+        const records = response.success ? response.data ?? [] : [];
+        const distribution = buildHealthFactorDistribution(records);
 
-        if (data && data.opportunities && Array.isArray(data.opportunities) && data.opportunities.length > 0) {
-          // Filter out opportunities with collateralValueUsd less than 1.00
-          const filteredOpportunities = data.opportunities.filter((opportunity: any) => {
-            const collateralValueUsd = opportunity.collateralValueUsd;
-            // Include if collateralValueUsd is undefined/null (for backward compatibility) or >= 1.00
-            return collateralValueUsd === undefined || collateralValueUsd === null || collateralValueUsd >= 1.00;
-          });
-          
-          console.log(`Filtered opportunities: ${filteredOpportunities.length} out of ${data.opportunities.length} (excluded ${data.opportunities.length - filteredOpportunities.length} with collateralValueUsd < 1.00)`);
-          
-          // Deduplicate by user to count unique users per health factor range
-          // Each user can have multiple opportunities (different collateral/debt pairs)
-          // We'll use the minimum effectiveHF for each user to represent their risk level
-          const userHealthFactors = new Map<string, number>();
-          
-          filteredOpportunities.forEach((opportunity: any) => {
-            const hf = opportunity.effectiveHF;
-            if (hf === null || hf === undefined || isNaN(hf)) return;
-            
-            const userId = opportunity.user;
-            const normalizedHf = hf / 10000;
-            
-            // Keep the minimum (worst) health factor for each user
-            if (!userHealthFactors.has(userId) || normalizedHf < userHealthFactors.get(userId)!) {
-              userHealthFactors.set(userId, normalizedHf);
-            }
-          });
-          
-          console.log(`Found ${userHealthFactors.size} unique users with health factors`);
-
-          // Categorize health factors into ranges using effectiveHF
-          const ranges: { [key: string]: number } = {
-            '<1.0': 0,
-            '1.0-1.1': 0,
-            '1.1-1.2': 0,
-            '1.2-1.5': 0,
-            '>1.5': 0,
-          };
-
-          userHealthFactors.forEach((hf) => {
-            if (hf < 1.0) {
-              ranges['<1.0']++;
-            } else if (hf >= 1.0 && hf < 1.1) {
-              ranges['1.0-1.1']++;
-            } else if (hf >= 1.1 && hf < 1.2) {
-              ranges['1.1-1.2']++;
-            } else if (hf >= 1.2 && hf <= 1.5) {
-              ranges['1.2-1.5']++;
-            } else if (hf > 1.5) {
-              ranges['>1.5']++;
-            }
-          });
-          
-          console.log('Health factor ranges:', ranges);
-
-          const distribution = Object.entries(ranges).map(([range, count]) => ({
-            range,
-            count,
-          }));
-
-          // Map colors to distribution ranges (matching demo page colors)
-          const colorMap: { [key: string]: string } = {
-            '<1.0': 'hsl(var(--destructive))', // red
-            '1.0-1.1': 'hsl(var(--warning-orange))', // orange
-            '1.1-1.2': 'hsl(var(--whale-gold))', // yellow
-            '1.2-1.5': 'hsl(var(--highlight-aqua))', // light blue
-            '>1.5': 'hsl(var(--ocean-teal))', // teal
-          };
-          
-          const transformed = distribution.map((item) => ({
+        setHealthFactorData(
+          distribution.map((item) => ({
             range: item.range,
             count: item.count,
-            color: colorMap[item.range] || 'hsl(var(--muted))',
-          }));
-          
-          console.log('Transformed health factor data:', transformed);
-          setHealthFactorData(transformed);
-        } else {
-          console.warn('No opportunities found in Orca API response', data);
-          setHealthFactorData([]);
-        }
+            color: RANGE_COLORS[item.range] || 'hsl(var(--muted))',
+          }))
+        );
       } catch (error) {
-        console.error('Error fetching health factor data from Orca API:', error);
-        if (error instanceof TypeError && error.message === 'Failed to fetch') {
-          console.error('CORS error - API may not allow direct browser requests. Consider using a proxy server.');
-        }
+        console.error('Error fetching health factor data:', error);
         setHealthFactorData([]);
       } finally {
         setLoading(false);
@@ -165,14 +83,16 @@ const HealthFactorChart = () => {
     return null;
   };
 
+  const hasAccounts = healthFactorData.some((item) => item.count > 0);
+
   return (
     <ChartCard 
       title="Health Factor Distribution" 
       subtitle="Borrower risk levels (<1.0 highlighted)"
-      tooltip="Distribution of borrower health factors. Values below 1.0 are liquidatable, 1.0-1.1 are high risk, above 1.5 are safe."
+      tooltip="Distribution of unique borrowers by worst health factor. Values below 1.0 are liquidatable, 1.0-1.1 are high risk, above 1.5 are safe."
       className="h-auto"
     >
-      {healthFactorData.length > 0 ? (
+      {hasAccounts ? (
         <>
           <div className="h-[220px] sm:h-[260px] mb-4 sm:mb-6">
             <ResponsiveContainer width="100%" height="100%">
@@ -226,4 +146,3 @@ const HealthFactorChart = () => {
 };
 
 export default HealthFactorChart;
-
