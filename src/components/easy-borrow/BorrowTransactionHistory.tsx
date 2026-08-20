@@ -1,24 +1,25 @@
 import { ExternalLink } from "lucide-react";
 import type { NetworkId } from "@/config";
-import type { SavingsTxRecord } from "@/services/savingsTransactionHistory";
+import type { BorrowTxRecord } from "@/services/borrowTransactionHistory";
 import { getExplorerTransactionUrl } from "@/utils/explorerLinks";
 import { cn } from "@/lib/utils";
 import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 import { consumerAssetDisplayLabel } from "@/services/savingsRouteResolver";
 
-type SavingsTransactionHistoryProps = {
+type BorrowTransactionHistoryProps = {
   networkId: NetworkId;
-  items: SavingsTxRecord[];
+  items: BorrowTxRecord[];
   isLoading?: boolean;
-  className?: string;
 };
 
-function kindLabel(kind: SavingsTxRecord["kind"]): string {
+function kindLabel(kind: BorrowTxRecord["kind"]): string {
   switch (kind) {
-    case "deposit":
+    case "borrow":
+      return "Borrow";
+    case "repay":
+      return "Repay";
+    case "supply":
       return "Deposit";
-    case "withdraw":
-      return "Withdraw";
     default:
       return "Activity";
   }
@@ -29,7 +30,6 @@ function formatWhen(ts: number): string {
     return new Intl.DateTimeFormat(undefined, {
       month: "short",
       day: "numeric",
-      year: "numeric",
       hour: "numeric",
       minute: "2-digit",
     }).format(new Date(ts));
@@ -43,42 +43,38 @@ function shortTx(txId: string): string {
   return `${txId.slice(0, 6)}…${txId.slice(-4)}`;
 }
 
-const SavingsTransactionHistory = ({
+const BorrowTransactionHistory = ({
   networkId,
   items,
   isLoading,
-  className,
-}: SavingsTransactionHistoryProps) => {
+}: BorrowTransactionHistoryProps) => {
   const consumerCopy = useConsumerCopy();
   return (
-    <section
-      className={cn(
-        "rounded-[28px] border border-border/60 bg-card p-5 sm:p-6 shadow-sm",
-        className
-      )}
-    >
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-xl sm:text-2xl font-semibold tracking-tight">
+    <div className="pt-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-muted-foreground">
           {consumerCopy ? "Activity" : "Transaction history"}
-        </h2>
+        </p>
         {isLoading ? (
-          <span className="text-xs text-muted-foreground">Updating…</span>
+          <span className="text-muted-foreground">Updating…</span>
         ) : null}
       </div>
 
       {items.length === 0 && !isLoading ? (
-        <p className="mt-6 text-sm text-muted-foreground">
-          No activity yet. Deposits and withdrawals will show up here.
+        <p className="mt-2 text-muted-foreground">
+          {consumerCopy
+            ? "No borrow activity yet."
+            : "No borrow transactions yet."}
         </p>
       ) : null}
 
       {items.length === 0 && isLoading ? (
-        <p className="mt-6 text-sm text-muted-foreground">Loading history…</p>
+        <p className="mt-2 text-muted-foreground">Loading history…</p>
       ) : null}
 
       {items.length > 0 ? (
-        <ul className="mt-5 divide-y divide-border/60">
-          {items.map((item) => {
+        <ul className="mt-2 divide-y divide-border/50">
+          {items.slice(0, 15).map((item) => {
             const url = getExplorerTransactionUrl(networkId, item.txId);
             const amountText =
               item.amount && item.symbol
@@ -87,36 +83,34 @@ const SavingsTransactionHistory = ({
                       ? consumerAssetDisplayLabel(item.symbol)
                       : item.symbol
                   }`
-                : item.amount
-                  ? item.amount
-                  : null;
-            const isIn = item.kind === "deposit";
-            const isOut = item.kind === "withdraw";
+                : item.amount || null;
+            const isBorrow = item.kind === "borrow";
+            const isRepay = item.kind === "repay";
 
             return (
               <li
                 key={item.txId}
-                className="flex items-start justify-between gap-3 py-3.5 first:pt-0 last:pb-0"
+                className="flex items-start justify-between gap-2 py-2 first:pt-1.5"
               >
                 <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <span
                       className={cn(
-                        "text-sm font-semibold",
-                        isIn && "text-ocean-teal",
-                        isOut && "text-orange-600 dark:text-orange-400"
+                        "font-medium",
+                        isBorrow && "text-ocean-teal",
+                        isRepay && "text-orange-600 dark:text-orange-400"
                       )}
                     >
                       {kindLabel(item.kind)}
                     </span>
                     {amountText ? (
-                      <span className="text-sm tabular-nums font-medium">
-                        {isOut ? "−" : isIn ? "+" : ""}
+                      <span className="tabular-nums">
+                        {isRepay ? "−" : isBorrow ? "+" : ""}
                         {amountText}
                       </span>
                     ) : null}
                   </div>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
+                  <p className="mt-0.5 text-muted-foreground">
                     {formatWhen(item.timestamp)}
                   </p>
                 </div>
@@ -125,11 +119,11 @@ const SavingsTransactionHistory = ({
                     href={url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 shrink-0 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                    className="inline-flex items-center gap-1 shrink-0 font-mono text-muted-foreground hover:text-foreground"
                     title="View on explorer"
                   >
-                    <span className="font-mono">{shortTx(item.txId)}</span>
-                    <ExternalLink className="size-3.5" aria-hidden />
+                    {shortTx(item.txId)}
+                    <ExternalLink className="size-3" aria-hidden />
                   </a>
                 ) : null}
               </li>
@@ -137,8 +131,8 @@ const SavingsTransactionHistory = ({
           })}
         </ul>
       ) : null}
-    </section>
+    </div>
   );
 };
 
-export default SavingsTransactionHistory;
+export default BorrowTransactionHistory;

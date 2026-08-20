@@ -5,6 +5,7 @@ import { NetworkProvider } from "@/contexts/NetworkContext";
 import { PrivySessionProvider } from "@/contexts/PrivySessionProvider";
 import { EasyStartModalsProvider } from "@/contexts/EasyStartModalsContext";
 import { LocaleSettingsProvider } from "@/contexts/LocaleSettingsContext";
+import { ProductFlavorProvider } from "@/contexts/ProductFlavorContext";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -37,19 +38,21 @@ export function SimplFiAppRoot({ children }: SimplFiAppRootProps) {
         storageKey="simplfi-theme"
         disableTransitionOnChange
       >
-        <PrivySessionProvider>
-          <NetworkProvider>
-            <LocaleSettingsProvider>
-              <EasyStartModalsProvider>
-                <TooltipProvider delayDuration={300} skipDelayDuration={100}>
-                  <Toaster />
-                  <Sonner />
-                  {children}
-                </TooltipProvider>
-              </EasyStartModalsProvider>
-            </LocaleSettingsProvider>
-          </NetworkProvider>
-        </PrivySessionProvider>
+        <ProductFlavorProvider consumerCopy>
+          <PrivySessionProvider>
+            <NetworkProvider>
+              <LocaleSettingsProvider>
+                <EasyStartModalsProvider>
+                  <TooltipProvider delayDuration={300} skipDelayDuration={100}>
+                    <Toaster />
+                    <Sonner />
+                    {children}
+                  </TooltipProvider>
+                </EasyStartModalsProvider>
+              </LocaleSettingsProvider>
+            </NetworkProvider>
+          </PrivySessionProvider>
+        </ProductFlavorProvider>
       </ThemeProvider>
     </QueryClientProvider>
   );

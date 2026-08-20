@@ -56,6 +56,34 @@ describe("easyBorrowMath", () => {
     ).toBe(600);
   });
 
+  it("skips cash-pool liquidity for mint / sToken markets", () => {
+    expect(
+      availableBorrowLiquidityTokens({
+        totalDeposits: 0,
+        totalBorrows: 500,
+        skipCashLiquidity: true,
+      })
+    ).toBeNull();
+
+    expect(
+      availableBorrowLiquidityTokens({
+        totalDeposits: 0,
+        totalBorrows: 500,
+        borrowCap: 800,
+        skipCashLiquidity: true,
+      })
+    ).toBe(300);
+
+    expect(
+      availableBorrowLiquidityTokens({
+        totalDeposits: 0,
+        totalBorrows: 800,
+        borrowCap: 800,
+        skipCashLiquidity: true,
+      })
+    ).toBe(0);
+  });
+
   it("takes the most restrictive available borrow", () => {
     expect(
       effectiveAvailableBorrowTokens({
@@ -64,6 +92,16 @@ describe("easyBorrowMath", () => {
         liquidity: 50,
       })
     ).toBe(50);
+  });
+
+  it("ignores null liquidity (mint route with no borrow cap)", () => {
+    expect(
+      effectiveAvailableBorrowTokens({
+        safeMax: 84,
+        chainMax: 100,
+        liquidity: null,
+      })
+    ).toBe(84);
   });
 
   it("handles missing oracle / zero price for theoretical max", () => {

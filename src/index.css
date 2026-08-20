@@ -25,7 +25,8 @@
     /* Near-black ink: #0c1927 */
     --ink: 211 53% 10%;
 
-    --background: 0 0% 100%;
+    /* Cool off-white so white cards read as elevated surfaces */
+    --background: 210 25% 97%;
     --foreground: 211 53% 10%;
 
     --card: 0 0% 100%;
@@ -49,8 +50,8 @@
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
+    --border: 214 25% 88%;
+    --input: 214 25% 88%;
     --ring: 178 100% 32%;
 
     --radius: 0.5rem;
@@ -86,10 +87,10 @@
     --background: 211 53% 10%;
     --foreground: 0 0% 100%;
 
-    --card: 211 53% 10%;
+    --card: 211 40% 14%;
     --card-foreground: 0 0% 100%;
 
-    --popover: 211 53% 10%;
+    --popover: 211 40% 14%;
     --popover-foreground: 0 0% 100%;
 
     --primary: 178 100% 32%;
@@ -109,8 +110,8 @@
 
     --warning-orange: 25 95% 60%;
 
-    --border: 217.2 32.6% 14%;
-    --input: 217.2 32.6% 14%;
+    --border: 211 28% 22%;
+    --input: 211 28% 22%;
     --ring: 178 100% 32%;
     
     /* Header Navy Color for Dark Mode */

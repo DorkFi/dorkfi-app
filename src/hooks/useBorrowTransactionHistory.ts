@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { NetworkId } from "@/config";
 import {
-  appendLocalSavingsTx,
-  fetchPoolSavingsTxns,
-  loadLocalSavingsTxHistory,
-  mergeSavingsTxHistory,
-  type SavingsTxKind,
-  type SavingsTxRecord,
-} from "@/services/savingsTransactionHistory";
+  appendLocalBorrowTx,
+  fetchPoolBorrowTxns,
+  loadLocalBorrowTxHistory,
+  mergeBorrowTxHistory,
+  type BorrowTxKind,
+  type BorrowTxRecord,
+} from "@/services/borrowTransactionHistory";
 
-export type RecordSavingsTxInput = {
+export type RecordBorrowTxInput = {
   txId: string;
-  kind: Exclude<SavingsTxKind, "activity">;
+  kind: Exclude<BorrowTxKind, "activity">;
   amount: string;
   symbol: string;
   poolId: string;
@@ -19,13 +19,13 @@ export type RecordSavingsTxInput = {
 };
 
 /**
- * Savings deposit/withdraw history: local records + optional indexer rows.
+ * Borrow/repay history: local records + optional indexer rows.
  * Uses useEffect (not useQuery) for simpler refresh / HMR behavior.
  *
  * When `allPools` is true, loads local history for the address and, if
  * `poolIds` are provided, merges chain indexer rows for each pool.
  */
-export function useSavingsTransactionHistory(params: {
+export function useBorrowTransactionHistory(params: {
   networkId: NetworkId;
   address?: string | null;
   poolId?: string | null;
@@ -48,11 +48,9 @@ export function useSavingsTransactionHistory(params: {
     .slice()
     .sort()
     .join(",");
-  const canQuery = Boolean(
-    enabled && address && (allPools || poolId)
-  );
+  const canQuery = Boolean(enabled && address && (allPools || poolId));
 
-  const [items, setItems] = useState<SavingsTxRecord[]>([]);
+  const [items, setItems] = useState<BorrowTxRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
   const reload = useCallback(async () => {
@@ -66,7 +64,7 @@ export function useSavingsTransactionHistory(params: {
     }
     setIsLoading(true);
     try {
-      const local = loadLocalSavingsTxHistory({
+      const local = loadLocalBorrowTxHistory({
         networkId,
         address,
         poolId: allPools ? undefined : poolId ?? undefined,
@@ -79,24 +77,24 @@ export function useSavingsTransactionHistory(params: {
         const chainLists = await Promise.all(
           ids.map(async (id) => {
             try {
-              return await fetchPoolSavingsTxns({
+              return await fetchPoolBorrowTxns({
                 networkId,
                 address,
                 poolId: id,
                 limit: 25,
               });
             } catch {
-              return [] as SavingsTxRecord[];
+              return [] as BorrowTxRecord[];
             }
           })
         );
-        setItems(mergeSavingsTxHistory(local, chainLists.flat()));
+        setItems(mergeBorrowTxHistory(local, chainLists.flat()));
         return;
       }
       if (!poolId) return;
-      let chain: SavingsTxRecord[] = [];
+      let chain: BorrowTxRecord[] = [];
       try {
-        chain = await fetchPoolSavingsTxns({
+        chain = await fetchPoolBorrowTxns({
           networkId,
           address,
           poolId,
@@ -105,7 +103,7 @@ export function useSavingsTransactionHistory(params: {
       } catch {
         // Indexer optional.
       }
-      setItems(mergeSavingsTxHistory(local, chain));
+      setItems(mergeBorrowTxHistory(local, chain));
     } finally {
       setIsLoading(false);
     }
@@ -121,9 +119,9 @@ export function useSavingsTransactionHistory(params: {
   }, [canQuery, reload]);
 
   const recordTx = useCallback(
-    (input: RecordSavingsTxInput) => {
+    (input: RecordBorrowTxInput) => {
       if (!address) return;
-      appendLocalSavingsTx({
+      appendLocalBorrowTx({
         txId: input.txId,
         networkId,
         address,
@@ -143,8 +141,6 @@ export function useSavingsTransactionHistory(params: {
     () => ({
       items,
       isLoading,
-      isError: false,
-      error: null,
       recordTx,
       refresh: reload,
     }),

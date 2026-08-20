@@ -14,6 +14,7 @@ import type { NetworkId } from "@/config";
 import {
   resolveSavingsRoute,
   savingsAccountDisplayLabel,
+  consumerAssetDisplayLabel,
   isEasySavingsHighYieldAssetConfigKey,
 } from "@/services/savingsRouteResolver";
 import type { SavingsRoute } from "@/types/easySavings";
@@ -37,6 +38,7 @@ import { useSavingsTransactionHistory } from "@/hooks/useSavingsTransactionHisto
 import { useSavingsUserPositions } from "@/hooks/useSavingsUserPositions";
 import { useEasyStartModals } from "@/contexts/easyStartModals";
 import { useEasyStartLogin } from "@/hooks/useEasyStartLogin";
+import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 import { getExplorerTransactionUrl } from "@/utils/explorerLinks";
 import { isLeveragedWadUsdcRoute } from "@/services/leveragedWadLpService";
 import LpPairIconStack from "@/components/pools/LpPairIconStack";
@@ -86,6 +88,38 @@ function txKindLabel(kind: SavingsTxRecord["kind"]): string {
   return "Activity";
 }
 
+function txAssetLabel(
+  item: SavingsTxRecord,
+  accounts: SavingsAccountRow[],
+  consumerCopy: boolean
+): string {
+  let label = item.symbol ?? "";
+  if (!label) {
+    const byKey = item.assetConfigKey
+      ? accounts.find((a) => a.route.asset.configKey === item.assetConfigKey)
+      : undefined;
+    if (byKey) label = savingsAccountDisplayLabel(byKey.route);
+    else {
+      const byPool = accounts.find((a) => a.route.poolId === item.poolId);
+      if (byPool) label = savingsAccountDisplayLabel(byPool.route);
+    }
+  }
+  if (!label) return "—";
+  return consumerCopy ? consumerAssetDisplayLabel(label) : label;
+}
+
+function txAmountText(
+  item: SavingsTxRecord,
+  consumerCopy: boolean
+): string | null {
+  if (!item.amount) return null;
+  if (!item.symbol) return item.amount;
+  const symbol = consumerCopy
+    ? consumerAssetDisplayLabel(item.symbol)
+    : item.symbol;
+  return `${item.amount} ${symbol}`;
+}
+
 /**
  * Easy Savings — account sidebar; empty-state hero CTA with savings calculator,
  * or funded balance summary with position charts. Deposit opens a signed supply modal.
@@ -95,6 +129,7 @@ const SavingsCard = () => {
   const networkId = currentNetwork as NetworkId;
   const { activeAccount } = useDorkFiWalletAdapter();
   const privy = usePrivyEasyStart();
+  const consumerCopy = useConsumerCopy();
   const [walletModalOpen, setWalletModalOpen] = useState(false);
   const [depositOpen, setDepositOpen] = useState(false);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
@@ -107,6 +142,13 @@ const SavingsCard = () => {
   const { openBridge, openDeposit: openEasyStartCashDeposit } =
     useEasyStartModals();
   const openEasyStartLogin = useEasyStartLogin();
+  const openConnect = () => {
+    if (consumerCopy) {
+      void openEasyStartLogin();
+      return;
+    }
+    setWalletModalOpen(true);
+  };
 
   /** USDC savings market — also backs the Wallet balance account (deposit target). */
   const usdcRoute = useMemo(
@@ -238,9 +280,13 @@ const SavingsCard = () => {
     activeQuote.supplyApyPercent ?? selectedAccount?.apy ?? null;
 
   const symbol = isWalletAccount
-    ? "USDC"
+    ? consumerCopy
+      ? "USD"
+      : "USDC"
     : route
-      ? savingsAccountDisplayLabel(route)
+      ? consumerCopy
+        ? consumerAssetDisplayLabel(savingsAccountDisplayLabel(route))
+        : savingsAccountDisplayLabel(route)
       : effectiveAssetKey || "—";
 
   /** Supply-only on savings markets; undeposited cash on wallet tab (portfolio chart uses portfolioTotalUsd). */
@@ -287,18 +333,30 @@ const SavingsCard = () => {
     enabled: Boolean(activeAccount?.address && route?.poolId && !isWalletAccount),
   });
 
+  const allPoolIds = useMemo(
+    () =>
+      Array.from(
+        new Set(accounts.map((a) => a.route.poolId).filter(Boolean))
+      ),
+    [accounts]
+  );
+
   const {
     items: allPoolsTxHistory,
+    isLoading: allPoolsTxHistoryLoading,
     refresh: refreshAllPoolsTxHistory,
   } = useSavingsTransactionHistory({
     networkId,
     address: activeAccount?.address,
     allPools: true,
+    poolIds: allPoolIds,
     enabled: Boolean(activeAccount?.address),
   });
 
   const txHistory = isWalletAccount ? allPoolsTxHistory : marketTxHistory;
-  const txHistoryLoading = isWalletAccount ? false : marketTxHistoryLoading;
+  const txHistoryLoading = isWalletAccount
+    ? allPoolsTxHistoryLoading
+    : marketTxHistoryLoading;
 
   /** Bumps after snapshot writes so chart series re-load from localStorage. */
   const [snapshotRev, setSnapshotRev] = useState(0);
@@ -609,7 +667,7 @@ const SavingsCard = () => {
     assetConfigKey?: string;
   }) => {
     if (!activeAccount) {
-      setWalletModalOpen(true);
+      openConnect();
       return;
     }
     if (opts?.assetConfigKey) {
@@ -622,7 +680,7 @@ const SavingsCard = () => {
 
   const openWithdraw = () => {
     if (!activeAccount) {
-      setWalletModalOpen(true);
+      openConnect();
       return;
     }
     if (isWalletAccount) {
@@ -689,7 +747,11 @@ const SavingsCard = () => {
     const label =
       row.route.asset.configKey === "USDC"
         ? "Earn"
-        : savingsAccountDisplayLabel(row.route);
+        : consumerCopy &&
+            (isLeveragedWadUsdcRoute(row.route.asset.configKey) ||
+              isEasySavingsHighYieldAssetConfigKey(row.route.asset.configKey))
+          ? "Higher yield"
+          : savingsAccountDisplayLabel(row.route);
     const isWadUsdc = isLeveragedWadUsdcRoute(row.route.asset.configKey);
     const rowLogo =
       row.route.asset.logoPath ||
@@ -742,7 +804,11 @@ const SavingsCard = () => {
             Savings
             <span
               className="text-muted-foreground"
-              title="Supply assets to earn a transparent APY."
+              title={
+                consumerCopy
+                  ? "Deposit to earn yield."
+                  : "Supply assets to earn a transparent APY."
+              }
             >
               <Info className="size-4" />
             </span>
@@ -757,7 +823,7 @@ const SavingsCard = () => {
               {activeAccount || evmAddress ? renderWalletBalanceRow() : null}
               {coreAccounts.length === 0 ? (
                 <p className="text-sm text-muted-foreground px-1">
-                  No yield markets on this network.
+                  No savings available right now.
                 </p>
               ) : (
                 coreAccounts.map(renderAccountRow)
@@ -765,12 +831,16 @@ const SavingsCard = () => {
             </div>
           </div>
 
-          {highYieldAccounts.length > 0 ? (
+          {highYieldAccounts.length > 0 && !consumerCopy ? (
             <div>
               <p className="mb-3 flex items-center gap-1.5 text-sm text-muted-foreground">
                 Higher-yield Opportunities
                 <span
-                  title="Pooled LP markets with higher yield and higher risk."
+                  title={
+                    consumerCopy
+                      ? "Higher yield, higher risk."
+                      : "Pooled LP markets with higher yield and higher risk."
+                  }
                 >
                   <Info className="size-3.5" />
                 </span>
@@ -825,7 +895,7 @@ const SavingsCard = () => {
                 >
                   {isWalletAccount
                     ? "Deposit to Earn"
-                    : isLeveragedWadUsdc
+                    : isLeveragedWadUsdc && !consumerCopy
                       ? "Open position"
                       : "Deposit"}
                 </DorkFiButton>
@@ -840,11 +910,13 @@ const SavingsCard = () => {
                   }
                 >
                   {isWalletAccount && !hasAnySavingsDeposit
-                    ? "Not supplied"
+                    ? consumerCopy
+                      ? "Nothing in savings yet"
+                      : "Not supplied"
                     : "Withdraw"}
                 </DorkFiButton>
               </div>
-              {isLeveragedWadUsdc ? (
+              {isLeveragedWadUsdc && !consumerCopy ? (
                 <button
                   type="button"
                   onClick={() => openDeposit({ plainLp: true })}
@@ -857,7 +929,7 @@ const SavingsCard = () => {
               {isWalletAccount ? (
                 <section className="rounded-[28px] border border-border/60 bg-card p-5 sm:p-6 shadow-sm">
                   <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight">
-                    Supported assets
+                    {consumerCopy ? "Savings account" : "Portfolio assets"}
                   </h2>
                   <div className="mt-6 overflow-x-auto">
                     <table className="w-full text-sm min-w-[560px]">
@@ -888,20 +960,34 @@ const SavingsCard = () => {
                                   />
                                 </span>
                               </span>
-                              USDC
-                              <span className="text-xs font-normal text-muted-foreground">
-                                Algorand
-                              </span>
+                              {consumerCopy ? "Transferrable" : "USDC"}
+                              {!consumerCopy ? (
+                                <span className="text-xs font-normal text-muted-foreground">
+                                  Algorand
+                                </span>
+                              ) : (
+                                <span className="text-xs font-normal text-muted-foreground">
+                                  Available
+                                </span>
+                              )}
                             </span>
                           </td>
                           <td className="py-4 text-muted-foreground tabular-nums">
-                            {walletUsdcAlgo != null
-                              ? formatToken(walletUsdcAlgo)
-                              : activeAccount
-                                ? usdcQuote.isLoading
-                                  ? "…"
-                                  : "0"
-                                : "—"}
+                            {consumerCopy
+                              ? walletUsdc != null
+                                ? formatToken(walletUsdc)
+                                : activeAccount || evmAddress
+                                  ? walletBalanceLoading
+                                    ? "…"
+                                    : "0"
+                                  : "—"
+                              : walletUsdcAlgo != null
+                                ? formatToken(walletUsdcAlgo)
+                                : activeAccount
+                                  ? usdcQuote.isLoading
+                                    ? "…"
+                                    : "0"
+                                  : "—"}
                           </td>
                           <td className="py-4 tabular-nums">—</td>
                           <td className="py-4 tabular-nums text-muted-foreground">
@@ -910,12 +996,16 @@ const SavingsCard = () => {
                           <td className="py-4 text-right">
                             <button
                               type="button"
-                              onClick={() =>
+                              onClick={() => {
+                                if (consumerCopy && hasBaseUsdc) {
+                                  openEasyStartCashDeposit();
+                                  return;
+                                }
                                 openDeposit({
                                   assetConfigKey:
                                     usdcRoute?.asset.configKey ?? "USDC",
-                                })
-                              }
+                                });
+                              }}
                               className="rounded-xl bg-muted px-4 py-2 text-sm font-semibold hover:bg-muted/80 transition-colors"
                             >
                               Deposit
@@ -924,7 +1014,7 @@ const SavingsCard = () => {
                         </tr>
 
                         {/* Base Easy Start USDC — bridge before supply */}
-                        {evmAddress ? (
+                        {evmAddress && !consumerCopy ? (
                           <tr className="border-b border-border/40">
                             <td className="py-4">
                               <span className="flex items-center gap-2 font-medium">
@@ -982,7 +1072,13 @@ const SavingsCard = () => {
                                       asset2Icon="/lovable-uploads/USDC.webp"
                                       fallbackIcon="/lovable-uploads/LP_TMPOOL2_WAD_USDC_pair.png"
                                       size="sm"
-                                      alt={pos.label}
+                                      alt={
+                                        consumerCopy && isWad
+                                          ? "Higher yield"
+                                          : consumerCopy && cfg === "USDC"
+                                            ? "Earning"
+                                            : pos.label
+                                      }
                                     />
                                   ) : (
                                     <img
@@ -991,7 +1087,11 @@ const SavingsCard = () => {
                                       className="size-6 rounded-full"
                                     />
                                   )}
-                                  {pos.label}
+                                  {consumerCopy && isWad
+                                    ? "Higher yield"
+                                    : consumerCopy && cfg === "USDC"
+                                      ? "Earning"
+                                      : pos.label}
                                   {pos.isHighYield ? (
                                     <span className="text-xs font-normal text-whale-gold">
                                       Higher yield
@@ -1027,7 +1127,7 @@ const SavingsCard = () => {
                                   }
                                   className="rounded-xl bg-muted px-4 py-2 text-sm font-semibold hover:bg-muted/80 transition-colors"
                                 >
-                                  {isWad ? "Open position" : "Deposit"}
+                                  {isWad ? (consumerCopy ? "Deposit" : "Open position") : "Deposit"}
                                 </button>
                               </td>
                             </tr>
@@ -1037,7 +1137,23 @@ const SavingsCard = () => {
                     </table>
                   </div>
                   <p className="mt-5 text-sm text-muted-foreground leading-relaxed">
-                    {hasBaseUsdc ? (
+                    {consumerCopy ? (
+                      hasBaseUsdc ? (
+                        <>
+                          You have{" "}
+                          <span className="font-medium text-foreground tabular-nums">
+                            {formatUsdAmount(walletUsdcUsd)}
+                          </span>{" "}
+                          available. Deposit to finish adding it to your account
+                          and start earning.
+                        </>
+                      ) : (
+                        <>
+                          You have undeposited funds. Deposit into savings to
+                          start earning yield.
+                        </>
+                      )
+                    ) : hasBaseUsdc ? (
                       <>
                         Undeposited USDC:{" "}
                         <span className="font-medium text-foreground tabular-nums">
@@ -1068,6 +1184,119 @@ const SavingsCard = () => {
                 </section>
               ) : null}
 
+              {isWalletAccount ? (
+                <section
+                  id="savings-transaction-history"
+                  className="rounded-[28px] border border-border/60 bg-card p-5 sm:p-6 shadow-sm"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight">
+                      {consumerCopy ? "Activity" : "Transaction history"}
+                    </h2>
+                    {txHistoryLoading ? (
+                      <span className="text-xs text-muted-foreground">
+                        Updating…
+                      </span>
+                    ) : null}
+                  </div>
+
+                  {txHistory.length === 0 ? (
+                    <p className="mt-5 text-sm text-muted-foreground leading-relaxed">
+                      {txHistoryLoading
+                        ? "Loading history…"
+                        : consumerCopy
+                          ? "No activity yet. Deposits and withdrawals will show up here."
+                          : "No transactions yet. Deposits and withdrawals will show up here."}
+                    </p>
+                  ) : (
+                    <div className="mt-6 overflow-x-auto">
+                      <table className="w-full text-sm min-w-[560px]">
+                        <thead>
+                          <tr className="border-b border-border text-left text-muted-foreground">
+                            <th className="pb-3 font-medium">Type</th>
+                            <th className="pb-3 font-medium">Asset</th>
+                            <th className="pb-3 font-medium">Amount</th>
+                            <th className="pb-3 font-medium">Date</th>
+                            {!consumerCopy ? (
+                              <th className="pb-3 font-medium text-right">
+                                Transaction
+                              </th>
+                            ) : null}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {txHistory.map((item) => {
+                            const url = getExplorerTransactionUrl(
+                              networkId,
+                              item.txId
+                            );
+                            const amountText = txAmountText(item, consumerCopy);
+                            const isIn = item.kind === "deposit";
+                            const isOut = item.kind === "withdraw";
+                            return (
+                              <tr
+                                key={item.txId}
+                                className="border-b border-border/40 last:border-0"
+                              >
+                                <td className="py-4">
+                                  <span
+                                    className={cn(
+                                      "font-semibold",
+                                      isIn && "text-ocean-teal",
+                                      isOut &&
+                                        "text-orange-600 dark:text-orange-400"
+                                    )}
+                                  >
+                                    {txKindLabel(item.kind)}
+                                  </span>
+                                </td>
+                                <td className="py-4 font-medium">
+                                  {txAssetLabel(item, accounts, consumerCopy)}
+                                </td>
+                                <td className="py-4 tabular-nums font-medium">
+                                  {amountText ? (
+                                    <>
+                                      {isOut ? "−" : isIn ? "+" : ""}
+                                      {amountText}
+                                    </>
+                                  ) : (
+                                    <span className="text-muted-foreground font-normal">
+                                      —
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="py-4 text-muted-foreground">
+                                  {formatTxWhen(item.timestamp)}
+                                </td>
+                                {!consumerCopy ? (
+                                  <td className="py-4 text-right">
+                                    <a
+                                      href={url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                                      title="View on explorer"
+                                    >
+                                      <span className="font-mono">
+                                        {shortTxId(item.txId)}
+                                      </span>
+                                      <ExternalLink
+                                        className="size-3.5"
+                                        aria-hidden
+                                      />
+                                    </a>
+                                  </td>
+                                ) : null}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </section>
+              ) : null}
+
               {/* Per-market history when viewing a savings market (not portfolio). */}
               {!isWalletAccount ? (
               <section
@@ -1077,7 +1306,7 @@ const SavingsCard = () => {
               >
                 <div className="flex items-center justify-between gap-3">
                   <h2 className="text-xl sm:text-2xl font-semibold tracking-tight">
-                    Transaction history
+                    {consumerCopy ? "Activity" : "Transaction history"}
                   </h2>
                   {txHistoryLoading ? (
                     <span className="text-xs text-muted-foreground">
@@ -1090,7 +1319,9 @@ const SavingsCard = () => {
                   <p className="mt-5 text-sm text-muted-foreground leading-relaxed">
                     {txHistoryLoading
                       ? "Loading history…"
-                      : "No transactions yet. Deposits and withdrawals will show up here."}
+                      : consumerCopy
+                        ? "No activity yet. Deposits and withdrawals will show up here."
+                        : "No transactions yet. Deposits and withdrawals will show up here."}
                   </p>
                 ) : (
                   <ul className="mt-5 divide-y divide-border/60">
@@ -1099,10 +1330,7 @@ const SavingsCard = () => {
                         networkId,
                         item.txId
                       );
-                      const amountText =
-                        item.amount && item.symbol
-                          ? `${item.amount} ${item.symbol}`
-                          : item.amount || null;
+                      const amountText = txAmountText(item, consumerCopy);
                       const isIn = item.kind === "deposit";
                       const isOut = item.kind === "withdraw";
                       return (
@@ -1133,18 +1361,20 @@ const SavingsCard = () => {
                               {formatTxWhen(item.timestamp)}
                             </p>
                           </div>
-                          <a
-                            href={url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 shrink-0 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-                            title="View on explorer"
-                          >
-                            <span className="font-mono">
-                              {shortTxId(item.txId)}
-                            </span>
-                            <ExternalLink className="size-3.5" aria-hidden />
-                          </a>
+                          {!consumerCopy ? (
+                            <a
+                              href={url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 shrink-0 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                              title="View on explorer"
+                            >
+                              <span className="font-mono">
+                                {shortTxId(item.txId)}
+                              </span>
+                              <ExternalLink className="size-3.5" aria-hidden />
+                            </a>
+                          ) : null}
                         </li>
                       );
                     })}
@@ -1185,23 +1415,38 @@ const SavingsCard = () => {
                     </div>
                     <p className="mt-4 max-w-md text-sm text-white/65 leading-relaxed">
                       {isLeveragedWadUsdc ? (
-                        <>
-                          Deploy USDC: 75% stays as safe DorkFi collateral, 25% pairs
-                          with minted WAD on Tinyman, then LP earns Higher Yield.{" "}
-                          <span className="text-whale-gold">Higher risk</span>
-                        </>
+                        consumerCopy ? (
+                          <>
+                            Higher yield, higher risk. You can lose more than
+                            with regular savings.{" "}
+                            <span className="text-whale-gold">Higher risk</span>
+                          </>
+                        ) : (
+                          <>
+                            Deploy USDC: 75% stays as safe DorkFi collateral, 25% pairs
+                            with minted WAD on Tinyman, then LP earns Higher Yield.{" "}
+                            <span className="text-whale-gold">Higher risk</span>
+                          </>
+                        )
                       ) : isHighYield ? (
-                        <>
-                          Deposit {symbol} LP tokens into a pooled market for higher
-                          yield with higher risk. Rates update as pool utilization
-                          evolves.{" "}
-                          <span className="text-whale-gold">Higher risk</span>
-                        </>
+                        consumerCopy ? (
+                          <>
+                            Higher yield, higher risk. Rates update
+                            automatically.{" "}
+                            <span className="text-whale-gold">Higher risk</span>
+                          </>
+                        ) : (
+                          <>
+                            Deposit {symbol} LP tokens into a pooled market for higher
+                            yield with higher risk. Rates update as pool utilization
+                            evolves.{" "}
+                            <span className="text-whale-gold">Higher risk</span>
+                          </>
+                        )
                       ) : (
                         <>
-                          Deposit into SimplFi Savings to earn a transparent
-                          APY. The rate updates automatically as markets
-                          evolve.{" "}
+                          Deposit into savings to earn a transparent APY. The
+                          rate updates automatically.{" "}
                           <span className="text-ocean-teal">Learn more</span>
                         </>
                       )}
@@ -1225,7 +1470,7 @@ const SavingsCard = () => {
                       }}
                     >
                       {activeAccount
-                        ? isLeveragedWadUsdc
+                        ? isLeveragedWadUsdc && !consumerCopy
                           ? "Open position"
                           : "Deposit"
                         : "Deposit"}
@@ -1239,7 +1484,7 @@ const SavingsCard = () => {
                         Withdraw
                       </button>
                     ) : null}
-                    {isLeveragedWadUsdc && activeAccount ? (
+                    {isLeveragedWadUsdc && activeAccount && !consumerCopy ? (
                       <button
                         type="button"
                         onClick={() => openDeposit({ plainLp: true })}
@@ -1262,7 +1507,7 @@ const SavingsCard = () => {
 
           {activeQuote.isLoading && showEmptyHero ? (
             <p className="text-center text-xs text-muted-foreground">
-              Loading market data…
+              Loading…
             </p>
           ) : activeQuote.error ? (
             <p className="text-center text-xs text-destructive">
@@ -1272,10 +1517,12 @@ const SavingsCard = () => {
         </div>
       </div>
 
-      <WalletModal
-        isOpen={walletModalOpen}
-        onClose={() => setWalletModalOpen(false)}
-      />
+      {!consumerCopy ? (
+        <WalletModal
+          isOpen={walletModalOpen}
+          onClose={() => setWalletModalOpen(false)}
+        />
+      ) : null}
 
       {isLeveragedWadUsdc && !plainLpSupply ? (
         <LeveragedWadLpDepositModal
@@ -1285,7 +1532,7 @@ const SavingsCard = () => {
           networkId={networkId}
           onConnectWallet={() => {
             setDepositOpen(false);
-            setWalletModalOpen(true);
+            openConnect();
           }}
           onSuccess={(payload) => {
             if (!route) return;
@@ -1308,7 +1555,7 @@ const SavingsCard = () => {
           isHighYield={isWalletAccount ? false : isHighYield}
           onConnectWallet={() => {
             setDepositOpen(false);
-            setWalletModalOpen(true);
+            openConnect();
           }}
           onSuccess={(payload) => {
             const r = isWalletAccount ? usdcRoute : route;
@@ -1332,7 +1579,7 @@ const SavingsCard = () => {
         networkId={networkId}
         onConnectWallet={() => {
           setWithdrawOpen(false);
-          setWalletModalOpen(true);
+          openConnect();
         }}
         onSuccess={(payload) => {
           const r = isWalletAccount ? usdcRoute : route;

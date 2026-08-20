@@ -19,6 +19,7 @@ import {
   type OfframpHealth,
 } from "@/lib/easyStart/offrampApi";
 import { sendBaseUsdc } from "@/lib/easyStart/sendBaseUsdc";
+import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 
 type CashOutPhase =
   | "idle"
@@ -51,6 +52,7 @@ export function EasyStartOfframpCashOut({
 }: EasyStartOfframpCashOutProps) {
   const { sendTransaction } = useSendTransaction();
   const { toast } = useToast();
+  const consumerCopy = useConsumerCopy();
 
   const [health, setHealth] = useState<OfframpHealth | null>(null);
   const [phase, setPhase] = useState<CashOutPhase>("idle");
@@ -92,7 +94,7 @@ export function EasyStartOfframpCashOut({
       setTxHash(hash);
       setPhase("done");
       toast({
-        title: "USDC sent",
+        title: "Sent",
         description: "Your cash-out is processing with the provider.",
       });
       return hash;
@@ -148,7 +150,7 @@ export function EasyStartOfframpCashOut({
       toast({
         title: "Complete sell in Coinbase",
         description:
-          "After you confirm the cash-out, we’ll prompt you to send USDC from Easy Start.",
+          "After you confirm the cash-out, we’ll prompt you to send funds from your account.",
       });
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
@@ -208,14 +210,14 @@ export function EasyStartOfframpCashOut({
       {phase === "sending" ? (
         <div className="flex items-center justify-center gap-2 text-sm text-slate-700 dark:text-slate-200">
           <Loader2 className="h-4 w-4 animate-spin text-ocean-teal" />
-          Confirm USDC transfer in your wallet…
+          Confirming transfer…
         </div>
       ) : null}
 
       {phase === "done" ? (
         <p className="text-sm text-ocean-teal text-center">
           Transfer submitted
-          {txHash ? ` (${txHash.slice(0, 10)}…)` : ""}. Fiat payout continues
+          {txHash && !consumerCopy ? ` (${txHash.slice(0, 10)}…)` : ""}. Fiat payout continues
           with the provider.
         </p>
       ) : null}

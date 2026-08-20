@@ -4,6 +4,7 @@ import {
 } from "@/utils/healthFactorUx";
 import { healthBandLabel, previewHealthBand } from "@/utils/easyBorrowMath";
 import { cn } from "@/lib/utils";
+import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 
 type HealthPreviewProps = {
   before: number | null;
@@ -16,6 +17,7 @@ function formatHf(n: number | null): string {
 }
 
 const HealthPreview = ({ before, after }: HealthPreviewProps) => {
+  const consumerCopy = useConsumerCopy();
   const band = previewHealthBand(after);
   const showWarning = band === "at_risk" || band === "warning";
   const blocked = band === "blocked";
@@ -33,33 +35,42 @@ const HealthPreview = ({ before, after }: HealthPreviewProps) => {
     >
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-medium">Portfolio Health</p>
+          <p className="text-sm font-medium">
+            {consumerCopy ? "Loan safety" : "Portfolio Health"}
+          </p>
           <p className="text-xs text-muted-foreground mt-0.5">
             {healthBandLabel(band)}
-            {after != null ? ` · ${getHealthFactorStatusLabel(after)}` : ""}
+            {after != null && !consumerCopy
+              ? ` · ${getHealthFactorStatusLabel(after)}`
+              : ""}
           </p>
         </div>
-        <div className="text-right">
-          <p className="text-xs text-muted-foreground">Current → After</p>
-          <p className="text-lg font-semibold tabular-nums">
-            <span className={getHealthFactorTextColorClass(before)}>
-              {formatHf(before)}
-            </span>
-            <span className="text-muted-foreground mx-1.5">→</span>
-            <span className={getHealthFactorTextColorClass(after)}>
-              {formatHf(after)}
-            </span>
-          </p>
-        </div>
+        {!consumerCopy ? (
+          <div className="text-right">
+            <p className="text-xs text-muted-foreground">Current → After</p>
+            <p className="text-lg font-semibold tabular-nums">
+              <span className={getHealthFactorTextColorClass(before)}>
+                {formatHf(before)}
+              </span>
+              <span className="text-muted-foreground mx-1.5">→</span>
+              <span className={getHealthFactorTextColorClass(after)}>
+                {formatHf(after)}
+              </span>
+            </p>
+          </div>
+        ) : null}
       </div>
       {blocked ? (
         <p className="mt-2 text-xs text-destructive">
-          This borrow would put your position at or below liquidation. Reduce
-          the amount or add more collateral.
+          {consumerCopy
+            ? "This would put your loan at risk. Borrow less or add more savings."
+            : "This borrow would put your position at or below liquidation. Reduce the amount or add more collateral."}
         </p>
       ) : showWarning ? (
         <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
-          This position would be close to liquidation. Consider borrowing less.
+          {consumerCopy
+            ? "This loan would be close to the safety limit. Consider borrowing less."
+            : "This position would be close to liquidation. Consider borrowing less."}
         </p>
       ) : null}
     </div>

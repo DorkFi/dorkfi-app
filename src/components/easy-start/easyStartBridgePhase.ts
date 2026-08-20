@@ -51,7 +51,7 @@ export function bridgePhaseLabel(
         ? "Preparing your withdrawal…"
         : "Preparing your deposit…";
     case "signing":
-      return "Confirm in your wallet…";
+      return "Confirming…";
     case "sending":
       return "Sending funds…";
     case "waiting":

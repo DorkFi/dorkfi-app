@@ -25,6 +25,7 @@ import { deposit } from "@/services/lendingService";
 import algorandService from "@/services/algorandService";
 import {
   savingsAccountDisplayLabel,
+  consumerAssetDisplayLabel,
 } from "@/services/savingsRouteResolver";
 import type { SavingsRoute } from "@/types/easySavings";
 import { formatUsdAmount, cn } from "@/lib/utils";
@@ -34,6 +35,7 @@ import {
   withRainbowkitHostDialogDismissed,
 } from "@/wallet/xchainSignUi";
 import { getTransactionErrorFeedback } from "@/utils/errorUtils";
+import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 
 const MODAL_SHELL =
   "w-full max-w-[98vw] sm:max-w-md rounded-t-2xl sm:rounded-xl p-0 max-h-[min(90vh,90dvh)] overflow-hidden flex flex-col";
@@ -79,6 +81,7 @@ const EasySavingsDepositModal = ({
   const { activeAccount, signTransactions, activeWallet } =
     useDorkFiWalletAdapter();
   const { toast } = useToast();
+  const consumerCopy = useConsumerCopy();
   const queryClient = useQueryClient();
 
   const [amount, setAmount] = useState("");
@@ -95,7 +98,10 @@ const EasySavingsDepositModal = ({
     amount,
   });
 
-  const symbol = route ? savingsAccountDisplayLabel(route) : "—";
+  const rawSymbol = route ? savingsAccountDisplayLabel(route) : "—";
+  const symbol = consumerCopy
+    ? consumerAssetDisplayLabel(rawSymbol)
+    : rawSymbol;
   const logo = route?.asset.logoPath || "/placeholder.svg";
   const amountNum = parseFloat(amount) || 0;
 
@@ -128,11 +134,17 @@ const EasySavingsDepositModal = ({
   })();
 
   const ctaLabel: Record<CtaState, string> = {
-    connect: "Connect Wallet",
+    connect: consumerCopy ? "Get Started" : "Connect Wallet",
     enter_amount: "Enter Amount",
     insufficient_balance: "Insufficient Balance",
-    cap_exceeded: "Supply Cap Reached",
-    supply: isSubmitting ? "Supplying…" : "Supply",
+    cap_exceeded: consumerCopy ? "Limit Reached" : "Supply Cap Reached",
+    supply: isSubmitting
+      ? consumerCopy
+        ? "Confirming…"
+        : "Supplying…"
+      : consumerCopy
+        ? "Deposit"
+        : "Supply",
   };
 
   const ctaDisabled =
@@ -151,7 +163,9 @@ const EasySavingsDepositModal = ({
     if (!signTransactions) {
       toast({
         title: "Cannot deposit",
-        description: "Connected wallet does not support signing.",
+        description: consumerCopy
+          ? "Couldn’t confirm. Try again."
+          : "Connected wallet does not support signing.",
         variant: "destructive",
       });
       return;
@@ -160,8 +174,10 @@ const EasySavingsDepositModal = ({
     const algorandNetwork = getAlgorandNetworkFromNetworkId(networkId);
     if (!algorandNetwork) {
       toast({
-        title: "Network error",
-        description: "This network is not Algorand-compatible.",
+        title: "Something went wrong",
+        description: consumerCopy
+          ? "Please try again."
+          : "This network is not Algorand-compatible.",
         variant: "destructive",
       });
       return;
@@ -200,8 +216,10 @@ const EasySavingsDepositModal = ({
 
       const walletName = activeWallet?.metadata?.name || "your wallet";
       toast({
-        title: "Please Sign Transaction",
-        description: `Approve the deposit in ${walletName}.`,
+        title: consumerCopy ? "Confirm" : "Please Sign Transaction",
+        description: consumerCopy
+          ? "Confirm this deposit."
+          : `Approve the deposit in ${walletName}.`,
         duration: 12_000,
       });
 
@@ -234,7 +252,9 @@ const EasySavingsDepositModal = ({
       });
       toast({
         title: "Deposit confirmed",
-        description: `Supplied ${amount} ${symbol}.`,
+        description: consumerCopy
+          ? `Deposited ${amount} ${symbol}.`
+          : `Supplied ${amount} ${symbol}.`,
       });
     } catch (e: unknown) {
       if (isRainbowkitXchainWallet(activeWallet)) {
@@ -299,11 +319,17 @@ const EasySavingsDepositModal = ({
                   Deposit
                 </DialogTitle>
                 <DialogDescription className="text-sm text-muted-foreground">
-                  Supply {symbol} to earn{" "}
-                  {quote.supplyApyPercent != null
-                    ? `${quote.supplyApyPercent.toFixed(2)}%`
-                    : "—"}{" "}
-                  APY in {route.marketLabel}.
+                  {consumerCopy
+                    ? `Deposit ${symbol} to earn ${
+                        quote.supplyApyPercent != null
+                          ? `${quote.supplyApyPercent.toFixed(2)}%`
+                          : "—"
+                      } APY.`
+                    : `Supply ${symbol} to earn ${
+                        quote.supplyApyPercent != null
+                          ? `${quote.supplyApyPercent.toFixed(2)}%`
+                          : "—"
+                      } APY in ${route.marketLabel}.`}
                 </DialogDescription>
                 <div className="flex items-center justify-center gap-3 pt-2">
                   <img
@@ -317,7 +343,7 @@ const EasySavingsDepositModal = ({
 
               <div className="mt-6 space-y-4">
                 <AssetSelector
-                  label={`Supply ${symbol}`}
+                  label={consumerCopy ? `Deposit ${symbol}` : `Supply ${symbol}`}
                   options={[
                     {
                       configKey: route.asset.configKey,
@@ -357,55 +383,62 @@ const EasySavingsDepositModal = ({
                   }}
                   footer={
                     <span>
-                      Wallet: {formatToken(quote.walletBalance)} {symbol}
+                      {consumerCopy ? "Available" : "Wallet"}:{" "}
+                      {formatToken(quote.walletBalance)} {symbol}
                       {quote.walletBalance != null && quote.price != null
                         ? ` · ${formatUsdAmount(quote.walletBalance * quote.price)}`
                         : ""}
                       {quote.existingDeposit != null &&
                       quote.existingDeposit > 0
-                        ? ` · Supplied ${formatToken(quote.existingDeposit)}`
+                        ? consumerCopy
+                          ? ` · In savings ${formatToken(quote.existingDeposit)}`
+                          : ` · Supplied ${formatToken(quote.existingDeposit)}`
                         : ""}
-                      {isHighYield ? " · Pooled asset" : ""}
+                      {isHighYield && !consumerCopy ? " · Pooled asset" : ""}
                     </span>
                   }
                 />
 
                 <SavingsSummary route={route} amount={amount} quote={quote} />
 
-                <button
-                  type="button"
-                  className="flex w-full items-center justify-between text-sm text-muted-foreground hover:text-foreground"
-                  onClick={() => setAdvancedOpen((v) => !v)}
-                >
-                  Advanced details
-                  <ChevronDown
-                    className={cn(
-                      "size-4 transition-transform",
-                      advancedOpen && "rotate-180"
-                    )}
-                  />
-                </button>
-                {advancedOpen ? (
-                  <dl className="space-y-1.5 rounded-xl border border-border/50 p-3 text-xs">
-                    <div className="flex justify-between gap-2">
-                      <dt className="text-muted-foreground">Market</dt>
-                      <dd>
-                        {route.marketLabel} · {route.asset.symbol}
-                      </dd>
-                    </div>
-                    <div className="flex justify-between gap-2">
-                      <dt className="text-muted-foreground">Pool ID</dt>
-                      <dd className="font-mono">{route.poolId}</dd>
-                    </div>
-                    <div className="flex justify-between gap-2">
-                      <dt className="text-muted-foreground">Supply cap</dt>
-                      <dd>{formatToken(quote.supplyCapHuman)}</dd>
-                    </div>
-                    <div className="flex justify-between gap-2">
-                      <dt className="text-muted-foreground">Remaining cap</dt>
-                      <dd>{formatToken(quote.remainingSupplyCap)}</dd>
-                    </div>
-                  </dl>
+                {!consumerCopy ? (
+                  <>
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between text-sm text-muted-foreground hover:text-foreground"
+                      onClick={() => setAdvancedOpen((v) => !v)}
+                    >
+                      Advanced details
+                      <ChevronDown
+                        className={cn(
+                          "size-4 transition-transform",
+                          advancedOpen && "rotate-180"
+                        )}
+                      />
+                    </button>
+                    {advancedOpen ? (
+                      <dl className="space-y-1.5 rounded-xl border border-border/50 p-3 text-xs">
+                        <div className="flex justify-between gap-2">
+                          <dt className="text-muted-foreground">Market</dt>
+                          <dd>
+                            {route.marketLabel} · {route.asset.symbol}
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-2">
+                          <dt className="text-muted-foreground">Pool ID</dt>
+                          <dd className="font-mono">{route.poolId}</dd>
+                        </div>
+                        <div className="flex justify-between gap-2">
+                          <dt className="text-muted-foreground">Supply cap</dt>
+                          <dd>{formatToken(quote.supplyCapHuman)}</dd>
+                        </div>
+                        <div className="flex justify-between gap-2">
+                          <dt className="text-muted-foreground">Remaining cap</dt>
+                          <dd>{formatToken(quote.remainingSupplyCap)}</dd>
+                        </div>
+                      </dl>
+                    ) : null}
+                  </>
                 ) : null}
 
                 {quote.error ? (

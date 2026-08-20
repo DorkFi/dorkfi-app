@@ -2418,18 +2418,18 @@ export const fetchUserWalletBalance = async (
   try {
     const networkConfig = getNetworkConfig(networkId);
     const tokens = getAllTokensWithDisplayInfo(networkId);
-    const token = tokens.find((t) => t.symbol === tokenSymbol);
+    const token =
+      tokens.find((t) => t.configKey === tokenSymbol) ??
+      tokens.find((t) => t.symbol === tokenSymbol) ??
+      tokens.find((t) => t.originalSymbol === tokenSymbol);
 
     if (!token) {
       console.warn(`Token not found for symbol ${tokenSymbol}`);
       return null;
     }
 
-    // Get the actual token config to access all properties
-    const tokenConfigRaw = getTokenConfig(networkId, tokenSymbol);
-    const tokenConfig = Array.isArray(tokenConfigRaw)
-      ? tokenConfigRaw[0]
-      : tokenConfigRaw;
+    // Resolve the specific market row (WAD/USDC exist on multiple pools).
+    const tokenConfig = resolveTokenConfigFromDisplayToken(networkId, token);
 
     if (!tokenConfig) {
       console.warn(`Token config not found for symbol ${tokenSymbol}`);
@@ -2463,15 +2463,31 @@ export const fetchUserWalletBalance = async (
         balance = (x => x >= BigInt(0) ? x : BigInt(0))(BigInt(accountInfo.amount) - BigInt(accountInfo.minBalance) - BigInt(1e6));
       } else if (
         tokenConfig.tokenStandard === "asa" ||
-        tokenConfig.tokenStandard === "asa-asa"
+        tokenConfig.tokenStandard === "asa-asa" ||
+        tokenConfig.tokenStandard === "arc200-exchange"
       ) {
-        // For ASA tokens, get balance from account asset information.
+        // ASA holdings, including WAD (`arc200-exchange` wrapped as ASA 3334160924).
         // algosdk v3 nests amount under assetHolding / asset-holding.
-        const accountAssetInfo = await clients.algod
-          .accountAssetInformation(userAddress, Number(tokenConfig.assetId))
-          .do();
-        balance =
-          getAccountAssetHoldingAmountAtomic(accountAssetInfo) ?? 0n;
+        const assetId = Number(tokenConfig.assetId);
+        if (!Number.isFinite(assetId) || assetId <= 0) {
+          console.warn(
+            `Invalid assetId for ${tokenSymbol} (${tokenConfig.tokenStandard})`
+          );
+          return null;
+        }
+        try {
+          const accountAssetInfo = await clients.algod
+            .accountAssetInformation(userAddress, assetId)
+            .do();
+          balance =
+            getAccountAssetHoldingAmountAtomic(accountAssetInfo) ?? 0n;
+        } catch (error) {
+          console.error(
+            `Error fetching ASA balance for ${tokenSymbol}:`,
+            error
+          );
+          balance = 0n;
+        }
       } else if (
         tokenConfig.tokenStandard === "arc200" &&
         (tokenConfig.contractId || token.underlyingContractId)
@@ -6759,9 +6775,17 @@ export const repay = async (
             });
           }
         } else if (tokenStandard == "arc200-exchange") {
+          // WAD/sToken has arc200_redeem, not nt200 createBalanceBox.
+          // Extra ALGO on first redeem covers ARC200 min-balance.
+          const xaid = Number(token.underlyingAssetId);
+          if (!Number.isFinite(xaid) || xaid <= 0) {
+            throw new Error(
+              `arc200-exchange repay: missing ASA id for ${symbol}`
+            );
+          }
           const axfer = {
             aamt: repayArc200Units,
-            xaid: Number(token.underlyingAssetId),
+            xaid,
           };
           const txnO = (
             await builder.arc200Exchange.arc200_redeem(repayArc200Units)
@@ -6769,6 +6793,7 @@ export const repay = async (
           buildN.push({
             ...txnO,
             ...axfer,
+            payment: p1 > 0 ? 28501 : 0,
             note: new TextEncoder().encode("arc200_redeem"),
           });
         }
@@ -6806,10 +6831,18 @@ export const repay = async (
           const txnO = (
             await builder.lending.repay(Number(marketId), repayArc200Units)
           ).obj as any;
+          const foreignApps = [];
+          if (networkConfig.networkId === "voi-mainnet") {
+            foreignApps.push(47138065);
+          }
+          if (networkConfig.networkId === "algorand-mainnet") {
+            foreignApps.push(3333688254);
+          }
           buildN.push({
             ...txnO,
             payment: 1e5,
             note: new TextEncoder().encode("lending repay"),
+            foreignApps,
           });
         }
         ci.setEnableGroupResourceSharing(true);
@@ -6819,13 +6852,18 @@ export const repay = async (
           ci.setBeaconId(3209233839); // TODO move this to ulujs
         }
         customR = await ci.custom();
-        console.log("customR", { customR });
+        console.log("customR", { customR, p1, p2 });
         if (customR.success) {
           break;
         }
       }
       if (!customR.success) {
-        throw new Error("Failed to create repay transaction");
+        const errText = String(customR?.error ?? "").trim();
+        throw new Error(
+          errText && errText !== "undefined"
+            ? errText
+            : "Failed to create repay transaction"
+        );
       }
       return {
         success: true,
@@ -7112,15 +7150,22 @@ export const repayOnBehalf = async (
             });
           }
         } else if (tokenStandard == "arc200-exchange") {
+          const xaid = Number(token.underlyingAssetId);
+          if (!Number.isFinite(xaid) || xaid <= 0) {
+            throw new Error(
+              `arc200-exchange repayOnBehalf: missing ASA id for ${symbol}`
+            );
+          }
           const axfer = {
             aamt: bigAmount,
-            xaid: Number(token.underlyingAssetId),
+            xaid,
           };
           const txnO = (await builder.arc200Exchange.arc200_redeem(bigAmount))
             .obj;
           buildN.push({
             ...txnO,
             ...axfer,
+            payment: p1 > 0 ? 28501 : 0,
             note: new TextEncoder().encode("arc200_redeem"),
             description: "arc200_redeem",
           });
@@ -7179,7 +7224,12 @@ export const repayOnBehalf = async (
       }
       console.log("customR", { customR });
       if (!customR.success) {
-        throw new Error("Failed to create repayOnBehalf transaction");
+        const errText = String(customR?.error ?? "").trim();
+        throw new Error(
+          errText && errText !== "undefined"
+            ? errText
+            : "Failed to create repayOnBehalf transaction"
+        );
       }
       return {
         success: true,
@@ -7589,9 +7639,15 @@ export const repayAll = async (
             });
           }
         } else if (tokenStandard == "arc200-exchange") {
+          const xaid = Number(token.underlyingAssetId);
+          if (!Number.isFinite(xaid) || xaid <= 0) {
+            throw new Error(
+              `arc200-exchange repayAll: missing ASA id for ${symbol}`
+            );
+          }
           const axfer = {
             aamt: repayArc200Units,
-            xaid: Number(token.underlyingAssetId),
+            xaid,
           };
           const txnO = (
             await builder.arc200Exchange.arc200_redeem(repayArc200Units)
@@ -7600,6 +7656,7 @@ export const repayAll = async (
           buildN.push({
             ...txnO,
             ...axfer,
+            payment: p1 > 0 ? 28501 : 0,
             note: new TextEncoder().encode(description),
             description,
           });
@@ -7630,11 +7687,19 @@ export const repayAll = async (
             await builder.lending.repay_all(Number(marketId))
           ).obj as any;
           const description = "lending repay_all";
+          const foreignApps = [];
+          if (networkConfig.networkId === "voi-mainnet") {
+            foreignApps.push(47138065);
+          }
+          if (networkConfig.networkId === "algorand-mainnet") {
+            foreignApps.push(3333688254);
+          }
           buildN.push({
             ...txnO,
             payment: 1e5,
             note: new TextEncoder().encode(description),
             description,
+            foreignApps,
           });
         }
         ci.setEnableGroupResourceSharing(true);
@@ -7650,7 +7715,12 @@ export const repayAll = async (
         }
       }
       if (!customR.success) {
-        throw new Error("Failed to create repay transaction");
+        const errText = String(customR?.error ?? "").trim();
+        throw new Error(
+          errText && errText !== "undefined"
+            ? errText
+            : "Failed to create repay transaction"
+        );
       }
       return {
         success: true,

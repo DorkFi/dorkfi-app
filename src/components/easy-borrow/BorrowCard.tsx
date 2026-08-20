@@ -1,10 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { waitForConfirmation } from "algosdk";
+import BigNumber from "bignumber.js";
+import { ChevronDown, Info, Loader2 } from "lucide-react";
 import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
 import { useEasyStartLogin } from "@/hooks/useEasyStartLogin";
-import { ChevronDown, Info } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import { useNetwork } from "@/contexts/NetworkContext";
-import type { NetworkId } from "@/config";
 import {
+  getAlgorandNetworkFromNetworkId,
+  type NetworkId,
+} from "@/config";
+import {
+  EASY_BORROW_POOL_A_FOLKS_USDC_UI_KEY,
   EASY_BORROW_POOL_D_USDC_UI_KEY,
   listBorrowAssetOptionsForCollateral,
   listUsdcCollateralSupplyOptions,
@@ -12,6 +20,8 @@ import {
   resolveBorrowRoutes,
   type EasyBorrowCollateralOption,
 } from "@/services/borrowRouteResolver";
+import { borrow, deposit } from "@/services/lendingService";
+import algorandService from "@/services/algorandService";
 import type { BorrowRoute } from "@/types/easyBorrow";
 import {
   useEasyBorrowQuote,
@@ -19,7 +29,26 @@ import {
 } from "@/hooks/useEasyBorrowQuote";
 import { previewHealthBand } from "@/utils/easyBorrowMath";
 import { formatUsdAmount } from "@/lib/utils";
+import { getExplorerTransactionUrl } from "@/utils/explorerLinks";
+import { invalidateUserPositionRpcCache } from "@/utils/rpcReadCache";
+import { useBorrowTransactionHistory } from "@/hooks/useBorrowTransactionHistory";
+import BorrowTransactionHistory from "@/components/easy-borrow/BorrowTransactionHistory";
+import {
+  isRainbowkitXchainWallet,
+  withRainbowkitHostDialogDismissed,
+} from "@/wallet/xchainSignUi";
+import { getTransactionErrorFeedback } from "@/utils/errorUtils";
 import DorkFiButton from "@/components/ui/DorkFiButton";
+import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
+import { consumerAssetDisplayLabel } from "@/services/savingsRouteResolver";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import SupplyBorrowCongrats from "@/components/SupplyBorrowCongrats";
 import AssetSelector, {
   type AssetSelectorOption,
 } from "@/components/easy-borrow/AssetSelector";
@@ -39,7 +68,43 @@ function formatApr(n: number | null | undefined): string {
   return `${n.toFixed(2)}%`;
 }
 
-/** Prefer Pool D USDC, then plain USDC, then first available borrow option. */
+function humanToAtomic(amount: string, decimals: number): string {
+  const atomic = new BigNumber(amount)
+    .multipliedBy(10 ** decimals)
+    .integerValue(BigNumber.ROUND_DOWN)
+    .toFixed(0);
+  if (atomic === "0") {
+    throw new Error("Amount is too small after decimal conversion.");
+  }
+  return atomic;
+}
+
+function b64TxnsToBytes(txns: string[]): Uint8Array[] {
+  return txns.map((txn) =>
+    Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+  );
+}
+
+function lendingTxnsFromResult(
+  result:
+    | { success: boolean; txId?: string; error?: string }
+    | { success: true; txns: string[] },
+  action: string
+): string[] {
+  if (!result.success) {
+    throw new Error(
+      "error" in result && result.error
+        ? String(result.error)
+        : `${action} failed to build.`
+    );
+  }
+  if (!("txns" in result) || !result.txns?.length) {
+    throw new Error(`No transactions returned for ${action}.`);
+  }
+  return result.txns;
+}
+
+/** Prefer Pool D USDC, then native USDC, then Pool A Folks USDC, then first. */
 function preferredBorrowUiKey(
   options: { uiKey: string }[]
 ): string | undefined {
@@ -47,6 +112,8 @@ function preferredBorrowUiKey(
   return (
     options.find((o) => o.uiKey === EASY_BORROW_POOL_D_USDC_UI_KEY)?.uiKey ??
     options.find((o) => o.uiKey === "USDC")?.uiKey ??
+    options.find((o) => o.uiKey === EASY_BORROW_POOL_A_FOLKS_USDC_UI_KEY)
+      ?.uiKey ??
     options[0]?.uiKey
   );
 }
@@ -76,10 +143,23 @@ type CtaState =
 const BorrowCard = () => {
   const { currentNetwork } = useNetwork();
   const networkId = currentNetwork as NetworkId;
-  const { activeAccount } = useDorkFiWalletAdapter();
+  const { activeAccount, signTransactions, activeWallet } =
+    useDorkFiWalletAdapter();
   const openEasyStartLogin = useEasyStartLogin();
+  const { toast } = useToast();
+  const consumerCopy = useConsumerCopy();
+  const displaySymbol = (symbol?: string | null) => {
+    if (!symbol) return "—";
+    return consumerCopy ? consumerAssetDisplayLabel(symbol) : symbol;
+  };
+  const queryClient = useQueryClient();
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [txId, setTxId] = useState<string | null>(null);
+  const [successAmount, setSuccessAmount] = useState("");
+  const [, setRainbowkitSignDialogSuppressed] = useState(false);
 
   const supplyOptions = useMemo(
     () => listUsdcCollateralSupplyOptions(networkId),
@@ -110,6 +190,7 @@ const BorrowCard = () => {
       collateral.collateralConfigKey,
       {
         collateralPoolId: collateral.collateralPoolId,
+        collateralContractId: collateral.collateralContractId,
         preferredPoolIds: collateral.preferredPoolIds,
       }
     );
@@ -127,6 +208,7 @@ const BorrowCard = () => {
       selectedCollateral.collateralConfigKey,
       {
         collateralPoolId: selectedCollateral.collateralPoolId,
+        collateralContractId: selectedCollateral.collateralContractId,
         preferredPoolIds: selectedCollateral.preferredPoolIds,
       }
     );
@@ -155,6 +237,7 @@ const BorrowCard = () => {
       collateralConfigKey: selectedCollateral.collateralConfigKey,
       borrowConfigKey: selectedBorrowOption.borrowConfigKey,
       collateralPoolId: selectedCollateral.collateralPoolId,
+      collateralContractId: selectedCollateral.collateralContractId,
       preferredPoolIds: [
         ...selectedCollateral.preferredPoolIds,
         ...(selectedBorrowOption.preferredPoolIds ?? []),
@@ -169,6 +252,7 @@ const BorrowCard = () => {
       collateralConfigKey: selectedCollateral.collateralConfigKey,
       borrowConfigKey: selectedBorrowOption.borrowConfigKey,
       collateralPoolId: selectedCollateral.collateralPoolId,
+      collateralContractId: selectedCollateral.collateralContractId,
       preferredPoolIds: [
         ...selectedCollateral.preferredPoolIds,
         ...(selectedBorrowOption.preferredPoolIds ?? []),
@@ -182,6 +266,16 @@ const BorrowCard = () => {
       collateralSource === "wallet" ? collateralAmount : "0",
     borrowAmount,
     collateralSource,
+  });
+
+  const {
+    items: borrowTxItems,
+    isLoading: borrowTxLoading,
+    recordTx,
+  } = useBorrowTransactionHistory({
+    networkId,
+    address: activeAccount?.address,
+    poolId: route?.poolId,
   });
 
   // Prefer existing collateral when the user already has a deposit.
@@ -333,15 +427,184 @@ const BorrowCard = () => {
     insufficient_liquidity: "Insufficient Liquidity",
     too_risky: "Position Too Risky",
     review: "Review Borrow",
-    supply_borrow: "Supply & Borrow",
-    borrow: "Borrow",
+    supply_borrow: isSubmitting
+      ? consumerCopy
+        ? "Confirming…"
+        : "Confirm in wallet…"
+      : consumerCopy
+        ? "Borrow"
+        : "Supply & Borrow",
+    borrow: isSubmitting
+      ? consumerCopy
+        ? "Confirming…"
+        : "Confirm in wallet…"
+      : "Borrow",
   };
 
   const ctaDisabled =
-    ctaState !== "connect" &&
-    ctaState !== "supply_borrow" &&
-    ctaState !== "borrow" &&
-    ctaState !== "review";
+    isSubmitting ||
+    (ctaState !== "connect" &&
+      ctaState !== "supply_borrow" &&
+      ctaState !== "borrow" &&
+      ctaState !== "review");
+
+  const invalidateQuotes = () => {
+    const address = activeAccount?.address?.trim();
+    if (address) {
+      invalidateUserPositionRpcCache(networkId, address);
+    }
+    void queryClient.invalidateQueries({ queryKey: ["easyBorrow"] });
+    void queryClient.invalidateQueries({ queryKey: ["has-open-borrow"] });
+    void queryClient.invalidateQueries({ queryKey: ["easy-start-borrow-debt"] });
+    void queryClient.invalidateQueries({ queryKey: ["easy-start-algo-usdc"] });
+  };
+
+  const signAndSend = async (txns: string[], prompt: string) => {
+    if (!signTransactions) {
+      throw new Error(
+        consumerCopy
+          ? "Couldn’t confirm. Try again."
+          : "Connected wallet does not support signing."
+      );
+    }
+    const algorandNetwork = getAlgorandNetworkFromNetworkId(networkId);
+    if (!algorandNetwork) {
+      throw new Error(
+        consumerCopy
+          ? "Please try again."
+          : "This network is not Algorand-compatible."
+      );
+    }
+    const walletName = activeWallet?.metadata?.name || "your wallet";
+    toast({
+      title: consumerCopy ? "Confirm" : "Please Sign Transaction",
+      description: consumerCopy
+        ? "Confirm this borrow."
+        : `${prompt} in ${walletName}.`,
+      duration: 12_000,
+    });
+    const signed = await withRainbowkitHostDialogDismissed({
+      wallet: activeWallet,
+      setSuppressed: setRainbowkitSignDialogSuppressed,
+      leaveOverlayDismissedOnSuccess: true,
+      run: () => signTransactions(b64TxnsToBytes(txns)),
+    });
+    const { algod } =
+      await algorandService.initializeClientsForTransactions(algorandNetwork);
+    const res = await algod.sendRawTransaction(signed).do();
+    await waitForConfirmation(algod, res.txid, 4);
+    return res.txid;
+  };
+
+  const handleCta = async () => {
+    if (ctaState === "connect") {
+      void openEasyStartLogin();
+      return;
+    }
+    if (ctaState !== "supply_borrow" && ctaState !== "borrow") {
+      setReviewOpen(true);
+      return;
+    }
+    if (!route || !activeAccount?.address) return;
+    if (!signTransactions) {
+      toast({
+        title: "Cannot borrow",
+        description: consumerCopy
+          ? "Couldn’t confirm. Try again."
+          : "Connected wallet does not support signing.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const willSupply =
+      ctaState === "supply_borrow" &&
+      collateralSource === "wallet" &&
+      collateralNum > 0;
+
+    setIsSubmitting(true);
+    setReviewOpen(true);
+    try {
+      if (willSupply) {
+        const depositResult = await deposit(
+          route.poolId,
+          route.collateral.contractId,
+          route.collateral.tokenStandard,
+          humanToAtomic(collateralAmount, route.collateral.decimals),
+          activeAccount.address,
+          networkId
+        );
+        const supplyTxId = await signAndSend(
+          lendingTxnsFromResult(depositResult, "supply"),
+          borrowNum > 0
+            ? "Step 1 of 2 — approve the supply"
+            : "Approve the supply"
+        );
+        recordTx({
+          txId: supplyTxId,
+          kind: "supply",
+          amount: collateralAmount,
+          symbol: route.collateral.symbol,
+          poolId: route.poolId,
+          assetConfigKey: route.collateral.configKey,
+        });
+      }
+
+      const borrowResult = await borrow(
+        route.poolId,
+        route.borrow.contractId,
+        route.borrow.tokenStandard,
+        humanToAtomic(borrowAmount, route.borrow.decimals),
+        activeAccount.address,
+        networkId
+      );
+      const confirmedTxId = await signAndSend(
+        lendingTxnsFromResult(borrowResult, "borrow"),
+        willSupply ? "Step 2 of 2 — approve the borrow" : "Approve the borrow"
+      );
+
+      recordTx({
+        txId: confirmedTxId,
+        kind: "borrow",
+        amount: borrowAmount,
+        symbol: route.borrow.symbol,
+        poolId: route.poolId,
+        assetConfigKey: route.borrow.configKey,
+      });
+
+      setTxId(confirmedTxId);
+      setSuccessAmount(borrowAmount);
+      setShowSuccess(true);
+      setRainbowkitSignDialogSuppressed(false);
+      invalidateQuotes();
+      toast({
+        title: "Borrow confirmed",
+        description: `Borrowed ${borrowAmount} ${displaySymbol(route.borrow.symbol)}.`,
+      });
+    } catch (e: unknown) {
+      if (isRainbowkitXchainWallet(activeWallet)) {
+        setRainbowkitSignDialogSuppressed(false);
+      }
+      const { userRejected, message } = getTransactionErrorFeedback(e);
+      toast({
+        title: userRejected ? "Borrow cancelled" : "Borrow failed",
+        description: message,
+        variant: "destructive",
+        duration: 14_000,
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleMakeAnother = () => {
+    setShowSuccess(false);
+    setTxId(null);
+    setSuccessAmount("");
+    setBorrowAmount("");
+    setCollateralAmount("");
+    setReviewOpen(false);
+  };
 
   const hasExisting =
     quote.existingDeposit != null && quote.existingDeposit > 0;
@@ -377,7 +640,7 @@ const BorrowCard = () => {
       {hasExisting ? (
         <div className="rounded-xl border border-border/60 bg-card p-3 space-y-2">
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-            Collateral source
+            {consumerCopy ? "Use" : "Collateral source"}
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <button
@@ -389,10 +652,13 @@ const BorrowCard = () => {
                   : "border-border"
               }`}
             >
-              <div className="font-medium">Existing collateral</div>
+              <div className="font-medium">
+                {consumerCopy ? "Savings already deposited" : "Existing collateral"}
+              </div>
               <div className="text-xs text-muted-foreground">
-                {formatToken(quote.existingDeposit)} {route?.collateral.symbol}{" "}
-                supplied
+                {formatToken(quote.existingDeposit)}{" "}
+                {displaySymbol(route?.collateral.symbol)}{" "}
+                {consumerCopy ? "in savings" : "supplied"}
               </div>
             </button>
             <button
@@ -404,10 +670,12 @@ const BorrowCard = () => {
                   : "border-border"
               }`}
             >
-              <div className="font-medium">Add from wallet</div>
+              <div className="font-medium">
+                {consumerCopy ? "Use available cash" : "Add from wallet"}
+              </div>
               <div className="text-xs text-muted-foreground">
                 Balance {formatToken(quote.walletBalance)}{" "}
-                {route?.collateral.symbol}
+                {displaySymbol(route?.collateral.symbol)}
               </div>
             </button>
           </div>
@@ -419,12 +687,16 @@ const BorrowCard = () => {
           <div className="grid gap-4 sm:grid-cols-2">
             <AssetSelector
               card
-              label="Supply"
+              label={consumerCopy ? "From savings" : "Supply"}
               headerAction={
                 <div className="flex items-center gap-2">
                   <span
                     className="text-muted-foreground"
-                    title="Assets you supply become collateral for this borrow."
+                    title={
+                      consumerCopy
+                        ? "Savings you deposit backs this loan."
+                        : "Assets you supply become collateral for this borrow."
+                    }
                   >
                     <Info className="size-4" />
                   </span>
@@ -462,6 +734,7 @@ const BorrowCard = () => {
                   collateral.collateralConfigKey,
                   {
                     collateralPoolId: collateral.collateralPoolId,
+                    collateralContractId: collateral.collateralContractId,
                     preferredPoolIds: collateral.preferredPoolIds,
                   }
                 );
@@ -489,16 +762,19 @@ const BorrowCard = () => {
               footer={
                 collateralSource === "wallet" ? (
                   <span>
-                    Wallet balance: {formatToken(quote.walletBalance)}{" "}
-                    {route?.collateral.symbol}
+                    {consumerCopy ? "Available" : "Wallet balance"}:{" "}
+                    {formatToken(quote.walletBalance)}{" "}
+                    {displaySymbol(route?.collateral.symbol)}
                     {quote.walletBalance != null && quote.collateralPrice != null
                       ? ` · ${formatUsdAmount(quote.walletBalance * quote.collateralPrice)}`
                       : ""}
                   </span>
                 ) : (
                   <span>
-                    Using existing position
-                    {quote.poolGlobal
+                    {consumerCopy
+                      ? "Using savings already deposited"
+                      : "Using existing position"}
+                    {quote.poolGlobal && !consumerCopy
                       ? ` · pool collateral ${formatUsdAmount(quote.poolGlobal.totalCollateralValue)}`
                       : ""}
                   </span>
@@ -521,7 +797,7 @@ const BorrowCard = () => {
               footer={
                 <span>
                   Available to borrow: {formatToken(available)}{" "}
-                  {route?.borrow.symbol}
+                  {displaySymbol(route?.borrow.symbol)}
                   {available > 0 && quote.borrowPrice != null
                     ? ` · ${formatUsdAmount(available * quote.borrowPrice)}`
                     : ""}
@@ -561,7 +837,7 @@ const BorrowCard = () => {
             logoPath: route?.collateral.logoPath,
             rateLabel: formatApr(quote.supplyAprPercent),
           }}
-          borrowHint={borrowHint}
+          borrowHint={consumerCopy ? undefined : borrowHint}
         />
       </div>
 
@@ -578,10 +854,14 @@ const BorrowCard = () => {
         />
       ) : (
         <p className="text-sm text-destructive">
-          No WAD/USDC borrow route for this collateral on the current network.
+          {consumerCopy
+            ? "Borrowing isn’t available for this savings type right now."
+            : "No WAD/USDC borrow route for this collateral on the current network."}
         </p>
       )}
 
+      {!consumerCopy ? (
+        <>
       <button
         type="button"
         className="flex w-full items-center justify-between text-sm text-muted-foreground hover:text-foreground"
@@ -662,60 +942,113 @@ const BorrowCard = () => {
         />
       </button>
       {advancedOpen && route ? (
-        <dl className="space-y-1.5 rounded-xl border border-border/50 p-3 text-xs">
-          <div className="flex justify-between gap-2">
-            <dt className="text-muted-foreground">Pool ID</dt>
-            <dd className="font-mono">{route.poolId}</dd>
+        <div className="space-y-1.5 rounded-xl border border-border/50 p-3 text-xs">
+          <dl className="space-y-1.5">
+            <div className="flex justify-between gap-2">
+              <dt className="text-muted-foreground">Pool ID</dt>
+              <dd className="font-mono">{route.poolId}</dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt className="text-muted-foreground">Collateral contract</dt>
+              <dd className="font-mono">{route.collateral.contractId}</dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt className="text-muted-foreground">Borrow contract</dt>
+              <dd className="font-mono">{route.borrow.contractId}</dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt className="text-muted-foreground">Supply cap</dt>
+              <dd>{formatToken(quote.supplyCapHuman)}</dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt className="text-muted-foreground">Borrow cap</dt>
+              <dd>{formatToken(quote.borrowCapHuman)}</dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt className="text-muted-foreground">Oracle (collateral)</dt>
+              <dd>
+                {quote.collateralPrice != null
+                  ? formatUsdAmount(quote.collateralPrice)
+                  : "—"}
+              </dd>
+            </div>
+          </dl>
+          <div className="border-t border-border/50 pt-2">
+            <BorrowTransactionHistory
+              networkId={networkId}
+              items={borrowTxItems}
+              isLoading={borrowTxLoading}
+            />
           </div>
-          <div className="flex justify-between gap-2">
-            <dt className="text-muted-foreground">Collateral contract</dt>
-            <dd className="font-mono">{route.collateral.contractId}</dd>
-          </div>
-          <div className="flex justify-between gap-2">
-            <dt className="text-muted-foreground">Borrow contract</dt>
-            <dd className="font-mono">{route.borrow.contractId}</dd>
-          </div>
-          <div className="flex justify-between gap-2">
-            <dt className="text-muted-foreground">Supply cap</dt>
-            <dd>{formatToken(quote.supplyCapHuman)}</dd>
-          </div>
-          <div className="flex justify-between gap-2">
-            <dt className="text-muted-foreground">Borrow cap</dt>
-            <dd>{formatToken(quote.borrowCapHuman)}</dd>
-          </div>
-          <div className="flex justify-between gap-2">
-            <dt className="text-muted-foreground">Oracle (collateral)</dt>
-            <dd>
-              {quote.collateralPrice != null
-                ? formatUsdAmount(quote.collateralPrice)
-                : "—"}
-            </dd>
-          </div>
-        </dl>
+        </div>
+      ) : null}
+        </>
       ) : null}
 
       <DorkFiButton
         className="w-full h-12 sticky bottom-0"
         disabled={ctaDisabled && ctaState !== "connect"}
         onClick={() => {
-          if (ctaState === "connect") {
-            void openEasyStartLogin();
-            return;
-          }
-          // Signing orchestration lands in the next increment.
-          setReviewOpen(true);
+          void handleCta();
         }}
       >
-        {ctaLabel[ctaState]}
+        {isSubmitting ? (
+          <span className="inline-flex items-center gap-2">
+            <Loader2 className="size-4 animate-spin" />
+            {ctaLabel[ctaState]}
+          </span>
+        ) : (
+          ctaLabel[ctaState]
+        )}
       </DorkFiButton>
 
       {quote.isLoading ? (
         <p className="text-center text-xs text-muted-foreground">
-          Loading market data…
+          Loading…
         </p>
       ) : quote.error ? (
         <p className="text-center text-xs text-destructive">{quote.error}</p>
       ) : null}
+
+      <Dialog
+        open={showSuccess && !!route}
+        onOpenChange={(open) => {
+          if (!open) handleMakeAnother();
+        }}
+      >
+        <DialogContent className="w-full max-w-[98vw] sm:max-w-md rounded-t-2xl sm:rounded-xl p-0 max-h-[min(90vh,90dvh)] overflow-hidden flex flex-col">
+          <div className="max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain px-5 pt-10 pb-6 sm:px-7 sm:pb-7">
+            <DialogHeader className="sr-only">
+              <DialogTitle>Borrow confirmed</DialogTitle>
+              <DialogDescription>
+                Your borrow completed successfully.
+              </DialogDescription>
+            </DialogHeader>
+            {route ? (
+              <SupplyBorrowCongrats
+                transactionType="borrow"
+                asset={displaySymbol(route.borrow.symbol)}
+                assetIcon={route.borrow.logoPath}
+                amount={successAmount}
+                onViewTransaction={() => {
+                  if (!txId) return;
+                  window.open(
+                    getExplorerTransactionUrl(networkId, txId),
+                    "_blank",
+                    "noopener,noreferrer"
+                  );
+                }}
+                onGoToPortfolio={() => {
+                  window.location.href = "/portfolio";
+                }}
+                onMakeAnother={handleMakeAnother}
+                onClose={handleMakeAnother}
+                viewTransactionDisabled={!txId}
+              />
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 };

@@ -13,19 +13,17 @@ import {
 import DorkFiButton from "@/components/ui/DorkFiButton";
 import AssetSelector from "@/components/easy-borrow/AssetSelector";
 import SupplyBorrowCongrats from "@/components/SupplyBorrowCongrats";
-import { useEasySavingsQuote } from "@/hooks/useEasySavingsQuote";
 import { useToast } from "@/hooks/use-toast";
 import {
   getAlgorandNetworkFromNetworkId,
   type NetworkId,
 } from "@/config";
 import {
-  getMaxWithdrawableForMarket,
-  withdraw,
+  fetchUserWalletBalance,
+  repay,
+  repayAll,
 } from "@/services/lendingService";
 import algorandService from "@/services/algorandService";
-import { savingsAccountDisplayLabel, consumerAssetDisplayLabel } from "@/services/savingsRouteResolver";
-import type { SavingsRoute } from "@/types/easySavings";
 import { formatUsdAmount } from "@/lib/utils";
 import { getExplorerTransactionUrl } from "@/utils/explorerLinks";
 import {
@@ -33,7 +31,15 @@ import {
   withRainbowkitHostDialogDismissed,
 } from "@/wallet/xchainSignUi";
 import { getTransactionErrorFeedback } from "@/utils/errorUtils";
+import { invalidateUserPositionRpcCache } from "@/utils/rpcReadCache";
+import { appendLocalBorrowTx } from "@/services/borrowTransactionHistory";
 import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
+import { consumerAssetDisplayLabel } from "@/services/savingsRouteResolver";
+import {
+  formatBorrowApyLabel,
+  isAccruedDisplayable,
+  type EasyStartBorrowPosition,
+} from "@/hooks/useEasyStartBorrowDebt";
 
 const MODAL_SHELL =
   "w-full max-w-[98vw] sm:max-w-md rounded-t-2xl sm:rounded-xl p-0 max-h-[min(90vh,90dvh)] overflow-hidden flex flex-col";
@@ -41,24 +47,16 @@ const MODAL_SHELL =
 type CtaState =
   | "connect"
   | "enter_amount"
-  | "no_position"
-  | "insufficient"
-  | "withdraw";
+  | "no_debt"
+  | "insufficient_balance"
+  | "repay";
 
-export type SavingsTxSuccessPayload = {
-  txId: string;
-  kind: "deposit" | "withdraw";
-  amount: string;
-  symbol: string;
-};
-
-type EasySavingsWithdrawModalProps = {
+type EasyBorrowRepayModalProps = {
   isOpen: boolean;
   onClose: () => void;
-  route: SavingsRoute | null;
+  position: EasyStartBorrowPosition | null;
   networkId: NetworkId;
   onConnectWallet?: () => void;
-  onSuccess?: (payload: SavingsTxSuccessPayload) => void;
 };
 
 function formatToken(n: number | null | undefined, digits = 4): string {
@@ -66,14 +64,19 @@ function formatToken(n: number | null | undefined, digits = 4): string {
   return n.toLocaleString(undefined, { maximumFractionDigits: digits });
 }
 
-const EasySavingsWithdrawModal = ({
+function formatAmountInput(n: number, decimals: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "";
+  const d = Math.min(Math.max(decimals, 0), 6);
+  return n.toFixed(d).replace(/\.?0+$/, "");
+}
+
+const EasyBorrowRepayModal = ({
   isOpen,
   onClose,
-  route,
+  position,
   networkId,
   onConnectWallet,
-  onSuccess,
-}: EasySavingsWithdrawModalProps) => {
+}: EasyBorrowRepayModalProps) => {
   const { activeAccount, signTransactions, activeWallet } =
     useDorkFiWalletAdapter();
   const { toast } = useToast();
@@ -87,50 +90,43 @@ const EasySavingsWithdrawModal = ({
   const [rainbowkitSignDialogSuppressed, setRainbowkitSignDialogSuppressed] =
     useState(false);
 
-  const quote = useEasySavingsQuote({
-    networkId,
-    route,
-    amount,
-  });
+  const market = position?.market ?? null;
+  const rawSymbol = position?.symbol ?? "—";
+  const symbol = consumerCopy
+    ? consumerAssetDisplayLabel(rawSymbol)
+    : rawSymbol;
+  const logo = position?.logoPath || "/placeholder.svg";
+  const debt = position?.amount ?? 0;
+  const interest = position?.interest ?? 0;
+  const principal = Math.max(0, debt - Math.max(0, interest));
+  const showAccrued = isAccruedDisplayable(interest);
+  const apyLabel = formatBorrowApyLabel(position?.apyPercent);
+  const amountNum = parseFloat(amount) || 0;
 
-  const maxWithdrawQuery = useQuery({
+  const walletQuery = useQuery({
     queryKey: [
-      "easySavings",
-      "maxWithdraw",
+      "easy-start-repay-wallet",
       networkId,
       activeAccount?.address,
-      route?.poolId,
-      route?.asset.contractId,
+      market?.configKey,
     ],
-    enabled: Boolean(
-      isOpen && route && activeAccount?.address
-    ),
+    enabled: Boolean(isOpen && market && activeAccount?.address),
     staleTime: 15_000,
     queryFn: async () => {
-      if (!route || !activeAccount?.address) return null;
-      return getMaxWithdrawableForMarket(
-        route.poolId,
-        route.asset.contractId,
+      if (!market || !activeAccount?.address) return null;
+      return fetchUserWalletBalance(
         activeAccount.address,
-        networkId,
-        route.asset.decimals
+        market.configKey,
+        networkId
       );
     },
   });
 
-  const rawSymbol = route ? savingsAccountDisplayLabel(route) : "—";
-  const symbol = consumerCopy
-    ? consumerAssetDisplayLabel(rawSymbol)
-    : rawSymbol;
-  const logo = route?.asset.logoPath || "/placeholder.svg";
-  const amountNum = parseFloat(amount) || 0;
-
-  const maxWithdrawable = (() => {
-    const fromChain = maxWithdrawQuery.data?.maxWithdrawUnderlying;
-    if (fromChain != null && Number.isFinite(fromChain) && fromChain >= 0) {
-      return fromChain;
-    }
-    return quote.existingDeposit ?? 0;
+  const walletBalance = walletQuery.data ?? null;
+  const walletBalanceReady = !walletQuery.isLoading && walletBalance != null;
+  const maxRepay = (() => {
+    if (debt <= 0 || walletBalance == null) return 0;
+    return Math.max(0, Math.min(debt, walletBalance));
   })();
 
   useEffect(() => {
@@ -140,44 +136,58 @@ const EasySavingsWithdrawModal = ({
     setShowSuccess(false);
     setTxId(null);
     setRainbowkitSignDialogSuppressed(false);
-  }, [isOpen, route?.asset.configKey, route?.poolId]);
+  }, [isOpen, position?.id]);
 
   const ctaState: CtaState = (() => {
     if (!activeAccount) return "connect";
-    if (maxWithdrawable <= 1e-12) return "no_position";
-    if (!route || amountNum <= 0) return "enter_amount";
-    if (amountNum > maxWithdrawable + 1e-8) return "insufficient";
-    return "withdraw";
+    if (debt <= 1e-12) return "no_debt";
+    if (!position || amountNum <= 0) return "enter_amount";
+    if (!walletBalanceReady) return "enter_amount";
+    if (amountNum > walletBalance + 1e-8) {
+      return "insufficient_balance";
+    }
+    if (amountNum > debt + 1e-8) return "insufficient_balance";
+    return "repay";
   })();
 
   const ctaLabel: Record<CtaState, string> = {
-    connect: consumerCopy ? "Get Started" : "Connect Wallet",
+    connect: "Get Started",
     enter_amount: "Enter Amount",
-    no_position: "Nothing to Withdraw",
-    insufficient: "Exceeds Withdrawable",
-    withdraw: isSubmitting
+    no_debt: "Nothing to Repay",
+    insufficient_balance: "Insufficient Balance",
+    repay: isSubmitting
       ? consumerCopy
         ? "Confirming…"
-        : "Withdrawing…"
-      : "Withdraw",
+        : "Confirm in wallet…"
+      : "Repay",
   };
 
   const ctaDisabled =
-    isSubmitting || (ctaState !== "connect" && ctaState !== "withdraw");
+    isSubmitting || (ctaState !== "connect" && ctaState !== "repay");
 
-  const invalidateQuotes = () => {
+  const invalidateAfterRepay = () => {
+    const address = activeAccount?.address?.trim();
+    if (address) {
+      invalidateUserPositionRpcCache(networkId, address);
+    }
+    void queryClient.invalidateQueries({ queryKey: ["easyBorrow"] });
+    void queryClient.invalidateQueries({ queryKey: ["has-open-borrow"] });
+    void queryClient.invalidateQueries({ queryKey: ["easy-start-borrow-debt"] });
+    void queryClient.invalidateQueries({ queryKey: ["easy-start-repay-wallet"] });
     void queryClient.invalidateQueries({ queryKey: ["easySavings"] });
   };
 
-  const handleWithdraw = async () => {
+  const handleRepay = async () => {
     if (ctaState === "connect") {
       onConnectWallet?.();
       return;
     }
-    if (ctaState !== "withdraw" || !route || !activeAccount?.address) return;
+    if (ctaState !== "repay" || !position || !market || !activeAccount?.address) {
+      return;
+    }
     if (!signTransactions) {
       toast({
-        title: "Cannot withdraw",
+        title: "Cannot repay",
         description: consumerCopy
           ? "Couldn’t confirm. Try again."
           : "Connected wallet does not support signing.",
@@ -198,51 +208,64 @@ const EasySavingsWithdrawModal = ({
       return;
     }
 
+    const amountHuman = amount.trim();
+    if (!amountHuman || !(parseFloat(amountHuman) > 0)) {
+      toast({
+        title: "Enter an amount",
+        description: "Choose how much to repay.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      // `withdraw()` multiplies by token decimals internally (human amount).
-      // Unlike `deposit()`, which expects atomic units — do not convert here.
-      const amountHuman = amount.trim();
-      if (!amountHuman || !(parseFloat(amountHuman) > 0)) {
-        throw new Error("Enter a positive withdraw amount.");
-      }
+      // Match RepayModal: repayAll only when the typed amount equals full debt
+      // after 6-decimal rounding. A 1 vs 1.0001 repay is partial — repayAll
+      // adds ~1% surplus and fails if the wallet only holds the borrowed amount.
+      const roundedAmount = Math.round(amountNum * 1e6) / 1e6;
+      const roundedDebt = Math.round(debt * 1e6) / 1e6;
+      const closeLoan =
+        debt > 0 &&
+        roundedAmount === roundedDebt &&
+        walletBalance != null &&
+        walletBalance + 1e-8 >= amountNum * 1.01;
 
-      const withdrawAll =
-        amountNum >= maxWithdrawable * 0.999 ||
-        Math.abs(amountNum - maxWithdrawable) < 1e-8;
-
-      const result = await withdraw(
-        route.poolId,
-        route.asset.contractId,
-        route.asset.tokenStandard,
-        amountHuman,
-        activeAccount.address,
-        networkId,
-        {
-          withdrawAll,
-          maxWithdrawScaled: withdrawAll
-            ? maxWithdrawQuery.data?.maxWithdrawScaled
-            : undefined,
-        }
-      );
+      const result = closeLoan
+        ? await repayAll(
+            market.poolId,
+            market.contractId,
+            market.tokenStandard,
+            amountHuman,
+            activeAccount.address,
+            networkId
+          )
+        : await repay(
+            market.poolId,
+            market.contractId,
+            market.tokenStandard,
+            amountHuman,
+            activeAccount.address,
+            networkId
+          );
 
       if (!result.success) {
         throw new Error(
           "error" in result && result.error
             ? String(result.error)
-            : "Withdraw failed to build."
+            : "Repay failed to build."
         );
       }
       if (!("txns" in result) || !result.txns?.length) {
-        throw new Error("No transactions returned for withdraw.");
+        throw new Error("No transactions returned for repay.");
       }
 
       const walletName = activeWallet?.metadata?.name || "your wallet";
       toast({
         title: consumerCopy ? "Confirm" : "Please Sign Transaction",
         description: consumerCopy
-          ? "Confirm this withdrawal."
-          : `Approve the withdraw in ${walletName}.`,
+          ? "Confirm this repayment."
+          : `Approve the repay in ${walletName}.`,
         duration: 12_000,
       });
 
@@ -266,16 +289,21 @@ const EasySavingsWithdrawModal = ({
       setTxId(res.txid);
       setShowSuccess(true);
       setRainbowkitSignDialogSuppressed(false);
-      invalidateQuotes();
-      onSuccess?.({
+      appendLocalBorrowTx({
         txId: res.txid,
-        kind: "withdraw",
-        amount,
-        symbol,
+        networkId,
+        address: activeAccount.address,
+        poolId: market.poolId,
+        assetConfigKey: market.configKey,
+        kind: "repay",
+        amount: amountHuman,
+        symbol: rawSymbol,
+        timestamp: Date.now(),
       });
+      invalidateAfterRepay();
       toast({
-        title: "Withdraw confirmed",
-        description: `Withdrew ${amount} ${symbol}.`,
+        title: "Repay confirmed",
+        description: `Repaid ${amountHuman} ${symbol}.`,
       });
     } catch (e: unknown) {
       if (isRainbowkitXchainWallet(activeWallet)) {
@@ -283,9 +311,14 @@ const EasySavingsWithdrawModal = ({
       }
       const { userRejected, message } = getTransactionErrorFeedback(e);
       toast({
-        title: userRejected ? "Withdraw cancelled" : "Withdraw failed",
-        description: message,
+        title: userRejected ? "Repay cancelled" : "Repay failed",
+        description: userRejected
+          ? consumerCopy
+            ? "You can try again when you’re ready."
+            : message
+          : message,
         variant: "destructive",
+        duration: 14_000,
       });
     } finally {
       setIsSubmitting(false);
@@ -298,7 +331,7 @@ const EasySavingsWithdrawModal = ({
     setAmount("");
   };
 
-  if (!route) return null;
+  if (!position) return null;
 
   return (
     <Dialog
@@ -311,7 +344,7 @@ const EasySavingsWithdrawModal = ({
         <div className="max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain px-5 pt-10 pb-6 sm:px-7 sm:pb-7">
           {showSuccess ? (
             <SupplyBorrowCongrats
-              transactionType="withdraw"
+              transactionType="repay"
               asset={symbol}
               assetIcon={logo}
               amount={amount}
@@ -325,7 +358,6 @@ const EasySavingsWithdrawModal = ({
               }}
               onGoToPortfolio={() => {
                 onClose();
-                window.location.href = "/portfolio";
               }}
               onMakeAnother={handleMakeAnother}
               onClose={onClose}
@@ -334,11 +366,11 @@ const EasySavingsWithdrawModal = ({
           ) : (
             <>
               <DialogHeader className="space-y-2 text-center pr-6">
-                <DialogTitle className="text-2xl font-bold">
-                  Withdraw
-                </DialogTitle>
+                <DialogTitle className="text-2xl font-bold">Repay</DialogTitle>
                 <DialogDescription className="text-sm text-muted-foreground">
-                  Withdraw {symbol} from your savings.
+                  {consumerCopy
+                    ? `Repay ${symbol} from available cash to reduce this loan.`
+                    : `Repay ${symbol} from your wallet to reduce this loan.`}
                 </DialogDescription>
                 <div className="flex items-center justify-center gap-3 pt-2">
                   <img
@@ -352,42 +384,36 @@ const EasySavingsWithdrawModal = ({
 
               <div className="mt-6 space-y-4">
                 <AssetSelector
-                  label={`Withdraw ${symbol}`}
+                  label={`Repay ${symbol}`}
                   options={[
                     {
-                      configKey: route.asset.configKey,
+                      configKey: market?.configKey ?? symbol,
                       symbol,
-                      logoPath: route.asset.logoPath,
-                      balance: maxWithdrawable,
-                      balanceUsd:
-                        quote.price != null
-                          ? maxWithdrawable * quote.price
-                          : null,
+                      logoPath: position.logoPath,
+                      balance: walletBalance,
+                      balanceUsd: null,
                     },
                   ]}
-                  value={route.asset.configKey}
+                  value={market?.configKey ?? symbol}
                   onChange={() => {}}
                   amount={amount}
                   onAmountChange={setAmount}
-                  amountUsd={quote.amountUsd > 0 ? quote.amountUsd : null}
+                  amountUsd={amountNum > 0 ? amountNum : null}
                   amountDisabled={isSubmitting}
                   showMax
                   onMax={() => {
-                    if (maxWithdrawable > 0) {
-                      setAmount(String(maxWithdrawable));
+                    if (maxRepay > 0) {
+                      setAmount(
+                        formatAmountInput(maxRepay, market?.decimals ?? 6)
+                      );
                     }
                   }}
                   footer={
                     <span>
-                      Withdrawable: {formatToken(maxWithdrawable)} {symbol}
-                      {quote.price != null && maxWithdrawable > 0
-                        ? ` · ${formatUsdAmount(maxWithdrawable * quote.price)}`
-                        : ""}
-                      {quote.existingDeposit != null &&
-                      quote.existingDeposit > 0
-                        ? consumerCopy
-                          ? ` · In savings ${formatToken(quote.existingDeposit)}`
-                          : ` · Supplied ${formatToken(quote.existingDeposit)}`
+                      {consumerCopy ? "Available" : "Wallet"}:{" "}
+                      {formatToken(walletBalance)} {symbol}
+                      {debt > 0
+                        ? ` · Debt ${formatToken(debt)} ${symbol}`
                         : ""}
                     </span>
                   }
@@ -396,26 +422,43 @@ const EasySavingsWithdrawModal = ({
                 <div className="rounded-2xl border border-border/60 divide-y divide-border/50 text-sm">
                   <div className="flex items-start justify-between gap-3 px-4 py-2.5">
                     <span className="text-muted-foreground shrink-0">
-                      You withdraw
+                      Principal
+                    </span>
+                    <span className="font-medium text-right">
+                      {debt > 0
+                        ? `${formatToken(principal, 6)} ${symbol}`
+                        : "None"}
+                    </span>
+                  </div>
+                  <div className="flex items-start justify-between gap-3 px-4 py-2.5">
+                    <span className="text-muted-foreground shrink-0">
+                      Accrued
+                    </span>
+                    <span className="font-medium text-right">
+                      {showAccrued
+                        ? `${formatToken(interest, 6)} ${symbol}`
+                        : apyLabel
+                          ? `Accruing at ${apyLabel}`
+                          : "—"}
+                    </span>
+                  </div>
+                  <div className="flex items-start justify-between gap-3 px-4 py-2.5">
+                    <span className="text-muted-foreground shrink-0">
+                      You repay
                     </span>
                     <span className="font-medium text-right">
                       {amountNum > 0
-                        ? `${formatToken(amountNum, 6)} ${symbol}${
-                            quote.amountUsd > 0
-                              ? ` · ${formatUsdAmount(quote.amountUsd)}`
-                              : ""
-                          }`
+                        ? `${formatToken(amountNum, 6)} ${symbol} · ${formatUsdAmount(amountNum)}`
                         : `— ${symbol}`}
                     </span>
                   </div>
                   <div className="flex items-start justify-between gap-3 px-4 py-2.5">
                     <span className="text-muted-foreground shrink-0">
-                      {consumerCopy ? "In savings" : "Your position"}
+                      Remaining debt
                     </span>
                     <span className="font-medium text-right">
-                      {quote.existingDeposit != null &&
-                      quote.existingDeposit > 0
-                        ? `${formatToken(quote.existingDeposit, 6)} ${symbol}`
+                      {debt > 0
+                        ? `${formatToken(Math.max(0, debt - amountNum), 6)} ${symbol}`
                         : "None"}
                     </span>
                   </div>
@@ -425,22 +468,28 @@ const EasySavingsWithdrawModal = ({
                         Market
                       </span>
                       <span className="font-medium text-right">
-                        {route.marketLabel} · {route.asset.symbol}
+                        {position.marketLabel} · {symbol}
                       </span>
                     </div>
                   ) : null}
                 </div>
 
-                {quote.error ? (
-                  <p className="text-xs text-destructive">{quote.error}</p>
+                {walletBalance != null &&
+                walletBalance + 1e-8 < debt &&
+                debt > 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    {consumerCopy
+                      ? `You need ${symbol} available to repay. This does not pull from savings.`
+                      : `You need ${symbol} in your Algorand wallet to repay. This does not pull from savings collateral.`}
+                  </p>
                 ) : null}
 
                 <DorkFiButton
-                  variant="withdraw"
+                  variant="borrow"
                   className="w-full h-12"
                   disabled={ctaDisabled}
                   onClick={() => {
-                    void handleWithdraw();
+                    void handleRepay();
                   }}
                 >
                   {isSubmitting ? (
@@ -461,4 +510,4 @@ const EasySavingsWithdrawModal = ({
   );
 };
 
-export default EasySavingsWithdrawModal;
+export default EasyBorrowRepayModal;

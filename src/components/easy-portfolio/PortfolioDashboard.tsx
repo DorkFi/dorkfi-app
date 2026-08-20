@@ -1,9 +1,27 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
+import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
 import { Info, Loader2 } from "lucide-react";
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
-import { usePortfolioData } from "@/hooks/usePortfolioData";
+import { useNetwork } from "@/contexts/NetworkContext";
+import type { NetworkId } from "@/config";
+import {
+  isAccruedDisplayable,
+  useEasyStartBorrowDebt,
+  type EasyStartBorrowPosition,
+} from "@/hooks/useEasyStartBorrowDebt";
+import { useEasyStartPortfolioTotal } from "@/hooks/useEasyStartPortfolioTotal";
+import { useSavingsAccounts } from "@/hooks/useSavingsAccounts";
+import { useSavingsUserPositions } from "@/hooks/useSavingsUserPositions";
+import { useEasyStartLogin } from "@/hooks/useEasyStartLogin";
+import EasyBorrowRepayModal from "@/components/easy-borrow/EasyBorrowRepayModal";
+import PortfolioActivityTable, {
+  type PortfolioActivityItem,
+} from "@/components/easy-portfolio/PortfolioActivityTable";
+import { useSavingsTransactionHistory } from "@/hooks/useSavingsTransactionHistory";
+import { useBorrowTransactionHistory } from "@/hooks/useBorrowTransactionHistory";
+import { listBorrowRoutes } from "@/services/borrowRouteResolver";
 import {
   getHealthFactorBand,
   getHealthFactorStatusLabel,
@@ -12,6 +30,7 @@ import { formatUsdAmount, cn } from "@/lib/utils";
 import { getTokenImagePath } from "@/utils/tokenImageUtils";
 import { Switch } from "@/components/ui/switch";
 import WalletModal from "@/components/WalletModal";
+import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 
 function formatTokenAmt(n: number | null | undefined, digits = 5): string {
   if (n == null || !Number.isFinite(n) || n === 0) return "—";
@@ -47,6 +66,7 @@ function PositionBars({
   supplied: number;
   borrowed: number;
 }) {
+  const consumerCopy = useConsumerCopy();
   const scale = Math.max(supplied, borrowed, 0.01);
   const suppliedPct = Math.min(100, (supplied / scale) * 100);
   const borrowedPct = Math.min(100, (borrowed / scale) * 100);
@@ -61,7 +81,9 @@ function PositionBars({
 
       <div>
         <div className="mb-2 flex items-center justify-between gap-3">
-          <span className="text-sm text-muted-foreground">Supplied</span>
+          <span className="text-sm text-muted-foreground">
+            {consumerCopy ? "In savings" : "Supplied"}
+          </span>
           <span className="text-sm font-semibold tabular-nums">
             {formatUsd(supplied)}
           </span>
@@ -113,6 +135,7 @@ function HealthGauge({
   referencePrice: number | null;
   referenceSymbol: string | null;
 }) {
+  const consumerCopy = useConsumerCopy();
   const band = getHealthFactorBand(healthFactor);
   const label =
     band === "safe"
@@ -141,7 +164,7 @@ function HealthGauge({
   return (
     <div className="rounded-[24px] border border-border/60 bg-card p-5 sm:p-6 shadow-sm h-full flex flex-col">
       <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight">
-        Health factor
+        {consumerCopy ? "Loan safety" : "Health factor"}
         <Info className="size-3.5 text-muted-foreground" />
       </h2>
 
@@ -172,20 +195,24 @@ function HealthGauge({
             className="text-foreground"
           />
           <circle cx={cx} cy={cy} r="5" className="fill-foreground" />
-          <text
-            x="28"
-            y="130"
-            className="fill-muted-foreground text-[10px]"
-          >
-            1
-          </text>
-          <text
-            x="200"
-            y="130"
-            className="fill-muted-foreground text-[10px]"
-          >
-            4+
-          </text>
+          {!consumerCopy ? (
+            <>
+              <text
+                x="28"
+                y="130"
+                className="fill-muted-foreground text-[10px]"
+              >
+                1
+              </text>
+              <text
+                x="200"
+                y="130"
+                className="fill-muted-foreground text-[10px]"
+              >
+                4+
+              </text>
+            </>
+          ) : null}
         </svg>
 
         <div className="absolute inset-x-0 top-[42%] flex flex-col items-center">
@@ -202,29 +229,36 @@ function HealthGauge({
             {label}
           </span>
           <p className="mt-1 text-3xl font-semibold tabular-nums tracking-tight">
-            {display}
+            {consumerCopy ? null : display}
           </p>
         </div>
       </div>
 
-      <dl className="mt-auto space-y-2 pt-4 text-sm border-t border-border/50">
-        <div className="flex justify-between gap-2">
-          <dt className="text-muted-foreground">Liquidation Price</dt>
-          <dd className="font-medium tabular-nums">
-            {liquidationPrice != null ? formatUsd(liquidationPrice) : "—"}
-          </dd>
-        </div>
-        <div className="flex justify-between gap-2">
-          <dt className="text-muted-foreground">
-            {referenceSymbol
-              ? `Current ${referenceSymbol} Price`
-              : "Reference Price"}
-          </dt>
-          <dd className="font-medium tabular-nums">
-            {referencePrice != null ? formatUsd(referencePrice) : "—"}
-          </dd>
-        </div>
-      </dl>
+      {!consumerCopy ? (
+        <dl className="mt-auto space-y-2 pt-4 text-sm border-t border-border/50">
+          <div className="flex justify-between gap-2">
+            <dt className="text-muted-foreground">Liquidation Price</dt>
+            <dd className="font-medium tabular-nums">
+              {liquidationPrice != null ? formatUsd(liquidationPrice) : "—"}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-2">
+            <dt className="text-muted-foreground">
+              {referenceSymbol
+                ? `Current ${referenceSymbol} Price`
+                : "Reference Price"}
+            </dt>
+            <dd className="font-medium tabular-nums">
+              {referencePrice != null ? formatUsd(referencePrice) : "—"}
+            </dd>
+          </div>
+        </dl>
+      ) : (
+        <p className="mt-auto pt-4 text-xs text-muted-foreground border-t border-border/50">
+          If this drops too far, part of your savings may be used to repay the
+          loan.
+        </p>
+      )}
     </div>
   );
 }
@@ -259,57 +293,138 @@ const WALLET_COLORS = [
  */
 const PortfolioDashboard = () => {
   const { activeAccount } = useDorkFiWalletAdapter();
+  const privy = usePrivyEasyStart();
+  const consumerCopy = useConsumerCopy();
+  const { currentNetwork } = useNetwork();
+  const networkId = currentNetwork as NetworkId;
   const navigate = useNavigate();
   const [walletModalOpen, setWalletModalOpen] = useState(false);
   const [includeSupplied, setIncludeSupplied] = useState(true);
+  const [repayPosition, setRepayPosition] =
+    useState<EasyStartBorrowPosition | null>(null);
+  const openEasyStartLogin = useEasyStartLogin();
+  const address =
+    (privy.algorandAddress ?? activeAccount?.address ?? "").trim() ||
+    undefined;
 
   const {
-    deposits,
-    borrows,
-    totalCollateral,
-    totalBorrowed,
+    totalUsd: borrowUsd,
+    collateralUsd,
     healthFactor,
-    walletBalances,
-    isLoading,
-    isLoadingPositions,
-    error,
-  } = usePortfolioData();
+    positions: borrowPositions,
+    isLoading: debtLoading,
+  } = useEasyStartBorrowDebt();
+  const {
+    algoWalletUsd,
+    isLoading: walletLoading,
+  } = useEasyStartPortfolioTotal();
+  const { all: savingsAccounts } = useSavingsAccounts(networkId);
+  const { positions: savingsPositions, isLoading: savingsLoading } =
+    useSavingsUserPositions(networkId, address, savingsAccounts);
 
-  // Progressive: show shell once markets/global path starts resolving; table may still spin.
-  const shellLoading = isLoading && deposits.length === 0 && borrows.length === 0;
+  const allPoolIds = useMemo(
+    () =>
+      Array.from(
+        new Set(savingsAccounts.map((a) => a.route.poolId).filter(Boolean))
+      ),
+    [savingsAccounts]
+  );
 
-  const supplyRows: SupplyRow[] = useMemo(() => {
-    const byAsset = new Map<string, SupplyRow>();
+  const borrowPoolIds = useMemo(() => {
+    const ids = new Set(allPoolIds);
+    for (const route of listBorrowRoutes(networkId)) {
+      if (route.poolId) ids.add(route.poolId);
+    }
+    return Array.from(ids);
+  }, [allPoolIds, networkId]);
 
-    for (const d of deposits) {
-      const earned = d.interest ?? 0;
-      byAsset.set(d.asset, {
-        key: d.asset,
-        symbol: d.asset,
-        icon: d.icon || getTokenImagePath(d.asset) || "/placeholder.svg",
-        wallet: 0,
-        walletUsd: 0,
-        supplied: d.balance,
-        suppliedUsd: d.value,
-        earned,
-        earnedUsd: earned * (d.tokenPrice || 1),
-        apy: d.apy,
-        asCollateral: true,
+  const { items: savingsTxItems, isLoading: savingsTxLoading } =
+    useSavingsTransactionHistory({
+      networkId,
+      address,
+      allPools: true,
+      poolIds: allPoolIds,
+      enabled: Boolean(address),
+    });
+
+  const {
+    items: borrowTxItems,
+    isLoading: borrowTxLoading,
+    refresh: refreshBorrowTx,
+  } = useBorrowTransactionHistory({
+    networkId,
+    address,
+    allPools: true,
+    poolIds: borrowPoolIds,
+    enabled: Boolean(address),
+  });
+
+  const activityItems = useMemo(() => {
+    const byId = new Map<string, PortfolioActivityItem>();
+    for (const s of savingsTxItems) {
+      byId.set(s.txId, {
+        txId: s.txId,
+        kind: s.kind,
+        amount: s.amount,
+        symbol: s.symbol,
+        timestamp: s.timestamp,
       });
     }
+    for (const b of borrowTxItems) {
+      const prev = byId.get(b.txId);
+      const isRich = b.kind === "borrow" || b.kind === "repay";
+      if (!prev || isRich) {
+        byId.set(b.txId, {
+          txId: b.txId,
+          kind: b.kind,
+          amount: b.amount ?? prev?.amount,
+          symbol: b.symbol ?? prev?.symbol,
+          timestamp: b.timestamp || prev?.timestamp || 0,
+        });
+      }
+    }
+    return Array.from(byId.values()).sort((a, b) => b.timestamp - a.timestamp);
+  }, [savingsTxItems, borrowTxItems]);
 
-    for (const [symbol, bal] of Object.entries(walletBalances)) {
-      const existing = byAsset.get(symbol);
-      if (existing) {
-        existing.wallet = bal.balance;
-        existing.walletUsd = bal.balanceUSD;
-      } else if (bal.balance > 0 || bal.balanceUSD > 0) {
-        byAsset.set(symbol, {
-          key: symbol,
-          symbol,
-          icon: getTokenImagePath(symbol) || "/placeholder.svg",
-          wallet: bal.balance,
-          walletUsd: bal.balanceUSD,
+  const fundedSavings = useMemo(
+    () => savingsPositions.filter((p) => p.deposit > 1e-8),
+    [savingsPositions]
+  );
+
+  const supplyRows: SupplyRow[] = useMemo(() => {
+    const rows: SupplyRow[] = fundedSavings.map((p) => {
+      const wallet = p.walletBalance ?? 0;
+      const price = p.price ?? 1;
+      return {
+        key: `${p.route.poolId}:${p.route.asset.configKey}`,
+        symbol: p.label,
+        icon:
+          p.route.asset.logoPath ||
+          getTokenImagePath(p.route.asset.symbol) ||
+          "/placeholder.svg",
+        wallet,
+        walletUsd: wallet > 0 ? wallet * price : 0,
+        supplied: p.deposit,
+        suppliedUsd: p.depositUsd,
+        earned: p.interest,
+        earnedUsd: p.interestUsd,
+        apy: p.apy,
+        asCollateral: true,
+      };
+    });
+
+    const usdcWallet = algoWalletUsd ?? 0;
+    if (usdcWallet > 0.005) {
+      const hasUsdcSupply = rows.some((r) =>
+        r.symbol.toUpperCase().includes("USDC")
+      );
+      if (!hasUsdcSupply) {
+        rows.unshift({
+          key: "wallet-usdc",
+          symbol: "USDC",
+          icon: getTokenImagePath("USDC") || "/placeholder.svg",
+          wallet: usdcWallet,
+          walletUsd: usdcWallet,
           supplied: 0,
           suppliedUsd: 0,
           earned: 0,
@@ -317,55 +432,108 @@ const PortfolioDashboard = () => {
           apy: null,
           asCollateral: false,
         });
+      } else {
+        const usdcRow = rows.find((r) =>
+          r.symbol.toUpperCase().includes("USDC")
+        );
+        if (usdcRow && usdcRow.wallet <= 0) {
+          usdcRow.wallet = usdcWallet;
+          usdcRow.walletUsd = usdcWallet;
+        }
       }
     }
 
-    return [...byAsset.values()].sort((a, b) => {
+    return rows.sort((a, b) => {
       if (b.suppliedUsd !== a.suppliedUsd) return b.suppliedUsd - a.suppliedUsd;
       return b.walletUsd - a.walletUsd;
     });
-  }, [deposits, walletBalances]);
+  }, [fundedSavings, algoWalletUsd]);
 
-  const primaryCollateral = deposits[0] ?? null;
+  const borrows = useMemo(
+    () =>
+      borrowPositions.map((p) => {
+        const tokenPrice =
+          borrowPositions.length === 1 && p.amount > 0
+            ? borrowUsd / p.amount
+            : 1;
+        return {
+          id: p.id,
+          asset: p.symbol,
+          icon: p.logoPath || getTokenImagePath(p.symbol) || "/placeholder.svg",
+          balance: p.amount,
+          value: p.amount * tokenPrice,
+          tokenPrice,
+          interest: p.interest,
+          apyPercent: p.apyPercent,
+          position: p,
+        };
+      }),
+    [borrowPositions, borrowUsd]
+  );
+
+  const totalCollateral =
+    collateralUsd > 0
+      ? collateralUsd
+      : fundedSavings.reduce((s, p) => s + p.depositUsd, 0);
+  const totalBorrowed = borrowUsd > 0 ? borrowUsd : borrows.reduce((s, b) => s + b.value, 0);
+
+  const primaryCollateral = fundedSavings[0] ?? null;
   const liquidationPrice =
     primaryCollateral &&
     totalBorrowed > 0 &&
-    primaryCollateral.balance > 0
-      ? totalBorrowed / (primaryCollateral.balance * 0.85)
+    primaryCollateral.deposit > 0
+      ? totalBorrowed / (primaryCollateral.deposit * 0.85)
       : null;
 
   const walletSegments = useMemo(() => {
     const segments: Array<{ name: string; value: number }> = [];
-    for (const [symbol, bal] of Object.entries(walletBalances)) {
-      if (bal.balanceUSD > 0.005) {
-        segments.push({ name: symbol, value: bal.balanceUSD });
-      }
+    if ((algoWalletUsd ?? 0) > 0.005) {
+      segments.push({ name: "USDC", value: algoWalletUsd ?? 0 });
     }
     if (includeSupplied) {
-      for (const d of deposits) {
-        if (d.value > 0.005) {
-          segments.push({ name: `${d.asset} (supplied)`, value: d.value });
+      for (const p of fundedSavings) {
+        if (p.depositUsd > 0.005) {
+          segments.push({
+            name: consumerCopy
+              ? `${p.label} (in savings)`
+              : `${p.label} (supplied)`,
+            value: p.depositUsd,
+          });
         }
       }
     }
     return segments.sort((a, b) => b.value - a.value);
-  }, [walletBalances, deposits, includeSupplied]);
+  }, [algoWalletUsd, fundedSavings, includeSupplied, consumerCopy]);
 
   const walletTotal = walletSegments.reduce((s, x) => s + x.value, 0);
+  const shellLoading =
+    (debtLoading || savingsLoading || walletLoading) &&
+    supplyRows.length === 0 &&
+    borrows.length === 0 &&
+    totalCollateral <= 0 &&
+    totalBorrowed <= 0;
 
-  if (!activeAccount) {
+  if (!activeAccount && !privy.authenticated) {
     return (
       <section className="w-full max-w-3xl mx-auto rounded-[28px] border border-border/60 bg-card p-8 text-center shadow-sm space-y-4">
         <h1 className="text-2xl font-semibold tracking-tight">Portfolio</h1>
         <p className="text-muted-foreground text-sm">
-          Connect your wallet to see supplies, borrows, and health.
+          {consumerCopy
+            ? "Sign in to see your savings, loans, and safety."
+            : "Connect your wallet to see supplies, borrows, and health."}
         </p>
         <button
           type="button"
-          onClick={() => setWalletModalOpen(true)}
+          onClick={() => {
+            if (consumerCopy) {
+              void openEasyStartLogin();
+              return;
+            }
+            setWalletModalOpen(true);
+          }}
           className="inline-flex h-11 items-center justify-center rounded-xl bg-ocean-teal px-6 text-sm font-semibold text-white hover:bg-ocean-teal/90"
         >
-          Connect Wallet
+          {consumerCopy ? "Get Started" : "Connect Wallet"}
         </button>
         <WalletModal
           isOpen={walletModalOpen}
@@ -377,9 +545,6 @@ const PortfolioDashboard = () => {
 
   return (
     <section className="w-full max-w-6xl mx-auto space-y-4">
-      {error ? (
-        <p className="text-sm text-destructive text-center">{error}</p>
-      ) : null}
       {shellLoading ? (
         <p className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="size-4 animate-spin" />
@@ -392,16 +557,18 @@ const PortfolioDashboard = () => {
         <HealthGauge
           healthFactor={healthFactor}
           liquidationPrice={liquidationPrice}
-          referencePrice={primaryCollateral?.tokenPrice ?? null}
-          referenceSymbol={primaryCollateral?.asset ?? null}
+          referencePrice={primaryCollateral?.price ?? null}
+          referenceSymbol={primaryCollateral?.route.asset.symbol ?? null}
         />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(260px,1fr)]">
         {/* Supply table */}
         <div className="rounded-[24px] border border-border/60 bg-card p-5 sm:p-6 shadow-sm overflow-x-auto">
-          <h2 className="text-lg font-semibold tracking-tight mb-4">Supply</h2>
-          {isLoadingPositions && supplyRows.length === 0 ? (
+          <h2 className="text-lg font-semibold tracking-tight mb-4">
+            {consumerCopy ? "Savings" : "Supply"}
+          </h2>
+          {savingsLoading && supplyRows.length === 0 ? (
             <p className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />
               Loading supplies…
@@ -411,14 +578,21 @@ const PortfolioDashboard = () => {
             <thead>
               <tr className="text-left text-muted-foreground border-b border-border/50">
                 <th className="pb-3 font-medium">Assets</th>
-                <th className="pb-3 font-medium">In Wallet</th>
-                <th className="pb-3 font-medium">Your supply</th>
+                <th className="pb-3 font-medium">
+                  {consumerCopy ? "Available" : "In Wallet"}
+                </th>
+                <th className="pb-3 font-medium">
+                  {consumerCopy ? "Earning" : "Your supply"}
+                </th>
+                <th className="pb-3 font-medium">Earned</th>
                 <th className="pb-3 font-medium">
                   <span className="inline-flex items-center gap-1">
                     APY <Info className="size-3" />
                   </span>
                 </th>
-                <th className="pb-3 font-medium">Collateral</th>
+                <th className="pb-3 font-medium">
+                  {consumerCopy ? "" : "Collateral"}
+                </th>
                 <th className="pb-3 font-medium text-right"> </th>
               </tr>
             </thead>
@@ -426,10 +600,13 @@ const PortfolioDashboard = () => {
               {supplyRows.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={6}
+                    colSpan={7}
                     className="py-8 text-center text-muted-foreground"
                   >
-                    No balances yet. Supply assets from Savings to get started.
+                    No balances yet.{" "}
+                    {consumerCopy
+                      ? "Deposit from Savings to get started."
+                      : "Supply assets from Savings to get started."}
                   </td>
                 </tr>
               ) : (
@@ -461,13 +638,19 @@ const PortfolioDashboard = () => {
                           <div className="text-xs text-muted-foreground">
                             {formatUsd(row.suppliedUsd)}
                           </div>
-                          {row.earned > 0 ? (
-                            <div className="text-xs text-ocean-teal mt-0.5">
-                              Earned {formatTokenAmt(row.earned)} ·{" "}
-                              {formatUsd(row.earnedUsd)}
-                            </div>
-                          ) : null}
                         </>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td className="py-3.5 tabular-nums">
+                      {row.earned > 0 ? (
+                        <div className="text-ocean-teal">
+                          <div>{formatTokenAmt(row.earned)}</div>
+                          <div className="text-xs">
+                            {formatUsd(row.earnedUsd)}
+                          </div>
+                        </div>
                       ) : (
                         "—"
                       )}
@@ -478,11 +661,13 @@ const PortfolioDashboard = () => {
                         : "—"}
                     </td>
                     <td className="py-3.5">
-                      <Switch
-                        checked={row.asCollateral}
-                        disabled
-                        aria-label={`${row.symbol} as collateral`}
-                      />
+                      {!consumerCopy ? (
+                        <Switch
+                          checked={row.asCollateral}
+                          disabled
+                          aria-label={`${row.symbol} as collateral`}
+                        />
+                      ) : null}
                     </td>
                     <td className="py-3.5 text-right">
                       <div className="inline-flex gap-2">
@@ -491,7 +676,7 @@ const PortfolioDashboard = () => {
                           onClick={() => navigate("/savings")}
                           className="rounded-lg bg-muted px-3 py-1.5 text-xs font-semibold hover:bg-muted/80"
                         >
-                          Supply
+                          {consumerCopy ? "Deposit" : "Supply"}
                         </button>
                         <button
                           type="button"
@@ -512,41 +697,86 @@ const PortfolioDashboard = () => {
 
           {borrows.length > 0 ? (
             <div className="mt-6 pt-4 border-t border-border/50">
-              <h3 className="text-sm font-semibold mb-3">Borrows</h3>
-              <ul className="space-y-2 text-sm">
-                {borrows.map((b) => (
-                  <li
-                    key={`borrow-${b.asset}`}
-                    className="flex items-center justify-between gap-3"
-                  >
-                    <span className="flex items-center gap-2 font-medium">
-                      <img
-                        src={
-                          b.icon ||
-                          getTokenImagePath(b.asset) ||
-                          "/placeholder.svg"
-                        }
-                        alt=""
-                        className="size-6 rounded-full"
-                      />
-                      {b.asset}
-                    </span>
-                    <span className="tabular-nums text-right text-muted-foreground">
-                      <div>
-                        {formatTokenAmt(b.balance)} · {formatUsd(b.value)}
-                      </div>
-                      {(b.interest ?? 0) > 0 ? (
-                        <div className="text-xs">
-                          Accrued {formatTokenAmt(b.interest)} ·{" "}
-                          {formatUsd(
-                            (b.interest ?? 0) * (b.tokenPrice || 1)
+              <h2 className="text-lg font-semibold tracking-tight mb-4">
+                Borrows
+              </h2>
+              <table className="w-full text-sm min-w-[640px]">
+                <thead>
+                  <tr className="text-left text-muted-foreground border-b border-border/50">
+                    <th className="pb-3 font-medium">Assets</th>
+                    <th className="pb-3 font-medium">Borrowed</th>
+                    <th className="pb-3 font-medium">Accrued</th>
+                    <th className="pb-3 font-medium">
+                      <span className="inline-flex items-center gap-1">
+                        APY <Info className="size-3" />
+                      </span>
+                    </th>
+                    <th className="pb-3 font-medium text-right"> </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {borrows.map((b) => {
+                    const accruedUsd = b.interest * (b.tokenPrice || 1);
+                    return (
+                      <tr
+                        key={`borrow-${b.id}`}
+                        className="border-b border-border/40 last:border-0"
+                      >
+                        <td className="py-3.5">
+                          <span className="flex items-center gap-2 font-medium">
+                            <img
+                              src={
+                                b.icon ||
+                                getTokenImagePath(b.asset) ||
+                                "/placeholder.svg"
+                              }
+                              alt=""
+                              className="size-7 rounded-full"
+                            />
+                            {b.asset}
+                          </span>
+                        </td>
+                        <td className="py-3.5 tabular-nums">
+                          <div>{formatTokenAmt(b.balance)}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {b.value > 0 ? formatUsd(b.value) : "—"}
+                          </div>
+                        </td>
+                        <td className="py-3.5 tabular-nums">
+                          {isAccruedDisplayable(b.interest) ? (
+                            <>
+                              <div>{formatTokenAmt(b.interest, 6)}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {accruedUsd >= 0.01
+                                  ? formatUsd(accruedUsd)
+                                  : "—"}
+                              </div>
+                            </>
+                          ) : (
+                            "—"
                           )}
-                        </div>
-                      ) : null}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+                        </td>
+                        <td className="py-3.5 tabular-nums">
+                          {b.apyPercent != null &&
+                          Number.isFinite(b.apyPercent) &&
+                          b.apyPercent > 0
+                            ? `${b.apyPercent.toFixed(2)}%`
+                            : "—"}
+                        </td>
+                        <td className="py-3.5 text-right">
+                          <button
+                            type="button"
+                            onClick={() => setRepayPosition(b.position)}
+                            className="rounded-lg bg-ocean-teal px-3 py-1.5 text-xs font-semibold text-white hover:bg-ocean-teal/90"
+                          >
+                            Repay
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           ) : null}
         </div>
@@ -554,9 +784,11 @@ const PortfolioDashboard = () => {
         {/* My Wallet */}
         <div className="rounded-[24px] border border-border/60 bg-card p-5 sm:p-6 shadow-sm">
           <div className="flex items-center justify-between gap-3 mb-2">
-            <h2 className="text-lg font-semibold tracking-tight">My Wallet</h2>
+            <h2 className="text-lg font-semibold tracking-tight">
+              {consumerCopy ? "Available cash" : "My Wallet"}
+            </h2>
             <label className="flex items-center gap-2 text-xs text-muted-foreground">
-              Include supplied
+              {consumerCopy ? "Include savings" : "Include supplied"}
               <Switch
                 checked={includeSupplied}
                 onCheckedChange={setIncludeSupplied}
@@ -588,7 +820,7 @@ const PortfolioDashboard = () => {
               </ResponsiveContainer>
             ) : (
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                No wallet assets
+                {consumerCopy ? "Nothing available yet" : "No wallet assets"}
               </div>
             )}
             {walletTotal > 0 ? (
@@ -628,6 +860,25 @@ const PortfolioDashboard = () => {
           ) : null}
         </div>
       </div>
+
+      <PortfolioActivityTable
+        networkId={networkId}
+        items={activityItems}
+        isLoading={savingsTxLoading || borrowTxLoading}
+      />
+
+      <EasyBorrowRepayModal
+        isOpen={repayPosition != null}
+        onClose={() => {
+          setRepayPosition(null);
+          void refreshBorrowTx();
+        }}
+        position={repayPosition}
+        networkId={networkId}
+        onConnectWallet={() => {
+          void openEasyStartLogin();
+        }}
+      />
     </section>
   );
 };

@@ -88,6 +88,12 @@ export function savingsAccountDisplayLabel(route: SavingsRoute): string {
   }
 }
 
+/** SimplFi: show the USDC ticker as USD. */
+export function consumerAssetDisplayLabel(label: string): string {
+  if (label === "USDC" || label === "fUSDC") return "USD";
+  return label.replace(/\bUSDC\b/g, "USD");
+}
+
 export type ListSavingsRoutesOptions = {
   /**
    * Defaults to core keys, plus high-yield when
