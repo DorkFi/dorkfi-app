@@ -1,6 +1,8 @@
 import { formatUsdAmount } from "@/lib/utils";
 import type { EasySavingsQuote } from "@/hooks/useEasySavingsQuote";
 import type { SavingsRoute } from "@/types/easySavings";
+import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
+import { consumerAssetDisplayLabel } from "@/services/savingsRouteResolver";
 
 type SavingsSummaryProps = {
   route: SavingsRoute;
@@ -15,43 +17,51 @@ function formatAmt(n: string, symbol: string): string {
 }
 
 const SavingsSummary = ({ route, amount, quote }: SavingsSummaryProps) => {
+  const consumerCopy = useConsumerCopy();
+  const symbol = consumerCopy
+    ? consumerAssetDisplayLabel(route.asset.symbol)
+    : route.asset.symbol;
   const rows: Array<{ label: string; value: string }> = [
     {
-      label: "You supply",
-      value: `${formatAmt(amount, route.asset.symbol)} · ${
+      label: consumerCopy ? "You deposit" : "You supply",
+      value: `${formatAmt(amount, symbol)} · ${
         quote.amountUsd > 0 ? formatUsdAmount(quote.amountUsd) : "—"
       }`,
     },
     {
-      label: "Supply APY",
+      label: consumerCopy ? "APY" : "Supply APY",
       value:
         quote.supplyApyPercent != null
           ? `${quote.supplyApyPercent.toFixed(2)}%`
           : "—",
     },
     {
-      label: "Your position",
+      label: consumerCopy ? "Already in savings" : "Your position",
       value:
         quote.existingDeposit != null && quote.existingDeposit > 0
           ? `${quote.existingDeposit.toLocaleString(undefined, {
               maximumFractionDigits: 6,
-            })} ${route.asset.symbol} · ${formatUsdAmount(quote.existingDepositUsd)}`
+            })} ${symbol} · ${formatUsdAmount(quote.existingDepositUsd)}`
           : "None yet",
     },
-    {
-      label: "Market",
-      value: `${route.marketLabel} · ${route.asset.symbol}`,
-    },
-    {
-      label: "Remaining supply cap",
-      value:
-        quote.remainingSupplyCap != null
-          ? `${quote.remainingSupplyCap.toLocaleString(undefined, {
-              maximumFractionDigits: 2,
-            })} ${route.asset.symbol}`
-          : "—",
-    },
   ];
+  if (!consumerCopy) {
+    rows.push(
+      {
+        label: "Market",
+        value: `${route.marketLabel} · ${route.asset.symbol}`,
+      },
+      {
+        label: "Remaining supply cap",
+        value:
+          quote.remainingSupplyCap != null
+            ? `${quote.remainingSupplyCap.toLocaleString(undefined, {
+                maximumFractionDigits: 2,
+              })} ${route.asset.symbol}`
+            : "—",
+      }
+    );
+  }
 
   return (
     <div className="rounded-2xl border border-border/60 divide-y divide-border/50 text-sm">

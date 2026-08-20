@@ -22,15 +22,17 @@ export type RecordSavingsTxInput = {
  * Savings deposit/withdraw history: local records + optional indexer rows.
  * Uses useEffect (not useQuery) for simpler refresh / HMR behavior.
  *
- * When `poolId` is omitted/null, loads all local history for the address
- * (used for portfolio chart). Chain indexer fetch still requires a pool id.
+ * When `allPools` is true, loads local history for the address and, if
+ * `poolIds` are provided, merges chain indexer rows for each pool.
  */
 export function useSavingsTransactionHistory(params: {
   networkId: NetworkId;
   address?: string | null;
   poolId?: string | null;
-  /** Load local history across all pools (portfolio). Implies no chain fetch. */
+  /** Load history across all pools (portfolio). */
   allPools?: boolean;
+  /** Pool ids to fetch from the indexer when `allPools` is true. */
+  poolIds?: readonly string[];
   enabled?: boolean;
 }) {
   const {
@@ -38,8 +40,14 @@ export function useSavingsTransactionHistory(params: {
     address,
     poolId,
     allPools = false,
+    poolIds,
     enabled = true,
   } = params;
+  const poolIdsKey = (poolIds ?? [])
+    .filter(Boolean)
+    .slice()
+    .sort()
+    .join(",");
   const canQuery = Boolean(
     enabled && address && (allPools || poolId)
   );
@@ -65,9 +73,27 @@ export function useSavingsTransactionHistory(params: {
       });
       // Local first for snappy paint.
       setItems(local);
-      if (allPools || !poolId) {
+      if (allPools) {
+        const ids = poolIdsKey ? poolIdsKey.split(",") : [];
+        if (ids.length === 0) return;
+        const chainLists = await Promise.all(
+          ids.map(async (id) => {
+            try {
+              return await fetchPoolSavingsTxns({
+                networkId,
+                address,
+                poolId: id,
+                limit: 25,
+              });
+            } catch {
+              return [] as SavingsTxRecord[];
+            }
+          })
+        );
+        setItems(mergeSavingsTxHistory(local, chainLists.flat()));
         return;
       }
+      if (!poolId) return;
       let chain: SavingsTxRecord[] = [];
       try {
         chain = await fetchPoolSavingsTxns({
@@ -83,7 +109,7 @@ export function useSavingsTransactionHistory(params: {
     } finally {
       setIsLoading(false);
     }
-  }, [address, networkId, poolId, allPools]);
+  }, [address, networkId, poolId, allPools, poolIdsKey]);
 
   useEffect(() => {
     if (!canQuery) {

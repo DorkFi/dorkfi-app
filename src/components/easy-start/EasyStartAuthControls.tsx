@@ -21,6 +21,7 @@ import { useEasyStartModals } from "@/contexts/easyStartModals";
 import { useEasyStartLogin } from "@/hooks/useEasyStartLogin";
 import { useEasyStartUserProfile } from "@/hooks/useEasyStartUserProfile";
 import { useEasyStartPortfolioTotal } from "@/hooks/useEasyStartPortfolioTotal";
+import { useEasyStartBorrowDebt } from "@/hooks/useEasyStartBorrowDebt";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import { AppSettingsMenuSection } from "@/components/AppSettingsMenuSection";
 
@@ -50,11 +51,18 @@ export function EasyStartConnectMenu() {
   const navigate = useNavigate();
   const { displayName, avatar } = useEasyStartUserProfile();
   const {
-    totalUsd,
+    totalUsd: assetUsd,
     isLoading: balancesLoading,
     isUnavailable: balancesUnavailable,
     hasAny: hasAnyBalance,
   } = useEasyStartPortfolioTotal();
+  const {
+    totalUsd: borrowUsd,
+    hasDebt,
+    isLoading: debtLoading,
+  } = useEasyStartBorrowDebt();
+  const netUsd = assetUsd - borrowUsd;
+  const showTotals = hasAnyBalance || hasDebt;
 
   return (
     <DropdownMenu>
@@ -87,25 +95,34 @@ export function EasyStartConnectMenu() {
           </p>
 
           <div className="pt-1.5">
-            {balancesLoading && !hasAnyBalance ? (
+            {balancesLoading && !showTotals ? (
               <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 Loading balance…
               </p>
-            ) : balancesUnavailable ? (
+            ) : balancesUnavailable && !hasDebt ? (
               <p className="text-sm text-muted-foreground">Balance unavailable</p>
             ) : (
               <>
                 <p className="text-xl font-bold tabular-nums text-foreground leading-tight">
-                  {formatCurrency(totalUsd, "USD", {
+                  {formatCurrency(netUsd, "USD", {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })}
-                  {balancesLoading ? "…" : ""}
+                  {balancesLoading || debtLoading ? "…" : ""}
                 </p>
                 <p className="text-[11px] text-muted-foreground">
-                  Total balance
+                  {hasDebt ? "Net balance" : "Total balance"}
                 </p>
+                {borrowUsd > 0.01 ? (
+                  <p className="text-[11px] text-muted-foreground">
+                    {formatCurrency(borrowUsd, "USD", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}{" "}
+                    borrowed
+                  </p>
+                ) : null}
               </>
             )}
           </div>

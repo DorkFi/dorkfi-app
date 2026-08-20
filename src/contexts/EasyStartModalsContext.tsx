@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
+import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 import {
   EasyStartModalsContext,
   type EasyStartModalsContextValue,
@@ -76,6 +77,7 @@ function EasyStartSheetFallback({
  */
 export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
   const privy = usePrivyEasyStart();
+  const consumerCopy = useConsumerCopy();
   const [depositOpen, setDepositOpen] = useState(false);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [bridgeOpen, setBridgeOpen] = useState(false);
@@ -119,7 +121,9 @@ export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
               <EasyStartDepositSheet
                 open={depositOpen}
                 onOpenChange={setDepositOpen}
-                onOpenAdvancedBridge={openAdvancedBridge}
+                onOpenAdvancedBridge={
+                  consumerCopy ? undefined : openAdvancedBridge
+                }
               />
             </Suspense>
           ) : null}
@@ -136,11 +140,13 @@ export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
               <EasyStartWithdrawSheet
                 open={withdrawOpen}
                 onOpenChange={setWithdrawOpen}
-                onOpenAdvancedBridge={openAdvancedBridge}
+                onOpenAdvancedBridge={
+                  consumerCopy ? undefined : openAdvancedBridge
+                }
               />
             </Suspense>
           ) : null}
-          {bridgeOpen ? (
+          {bridgeOpen && !consumerCopy ? (
             <Suspense
               fallback={
                 <EasyStartSheetFallback

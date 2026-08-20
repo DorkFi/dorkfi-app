@@ -98,23 +98,29 @@ export function safeMaxBorrowTokens(args: {
 
 /**
  * Available liquidity for the borrow market (deposits − borrows), human tokens.
+ * Returns `null` when cash liquidity is skipped and no borrow cap applies
+ * (WAD mint / sToken — same as MintModal treating supply as unlimited).
  */
 export function availableBorrowLiquidityTokens(args: {
   totalDeposits: number;
   totalBorrows: number;
   borrowCap?: number | null;
-}): number {
-  const liquidity = Math.max(
-    0,
-    (Number.isFinite(args.totalDeposits) ? args.totalDeposits : 0) -
-      (Number.isFinite(args.totalBorrows) ? args.totalBorrows : 0)
-  );
-  if (args.borrowCap != null && args.borrowCap > 0) {
-    const remainingCap = Math.max(
-      0,
-      args.borrowCap -
-        (Number.isFinite(args.totalBorrows) ? args.totalBorrows : 0)
-    );
+  /** Skip deposits−borrows; mint markets have no idle cash to draw. */
+  skipCashLiquidity?: boolean;
+}): number | null {
+  const deposits = Number.isFinite(args.totalDeposits) ? args.totalDeposits : 0;
+  const borrows = Number.isFinite(args.totalBorrows) ? args.totalBorrows : 0;
+  const remainingCap =
+    args.borrowCap != null && args.borrowCap > 0
+      ? Math.max(0, args.borrowCap - borrows)
+      : null;
+
+  if (args.skipCashLiquidity) {
+    return remainingCap;
+  }
+
+  const liquidity = Math.max(0, deposits - borrows);
+  if (remainingCap != null) {
     return Math.min(liquidity, remainingCap);
   }
   return liquidity;

@@ -30,9 +30,10 @@ import {
 import { useNetwork } from "@/contexts/NetworkContext";
 import { getNetworkLogoPath } from "@/utils/tokenImageUtils";
 import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
-import { EasyStartConnectMenu } from "@/components/easy-start/EasyStartAuthControls";
+import { EasyStartConnectMenu, EasyStartButton } from "@/components/easy-start/EasyStartAuthControls";
 import { useEasyStartLogin } from "@/hooks/useEasyStartLogin";
 import { AppSettingsMenuSection } from "@/components/AppSettingsMenuSection";
+import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 
 interface WalletNetworkButtonProps {
   currentNetwork?: NetworkId;
@@ -64,6 +65,7 @@ const WalletNetworkButton = ({
   const showEasyStartEntry =
     privyEasyStart.enabled && privyEasyStart.configured;
   const openEasyStartLogin = useEasyStartLogin();
+  const consumerCopy = useConsumerCopy();
 
   const handlePrivyEmailLogin = () => {
     void openEasyStartLogin();
@@ -305,7 +307,7 @@ const WalletNetworkButton = ({
   const isOnline = true; // You can implement actual network status checking here
   const enabledNetworks = getEnabledNetworks();
   const supportedNetworks = getSupportedNetworks();
-  const showNetworkSection = supportedNetworks.length > 1;
+  const showNetworkSection = supportedNetworks.length > 1 && !consumerCopy;
 
   if (
     !activeAccount &&
@@ -313,6 +315,10 @@ const WalletNetworkButton = ({
     privyEasyStart.authenticated
   ) {
     return <EasyStartConnectMenu />;
+  }
+
+  if (consumerCopy && showEasyStartEntry && !activeAccount) {
+    return <EasyStartButton />;
   }
 
   if (activeAccount) {
@@ -354,7 +360,7 @@ const WalletNetworkButton = ({
               ) : (
                 <Copy className="w-4 h-4 mr-2" />
               )}
-              {copied ? "Copied!" : "Copy Address"}
+              {copied ? "Copied!" : consumerCopy ? "Copy address" : "Copy Address"}
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={handleDisconnect}

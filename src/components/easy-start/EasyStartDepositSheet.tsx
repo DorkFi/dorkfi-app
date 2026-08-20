@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
+import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import {
@@ -91,6 +92,7 @@ export function EasyStartDepositSheet({
   const { fundWallet } = useFundWallet();
   const { fund: fundFiatOnramp } = useFiatOnramp();
   const { evmAddress, algorandAddress } = usePrivyEasyStart();
+  const consumerCopy = useConsumerCopy();
   const { toast } = useToast();
 
   const [amount, setAmount] = useState("100");
@@ -155,7 +157,7 @@ export function EasyStartDepositSheet({
       onOpenChange(true);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
-      setError(message || "Couldn’t check network fees");
+      setError(message || "Couldn’t check processing fees");
       setPhase("error");
       onOpenChange(true);
     }
@@ -252,7 +254,11 @@ export function EasyStartDepositSheet({
         ? Math.min(requested, Number.isFinite(bal) && bal > 0 ? bal : requested)
         : bal;
     if (!toBridge || toBridge <= 0) {
-      setError("No USDC on Base to move yet. Deposit with a card first.");
+      setError(
+        consumerCopy
+          ? "No funds to move yet. Deposit with a card first."
+          : "No USDC on Base to move yet. Deposit with a card first."
+      );
       setPhase("error");
       return;
     }
@@ -329,16 +335,22 @@ export function EasyStartDepositSheet({
                 </div>
                 <DialogDescription className="text-center text-sm text-slate-600 dark:text-slate-400">
                   {phase === "idle"
-                    ? "Choose MoonPay, Coinbase, or Stripe, then pay with card. We’ll move your USDC to Algorand automatically."
+                    ? consumerCopy
+                      ? "Pay with a card. We’ll add the funds to your account automatically."
+                      : "Choose MoonPay, Coinbase, or Stripe, then pay with card. We’ll move your USDC to Algorand automatically."
                     : phase === "gas"
-                      ? "One quick step: add a little ETH for network fees, then we finish the deposit."
+                      ? consumerCopy
+                        ? "One quick step: a small processing fee, then we finish the deposit."
+                        : "One quick step: add a little ETH for network fees, then we finish the deposit."
                       : phase === "bridging"
                         ? bridgePhaseLabel(bridgePhase)
                         : phase === "success"
-                          ? "Your funds are ready on Algorand."
+                          ? consumerCopy
+                            ? "Your funds are ready."
+                            : "Your funds are ready on Algorand."
                           : phase === "error"
                             ? isXoGeoRestricted(error)
-                              ? "This swap provider isn’t available in your region."
+                              ? "This payment provider isn’t available in your region."
                               : "Something went wrong — you can retry."
                             : "Working on your deposit…"}
                 </DialogDescription>
@@ -353,11 +365,13 @@ export function EasyStartDepositSheet({
                     Deposit complete
                   </p>
                   <p className="text-sm text-slate-600 dark:text-slate-400">
-                    USDC is in your Algorand account
-                    {algorandAddress
-                      ? ` (${algorandAddress.slice(0, 6)}…${algorandAddress.slice(-4)})`
-                      : ""}
-                    . You can supply to DorkFi markets next.
+                    {consumerCopy
+                      ? "Your deposit is in your account. You can add it to savings next."
+                      : `USDC is in your Algorand account${
+                          algorandAddress
+                            ? ` (${algorandAddress.slice(0, 6)}…${algorandAddress.slice(-4)})`
+                            : ""
+                        }. You can supply to DorkFi markets next.`}
                   </p>
                   <Button
                     className="w-full bg-ocean-teal hover:bg-ocean-teal/90 text-white"
@@ -383,8 +397,11 @@ export function EasyStartDepositSheet({
               ) : phase === "gas" ? (
                 <div className="space-y-4 py-2">
                   <p className="text-sm text-slate-600 dark:text-slate-400 text-center">
-                    Bridging needs a tiny bit of ETH on Base for gas (separate
-                    from your USDC). About ${GAS_TOPUP_USD} is enough.
+                    {consumerCopy
+                      ? `Deposits need a small processing fee (about $${GAS_TOPUP_USD}), separate from the amount you deposited.`
+                      : "Bridging needs a tiny bit of ETH on Base for gas (separate from your USDC). About $" +
+                        GAS_TOPUP_USD +
+                        " is enough."}
                   </p>
                   <EasyStartCardProviderPicker
                     value={
@@ -406,7 +423,7 @@ export function EasyStartDepositSheet({
                     onClick={() => void handleFundGas()}
                   >
                     <CreditCard className="mr-2 h-4 w-4" />
-                    Add network fee
+                    Add processing fee
                   </Button>
                   <Button
                     variant="ghost"
@@ -415,7 +432,9 @@ export function EasyStartDepositSheet({
                       void ensureGasThenBridge(bridgeAmount ?? amount)
                     }
                   >
-                    I already added ETH — continue
+                    {consumerCopy
+                      ? "I already paid the fee — continue"
+                      : "I already added ETH — continue"}
                   </Button>
                 </div>
               ) : phase === "error" ? (
@@ -493,7 +512,7 @@ export function EasyStartDepositSheet({
                         onChange={(e) => setSkipFiat(e.target.checked)}
                       />
                       <span>
-                        Use existing Base USDC (
+                        Use funds already in your account (
                         {baseUsdcNum.toLocaleString(undefined, {
                           maximumFractionDigits: 2,
                         })}
@@ -514,7 +533,7 @@ export function EasyStartDepositSheet({
 
                   {!address ? (
                     <p className="text-sm text-amber-600 dark:text-amber-400">
-                      Waiting for your Easy Start wallet…
+                      Waiting for your account…
                     </p>
                   ) : null}
 
@@ -575,7 +594,9 @@ export function EasyStartDepositSheet({
               onOpenChange(true);
               toast({
                 title: "Deposit complete",
-                description: "USDC is ready on your Algorand account.",
+                description: consumerCopy
+                  ? "Your deposit is ready."
+                  : "USDC is ready on your Algorand account.",
               });
             }}
           />

@@ -3,6 +3,8 @@ import { Check, ChevronDown, Search } from "lucide-react";
 import { getTokenImagePath } from "@/utils/tokenImageUtils";
 import { formatUsdAmount } from "@/lib/utils";
 import { cn } from "@/lib/utils";
+import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
+import { consumerAssetDisplayLabel } from "@/services/savingsRouteResolver";
 
 export type AssetSelectorOption = {
   configKey: string;
@@ -54,8 +56,11 @@ const AssetSelector = ({
   headerAction,
   card = false,
 }: AssetSelectorProps) => {
+  const consumerCopy = useConsumerCopy();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const displaySymbol = (symbol: string) =>
+    consumerCopy ? consumerAssetDisplayLabel(symbol) : symbol;
 
   const selected = options.find((o) => o.configKey === value) ?? options[0];
 
@@ -121,7 +126,9 @@ const AssetSelector = ({
                   className="size-6 rounded-full"
                 />
               ) : null}
-              <span>{selected?.symbol ?? "Select"}</span>
+              <span>
+                {selected ? displaySymbol(selected.symbol) : "Select"}
+              </span>
               <ChevronDown className="size-4 text-muted-foreground" />
             </button>
 
@@ -164,10 +171,12 @@ const AssetSelector = ({
                         className="size-7 rounded-full"
                       />
                       <div className="min-w-0 flex-1">
-                        <div className="font-medium truncate">{option.symbol}</div>
+                        <div className="font-medium truncate">
+                          {displaySymbol(option.symbol)}
+                        </div>
                         {option.subtitle ? (
                           <div className="text-xs text-muted-foreground truncate">
-                            {option.subtitle}
+                            {displaySymbol(option.subtitle)}
                           </div>
                         ) : null}
                       </div>

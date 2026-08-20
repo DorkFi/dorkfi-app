@@ -271,6 +271,7 @@ export function useEasyBorrowQuote(
         totalDeposits,
         totalBorrows,
         borrowCap: borrowCapHuman,
+        skipCashLiquidity: route?.mechanism === "wad_mint_via_borrow",
       })
     : null;
 

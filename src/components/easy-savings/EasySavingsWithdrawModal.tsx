@@ -24,7 +24,7 @@ import {
   withdraw,
 } from "@/services/lendingService";
 import algorandService from "@/services/algorandService";
-import { savingsAccountDisplayLabel } from "@/services/savingsRouteResolver";
+import { savingsAccountDisplayLabel, consumerAssetDisplayLabel } from "@/services/savingsRouteResolver";
 import type { SavingsRoute } from "@/types/easySavings";
 import { formatUsdAmount } from "@/lib/utils";
 import { getExplorerTransactionUrl } from "@/utils/explorerLinks";
@@ -33,6 +33,7 @@ import {
   withRainbowkitHostDialogDismissed,
 } from "@/wallet/xchainSignUi";
 import { getTransactionErrorFeedback } from "@/utils/errorUtils";
+import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 
 const MODAL_SHELL =
   "w-full max-w-[98vw] sm:max-w-md rounded-t-2xl sm:rounded-xl p-0 max-h-[min(90vh,90dvh)] overflow-hidden flex flex-col";
@@ -76,6 +77,7 @@ const EasySavingsWithdrawModal = ({
   const { activeAccount, signTransactions, activeWallet } =
     useDorkFiWalletAdapter();
   const { toast } = useToast();
+  const consumerCopy = useConsumerCopy();
   const queryClient = useQueryClient();
 
   const [amount, setAmount] = useState("");
@@ -116,7 +118,10 @@ const EasySavingsWithdrawModal = ({
     },
   });
 
-  const symbol = route ? savingsAccountDisplayLabel(route) : "—";
+  const rawSymbol = route ? savingsAccountDisplayLabel(route) : "—";
+  const symbol = consumerCopy
+    ? consumerAssetDisplayLabel(rawSymbol)
+    : rawSymbol;
   const logo = route?.asset.logoPath || "/placeholder.svg";
   const amountNum = parseFloat(amount) || 0;
 
@@ -146,11 +151,15 @@ const EasySavingsWithdrawModal = ({
   })();
 
   const ctaLabel: Record<CtaState, string> = {
-    connect: "Connect Wallet",
+    connect: consumerCopy ? "Get Started" : "Connect Wallet",
     enter_amount: "Enter Amount",
     no_position: "Nothing to Withdraw",
     insufficient: "Exceeds Withdrawable",
-    withdraw: isSubmitting ? "Withdrawing…" : "Withdraw",
+    withdraw: isSubmitting
+      ? consumerCopy
+        ? "Confirming…"
+        : "Withdrawing…"
+      : "Withdraw",
   };
 
   const ctaDisabled =
@@ -169,7 +178,9 @@ const EasySavingsWithdrawModal = ({
     if (!signTransactions) {
       toast({
         title: "Cannot withdraw",
-        description: "Connected wallet does not support signing.",
+        description: consumerCopy
+          ? "Couldn’t confirm. Try again."
+          : "Connected wallet does not support signing.",
         variant: "destructive",
       });
       return;
@@ -178,8 +189,10 @@ const EasySavingsWithdrawModal = ({
     const algorandNetwork = getAlgorandNetworkFromNetworkId(networkId);
     if (!algorandNetwork) {
       toast({
-        title: "Network error",
-        description: "This network is not Algorand-compatible.",
+        title: "Something went wrong",
+        description: consumerCopy
+          ? "Please try again."
+          : "This network is not Algorand-compatible.",
         variant: "destructive",
       });
       return;
@@ -226,8 +239,10 @@ const EasySavingsWithdrawModal = ({
 
       const walletName = activeWallet?.metadata?.name || "your wallet";
       toast({
-        title: "Please Sign Transaction",
-        description: `Approve the withdraw in ${walletName}.`,
+        title: consumerCopy ? "Confirm" : "Please Sign Transaction",
+        description: consumerCopy
+          ? "Confirm this withdrawal."
+          : `Approve the withdraw in ${walletName}.`,
         duration: 12_000,
       });
 
@@ -323,7 +338,7 @@ const EasySavingsWithdrawModal = ({
                   Withdraw
                 </DialogTitle>
                 <DialogDescription className="text-sm text-muted-foreground">
-                  Withdraw {symbol} from your savings in {route.marketLabel}.
+                  Withdraw {symbol} from your savings.
                 </DialogDescription>
                 <div className="flex items-center justify-center gap-3 pt-2">
                   <img
@@ -370,7 +385,9 @@ const EasySavingsWithdrawModal = ({
                         : ""}
                       {quote.existingDeposit != null &&
                       quote.existingDeposit > 0
-                        ? ` · Supplied ${formatToken(quote.existingDeposit)}`
+                        ? consumerCopy
+                          ? ` · In savings ${formatToken(quote.existingDeposit)}`
+                          : ` · Supplied ${formatToken(quote.existingDeposit)}`
                         : ""}
                     </span>
                   }
@@ -393,7 +410,7 @@ const EasySavingsWithdrawModal = ({
                   </div>
                   <div className="flex items-start justify-between gap-3 px-4 py-2.5">
                     <span className="text-muted-foreground shrink-0">
-                      Your position
+                      {consumerCopy ? "In savings" : "Your position"}
                     </span>
                     <span className="font-medium text-right">
                       {quote.existingDeposit != null &&
@@ -402,14 +419,16 @@ const EasySavingsWithdrawModal = ({
                         : "None"}
                     </span>
                   </div>
-                  <div className="flex items-start justify-between gap-3 px-4 py-2.5">
-                    <span className="text-muted-foreground shrink-0">
-                      Market
-                    </span>
-                    <span className="font-medium text-right">
-                      {route.marketLabel} · {route.asset.symbol}
-                    </span>
-                  </div>
+                  {!consumerCopy ? (
+                    <div className="flex items-start justify-between gap-3 px-4 py-2.5">
+                      <span className="text-muted-foreground shrink-0">
+                        Market
+                      </span>
+                      <span className="font-medium text-right">
+                        {route.marketLabel} · {route.asset.symbol}
+                      </span>
+                    </div>
+                  ) : null}
                 </div>
 
                 {quote.error ? (

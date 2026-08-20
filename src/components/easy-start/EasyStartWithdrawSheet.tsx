@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
+import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 import { useToast } from "@/hooks/use-toast";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import { cn } from "@/lib/utils";
@@ -69,6 +70,7 @@ export function EasyStartWithdrawSheet({
   onOpenAdvancedBridge,
 }: EasyStartWithdrawSheetProps) {
   const { algorandAddress, evmAddress } = usePrivyEasyStart();
+  const consumerCopy = useConsumerCopy();
   const { toast } = useToast();
   const { formatNumber, formatCurrency } = useNumberI18n();
 
@@ -133,9 +135,13 @@ export function EasyStartWithdrawSheet({
     }
     if (requested > availableNum + 1e-9) {
       setError(
-        `You only have ${availableNum.toLocaleString(undefined, {
-          maximumFractionDigits: 2,
-        })} USDC available on Algorand. If funds are supplied to markets, withdraw them in Portfolio first.`
+        consumerCopy
+          ? `You only have ${availableNum.toLocaleString(undefined, {
+              maximumFractionDigits: 2,
+            })} available. If funds are in savings, withdraw them from savings first.`
+          : `You only have ${availableNum.toLocaleString(undefined, {
+              maximumFractionDigits: 2,
+            })} USDC available on Algorand. If funds are supplied to markets, withdraw them in Portfolio first.`
       );
       return;
     }
@@ -145,7 +151,9 @@ export function EasyStartWithdrawSheet({
       const algo = await fetchAlgorandAlgoBalance(algorandAddress);
       if (!hasEnoughAlgorandAlgo(algo.valueMicro)) {
         setError(
-          "Your Algorand account needs a little ALGO for network fees (~0.1 ALGO). Bridge a small deposit again or fund the account, then retry."
+          consumerCopy
+            ? "A small processing fee is needed to complete this withdrawal. Deposit a little more, then retry."
+            : "Your Algorand account needs a little ALGO for network fees (~0.1 ALGO). Bridge a small deposit again or fund the account, then retry."
         );
         setPhase("error");
         return;
@@ -157,7 +165,7 @@ export function EasyStartWithdrawSheet({
       setPhase("bridging");
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
-      setError(message || "Couldn’t check Algorand fees");
+      setError(message || (consumerCopy ? "Couldn’t check fees" : "Couldn’t check Algorand fees"));
       setPhase("error");
     }
   };
@@ -177,19 +185,23 @@ export function EasyStartWithdrawSheet({
                 <div className="flex items-center justify-center gap-2 pb-1">
                   <ArrowDownToLine className="h-5 w-5 text-ocean-teal" />
                   <span className="text-sm font-medium text-slate-600 dark:text-slate-300">
-                    Move cash back to Base
+                    {consumerCopy ? "Cash out to your bank" : "Move cash back to Base"}
                   </span>
                 </div>
                 <DialogDescription className="text-center text-sm text-slate-600 dark:text-slate-400">
                   {phase === "idle"
-                    ? "We’ll move USDC from Algorand to your Easy Start Base wallet, then you can cash out with MoonPay or Coinbase."
+                    ? consumerCopy
+                      ? "We’ll prepare your funds, then you can cash out with MoonPay or Coinbase."
+                      : "We’ll move USDC from Algorand to your Easy Start Base wallet, then you can cash out with MoonPay or Coinbase."
                     : phase === "bridging" || phase === "fee_check"
                       ? bridgePhaseLabel(bridgePhase, "algo-to-base")
                       : phase === "success"
-                        ? "USDC is ready on Base — cash out if you like."
+                        ? consumerCopy
+                          ? "Your funds are ready — cash out if you like."
+                          : "USDC is ready on Base — cash out if you like."
                         : phase === "error"
                           ? isXoGeoRestricted(error)
-                            ? "This swap provider isn’t available in your region."
+                            ? "This payment provider isn’t available in your region."
                             : "Something went wrong — you can retry."
                           : "Working on your withdrawal…"}
                 </DialogDescription>
@@ -204,12 +216,13 @@ export function EasyStartWithdrawSheet({
                     Withdrawal complete
                   </p>
                   <p className="text-sm text-slate-600 dark:text-slate-400">
-                    USDC is in your Base wallet
-                    {evmAddress
-                      ? ` (${evmAddress.slice(0, 6)}…${evmAddress.slice(-4)})`
-                      : ""}
-                    . Cash out in-app with MoonPay or Coinbase, or keep it on
-                    Base.
+                    {consumerCopy
+                      ? "Your funds are ready to cash out with MoonPay or Coinbase, or you can keep them in your account."
+                      : `USDC is in your Base wallet${
+                          evmAddress
+                            ? ` (${evmAddress.slice(0, 6)}…${evmAddress.slice(-4)})`
+                            : ""
+                        }. Cash out in-app with MoonPay or Coinbase, or keep it on Base.`}
                   </p>
                   <EasyStartOfframpCashOut
                     evmAddress={evmAddress}
@@ -223,7 +236,7 @@ export function EasyStartWithdrawSheet({
                     className="w-full border-ocean-teal/40"
                     onClick={() => handleClose(false)}
                   >
-                    Keep on Base · Done
+                    {consumerCopy ? "Keep in account · Done" : "Keep on Base · Done"}
                   </Button>
                 </div>
               ) : phase === "bridging" || phase === "fee_check" ? (
@@ -231,7 +244,9 @@ export function EasyStartWithdrawSheet({
                   <Loader2 className="h-8 w-8 animate-spin text-ocean-teal" />
                   <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
                     {phase === "fee_check"
-                      ? "Checking network fees…"
+                      ? consumerCopy
+                        ? "Checking fees…"
+                        : "Checking network fees…"
                       : bridgePhaseLabel(bridgePhase, "algo-to-base")}
                   </p>
                   {error ? (
@@ -268,7 +283,7 @@ export function EasyStartWithdrawSheet({
                 <div className="space-y-5">
                   <div className="rounded-xl border border-ocean-teal/20 bg-white/50 dark:bg-slate-900/40 px-3 py-2.5 text-center">
                     <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                      Available on Algorand
+                      {consumerCopy ? "Available" : "Available on Algorand"}
                     </p>
                     <p className="text-xl font-bold tabular-nums text-slate-800 dark:text-white">
                       {formatCurrency(
@@ -284,9 +299,9 @@ export function EasyStartWithdrawSheet({
 
                   {!hasAvailable ? (
                     <p className="text-sm text-amber-600 dark:text-amber-400 text-center">
-                      No USDC in your Algorand wallet yet. If you supplied to
-                      markets, withdraw from Portfolio first, then come back
-                      here.
+                      {consumerCopy
+                        ? "Nothing available to withdraw yet. If funds are in savings, withdraw from savings first, then come back here."
+                        : "No USDC in your Algorand wallet yet. If you supplied to markets, withdraw from Portfolio first, then come back here."}
                     </p>
                   ) : (
                     <div>
@@ -390,9 +405,9 @@ export function EasyStartWithdrawSheet({
                   </Button>
 
                   <p className="text-[11px] text-center text-slate-500 leading-relaxed">
-                    First we move USDC to Base. Then you can cash out in-app
-                    with MoonPay or Coinbase (USDC leaves your Easy Start
-                    wallet to the provider).
+                    {consumerCopy
+                      ? "Then you can cash out in-app with MoonPay or Coinbase."
+                      : "First we move USDC to Base. Then you can cash out in-app with MoonPay or Coinbase (USDC leaves your Easy Start wallet to the provider)."}
                   </p>
 
                   {onOpenAdvancedBridge ? (
@@ -433,7 +448,9 @@ export function EasyStartWithdrawSheet({
               onOpenChange(true);
               toast({
                 title: "Withdrawal complete",
-                description: "USDC is ready on your Base wallet.",
+                description: consumerCopy
+                  ? "Your funds are ready to cash out."
+                  : "USDC is ready on your Base wallet.",
               });
             }}
           />

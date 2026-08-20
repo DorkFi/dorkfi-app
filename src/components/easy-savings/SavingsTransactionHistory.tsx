@@ -3,6 +3,8 @@ import type { NetworkId } from "@/config";
 import type { SavingsTxRecord } from "@/services/savingsTransactionHistory";
 import { getExplorerTransactionUrl } from "@/utils/explorerLinks";
 import { cn } from "@/lib/utils";
+import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
+import { consumerAssetDisplayLabel } from "@/services/savingsRouteResolver";
 
 type SavingsTransactionHistoryProps = {
   networkId: NetworkId;
@@ -47,6 +49,7 @@ const SavingsTransactionHistory = ({
   isLoading,
   className,
 }: SavingsTransactionHistoryProps) => {
+  const consumerCopy = useConsumerCopy();
   return (
     <section
       className={cn(
@@ -56,7 +59,7 @@ const SavingsTransactionHistory = ({
     >
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-xl sm:text-2xl font-semibold tracking-tight">
-          Transaction history
+          {consumerCopy ? "Activity" : "Transaction history"}
         </h2>
         {isLoading ? (
           <span className="text-xs text-muted-foreground">Updating…</span>
@@ -65,7 +68,7 @@ const SavingsTransactionHistory = ({
 
       {items.length === 0 && !isLoading ? (
         <p className="mt-6 text-sm text-muted-foreground">
-          No transactions yet. Deposits and withdrawals will show up here.
+          No activity yet. Deposits and withdrawals will show up here.
         </p>
       ) : null}
 
@@ -79,7 +82,11 @@ const SavingsTransactionHistory = ({
             const url = getExplorerTransactionUrl(networkId, item.txId);
             const amountText =
               item.amount && item.symbol
-                ? `${item.amount} ${item.symbol}`
+                ? `${item.amount} ${
+                    consumerCopy
+                      ? consumerAssetDisplayLabel(item.symbol)
+                      : item.symbol
+                  }`
                 : item.amount
                   ? item.amount
                   : null;
@@ -113,16 +120,18 @@ const SavingsTransactionHistory = ({
                     {formatWhen(item.timestamp)}
                   </p>
                 </div>
-                <a
-                  href={url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 shrink-0 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-                  title="View on explorer"
-                >
-                  <span className="font-mono">{shortTx(item.txId)}</span>
-                  <ExternalLink className="size-3.5" aria-hidden />
-                </a>
+                {!consumerCopy ? (
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 shrink-0 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                    title="View on explorer"
+                  >
+                    <span className="font-mono">{shortTx(item.txId)}</span>
+                    <ExternalLink className="size-3.5" aria-hidden />
+                  </a>
+                ) : null}
               </li>
             );
           })}

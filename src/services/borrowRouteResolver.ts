@@ -37,9 +37,13 @@ export function isEasyBorrowV1BorrowConfigKey(
 }
 
 /**
- * Pool D Folks USDC markets live under config key `fUSDC` but are presented as USDC
- * in Easy Borrow (same-pool pairs with Algo and WAD on D).
+ * Markets where Folks V2 USDC (`fUSDC`) is treated as a USDC borrow/supply
+ * equivalent. Pool D has no native USDC listing; Pool A does, so `fUSDC` is
+ * the same-pool USDC debt market against native USDC A collateral.
+ * Isolated `fiUSDC` is not included.
  */
+const EASY_BORROW_FUSDC_MARKET_LABELS = new Set(["A", "D"]);
+
 export function isEasyBorrowUsdcEquivalentConfigKey(
   networkId: NetworkId,
   configKey: string,
@@ -47,7 +51,8 @@ export function isEasyBorrowUsdcEquivalentConfigKey(
 ): boolean {
   if (configKey === "USDC") return true;
   if (configKey !== "fUSDC" || !poolId) return false;
-  return getMarketLabel(networkId, poolId) === "D";
+  const label = getMarketLabel(networkId, poolId);
+  return label != null && EASY_BORROW_FUSDC_MARKET_LABELS.has(label);
 }
 
 /** Collapse Folks/USDC proxy keys so the UI exposes a single "USDC" option. */
@@ -193,7 +198,8 @@ function isExplicitLpWadRoute(
  * Default: v1 borrow set (WAD + USDC only). Pass `borrowConfigKeys: null` for
  * the full cross-collateral graph.
  *
- * Pool D Folks USDC (`fUSDC`) is included whenever USDC is in the borrow filter.
+ * Pool A and Pool D Folks USDC (`fUSDC`) are included whenever USDC is in the
+ * borrow filter. Isolated `fiUSDC` is not.
  */
 export function listBorrowRoutes(
   networkId: NetworkId,
@@ -414,6 +420,9 @@ export function listCollateralConfigKeys(networkId: NetworkId): string[] {
 /** Synthetic UI key for Pool B USDC (own row in the supply dropdown). */
 export const EASY_BORROW_POOL_B_USDC_UI_KEY = "USDC_B";
 
+/** Synthetic UI key for Pool A Folks V2 USDC (borrow against native USDC A). */
+export const EASY_BORROW_POOL_A_FOLKS_USDC_UI_KEY = "USDC_A_FOLKS";
+
 /** Synthetic UI key for Pool D Folks USDC (own row in the supply/borrow dropdown). */
 export const EASY_BORROW_POOL_D_USDC_UI_KEY = "USDC_D";
 
@@ -443,6 +452,8 @@ export type EasyBorrowCollateralOption = {
   /** Passed to {@link resolveBorrowRoute} as `collateralConfigKey` (always `USDC`). */
   collateralConfigKey: string;
   collateralPoolId: string;
+  /** Native vs Folks USDC share Pool A; pin the supply market contract. */
+  collateralContractId: string;
   preferredPoolIds: readonly string[];
 };
 
@@ -518,6 +529,7 @@ export function listUsdcCollateralSupplyOptions(
         logoPath: ref.logoPath || "/lovable-uploads/USDC.webp",
         collateralConfigKey: "USDC",
         collateralPoolId: ref.poolId,
+        collateralContractId: ref.contractId,
         preferredPoolIds: [ref.poolId],
       });
       continue;
@@ -531,6 +543,7 @@ export function listUsdcCollateralSupplyOptions(
         logoPath: ref.logoPath || "/lovable-uploads/USDC.webp",
         collateralConfigKey: "USDC",
         collateralPoolId: ref.poolId,
+        collateralContractId: ref.contractId,
         preferredPoolIds: [ref.poolId],
       });
       continue;
@@ -543,6 +556,7 @@ export function listUsdcCollateralSupplyOptions(
       logoPath: ref.logoPath || "/lovable-uploads/USDC.webp",
       collateralConfigKey: "USDC",
       collateralPoolId: ref.poolId,
+      collateralContractId: ref.contractId,
       preferredPoolIds: [ref.poolId],
     });
   }
@@ -554,6 +568,8 @@ export function listUsdcCollateralSupplyOptions(
  * Borrow dropdown rows for a collateral selection.
  * Pool D Folks USDC is listed separately as {@link EASY_BORROW_POOL_D_USDC_UI_KEY}
  * so users can pin market D instead of default A/B USDC.
+ * Pool A Folks V2 USDC ({@link EASY_BORROW_POOL_A_FOLKS_USDC_UI_KEY}) is listed
+ * only when native USDC is not a valid borrow for that collateral (USDC A).
  */
 export function listBorrowAssetOptionsForCollateral(
   networkId: NetworkId,
@@ -579,6 +595,7 @@ export function listBorrowAssetOptionsForCollateral(
 
   let wad: EasyBorrowAssetOption | null = null;
   let usdc: EasyBorrowAssetOption | null = null;
+  let usdcAFolks: EasyBorrowAssetOption | null = null;
   let usdcD: EasyBorrowAssetOption | null = null;
 
   for (const route of routes) {
@@ -590,6 +607,23 @@ export function listBorrowAssetOptionsForCollateral(
           subtitle: "Stablecoin debt",
           logoPath: route.borrow.logoPath,
           borrowConfigKey: "WAD",
+        };
+      }
+      continue;
+    }
+
+    const isPoolAFolksUsdc =
+      route.marketLabel === "A" && route.borrow.configKey === "fUSDC";
+
+    if (isPoolAFolksUsdc) {
+      if (!usdcAFolks) {
+        usdcAFolks = {
+          uiKey: EASY_BORROW_POOL_A_FOLKS_USDC_UI_KEY,
+          symbol: "Folks USDC",
+          subtitle: "Market A",
+          logoPath: route.borrow.logoPath || "/lovable-uploads/USDC.webp",
+          borrowConfigKey: "fUSDC",
+          preferredPoolIds: [route.poolId],
         };
       }
       continue;
@@ -637,7 +671,7 @@ export function listBorrowAssetOptionsForCollateral(
     }
   }
 
-  return [wad, usdc, usdcD].filter(
+  return [wad, usdc ?? usdcAFolks, usdcD].filter(
     (o): o is EasyBorrowAssetOption => o != null
   );
 }
@@ -670,6 +704,31 @@ export function listCollateralMarketRefs(
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(route.collateral);
+  }
+  return out;
+}
+
+/**
+ * Unique Easy Borrow debt markets (WAD / USDC on curated A/B/D pools).
+ * Deduped by pool + contract so Account can fetch balances without repeating pairs.
+ */
+export function listEasyBorrowDebtMarkets(
+  networkId: NetworkId
+): EasyBorrowMarketRef[] {
+  const seen = new Set<string>();
+  const out: EasyBorrowMarketRef[] = [];
+  for (const route of listBorrowRoutes(networkId)) {
+    if (
+      !(
+        EASY_BORROW_USDC_SUPPLY_MARKET_LABELS as readonly string[]
+      ).includes(route.marketLabel)
+    ) {
+      continue;
+    }
+    const key = `${route.borrow.poolId}:${route.borrow.contractId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(route.borrow);
   }
   return out;
 }
