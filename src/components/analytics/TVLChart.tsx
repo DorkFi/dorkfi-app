@@ -2,7 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import ChartCard from './ChartCard';
 import { dorkfiAPIService } from '@/services/dorkfiAPIService';
+import { fetchOracleBasedProtocolTotals, peekCachedOracleProtocolTotals } from '@/services/analyticsProtocolTvl';
 import { formatCurrency, formatChartDate } from '@/utils/analyticsUtils';
+import {
+  overlayLiveTvlOnSeries,
+  tvlFromGrowthDataPoint,
+} from '@/utils/analyticsProtocolTvl';
 import { useTheme } from 'next-themes';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
@@ -31,8 +36,8 @@ const TVLChart = () => {
         const days = timePeriod === '7d' ? 7 : timePeriod === '30d' ? 30 : 90;
         const startTime = now - (days * 24 * 60 * 60 * 1000);
         
-        // Always use total (no network filter)
         const networkFilter = undefined;
+        const cachedOracle = peekCachedOracleProtocolTotals();
         const response = await dorkfiAPIService.getTVLGrowth(
           startTime,
           now,
@@ -43,31 +48,47 @@ const TVLChart = () => {
         if (response.success && response.data?.dataPoints) {
           const dataPoints = response.data.dataPoints;
           if (dataPoints.length > 0) {
-            // Extract TVL values based on network filter, matching demo page logic
             const transformed: TVLDataPoint[] = dataPoints
-              .map((point: any) => {
-                // When showing total, use the 'tvl' field from dataPoint (matches demo page)
-                const tvlValue = point.tvl || point.value || 0;
+              .map((point: { tvl?: number; value?: number; timestamp: number }) => {
+                const tvlValue = tvlFromGrowthDataPoint(point);
                 
                 return {
                   date: new Date(point.timestamp).toISOString().split('T')[0],
                   total: tvlValue,
-                  // Placeholder asset breakdowns - would need asset-specific endpoints for accurate data
                   weth: tvlValue * 0.35,
                   usdc: tvlValue * 0.28,
                   usdt: tvlValue * 0.22,
                   wbtc: tvlValue * 0.15,
                 };
               })
-              .filter((point) => point.total >= 0); // Allow 0 values but filter out negative
+              .filter((point) => point.total >= 0);
             
-            setTvlData(transformed);
+            setTvlData(
+              cachedOracle?.tvl
+                ? overlayLiveTvlOnSeries(transformed, cachedOracle.tvl)
+                : transformed
+            );
           } else {
             setTvlData([]);
           }
         } else {
           console.warn('TVL growth API returned unsuccessful response');
           setTvlData([]);
+        }
+
+        if (!cachedOracle) {
+          fetchOracleBasedProtocolTotals()
+            .then((oracleTotals) => {
+              if (!oracleTotals?.tvl) return;
+              setTvlData((prev) =>
+                prev.length > 0
+                  ? overlayLiveTvlOnSeries(prev, oracleTotals.tvl)
+                  : prev
+              );
+            })
+            .catch((error) => {
+              console.warn('[TVLChart] oracle overlay failed', error);
+            });
         }
       } catch (error) {
         console.error('Error fetching TVL growth data:', error);

@@ -1,5 +1,22 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { dorkfiAPIService } from '@/services/dorkfiAPIService';
+import {
+  fetchAnalyticsMarketUsdLookup,
+  fetchOracleBasedProtocolTotals,
+  peekCachedOracleProtocolTotals,
+} from '@/services/analyticsProtocolTvl';
+import { buildHealthFactorDistribution } from '@/utils/analyticsHealthFactorDistribution';
+import {
+  growthPercentFromSeries,
+  overlayLiveTvlOnSeries,
+  pickFirstFiniteNumber,
+  tvlFromGrowthDataPoint,
+} from '@/utils/analyticsProtocolTvl';
+import {
+  activityRowToUsd,
+  analyticsValueToUsd,
+  pickWithdrawValueUsd,
+} from '@/utils/analyticsActivityUsd';
 
 export interface KPIData {
   tvl: number;
@@ -126,35 +143,6 @@ export interface WithdrawalsData {
   amount: number;
 }
 
-const generateMockKPIData = (): KPIData => ({
-  tvl: 245_680_000,
-  totalBorrowed: 156_420_000,
-  wadCirculation: 89_340_000,
-  protocolRevenue: 2_150_000,
-  activeWallets: 48_720,
-});
-
-const generateMockTVLData = (days: number = 30): TVLData[] => {
-  const data: TVLData[] = [];
-  const now = new Date();
-  
-  for (let i = days; i >= 0; i--) {
-    const date = new Date(now);
-    date.setDate(date.getDate() - i);
-    
-    const baseTotal = 200_000_000 + (days - i) * 1_500_000 + Math.random() * 5_000_000;
-    data.push({
-      date: date.toISOString().split('T')[0],
-      total: baseTotal,
-      weth: baseTotal * 0.35,
-      usdc: baseTotal * 0.28,
-      usdt: baseTotal * 0.22,
-      wbtc: baseTotal * 0.15,
-    });
-  }
-  return data;
-};
-
 const generateMockUtilizationData = (): UtilizationData[] => [
   { asset: 'WETH', supplied: 125_000_000, borrowed: 87_500_000, utilization: 70 },
   { asset: 'USDC', supplied: 68_000_000, borrowed: 40_800_000, utilization: 60 },
@@ -239,14 +227,6 @@ const generateMockInterestRateData = (days: number = 30): InterestRateData[] => 
   }));
 };
 
-const generateMockHealthFactorData = (): HealthFactorData[] => [
-  { range: '<1.0', count: 234, color: 'hsl(var(--destructive))' },
-  { range: '1.0-1.1', count: 567, color: 'hsl(var(--warning-orange))' },
-  { range: '1.1-1.2', count: 1234, color: 'hsl(var(--whale-gold))' },
-  { range: '1.2-1.5', count: 2890, color: 'hsl(var(--highlight-aqua))' },
-  { range: '>1.5', count: 4123, color: 'hsl(var(--ocean-teal))' },
-];
-
 const generateMockLiquidationData = (days: number = 30): LiquidationData => ({
   events: Array.from({ length: days }, (_, i) => ({
     date: new Date(Date.now() - (days - 1 - i) * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
@@ -292,21 +272,22 @@ export const useAnalyticsData = () => {
   const [liquidationData, setLiquidationData] = useState<LiquidationData | null>(null);
   const [depositsData, setDepositsData] = useState<DepositsData[]>([]);
   const [withdrawalsData, setWithdrawalsData] = useState<WithdrawalsData[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [kpiLoading, setKpiLoading] = useState(true);
+  const [oracleRefining, setOracleRefining] = useState(false);
+  const tvlSeriesRef = useRef<TVLData[]>([]);
 
   useEffect(() => {
-    const loadData = async () => {
-      setLoading(true);
+    let cancelled = false;
+
+    const loadFastKpis = async () => {
+      setKpiLoading(true);
       
       try {
-        console.log('Fetching analytics data from DorkFi API...');
-        
-        // Calculate time ranges
         const now = Date.now();
         const days30 = 30 * 24 * 60 * 60 * 1000;
         const startTime30d = now - days30;
+        const cachedOracle = peekCachedOracleProtocolTotals();
 
-        // Load all data in parallel
         const [
           tvlResponse,
           tvlGrowthResponse,
@@ -316,9 +297,6 @@ export const useAnalyticsData = () => {
           wadGrowthResponse,
           walletsResponse,
           walletsGrowthResponse,
-          depositsResponse,
-          withdrawalsResponse,
-          healthFactorResponse,
         ] = await Promise.allSettled([
           dorkfiAPIService.getTVL(),
           dorkfiAPIService.getTVLGrowth(startTime30d, now, 'day'),
@@ -328,191 +306,301 @@ export const useAnalyticsData = () => {
           dorkfiAPIService.getWADSupplyGrowth(startTime30d, now, 'day'),
           dorkfiAPIService.getActiveWallets(),
           dorkfiAPIService.getActiveWalletsGrowth(),
-          dorkfiAPIService.getDeposits(startTime30d, now, 10000),
-          dorkfiAPIService.getWithdrawals(startTime30d, now, 10000),
-          dorkfiAPIService.getHealthFactorDistribution(),
         ]);
 
-        // Process KPI Data
-        const tvl = tvlResponse.status === 'fulfilled' && tvlResponse.value.success
-          ? tvlResponse.value.data?.totalTVL || 0
-          : 0;
-        
-        const borrowed = borrowedResponse.status === 'fulfilled' && borrowedResponse.value.success
-          ? borrowedResponse.value.data?.totalBorrowed || 0
-          : 0;
-        
-        const wadCirculation = wadResponse.status === 'fulfilled' && wadResponse.value.success
-          ? parseFloat(wadResponse.value.data?.totalWadCirculation || '0') / 1e6
-          : 0;
-        
-        const activeWallets = walletsResponse.status === 'fulfilled' && walletsResponse.value.success
-          ? walletsResponse.value.data?.totalActiveWallets || 0
-          : 0;
+        if (cancelled) return;
 
-        // Extract growth percentages from API responses
-        const tvlGrowth7d = tvlGrowthResponse.status === 'fulfilled' && tvlGrowthResponse.value.success
-          ? tvlGrowthResponse.value.data?.growth7d || tvlGrowthResponse.value.data?.growth24h || undefined
-          : undefined;
-        
-        const borrowedGrowth7d = borrowedGrowthResponse.status === 'fulfilled' && borrowedGrowthResponse.value.success
-          ? borrowedGrowthResponse.value.data?.growth7d || borrowedGrowthResponse.value.data?.growth24h || undefined
-          : undefined;
-        
-        const wadGrowth7d = wadGrowthResponse.status === 'fulfilled' && wadGrowthResponse.value.success
-          ? wadGrowthResponse.value.data?.growth7d || wadGrowthResponse.value.data?.growth24h || undefined
-          : undefined;
-        
-        const walletsGrowth7d = walletsGrowthResponse.status === 'fulfilled' && walletsGrowthResponse.value.success
-          ? walletsGrowthResponse.value.data?.growth7d || walletsGrowthResponse.value.data?.growth24h || undefined
-          : undefined;
+        const apiTvl =
+          tvlResponse.status === 'fulfilled' && tvlResponse.value.success
+            ? tvlResponse.value.data?.totalTVL || 0
+            : 0;
+        const apiBorrowed =
+          borrowedResponse.status === 'fulfilled' && borrowedResponse.value.success
+            ? borrowedResponse.value.data?.totalBorrowed || 0
+            : 0;
 
-        // Calculate protocol revenue (placeholder - would need actual revenue endpoint)
-        const protocolRevenue = 0; // TODO: Add revenue endpoint
+        const wadCirculation =
+          wadResponse.status === 'fulfilled' && wadResponse.value.success
+            ? parseFloat(wadResponse.value.data?.totalWadCirculation || '0') / 1e6
+            : 0;
+
+        const activeWallets =
+          walletsResponse.status === 'fulfilled' && walletsResponse.value.success
+            ? walletsResponse.value.data?.totalActiveWallets || 0
+            : 0;
+
+        const apiTvlGrowth7d =
+          tvlGrowthResponse.status === 'fulfilled' && tvlGrowthResponse.value.success
+            ? pickFirstFiniteNumber(
+                tvlGrowthResponse.value.data?.growth7d,
+                tvlGrowthResponse.value.data?.growth24h
+              )
+            : undefined;
+
+        const borrowedGrowth7d =
+          borrowedGrowthResponse.status === 'fulfilled' &&
+          borrowedGrowthResponse.value.success
+            ? pickFirstFiniteNumber(
+                borrowedGrowthResponse.value.data?.growth7d,
+                borrowedGrowthResponse.value.data?.growth24h
+              )
+            : undefined;
+
+        const wadGrowth7d =
+          wadGrowthResponse.status === 'fulfilled' && wadGrowthResponse.value.success
+            ? pickFirstFiniteNumber(
+                wadGrowthResponse.value.data?.growth7d,
+                wadGrowthResponse.value.data?.growth24h
+              )
+            : undefined;
+
+        const walletsGrowth7d =
+          walletsGrowthResponse.status === 'fulfilled' &&
+          walletsGrowthResponse.value.success
+            ? pickFirstFiniteNumber(
+                walletsGrowthResponse.value.data?.growth7d,
+                walletsGrowthResponse.value.data?.growth24h
+              )
+            : undefined;
+
+        let transformedTvlSeries: TVLData[] = [];
+        if (
+          tvlGrowthResponse.status === 'fulfilled' &&
+          tvlGrowthResponse.value.success
+        ) {
+          const dataPoints = tvlGrowthResponse.value.data?.dataPoints || [];
+          transformedTvlSeries = dataPoints.map((point) => {
+            const tvlValue = tvlFromGrowthDataPoint(
+              point as { tvl?: number; value?: number }
+            );
+            return {
+              date: new Date(point.timestamp).toISOString().split('T')[0],
+              total: tvlValue,
+              weth: tvlValue * 0.35,
+              usdc: tvlValue * 0.28,
+              usdt: tvlValue * 0.22,
+              wbtc: tvlValue * 0.15,
+            };
+          });
+        }
+
+        const initialTvl = cachedOracle?.tvl ?? apiTvl;
+        const initialBorrowed = cachedOracle?.borrowed ?? apiBorrowed;
+
+        if (cachedOracle?.tvl) {
+          transformedTvlSeries = overlayLiveTvlOnSeries(
+            transformedTvlSeries,
+            cachedOracle.tvl
+          );
+        }
+
+        tvlSeriesRef.current = transformedTvlSeries;
+        setTvlData(transformedTvlSeries);
+
+        const tvlGrowth7d = cachedOracle?.tvl
+          ? pickFirstFiniteNumber(
+              growthPercentFromSeries(transformedTvlSeries, cachedOracle.tvl, 7),
+              apiTvlGrowth7d
+            )
+          : apiTvlGrowth7d;
 
         setKpiData({
-          tvl,
-          totalBorrowed: borrowed,
+          tvl: initialTvl,
+          totalBorrowed: initialBorrowed,
           wadCirculation,
-          protocolRevenue,
+          protocolRevenue: 0,
           activeWallets,
           tvlGrowth7d,
           borrowedGrowth7d,
           wadGrowth7d,
           walletsGrowth7d,
         });
+        setKpiLoading(false);
 
-        // Process TVL Growth Data
-        if (tvlGrowthResponse.status === 'fulfilled' && tvlGrowthResponse.value.success) {
-          const dataPoints = tvlGrowthResponse.value.data?.dataPoints || [];
-          if (dataPoints.length > 0) {
-            const transformed = dataPoints.map((point) => ({
-              date: new Date(point.timestamp).toISOString().split('T')[0],
-              total: point.value,
-              weth: point.value * 0.35, // Placeholder - would need asset breakdown
-              usdc: point.value * 0.28,
-              usdt: point.value * 0.22,
-              wbtc: point.value * 0.15,
-            }));
-            setTvlData(transformed);
-          } else {
-            console.warn('TVL growth API returned empty data, using mock data');
-            setTvlData(generateMockTVLData());
-          }
-        } else {
-          console.warn('TVL growth API call failed, using mock data:', tvlGrowthResponse.status === 'rejected' ? tvlGrowthResponse.reason : 'API returned unsuccessful response');
-          setTvlData(generateMockTVLData());
+        if (cachedOracle) return;
+
+        setOracleRefining(true);
+        fetchOracleBasedProtocolTotals()
+          .then((oracleTotals) => {
+            if (cancelled || !oracleTotals) return;
+
+            const series = tvlSeriesRef.current;
+            const overlaid = overlayLiveTvlOnSeries(series, oracleTotals.tvl);
+            tvlSeriesRef.current = overlaid;
+            setTvlData(overlaid);
+
+            setKpiData((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    tvl: oracleTotals.tvl,
+                    totalBorrowed: oracleTotals.borrowed,
+                    tvlGrowth7d: pickFirstFiniteNumber(
+                      growthPercentFromSeries(overlaid, oracleTotals.tvl, 7),
+                      prev.tvlGrowth7d
+                    ),
+                  }
+                : prev
+            );
+          })
+          .catch((error) => {
+            console.warn('[useAnalyticsData] oracle TVL refine failed', error);
+          })
+          .finally(() => {
+            if (!cancelled) setOracleRefining(false);
+          });
+      } catch (error) {
+        console.error('Error loading analytics KPIs:', error);
+        if (!cancelled) {
+          setKpiData({
+            tvl: 0,
+            totalBorrowed: 0,
+            wadCirculation: 0,
+            protocolRevenue: 0,
+            activeWallets: 0,
+          });
+          setKpiLoading(false);
+          setOracleRefining(false);
         }
+      }
+    };
 
-        // Process WAD Supply Growth Data
-        if (wadGrowthResponse.status === 'fulfilled' && wadGrowthResponse.value.success) {
+    const loadSecondaryData = async () => {
+      try {
+        const now = Date.now();
+        const days30 = 30 * 24 * 60 * 60 * 1000;
+        const startTime30d = now - days30;
+
+        const [
+          wadGrowthResponse,
+          depositsResponse,
+          withdrawalsResponse,
+          healthFactorResponse,
+          marketUsdLookupResult,
+        ] = await Promise.allSettled([
+          dorkfiAPIService.getWADSupplyGrowth(startTime30d, now, 'day'),
+          dorkfiAPIService.getDeposits(startTime30d, now, 10000),
+          dorkfiAPIService.getWithdrawals(startTime30d, now, 10000),
+          dorkfiAPIService.getAllUserHealth(),
+          fetchAnalyticsMarketUsdLookup(),
+        ]);
+
+        if (cancelled) return;
+
+        if (
+          wadGrowthResponse.status === 'fulfilled' &&
+          wadGrowthResponse.value.success
+        ) {
           const dataPoints = wadGrowthResponse.value.data?.dataPoints || [];
           if (dataPoints.length > 0) {
             const supplyData = dataPoints.map((point) => ({
               date: new Date(point.timestamp).toISOString().split('T')[0],
-              supply: point.value / 1e6, // Normalize from micro-units
+              supply: point.value / 1e6,
             }));
-            
+
             setWadData({
               supplyData,
-              collateralizationRatio: 135.4, // Placeholder - would need actual endpoint
+              collateralizationRatio: 135.4,
               pegStability: supplyData.map((d) => ({
                 date: d.date,
-                price: 1.0, // Placeholder
+                price: 1.0,
               })),
             });
           } else {
-            console.warn('WAD supply growth API returned empty data, using mock data');
             setWadData(generateMockWADData());
           }
         } else {
-          console.warn('WAD supply growth API call failed, using mock data:', wadGrowthResponse.status === 'rejected' ? wadGrowthResponse.reason : 'API returned unsuccessful response');
           setWadData(generateMockWADData());
         }
 
-        // Process Deposits Data
-        if (depositsResponse.status === 'fulfilled' && depositsResponse.value.success) {
+        if (
+          depositsResponse.status === 'fulfilled' &&
+          depositsResponse.value.success
+        ) {
           const deposits = depositsResponse.value.data?.deposits || [];
           if (deposits.length > 0) {
-            // Group by date and sum amounts
             const dailyDeposits: { [key: string]: number } = {};
-            
             deposits.forEach((deposit) => {
               const date = new Date(deposit.timestamp).toISOString().split('T')[0];
-              const value = parseFloat(deposit.depositValueUSD) / 1e12; // Convert from micro-units to USD
+              const value = analyticsValueToUsd(
+                deposit.depositValueUSD,
+                deposit.amount
+              );
               dailyDeposits[date] = (dailyDeposits[date] || 0) + value;
             });
-
-            const transformed = Object.entries(dailyDeposits)
-              .map(([date, amount]) => ({ date, amount }))
-              .sort((a, b) => a.date.localeCompare(b.date));
-            
-            setDepositsData(transformed);
+            setDepositsData(
+              Object.entries(dailyDeposits)
+                .map(([date, amount]) => ({ date, amount }))
+                .sort((a, b) => a.date.localeCompare(b.date))
+            );
           } else {
-            console.warn('Deposits API returned empty data, using mock data');
             setDepositsData(generateMockDepositsData());
           }
         } else {
-          console.warn('Deposits API call failed, using mock data:', depositsResponse.status === 'rejected' ? depositsResponse.reason : 'API returned unsuccessful response');
           setDepositsData(generateMockDepositsData());
         }
 
-        // Process Withdrawals Data
-        if (withdrawalsResponse.status === 'fulfilled' && withdrawalsResponse.value.success) {
+        if (
+          withdrawalsResponse.status === 'fulfilled' &&
+          withdrawalsResponse.value.success
+        ) {
           const withdrawals = withdrawalsResponse.value.data?.withdrawals || [];
           if (withdrawals.length > 0) {
-            // Group by date and sum amounts
+            const marketUsdLookup =
+              marketUsdLookupResult.status === 'fulfilled'
+                ? marketUsdLookupResult.value
+                : new Map();
             const dailyWithdrawals: { [key: string]: number } = {};
-            
             withdrawals.forEach((withdrawal) => {
               const date = new Date(withdrawal.timestamp).toISOString().split('T')[0];
-              const value = parseFloat(withdrawal.withdrawalValueUSD) / 1e12; // Convert from micro-units to USD
+              const value = activityRowToUsd(
+                {
+                  amount: withdrawal.amount,
+                  valueUsd: pickWithdrawValueUsd(withdrawal),
+                  network: withdrawal.network,
+                  marketId: withdrawal.marketId,
+                },
+                marketUsdLookup
+              );
               dailyWithdrawals[date] = (dailyWithdrawals[date] || 0) + value;
             });
-
-            const transformed = Object.entries(dailyWithdrawals)
-              .map(([date, amount]) => ({ date, amount }))
-              .sort((a, b) => a.date.localeCompare(b.date));
-            
-            setWithdrawalsData(transformed);
+            setWithdrawalsData(
+              Object.entries(dailyWithdrawals)
+                .map(([date, amount]) => ({ date, amount }))
+                .sort((a, b) => a.date.localeCompare(b.date))
+            );
           } else {
-            console.warn('Withdrawals API returned empty data, using mock data');
             setWithdrawalsData(generateMockWithdrawalsData());
           }
         } else {
-          console.warn('Withdrawals API call failed, using mock data:', withdrawalsResponse.status === 'rejected' ? withdrawalsResponse.reason : 'API returned unsuccessful response');
           setWithdrawalsData(generateMockWithdrawalsData());
         }
 
-        // Process Health Factor Distribution
-        if (healthFactorResponse.status === 'fulfilled' && healthFactorResponse.value.success) {
-          const distribution = healthFactorResponse.value.data?.distribution || [];
-          if (distribution.length > 0) {
-            const colors = [
-              'hsl(var(--destructive))',
-              'hsl(var(--warning-orange))',
-              'hsl(var(--whale-gold))',
-              'hsl(var(--highlight-aqua))',
-              'hsl(var(--ocean-teal))',
-            ];
-            
-            const transformed = distribution.map((item, index) => ({
+        if (
+          healthFactorResponse.status === 'fulfilled' &&
+          healthFactorResponse.value.success
+        ) {
+          const colors = [
+            'hsl(var(--destructive))',
+            'hsl(var(--warning-orange))',
+            'hsl(var(--whale-gold))',
+            'hsl(var(--highlight-aqua))',
+            'hsl(var(--ocean-teal))',
+          ];
+          const distribution = buildHealthFactorDistribution(
+            healthFactorResponse.value.data || []
+          );
+          setHealthFactorData(
+            distribution.map((item, index) => ({
               range: item.range,
               count: item.count,
               color: colors[index % colors.length],
-            }));
-            
-            setHealthFactorData(transformed);
-          } else {
-            console.warn('Health factor distribution API returned empty data, using mock data');
-            setHealthFactorData(generateMockHealthFactorData());
-          }
+            }))
+          );
         } else {
-          console.warn('Health factor distribution API call failed, using mock data:', healthFactorResponse.status === 'rejected' ? healthFactorResponse.reason : 'API returned unsuccessful response');
-          setHealthFactorData(generateMockHealthFactorData());
+          setHealthFactorData([]);
         }
 
-        // Set placeholder data for other metrics (not yet available in API)
         setUtilizationData(generateMockUtilizationData());
         setRevenueData(generateMockRevenueData());
         setTreasuryData(generateMockTreasuryData());
@@ -521,32 +609,17 @@ export const useAnalyticsData = () => {
         setAssetDistribution(generateMockAssetDistribution());
         setInterestRateData(generateMockInterestRateData());
         setLiquidationData(generateMockLiquidationData());
-
-        console.log('Analytics data loaded successfully from DorkFi API');
-
       } catch (error) {
-        console.error('Error loading analytics data:', error);
-        // Fallback to mock data on error
-        setKpiData(generateMockKPIData());
-        setTvlData(generateMockTVLData());
-        setWadData(generateMockWADData());
-        setDepositsData(generateMockDepositsData());
-        setWithdrawalsData(generateMockWithdrawalsData());
-        setHealthFactorData(generateMockHealthFactorData());
-        setUtilizationData(generateMockUtilizationData());
-        setRevenueData(generateMockRevenueData());
-        setTreasuryData(generateMockTreasuryData());
-        setMauData(generateMockMAUData());
-        setLoanData(generateMockLoanData());
-        setAssetDistribution(generateMockAssetDistribution());
-        setInterestRateData(generateMockInterestRateData());
-        setLiquidationData(generateMockLiquidationData());
-      } finally {
-        setLoading(false);
+        console.error('Error loading secondary analytics data:', error);
       }
     };
 
-    loadData();
+    loadFastKpis();
+    loadSecondaryData();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return {
@@ -564,7 +637,9 @@ export const useAnalyticsData = () => {
     liquidationData,
     depositsData,
     withdrawalsData,
-    loading,
+    loading: kpiLoading,
+    kpiLoading,
+    oracleRefining,
   };
 };
 

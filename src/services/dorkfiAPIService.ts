@@ -533,6 +533,49 @@ class DorkFiAPIService {
   }
 
   /**
+   * Get all user health records across networks.
+   */
+  async getAllUserHealth(): Promise<ApiListResponse<UserHealth>> {
+    try {
+      const response = await fetch(`${this.baseUrl}/user-health`);
+
+      if (response.ok) {
+        const data = await response.json();
+        if (Array.isArray(data?.data)) {
+          return {
+            success: data.success !== false,
+            count: data.count ?? data.data.length,
+            data: data.data,
+            network: data.network,
+            appId: data.appId,
+          };
+        }
+      }
+    } catch {
+      // Fall through to per-network fetches.
+    }
+
+    try {
+      const [algorand, voi] = await Promise.all([
+        this.getUserHealthByNetwork("algorand-mainnet"),
+        this.getUserHealthByNetwork("voi-mainnet"),
+      ]);
+      const data = [
+        ...(algorand.success ? algorand.data ?? [] : []),
+        ...(voi.success ? voi.data ?? [] : []),
+      ];
+      return {
+        success: algorand.success || voi.success,
+        count: data.length,
+        data,
+      };
+    } catch (error) {
+      console.error("Error fetching all user health records:", error);
+      throw error;
+    }
+  }
+
+  /**
    * Get user health for a specific user address
    * @param userAddress - User address
    * @returns Promise<ApiResponse<UserHealth>>
@@ -1152,7 +1195,7 @@ class DorkFiAPIService {
    * @param endTime - End timestamp in milliseconds
    * @param limit - Maximum number of results
    * @param network - Optional network filter
-   * @returns Promise<ApiResponse<{ deposits: Array<{ timestamp: number; round: number; depositValueUSD: string; network?: string }>; summary: { totalDepositValueUSD: string } }>>
+   * @returns Promise<ApiResponse<{ deposits: Array<{ timestamp: number; round: number; amount?: string; depositValueUSD: string; network?: string }>; summary: { totalDepositValueUSD: string } }>>
    */
   async getDeposits(
     startTime?: number,
@@ -1164,6 +1207,7 @@ class DorkFiAPIService {
       deposits: Array<{
         timestamp: number;
         round: number;
+        amount?: string;
         depositValueUSD: string;
         network?: string;
       }>;
@@ -1194,7 +1238,7 @@ class DorkFiAPIService {
    * @param endTime - End timestamp in milliseconds
    * @param limit - Maximum number of results
    * @param network - Optional network filter
-   * @returns Promise<ApiResponse<{ withdrawals: Array<{ timestamp: number; round: number; withdrawalValueUSD: string; network?: string }>; summary: { totalWithdrawalValueUSD: string } }>>
+   * @returns Promise<ApiResponse<{ withdrawals: Array<{ timestamp: number; round: number; amount?: string; withdrawValueUSD?: string; withdrawalValueUSD?: string; network?: string }>; summary: { totalWithdrawValueUSD?: string; totalWithdrawalValueUSD?: string } }>>
    */
   async getWithdrawals(
     startTime?: number,
@@ -1206,10 +1250,16 @@ class DorkFiAPIService {
       withdrawals: Array<{
         timestamp: number;
         round: number;
-        withdrawalValueUSD: string;
+        amount?: string;
+        marketId?: string;
+        withdrawValueUSD?: string;
+        withdrawalValueUSD?: string;
         network?: string;
       }>;
-      summary: { totalWithdrawalValueUSD: string };
+      summary: {
+        totalWithdrawValueUSD?: string;
+        totalWithdrawalValueUSD?: string;
+      };
     }>
   > {
     try {
@@ -1276,6 +1326,7 @@ class DorkFiAPIService {
       borrows: Array<{
         timestamp: number;
         round: number;
+        amount?: string;
         borrowValueUSD: string;
         network?: string;
       }>;
@@ -1318,6 +1369,7 @@ class DorkFiAPIService {
       repays: Array<{
         timestamp: number;
         round: number;
+        amount?: string;
         repayValueUSD: string;
         network?: string;
       }>;

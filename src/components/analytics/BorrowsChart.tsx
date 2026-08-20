@@ -2,6 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Area, AreaChart, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import ChartCard from './ChartCard';
 import { dorkfiAPIService } from '@/services/dorkfiAPIService';
+import {
+  analyticsSummaryToUsd,
+  analyticsValueToUsd,
+} from '@/utils/analyticsActivityUsd';
 import { useTheme } from 'next-themes';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
@@ -42,10 +46,12 @@ const BorrowsChart = () => {
             // Group by date and sum amounts (matching demo page approach)
             const dailyBorrows: { [key: string]: number } = {};
             
-            borrows.forEach((borrow: Record<string, unknown>) => {
+            borrows.forEach((borrow) => {
               const date = new Date(borrow.timestamp).toISOString().split('T')[0];
-              // Convert from micro-units to USD (divide by 1e12, matching demo page)
-              const value = parseFloat(borrow.borrowValueUSD || '0') / 1e12;
+              const value = analyticsValueToUsd(
+                borrow.borrowValueUSD,
+                borrow.amount
+              );
               dailyBorrows[date] = (dailyBorrows[date] || 0) + value;
             });
 
@@ -56,8 +62,14 @@ const BorrowsChart = () => {
             setBorrowsData(transformed);
             
             // Calculate total from summary if available, otherwise sum the daily amounts
-            const totalFromSummary = response.data.summary?.totalBorrowValueUSD 
-              ? parseFloat(response.data.summary.totalBorrowValueUSD) / 1e12
+            const totalFromSummary = response.data.summary?.totalBorrowValueUSD
+              ? analyticsSummaryToUsd(
+                  response.data.summary.totalBorrowValueUSD,
+                  borrows.map((b) => ({
+                    valueUsd: b.borrowValueUSD,
+                    amount: b.amount,
+                  }))
+                )
               : transformed.reduce((sum, d) => sum + d.amount, 0);
             setTotalBorrows(totalFromSummary);
           } else {

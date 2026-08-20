@@ -5,9 +5,9 @@ import { formatCurrency, formatNumber } from '@/utils/analyticsUtils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 const KPIGrid = () => {
-  const { kpiData, loading } = useAnalyticsData();
+  const { kpiData, kpiLoading, oracleRefining } = useAnalyticsData();
 
-  if (loading || !kpiData) {
+  if (kpiLoading || !kpiData) {
     return (
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 animate-fade-in">
         {Array.from({ length: 4 }).map((_, i) => (
@@ -27,11 +27,12 @@ const KPIGrid = () => {
                 title="Total Value Locked"
                 value={formatCurrency(kpiData.tvl)}
                 change={kpiData.tvlGrowth7d}
+                refining={oracleRefining}
               />
             </div>
           </TooltipTrigger>
           <TooltipContent>
-            <p>Total Value Locked - The total value of all assets deposited in the protocol</p>
+            <p>Total value of assets deposited, priced from the live price oracle (same source as Markets)</p>
           </TooltipContent>
         </Tooltip>
 
@@ -42,6 +43,7 @@ const KPIGrid = () => {
                 title="Total Borrowed"
                 value={formatCurrency(kpiData.totalBorrowed)}
                 change={kpiData.borrowedGrowth7d}
+                refining={oracleRefining}
               />
             </div>
           </TooltipTrigger>

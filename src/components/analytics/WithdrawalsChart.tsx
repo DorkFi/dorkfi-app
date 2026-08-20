@@ -2,6 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { Area, AreaChart, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import ChartCard from './ChartCard';
 import { dorkfiAPIService } from '@/services/dorkfiAPIService';
+import { fetchAnalyticsMarketUsdLookup } from '@/services/analyticsProtocolTvl';
+import {
+  activityRowToUsd,
+  pickWithdrawValueUsd,
+} from '@/utils/analyticsActivityUsd';
 import { useTheme } from 'next-themes';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
@@ -29,12 +34,18 @@ const WithdrawalsChart = () => {
         
         // Always use total (no network filter)
         const networkFilter = undefined;
-        const response = await dorkfiAPIService.getWithdrawals(
-          startTime,
-          now,
-          10000,
-          networkFilter
-        );
+        const [response, marketUsdLookup] = await Promise.all([
+          dorkfiAPIService.getWithdrawals(
+            startTime,
+            now,
+            10000,
+            networkFilter
+          ),
+          fetchAnalyticsMarketUsdLookup().catch((error) => {
+            console.warn('Withdrawals market USD lookup failed', error);
+            return new Map();
+          }),
+        ]);
 
         if (response.success && response.data?.withdrawals) {
           const withdrawals = response.data.withdrawals;
@@ -42,13 +53,17 @@ const WithdrawalsChart = () => {
             // Group by date and sum amounts (matching demo page approach)
             const dailyWithdrawals: { [key: string]: number } = {};
             
-            withdrawals.forEach((withdrawal: any) => {
+            withdrawals.forEach((withdrawal) => {
               const date = new Date(withdrawal.timestamp).toISOString().split('T')[0];
-              // Convert from micro-units to USD (divide by 1e12, matching demo page)
-              // Demo uses withdrawValueUSD (without "al"), but API types may use withdrawalValueUSD
-              const value = parseFloat(
-                (withdrawal.withdrawValueUSD || withdrawal.withdrawalValueUSD || '0')
-              ) / 1e12;
+              const value = activityRowToUsd(
+                {
+                  amount: withdrawal.amount,
+                  valueUsd: pickWithdrawValueUsd(withdrawal),
+                  network: withdrawal.network,
+                  marketId: withdrawal.marketId,
+                },
+                marketUsdLookup
+              );
               dailyWithdrawals[date] = (dailyWithdrawals[date] || 0) + value;
             });
 
@@ -58,14 +73,10 @@ const WithdrawalsChart = () => {
             
             setWithdrawalsData(transformed);
             
-            // Calculate total from summary if available, otherwise sum the daily amounts
-            // Handle both field name variations (demo uses totalWithdrawValueUSD, types use totalWithdrawalValueUSD)
-            const summary = response.data.summary as any;
-            const summaryTotal = summary?.totalWithdrawValueUSD || summary?.totalWithdrawalValueUSD || '0';
-            const totalFromSummary = summaryTotal 
-              ? parseFloat(summaryTotal) / 1e12
-              : transformed.reduce((sum, d) => sum + d.amount, 0);
-            setTotalWithdrawals(totalFromSummary);
+            // Sum normalized rows. Withdrawal summaries are still mixed-scale vs deposits.
+            setTotalWithdrawals(
+              transformed.reduce((sum, d) => sum + d.amount, 0)
+            );
           } else {
             setWithdrawalsData([]);
             setTotalWithdrawals(0);
