@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   CartesianGrid,
   Legend,
@@ -12,23 +12,14 @@ import {
 } from "recharts";
 import ChartCard from "./ChartCard";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { dorkfiAPIService } from "@/services/dorkfiAPIService";
-import { fetchAnalyticsMarketUsdLookup } from "@/services/analyticsProtocolTvl";
 import {
-  activityRowToUsd,
-  analyticsValueToUsd,
-  pickWithdrawValueUsd,
-} from "@/utils/analyticsActivityUsd";
-import {
-  aggregateEventsByDay,
-  mergeDailyFlows,
-  symmetricYDomain,
-  type FlowDataPoint,
-} from "@/utils/analyticsActivityFlows";
+  useFlowSeries,
+} from "@/hooks/useCachedAnalyticsSeries";
+import { symmetricYDomain } from "@/utils/analyticsActivityFlows";
 import { formatCurrency, formatChartDate } from "@/utils/analyticsUtils";
+import { type AnalyticsTimePeriod } from "@/utils/analyticsTimePeriod";
 import { useTheme } from "next-themes";
 
-type TimePeriod = "7d" | "30d" | "90d";
 type FlowMode = "liquidity" | "loans";
 
 interface ActivityFlowsChartProps {
@@ -77,101 +68,8 @@ function formatAxisValue(value: number): string {
 const ActivityFlowsChart = ({ mode }: ActivityFlowsChartProps) => {
   const { theme } = useTheme();
   const config = FLOW_CONFIG[mode];
-  const [flowData, setFlowData] = useState<FlowDataPoint[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [timePeriod, setTimePeriod] = useState<TimePeriod>("90d");
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const fetchFlowData = async () => {
-      setLoading(true);
-      try {
-        const now = Date.now();
-        const days =
-          timePeriod === "7d" ? 7 : timePeriod === "30d" ? 30 : 90;
-        const startTime = now - days * 24 * 60 * 60 * 1000;
-
-        if (mode === "liquidity") {
-          const [depositsResponse, withdrawalsResponse, marketUsdLookup] =
-            await Promise.all([
-              dorkfiAPIService.getDeposits(startTime, now, 10000),
-              dorkfiAPIService.getWithdrawals(startTime, now, 10000),
-              fetchAnalyticsMarketUsdLookup().catch((error) => {
-                console.warn("Flow chart market USD lookup failed", error);
-                return new Map();
-              }),
-            ]);
-
-          if (cancelled) return;
-
-          const deposits =
-            depositsResponse.success && depositsResponse.data?.deposits
-              ? depositsResponse.data.deposits
-              : [];
-          const withdrawals =
-            withdrawalsResponse.success &&
-            withdrawalsResponse.data?.withdrawals
-              ? withdrawalsResponse.data.withdrawals
-              : [];
-
-          const inflowByDay = aggregateEventsByDay(deposits, (deposit) =>
-            analyticsValueToUsd(deposit.depositValueUSD, deposit.amount)
-          );
-          const outflowByDay = aggregateEventsByDay(withdrawals, (withdrawal) =>
-            activityRowToUsd(
-              {
-                amount: withdrawal.amount,
-                valueUsd: pickWithdrawValueUsd(withdrawal),
-                network: withdrawal.network,
-                marketId: withdrawal.marketId,
-              },
-              marketUsdLookup
-            )
-          );
-
-          setFlowData(mergeDailyFlows(inflowByDay, outflowByDay));
-          return;
-        }
-
-        const [borrowsResponse, repaysResponse] = await Promise.all([
-          dorkfiAPIService.getBorrows(startTime, now, 10000),
-          dorkfiAPIService.getRepays(startTime, now, 10000),
-        ]);
-
-        if (cancelled) return;
-
-        const borrows =
-          borrowsResponse.success && borrowsResponse.data?.borrows
-            ? borrowsResponse.data.borrows
-            : [];
-        const repays =
-          repaysResponse.success && repaysResponse.data?.repays
-            ? repaysResponse.data.repays
-            : [];
-
-        const inflowByDay = aggregateEventsByDay(borrows, (borrow) =>
-          analyticsValueToUsd(borrow.borrowValueUSD, borrow.amount)
-        );
-        const outflowByDay = aggregateEventsByDay(repays, (repay) =>
-          analyticsValueToUsd(repay.repayValueUSD, repay.amount)
-        );
-
-        setFlowData(mergeDailyFlows(inflowByDay, outflowByDay));
-      } catch (error) {
-        console.error(`Error fetching ${mode} flow data:`, error);
-        if (!cancelled) setFlowData([]);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-
-    fetchFlowData();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [mode, timePeriod]);
+  const [timePeriod, setTimePeriod] = useState<AnalyticsTimePeriod>("90d");
+  const { series: flowData, loading } = useFlowSeries(mode, timePeriod);
 
   const chartData = useMemo(
     () =>
@@ -215,7 +113,9 @@ const ActivityFlowsChart = ({ mode }: ActivityFlowsChartProps) => {
         <ToggleGroup
           type="single"
           value={timePeriod}
-          onValueChange={(value) => value && setTimePeriod(value as TimePeriod)}
+          onValueChange={(value) =>
+            value && setTimePeriod(value as AnalyticsTimePeriod)
+          }
           variant="outline"
           size="sm"
         >

@@ -1,79 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import ChartCard from './ChartCard';
-import { dorkfiAPIService } from '@/services/dorkfiAPIService';
+import { useWadGrowthSeries } from '@/hooks/useCachedAnalyticsSeries';
 import { formatCurrency, formatChartDate } from '@/utils/analyticsUtils';
+import { type AnalyticsTimePeriod } from '@/utils/analyticsTimePeriod';
 import { useTheme } from 'next-themes';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
-interface WADDataPoint {
-  date: string;
-  supply: number;
-}
-
-type TimePeriod = '7d' | '30d' | '90d';
-
 const WADCirculationChart = () => {
   const { theme } = useTheme();
-  const [wadData, setWadData] = useState<WADDataPoint[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [timePeriod, setTimePeriod] = useState<TimePeriod>('90d');
+  const [timePeriod, setTimePeriod] = useState<AnalyticsTimePeriod>('90d');
+  const { series: wadData, loading } = useWadGrowthSeries(timePeriod);
 
-  useEffect(() => {
-    const fetchWADData = async () => {
-      setLoading(true);
-      try {
-        const now = Date.now();
-        const days = timePeriod === '7d' ? 7 : timePeriod === '30d' ? 30 : 90;
-        const startTime = now - (days * 24 * 60 * 60 * 1000);
-        
-        // Always use total (no network filter)
-        const networkFilter = undefined;
-        const response = await dorkfiAPIService.getWADSupplyGrowth(
-          startTime,
-          now,
-          'day',
-          networkFilter
-        );
-
-        if (response.success && response.data?.dataPoints) {
-          const dataPoints = response.data.dataPoints;
-          if (dataPoints.length > 0) {
-            // Extract WAD supply values for total, matching demo page logic
-            const transformed: WADDataPoint[] = dataPoints
-              .map((point: any) => {
-                // When showing total, use the 'supply' field from dataPoint
-                // Normalize WAD by dividing by 10^6 (1e6)
-                const rawValue = parseFloat(point.supply || point.value || '0');
-                const supplyValue = rawValue / 1e6;
-                
-                return {
-                  date: new Date(point.timestamp).toISOString().split('T')[0],
-                  supply: supplyValue,
-                };
-              })
-              .filter((point) => point.supply >= 0); // Allow 0 values but filter out negative
-            
-            setWadData(transformed);
-          } else {
-            setWadData([]);
-          }
-        } else {
-          console.warn('WAD supply growth API returned unsuccessful response');
-          setWadData([]);
-        }
-      } catch (error) {
-        console.error('Error fetching WAD supply growth data:', error);
-        setWadData([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchWADData();
-  }, [timePeriod]);
-
-  // Calculate min and max values from the data
   const yAxisDomain = React.useMemo(() => {
     if (wadData.length === 0) return ['auto', 'auto'];
     
@@ -81,7 +19,6 @@ const WADCirculationChart = () => {
     const min = Math.min(...values);
     const max = Math.max(...values);
     
-    // Set y-axis to 0.95 * min and 1.05 * max for better visualization
     return [min * 0.95, max * 1.05];
   }, [wadData]);
 
@@ -118,7 +55,7 @@ const WADCirculationChart = () => {
         <ToggleGroup 
           type="single" 
           value={timePeriod} 
-          onValueChange={(value) => value && setTimePeriod(value as TimePeriod)}
+          onValueChange={(value) => value && setTimePeriod(value as AnalyticsTimePeriod)}
           variant="outline"
           size="sm"
         >
@@ -163,4 +100,3 @@ const WADCirculationChart = () => {
 };
 
 export default WADCirculationChart;
-

@@ -1,107 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import ChartCard from './ChartCard';
-import { dorkfiAPIService } from '@/services/dorkfiAPIService';
-import { fetchOracleBasedProtocolTotals, peekCachedOracleProtocolTotals } from '@/services/analyticsProtocolTvl';
+import { useTvlGrowthSeries } from '@/hooks/useCachedAnalyticsSeries';
 import { formatCurrency, formatChartDate } from '@/utils/analyticsUtils';
-import {
-  overlayLiveTvlOnSeries,
-  tvlFromGrowthDataPoint,
-} from '@/utils/analyticsProtocolTvl';
+import { type AnalyticsTimePeriod } from '@/utils/analyticsTimePeriod';
 import { useTheme } from 'next-themes';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
-interface TVLDataPoint {
-  date: string;
-  total: number;
-  weth: number;
-  usdc: number;
-  usdt: number;
-  wbtc: number;
-}
-
-type TimePeriod = '7d' | '30d' | '90d';
-
 const TVLChart = () => {
   const { theme } = useTheme();
-  const [tvlData, setTvlData] = useState<TVLDataPoint[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [timePeriod, setTimePeriod] = useState<TimePeriod>('90d');
+  const [timePeriod, setTimePeriod] = useState<AnalyticsTimePeriod>('90d');
+  const { series: tvlData, loading } = useTvlGrowthSeries(timePeriod);
 
-  useEffect(() => {
-    const fetchTVLData = async () => {
-      setLoading(true);
-      try {
-        const now = Date.now();
-        const days = timePeriod === '7d' ? 7 : timePeriod === '30d' ? 30 : 90;
-        const startTime = now - (days * 24 * 60 * 60 * 1000);
-        
-        const networkFilter = undefined;
-        const cachedOracle = peekCachedOracleProtocolTotals();
-        const response = await dorkfiAPIService.getTVLGrowth(
-          startTime,
-          now,
-          'day',
-          networkFilter
-        );
-
-        if (response.success && response.data?.dataPoints) {
-          const dataPoints = response.data.dataPoints;
-          if (dataPoints.length > 0) {
-            const transformed: TVLDataPoint[] = dataPoints
-              .map((point: { tvl?: number; value?: number; timestamp: number }) => {
-                const tvlValue = tvlFromGrowthDataPoint(point);
-                
-                return {
-                  date: new Date(point.timestamp).toISOString().split('T')[0],
-                  total: tvlValue,
-                  weth: tvlValue * 0.35,
-                  usdc: tvlValue * 0.28,
-                  usdt: tvlValue * 0.22,
-                  wbtc: tvlValue * 0.15,
-                };
-              })
-              .filter((point) => point.total >= 0);
-            
-            setTvlData(
-              cachedOracle?.tvl
-                ? overlayLiveTvlOnSeries(transformed, cachedOracle.tvl)
-                : transformed
-            );
-          } else {
-            setTvlData([]);
-          }
-        } else {
-          console.warn('TVL growth API returned unsuccessful response');
-          setTvlData([]);
-        }
-
-        if (!cachedOracle) {
-          fetchOracleBasedProtocolTotals()
-            .then((oracleTotals) => {
-              if (!oracleTotals?.tvl) return;
-              setTvlData((prev) =>
-                prev.length > 0
-                  ? overlayLiveTvlOnSeries(prev, oracleTotals.tvl)
-                  : prev
-              );
-            })
-            .catch((error) => {
-              console.warn('[TVLChart] oracle overlay failed', error);
-            });
-        }
-      } catch (error) {
-        console.error('Error fetching TVL growth data:', error);
-        setTvlData([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchTVLData();
-  }, [timePeriod]);
-
-  // Calculate min and max values from the data
   const yAxisDomain = React.useMemo(() => {
     if (tvlData.length === 0) return ['auto', 'auto'];
     
@@ -109,7 +19,6 @@ const TVLChart = () => {
     const min = Math.min(...values);
     const max = Math.max(...values);
     
-    // Set y-axis to 0.95 * min and 1.05 * max for better visualization
     return [min * 0.95, max * 1.05];
   }, [tvlData]);
 
@@ -147,7 +56,7 @@ const TVLChart = () => {
         <ToggleGroup 
           type="single" 
           value={timePeriod} 
-          onValueChange={(value) => value && setTimePeriod(value as TimePeriod)}
+          onValueChange={(value) => value && setTimePeriod(value as AnalyticsTimePeriod)}
           variant="outline"
           size="sm"
         >
@@ -192,4 +101,3 @@ const TVLChart = () => {
 };
 
 export default TVLChart;
-

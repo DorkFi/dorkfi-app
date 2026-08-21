@@ -1,8 +1,10 @@
 /**
- * Protocol TVL / borrowed using the same oracle overlay as Markets
- * (`buildMarketInfoFromRawMarketData` + `usdPerTokenFromPortfolioMarketRow`).
- * Amounts come from the bulk market-data API; USD prices come from the oracle
- * contract instead of stale `get_market.price`.
+ * Protocol TVL / borrowed for Analytics.
+ *
+ * Two price paths:
+ * - Fast: bulk `/market-data` prices only (no per-market oracle RPC) — used by
+ *   activity charts (withdrawals need USD conversion).
+ * - Oracle: Markets-accurate overlay for KPI refine after first paint.
  */
 
 import {
@@ -30,24 +32,42 @@ import {
 import { runWithConcurrency } from "@/utils/runWithConcurrency";
 
 const ORACLE_TVL_CACHE_TTL_MS = 60_000;
-const ORACLE_REFINE_CONCURRENCY = 6;
+const HYDRATE_CONCURRENCY = 8;
 const SESSION_CACHE_KEY = "dorkfi:analytics:oracle-protocol-totals";
 
 export interface OracleBasedProtocolTotals extends ProtocolUsdTotals {
   fetchedAt: number;
 }
 
+type HydrateMode = "fast" | "oracle";
+
 let cachedTotals: OracleBasedProtocolTotals | null = null;
-let inFlight: Promise<OracleBasedProtocolTotals | null> | null = null;
-let cachedHydratedMarkets: { markets: MarketInfo[]; fetchedAt: number } | null =
+let oracleTotalsInFlight: Promise<OracleBasedProtocolTotals | null> | null =
   null;
-let hydrateInFlight: Promise<MarketInfo[] | null> | null = null;
+let bulkTotalsInFlight: Promise<OracleBasedProtocolTotals | null> | null = null;
+
+let cachedFastMarkets: { markets: MarketInfo[]; fetchedAt: number } | null =
+  null;
+let cachedOracleMarkets: { markets: MarketInfo[]; fetchedAt: number } | null =
+  null;
+let fastHydrateInFlight: Promise<MarketInfo[] | null> | null = null;
+let oracleHydrateInFlight: Promise<MarketInfo[] | null> | null = null;
 
 function isFreshTotals(totals: OracleBasedProtocolTotals): boolean {
   return (
     Number.isFinite(totals.fetchedAt) &&
     Date.now() - totals.fetchedAt < ORACLE_TVL_CACHE_TTL_MS &&
     totals.tvl > 0
+  );
+}
+
+function isFreshMarkets(entry: {
+  markets: MarketInfo[];
+  fetchedAt: number;
+}): boolean {
+  return (
+    Date.now() - entry.fetchedAt < ORACLE_TVL_CACHE_TTL_MS &&
+    entry.markets.length > 0
   );
 }
 
@@ -96,8 +116,10 @@ function marketUsdPerToken(market: MarketInfo): number {
 }
 
 async function hydrateNetworkMarkets(
-  networkId: NetworkId
+  networkId: NetworkId,
+  mode: HydrateMode
 ): Promise<MarketInfo[]> {
+  const applyOracle = mode === "oracle";
   const tokens = getAllTokensWithDisplayInfo(networkId);
   let bulkMap: Map<string, MarketData> | null = null;
   try {
@@ -135,27 +157,28 @@ async function hydrateNetworkMarkets(
   }
 
   const markets: MarketInfo[] = [];
-  await runWithConcurrency(jobs, ORACLE_REFINE_CONCURRENCY, async (job) => {
+  await runWithConcurrency(jobs, HYDRATE_CONCURRENCY, async (job) => {
     try {
       const marketInfo = await buildMarketInfoFromRawMarketData(
         job.raw,
         job.poolId,
         job.marketId,
         networkId,
-        { applyOracle: true }
+        { applyOracle }
       );
       if (marketInfo) markets.push(marketInfo);
     } catch (error) {
       console.warn(
-        `[analyticsProtocolTvl] oracle build failed ${networkId}/${job.poolId}/${job.marketId}`,
+        `[analyticsProtocolTvl] ${mode} build failed ${networkId}/${job.poolId}/${job.marketId}`,
         error
       );
     }
   });
 
-  if (missingKeys.length > 0) {
+  // Gap-fill only for oracle path — fetchMarketsByKeys applies oracle pricing.
+  if (applyOracle && missingKeys.length > 0) {
     const gapFilled = await fetchMarketsByKeys(missingKeys, {
-      concurrency: ORACLE_REFINE_CONCURRENCY,
+      concurrency: HYDRATE_CONCURRENCY,
     });
     markets.push(...gapFilled);
   }
@@ -163,30 +186,56 @@ async function hydrateNetworkMarkets(
   return markets;
 }
 
-async function fetchHydratedAnalyticsMarkets(): Promise<MarketInfo[] | null> {
-  if (
-    cachedHydratedMarkets &&
-    Date.now() - cachedHydratedMarkets.fetchedAt < ORACLE_TVL_CACHE_TTL_MS &&
-    cachedHydratedMarkets.markets.length > 0
-  ) {
-    return cachedHydratedMarkets.markets;
-  }
-  if (hydrateInFlight) return hydrateInFlight;
+async function fetchHydratedAnalyticsMarkets(
+  mode: HydrateMode
+): Promise<MarketInfo[] | null> {
+  if (mode === "fast") {
+    if (cachedFastMarkets && isFreshMarkets(cachedFastMarkets)) {
+      return cachedFastMarkets.markets;
+    }
+    // Prefer oracle cache if already warm — prices are at least as good.
+    if (cachedOracleMarkets && isFreshMarkets(cachedOracleMarkets)) {
+      return cachedOracleMarkets.markets;
+    }
+    if (fastHydrateInFlight) return fastHydrateInFlight;
 
-  hydrateInFlight = (async () => {
+    fastHydrateInFlight = (async () => {
+      const networks = getEnabledNetworks().filter(isAlgorandCompatibleNetwork);
+      const perNetwork = await Promise.all(
+        networks.map((networkId) => hydrateNetworkMarkets(networkId, "fast"))
+      );
+      const markets = perNetwork.flat();
+      if (markets.length === 0) return null;
+      cachedFastMarkets = { markets, fetchedAt: Date.now() };
+      return markets;
+    })().finally(() => {
+      fastHydrateInFlight = null;
+    });
+
+    return fastHydrateInFlight;
+  }
+
+  if (cachedOracleMarkets && isFreshMarkets(cachedOracleMarkets)) {
+    return cachedOracleMarkets.markets;
+  }
+  if (oracleHydrateInFlight) return oracleHydrateInFlight;
+
+  oracleHydrateInFlight = (async () => {
     const networks = getEnabledNetworks().filter(isAlgorandCompatibleNetwork);
     const perNetwork = await Promise.all(
-      networks.map((networkId) => hydrateNetworkMarkets(networkId))
+      networks.map((networkId) => hydrateNetworkMarkets(networkId, "oracle"))
     );
     const markets = perNetwork.flat();
     if (markets.length === 0) return null;
-    cachedHydratedMarkets = { markets, fetchedAt: Date.now() };
+    cachedOracleMarkets = { markets, fetchedAt: Date.now() };
+    // Oracle results also satisfy fast consumers.
+    cachedFastMarkets = cachedOracleMarkets;
     return markets;
   })().finally(() => {
-    hydrateInFlight = null;
+    oracleHydrateInFlight = null;
   });
 
-  return hydrateInFlight;
+  return oracleHydrateInFlight;
 }
 
 export function buildAnalyticsMarketUsdLookup(
@@ -207,18 +256,78 @@ export function buildAnalyticsMarketUsdLookup(
   return lookup;
 }
 
-/** Oracle USD/token + decimals keyed by `network|marketId`. */
+/**
+ * Fast USD/token lookup from bulk market-data prices (no oracle RPC).
+ * Prefer this for activity charts so withdrawals aren't blocked on N oracle calls.
+ */
 export async function fetchAnalyticsMarketUsdLookup(): Promise<
   Map<string, AnalyticsMarketUsdQuote>
 > {
-  const markets = await fetchHydratedAnalyticsMarkets();
+  const markets = await fetchHydratedAnalyticsMarkets("fast");
   return buildAnalyticsMarketUsdLookup(markets ?? []);
 }
 
-async function computeOracleBasedProtocolTotals(): Promise<OracleBasedProtocolTotals | null> {
-  const markets = await fetchHydratedAnalyticsMarkets();
-  if (!markets || markets.length === 0) return null;
+/**
+ * Oracle-priced USD lookup for a specific set of markets (e.g. withdrawal rows).
+ * Much cheaper than hydrating every configured market when only ~20 ids appear in activity.
+ */
+export async function fetchOracleMarketUsdLookupForRefs(
+  refs: Array<{
+    network?: string;
+    marketId?: string | number;
+    poolId?: string | number;
+    appId?: string | number;
+  }>
+): Promise<Map<string, AnalyticsMarketUsdQuote>> {
+  // Reuse full oracle cache when already warm.
+  if (cachedOracleMarkets && isFreshMarkets(cachedOracleMarkets)) {
+    return buildAnalyticsMarketUsdLookup(cachedOracleMarkets.markets);
+  }
 
+  const keys: UserPositionMarketKey[] = [];
+  const seen = new Set<string>();
+
+  for (const ref of refs) {
+    const networkId = ref.network as NetworkId | undefined;
+    const marketId = String(ref.marketId ?? "").trim();
+    if (!networkId || !marketId || !isAlgorandCompatibleNetwork(networkId)) {
+      continue;
+    }
+
+    let poolId = String(ref.poolId ?? ref.appId ?? "").trim();
+    if (!poolId) {
+      const token = getAllTokensWithDisplayInfo(networkId).find((t) => {
+        const id = String(
+          t.underlyingContractId ||
+            t.underlyingAssetId ||
+            t.originalContractId ||
+            ""
+        ).trim();
+        return id === marketId;
+      });
+      poolId = token?.poolId != null ? String(token.poolId) : "";
+    }
+    if (!poolId) continue;
+
+    const dedupe = `${networkId}|${poolId}|${marketId}`;
+    if (seen.has(dedupe)) continue;
+    seen.add(dedupe);
+    keys.push({ networkId, poolId, marketId });
+  }
+
+  if (keys.length === 0) {
+    return fetchAnalyticsMarketUsdLookup();
+  }
+
+  const markets = await fetchMarketsByKeys(keys, {
+    concurrency: HYDRATE_CONCURRENCY,
+  });
+  return buildAnalyticsMarketUsdLookup(markets);
+}
+
+function totalsFromMarkets(
+  markets: MarketInfo[]
+): OracleBasedProtocolTotals | null {
   const totals = sumProtocolUsdTotals(
     markets.map((market) => ({
       totalDeposits: market.totalDeposits,
@@ -227,11 +336,34 @@ async function computeOracleBasedProtocolTotals(): Promise<OracleBasedProtocolTo
     }))
   );
   if (!(totals.tvl > 0)) return null;
-
   return {
     ...totals,
     fetchedAt: Date.now(),
   };
+}
+
+/**
+ * Protocol totals from bulk market-data prices (no oracle RPC).
+ * Use for a fast KPI refine before the slower oracle path finishes.
+ */
+export async function fetchBulkBasedProtocolTotals(): Promise<OracleBasedProtocolTotals | null> {
+  if (bulkTotalsInFlight) return bulkTotalsInFlight;
+
+  bulkTotalsInFlight = (async () => {
+    const markets = await fetchHydratedAnalyticsMarkets("fast");
+    if (!markets || markets.length === 0) return null;
+    return totalsFromMarkets(markets);
+  })().finally(() => {
+    bulkTotalsInFlight = null;
+  });
+
+  return bulkTotalsInFlight;
+}
+
+async function computeOracleBasedProtocolTotals(): Promise<OracleBasedProtocolTotals | null> {
+  const markets = await fetchHydratedAnalyticsMarkets("oracle");
+  if (!markets || markets.length === 0) return null;
+  return totalsFromMarkets(markets);
 }
 
 /**
@@ -241,9 +373,9 @@ async function computeOracleBasedProtocolTotals(): Promise<OracleBasedProtocolTo
 export async function fetchOracleBasedProtocolTotals(): Promise<OracleBasedProtocolTotals | null> {
   const peek = peekCachedOracleProtocolTotals();
   if (peek) return peek;
-  if (inFlight) return inFlight;
+  if (oracleTotalsInFlight) return oracleTotalsInFlight;
 
-  inFlight = computeOracleBasedProtocolTotals()
+  oracleTotalsInFlight = computeOracleBasedProtocolTotals()
     .then((result) => {
       if (result) {
         cachedTotals = result;
@@ -252,8 +384,19 @@ export async function fetchOracleBasedProtocolTotals(): Promise<OracleBasedProto
       return result;
     })
     .finally(() => {
-      inFlight = null;
+      oracleTotalsInFlight = null;
     });
 
-  return inFlight;
+  return oracleTotalsInFlight;
+}
+
+/** Test helper */
+export function __resetAnalyticsProtocolTvlCacheForTests(): void {
+  cachedTotals = null;
+  oracleTotalsInFlight = null;
+  bulkTotalsInFlight = null;
+  cachedFastMarkets = null;
+  cachedOracleMarkets = null;
+  fastHydrateInFlight = null;
+  oracleHydrateInFlight = null;
 }
