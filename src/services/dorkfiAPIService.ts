@@ -1252,6 +1252,7 @@ class DorkFiAPIService {
         round: number;
         amount?: string;
         marketId?: string;
+        appId?: number | string;
         withdrawValueUSD?: string;
         withdrawalValueUSD?: string;
         network?: string;

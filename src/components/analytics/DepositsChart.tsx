@@ -1,97 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Area, AreaChart, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import ChartCard from './ChartCard';
-import { dorkfiAPIService } from '@/services/dorkfiAPIService';
-import {
-  analyticsSummaryToUsd,
-  analyticsValueToUsd,
-} from '@/utils/analyticsActivityUsd';
+import { useActivityDailySeries } from '@/hooks/useCachedAnalyticsSeries';
+import { type AnalyticsTimePeriod } from '@/utils/analyticsTimePeriod';
 import { useTheme } from 'next-themes';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
-interface DepositsDataPoint {
-  date: string;
-  amount: number;
-}
-
-type TimePeriod = '7d' | '30d' | '90d';
-
 const DepositsChart = () => {
   const { theme } = useTheme();
-  const [depositsData, setDepositsData] = useState<DepositsDataPoint[]>([]);
-  const [totalDeposits, setTotalDeposits] = useState<number>(0);
-  const [loading, setLoading] = useState(true);
-  const [timePeriod, setTimePeriod] = useState<TimePeriod>('90d');
-
-  useEffect(() => {
-    const fetchDepositsData = async () => {
-      setLoading(true);
-      try {
-        const now = Date.now();
-        const days = timePeriod === '7d' ? 7 : timePeriod === '30d' ? 30 : 90;
-        const startTime = now - (days * 24 * 60 * 60 * 1000);
-        
-        // Always use total (no network filter)
-        const networkFilter = undefined;
-        const response = await dorkfiAPIService.getDeposits(
-          startTime,
-          now,
-          10000,
-          networkFilter
-        );
-
-        if (response.success && response.data?.deposits) {
-          const deposits = response.data.deposits;
-          if (deposits.length > 0) {
-            // Group by date and sum amounts (matching demo page approach)
-            const dailyDeposits: { [key: string]: number } = {};
-            
-            deposits.forEach((deposit) => {
-              const date = new Date(deposit.timestamp).toISOString().split('T')[0];
-              const value = analyticsValueToUsd(
-                deposit.depositValueUSD,
-                deposit.amount
-              );
-              dailyDeposits[date] = (dailyDeposits[date] || 0) + value;
-            });
-
-            const transformed = Object.entries(dailyDeposits)
-              .map(([date, amount]) => ({ date, amount }))
-              .sort((a, b) => a.date.localeCompare(b.date));
-            
-            setDepositsData(transformed);
-            
-            // Calculate total from summary if available, otherwise sum the daily amounts
-            const totalFromSummary = response.data.summary?.totalDepositValueUSD
-              ? analyticsSummaryToUsd(
-                  response.data.summary.totalDepositValueUSD,
-                  deposits.map((d) => ({
-                    valueUsd: d.depositValueUSD,
-                    amount: d.amount,
-                  }))
-                )
-              : transformed.reduce((sum, d) => sum + d.amount, 0);
-            setTotalDeposits(totalFromSummary);
-          } else {
-            setDepositsData([]);
-            setTotalDeposits(0);
-          }
-        } else {
-          console.warn('Deposits API returned unsuccessful response');
-          setDepositsData([]);
-          setTotalDeposits(0);
-        }
-      } catch (error) {
-        console.error('Error fetching deposits data:', error);
-        setDepositsData([]);
-        setTotalDeposits(0);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchDepositsData();
-  }, [timePeriod]);
+  const [timePeriod, setTimePeriod] = useState<AnalyticsTimePeriod>('90d');
+  const { series: depositsData, loading, total: totalDeposits } =
+    useActivityDailySeries('deposits', timePeriod);
 
   const formattedTotal = totalDeposits >= 1_000_000 
     ? `$${(totalDeposits / 1_000_000).toFixed(1)}M`
@@ -101,14 +20,13 @@ const DepositsChart = () => {
 
   const chartData = depositsData.map(d => ({
     date: new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    amount: d.amount, // Use raw dollar amounts
+    amount: d.amount,
   }));
 
-  // Calculate max value and set Y-axis domain to 1.1x max
   const maxValue = chartData.length > 0 
     ? Math.max(...chartData.map(d => d.amount))
     : 0;
-  const yAxisDomain = [0, maxValue * 1.1 || 5000]; // Default to 5000 if no data
+  const yAxisDomain = [0, maxValue * 1.1 || 5000];
 
   if (loading) {
     return (
@@ -133,7 +51,7 @@ const DepositsChart = () => {
         <ToggleGroup 
           type="single" 
           value={timePeriod} 
-          onValueChange={(value) => value && setTimePeriod(value as TimePeriod)}
+          onValueChange={(value) => value && setTimePeriod(value as AnalyticsTimePeriod)}
           variant="outline"
           size="sm"
         >
@@ -204,4 +122,3 @@ const DepositsChart = () => {
 };
 
 export default DepositsChart;
-

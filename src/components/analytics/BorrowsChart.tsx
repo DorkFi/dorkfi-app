@@ -1,97 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Area, AreaChart, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import ChartCard from './ChartCard';
-import { dorkfiAPIService } from '@/services/dorkfiAPIService';
-import {
-  analyticsSummaryToUsd,
-  analyticsValueToUsd,
-} from '@/utils/analyticsActivityUsd';
+import { useActivityDailySeries } from '@/hooks/useCachedAnalyticsSeries';
+import { type AnalyticsTimePeriod } from '@/utils/analyticsTimePeriod';
 import { useTheme } from 'next-themes';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
-interface BorrowsDataPoint {
-  date: string;
-  amount: number;
-}
-
-type TimePeriod = '7d' | '30d' | '90d';
-
 const BorrowsChart = () => {
   const { theme } = useTheme();
-  const [borrowsData, setBorrowsData] = useState<BorrowsDataPoint[]>([]);
-  const [totalBorrows, setTotalBorrows] = useState<number>(0);
-  const [loading, setLoading] = useState(true);
-  const [timePeriod, setTimePeriod] = useState<TimePeriod>('90d');
-
-  useEffect(() => {
-    const fetchBorrowsData = async () => {
-      setLoading(true);
-      try {
-        const now = Date.now();
-        const days = timePeriod === '7d' ? 7 : timePeriod === '30d' ? 30 : 90;
-        const startTime = now - (days * 24 * 60 * 60 * 1000);
-        
-        // Always use total (no network filter)
-        const networkFilter = undefined;
-        const response = await dorkfiAPIService.getBorrows(
-          startTime,
-          now,
-          10000,
-          networkFilter
-        );
-
-        if (response.success && response.data?.borrows) {
-          const borrows = response.data.borrows;
-          if (borrows.length > 0) {
-            // Group by date and sum amounts (matching demo page approach)
-            const dailyBorrows: { [key: string]: number } = {};
-            
-            borrows.forEach((borrow) => {
-              const date = new Date(borrow.timestamp).toISOString().split('T')[0];
-              const value = analyticsValueToUsd(
-                borrow.borrowValueUSD,
-                borrow.amount
-              );
-              dailyBorrows[date] = (dailyBorrows[date] || 0) + value;
-            });
-
-            const transformed = Object.entries(dailyBorrows)
-              .map(([date, amount]) => ({ date, amount }))
-              .sort((a, b) => a.date.localeCompare(b.date));
-            
-            setBorrowsData(transformed);
-            
-            // Calculate total from summary if available, otherwise sum the daily amounts
-            const totalFromSummary = response.data.summary?.totalBorrowValueUSD
-              ? analyticsSummaryToUsd(
-                  response.data.summary.totalBorrowValueUSD,
-                  borrows.map((b) => ({
-                    valueUsd: b.borrowValueUSD,
-                    amount: b.amount,
-                  }))
-                )
-              : transformed.reduce((sum, d) => sum + d.amount, 0);
-            setTotalBorrows(totalFromSummary);
-          } else {
-            setBorrowsData([]);
-            setTotalBorrows(0);
-          }
-        } else {
-          console.warn('Borrows API returned unsuccessful response');
-          setBorrowsData([]);
-          setTotalBorrows(0);
-        }
-      } catch (error) {
-        console.error('Error fetching borrows data:', error);
-        setBorrowsData([]);
-        setTotalBorrows(0);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchBorrowsData();
-  }, [timePeriod]);
+  const [timePeriod, setTimePeriod] = useState<AnalyticsTimePeriod>('90d');
+  const { series: borrowsData, loading, total: totalBorrows } =
+    useActivityDailySeries('borrows', timePeriod);
 
   const formattedTotal = totalBorrows >= 1_000_000 
     ? `$${(totalBorrows / 1_000_000).toFixed(1)}M`
@@ -101,14 +20,13 @@ const BorrowsChart = () => {
 
   const chartData = borrowsData.map(d => ({
     date: new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    amount: d.amount, // Use raw dollar amounts
+    amount: d.amount,
   }));
 
-  // Calculate max value and set Y-axis domain to 1.1x max
   const maxValue = chartData.length > 0 
     ? Math.max(...chartData.map(d => d.amount))
     : 0;
-  const yAxisDomain = [0, maxValue * 1.1 || 5000]; // Default to 5000 if no data
+  const yAxisDomain = [0, maxValue * 1.1 || 5000];
 
   if (loading) {
     return (
@@ -133,7 +51,7 @@ const BorrowsChart = () => {
         <ToggleGroup 
           type="single" 
           value={timePeriod} 
-          onValueChange={(value) => value && setTimePeriod(value as TimePeriod)}
+          onValueChange={(value) => value && setTimePeriod(value as AnalyticsTimePeriod)}
           variant="outline"
           size="sm"
         >
@@ -204,4 +122,3 @@ const BorrowsChart = () => {
 };
 
 export default BorrowsChart;
-

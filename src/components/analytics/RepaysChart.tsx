@@ -1,97 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Area, AreaChart, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import ChartCard from './ChartCard';
-import { dorkfiAPIService } from '@/services/dorkfiAPIService';
-import {
-  analyticsSummaryToUsd,
-  analyticsValueToUsd,
-} from '@/utils/analyticsActivityUsd';
+import { useActivityDailySeries } from '@/hooks/useCachedAnalyticsSeries';
+import { type AnalyticsTimePeriod } from '@/utils/analyticsTimePeriod';
 import { useTheme } from 'next-themes';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
-interface RepaysDataPoint {
-  date: string;
-  amount: number;
-}
-
-type TimePeriod = '7d' | '30d' | '90d';
-
 const RepaysChart = () => {
   const { theme } = useTheme();
-  const [repaysData, setRepaysData] = useState<RepaysDataPoint[]>([]);
-  const [totalRepays, setTotalRepays] = useState<number>(0);
-  const [loading, setLoading] = useState(true);
-  const [timePeriod, setTimePeriod] = useState<TimePeriod>('90d');
-
-  useEffect(() => {
-    const fetchRepaysData = async () => {
-      setLoading(true);
-      try {
-        const now = Date.now();
-        const days = timePeriod === '7d' ? 7 : timePeriod === '30d' ? 30 : 90;
-        const startTime = now - (days * 24 * 60 * 60 * 1000);
-        
-        // Always use total (no network filter)
-        const networkFilter = undefined;
-        const response = await dorkfiAPIService.getRepays(
-          startTime,
-          now,
-          10000,
-          networkFilter
-        );
-
-        if (response.success && response.data?.repays) {
-          const repays = response.data.repays;
-          if (repays.length > 0) {
-            // Group by date and sum amounts (matching demo page approach)
-            const dailyRepays: { [key: string]: number } = {};
-            
-            repays.forEach((repay) => {
-              const date = new Date(repay.timestamp).toISOString().split('T')[0];
-              const value = analyticsValueToUsd(
-                repay.repayValueUSD,
-                repay.amount
-              );
-              dailyRepays[date] = (dailyRepays[date] || 0) + value;
-            });
-
-            const transformed = Object.entries(dailyRepays)
-              .map(([date, amount]) => ({ date, amount }))
-              .sort((a, b) => a.date.localeCompare(b.date));
-            
-            setRepaysData(transformed);
-            
-            // Calculate total from summary if available, otherwise sum the daily amounts
-            const totalFromSummary = response.data.summary?.totalRepayValueUSD
-              ? analyticsSummaryToUsd(
-                  response.data.summary.totalRepayValueUSD,
-                  repays.map((r) => ({
-                    valueUsd: r.repayValueUSD,
-                    amount: r.amount,
-                  }))
-                )
-              : transformed.reduce((sum, d) => sum + d.amount, 0);
-            setTotalRepays(totalFromSummary);
-          } else {
-            setRepaysData([]);
-            setTotalRepays(0);
-          }
-        } else {
-          console.warn('Repays API returned unsuccessful response');
-          setRepaysData([]);
-          setTotalRepays(0);
-        }
-      } catch (error) {
-        console.error('Error fetching repays data:', error);
-        setRepaysData([]);
-        setTotalRepays(0);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchRepaysData();
-  }, [timePeriod]);
+  const [timePeriod, setTimePeriod] = useState<AnalyticsTimePeriod>('90d');
+  const { series: repaysData, loading, total: totalRepays } =
+    useActivityDailySeries('repays', timePeriod);
 
   const formattedTotal = totalRepays >= 1_000_000 
     ? `$${(totalRepays / 1_000_000).toFixed(1)}M`
@@ -101,14 +20,13 @@ const RepaysChart = () => {
 
   const chartData = repaysData.map(d => ({
     date: new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    amount: d.amount, // Use raw dollar amounts
+    amount: d.amount,
   }));
 
-  // Calculate max value and set Y-axis domain to 1.1x max
   const maxValue = chartData.length > 0 
     ? Math.max(...chartData.map(d => d.amount))
     : 0;
-  const yAxisDomain = [0, maxValue * 1.1 || 5000]; // Default to 5000 if no data
+  const yAxisDomain = [0, maxValue * 1.1 || 5000];
 
   if (loading) {
     return (
@@ -133,7 +51,7 @@ const RepaysChart = () => {
         <ToggleGroup 
           type="single" 
           value={timePeriod} 
-          onValueChange={(value) => value && setTimePeriod(value as TimePeriod)}
+          onValueChange={(value) => value && setTimePeriod(value as AnalyticsTimePeriod)}
           variant="outline"
           size="sm"
         >
@@ -204,4 +122,3 @@ const RepaysChart = () => {
 };
 
 export default RepaysChart;
-
