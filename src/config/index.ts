@@ -3276,8 +3276,10 @@ const algorandMainnetProdConfig: NetworkConfig = {
   walletNetworkId: "mainnet",
   name: "Algorand Mainnet",
   networkType: "avm",
-  rpcUrl: "https://mainnet-api.algorand.dork.fi",
-  rpcPublicUrl: "https://mainnet-api.algorand.dork.fi",
+  // Nodely public algod (v5). mainnet-api.algorand.dork.fi proxies to a local
+  // node that is down after the Algorand v5.0 consensus upgrade.
+  rpcUrl: "https://mainnet-api.4160.nodely.dev",
+  rpcPublicUrl: "https://mainnet-api.4160.nodely.dev",
   rpcPort: 443,
   rpcToken: undefined, // Public endpoint, no token required
   indexerUrl: "https://mainnet-idx.4160.nodely.dev",
