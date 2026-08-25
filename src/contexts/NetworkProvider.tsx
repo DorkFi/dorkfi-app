@@ -1,5 +1,4 @@
-import React, { useState, type ReactNode } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import React, { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import {
   WalletManager,
   NetworkId,
@@ -7,11 +6,6 @@ import {
   WalletProvider,
   NetworkConfigBuilder,
 } from "@txnlab/use-wallet-react";
-import {
-  WalletUIProvider,
-  type NoticesConfig,
-} from "@txnlab/use-wallet-ui-react";
-import { xchainWagmiConfig } from "@/wallet/xchainWagmiConfig";
 import {
   getCurrentNetworkConfig,
   NetworkId as ConfigNetworkId,
@@ -22,25 +16,12 @@ import {
   getSavedNetwork,
   saveSelectedNetwork,
 } from "@/utils/networkPersistence";
+import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 import { NetworkContext } from "./NetworkContext";
 
-const xchainWalletNotices: NoticesConfig = {
-  "evm-connect": {
-    kind: "disclaimer",
-    text: (
-      <>
-        xChain Accounts are beta. Connecting an EVM wallet creates an Algorand
-        account you control via EIP-712 signatures, not a seed phrase. Only use
-        funds you accept risking, and confirm the app network is Algorand
-        Mainnet when using this option.
-      </>
-    ),
-  },
-};
-
 /**
- * Wraps children with WalletUIProvider. Wagmi / RainbowKit (xChain WalletConnect) is mounted
- * only on Algorand Mainnet so VOI sessions do not run a second WC stack on the same project id.
+ * Wraps children with WalletUIProvider after a dynamic import so SimplFi
+ * (consumer copy) never loads RainbowKit on first paint.
  */
 function PrefiWalletUI({
   children,
@@ -49,17 +30,27 @@ function PrefiWalletUI({
   children: ReactNode;
   enableXchainWagmi: boolean;
 }) {
-  const queryClient = useQueryClient();
-  return (
-    <WalletUIProvider
-      theme="dark"
-      {...(enableXchainWagmi ? { wagmiConfig: xchainWagmiConfig } : {})}
-      queryClient={queryClient}
-      notices={xchainWalletNotices}
-    >
-      {children}
-    </WalletUIProvider>
-  );
+  const consumerCopy = useConsumerCopy();
+  const [Gate, setGate] = useState<ComponentType<{
+    children: ReactNode;
+    enableXchainWagmi?: boolean;
+  }> | null>(null);
+
+  useEffect(() => {
+    if (consumerCopy) return;
+    let cancelled = false;
+    void import("./XchainPrefiWalletUI").then((mod) => {
+      if (!cancelled) setGate(() => mod.default);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [consumerCopy]);
+
+  if (consumerCopy || !Gate) {
+    return children;
+  }
+  return <Gate enableXchainWagmi={enableXchainWagmi}>{children}</Gate>;
 }
 
 interface NetworkProviderProps {
@@ -69,14 +60,33 @@ interface NetworkProviderProps {
 export const NetworkProvider: React.FC<NetworkProviderProps> = ({
   children,
 }) => {
-  // Initialize with saved network or default to algorand-mainnet
+  const consumerCopy = useConsumerCopy();
+  // SimplFi hides the network picker; a saved chain (e.g. Voi) would make
+  // Easy Start Algorand balances look empty. Always pin consumer to mainnet.
   const [currentNetwork, setCurrentNetworkState] = useState<ConfigNetworkId>(
     () => {
+      if (consumerCopy) return "algorand-mainnet";
       const savedNetwork = getSavedNetwork();
       return savedNetwork || "algorand-mainnet";
     }
   );
   const [isSwitchingNetwork, setIsSwitchingNetwork] = useState(false);
+  const [rainbowKitWallet, setRainbowKitWallet] = useState<unknown | null>(null);
+
+  useEffect(() => {
+    if (consumerCopy) return;
+    let cancelled = false;
+    void import("@/wallet/xchainWagmiConfig").then(({ xchainWagmiConfig }) => {
+      if (cancelled) return;
+      setRainbowKitWallet({
+        id: WalletId.RAINBOWKIT,
+        options: { wagmiConfig: xchainWagmiConfig },
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [consumerCopy]);
 
   // Create WalletManager with current network configuration
   const createWalletManager = (networkId: ConfigNetworkId): WalletManager => {
@@ -199,12 +209,10 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
           },
         },
       ];
-      // xChain (RainbowKit / EVM) — Algorand Mainnet only until Voi LogicSig support is confirmed
-      if (networkId === "algorand-mainnet") {
-        avmWallets.unshift({
-          id: WalletId.RAINBOWKIT,
-          options: { wagmiConfig: xchainWagmiConfig },
-        });
+      // xChain (RainbowKit / EVM) — Algorand Mainnet only until Voi LogicSig support is confirmed.
+      // Skip on SimplFi: Easy Start uses Privy, and RainbowKit's static graph blocked first paint.
+      if (networkId === "algorand-mainnet" && !consumerCopy && rainbowKitWallet) {
+        avmWallets.unshift(rainbowKitWallet);
       }
       return avmWallets as any[];
     } else if (networkConfig.networkType === "evm") {
@@ -220,7 +228,24 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
     createWalletManager(currentNetwork)
   );
 
+  useEffect(() => {
+    if (consumerCopy || !rainbowKitWallet) return;
+    setWalletManager(createWalletManager(currentNetwork));
+    // Recreate once RainbowKit config is available (DorkFi xChain wallet).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rainbowKitWallet]);
+
+  useEffect(() => {
+    if (!consumerCopy || currentNetwork === "algorand-mainnet") return;
+    setCurrentNetwork("algorand-mainnet");
+    setCurrentNetworkState("algorand-mainnet");
+    setWalletManager(createWalletManager("algorand-mainnet"));
+  }, [consumerCopy, currentNetwork]);
+
   const switchNetwork = async (networkId: ConfigNetworkId) => {
+    if (consumerCopy && networkId !== "algorand-mainnet") {
+      return;
+    }
     if (isSwitchingNetwork) return; // Prevent multiple simultaneous switches
 
     setIsSwitchingNetwork(true);

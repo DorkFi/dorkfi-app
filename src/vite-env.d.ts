@@ -27,6 +27,7 @@ interface ImportMetaEnv {
   readonly VITE_ENABLE_POOLS?: string;
   /** When `true` or `1`, show Deposit / Withdraw LP actions on pool cards (Supply / Withdraw always shown). */
   readonly VITE_ENABLE_POOL_DEPOSIT_WITHDRAW?: string;
+  readonly VITE_ENABLE_POOL_DEPOSIT_WITHDRAW?: string;
   /**
    * When `true` or `1`, enable cross-asset repay via Haystack (Algorand mainnet).
    * Defaults on in Vite DEV; off in production builds unless set (safe beta dark-ship).
@@ -46,6 +47,8 @@ interface ImportMetaEnv {
   readonly VITE_PRIVY_APP_ID?: string;
   /** When `true` or `1`, show Get Started (Privy) alongside Connect Wallet. */
   readonly VITE_ENABLE_PRIVY_ONBOARDING?: string;
+  /** Extra Privy allowed origins (comma-separated). Also add them in the Privy dashboard. */
+  readonly VITE_PRIVY_ALLOWED_ORIGINS?: string;
   /** MoonPay publishable key (`pk_test_…` / `pk_live_…`) for Easy Start sell widget. */
   readonly VITE_MOONPAY_API_KEY?: string;
   /** Optional origin for off-ramp API (default `/api/offramp` via Vite plugin). */

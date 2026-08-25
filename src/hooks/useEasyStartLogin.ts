@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
+import {
+  queueEasyStartLogin,
+  usePrivyEasyStart,
+} from "@/contexts/privyEasyStartContext";
 import { getPrivyOriginHint } from "@/utils/privyOrigin";
 
 const READY_WAIT_MS = 15_000;
@@ -36,12 +39,19 @@ export function useEasyStartLogin() {
     }
 
     if (!loginRef.current) {
+      queueEasyStartLogin();
       toast({
-        title: "Easy Start unavailable",
-        description:
-          "Privy did not initialize. Confirm VITE_PRIVY_APP_ID, then hard-refresh on an allowlisted origin (http://localhost:8080 or http://localhost:5173).",
-        variant: "destructive",
+        title: "Starting Easy Start…",
+        description: "Loading sign-in. The login window will open in a moment.",
       });
+      const deadline = Date.now() + READY_WAIT_MS;
+      while (!loginRef.current && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
+
+    if (!loginRef.current) {
+      // Lazy Privy remounts the tree; the new provider opens the queued login.
       return;
     }
 

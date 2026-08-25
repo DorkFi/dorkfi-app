@@ -1,7 +1,5 @@
 import React, {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -24,52 +22,20 @@ import {
   getPrivyOriginHint,
   resolvePrivyOnboardingEnabled,
 } from "@/utils/privyOrigin";
+import {
+  DEFAULT_PRIVY_EASY_START_STATE,
+  PrivyEasyStartContext,
+  takeQueuedEasyStartLogin,
+  type PrivyEasyStartState,
+} from "@/contexts/privyEasyStartContext";
+
+export type { PrivyEasyStartState } from "@/contexts/privyEasyStartContext";
+export {
+  usePrivyEasyStart,
+  usePrivyEasyStartEnabled,
+} from "@/contexts/privyEasyStartContext";
 
 const PRIVY_APP_ID = getPrivyAppId();
-
-export type PrivyEasyStartState = {
-  enabled: boolean;
-  configured: boolean;
-  ready: boolean;
-  authenticated: boolean;
-  evmAddress: string | null;
-  algorandAddress: string | null;
-  algorandAddressLoading: boolean;
-  displayName: string | null;
-  login: ((options?: { loginMethods?: string[] }) => void) | null;
-  logout: (() => Promise<void>) | null;
-  /** xChain EIP-712 signing for Algorand txn groups (Privy embedded wallet). */
-  signTransactions: ((txns: Uint8Array[]) => Promise<Uint8Array[]>) | null;
-};
-
-const DEFAULT_STATE: PrivyEasyStartState = {
-  enabled: false,
-  configured: false,
-  ready: false,
-  authenticated: false,
-  evmAddress: null,
-  algorandAddress: null,
-  algorandAddressLoading: false,
-  displayName: null,
-  login: null,
-  logout: null,
-  signTransactions: null,
-};
-
-const PrivyEasyStartContext = createContext<PrivyEasyStartState>(DEFAULT_STATE);
-
-export function usePrivyEasyStart(): PrivyEasyStartState {
-  return useContext(PrivyEasyStartContext);
-}
-
-/** @deprecated Use usePrivyEasyStart */
-export function usePrivyEasyStartEnabled(): {
-  enabled: boolean;
-  configured: boolean;
-} {
-  const { enabled, configured } = usePrivyEasyStart();
-  return { enabled, configured };
-}
 
 function privyDisplayName(
   user: ReturnType<typeof usePrivy>["user"]
@@ -121,6 +87,13 @@ function PrivyEasyStartStateBridge({
     }, 8000);
     return () => window.clearTimeout(t);
   }, [ready, onReadyStuck]);
+
+  useEffect(() => {
+    if (!ready || !login) return;
+    if (takeQueuedEasyStartLogin()) {
+      login({ loginMethods: ["email"] });
+    }
+  }, [ready, login]);
 
   /** Survive Privy wallets[] blips (e.g. after Base chain switch). */
   const [stableEvmAddress, setStableEvmAddress] = useState<string | null>(null);
@@ -236,7 +209,7 @@ export function PrivySessionProvider({ children }: PrivySessionProviderProps) {
 
   const disabledValue = useMemo(
     (): PrivyEasyStartState => ({
-      ...DEFAULT_STATE,
+      ...DEFAULT_PRIVY_EASY_START_STATE,
       enabled,
       configured,
     }),

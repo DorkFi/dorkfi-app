@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { getLendingPoolLabel, type NetworkId } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
+import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
 import { listEasyBorrowDebtMarkets } from "@/services/borrowRouteResolver";
 import {

@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useWallet } from "@txnlab/use-wallet-react";
-import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
+import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 import { isRainbowkitXchainWallet } from "@/wallet/xchainSignUi";
 import {
   EMPTY_DORKFI_SESSION,
