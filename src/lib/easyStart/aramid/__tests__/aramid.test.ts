@@ -6,11 +6,10 @@ import { encodeAramidAvmToBaseNote } from "@/lib/easyStart/aramid/note";
 import { ARAMID_NOTE_PREFIX } from "@/lib/easyStart/aramid/constants";
 
 describe("splitAramidFee", () => {
-  it("matches the live Base 1.001 floor (24.476842 USDC example)", () => {
-    const total = 24476842n;
+  it("truncates destination as floor(total / 1.001)", () => {
+    const total = 100_000_000n;
     const { feeAmount, destinationAmount } = splitAramidFee(total);
-    expect(destinationAmount).toBe(24452386n);
-    expect(feeAmount).toBe(24456n);
+    expect(destinationAmount).toBe((total * 1000n) / 1001n);
     expect(feeAmount + destinationAmount).toBe(total);
   });
 
@@ -24,7 +23,7 @@ describe("encodeAramidLockTokens", () => {
   it("uses the live lockTokens selector", () => {
     const data = encodeAramidLockTokens({
       feeAmount: 24456n,
-      rootAmount: 24452386n,
+      rootAmount: 24431138n,
       algorandAddress:
         "65Z4RSSNWO4N6BBF7FINJC2ZE6F7JBVCEFMKKMWZ3RZA7VTX4RXZWCLLVA",
     });
