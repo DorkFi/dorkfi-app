@@ -29,7 +29,7 @@ import {
 } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { getNetworkLogoPath } from "@/utils/tokenImageUtils";
-import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
+import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 import { EasyStartConnectMenu, EasyStartButton } from "@/components/easy-start/EasyStartAuthControls";
 import { useEasyStartLogin } from "@/hooks/useEasyStartLogin";
 import { AppSettingsMenuSection } from "@/components/AppSettingsMenuSection";

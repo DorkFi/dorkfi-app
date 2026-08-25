@@ -5,7 +5,7 @@ import {
   writeEasyStartProfile,
   type EasyStartUserProfile,
 } from "@/lib/easyStart/userProfile";
-import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
+import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 
 function subscribe(onStoreChange: () => void): () => void {
   const onStorage = (e: StorageEvent) => {

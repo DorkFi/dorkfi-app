@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { Address } from "viem";
 import type { NetworkId } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
+import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
 import { useSavingsAccounts } from "@/hooks/useSavingsAccounts";
 import { useSavingsUserPositions } from "@/hooks/useSavingsUserPositions";

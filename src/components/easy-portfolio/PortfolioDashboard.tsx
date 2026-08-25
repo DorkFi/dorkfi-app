@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
-import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
+import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 import { Info, Loader2 } from "lucide-react";
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
 import { useNetwork } from "@/contexts/NetworkContext";

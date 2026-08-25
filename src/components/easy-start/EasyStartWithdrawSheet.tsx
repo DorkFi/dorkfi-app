@@ -14,7 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
+import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 import { useToast } from "@/hooks/use-toast";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";

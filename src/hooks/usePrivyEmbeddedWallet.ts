@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useWallets, type ConnectedWallet } from "@privy-io/react-auth";
-import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
+import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 
 /** Privy embedded wallet when Easy Start is active (must run under PrivyProvider). */
 export function usePrivyEmbeddedWallet(): {

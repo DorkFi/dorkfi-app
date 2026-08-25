@@ -3,7 +3,7 @@ import { Algodv2 } from "algosdk";
 import { useQueryClient } from "@tanstack/react-query";
 import type { BridgeWalletAdapter } from "@d13co/algo-x-evm-ui";
 import { base } from "viem/chains";
-import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
+import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 import { usePrivyEmbeddedWallet } from "@/hooks/usePrivyEmbeddedWallet";
 
 /**

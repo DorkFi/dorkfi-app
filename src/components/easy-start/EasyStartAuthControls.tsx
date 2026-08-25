@@ -16,7 +16,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
+import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 import { useEasyStartModals } from "@/contexts/easyStartModals";
 import { useEasyStartLogin } from "@/hooks/useEasyStartLogin";
 import { useEasyStartUserProfile } from "@/hooks/useEasyStartUserProfile";
@@ -27,17 +27,22 @@ import { AppSettingsMenuSection } from "@/components/AppSettingsMenuSection";
 
 export function EasyStartButton() {
   const openEasyStartLogin = useEasyStartLogin();
-  const { login } = usePrivyEasyStart();
+  const { enabled, configured, login, ready } = usePrivyEasyStart();
+  const waiting = enabled && configured && (!login || !ready);
 
   return (
     <Button
       type="button"
       variant="outline"
       className="border-ocean-teal/40 text-ocean-teal hover:bg-ocean-teal/10 font-semibold"
-      disabled={!login}
+      disabled={!enabled || !configured}
       onClick={() => void openEasyStartLogin()}
     >
-      <Sparkles className="mr-2 h-4 w-4" />
+      {waiting ? (
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+      ) : (
+        <Sparkles className="mr-2 h-4 w-4" />
+      )}
       <span className="hidden sm:inline">Get Started</span>
       <span className="sm:hidden">Start</span>
     </Button>

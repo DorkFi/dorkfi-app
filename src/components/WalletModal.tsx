@@ -18,7 +18,7 @@ import {
   type NetworkId,
 } from "@/config";
 import { getNetworkLogoPath } from "@/utils/tokenImageUtils";
-import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
+import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 import { useEasyStartLogin } from "@/hooks/useEasyStartLogin";
 import { cn } from "@/lib/utils";
 

@@ -9,7 +9,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
+import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 import type { NetworkId } from "@/config";
 import {
   resolveSavingsRoute,

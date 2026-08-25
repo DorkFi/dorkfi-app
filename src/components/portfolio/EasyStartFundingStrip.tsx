@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import { Button } from "@/components/ui/button";
-import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
+import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 import { useEasyStartModals } from "@/contexts/easyStartModals";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import { cn } from "@/lib/utils";

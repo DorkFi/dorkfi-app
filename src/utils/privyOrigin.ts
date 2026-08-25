@@ -58,8 +58,21 @@ export function resolvePrivyOnboardingEnabled(
   return configFeatureEnabled;
 }
 
+function extraAllowedOrigins(): string[] {
+  const raw = (import.meta.env.VITE_PRIVY_ALLOWED_ORIGINS ?? "").trim();
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((part) => part.trim().replace(/\/+$/, ""))
+    .filter(Boolean);
+}
+
 export function isPrivyOriginAllowed(origin = window.location.origin): boolean {
-  return (PRIVY_ALLOWED_ORIGINS as readonly string[]).includes(origin);
+  const normalized = origin.replace(/\/+$/, "");
+  if ((PRIVY_ALLOWED_ORIGINS as readonly string[]).includes(normalized)) {
+    return true;
+  }
+  return extraAllowedOrigins().includes(normalized);
 }
 
 /** Actionable hint when the current URL cannot initialize Privy. */
@@ -81,5 +94,5 @@ export function getPrivyOriginHint(origin = window.location.origin): string | nu
     }
   }
 
-  return `Add ${origin} to Allowed origins in the Privy dashboard and PRIVY_ALLOWED_ORIGINS, then hard-refresh.`;
+  return `Add ${origin} to Allowed origins in the Privy dashboard and set VITE_PRIVY_ALLOWED_ORIGINS (or PRIVY_ALLOWED_ORIGINS), then hard-refresh.`;
 }

@@ -1,4 +1,4 @@
-import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
+import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 
 export function usePrivyXchainAddress() {
   const privy = usePrivyEasyStart();

@@ -9,7 +9,7 @@ import {
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
-import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
+import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 import { EasyStartFundingStrip } from "@/components/portfolio/EasyStartFundingStrip";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { useAddressName } from "@/hooks/useAddressName";

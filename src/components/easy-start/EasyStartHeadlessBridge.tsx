@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useSendTransaction } from "@privy-io/react-auth";
 import { useQueryClient } from "@tanstack/react-query";
-import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
+import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 import {
   type EasyStartBridgeDirection,
   type EasyStartBridgePhase,
