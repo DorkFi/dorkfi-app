@@ -477,19 +477,6 @@ export type FetchMarketInfoContractMethod = "sync_market" | "get_market";
 
 const ORACLE_PRICE_CACHE_TTL_MS = 60_000;
 
-/**
- * On Pool A, fWBTC's price-oracle feed tracks spot BTC; goBTC's own oracle entry can lag.
- * When resolving goBTC display price, also consider these reference market contract IDs.
- */
-const ALGORAND_POOL_BTC_ORACLE_REFERENCE_MARKETS: Partial<
-  Record<string, string[]>
-> = {
-  "3333688282": ["3575837891"],
-};
-
-/** Symbols that can use the Pool A fWBTC oracle feed when their own entry is stale/missing. */
-const BTC_ORACLE_REFERENCE_SYMBOLS = new Set(["GOBTC", "WBTC", "BTC"]);
-
 async function readOracleUsdPerToken(
   networkId: NetworkId,
   oracleKey: string,
@@ -585,20 +572,8 @@ async function applyOraclePriceToMarketInfo(
     );
   };
 
-  // Primary keys first — avoid BTC-ref RPCs when the market's own feed is live.
-  let candidates = await collectFromKeys(oracleKeys);
-
-  const sym = marketInfo.symbol.toUpperCase();
-  const btcRefMarkets =
-    ALGORAND_POOL_BTC_ORACLE_REFERENCE_MARKETS[marketInfo.poolId];
-  if (
-    candidates.length === 0 &&
-    btcRefMarkets &&
-    BTC_ORACLE_REFERENCE_SYMBOLS.has(sym)
-  ) {
-    const refKeys = btcRefMarkets.filter((id) => !oracleKeys.includes(id));
-    candidates = await collectFromKeys(refKeys);
-  }
+  // This market's own oracle keys only — never another wrapper's feed.
+  const candidates = await collectFromKeys(oracleKeys);
 
   if (candidates.length === 0) return;
 

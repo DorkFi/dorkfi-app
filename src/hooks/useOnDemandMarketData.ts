@@ -46,6 +46,9 @@ import { useFolksMainnetWbtcNttPoolLiveApyPercent } from "@/hooks/useFolksMainne
 import { useFolksMainnetWethNttPoolLiveApyPercent } from "@/hooks/useFolksMainnetWethNttPoolLiveApyPercent";
 import { resolveTokenIconBadgeUrl } from "@/utils/tokenImageUtils";
 import { withRpcReadCache, getRpcReadCache } from "@/utils/rpcReadCache";
+import { useDisplayAssetUsdMap } from "@/hooks/useDisplayAssetUsdMap";
+import { collectAlgorandMainnetDisplayAsaIds } from "@/utils/resolveAsaIdForDisplayUsd";
+import { overlayOnDemandMarketsRecord } from "@/utils/overlayOnDemandMarketUsd";
 
 export interface OnDemandMarketData {
   asset: string;
@@ -409,6 +412,15 @@ export const useOnDemandMarketData = ({
    */
   const marketsDataEpochRef = useRef(0);
   const algorandMainnetMarkets = currentNetwork === "algorand-mainnet";
+  const algorandDisplayAsaIds = useMemo(
+    () =>
+      algorandMainnetMarkets ? collectAlgorandMainnetDisplayAsaIds() : [],
+    [algorandMainnetMarkets]
+  );
+  const displayUsdByAsaId = useDisplayAssetUsdMap(
+    algorandDisplayAsaIds,
+    algorandMainnetMarkets
+  );
   const tinymanLiveIntrinsicApyPct = useTinymanLiquidStakingLiveApyPercent(
     algorandMainnetMarkets
   );
@@ -1253,14 +1265,24 @@ export const useOnDemandMarketData = ({
     [autoLoad, loadMarketData]
   );
 
+  const marketsDataForDisplay = useMemo(
+    () =>
+      overlayOnDemandMarketsRecord(
+        marketsData,
+        currentNetwork,
+        displayUsdByAsaId
+      ),
+    [marketsData, currentNetwork, displayUsdByAsaId]
+  );
+
   // Convert markets data to array format (include _sortKey for stable tie-breaking)
   const marketDataArray = useMemo(() => {
-    return Object.entries(marketsData).map(([key, market]) => ({
+    return Object.entries(marketsDataForDisplay).map(([key, market]) => ({
       ...market,
       isLoading: loadingMarkets.has(key),
       _sortKey: key,
     }));
-  }, [marketsData, loadingMarkets]);
+  }, [marketsDataForDisplay, loadingMarkets]);
 
   /** Lending pool app ids in order: A = [0], B = [1], D = [2] when present. */
   const lendingPools = useMemo(() => {
@@ -1524,7 +1546,7 @@ export const useOnDemandMarketData = ({
     hydrateMarkets,
     isLoading: loadingMarkets.size > 0,
     isLoadingVisible,
-    marketsData,
+    marketsData: marketsDataForDisplay,
     wadMintMarket,
     newMarketsCount,
     rewardMarketsCount,

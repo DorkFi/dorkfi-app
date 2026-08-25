@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useWallet } from "@txnlab/use-wallet-react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import NFTMintModal from "./NFTMintModal";
@@ -18,6 +18,13 @@ import algorandService from "@/services/algorandService";
 import { getNetworkConfig } from "@/config";
 import { LENDING_USER_HEALTH_ROUND_LOOKBACK } from "@/constants/lendingUserHealthIndexer";
 import algosdk from "algosdk";
+import { useDisplayAssetUsdMap } from "@/hooks/useDisplayAssetUsdMap";
+import { usdPerTokenFromPortfolioMarketRow } from "@/utils/assetDecimals";
+import { overlayUsdWithDisplayPrice } from "@/utils/displayUsdPerToken";
+import {
+  collectAlgorandMainnetDisplayAsaIds,
+  resolveAsaIdForDisplayUsd,
+} from "@/utils/resolveAsaIdForDisplayUsd";
 
 interface DashboardProps {
   onTabChange?: (value: string) => void;
@@ -26,6 +33,17 @@ interface DashboardProps {
 const Dashboard = ({ onTabChange }: DashboardProps) => {
   const { activeAccount } = useWallet();
   const { currentNetwork } = useNetwork();
+  const algorandDisplayAsaIds = useMemo(
+    () =>
+      currentNetwork === "algorand-mainnet"
+        ? collectAlgorandMainnetDisplayAsaIds()
+        : [],
+    [currentNetwork]
+  );
+  const displayUsdByAsaId = useDisplayAssetUsdMap(
+    algorandDisplayAsaIds,
+    currentNetwork === "algorand-mainnet"
+  );
 
   // Real user data state
   const [userGlobalData, setUserGlobalData] = useState<{
@@ -94,32 +112,45 @@ const Dashboard = ({ onTabChange }: DashboardProps) => {
     netAPY: calculateNetAPY(userAssets.assets),
   };
 
-  // Calculate market stats from real market data
-  const marketStats = {
-    totalValueLocked: marketData.reduce((sum, market) => {
-      const deposits = parseFloat(market.totalDeposits || "0");
-      const price = parseFloat(market.price || "0");
-      // Convert price from scaled format (divide by 10^6 as done in PreFi)
-      const scaledPrice = price / Math.pow(10, 6);
-      return sum + deposits * scaledPrice;
-    }, 0),
-    totalBorrowed: marketData.reduce((sum, market) => {
-      const borrows = parseFloat(market.totalBorrows || "0");
-      const price = parseFloat(market.price || "0");
-      // Convert price from scaled format (divide by 10^6 as done in PreFi)
-      const scaledPrice = price / Math.pow(10, 6);
-      return sum + borrows * scaledPrice;
-    }, 0),
-    availableLiquidity: marketData.reduce((sum, market) => {
-      const deposits = parseFloat(market.totalDeposits || "0");
-      const borrows = parseFloat(market.totalBorrows || "0");
-      const price = parseFloat(market.price || "0");
-      // Convert price from scaled format (divide by 10^6 as done in PreFi)
-      const scaledPrice = price / Math.pow(10, 6);
-      return sum + (deposits - borrows) * scaledPrice;
-    }, 0),
-    activeUsers: activeUsersCount,
-  };
+  // Calculate market stats from real market data (DEX USD when available)
+  const marketStats = useMemo(() => {
+    const usdForMarket = (market: MarketInfo) => {
+      const protocolUsd = usdPerTokenFromPortfolioMarketRow(
+        market,
+        market.decimals || 6,
+        { displaySymbol: market.symbol }
+      );
+      const asaId = resolveAsaIdForDisplayUsd({
+        networkId: market.networkId || currentNetwork,
+        poolId: market.poolId,
+        marketId: market.marketId,
+        displaySymbol: market.symbol,
+      });
+      return overlayUsdWithDisplayPrice(
+        protocolUsd,
+        asaId != null ? displayUsdByAsaId.get(asaId) : undefined
+      );
+    };
+    return {
+      totalValueLocked: marketData.reduce((sum, market) => {
+        const deposits = parseFloat(market.totalDeposits || "0");
+        return sum + (Number.isFinite(deposits) ? deposits * usdForMarket(market) : 0);
+      }, 0),
+      totalBorrowed: marketData.reduce((sum, market) => {
+        const borrows = parseFloat(market.totalBorrows || "0");
+        return sum + (Number.isFinite(borrows) ? borrows * usdForMarket(market) : 0);
+      }, 0),
+      availableLiquidity: marketData.reduce((sum, market) => {
+        const deposits = parseFloat(market.totalDeposits || "0");
+        const borrows = parseFloat(market.totalBorrows || "0");
+        const net =
+          (Number.isFinite(deposits) ? deposits : 0) -
+          (Number.isFinite(borrows) ? borrows : 0);
+        return sum + net * usdForMarket(market);
+      }, 0),
+      activeUsers: activeUsersCount,
+    };
+  }, [marketData, displayUsdByAsaId, currentNetwork, activeUsersCount]);
 
   const [nftMintModalOpen, setNFTMintModalOpen] = useState(false);
   // In real app, these would be from user/session

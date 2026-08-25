@@ -125,6 +125,12 @@ import {
 } from "@/utils/modalPrefetch";
 import { buildMarketHoverHandlers } from "@/utils/modalHoverHandlers";
 import { resolveUsdPerTokenFromMarketInfo } from "@/utils/assetDecimals";
+import { overlayUsdWithDisplayPrice } from "@/utils/displayUsdPerToken";
+import {
+  collectAlgorandMainnetDisplayAsaIds,
+  resolveAsaIdForDisplayUsd,
+} from "@/utils/resolveAsaIdForDisplayUsd";
+import { useDisplayAssetUsdMap } from "@/hooks/useDisplayAssetUsdMap";
 
 const MAX_CLAIMS_PER_TX = 3;
 
@@ -173,7 +179,8 @@ function resolveMarketRowTokenDecimals(
 /** Map on-demand market row → PremiumMarketModal `MarketData` (USD fields in whole dollars like the markets table). */
 function normalizeMarketData(
   md: Record<string, unknown>,
-  networkId?: NetworkId
+  networkId?: NetworkId,
+  dexUsdByAsaId?: Map<number, number>
 ) {
   const totalSupplyUSD = Number(md.totalSupplyUSD ?? 0);
   const totalBorrowUSD = Number(md.totalBorrowUSD ?? 0);
@@ -221,6 +228,23 @@ function normalizeMarketData(
       price = totalSupplyUSD / 1_000_000 / supplyTokensHuman;
     }
   }
+
+  const asaId = resolveAsaIdForDisplayUsd({
+    networkId,
+    poolId: md.poolId != null ? String(md.poolId) : null,
+    marketId: String(
+      md.marketId ??
+        (md.marketInfo as { marketId?: unknown } | undefined)?.marketId ??
+        ""
+    ),
+    configKey: md.configSymbol != null ? String(md.configSymbol) : null,
+    displaySymbol: String(md.asset ?? md.symbol ?? ""),
+  });
+  const dexUsd =
+    asaId != null && networkId === "algorand-mainnet"
+      ? dexUsdByAsaId?.get(asaId)
+      : undefined;
+  price = overlayUsdWithDisplayPrice(price, dexUsd);
 
   const utilization = Number(md.utilization ?? 0);
 
@@ -555,6 +579,17 @@ const MarketsTable = () => {
   const { activeAccount, signTransactions, activeWallet } = useWallet();
 
   const { currentNetwork, switchNetwork } = useNetwork();
+  const algorandDisplayAsaIds = useMemo(
+    () =>
+      currentNetwork === "algorand-mainnet"
+        ? collectAlgorandMainnetDisplayAsaIds()
+        : [],
+    [currentNetwork]
+  );
+  const displayUsdByAsaId = useDisplayAssetUsdMap(
+    algorandDisplayAsaIds,
+    currentNetwork === "algorand-mainnet"
+  );
 
   const enabledNetworks = getEnabledNetworks();
   const showMarketsLiquidityToolbar =
@@ -3090,7 +3125,11 @@ const MarketsTable = () => {
         marketRowKey
       );
       const tokenPrice = marketForPrice
-        ? normalizeMarketData(marketForPrice, currentNetwork as NetworkId).price
+        ? normalizeMarketData(
+            marketForPrice,
+            currentNetwork as NetworkId,
+            displayUsdByAsaId
+          ).price
         : 0;
       const balanceUSD = balance * tokenPrice;
 
@@ -3402,7 +3441,11 @@ const MarketsTable = () => {
       portfolioHealthFactor: number | null,
       maxWithdrawUnderlying: number | null
     ): MarketDetailUserPosition => {
-      const norm = normalizeMarketData(row, currentNetwork as NetworkId);
+      const norm = normalizeMarketData(
+        row,
+        currentNetwork as NetworkId,
+        displayUsdByAsaId
+      );
       const price =
         norm.price > 0 && Number.isFinite(norm.price) ? norm.price : 0;
       const assetData = getAssetData(asset, poolId, detailModal.marketRowKey);
@@ -3548,7 +3591,11 @@ const MarketsTable = () => {
             if (maxWithdrawResult?.maxWithdrawUnderlying == null) return;
             setDetailModalUserPosition((prev) => {
               if (!prev) return prev;
-              const norm = normalizeMarketData(row, currentNetwork as NetworkId);
+              const norm = normalizeMarketData(
+                row,
+                currentNetwork as NetworkId,
+                displayUsdByAsaId
+              );
               const price =
                 norm.price > 0 && Number.isFinite(norm.price) ? norm.price : 0;
               const dep =
@@ -4047,7 +4094,8 @@ const MarketsTable = () => {
             rawMarket={detailModal.marketData}
             marketData={normalizeMarketData(
               detailModal.marketData,
-              currentNetwork as NetworkId
+              currentNetwork as NetworkId,
+              displayUsdByAsaId
             )}
             userPosition={detailModalUserPosition ?? undefined}
             userPositionLoadState={detailModalUserPositionLoad}

@@ -1,8 +1,7 @@
 /**
- * Protocol TVL / borrowed using the same oracle overlay as Markets
- * (`buildMarketInfoFromRawMarketData` + `usdPerTokenFromPortfolioMarketRow`).
- * Amounts come from the bulk market-data API; USD prices come from the oracle
- * contract instead of stale `get_market.price`.
+ * Protocol TVL / borrowed using display USD (Tinyman DEX when available,
+ * otherwise this market's own oracle) × human deposit/borrow amounts.
+ * Amounts come from the bulk market-data API.
  */
 
 import {
@@ -20,7 +19,13 @@ import {
   type MarketInfo,
   type UserPositionMarketKey,
 } from "@/services/lendingService";
+import { fetchTinymanAssetUsdMap } from "@/services/tinymanAssetUsd";
 import { usdPerTokenFromPortfolioMarketRow } from "@/utils/assetDecimals";
+import { overlayUsdWithDisplayPrice, isDisplayUsdNetwork } from "@/utils/displayUsdPerToken";
+import {
+  collectAlgorandMainnetDisplayAsaIds,
+  resolveAsaIdForDisplayUsd,
+} from "@/utils/resolveAsaIdForDisplayUsd";
 import {
   analyticsMarketUsdKey,
   sumProtocolUsdTotals,
@@ -93,6 +98,32 @@ function marketUsdPerToken(market: MarketInfo): number {
   return usdPerTokenFromPortfolioMarketRow(market, market.decimals || 6, {
     displaySymbol: market.symbol,
   });
+}
+
+function marketDisplayUsdPerToken(
+  market: MarketInfo,
+  dexUsdByAsaId: Map<number, number>
+): number {
+  const protocolUsd = marketUsdPerToken(market);
+  if (!isDisplayUsdNetwork(market.networkId) || dexUsdByAsaId.size === 0) {
+    return protocolUsd;
+  }
+  const asaId = resolveAsaIdForDisplayUsd({
+    networkId: market.networkId,
+    poolId: market.poolId,
+    marketId: market.marketId,
+    displaySymbol: market.symbol,
+  });
+  const dexUsd = asaId != null ? dexUsdByAsaId.get(asaId) : undefined;
+  return overlayUsdWithDisplayPrice(protocolUsd, dexUsd);
+}
+
+async function fetchDisplayUsdByAsaId(): Promise<Map<number, number>> {
+  try {
+    return await fetchTinymanAssetUsdMap(collectAlgorandMainnetDisplayAsaIds());
+  } catch {
+    return new Map();
+  }
 }
 
 async function hydrateNetworkMarkets(
@@ -190,11 +221,13 @@ async function fetchHydratedAnalyticsMarkets(): Promise<MarketInfo[] | null> {
 }
 
 export function buildAnalyticsMarketUsdLookup(
-  markets: MarketInfo[]
+  markets: MarketInfo[],
+  dexUsdByAsaId?: Map<number, number>
 ): Map<string, AnalyticsMarketUsdQuote> {
   const lookup = new Map<string, AnalyticsMarketUsdQuote>();
+  const dex = dexUsdByAsaId ?? new Map<number, number>();
   for (const market of markets) {
-    const usdPerToken = marketUsdPerToken(market);
+    const usdPerToken = marketDisplayUsdPerToken(market, dex);
     if (!(usdPerToken > 0)) continue;
     const key = analyticsMarketUsdKey(market.networkId, market.marketId);
     if (!lookup.has(key)) {
@@ -207,23 +240,29 @@ export function buildAnalyticsMarketUsdLookup(
   return lookup;
 }
 
-/** Oracle USD/token + decimals keyed by `network|marketId`. */
+/** Display USD/token + decimals keyed by `network|marketId`. */
 export async function fetchAnalyticsMarketUsdLookup(): Promise<
   Map<string, AnalyticsMarketUsdQuote>
 > {
-  const markets = await fetchHydratedAnalyticsMarkets();
-  return buildAnalyticsMarketUsdLookup(markets ?? []);
+  const [markets, dexUsdByAsaId] = await Promise.all([
+    fetchHydratedAnalyticsMarkets(),
+    fetchDisplayUsdByAsaId(),
+  ]);
+  return buildAnalyticsMarketUsdLookup(markets ?? [], dexUsdByAsaId);
 }
 
 async function computeOracleBasedProtocolTotals(): Promise<OracleBasedProtocolTotals | null> {
-  const markets = await fetchHydratedAnalyticsMarkets();
+  const [markets, dexUsdByAsaId] = await Promise.all([
+    fetchHydratedAnalyticsMarkets(),
+    fetchDisplayUsdByAsaId(),
+  ]);
   if (!markets || markets.length === 0) return null;
 
   const totals = sumProtocolUsdTotals(
     markets.map((market) => ({
       totalDeposits: market.totalDeposits,
       totalBorrows: market.totalBorrows,
-      usdPerToken: marketUsdPerToken(market),
+      usdPerToken: marketDisplayUsdPerToken(market, dexUsdByAsaId),
     }))
   );
   if (!(totals.tvl > 0)) return null;
@@ -235,7 +274,7 @@ async function computeOracleBasedProtocolTotals(): Promise<OracleBasedProtocolTo
 }
 
 /**
- * Live protocol TVL and borrowed (oracle USD × human deposit/borrow amounts).
+ * Live protocol TVL and borrowed (display USD × human deposit/borrow amounts).
  * Dedupes concurrent callers and caches for {@link ORACLE_TVL_CACHE_TTL_MS}.
  */
 export async function fetchOracleBasedProtocolTotals(): Promise<OracleBasedProtocolTotals | null> {

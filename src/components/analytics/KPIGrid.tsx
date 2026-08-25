@@ -32,7 +32,7 @@ const KPIGrid = () => {
             </div>
           </TooltipTrigger>
           <TooltipContent>
-            <p>Total value of assets deposited, priced from the live price oracle (same source as Markets)</p>
+            <p>Total value of assets deposited, priced from live DEX USD when available (same source as Portfolio)</p>
           </TooltipContent>
         </Tooltip>
 

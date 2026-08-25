@@ -25,6 +25,9 @@ import {
   resolveWithLastGoodPortfolioUsd,
 } from "@/utils/portfolioUsdCache";
 import { marketRowForPortfolioPosition } from "@/utils/marketRowForPortfolioPosition";
+import { overlayUsdWithDisplayPrice } from "@/utils/displayUsdPerToken";
+import { overlayPositionDisplayUsd } from "@/utils/overlayPositionDisplayUsd";
+import { resolveAsaIdForDisplayUsd } from "@/utils/resolveAsaIdForDisplayUsd";
 
 export type PortfolioChainLiveOverride = {
   balance?: number;
@@ -106,6 +109,24 @@ function resolvePollToken(
 }
 
 type PollToken = NonNullable<ReturnType<typeof resolvePollToken>>;
+
+function applyDisplayUsdForPollToken(
+  networkId: NetworkId,
+  token: PollToken,
+  protocolUsd: number,
+  dexUsdByAsaId: Map<number, number> | undefined
+): number {
+  const asaId = resolveAsaIdForDisplayUsd({
+    networkId,
+    poolId: token.poolId,
+    marketId: token.underlyingContractId,
+    configKey: token.configKey,
+    originalSymbol: token.originalSymbol,
+    displaySymbol: token.symbol,
+  });
+  const dexUsd = asaId != null ? dexUsdByAsaId?.get(asaId) : undefined;
+  return overlayUsdWithDisplayPrice(protocolUsd, dexUsd);
+}
 
 function tokenConfigForPollToken(
   networkId: NetworkId,
@@ -284,6 +305,8 @@ export function usePortfolioVisibleChainLive(opts: {
   marketData: unknown[];
   pollIntervalMs?: number;
   enabled?: boolean;
+  /** Per-ASA DEX USD for display; never reused across wrappers. */
+  displayUsdByAsaId?: Map<number, number>;
   formatPriceFromContract: (
     contractPrice: string | number,
     tokenDecimals: number
@@ -300,6 +323,8 @@ export function usePortfolioVisibleChainLive(opts: {
       import.meta.env.VITE_PORTFOLIO_CHAIN_POLL !== "0",
   } = opts;
   void opts.formatPriceFromContract;
+  const displayUsdByAsaIdRef = useRef(opts.displayUsdByAsaId);
+  displayUsdByAsaIdRef.current = opts.displayUsdByAsaId;
 
   const useApiUserData =
     import.meta.env.VITE_PORTFOLIO_CHAIN_USE_API_USER_DATA !== "false" &&
@@ -366,15 +391,20 @@ export function usePortfolioVisibleChainLive(opts: {
         poolId: token.poolId,
         displaySymbol: token.symbol,
       });
-      const tp = resolveWithLastGoodPortfolioUsd(
-        usdPerTokenFromPortfolioMarketRow(mkt, token.decimals, {
-          displaySymbol: token.symbol,
-        }),
-        portfolioUsdCacheKey(
-          String(networkId),
-          String(token.poolId),
-          String(token.underlyingContractId)
-        )
+      const tp = applyDisplayUsdForPollToken(
+        networkId,
+        token,
+        resolveWithLastGoodPortfolioUsd(
+          usdPerTokenFromPortfolioMarketRow(mkt, token.decimals, {
+            displaySymbol: token.symbol,
+          }),
+          portfolioUsdCacheKey(
+            String(networkId),
+            String(token.poolId),
+            String(token.underlyingContractId)
+          )
+        ),
+        displayUsdByAsaIdRef.current
       );
 
       try {
@@ -503,20 +533,33 @@ export function usePortfolioVisibleChainLive(opts: {
         );
       }
 
-      const tokenPrice = resolveWithLastGoodPortfolioUsd(
-        usdPerTokenFromPortfolioMarketRow(
-          group.market,
-          group.tokenDecimals,
-          {
-            displaySymbol:
-              (group.market as { symbol?: string } | null)?.symbol ?? undefined,
-          }
+      const tokenPrice = overlayUsdWithDisplayPrice(
+        resolveWithLastGoodPortfolioUsd(
+          usdPerTokenFromPortfolioMarketRow(
+            group.market,
+            group.tokenDecimals,
+            {
+              displaySymbol:
+                (group.market as { symbol?: string } | null)?.symbol ??
+                undefined,
+            }
+          ),
+          portfolioUsdCacheKey(
+            String(group.network),
+            String(group.appId),
+            String(group.marketId)
+          )
         ),
-        portfolioUsdCacheKey(
-          String(group.network),
-          String(group.appId),
-          String(group.marketId)
-        )
+        (() => {
+          const asaId = resolveAsaIdForDisplayUsd({
+            networkId: group.network,
+            poolId: String(group.appId),
+            marketId: String(group.marketId),
+          });
+          return asaId != null
+            ? displayUsdByAsaIdRef.current?.get(asaId)
+            : undefined;
+        })()
       );
 
       let groupDepositMinted: bigint | null = null;
@@ -613,16 +656,21 @@ export function usePortfolioVisibleChainLive(opts: {
           poolId: token.poolId,
           displaySymbol: token.symbol,
         });
-        const tp = resolveWithLastGoodPortfolioUsd(
-        usdPerTokenFromPortfolioMarketRow(mkt, token.decimals, {
-          displaySymbol: token.symbol,
-        }),
-        portfolioUsdCacheKey(
-          String(networkId),
-          String(token.poolId),
-          String(token.underlyingContractId)
-        )
-      );
+        const tp = applyDisplayUsdForPollToken(
+          networkId,
+          token,
+          resolveWithLastGoodPortfolioUsd(
+            usdPerTokenFromPortfolioMarketRow(mkt, token.decimals, {
+              displaySymbol: token.symbol,
+            }),
+            portfolioUsdCacheKey(
+              String(networkId),
+              String(token.poolId),
+              String(token.underlyingContractId)
+            )
+          ),
+          displayUsdByAsaIdRef.current
+        );
 
         try {
           if (row.kind === "deposit") {
@@ -768,7 +816,7 @@ export function usePortfolioVisibleChainLive(opts: {
       );
       const o = overrides[key];
       if (!o || (o.balance === undefined && o.value === undefined)) return row;
-      return {
+      const merged: PositionRow = {
         ...row,
         balance: o.balance ?? row.balance,
         value: o.value ?? row.value,
@@ -781,6 +829,10 @@ export function usePortfolioVisibleChainLive(opts: {
             }
           : {}),
       };
+      return overlayPositionDisplayUsd(
+        merged,
+        displayUsdByAsaIdRef.current ?? new Map()
+      );
     },
     [overrides]
   );
@@ -798,7 +850,7 @@ export function usePortfolioVisibleChainLive(opts: {
       );
       const o = overrides[key];
       if (!o || (o.balance === undefined && o.value === undefined)) return row;
-      return {
+      const merged: PositionRow = {
         ...row,
         balance: o.balance ?? row.balance,
         value: o.value ?? row.value,
@@ -812,6 +864,10 @@ export function usePortfolioVisibleChainLive(opts: {
             }
           : {}),
       };
+      return overlayPositionDisplayUsd(
+        merged,
+        displayUsdByAsaIdRef.current ?? new Map()
+      );
     },
     [overrides]
   );

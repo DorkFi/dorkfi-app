@@ -105,6 +105,9 @@ import {
 } from "@/components/portfolio/PortfolioPositionsFilterBar";
 import PortfolioPositionsCardHeader from "@/components/portfolio/PortfolioPositionsCardHeader";
 import { usdPerTokenFromPortfolioMarketRow } from "@/utils/assetDecimals";
+import { overlayPositionsDisplayUsd } from "@/utils/overlayPositionDisplayUsd";
+import { collectAlgorandMainnetDisplayAsaIds } from "@/utils/resolveAsaIdForDisplayUsd";
+import { useDisplayAssetUsdMap } from "@/hooks/useDisplayAssetUsdMap";
 import { formatNftHolderClaimableDisplayFromAgent } from "@/utils/nftHolderClaimAgentDisplay";
 import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
 import { portfolioWalletBalanceCacheKey } from "@/utils/portfolioWalletBalanceCacheKey";
@@ -281,50 +284,7 @@ function folksUnderlyingUsdFallbackSamePool(
   });
 }
 
-/** When wBTC/goBTC market price is missing, reuse a same-pool BTC-family market with a valid price. */
-function btcFamilyUsdFallbackSamePool(
-  marketRows: unknown[],
-  networkId: NetworkId,
-  poolId: string,
-  currentUnderlyingMarketId: string
-): number {
-  const tokens = getAllTokensWithDisplayInfo(networkId);
-  const preferred = tokens.filter((t) => {
-    if (String(t.poolId) !== String(poolId)) return false;
-    if (
-      String(t.underlyingContractId ?? "") === String(currentUnderlyingMarketId)
-    ) {
-      return false;
-    }
-    const key = String(t.configKey ?? t.originalSymbol ?? t.symbol).toUpperCase();
-    return key === "GOBTC" || key === "WBTC" || key === "BTC";
-  });
-  // Prefer goBTC / fWBTC (Folks) rows — fresher BTC oracle feed on Pool A
-  const ordered = [...preferred].sort((a, b) => {
-    const score = (t: (typeof preferred)[number]) => {
-      const id = String(t.underlyingContractId ?? "");
-      if (id === "3575837891") return 0;
-      const key = String(t.configKey ?? t.originalSymbol ?? "").toUpperCase();
-      if (key === "GOBTC") return 1;
-      return 2;
-    };
-    return score(a) - score(b);
-  });
-  for (const ref of ordered) {
-    if (!ref.underlyingContractId) continue;
-    const m = marketRowForPortfolioPosition(marketRows, {
-      marketId: ref.underlyingContractId,
-      poolId,
-      displaySymbol: ref.symbol,
-    });
-    const usd = usdPerTokenFromPortfolioMarketRow(m, ref.decimals, {
-      displaySymbol: ref.symbol,
-    });
-    if (usd > 0) return usd;
-  }
-  return 0;
-}
-
+/** Folks f-asset rows show underlying balance; if their market row has no usable price, use native ALGO same pool. */
 function resolvePortfolioPositionUsdPerToken(options: {
   market: unknown;
   tokenDecimals: number;
@@ -369,25 +329,6 @@ function resolvePortfolioPositionUsdPerToken(options: {
     options.marketId
   ) {
     tokenPrice = folksUnderlyingUsdFallbackSamePool(
-      options.marketRows,
-      options.networkId,
-      String(options.poolId),
-      String(options.marketId)
-    );
-    if (tokenPrice > 0) {
-      return resolveWithLastGoodPortfolioUsd(tokenPrice, cacheKey);
-    }
-  }
-
-  const sym = String(
-    options.configKey ?? options.originalSymbol ?? options.displaySymbol ?? ""
-  ).toUpperCase();
-  if (
-    (sym === "WBTC" || sym === "GOBTC" || sym === "BTC") &&
-    options.poolId != null &&
-    options.marketId
-  ) {
-    tokenPrice = btcFamilyUsdFallbackSamePool(
       options.marketRows,
       options.networkId,
       String(options.poolId),
@@ -886,11 +827,18 @@ const Portfolio = () => {
     []
   );
 
+  const algorandDisplayAsaIds = useMemo(
+    () => collectAlgorandMainnetDisplayAsaIds(),
+    []
+  );
+  const displayUsdByAsaId = useDisplayAssetUsdMap(algorandDisplayAsaIds, true);
+
   const { attachChainPollRow, mergeDeposit, mergeBorrow } =
     usePortfolioVisibleChainLive({
       address: displayAddress,
       marketData,
       formatPriceFromContract,
+      displayUsdByAsaId,
     });
 
   // POST `/market-data/...` when a supply/borrow position modal opens (fresh API snapshot for that market).
@@ -1394,7 +1342,7 @@ const Portfolio = () => {
             return; // Skip zero balances
           }
 
-          // Get token price (oracle-aware; Folks/BTC family fallbacks — never invent $1)
+          // Protocol/oracle USD for this market only; DEX overlay applied after transform.
           const tokenPrice = resolvePortfolioPositionUsdPerToken({
             market,
             tokenDecimals: token.decimals,
@@ -1625,7 +1573,7 @@ const Portfolio = () => {
             return; // Skip zero balances
           }
 
-          // Get token price (oracle-aware; Folks/BTC family fallbacks — never invent $1)
+          // Protocol/oracle USD for this market only; DEX overlay applied after transform.
           const tokenPrice = resolvePortfolioPositionUsdPerToken({
             market,
             tokenDecimals: token.decimals,
@@ -1734,11 +1682,17 @@ const Portfolio = () => {
     hasComputedData && transformedDepositsAndBorrows.borrows.length > 0
       ? transformedDepositsAndBorrows.borrows
       : userPositions.filter((pos) => pos.type === "borrow");
-  const deposits = rawDeposits.filter(
-    (pos) => !isExcludedPortfolioPositionRow(pos as ItemWithNetwork)
+  const deposits = overlayPositionsDisplayUsd(
+    rawDeposits.filter(
+      (pos) => !isExcludedPortfolioPositionRow(pos as ItemWithNetwork)
+    ),
+    displayUsdByAsaId
   );
-  const borrows = rawBorrows.filter(
-    (pos) => !isExcludedPortfolioPositionRow(pos as ItemWithNetwork)
+  const borrows = overlayPositionsDisplayUsd(
+    rawBorrows.filter(
+      (pos) => !isExcludedPortfolioPositionRow(pos as ItemWithNetwork)
+    ),
+    displayUsdByAsaId
   );
 
   const hasBothPositionTypes =
@@ -1856,21 +1810,19 @@ const Portfolio = () => {
     finalBorrowsCount: borrows.length,
   });
 
-  // Calculate totals - prioritize computed global values from API, then fallback to local calculations
-  const totalCollateral =
-    user?.computed?.globalCollateralValue !== undefined
-      ? Number(user.computed.globalCollateralValue)
-      : userGlobalData?.totalCollateralValue ||
-      deposits.reduce((sum, deposit) => sum + deposit.value, 0);
+  // Display totals from live per-asset USD × balances (not stale pool book).
+  const totalCollateral = deposits.reduce(
+    (sum, deposit) => sum + (deposit.value || 0),
+    0
+  );
 
   console.log({
   });
 
-  const totalBorrowed =
-    user?.computed?.globalBorrowValue !== undefined
-      ? Number(user.computed.globalBorrowValue)
-      : userGlobalData?.totalBorrowValue ||
-      borrows.reduce((sum, borrow) => sum + borrow.value, 0);
+  const totalBorrowed = borrows.reduce(
+    (sum, borrow) => sum + (borrow.value || 0),
+    0
+  );
 
   // Calculate weighted liquidation threshold based on borrowed assets only
   // This is more accurate because liquidation risk only applies to markets with active debt
@@ -2056,9 +2008,22 @@ const Portfolio = () => {
                   BigInt(poolGlobalData.totalBorrowValue) / BigInt(1e12)
                 ) || 0;
 
+              const posCollateral = deposits
+                .filter((d) => String(d.poolId ?? "") === String(deposit.poolId))
+                .reduce((sum, d) => sum + (d.value || 0), 0);
+              const posBorrow = borrows
+                .filter((b) => String(b.poolId ?? "") === String(deposit.poolId))
+                .reduce((sum, b) => sum + (b.value || 0), 0);
+              if (posCollateral > 0 || posBorrow > 0) {
+                poolCollateralValueUSD = posCollateral;
+                poolBorrowsUSD = posBorrow;
+              }
+
               riskRatio =
-                (poolCollateralValueUSD * liquidationFactorNum) /
-                poolBorrowsUSD;
+                poolBorrowsUSD > 0
+                  ? (poolCollateralValueUSD * liquidationFactorNum) /
+                    poolBorrowsUSD
+                  : riskRatio;
             } catch (error) {
               console.warn(
                 `Error parsing global user data for pool ${deposit.poolId}:`,
@@ -2084,7 +2049,7 @@ const Portfolio = () => {
       })
       .filter((asset) => asset.isAtRisk && asset.poolBorrowsUSD >= 0.01)
       .sort((a, b) => a.riskRatio - b.riskRatio); // Sort by risk ratio (most risky first)
-  }, [deposits, marketData, totalBorrowed, user?.globalUserData]);
+  }, [deposits, borrows, marketData, totalBorrowed, user?.globalUserData]);
 
   // Portfolio health matches lending pool _calculate_user_health(collateral, borrow, liquidation_threshold).
   // Prefer each pool's get_global_user-style totals from `user.globalUserData`; portfolio HF = worst (min) HF
@@ -2148,6 +2113,17 @@ const Portfolio = () => {
           );
         } catch {
           continue;
+        }
+
+        const posCollateral = deposits
+          .filter((d) => String(d.poolId ?? "") === poolId)
+          .reduce((sum, d) => sum + (d.value || 0), 0);
+        const posBorrow = borrows
+          .filter((b) => String(b.poolId ?? "") === poolId)
+          .reduce((sum, b) => sum + (b.value || 0), 0);
+        if (posCollateral > 0 || posBorrow > 0) {
+          collateral = posCollateral;
+          borrow = posBorrow;
         }
 
         const lt = minLtForPool(poolId);
@@ -2303,21 +2279,24 @@ const Portfolio = () => {
     }
 
     for (const agg of byKey.values()) {
-      if (agg.fromGud) continue;
-      agg.collateral = deposits
+      const posCollateral = deposits
         .filter(
           (d) =>
             String(d.poolId ?? "") === agg.poolId &&
             String((d as ItemWithNetwork).network ?? "") === agg.network
         )
         .reduce((sum, d) => sum + (d.value || 0), 0);
-      agg.borrow = borrows
+      const posBorrow = borrows
         .filter(
           (b) =>
             String(b.poolId ?? "") === agg.poolId &&
             String((b as ItemWithNetwork).network ?? "") === agg.network
         )
         .reduce((sum, b) => sum + (b.value || 0), 0);
+      if (posCollateral > 0 || posBorrow > 0) {
+        agg.collateral = posCollateral;
+        agg.borrow = posBorrow;
+      }
     }
 
     const rows: Array<{

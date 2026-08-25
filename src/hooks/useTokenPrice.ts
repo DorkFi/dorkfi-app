@@ -1,8 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { fetchMarketInfo } from '@/services/lendingService';
 import { getAllTokensWithDisplayInfo } from '@/config';
 import { useNetwork } from '@/contexts/NetworkContext';
 import { resolveUsdPerTokenFromMarketInfo } from '@/utils/assetDecimals';
+import { overlayUsdWithDisplayPrice } from '@/utils/displayUsdPerToken';
+import { resolveAsaIdForDisplayUsd } from '@/utils/resolveAsaIdForDisplayUsd';
+import { useDisplayAssetUsdMap } from '@/hooks/useDisplayAssetUsdMap';
 import { withRpcReadCache } from '@/utils/rpcReadCache';
 
 interface UseTokenPriceResult {
@@ -70,18 +73,33 @@ async function fetchTokenPriceUsd(
 }
 
 export const useTokenPrice = (tokenSymbol: string, networkId?: string): UseTokenPriceResult => {
-  const [price, setPrice] = useState<number>(0);
+  const [protocolPrice, setProtocolPrice] = useState<number>(0);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const { currentNetwork } = useNetwork();
+  const networkToUse = networkId || currentNetwork;
+
+  const asaId = useMemo(() => {
+    if (!tokenSymbol || networkToUse !== "algorand-mainnet") return null;
+    return resolveAsaIdForDisplayUsd({
+      networkId: networkToUse,
+      configKey: tokenSymbol,
+      displaySymbol: tokenSymbol,
+    });
+  }, [tokenSymbol, networkToUse]);
+
+  const asaIds = useMemo(() => (asaId != null ? [asaId] : []), [asaId]);
+  const dexUsdByAsaId = useDisplayAssetUsdMap(
+    asaIds,
+    asaId != null
+  );
 
   const fetchPrice = useCallback(async () => {
     if (!tokenSymbol) {
-      setPrice(0);
+      setProtocolPrice(0);
       return;
     }
 
-    const networkToUse = networkId || currentNetwork;
     if (!networkToUse) {
       setError('No network specified');
       return;
@@ -98,7 +116,7 @@ export const useTokenPrice = (tokenSymbol: string, networkId?: string): UseToken
         () => fetchTokenPriceUsd(tokenSymbol, networkToUse),
         TOKEN_PRICE_CACHE_TTL_MS
       );
-      setPrice(marketPrice);
+      setProtocolPrice(marketPrice);
     } catch (err) {
       console.error(`Error fetching market price for ${tokenSymbol}:`, err);
       setError(err instanceof Error ? err.message : 'Failed to fetch market price');
@@ -116,11 +134,11 @@ export const useTokenPrice = (tokenSymbol: string, networkId?: string): UseToken
         'DAI': 1.0
       };
 
-      setPrice(mockPrices[tokenSymbol] || 1.0);
+      setProtocolPrice(mockPrices[tokenSymbol] || 1.0);
     } finally {
       setIsLoading(false);
     }
-  }, [tokenSymbol, networkId, currentNetwork]);
+  }, [tokenSymbol, networkToUse]);
 
   useEffect(() => {
     fetchPrice();
@@ -129,6 +147,11 @@ export const useTokenPrice = (tokenSymbol: string, networkId?: string): UseToken
   const refetch = useCallback(() => {
     fetchPrice();
   }, [fetchPrice]);
+
+  const price = overlayUsdWithDisplayPrice(
+    protocolPrice,
+    asaId != null ? dexUsdByAsaId.get(asaId) : undefined
+  );
 
   return {
     price,
