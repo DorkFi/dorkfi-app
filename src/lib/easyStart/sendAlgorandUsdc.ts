@@ -67,6 +67,8 @@ export async function sendAlgorandUsdc(args: {
   /** Human USDC amount, e.g. "18.5" */
   amount: string;
   signTransactions: SignAlgorandTxns;
+  /** Optional note (Aramid AVM → EVM transfers). */
+  note?: Uint8Array;
 }): Promise<string> {
   const atomic = parseUsdcAtomic(args.amount);
   const sp = await ALGORAND_MAINNET_ALGOD.getTransactionParams().do();
@@ -76,6 +78,7 @@ export async function sendAlgorandUsdc(args: {
     amount: atomic,
     assetIndex: ALGORAND_MAINNET_USDC_ASA,
     suggestedParams: sp,
+    note: args.note,
   });
   return signAndSend([txn.toByte()], args.signTransactions);
 }

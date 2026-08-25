@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 
 /**
  * Legacy Allbridge chain symbols (see @d13co/algo-x-evm-ui bridgeSdk).
- * Easy Start now uses XO Swap; this RainbowKit control still opens Allbridge UI.
+ * Easy Start now uses Aramid Bridge; this RainbowKit control still opens Allbridge UI.
  */
 const BRIDGE_CHAIN_ALG = "ALG";
 const BRIDGE_CHAIN_BASE = "BAS";
