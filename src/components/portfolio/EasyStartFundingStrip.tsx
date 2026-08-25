@@ -18,7 +18,7 @@ import { fetchBaseUsdcBalance } from "@/lib/easyStart/baseBalances";
 /** Re-export for callers that imported the constant from this module. */
 export { BASE_MAINNET_USDC } from "@/lib/easyStart/baseBalances";
 
-/** Base USDC staging balance + Deposit / Withdraw / XO Swap CTAs for Privy Easy Start. */
+/** Base USDC staging balance + Deposit / Withdraw / Move USDC CTAs for Privy Easy Start. */
 export function EasyStartFundingStrip() {
   const privy = usePrivyEasyStart();
   const { openDeposit, openWithdraw, openBridge } = useEasyStartModals();

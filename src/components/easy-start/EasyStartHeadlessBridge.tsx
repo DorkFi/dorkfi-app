@@ -6,7 +6,7 @@ import {
   type EasyStartBridgeDirection,
   type EasyStartBridgePhase,
 } from "@/components/easy-start/easyStartBridgePhase";
-import { runXoUsdcSwap } from "@/lib/easyStart/xoSwap/runUsdcSwap";
+import { runAramidUsdcBridge } from "@/lib/easyStart/aramid/runUsdcBridge";
 
 interface EasyStartHeadlessBridgeProps {
   /** USDC amount to swap (human units, e.g. "100"). */
@@ -19,8 +19,8 @@ interface EasyStartHeadlessBridgeProps {
 }
 
 /**
- * Invisible XO Swap runner for Easy Start orchestrated deposit/withdraw.
- * Mount only while swapping; uses Privy sendTransaction + xChain Algorand signing.
+ * Invisible Aramid Bridge runner for Easy Start orchestrated deposit/withdraw.
+ * Mount only while bridging; uses Privy sendTransaction + xChain Algorand signing.
  */
 export function EasyStartHeadlessBridge({
   amount,
@@ -67,7 +67,7 @@ export function EasyStartHeadlessBridge({
 
     void (async () => {
       try {
-        await runXoUsdcSwap({
+        await runAramidUsdcBridge({
           direction,
           amount,
           evmAddress,
@@ -99,7 +99,7 @@ export function EasyStartHeadlessBridge({
       } catch (err) {
         if (ac.signal.aborted) return;
         const message =
-          err instanceof Error ? err.message : "XO Swap failed";
+          err instanceof Error ? err.message : "Bridge failed";
         if (message === "Aborted" || (err as { name?: string })?.name === "AbortError") {
           return;
         }
