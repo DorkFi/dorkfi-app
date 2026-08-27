@@ -90,7 +90,7 @@ describe("buildGovernanceVoteShareText", () => {
 describe("governanceVoteShareUrl", () => {
   it("uses an app.dork.fi governance permalink", () => {
     expect(governanceVoteShareUrl()).toBe(
-      "https://app.dork.fi/governance/share/"
+      "https://app.dork.fi/governance/share/?v=1"
     );
   });
 });
@@ -98,7 +98,7 @@ describe("governanceVoteShareUrl", () => {
 describe("buildGovernanceVoteIntentUrl", () => {
   it("keeps the tweet text and swaps in the share permalink", () => {
     const text = 'Voted YES on "List WAD" in @dork_fi governance 🗳️';
-    const shareUrl = "https://app.dork.fi/governance/share/";
+    const shareUrl = "https://app.dork.fi/governance/share/?v=1";
     expect(buildGovernanceVoteIntentUrl(text, shareUrl)).toBe(
       `https://x.com/intent/tweet?text=${encodeURIComponent(
         text
