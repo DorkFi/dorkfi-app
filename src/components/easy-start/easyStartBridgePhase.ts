@@ -7,6 +7,7 @@ export type EasyStartBridgePhase =
   | "signing"
   | "sending"
   | "waiting"
+  | "pending"
   | "success"
   | "error";
 
@@ -30,6 +31,7 @@ export function mapBridgeStatusToPhase(
       return "sending";
     case "waiting":
     case "watching-funding":
+    case "pending":
       return "waiting";
     case "success":
       return "success";
@@ -55,7 +57,13 @@ export function bridgePhaseLabel(
     case "sending":
       return "Sending funds…";
     case "waiting":
-      return "Almost done — finishing transfer…";
+      return isWithdraw
+        ? "Waiting for funds on Base…"
+        : "Waiting for funds on Algorand…";
+    case "pending":
+      return isWithdraw
+        ? "Your USD is on the way…"
+        : "Almost done — finishing transfer…";
     case "success":
       return isWithdraw ? "Withdrawal complete" : "Deposit complete";
     case "error":

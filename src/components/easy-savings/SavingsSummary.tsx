@@ -8,6 +8,7 @@ type SavingsSummaryProps = {
   route: SavingsRoute;
   amount: string;
   quote: EasySavingsQuote;
+  extraRows?: Array<{ label: string; value: string }>;
 };
 
 function formatAmt(n: string, symbol: string): string {
@@ -16,7 +17,12 @@ function formatAmt(n: string, symbol: string): string {
   return `${v.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${symbol}`;
 }
 
-const SavingsSummary = ({ route, amount, quote }: SavingsSummaryProps) => {
+const SavingsSummary = ({
+  route,
+  amount,
+  quote,
+  extraRows,
+}: SavingsSummaryProps) => {
   const consumerCopy = useConsumerCopy();
   const symbol = consumerCopy
     ? consumerAssetDisplayLabel(route.asset.symbol)
@@ -61,6 +67,9 @@ const SavingsSummary = ({ route, amount, quote }: SavingsSummaryProps) => {
             : "—",
       }
     );
+  }
+  if (extraRows?.length) {
+    rows.push(...extraRows);
   }
 
   return (

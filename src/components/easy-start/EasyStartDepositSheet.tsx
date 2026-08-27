@@ -270,8 +270,13 @@ export function EasyStartDepositSheet({
     setError(null);
 
     if (skipFiat || (hasUsdcOnBase && baseUsdcNum >= Number(amount))) {
-      setPhase("funding");
-      await startBridgeWithExisting();
+      setPhase("success");
+      toast({
+        title: consumerCopy ? "Funds ready" : "USDC is on Base",
+        description: consumerCopy
+          ? "Deposit to Earn to move it into savings."
+          : "Open Deposit to Earn to bridge via Aramid and supply.",
+      });
       return;
     }
 
@@ -291,10 +296,13 @@ export function EasyStartDepositSheet({
       }
       await new Promise((r) => setTimeout(r, 1500));
       await refetchUsdc();
-      await ensureGasThenBridge(amount);
+      setPhase("success");
+      onOpenChange(true);
       toast({
         title: "Payment received",
-        description: "Finishing your deposit…",
+        description: consumerCopy
+          ? "Deposit to Earn to start earning."
+          : "USDC is on Base. Deposit to Earn to bridge and supply.",
       });
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
@@ -335,8 +343,8 @@ export function EasyStartDepositSheet({
                 <DialogDescription className="text-center text-sm text-slate-600 dark:text-slate-400">
                   {phase === "idle"
                     ? consumerCopy
-                      ? "Pay with a card. We’ll add the funds to your account automatically."
-                      : "Choose MoonPay, Coinbase, or Stripe, then pay with card. We’ll move your USDC to Algorand automatically."
+                      ? "Pay with a card. Then Deposit to Earn to start earning."
+                      : "Choose MoonPay, Coinbase, or Stripe, then pay with card. Deposit to Earn to bridge USDC to Algorand and supply."
                     : phase === "gas"
                       ? consumerCopy
                         ? "One quick step: a small processing fee, then we finish the deposit."
@@ -345,8 +353,8 @@ export function EasyStartDepositSheet({
                         ? bridgePhaseLabel(bridgePhase)
                         : phase === "success"
                           ? consumerCopy
-                            ? "Your funds are ready."
-                            : "Your funds are ready on Algorand."
+                            ? "Your funds are ready. Deposit to Earn next."
+                            : "USDC is on Base. Deposit to Earn to bridge and supply."
                           : phase === "error"
                             ? "Something went wrong — you can retry."
                             : "Working on your deposit…"}
@@ -363,12 +371,12 @@ export function EasyStartDepositSheet({
                   </p>
                   <p className="text-sm text-slate-600 dark:text-slate-400">
                     {consumerCopy
-                      ? "Your deposit is in your account. You can add it to savings next."
-                      : `USDC is in your Algorand account${
+                      ? "Your funds are in your account. Open Deposit to Earn to start earning."
+                      : `USDC is on Base${
                           algorandAddress
-                            ? ` (${algorandAddress.slice(0, 6)}…${algorandAddress.slice(-4)})`
+                            ? `; Algorand ${algorandAddress.slice(0, 6)}…${algorandAddress.slice(-4)}`
                             : ""
-                        }. You can supply to DorkFi markets next.`}
+                        }. Use Deposit to Earn to bridge via Aramid and supply.`}
                   </p>
                   <Button
                     className="w-full bg-ocean-teal hover:bg-ocean-teal/90 text-white"

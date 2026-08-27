@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useSendTransaction } from "@privy-io/react-auth";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
 import { waitForConfirmation } from "algosdk";
@@ -24,7 +25,10 @@ import {
   withdraw,
 } from "@/services/lendingService";
 import algorandService from "@/services/algorandService";
-import { savingsAccountDisplayLabel, consumerAssetDisplayLabel } from "@/services/savingsRouteResolver";
+import {
+  savingsAccountDisplayLabel,
+  consumerAssetDisplayLabel,
+} from "@/services/savingsRouteResolver";
 import type { SavingsRoute } from "@/types/easySavings";
 import { formatUsdAmount } from "@/lib/utils";
 import { getExplorerTransactionUrl } from "@/utils/explorerLinks";
@@ -34,6 +38,43 @@ import {
 } from "@/wallet/xchainSignUi";
 import { getTransactionErrorFeedback } from "@/utils/errorUtils";
 import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
+import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
+import type { Address } from "viem";
+import {
+  fetchAlgorandAlgoBalance,
+  fetchBaseUsdcBalance,
+  hasEnoughAlgorandAlgo,
+} from "@/lib/easyStart/baseBalances";
+import {
+  atomicToUsdc,
+  atomicToUsdcString,
+  splitAramidFee,
+  usdcToAtomic,
+} from "@/lib/easyStart/aramid/fees";
+import { waitForBaseUsdcCredit } from "@/lib/easyStart/aramid/waitForBaseCredit";
+import { isAramidCreditPendingError } from "@/lib/easyStart/aramid/creditPending";
+import { assertAramidBaseCanRelease } from "@/lib/easyStart/aramid/liquidity";
+import { findAramidAxferTxId } from "@/lib/easyStart/aramid/avmToBaseExtraTxn";
+import type { SendUsdcFn } from "@/lib/easyStart/sendBaseUsdc";
+
+function PrivySendTransactionBinder({
+  onReady,
+}: {
+  onReady: (send: SendUsdcFn) => void;
+}) {
+  const { sendTransaction } = useSendTransaction();
+  useEffect(() => {
+    onReady((input) =>
+      sendTransaction({
+        to: input.to as `0x${string}`,
+        data: input.data,
+        value: input.value != null ? `0x${input.value.toString(16)}` : "0x0",
+        chainId: input.chainId,
+      })
+    );
+  }, [onReady, sendTransaction]);
+  return null;
+}
 
 const MODAL_SHELL =
   "w-full max-w-[98vw] sm:max-w-md rounded-t-2xl sm:rounded-xl p-0 max-h-[min(90vh,90dvh)] overflow-hidden flex flex-col";
@@ -66,6 +107,11 @@ function formatToken(n: number | null | undefined, digits = 4): string {
   return n.toLocaleString(undefined, { maximumFractionDigits: digits });
 }
 
+function isUsdcRoute(route: SavingsRoute | null): boolean {
+  if (!route) return false;
+  return route.asset.configKey === "USDC" || route.asset.symbol === "USDC";
+}
+
 const EasySavingsWithdrawModal = ({
   isOpen,
   onClose,
@@ -74,24 +120,39 @@ const EasySavingsWithdrawModal = ({
   onConnectWallet,
   onSuccess,
 }: EasySavingsWithdrawModalProps) => {
-  const { activeAccount, signTransactions, activeWallet } =
+  const { activeAccount, signTransactions, activeWallet, isPrivyEasyStart } =
     useDorkFiWalletAdapter();
+  const privy = usePrivyEasyStart();
   const { toast } = useToast();
   const consumerCopy = useConsumerCopy();
   const queryClient = useQueryClient();
 
   const [amount, setAmount] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [waitingOnBase, setWaitingOnBase] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [txId, setTxId] = useState<string | null>(null);
   const [rainbowkitSignDialogSuppressed, setRainbowkitSignDialogSuppressed] =
     useState(false);
+  const [flowError, setFlowError] = useState<string | null>(null);
+  const [confirmedAmount, setConfirmedAmount] = useState("");
+  const [helpClaimUrl, setHelpClaimUrl] = useState<string | null>(null);
+  const [sendTransaction, setSendTransaction] = useState<SendUsdcFn | null>(
+    null
+  );
+  const bindSendTransaction = useCallback((fn: SendUsdcFn) => {
+    setSendTransaction(() => fn);
+  }, []);
 
   const quote = useEasySavingsQuote({
     networkId,
     route,
     amount,
   });
+
+  const evmAddress = privy.evmAddress as Address | null;
+  const bridgeToBase =
+    isUsdcRoute(route) && isPrivyEasyStart && Boolean(evmAddress);
 
   const maxWithdrawQuery = useQuery({
     queryKey: [
@@ -102,9 +163,7 @@ const EasySavingsWithdrawModal = ({
       route?.poolId,
       route?.asset.contractId,
     ],
-    enabled: Boolean(
-      isOpen && route && activeAccount?.address
-    ),
+    enabled: Boolean(isOpen && route && activeAccount?.address),
     staleTime: 15_000,
     queryFn: async () => {
       if (!route || !activeAccount?.address) return null;
@@ -133,14 +192,42 @@ const EasySavingsWithdrawModal = ({
     return quote.existingDeposit ?? 0;
   })();
 
+  const feePreview = (() => {
+    if (!bridgeToBase || amountNum <= 0) return null;
+    try {
+      const { feeAmount, destinationAmount } = splitAramidFee(
+        usdcToAtomic(String(amountNum))
+      );
+      return {
+        fee: atomicToUsdc(feeAmount),
+        dest: atomicToUsdc(destinationAmount),
+        destStr: atomicToUsdcString(destinationAmount),
+      };
+    } catch {
+      return null;
+    }
+  })();
+
   useEffect(() => {
     if (!isOpen) return;
+    if (waitingOnBase || showSuccess || helpClaimUrl) return;
     setAmount("");
     setIsSubmitting(false);
+    setWaitingOnBase(false);
     setShowSuccess(false);
     setTxId(null);
+    setFlowError(null);
+    setConfirmedAmount("");
+    setHelpClaimUrl(null);
     setRainbowkitSignDialogSuppressed(false);
-  }, [isOpen, route?.asset.configKey, route?.poolId]);
+  }, [
+    isOpen,
+    route?.asset.configKey,
+    route?.poolId,
+    waitingOnBase,
+    showSuccess,
+    helpClaimUrl,
+  ]);
 
   const ctaState: CtaState = (() => {
     if (!activeAccount) return "connect";
@@ -150,23 +237,36 @@ const EasySavingsWithdrawModal = ({
     return "withdraw";
   })();
 
+  const busy = isSubmitting && !waitingOnBase;
+
   const ctaLabel: Record<CtaState, string> = {
     connect: consumerCopy ? "Get Started" : "Connect Wallet",
     enter_amount: "Enter Amount",
     no_position: "Nothing to Withdraw",
     insufficient: "Exceeds Withdrawable",
-    withdraw: isSubmitting
-      ? consumerCopy
-        ? "Confirming…"
-        : "Withdrawing…"
-      : "Withdraw",
+    withdraw: busy
+      ? waitingOnBase
+        ? consumerCopy
+          ? "Moving to Base…"
+          : "Bridging to Base…"
+        : consumerCopy
+          ? "Confirming…"
+          : "Withdrawing…"
+      : bridgeToBase
+        ? consumerCopy
+          ? "Withdraw to Base"
+          : "Withdraw to Base"
+        : "Withdraw",
   };
 
   const ctaDisabled =
-    isSubmitting || (ctaState !== "connect" && ctaState !== "withdraw");
+    busy || (ctaState !== "connect" && ctaState !== "withdraw");
 
   const invalidateQuotes = () => {
     void queryClient.invalidateQueries({ queryKey: ["easySavings"] });
+    void queryClient.invalidateQueries({ queryKey: ["easy-start-base-usdc"] });
+    void queryClient.invalidateQueries({ queryKey: ["easy-start-algo-usdc"] });
+    void queryClient.invalidateQueries({ queryKey: ["account-info"] });
   };
 
   const handleWithdraw = async () => {
@@ -198,18 +298,46 @@ const EasySavingsWithdrawModal = ({
       return;
     }
 
+    setFlowError(null);
     setIsSubmitting(true);
     try {
-      // `withdraw()` multiplies by token decimals internally (human amount).
-      // Unlike `deposit()`, which expects atomic units — do not convert here.
       const amountHuman = amount.trim();
       if (!amountHuman || !(parseFloat(amountHuman) > 0)) {
         throw new Error("Enter a positive withdraw amount.");
       }
 
+      if (bridgeToBase && activeAccount.address) {
+        const algo = await fetchAlgorandAlgoBalance(activeAccount.address);
+        if (!hasEnoughAlgorandAlgo(algo.valueMicro)) {
+          throw new Error(
+            consumerCopy
+              ? "A small network fee is needed (~0.1 ALGO). Add a little ALGO, then try again."
+              : "Your Algorand account needs ~0.1 ALGO for network fees."
+          );
+        }
+        try {
+          const { destinationAmount } = splitAramidFee(
+            usdcToAtomic(amountHuman)
+          );
+          await assertAramidBaseCanRelease({
+            destinationAtomic: destinationAmount,
+            consumerCopy,
+          });
+        } catch (liqErr) {
+          throw liqErr instanceof Error
+            ? liqErr
+            : new Error("Can't move USD right now. Try again in a bit.");
+        }
+      }
+
       const withdrawAll =
         amountNum >= maxWithdrawable * 0.999 ||
         Math.abs(amountNum - maxWithdrawable) < 1e-8;
+
+      const baseBefore =
+        bridgeToBase && evmAddress
+          ? await fetchBaseUsdcBalance(evmAddress)
+          : null;
 
       const result = await withdraw(
         route.poolId,
@@ -222,6 +350,9 @@ const EasySavingsWithdrawModal = ({
           withdrawAll,
           maxWithdrawScaled: withdrawAll
             ? maxWithdrawQuery.data?.maxWithdrawScaled
+            : undefined,
+          aramidToBaseEvmAddress: bridgeToBase
+            ? evmAddress ?? undefined
             : undefined,
         }
       );
@@ -241,7 +372,9 @@ const EasySavingsWithdrawModal = ({
       toast({
         title: consumerCopy ? "Confirm" : "Please Sign Transaction",
         description: consumerCopy
-          ? "Confirm this withdrawal."
+          ? bridgeToBase
+            ? "Confirm once — we’ll move this to Base."
+            : "Confirm this withdrawal."
           : `Approve the withdraw in ${walletName}.`,
         duration: 12_000,
       });
@@ -262,26 +395,96 @@ const EasySavingsWithdrawModal = ({
         await algorandService.initializeClientsForTransactions(algorandNetwork);
       const res = await algod.sendRawTransaction(signed).do();
       await waitForConfirmation(algod, res.txid, 4);
+      invalidateQuotes();
+
+      const aramid =
+        "withdrawMeta" in result &&
+        result.withdrawMeta &&
+        "aramidToBase" in result.withdrawMeta
+          ? result.withdrawMeta.aramidToBase
+          : undefined;
+
+      if (bridgeToBase && aramid && evmAddress && baseBefore) {
+        setWaitingOnBase(true);
+        setRainbowkitSignDialogSuppressed(false);
+        const claimTxId =
+          aramid.claimTxId ?? findAramidAxferTxId(result.txns) ?? res.txid;
+        try {
+          await waitForBaseUsdcCredit({
+            evmAddress,
+            start: baseBefore.value,
+            minIncrease: BigInt(aramid.destinationAtomic),
+            claimTxId,
+            sendTransaction: sendTransaction ?? undefined,
+            onClaim: () => {
+              toast({
+                title: consumerCopy ? "Confirm" : "Confirm on Base",
+                description: consumerCopy
+                  ? "Confirm once more to receive your USD."
+                  : "Confirm in your wallet to receive USDC on Base.",
+                duration: 12_000,
+              });
+            },
+          });
+        } catch (bridgeErr) {
+          if (isAramidCreditPendingError(bridgeErr)) {
+            setTxId(res.txid);
+            setHelpClaimUrl(bridgeErr.claimUrl);
+            setWaitingOnBase(false);
+            setIsSubmitting(false);
+            toast({
+              title: consumerCopy ? "On the way" : "Still moving to Base",
+              description: consumerCopy
+                ? "Your USD is moving. You can close this and check back soon."
+                : "USDC left savings and should arrive on Base within about an hour.",
+            });
+            return;
+          }
+          const message =
+            bridgeErr instanceof Error ? bridgeErr.message : String(bridgeErr);
+          setTxId(res.txid);
+          setFlowError(message);
+          toast({
+            title: consumerCopy ? "On the way" : "Still moving",
+            description: message,
+          });
+          setWaitingOnBase(false);
+          setIsSubmitting(false);
+          return;
+        }
+      }
+
+      const received =
+        aramid != null
+          ? atomicToUsdcString(BigInt(aramid.destinationAtomic))
+          : amount;
 
       setTxId(res.txid);
+      setConfirmedAmount(received);
       setShowSuccess(true);
+      setWaitingOnBase(false);
       setRainbowkitSignDialogSuppressed(false);
       invalidateQuotes();
       onSuccess?.({
         txId: res.txid,
         kind: "withdraw",
-        amount,
+        amount: received,
         symbol,
       });
       toast({
         title: "Withdraw confirmed",
-        description: `Withdrew ${amount} ${symbol}.`,
+        description: bridgeToBase
+          ? consumerCopy
+            ? `${received} ${symbol} is on Base.`
+            : `Received ${received} ${symbol} on Base.`
+          : `Withdrew ${amount} ${symbol}.`,
       });
     } catch (e: unknown) {
       if (isRainbowkitXchainWallet(activeWallet)) {
         setRainbowkitSignDialogSuppressed(false);
       }
       const { userRejected, message } = getTransactionErrorFeedback(e);
+      setWaitingOnBase(false);
       toast({
         title: userRejected ? "Withdraw cancelled" : "Withdraw failed",
         description: message,
@@ -296,15 +499,26 @@ const EasySavingsWithdrawModal = ({
     setShowSuccess(false);
     setTxId(null);
     setAmount("");
+    setWaitingOnBase(false);
+    setFlowError(null);
+    setConfirmedAmount("");
+    setHelpClaimUrl(null);
   };
 
   if (!route) return null;
 
   return (
-    <Dialog
+    <>
+      {privy.enabled && privy.configured ? (
+        <PrivySendTransactionBinder onReady={bindSendTransaction} />
+      ) : null}
+      <Dialog
       open={isOpen && !rainbowkitSignDialogSuppressed}
       onOpenChange={(open) => {
-        if (!open && !isSubmitting) onClose();
+        if (!open) {
+          if (isSubmitting && !waitingOnBase) return;
+          onClose();
+        }
       }}
     >
       <DialogContent className={MODAL_SHELL}>
@@ -314,7 +528,7 @@ const EasySavingsWithdrawModal = ({
               transactionType="withdraw"
               asset={symbol}
               assetIcon={logo}
-              amount={amount}
+              amount={confirmedAmount || amount}
               onViewTransaction={() => {
                 if (!txId) return;
                 window.open(
@@ -331,6 +545,41 @@ const EasySavingsWithdrawModal = ({
               onClose={onClose}
               viewTransactionDisabled={!txId}
             />
+          ) : waitingOnBase || helpClaimUrl ? (
+            <div className="py-10 flex flex-col items-center gap-3 text-center">
+              {waitingOnBase ? (
+                <Loader2 className="h-8 w-8 animate-spin text-ocean-teal" />
+              ) : null}
+              <DialogHeader className="space-y-2">
+                <DialogTitle className="text-xl font-bold">
+                  {consumerCopy ? "Moving your USD" : "Moving to Base"}
+                </DialogTitle>
+                <DialogDescription className="text-sm text-muted-foreground">
+                  {consumerCopy
+                    ? "This can take a few minutes. If asked, confirm once more to receive your USD. You can close this and check back soon."
+                    : "Confirmed on Algorand. If prompted, confirm once more to receive USDC on Base."}
+                </DialogDescription>
+              </DialogHeader>
+              {helpClaimUrl ? (
+                <p className="text-sm px-4">
+                  <a
+                    href={helpClaimUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-ocean-teal underline break-all"
+                  >
+                    Need help?
+                  </a>
+                </p>
+              ) : null}
+              <button
+                type="button"
+                className="text-sm text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+                onClick={() => onClose()}
+              >
+                {consumerCopy ? "Done for now" : "Close"}
+              </button>
+            </div>
           ) : (
             <>
               <DialogHeader className="space-y-2 text-center pr-6">
@@ -338,7 +587,11 @@ const EasySavingsWithdrawModal = ({
                   Withdraw
                 </DialogTitle>
                 <DialogDescription className="text-sm text-muted-foreground">
-                  Withdraw {symbol} from your savings.
+                  {bridgeToBase
+                    ? consumerCopy
+                      ? `Withdraw ${symbol} to Base in one confirmation.`
+                      : `Redeem from savings and bridge to Base USDC in one signature.`
+                    : `Withdraw ${symbol} from your savings.`}
                 </DialogDescription>
                 <div className="flex items-center justify-center gap-3 pt-2">
                   <img
@@ -370,7 +623,7 @@ const EasySavingsWithdrawModal = ({
                   amount={amount}
                   onAmountChange={setAmount}
                   amountUsd={quote.amountUsd > 0 ? quote.amountUsd : null}
-                  amountDisabled={isSubmitting}
+                  amountDisabled={busy}
                   showMax
                   onMax={() => {
                     if (maxWithdrawable > 0) {
@@ -408,6 +661,40 @@ const EasySavingsWithdrawModal = ({
                         : `— ${symbol}`}
                     </span>
                   </div>
+                  {bridgeToBase ? (
+                    <>
+                      <div className="flex items-start justify-between gap-3 px-4 py-2.5">
+                        <span className="text-muted-foreground shrink-0">
+                          Move fee
+                        </span>
+                        <span className="font-medium text-right">
+                          {feePreview
+                            ? `${formatToken(feePreview.fee, 6)} ${symbol} · ~0.1%`
+                            : "—"}
+                        </span>
+                      </div>
+                      <div className="flex items-start justify-between gap-3 px-4 py-2.5">
+                        <span className="text-muted-foreground shrink-0">
+                          You receive on Base
+                        </span>
+                        <span className="font-medium text-right">
+                          {feePreview
+                            ? `${feePreview.destStr} ${symbol}`
+                            : `— ${symbol}`}
+                        </span>
+                      </div>
+                      <div className="flex items-start justify-between gap-3 px-4 py-2.5">
+                        <span className="text-muted-foreground shrink-0">
+                          Network fee
+                        </span>
+                        <span className="font-medium text-right">
+                          {consumerCopy
+                            ? "~0.1 ALGO (must already be in wallet)"
+                            : "~0.1 ALGO on Algorand"}
+                        </span>
+                      </div>
+                    </>
+                  ) : null}
                   <div className="flex items-start justify-between gap-3 px-4 py-2.5">
                     <span className="text-muted-foreground shrink-0">
                       {consumerCopy ? "In savings" : "Your position"}
@@ -434,6 +721,9 @@ const EasySavingsWithdrawModal = ({
                 {quote.error ? (
                   <p className="text-xs text-destructive">{quote.error}</p>
                 ) : null}
+                {flowError ? (
+                  <p className="text-xs text-destructive">{flowError}</p>
+                ) : null}
 
                 <DorkFiButton
                   variant="withdraw"
@@ -443,7 +733,7 @@ const EasySavingsWithdrawModal = ({
                     void handleWithdraw();
                   }}
                 >
-                  {isSubmitting ? (
+                  {busy ? (
                     <span className="inline-flex items-center gap-2">
                       <Loader2 className="size-4 animate-spin" />
                       {ctaLabel[ctaState]}
@@ -458,6 +748,7 @@ const EasySavingsWithdrawModal = ({
         </div>
       </DialogContent>
     </Dialog>
+    </>
   );
 };
 

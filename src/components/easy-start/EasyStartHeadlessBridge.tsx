@@ -7,6 +7,7 @@ import {
   type EasyStartBridgePhase,
 } from "@/components/easy-start/easyStartBridgePhase";
 import { runAramidUsdcBridge } from "@/lib/easyStart/aramid/runUsdcBridge";
+import { isAramidCreditPendingError } from "@/lib/easyStart/aramid/creditPending";
 
 interface EasyStartHeadlessBridgeProps {
   /** USDC amount to swap (human units, e.g. "100"). */
@@ -79,7 +80,7 @@ export function EasyStartHeadlessBridge({
             if (phase === "error") {
               onPhaseChange?.(phase, detail ?? "Swap failed");
             } else {
-              onPhaseChange?.(phase, null);
+              onPhaseChange?.(phase, detail ?? null);
             }
           },
         });
@@ -98,6 +99,16 @@ export function EasyStartHeadlessBridge({
         onComplete?.();
       } catch (err) {
         if (ac.signal.aborted) return;
+        if (isAramidCreditPendingError(err)) {
+          void queryClient.invalidateQueries({
+            queryKey: ["easy-start-base-usdc"],
+          });
+          void queryClient.invalidateQueries({
+            queryKey: ["easy-start-algo-usdc"],
+          });
+          onPhaseChange?.("pending", err.claimUrl);
+          return;
+        }
         const message =
           err instanceof Error ? err.message : "Bridge failed";
         if (message === "Aborted" || (err as { name?: string })?.name === "AbortError") {

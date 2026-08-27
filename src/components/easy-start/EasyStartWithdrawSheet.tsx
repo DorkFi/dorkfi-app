@@ -24,6 +24,8 @@ import {
   fetchAlgorandUsdcBalance,
   hasEnoughAlgorandAlgo,
 } from "@/lib/easyStart/baseBalances";
+import { assertAramidBaseCanRelease } from "@/lib/easyStart/aramid/liquidity";
+import { splitAramidFee, usdcToAtomic } from "@/lib/easyStart/aramid/fees";
 import {
   bridgePhaseLabel,
   type EasyStartBridgePhase,
@@ -50,6 +52,7 @@ type WithdrawPhase =
   | "idle"
   | "fee_check"
   | "bridging"
+  | "pending"
   | "success"
   | "error";
 
@@ -81,6 +84,7 @@ export function EasyStartWithdrawSheet({
     useState<EasyStartBridgePhase>("preparing");
   const [bridgeAmount, setBridgeAmount] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [helpClaimUrl, setHelpClaimUrl] = useState<string | null>(null);
 
   const { data: algoUsdc, refetch: refetchUsdc } = useQuery({
     queryKey: ["easy-start-algo-usdc", algorandAddress],
@@ -100,11 +104,14 @@ export function EasyStartWithdrawSheet({
     setBridgePhase("preparing");
     setBridgeAmount(null);
     setError(null);
+    setHelpClaimUrl(null);
   }, []);
 
   const handleClose = (next: boolean) => {
     if (!next) {
-      if (
+      if (phase === "bridging") {
+        setPhase("pending");
+      } else if (
         phase === "idle" ||
         phase === "success" ||
         phase === "error" ||
@@ -158,6 +165,12 @@ export function EasyStartWithdrawSheet({
         return;
       }
 
+      const { destinationAmount } = splitAramidFee(usdcToAtomic(String(requested)));
+      await assertAramidBaseCanRelease({
+        destinationAtomic: destinationAmount,
+        consumerCopy,
+      });
+
       const formatted =
         requested.toFixed(6).replace(/\.?0+$/, "") || String(requested);
       setBridgeAmount(formatted);
@@ -192,8 +205,10 @@ export function EasyStartWithdrawSheet({
                     ? consumerCopy
                       ? "We’ll prepare your funds, then you can cash out with MoonPay or Coinbase."
                       : "We’ll move USDC from Algorand to your Easy Start Base wallet, then you can cash out with MoonPay or Coinbase."
-                    : phase === "bridging" || phase === "fee_check"
-                      ? bridgePhaseLabel(bridgePhase, "algo-to-base")
+                    : phase === "pending"
+                        ? consumerCopy
+                          ? "Your USD is on the way. You can close this and check back soon."
+                          : "USDC is still moving to Base. You can close this and check back soon."
                       : phase === "success"
                         ? consumerCopy
                           ? "Your funds are ready — cash out if you like."
@@ -206,7 +221,37 @@ export function EasyStartWithdrawSheet({
             </div>
 
             <div className="px-6 pb-6 pt-4">
-              {phase === "success" ? (
+              {phase === "pending" ? (
+                <div className="py-6 text-center space-y-4">
+                  <p className="text-lg font-semibold text-slate-800 dark:text-white">
+                    {consumerCopy ? "Your USD is on the way" : "USDC is on the way to Base"}
+                  </p>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">
+                    {consumerCopy
+                      ? "This can take a little while. You can close this and check back soon."
+                      : "Soldiers usually finish this within an hour. You can close this and come back."}
+                  </p>
+                  {helpClaimUrl ? (
+                    <p className="text-sm">
+                      <a
+                        href={helpClaimUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-ocean-teal underline break-all"
+                      >
+                        Need help?
+                      </a>
+                    </p>
+                  ) : null}
+                  <Button
+                    variant="outline"
+                    className="w-full border-ocean-teal/40"
+                    onClick={() => handleClose(false)}
+                  >
+                    {consumerCopy ? "Done for now" : "Close"}
+                  </Button>
+                </div>
+              ) : phase === "success" ? (
                 <div className="py-4 text-center space-y-4">
                   <CheckCircle2 className="mx-auto h-12 w-12 text-ocean-teal" />
                   <p className="text-lg font-semibold text-slate-800 dark:text-white">
@@ -250,6 +295,33 @@ export function EasyStartWithdrawSheet({
                     <p className="text-sm text-destructive" role="alert">
                       {error}
                     </p>
+                  ) : phase === "bridging" ? (
+                    <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm">
+                      {consumerCopy
+                        ? "This can take a few minutes. You can close this and check back soon."
+                        : "This can take a few minutes. Close this anytime — we’ll keep waiting in the background."}
+                    </p>
+                  ) : null}
+                  {helpClaimUrl ? (
+                    <p className="text-sm">
+                      <a
+                        href={helpClaimUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-ocean-teal underline break-all"
+                      >
+                        Need help?
+                      </a>
+                    </p>
+                  ) : null}
+                  {phase === "bridging" ? (
+                    <Button
+                      variant="outline"
+                      className="mt-2 w-full border-ocean-teal/40"
+                      onClick={() => handleClose(false)}
+                    >
+                      {consumerCopy ? "Done for now" : "Close"}
+                    </Button>
                   ) : null}
                 </div>
               ) : phase === "error" ? (
@@ -426,7 +498,7 @@ export function EasyStartWithdrawSheet({
         </DialogContent>
       </Dialog>
 
-      {phase === "bridging" && bridgeAmount ? (
+      {(phase === "bridging" || phase === "pending") && bridgeAmount ? (
         <Suspense fallback={null}>
           <EasyStartHeadlessBridge
             enabled
@@ -434,7 +506,19 @@ export function EasyStartWithdrawSheet({
             direction="algo-to-base"
             onPhaseChange={(p, err) => {
               setBridgePhase(p);
-              if (p === "error") {
+              if (err?.startsWith("http")) {
+                setHelpClaimUrl(err);
+              }
+              if (p === "pending") {
+                setPhase("pending");
+                onOpenChange(true);
+                toast({
+                  title: consumerCopy ? "On the way" : "Still moving to Base",
+                  description: consumerCopy
+                    ? "Your USD is moving. Check back shortly."
+                    : "USDC has left Algorand and should arrive on Base soon.",
+                });
+              } else if (p === "error") {
                 setError(err ?? "Bridge failed");
                 setPhase("error");
               }

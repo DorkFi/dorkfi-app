@@ -26,3 +26,32 @@ export function usdcToAtomic(amountHuman: string): bigint {
   }
   return BigInt(Math.round(n * 1_000_000));
 }
+
+/** 6-decimal atomic units → human USDC number. */
+export function atomicToUsdc(atomic: bigint): number {
+  return Number(atomic) / 1_000_000;
+}
+
+/** Human string with up to 6 decimals, no trailing zeros. */
+export function atomicToUsdcString(atomic: bigint): string {
+  const neg = atomic < 0n;
+  const abs = neg ? -atomic : atomic;
+  const whole = abs / 1_000_000n;
+  const frac = abs % 1_000_000n;
+  const fracStr = frac.toString().padStart(6, "0").replace(/0+$/, "");
+  const body = fracStr.length ? `${whole.toString()}.${fracStr}` : whole.toString();
+  return neg ? `-${body}` : body;
+}
+
+/**
+ * Minimum Base USDC to send so Aramid credits at least `destinationAtomic`
+ * on Algorand after the 1.001 floor.
+ */
+export function aramidSendForDestination(destinationAtomic: bigint): bigint {
+  if (destinationAtomic <= 0n) return 0n;
+  let send = (destinationAtomic * 1001n + 999n) / 1000n;
+  while (splitAramidFee(send).destinationAmount < destinationAtomic) {
+    send += 1n;
+  }
+  return send;
+}

@@ -6,10 +6,24 @@ import react from "@vitejs/plugin-react-swc";
 export default defineConfig({
   plugins: [react()],
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-      buffer: "buffer",
-    },
+    alias: [
+      { find: "@", replacement: path.resolve(__dirname, "./src") },
+      { find: "buffer", replacement: "buffer" },
+      {
+        find: /^algosdk\/unpatched$/,
+        replacement: path.resolve(
+          __dirname,
+          "node_modules/algosdk/dist/esm/index.js"
+        ),
+      },
+      {
+        find: /^algosdk$/,
+        replacement: path.resolve(
+          __dirname,
+          "src/lib/algorand/algosdkWithCoerce.ts"
+        ),
+      },
+    ],
   },
   define: {
     global: "globalThis",

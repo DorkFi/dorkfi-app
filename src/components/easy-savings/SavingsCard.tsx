@@ -891,7 +891,16 @@ const SavingsCard = () => {
               <div className="grid grid-cols-2 gap-3 sm:gap-4">
                 <DorkFiButton
                   className="rounded-full h-12 w-full min-w-0 text-base"
-                  onClick={() => openDeposit()}
+                  onClick={() =>
+                    openDeposit(
+                      isWalletAccount
+                        ? {
+                            assetConfigKey:
+                              usdcRoute?.asset.configKey ?? "USDC",
+                          }
+                        : undefined
+                    )
+                  }
                 >
                   {isWalletAccount
                     ? "Deposit to Earn"
@@ -997,10 +1006,6 @@ const SavingsCard = () => {
                             <button
                               type="button"
                               onClick={() => {
-                                if (consumerCopy && hasBaseUsdc) {
-                                  openEasyStartCashDeposit();
-                                  return;
-                                }
                                 openDeposit({
                                   assetConfigKey:
                                     usdcRoute?.asset.configKey ?? "USDC",

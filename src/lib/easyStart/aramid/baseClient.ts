@@ -32,10 +32,14 @@ export async function fetchUsdcAllowance(
   });
 }
 
-export async function waitForBaseTx(hash: Hex): Promise<void> {
+export async function waitForBaseTx(
+  hash: Hex,
+  timeoutMs = 60_000
+): Promise<void> {
   const receipt = await basePublicClient.waitForTransactionReceipt({
     hash,
     confirmations: 1,
+    timeout: timeoutMs,
   });
   if (receipt.status !== "success") {
     throw new Error("Base transaction failed");

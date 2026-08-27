@@ -157,7 +157,20 @@ export function EasyStartBridgeSheet({
                 ) : null}
 
                 {error ? (
-                  <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
+                  error.startsWith("http") ? (
+                    <p className="text-xs">
+                      <a
+                        href={error}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-ocean-teal underline break-all"
+                      >
+                        Need help?
+                      </a>
+                    </p>
+                  ) : (
+                    <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
+                  )
                 ) : null}
 
                 <Button
@@ -180,7 +193,9 @@ export function EasyStartBridgeSheet({
                   <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
                 ) : (
                   <p className="text-xs text-slate-500">
-                    Keep this window open until the swap finishes.
+                    {direction === "algo-to-base"
+                      ? "This can take a few minutes. You can close this and check back."
+                      : "Keep this window open until the swap finishes."}
                   </p>
                 )}
                 {error ? (
@@ -210,6 +225,10 @@ export function EasyStartBridgeSheet({
               setBridgePhase(p);
               if (p === "error") {
                 setError(err ?? "Swap failed");
+              }
+              if (p === "pending") {
+                setError(err);
+                setRunning(false);
               }
             }}
             onComplete={() => {

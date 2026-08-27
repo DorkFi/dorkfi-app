@@ -5,6 +5,13 @@
  * including fetching market information, user positions, and protocol statistics.
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { requireAlgorandAddressString } from "@/lib/algorand/addressString";
+import {
+  aramidAvmToBaseArccjsExtraTxn,
+  findAramidAxferTxId,
+} from "@/lib/easyStart/aramid/avmToBaseExtraTxn";
+import { ARAMID_ALGORAND_USDC_TOKEN_ID } from "@/lib/easyStart/aramid/constants";
+import { splitAramidFee } from "@/lib/easyStart/aramid/fees";
 import {
   getCurrentNetworkConfig,
   getNetworkConfig,
@@ -3097,6 +3104,11 @@ export const withdraw = async (
     folksTwoStep?: "lending_to_wallet" | "folks_redeem_only";
     /** Step 2: f-ASA amount (smallest units) to redeem after step 1 left f-ALGO in the wallet. */
     folksRedeemFAssetAtomic?: string;
+    /**
+     * After native USDC redeem, append Aramid AVM→Base axfer in the same atomic
+     * group (one signature). Base address receives Circle USDC after the bridge.
+     */
+    aramidToBaseEvmAddress?: string;
   }
 ): Promise<
   | { success: boolean; txId?: string; error?: string }
@@ -3108,7 +3120,14 @@ export const withdraw = async (
       folksTwoStep: "lending_to_wallet";
       fAssetToRedeemAtomic: string;
     }
-    | { folksTwoStep: "folks_redeem_only" };
+    | { folksTwoStep: "folks_redeem_only" }
+    | {
+      aramidToBase: {
+        sendAtomic: string;
+        destinationAtomic: string;
+        claimTxId?: string;
+      };
+    };
   }
 > => {
   console.log("withdraw", {
@@ -3121,12 +3140,14 @@ export const withdraw = async (
     xalgoConsensusWithdrawAppendBurn:
       options?.xalgoConsensusWithdrawAppendBurn,
     folksTwoStep: options?.folksTwoStep,
+    aramidToBase: Boolean(options?.aramidToBaseEvmAddress),
   });
 
   try {
     const networkConfig = getNetworkConfig(networkId);
 
     if (isAlgorandCompatibleNetwork(networkId)) {
+      userAddress = requireAlgorandAddressString(userAddress, "user address");
       const clients = await algorandService.initializeClientsForReads(
         networkConfig.walletNetworkId as AlgorandNetwork
       );
@@ -4431,6 +4452,7 @@ export const withdraw = async (
 
       // Withdraw from lending pool
       let withdrawSim: any = BigInt(0);
+      let appendedAramidToBase = false;
       {
         const withdrawAmount = adjustedAmount;
         const formattedWithdrawAmount = new BigNumber(withdrawAmount)
@@ -4473,6 +4495,36 @@ export const withdraw = async (
           desc: note,
         });
 
+        const evmForAramid = options?.aramidToBaseEvmAddress?.trim() ?? "";
+        const nativeUsdcAssetId = String(
+          tokenConfigForWithdraw?.assetId ?? token.underlyingAssetId ?? ""
+        );
+        const isNativeUsdcAsa =
+          token.configKey === "USDC" &&
+          tokenStandard === "asa" &&
+          nativeUsdcAssetId === ARAMID_ALGORAND_USDC_TOKEN_ID;
+        const sendAtomic = BigInt(withdrawSim.toString());
+        if (
+          evmForAramid &&
+          /^0x[a-fA-F0-9]{40}$/.test(evmForAramid) &&
+          isNativeUsdcAsa &&
+          sendAtomic > 0n &&
+          !folksWithdrawUsesFolksRedeem &&
+          options?.folksTwoStep == null &&
+          options?.xalgoConsensusWithdrawAppendBurn !== true
+        ) {
+          const { feeAmount, destinationAmount } = splitAramidFee(sendAtomic);
+          buildN.push(
+            aramidAvmToBaseArccjsExtraTxn({
+              userAddress,
+              sendAtomic,
+              evmAddress: evmForAramid,
+              feeAmount,
+              destinationAmount,
+            })
+          );
+          appendedAramidToBase = true;
+        }
 
         if (
           folksWithdrawUsesFolksRedeem &&
@@ -4610,9 +4662,28 @@ export const withdraw = async (
         };
       }
 
+      const aramidMeta = (() => {
+        if (!appendedAramidToBase) return undefined;
+        const sendAtomic = BigInt(withdrawSim.toString());
+        if (sendAtomic <= 0n) return undefined;
+        try {
+          const { destinationAmount } = splitAramidFee(sendAtomic);
+          return {
+            aramidToBase: {
+              sendAtomic: sendAtomic.toString(),
+              destinationAtomic: destinationAmount.toString(),
+              claimTxId: findAramidAxferTxId(customTx.txns),
+            },
+          };
+        } catch {
+          return undefined;
+        }
+      })();
+
       return {
         success: true,
         txns: customTx.txns,
+        ...(aramidMeta ? { withdrawMeta: aramidMeta } : {}),
       };
     } else if (isEVMNetwork(networkId)) {
       // TODO: Implement EVM withdraw
@@ -4685,6 +4756,7 @@ export const deposit = async (
 
     if (isAlgorandCompatibleNetwork(networkId)) {
       console.log({ networkConfig, networkId });
+      userAddress = requireAlgorandAddressString(userAddress, "user address");
       // Convert networkId to AlgorandNetwork format
       const algorandNetwork = getAlgorandNetworkFromNetworkId(networkId);
 

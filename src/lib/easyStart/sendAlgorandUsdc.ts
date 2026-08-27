@@ -1,8 +1,5 @@
-import {
-  Algodv2,
-  makeAssetTransferTxnWithSuggestedParamsFromObject,
-  waitForConfirmation,
-} from "algosdk";
+import algosdk, { Algodv2, waitForConfirmation } from "algosdk";
+import { requireAlgorandAddressString } from "@/lib/algorand/addressString";
 import {
   ALGORAND_MAINNET_USDC_ASA,
   fetchAlgorandUsdcBalance,
@@ -45,10 +42,11 @@ export async function ensureAlgorandUsdcOptIn(args: {
   const bal = await fetchAlgorandUsdcBalance(args.address);
   if (bal.optedIn) return { alreadyOptedIn: true };
 
+  const address = requireAlgorandAddressString(args.address);
   const sp = await ALGORAND_MAINNET_ALGOD.getTransactionParams().do();
-  const txn = makeAssetTransferTxnWithSuggestedParamsFromObject({
-    sender: args.address,
-    receiver: args.address,
+  const txn = algosdk.makeAssetTransferTxnWithSuggestedParamsFromObject({
+    sender: address,
+    receiver: address,
     amount: 0,
     assetIndex: ALGORAND_MAINNET_USDC_ASA,
     suggestedParams: sp,
@@ -72,9 +70,9 @@ export async function sendAlgorandUsdc(args: {
 }): Promise<string> {
   const atomic = parseUsdcAtomic(args.amount);
   const sp = await ALGORAND_MAINNET_ALGOD.getTransactionParams().do();
-  const txn = makeAssetTransferTxnWithSuggestedParamsFromObject({
-    sender: args.from,
-    receiver: args.to,
+  const txn = algosdk.makeAssetTransferTxnWithSuggestedParamsFromObject({
+    sender: requireAlgorandAddressString(args.from, "sender"),
+    receiver: requireAlgorandAddressString(args.to, "receiver"),
     amount: atomic,
     assetIndex: ALGORAND_MAINNET_USDC_ASA,
     suggestedParams: sp,

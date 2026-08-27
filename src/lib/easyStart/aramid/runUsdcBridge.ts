@@ -5,10 +5,10 @@ import type {
 import {
   ARAMID_AVM_BRIDGE,
   ARAMID_BASE_USDC,
-  ARAMID_CLAIM_URL,
   ARAMID_EVM_BRIDGE,
   ARAMID_MAX_POLLS,
   ARAMID_POLL_MS,
+  aramidClaimUrl,
 } from "@/lib/easyStart/aramid/constants";
 import {
   fetchUsdcAllowance,
@@ -20,6 +20,8 @@ import {
   encodeUsdcApprove,
 } from "@/lib/easyStart/aramid/lockTokens";
 import { encodeAramidAvmToBaseNote } from "@/lib/easyStart/aramid/note";
+import { assertAramidBaseCanRelease } from "@/lib/easyStart/aramid/liquidity";
+import { waitForBaseUsdcCredit } from "@/lib/easyStart/aramid/waitForBaseCredit";
 import {
   fetchAlgorandUsdcBalance,
   fetchBaseUsdcBalance,
@@ -81,7 +83,7 @@ async function sendBaseCall(args: {
 /**
  * Easy Start Base ↔ Algorand USDC via Aramid Bridge.
  * Deposit: approve + lockTokens, then poll Algorand credit.
- * Withdraw: ASA transfer with Aramid note, then poll Base (claim URL on timeout).
+ * Withdraw: liquidity check, ASA transfer with Aramid note, poll Base.
  */
 export async function runAramidUsdcBridge(
   args: RunAramidUsdcBridgeArgs
@@ -145,6 +147,7 @@ export async function runAramidUsdcBridge(
   }
 
   const before = await fetchBaseUsdcBalance(args.evmAddress as Address);
+  await assertAramidBaseCanRelease({ destinationAtomic: destinationAmount });
   report("signing");
   const note = encodeAramidAvmToBaseNote({
     evmAddress: args.evmAddress,
@@ -160,23 +163,17 @@ export async function runAramidUsdcBridge(
   });
 
   report("sending");
-  report("waiting", "Waiting for USDC on Base…");
-  try {
-    await waitForBalanceIncrease({
-      read: () =>
-        fetchBaseUsdcBalance(args.evmAddress as Address).then((b) => b.value),
-      start: before.value,
-      minIncrease: destinationAmount,
-      signal: args.signal,
-    });
-  } catch (err) {
-    if (err instanceof Error && err.message === "Bridge timed out") {
-      throw new Error(
-        `Bridge sent. If USDC is not on Base yet, claim it at ${ARAMID_CLAIM_URL}/${txId}`
-      );
-    }
-    throw err;
-  }
+  report("waiting", aramidClaimUrl(txId));
+  await waitForBaseUsdcCredit({
+    evmAddress: args.evmAddress as Address,
+    start: before.value,
+    minIncrease: destinationAmount,
+    claimTxId: txId,
+    signal: args.signal,
+    sendTransaction: args.sendTransaction,
+    onClaim: () => report("signing", "Confirm receive on Base…"),
+    onClaimSettled: () => report("waiting", aramidClaimUrl(txId)),
+  });
 
   report("success");
   return { txId };

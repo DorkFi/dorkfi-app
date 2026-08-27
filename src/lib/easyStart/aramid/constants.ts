@@ -24,5 +24,25 @@ export const ARAMID_BASE_USDC =
 
 export const ARAMID_CLAIM_URL = "https://app.aramid.finance/claim";
 
+/** AramidChain — soldiers publish `aramid-claim-data/v1` here. */
+export const ARAMID_CHAIN_ID = 101003;
+
+export const ARAMID_CLAIMS_ADDRESS =
+  "ARAMIDCBFNGLVMI2TYP3MMMTYD7JVYZT2WUJW24HYBKVNGWR3IFNKU5N4Q";
+
+export const ARAMID_CLAIM_DATA_PREFIX = "aramid-claim-data/v1:j";
+
+/** Public AramidChain indexers (CORS `*`). */
+export const ARAMID_CHAIN_INDEXER_HOSTS = [
+  "https://aramid-indexer-public.de.nodes.biatec.io",
+  "https://aramidindexer.de-k1.a-wallet.net",
+] as const;
+
 export const ARAMID_POLL_MS = 5_000;
-export const ARAMID_MAX_POLLS = 120; // ~10 minutes
+/** ~1 hour — soldiers auto-release AVM→EVM within ~1000 Algorand rounds. */
+export const ARAMID_MAX_POLLS = 720;
+
+export function aramidClaimUrl(txId?: string | null): string {
+  const id = txId?.trim();
+  return id ? `${ARAMID_CLAIM_URL}/${id}` : ARAMID_CLAIM_URL;
+}

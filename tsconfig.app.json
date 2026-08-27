@@ -23,7 +23,8 @@
 
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "algosdk/unpatched": ["./node_modules/algosdk/dist/types/index.d.ts"]
     }
   },
   "include": ["src"]

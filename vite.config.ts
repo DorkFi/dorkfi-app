@@ -87,13 +87,31 @@ export default defineConfig(({ mode }) => {
     componentTagger(),
   ].filter(Boolean),
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-      buffer: "buffer",
-    },
+    alias: [
+      { find: "@", replacement: path.resolve(__dirname, "./src") },
+      { find: "buffer", replacement: "buffer" },
+      {
+        find: /^algosdk\/unpatched$/,
+        replacement: path.resolve(
+          __dirname,
+          "node_modules/algosdk/dist/esm/index.js"
+        ),
+      },
+      {
+        find: /^algosdk$/,
+        replacement: path.resolve(
+          __dirname,
+          "src/lib/algorand/algosdkWithCoerce.ts"
+        ),
+      },
+    ],
     dedupe: [
       "react",
       "react-dom",
+      "algosdk",
+      "@algorandfoundation/algokit-utils",
+      "algo-x-evm-sdk",
+      "ulujs",
       "@tanstack/react-query",
       "@txnlab/use-wallet-react",
       "wagmi",
@@ -114,6 +132,7 @@ export default defineConfig(({ mode }) => {
       "@walletconnect/sign-client",
       "@perawallet/connect",
       "lute-connect",
+      "algosdk/unpatched",
       "algosdk",
       "@algorandfoundation/algokit-utils",
     ],

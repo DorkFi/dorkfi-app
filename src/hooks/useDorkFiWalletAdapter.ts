@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from "react";
 import { useWallet } from "@txnlab/use-wallet-react";
-import algosdk from "algosdk";
+import { asAlgorandAddressString } from "@/lib/algorand/addressString";
 import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 import { privyEasyStartSyntheticWallet } from "@/wallet/privySyntheticWallet";
@@ -8,26 +8,6 @@ import { privyEasyStartSyntheticWallet } from "@/wallet/privySyntheticWallet";
 type WalletAccount = NonNullable<
   ReturnType<typeof useWallet>["activeAccount"]
 >;
-
-/**
- * Normalize wallet / xChain addresses to plain strings.
- * Dual algosdk copies turn Address objects into `Not an address` via instanceof.
- */
-function asAddressString(address: unknown): string | undefined {
-  if (address == null) return undefined;
-  let value: string | undefined;
-  if (typeof address === "string") {
-    value = address.trim();
-  } else if (
-    typeof address === "object" &&
-    typeof (address as { toString?: () => string }).toString === "function"
-  ) {
-    const s = (address as { toString: () => string }).toString().trim();
-    if (s && s !== "[object Object]") value = s;
-  }
-  if (!value) return undefined;
-  return algosdk.isValidAddress(value) ? value : undefined;
-}
 
 /**
  * Extends `useWallet()` with Privy Easy Start: Algorand xChain address + EIP-712 signing
@@ -38,8 +18,8 @@ export function useDorkFiWalletAdapter() {
   const privy = usePrivyEasyStart();
   const consumerCopy = useConsumerCopy();
 
-  const walletAddress = asAddressString(wallet.activeAccount?.address);
-  const privyAlgoAddress = asAddressString(privy.algorandAddress);
+  const walletAddress = asAlgorandAddressString(wallet.activeAccount?.address);
+  const privyAlgoAddress = asAlgorandAddressString(privy.algorandAddress);
   const preferPrivy =
     consumerCopy && privy.authenticated && Boolean(privyAlgoAddress);
 
