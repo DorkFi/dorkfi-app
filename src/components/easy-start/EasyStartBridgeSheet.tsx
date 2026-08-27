@@ -35,7 +35,7 @@ interface EasyStartBridgeSheetProps {
 }
 
 /**
- * Advanced Easy Start USDC move: Base ↔ Algorand via Aramid Bridge.
+ * Advanced Easy Start USDC move: Base ↔ Algorand via Exodus XO Swap.
  * Escape hatch when Deposit / Withdraw orchestration is not enough.
  */
 export function EasyStartBridgeSheet({
@@ -86,7 +86,7 @@ export function EasyStartBridgeSheet({
               Move USDC
             </DialogTitle>
             <DialogDescription className="text-slate-600 dark:text-slate-300">
-              Base ↔ Algorand USDC via Aramid Bridge
+              Base ↔ Algorand USDC via XO Swap
             </DialogDescription>
           </DialogHeader>
 
@@ -165,7 +165,7 @@ export function EasyStartBridgeSheet({
                   disabled={!ready || !amount || Number(amount) <= 0}
                   onClick={start}
                 >
-                  Bridge USDC
+                  Swap USDC
                 </Button>
               </>
             ) : (

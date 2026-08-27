@@ -6,13 +6,11 @@ Optional email / social onboarding path for **Algorand Mainnet only**. Existing 
 
 1. **Get Started** → Privy login (email, Google, Apple, passkey)
 2. Embedded EVM wallet created on **Base**
-3. **Deposit** → one sheet: amount → card/Apple Pay → (ETH gas top-up if needed) → automatic Base→Algorand USDC via **Aramid Bridge**
+3. **Deposit** → one sheet: amount → card/Apple Pay → (ETH gas top-up if needed) → automatic Base→Algorand USDC via **XO Swap**
 4. Algorand xChain address derived from EVM wallet → DorkFi markets (supply signing: Phase 5)
-5. **Withdraw** → one sheet: amount → Algorand→Base USDC via **Aramid Bridge** (EVM destinations may require a claim at `app.aramid.finance/claim/<tx>`) → optional **in-app cash-out** (Coinbase Offramp or MoonPay Sell) via Privy USDC transfer
+5. **Withdraw** → one sheet: amount → automatic Algorand→Base USDC via **XO Swap** → optional **in-app cash-out** (Coinbase Offramp or MoonPay Sell) via Privy USDC transfer
 
-Advanced Aramid UI remains available as an escape hatch (Portfolio **Move USDC**).
-
-This branch uses Aramid instead of Exodus XO Swap. XO Swap remains on `feature/privy-easy-start-onboarding`.
+Advanced XO Swap UI remains available as an escape hatch (Portfolio **Move USDC**).
 
 ## Environment variables
 
@@ -26,7 +24,11 @@ This branch uses Aramid instead of Exodus XO Swap. XO Swap remains on `feature/p
 | `CDP_API_KEY_SECRET` | For Coinbase Offramp | CDP secret (PEM / multiline OK in `.env`) |
 | `VITE_OFFRAMP_API_BASE` | No | Defaults to `/api/offramp` (Vite plugin in dev). Point at your API in production. |
 | `VITE_OFFRAMP_REDIRECT_URL` | No | Coinbase Offramp redirect (allowlist in CDP). Defaults to `{origin}/portfolio`. |
-| `XO_SWAP_*` | No | Unused on this branch (XO Swap proxy may still be mounted). Easy Start USDC move uses Aramid on-chain. |
+| `XO_SWAP_APP_NAME` | For USDC move | Exodus XO Swap partner `App-Name` (server-only) |
+| `XO_SWAP_APP_VERSION` | No | Defaults to `1.0.0` |
+| `XO_SWAP_API_KEY` | No | Optional Bearer token if Exodus issues one |
+| `XO_SWAP_API_BASE` | No | Defaults to `https://exchange.exodus.io` |
+| `VITE_XO_SWAP_API_BASE` | No | Defaults to `/api/xo-swap` (Vite plugin in dev). Point at your API in production. |
 
 In local development, Easy Start defaults on. On **https://beta.dork.fi** it also auto-enables (see `PRIVY_AUTO_ENABLE_ORIGINS`). Production (`app.dork.fi`) still needs `VITE_ENABLE_PRIVY_ONBOARDING=true` (or the config feature flag) until you choose to roll it out.
 
@@ -41,13 +43,24 @@ The Vite plugin `plugins/offrampApiPlugin.ts` serves:
 
 Put CDP / MoonPay **secrets in `.env`** (not `VITE_*`). Restart `npm run dev` after changing them. For production, mount the same handlers from `server/offramp/handlers.ts` on your API and set `VITE_OFFRAMP_API_BASE`.
 
-### Aramid Bridge (USDC move)
+### XO Swap API (dev)
 
-Easy Start deposit/withdraw call `runAramidUsdcBridge`:
+The Vite plugin `plugins/xoSwapApiPlugin.ts` serves:
 
-- **Base → Algorand:** USDC `approve` + `lockTokens` on `0xC7FAA8f8…C263`, then poll Algorand ASA `31566704` (auto-credit).
-- **Algorand → Base:** USDC ASA transfer to `ARAMIDFJY…` with `aramid-transfer/v1` note, then poll Base USDC. If credit times out, the error includes `https://app.aramid.finance/claim/<algod-txid>`.
-- Fee: ~0.1% (`floor(amount / 1.001)` destination, remainder is fee). No partner API key.
+- `GET /api/xo-swap/health`
+- `GET /api/xo-swap/pair/:pairId/rates`
+- `GET /api/xo-swap/pair/:pairId/quotes?amount=`
+- `POST /api/xo-swap/orders` / `POST /api/xo-swap/orders/float`
+- `GET|PATCH /api/xo-swap/orders/:orderId`
+
+Put `XO_SWAP_APP_NAME` in `.env` (not `VITE_*`). Restart `npm run dev` after changing it. For production, mount `server/xoSwap/handlers.ts` on your API and set `VITE_XO_SWAP_API_BASE`.
+
+Confirm with Exodus that Direct Swap pairs exist for:
+
+- Base → Algorand: `USDCbasemainnetB5A52617_USDCALGO`
+- Algorand → Base: `USDCALGO_USDCbasemainnetB5A52617`
+
+`/pairs`, `/rates`, and `/orders` are geo-gated. Local `npm run dev` uses your machine’s IP, so a `RESTRICTED_GEOLOCATION` response means Exodus is blocking this region — retrying will not help. Test from an allowed network or ask Exodus to enable the pair for `XO_SWAP_APP_NAME`.
 
 ## Privy dashboard setup
 
@@ -82,9 +95,10 @@ Cash-out flow after bridge:
 | Withdraw auto-swap | `src/components/easy-start/EasyStartWithdrawSheet.tsx` — Algorand→Base USDC |
 | In-app cash-out | `src/components/easy-start/EasyStartOfframpCashOut.tsx` — Coinbase + MoonPay |
 | Off-ramp API (dev) | `server/offramp/handlers.ts` + `plugins/offrampApiPlugin.ts` |
-| Headless Aramid bridge | `src/components/easy-start/EasyStartHeadlessBridge.tsx` (both directions) |
-| Bridge orchestrator | `src/lib/easyStart/aramid/runUsdcBridge.ts` |
-| Advanced bridge UI | `src/components/easy-start/EasyStartBridgeSheet.tsx` — escape hatch |
+| XO Swap API (dev) | `server/xoSwap/handlers.ts` + `plugins/xoSwapApiPlugin.ts` |
+| Headless XO Swap | `src/components/easy-start/EasyStartHeadlessBridge.tsx` (both directions) |
+| Swap orchestrator | `src/lib/easyStart/xoSwap/runUsdcSwap.ts` |
+| Advanced swap UI | `src/components/easy-start/EasyStartBridgeSheet.tsx` — escape hatch |
 | Portfolio staging strip | `src/components/portfolio/EasyStartFundingStrip.tsx` — Deposit + Withdraw + Move USDC |
 
 Native wallet sessions take precedence over Privy when both could apply.
@@ -106,8 +120,7 @@ Synthetic wallet id: `privy-easy-start` (treated like RainbowKit xChain for netw
 ## Not in scope (follow-ups)
 - Profile setup (preferred name, avatar)
 - Voi / Voi bridge
-- Production hosting of `/api/offramp` outside Vite (wire handlers into dorkfi-api or similar)
-- In-app Aramid EVM claim (withdraw currently falls back to the Aramid claim URL on timeout)
+- Production hosting of `/api/offramp` and `/api/xo-swap` outside Vite (wire handlers into dorkfi-api or similar)
 - RainbowKit `XchainUsdcBridgeControls` still uses the legacy Allbridge dialog — migrate separately
 
 See implementation plan in team docs for full phasing.
