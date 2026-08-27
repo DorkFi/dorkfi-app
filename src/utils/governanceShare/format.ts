@@ -4,7 +4,7 @@ const DAY_MS = 24 * HOUR_MS;
 
 /** Same-origin permalink so tweets show app.dork.fi, not the share server. */
 export const GOVERNANCE_VOTE_SHARE_URL =
-  "https://app.dork.fi/governance/share/";
+  "https://app.dork.fi/governance/share/?v=1";
 
 export function formatGovernanceShareTimeLeft(
   endTime: Date,
