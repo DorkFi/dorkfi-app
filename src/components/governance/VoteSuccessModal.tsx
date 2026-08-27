@@ -9,6 +9,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { PartyPopper, TrendingUp, TrendingDown, ExternalLink } from "lucide-react";
 import { Proposal } from "@/types/governanceTypes";
+import {
+  buildGovernanceVoteIntentUrl,
+  buildGovernanceVoteShareText,
+  governanceVoteShareUrl,
+} from "@/utils/governanceShare/format";
 
 interface VoteSuccessModalProps {
   open: boolean;
@@ -38,12 +43,14 @@ export const VoteSuccessModal = ({
 
   const [shareButtonClicked, setShareButtonClicked] = useState(false);
 
-  // Truncate proposal title for tweet (leave room for fixed text ~60 chars)
-  const titleForShare = proposal.title.length > 100
-    ? `${proposal.title.slice(0, 97)}...`
-    : proposal.title;
-  const voteLabel = support ? "YES" : "NO";
-  const shareText = `Voted ${voteLabel} on "${titleForShare}" in @dork_fi governance 🗳️`;
+  const shareText = buildGovernanceVoteShareText({
+    support,
+    proposalTitle: proposal.title,
+    endTime: proposal.endTime,
+    votesFor: updatedVotesFor,
+    votesAgainst: updatedVotesAgainst,
+  });
+  const shareUrl = governanceVoteShareUrl();
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -145,9 +152,7 @@ export const VoteSuccessModal = ({
                 <div className="flex-1 h-px bg-border" />
               </div>
               <a
-                href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(
-                  shareText
-                )}&url=${encodeURIComponent("https://app.dork.fi")}`}
+                href={buildGovernanceVoteIntentUrl(shareText, shareUrl)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="w-full flex items-center justify-center gap-2 py-3 px-6 rounded-lg bg-black hover:bg-gray-900 dark:bg-white dark:hover:bg-gray-100 text-white dark:text-black font-semibold text-base text-center transition border border-border"
