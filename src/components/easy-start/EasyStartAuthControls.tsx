@@ -137,11 +137,11 @@ export function EasyStartConnectMenu() {
 
         <DropdownMenuItem onClick={openDeposit}>
           <CreditCard className="mr-2 h-4 w-4" />
-          Deposit
+          Add money
         </DropdownMenuItem>
         <DropdownMenuItem onClick={openWithdraw}>
           <ArrowDownToLine className="mr-2 h-4 w-4" />
-          Withdraw
+          Cash out
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => navigate("/account")}>
           <UserRound className="mr-2 h-4 w-4" />

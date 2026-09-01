@@ -12,15 +12,17 @@ import { Button } from "@/components/ui/button";
 import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 import { useEasyStartModals } from "@/contexts/easyStartModals";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
+import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 import { cn } from "@/lib/utils";
 import { fetchBaseUsdcBalance } from "@/lib/easyStart/baseBalances";
 
 /** Re-export for callers that imported the constant from this module. */
 export { BASE_MAINNET_USDC } from "@/lib/easyStart/baseBalances";
 
-/** Base USDC staging balance + Deposit / Withdraw / XO Swap CTAs for Privy Easy Start. */
+/** Base USDC balance + Deposit / Withdraw / XO Swap CTAs for Privy Easy Start. */
 export function EasyStartFundingStrip() {
   const privy = usePrivyEasyStart();
+  const consumerCopy = useConsumerCopy();
   const { openDeposit, openWithdraw, openBridge } = useEasyStartModals();
   const { formatNumber, formatCurrency } = useNumberI18n();
 
@@ -58,8 +60,12 @@ export function EasyStartFundingStrip() {
           </p>
           <p className="text-sm text-muted-foreground">
             {hasBalance
-              ? "You have USDC ready to finish depositing to Algorand."
-              : "Deposit with a card — we’ll move USDC to Algorand for you."}
+              ? consumerCopy
+                ? "Funds in your account. Deposit to Earn when you’re ready."
+                : "USDC on Base. Deposit to Earn to swap and supply."
+              : consumerCopy
+                ? "Deposit with a card. Funds stay in your account until you earn."
+                : "Deposit with a card — USDC stays on Base until you Deposit to Earn."}
           </p>
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 pt-1">
             <span className="text-2xl font-bold tabular-nums text-slate-800 dark:text-white">
@@ -91,7 +97,7 @@ export function EasyStartFundingStrip() {
                   minimumFractionDigits: 2,
                   maximumFractionDigits: 2,
                 })}{" "}
-                staging
+                on Base
               </span>
             ) : null}
           </div>
@@ -121,7 +127,7 @@ export function EasyStartFundingStrip() {
               onClick={openDeposit}
             >
               <Sparkles className="mr-2 h-4 w-4" />
-              Deposit
+              {consumerCopy ? "Add money" : "Deposit"}
             </Button>
             <Button
               type="button"
@@ -130,7 +136,7 @@ export function EasyStartFundingStrip() {
               onClick={openWithdraw}
             >
               <ArrowDownToLine className="mr-2 h-4 w-4" />
-              Withdraw
+              {consumerCopy ? "Cash out" : "Withdraw"}
             </Button>
             <Button
               type="button"

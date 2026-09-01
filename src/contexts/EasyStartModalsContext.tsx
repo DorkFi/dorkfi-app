@@ -43,7 +43,7 @@ const EasyStartBridgeSheet = lazy(() =>
 );
 
 const SHEET_FALLBACK_CLASS =
-  "bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-white rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-[95vw] md:max-w-md p-0";
+  "bg-background text-foreground rounded-2xl border border-border/60 shadow-xl max-w-[95vw] md:max-w-md p-0";
 
 function EasyStartSheetFallback({
   open,
@@ -62,7 +62,7 @@ function EasyStartSheetFallback({
             <DialogTitle>{title}</DialogTitle>
           </DialogHeader>
           <Loader2 className="h-6 w-6 animate-spin text-ocean-teal" />
-          <p className="text-sm text-slate-600 dark:text-slate-300">
+          <p className="text-sm text-muted-foreground">
             Opening {title.toLowerCase()}…
           </p>
         </div>
@@ -114,7 +114,7 @@ export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
                 <EasyStartSheetFallback
                   open={depositOpen}
                   onOpenChange={setDepositOpen}
-                  title="Deposit"
+                  title="Add money"
                 />
               }
             >
@@ -133,7 +133,7 @@ export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
                 <EasyStartSheetFallback
                   open={withdrawOpen}
                   onOpenChange={setWithdrawOpen}
-                  title="Withdraw"
+                  title="Cash out"
                 />
               }
             >

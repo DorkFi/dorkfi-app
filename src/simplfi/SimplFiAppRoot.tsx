@@ -55,9 +55,13 @@ export function SimplFiAppRoot({ children }: SimplFiAppRootProps) {
 
   useEffect(() => {
     let cancelled = false;
-    void import("@/contexts/PrivySessionProvider").then((mod) => {
-      if (!cancelled) setPrivyGate(() => mod.PrivySessionProvider);
-    });
+    void import("@/contexts/PrivySessionProvider")
+      .then((mod) => {
+        if (!cancelled) setPrivyGate(() => mod.PrivySessionProvider);
+      })
+      .catch((err) => {
+        console.error("[SimplFi] Privy failed to load; continuing without it.", err);
+      });
     return () => {
       cancelled = true;
     };
