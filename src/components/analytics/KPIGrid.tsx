@@ -79,7 +79,7 @@ const KPIGrid = () => {
             </div>
           </TooltipTrigger>
           <TooltipContent>
-            <p>Monthly Active Users - Unique wallets that interacted with the protocol this month</p>
+            <p>Unique per-chain wallets indexed by DorkFi user-health data</p>
           </TooltipContent>
         </Tooltip>
       </div>
@@ -88,4 +88,3 @@ const KPIGrid = () => {
 };
 
 export default KPIGrid;
-

@@ -32,6 +32,25 @@ interface TvlSeriesPoint {
   total: number;
 }
 
+const countPerNetworkWallets = (
+  records: Array<{ userAddress?: string; network?: string }>
+): number => {
+  const walletsByNetwork = new Map<string, Set<string>>();
+
+  records.forEach((record) => {
+    if (!record.userAddress || !record.network) return;
+
+    const wallets = walletsByNetwork.get(record.network) ?? new Set<string>();
+    wallets.add(record.userAddress);
+    walletsByNetwork.set(record.network, wallets);
+  });
+
+  return [...walletsByNetwork.values()].reduce(
+    (total, wallets) => total + wallets.size,
+    0
+  );
+};
+
 /**
  * Paint TVL/borrowed ASAP from session oracle cache or analytics API, then
  * refine to Markets-accurate oracle totals without blocking first paint.
@@ -135,6 +154,7 @@ export const useAnalyticsData = () => {
           wadGrowthResponse,
           walletsResponse,
           walletsGrowthResponse,
+          userHealthResponse,
         ] = await Promise.allSettled([
           dorkfiAPIService.getTVLGrowth(startTime30d, now, "day"),
           dorkfiAPIService.getBorrowedGrowth(),
@@ -142,6 +162,7 @@ export const useAnalyticsData = () => {
           dorkfiAPIService.getWADSupplyGrowth(startTime30d, now, "day"),
           dorkfiAPIService.getActiveWallets(),
           dorkfiAPIService.getActiveWalletsGrowth(),
+          dorkfiAPIService.getAllUserHealth(),
         ]);
         if (cancelled) return;
 
@@ -194,11 +215,19 @@ export const useAnalyticsData = () => {
             ? parseFloat(wadResponse.value.data?.totalWadCirculation || "0") /
               1e6
             : 0;
+
+        const indexedActiveWallets =
+          userHealthResponse.status === "fulfilled" &&
+          userHealthResponse.value.success
+            ? countPerNetworkWallets(userHealthResponse.value.data ?? [])
+            : 0;
+
         const activeWallets =
-          walletsResponse.status === "fulfilled" &&
+          indexedActiveWallets ||
+          (walletsResponse.status === "fulfilled" &&
           walletsResponse.value.success
             ? walletsResponse.value.data?.totalActiveWallets || 0
-            : 0;
+            : 0);
 
         const borrowedGrowth7d =
           borrowedGrowthResponse.status === "fulfilled" &&
@@ -216,9 +245,10 @@ export const useAnalyticsData = () => {
                 wadGrowthResponse.value.data?.growth24h
               )
             : undefined;
-        const walletsGrowth7d =
-          walletsGrowthResponse.status === "fulfilled" &&
-          walletsGrowthResponse.value.success
+        const walletsGrowth7d = indexedActiveWallets
+          ? undefined
+          : walletsGrowthResponse.status === "fulfilled" &&
+              walletsGrowthResponse.value.success
             ? pickFirstFiniteNumber(
                 walletsGrowthResponse.value.data?.growth7d,
                 walletsGrowthResponse.value.data?.growth24h
