@@ -69,7 +69,10 @@ import { useToast } from "@/hooks/use-toast";
 import { useTokenPrice } from "@/hooks/useTokenPrice";
 import { calculateMaxBorrowAmount } from "@/services/adminService";
 import dorkfiAPIService from "@/services/dorkfiAPIService";
-import { updateTransactionMetadata } from "@/utils/transactionUtils";
+import {
+  TX_CONFIRMATION_WAIT_ROUNDS,
+  scheduleTransactionMetadataUpdate,
+} from "@/utils/transactionUtils";
 import { warmBorrowModalMaxAndPool } from "@/utils/modalPrefetchHeavy";
 import type { PoolCollateralMarketRow } from "@/utils/poolCollateralMarketRows";
 import {
@@ -1915,7 +1918,11 @@ const SupplyBorrowModal = ({
     }
     const algorandClients =
       await algorandService.initializeClientsForTransactions(algorandNetwork);
-    await waitForConfirmation(algorandClients.algod, res.txid, 4);
+    await waitForConfirmation(
+      algorandClients.algod,
+      res.txid,
+      TX_CONFIRMATION_WAIT_ROUNDS
+    );
 
     if (pending.folksTwoStepPhase === "folks_mint_only") {
       setTransactionId(res.txid);
@@ -2120,57 +2127,18 @@ const SupplyBorrowModal = ({
       .find(
         (txn: any) =>
           txn.txn.type === "appl" &&
-          Number(txn.txn.applicationCall.appIndex) ===
+          Number(txn.txn.applicationCall?.appIndex) ===
             parseInt(pending.poolAppId, 10)
       );
     const poolTxnID = poolTxn?.txn?.txID?.();
-    if (!poolTxnID) {
-      throw new Error("Could not locate pool application transaction in group.");
+    scheduleTransactionMetadataUpdate(poolTxnID ?? res.txid, finalNetwork);
+
+    if (!activeAccount?.address) {
+      setTransactionId(res.txid);
+      setPendingSign(null);
+      setShowSuccess(true);
+      return;
     }
-    await new Promise((resolve) => setTimeout(resolve, 5000));
-    let metadataUpdated = false;
-    let metaRetry = 0;
-    const maxRetries = 10;
-    const apiBaseUrl =
-      import.meta.env.VITE_DORKFI_API_URL || "https://dorkfi-api.nautilus.sh";
-    const networkParam = finalNetwork ? `?network=${finalNetwork}` : "";
-
-    while (!metadataUpdated && metaRetry < maxRetries) {
-      try {
-        const response = await fetch(
-          `${apiBaseUrl}/transaction-metadata/${poolTxnID}${networkParam}`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-          }
-        );
-
-        if (response.ok) {
-          const metaResult = await response.json();
-          console.log("Transaction metadata successfully updated:", metaResult.data);
-          metadataUpdated = true;
-        } else {
-          const errBody = await response.json();
-          throw new Error(errBody.error || "Failed to update transaction metadata");
-        }
-      } catch (err) {
-        metaRetry++;
-        if (metaRetry < maxRetries) {
-          const delay = 1000 * Math.pow(2, metaRetry - 1);
-          console.warn(
-            `Metadata update attempt ${metaRetry} failed, retrying in ${delay}ms:`,
-            err
-          );
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        } else {
-          console.error("Failed to update transaction metadata after all retries:", err);
-        }
-      }
-    }
-
-    if (!activeAccount?.address) return;
 
     const apiNet = pending.actualNetwork;
     Promise.all([
@@ -2444,7 +2412,7 @@ const SupplyBorrowModal = ({
           ),
       });
       const res = await algod.sendRawTransaction(stxns).do();
-      await waitForConfirmation(algod, res.txid, 4);
+      await waitForConfirmation(algod, res.txid, TX_CONFIRMATION_WAIT_ROUNDS);
       setFAssetPreOptInStatus("in");
       toast({
         title: "Opt-in complete",

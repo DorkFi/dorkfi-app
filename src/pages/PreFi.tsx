@@ -78,7 +78,10 @@ import { ARC200Service } from "@/services/arc200Service";
 import BigNumber from "bignumber.js";
 import { ARC200TokenService } from "@/services/mimirApi/arc200TokenService";
 import { APP_SPEC as LendingPoolAppSpec } from "@/clients/DorkFiLendingPoolClient";
-import { updateTransactionMetadata } from "@/utils/transactionUtils";
+import {
+  TX_CONFIRMATION_WAIT_ROUNDS,
+  scheduleTransactionMetadataUpdate,
+} from "@/utils/transactionUtils";
 import { spendableAlgoMicroAlgosFromAccount } from "@/utils/algorandWalletBalance";
 import { DorkFiLendingPoolClient } from "@/clients/DorkFiLendingPoolClient";
 import { abi, CONTRACT } from "ulujs";
@@ -1517,54 +1520,18 @@ export default function PreFiDashboard() {
 
         const res = await algorandClients.algod.sendRawTransaction(stxns).do();
 
-        await waitForConfirmation(algorandClients.algod, res.txid, 4);
+        await waitForConfirmation(
+          algorandClients.algod,
+          res.txid,
+          TX_CONFIRMATION_WAIT_ROUNDS
+        );
 
         // Decode transactions to find the pool transaction ID
         const decodedStxns = stxns.map((txn: Uint8Array) => {
           return algosdk.decodeSignedTransaction(txn);
         });
-        const poolTxnID = decodedStxns.reverse().find((txn: any) => txn.txn.type === "appl" && Number(txn.txn.applicationCall.appIndex) === parseInt(selectedMarket.poolId || ""))?.txn.txID();
-        if (poolTxnID) {
-          await new Promise((resolve) => setTimeout(resolve, 5000));
-          // Retry until metadata update succeeds
-          let metadataUpdated = false;
-          let retryCount = 0;
-          const maxRetries = 10;
-          const apiBaseUrl = import.meta.env.VITE_DORKFI_API_URL || "https://dorkfi-api.nautilus.sh";
-          const networkParam = currentNetwork ? `?network=${currentNetwork}` : "";
-          
-          while (!metadataUpdated && retryCount < maxRetries) {
-            try {
-              const response = await fetch(
-                `${apiBaseUrl}/transaction-metadata/${poolTxnID}${networkParam}`,
-                {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                  },
-                }
-              );
-
-              if (response.ok) {
-                const result = await response.json();
-                console.log("Transaction metadata successfully updated:", result.data);
-                metadataUpdated = true;
-              } else {
-                const error = await response.json();
-                throw new Error(error.error || "Failed to update transaction metadata");
-              }
-            } catch (error) {
-              retryCount++;
-              if (retryCount < maxRetries) {
-                const delay = 1000 * Math.pow(2, retryCount - 1); // Exponential backoff
-                console.warn(`Metadata update attempt ${retryCount} failed, retrying in ${delay}ms:`, error);
-                await new Promise((resolve) => setTimeout(resolve, delay));
-              } else {
-                console.error("Failed to update transaction metadata after all retries:", error);
-              }
-            }
-          }
-        }
+        const poolTxnID = decodedStxns.reverse().find((txn: any) => txn.txn.type === "appl" && Number(txn.txn.applicationCall?.appIndex) === parseInt(selectedMarket.poolId || ""))?.txn.txID();
+        scheduleTransactionMetadataUpdate(poolTxnID ?? res.txid, currentNetwork);
 
         console.log("Transaction confirmed:", res);
       } else if (isCurrentNetworkEVM()) {
@@ -1954,7 +1921,11 @@ export default function PreFiDashboard() {
 
     const res = await algorandClients.algod.sendRawTransaction(stxns).do();
 
-    await waitForConfirmation(algorandClients.algod, res.txid, 4);
+    await waitForConfirmation(
+      algorandClients.algod,
+      res.txid,
+      TX_CONFIRMATION_WAIT_ROUNDS
+    );
 
     console.log("Transaction confirmed:", res);
 
@@ -3468,7 +3439,11 @@ export default function PreFiDashboard() {
                   .sendRawTransaction(stxns)
                   .do();
 
-                await waitForConfirmation(algorandClients.algod, res.txid, 4);
+                await waitForConfirmation(
+                  algorandClients.algod,
+                  res.txid,
+                  TX_CONFIRMATION_WAIT_ROUNDS
+                );
 
                 console.log("Transaction confirmed:", res);
               } else if (isCurrentNetworkEVM()) {
