@@ -1,58 +1,40 @@
-import { lazy, Suspense, useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  ArrowDownToLine,
-  CheckCircle2,
-  Loader2,
-  Wallet,
-} from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Building2, CreditCard } from "lucide-react";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
-import { useToast } from "@/hooks/use-toast";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
-import { cn } from "@/lib/utils";
-import {
-  fetchAlgorandAlgoBalance,
-  fetchAlgorandUsdcBalance,
-  hasEnoughAlgorandAlgo,
-} from "@/lib/easyStart/baseBalances";
-import {
-  bridgePhaseLabel,
-  type EasyStartBridgePhase,
-} from "@/components/easy-start/easyStartBridgePhase";
-import { isXoGeoRestricted } from "@/lib/easyStart/xoSwap/errors";
-import {
-  EasyStartCardProviderPicker,
-  type CardProvider,
-} from "@/components/easy-start/EasyStartCardProviderPicker";
+import { fetchBaseUsdcBalance } from "@/lib/easyStart/baseBalances";
+import type { CardProvider } from "@/components/easy-start/EasyStartCardProviderPicker";
 import { EasyStartOfframpCashOut } from "@/components/easy-start/EasyStartOfframpCashOut";
+import type { Address } from "viem";
+import {
+  AmountHero,
+  AmountPresets,
+  ChooseSummary,
+  ContinueLabel,
+  EASY_START_FUNDING_DIALOG_CLASS,
+  FundingPrimaryButton,
+  FundingSheetHeader,
+  InstantTagIcon,
+  PayMethodList,
+  PrivySecureNote,
+  ReviewBreakdown,
+  ReviewPayWithCard,
+  SecuredByPrivy,
+  TermsNote,
+  TrustInline,
+  TrustValueList,
+  type PayMethodOption,
+} from "@/components/easy-start/EasyStartFundingUi";
 
-/** Loaded only while bridging so opening Withdraw never waits on `@privy-io/wagmi`. */
-const EasyStartHeadlessBridge = lazy(() =>
-  import("@/components/easy-start/EasyStartHeadlessBridge").then((m) => ({
-    default: m.EasyStartHeadlessBridge,
-  }))
-);
+const PRESET_AMOUNTS = ["25", "50", "100", "250"] as const;
 
-const PRESET_AMOUNTS = ["25", "50", "100", "250"];
-
-const EASY_START_DIALOG_CONTENT_CLASS =
-  "bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-white rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-[95vw] md:max-w-md max-h-[min(90vh,90dvh)] min-h-0 overflow-x-hidden overflow-y-auto flex flex-col p-0 overscroll-contain";
-
-type WithdrawPhase =
-  | "idle"
-  | "fee_check"
-  | "bridging"
-  | "success"
-  | "error";
+type WithdrawPhase = "idle" | "error";
+type WithdrawStep = "choose" | "review";
+type WithdrawPayMethod = "debit_card" | "bank";
 
 interface EasyStartWithdrawSheetProps {
   open: boolean;
@@ -60,60 +42,66 @@ interface EasyStartWithdrawSheetProps {
   onOpenAdvancedBridge?: () => void;
 }
 
+function methodToProvider(method: WithdrawPayMethod): CardProvider {
+  return method === "bank" ? "coinbase" : "moonpay";
+}
+
 /**
- * Cash Stash–style one-click withdraw: amount → Algorand→Base USDC bridge →
- * optional in-app Coinbase / MoonPay cash-out (Privy USDC transfer).
+ * Cash out Base USDC (MoonPay / Coinbase). Earn withdraws should already
+ * have swapped Algorand → Base before this sheet.
  */
 export function EasyStartWithdrawSheet({
   open,
   onOpenChange,
   onOpenAdvancedBridge,
 }: EasyStartWithdrawSheetProps) {
-  const { algorandAddress, evmAddress } = usePrivyEasyStart();
+  const { evmAddress } = usePrivyEasyStart();
   const consumerCopy = useConsumerCopy();
-  const { toast } = useToast();
-  const { formatNumber, formatCurrency } = useNumberI18n();
+  const { formatCurrency } = useNumberI18n();
 
   const [amount, setAmount] = useState("");
-  const [cashOutProvider, setCashOutProvider] =
-    useState<CardProvider>("moonpay");
+  const [method, setMethod] = useState<WithdrawPayMethod>("debit_card");
+  const [step, setStep] = useState<WithdrawStep>("choose");
+  const [editingAmount, setEditingAmount] = useState(false);
   const [phase, setPhase] = useState<WithdrawPhase>("idle");
-  const [bridgePhase, setBridgePhase] =
-    useState<EasyStartBridgePhase>("preparing");
-  const [bridgeAmount, setBridgeAmount] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const { data: algoUsdc, refetch: refetchUsdc } = useQuery({
-    queryKey: ["easy-start-algo-usdc", algorandAddress],
-    queryFn: () => fetchAlgorandUsdcBalance(algorandAddress!),
-    enabled: Boolean(open && algorandAddress),
+  const address = evmAddress as Address | null;
+  const cashOutProvider = methodToProvider(method);
+
+  const { data: baseUsdc } = useQuery({
+    queryKey: ["easy-start-base-usdc", address],
+    queryFn: () => fetchBaseUsdcBalance(address!),
+    enabled: Boolean(open && address),
     refetchInterval: open ? 10_000 : false,
   });
 
-  const availableNum = algoUsdc
-    ? Number.parseFloat(algoUsdc.formatted)
-    : 0;
-  const hasAvailable =
-    Number.isFinite(availableNum) && availableNum > 0.01;
+  const availableNum = baseUsdc ? Number.parseFloat(baseUsdc.formatted) : 0;
+  const hasAvailable = Number.isFinite(availableNum) && availableNum > 0.01;
+  const amountNum = Number(amount);
+  const amountValid = Number.isFinite(amountNum) && amountNum > 0;
+  const amountDisplay = formatCurrency(amountValid ? amountNum : 0, "USD", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  const availableDisplay = formatCurrency(
+    Number.isFinite(availableNum) ? availableNum : 0,
+    "USD",
+    { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+  );
 
   const resetLocal = useCallback(() => {
     setPhase("idle");
-    setBridgePhase("preparing");
-    setBridgeAmount(null);
     setError(null);
+    setStep("choose");
+    setEditingAmount(false);
+    setMethod("debit_card");
+    setAmount("");
   }, []);
 
   const handleClose = (next: boolean) => {
     if (!next) {
-      if (
-        phase === "idle" ||
-        phase === "success" ||
-        phase === "error" ||
-        phase === "fee_check"
-      ) {
-        resetLocal();
-        setAmount("");
-      }
+      resetLocal();
     }
     onOpenChange(next);
   };
@@ -122,340 +110,258 @@ export function EasyStartWithdrawSheet({
     if (!hasAvailable) return;
     const max = Math.max(0, Math.floor(availableNum * 100) / 100);
     setAmount(String(max));
+    setEditingAmount(false);
   };
 
-  const startWithdraw = async () => {
-    if (!algorandAddress) return;
+  const goReview = () => {
     setError(null);
-
-    const requested = Number(amount);
-    if (!Number.isFinite(requested) || requested <= 0) {
-      setError("Enter an amount to withdraw.");
+    if (!amountValid) {
+      setError("Enter an amount to cash out.");
       return;
     }
-    if (requested > availableNum + 1e-9) {
+    if (amountNum > availableNum + 1e-9) {
       setError(
         consumerCopy
-          ? `You only have ${availableNum.toLocaleString(undefined, {
-              maximumFractionDigits: 2,
-            })} available. If funds are in savings, withdraw them from savings first.`
-          : `You only have ${availableNum.toLocaleString(undefined, {
-              maximumFractionDigits: 2,
-            })} USDC available on Algorand. If funds are supplied to markets, withdraw them in Portfolio first.`
+          ? `You only have ${availableDisplay} available. If funds are in savings, withdraw from earn first.`
+          : `You only have ${availableDisplay} available. Withdraw from savings first if funds are still earning.`
       );
       return;
     }
-
-    setPhase("fee_check");
-    try {
-      const algo = await fetchAlgorandAlgoBalance(algorandAddress);
-      if (!hasEnoughAlgorandAlgo(algo.valueMicro)) {
-        setError(
-          consumerCopy
-            ? "A small processing fee is needed to complete this withdrawal. Deposit a little more, then retry."
-            : "Your Algorand account needs a little ALGO for network fees (~0.1 ALGO). Bridge a small deposit again or fund the account, then retry."
-        );
-        setPhase("error");
-        return;
-      }
-
-      const formatted =
-        requested.toFixed(6).replace(/\.?0+$/, "") || String(requested);
-      setBridgeAmount(formatted);
-      setPhase("bridging");
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      setError(message || (consumerCopy ? "Couldn’t check fees" : "Couldn’t check Algorand fees"));
-      setPhase("error");
-    }
+    setStep("review");
   };
 
-  const busy = phase === "bridging" || phase === "fee_check";
+  const cashOutAmount =
+    amount.trim() ||
+    (hasAvailable
+      ? availableNum.toFixed(6).replace(/\.?0+$/, "")
+      : null);
+
+  const payMethods: PayMethodOption[] = useMemo(
+    () => [
+      {
+        id: "debit_card",
+        title: "Debit card",
+        description: "Instant · Fee shown at checkout",
+        icon: <CreditCard className="h-5 w-5" />,
+        badge: "Recommended",
+        tag: { label: "Fastest", tone: "fast" },
+      },
+      {
+        id: "bank",
+        title: "Bank account",
+        description: "Usually 1–3 business days · Fee shown at checkout",
+        icon: <Building2 className="h-5 w-5" />,
+        tag: { label: "Bank", tone: "muted" },
+      },
+    ],
+    []
+  );
+
+  const selectedMethod =
+    payMethods.find((m) => m.id === method) ?? payMethods[0];
+  const methodTitle =
+    method === "bank" ? "bank" : "debit card";
 
   return (
-    <>
-      <Dialog open={open} onOpenChange={handleClose}>
-        <DialogContent className={EASY_START_DIALOG_CONTENT_CLASS}>
-          <div className="flex flex-col min-h-0">
-            <div className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 px-6 pt-4 pb-2 shrink-0">
-              <DialogHeader className="pb-0 space-y-2">
-                <DialogTitle className="text-2xl font-bold text-center text-slate-800 dark:text-white">
-                  Withdraw
-                </DialogTitle>
-                <div className="flex items-center justify-center gap-2 pb-1">
-                  <ArrowDownToLine className="h-5 w-5 text-ocean-teal" />
-                  <span className="text-sm font-medium text-slate-600 dark:text-slate-300">
-                    {consumerCopy ? "Cash out to your bank" : "Move cash back to Base"}
-                  </span>
-                </div>
-                <DialogDescription className="text-center text-sm text-slate-600 dark:text-slate-400">
-                  {phase === "idle"
-                    ? consumerCopy
-                      ? "We’ll prepare your funds, then you can cash out with MoonPay or Coinbase."
-                      : "We’ll move USDC from Algorand to your Easy Start Base wallet, then you can cash out with MoonPay or Coinbase."
-                    : phase === "bridging" || phase === "fee_check"
-                      ? bridgePhaseLabel(bridgePhase, "algo-to-base")
-                      : phase === "success"
-                        ? consumerCopy
-                          ? "Your funds are ready — cash out if you like."
-                          : "USDC is ready on Base — cash out if you like."
-                        : phase === "error"
-                          ? isXoGeoRestricted(error)
-                            ? "This payment provider isn’t available in your region."
-                            : "Something went wrong — you can retry."
-                          : "Working on your withdrawal…"}
-                </DialogDescription>
-              </DialogHeader>
-            </div>
-
-            <div className="px-6 pb-6 pt-4">
-              {phase === "success" ? (
-                <div className="py-4 text-center space-y-4">
-                  <CheckCircle2 className="mx-auto h-12 w-12 text-ocean-teal" />
-                  <p className="text-lg font-semibold text-slate-800 dark:text-white">
-                    Withdrawal complete
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className={EASY_START_FUNDING_DIALOG_CLASS}>
+        <div className="flex flex-col min-h-0">
+          {phase === "error" ? (
+            <>
+              <FundingSheetHeader
+                title="Couldn’t cash out"
+                subtitle="Something went wrong — you can retry."
+              />
+              <div className="px-6 pb-6 pt-2 space-y-4 text-center">
+                <p className="text-sm text-destructive" role="alert">
+                  {error ?? "Withdrawal failed"}
+                </p>
+                <FundingPrimaryButton
+                  onClick={() => {
+                    setPhase("idle");
+                    setError(null);
+                    setStep("choose");
+                  }}
+                >
+                  Try again
+                </FundingPrimaryButton>
+              </div>
+            </>
+          ) : step === "review" ? (
+            <>
+              <FundingSheetHeader
+                onBack={() => setStep("choose")}
+                title={`Cash out ${amountDisplay}`}
+                subtitle="Review your cash-out details"
+              />
+              <div className="px-6 pb-6 pt-3 space-y-4">
+                <ReviewPayWithCard
+                  icon={selectedMethod.icon}
+                  title={selectedMethod.title}
+                  tags={
+                    method === "bank"
+                      ? [{ label: "1–3 business days" }, { label: "Fee shown at checkout" }]
+                      : [
+                          { label: "Instant", icon: <InstantTagIcon /> },
+                          { label: "Fee shown at checkout" },
+                        ]
+                  }
+                  onChange={() => setStep("choose")}
+                />
+                <ReviewBreakdown
+                  amountLabel="Amount"
+                  amountValue={amountDisplay}
+                  feeLabel="Processing fee"
+                  feeValue="Shown at checkout"
+                  receiveLabel="You'll cash out"
+                  receiveValue={amountDisplay}
+                  footnote={
+                    method === "bank"
+                      ? "Sent to your bank. Timing depends on the payout."
+                      : "Sent to your debit card. Timing depends on the payout."
+                  }
+                />
+                <TrustValueList />
+                <TermsNote />
+                <EasyStartOfframpCashOut
+                  evmAddress={evmAddress}
+                  amount={cashOutAmount}
+                  provider={cashOutProvider}
+                  onProviderChange={(p) =>
+                    setMethod(p === "coinbase" ? "bank" : "debit_card")
+                  }
+                  hideProviderPicker
+                  ctaLabel={`Cash out ${amountDisplay} to ${methodTitle}`}
+                  onDone={() => handleClose(false)}
+                />
+                <Button
+                  variant="ghost"
+                  className="w-full text-muted-foreground"
+                  onClick={() => handleClose(false)}
+                >
+                  {consumerCopy ? "Keep in account" : "Keep in wallet"}
+                </Button>
+                <SecuredByPrivy />
+              </div>
+            </>
+          ) : (
+            <>
+              <FundingSheetHeader
+                title="Cash out"
+                subtitle={
+                  consumerCopy
+                    ? "Send money from your SimplFi balance."
+                    : "Send money from your account."
+                }
+              />
+              <div className="px-6 pb-6 pt-3 space-y-5">
+                <div className="rounded-xl border border-border bg-muted/40 px-3 py-2.5 text-center">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Available
                   </p>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
+                  <p className="text-xl font-bold tabular-nums">
+                    {availableDisplay}
+                  </p>
+                </div>
+
+                {!hasAvailable ? (
+                  <p className="text-sm text-amber-600 dark:text-amber-400 text-center">
                     {consumerCopy
-                      ? "Your funds are ready to cash out with MoonPay or Coinbase, or you can keep them in your account."
-                      : `USDC is in your Base wallet${
-                          evmAddress
-                            ? ` (${evmAddress.slice(0, 6)}…${evmAddress.slice(-4)})`
-                            : ""
-                        }. Cash out in-app with MoonPay or Coinbase, or keep it on Base.`}
+                      ? "Nothing available to cash out yet. If funds are in savings, withdraw from earn first."
+                      : "Nothing available to cash out yet. Withdraw from savings first, then cash out here."}
                   </p>
-                  <EasyStartOfframpCashOut
-                    evmAddress={evmAddress}
-                    amount={bridgeAmount ?? amount}
-                    provider={cashOutProvider}
-                    onProviderChange={setCashOutProvider}
-                    onDone={() => handleClose(false)}
-                  />
-                  <Button
-                    variant="outline"
-                    className="w-full border-ocean-teal/40"
-                    onClick={() => handleClose(false)}
-                  >
-                    {consumerCopy ? "Keep in account · Done" : "Keep on Base · Done"}
-                  </Button>
-                </div>
-              ) : phase === "bridging" || phase === "fee_check" ? (
-                <div className="py-10 flex flex-col items-center gap-3 text-center">
-                  <Loader2 className="h-8 w-8 animate-spin text-ocean-teal" />
-                  <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
-                    {phase === "fee_check"
-                      ? consumerCopy
-                        ? "Checking fees…"
-                        : "Checking network fees…"
-                      : bridgePhaseLabel(bridgePhase, "algo-to-base")}
-                  </p>
-                  {error ? (
-                    <p className="text-sm text-destructive" role="alert">
-                      {error}
-                    </p>
-                  ) : null}
-                </div>
-              ) : phase === "error" ? (
-                <div className="space-y-4 py-2 text-center">
-                  <p className="text-sm text-destructive" role="alert">
-                    {error ?? "Withdrawal failed"}
-                  </p>
-                  <Button
-                    className="w-full bg-ocean-teal hover:bg-ocean-teal/90 text-white"
-                    onClick={() => resetLocal()}
-                  >
-                    Try again
-                  </Button>
-                  {onOpenAdvancedBridge ? (
-                    <Button
-                      variant="outline"
-                      className="w-full border-ocean-teal/40"
-                      onClick={() => {
-                        handleClose(false);
-                        onOpenAdvancedBridge();
-                      }}
-                    >
-                      Open advanced bridge
-                    </Button>
-                  ) : null}
-                </div>
-              ) : (
-                <div className="space-y-5">
-                  <div className="rounded-xl border border-ocean-teal/20 bg-white/50 dark:bg-slate-900/40 px-3 py-2.5 text-center">
-                    <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                      {consumerCopy ? "Available" : "Available on Algorand"}
-                    </p>
-                    <p className="text-xl font-bold tabular-nums text-slate-800 dark:text-white">
-                      {formatCurrency(
-                        Number.isFinite(availableNum) ? availableNum : 0,
-                        "USD",
-                        {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        }
-                      )}
-                    </p>
-                  </div>
-
-                  {!hasAvailable ? (
-                    <p className="text-sm text-amber-600 dark:text-amber-400 text-center">
-                      {consumerCopy
-                        ? "Nothing available to withdraw yet. If funds are in savings, withdraw from savings first, then come back here."
-                        : "No USDC in your Algorand wallet yet. If you supplied to markets, withdraw from Portfolio first, then come back here."}
-                    </p>
-                  ) : (
-                    <div>
-                      <div className="flex items-center justify-between mb-3">
-                        <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                          Amount (USD)
-                        </p>
-                        <button
-                          type="button"
-                          className="text-xs font-semibold text-ocean-teal hover:underline"
-                          onClick={setMax}
-                        >
-                          Max
-                        </button>
-                      </div>
-                      <div className="grid grid-cols-4 gap-2 mb-3">
-                        {PRESET_AMOUNTS.map((preset) => {
-                          const disabled =
-                            !hasAvailable || Number(preset) > availableNum;
-                          return (
-                            <button
-                              key={preset}
-                              type="button"
-                              disabled={disabled}
-                              onClick={() => setAmount(preset)}
-                              className={cn(
-                                "rounded-xl border py-2.5 text-sm font-semibold transition-colors disabled:opacity-40",
-                                amount === preset
-                                  ? "border-ocean-teal bg-ocean-teal/10 text-ocean-teal"
-                                  : "border-gray-200/80 dark:border-slate-600 hover:bg-white/50 dark:hover:bg-slate-700/50 text-slate-800 dark:text-white"
-                              )}
-                            >
-                              ${preset}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <label
-                        className="text-xs text-slate-500 dark:text-slate-400"
-                        htmlFor="withdraw-custom-amount"
+                ) : (
+                  <div>
+                    <div className="mb-3 flex items-center justify-between">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        Amount (USD)
+                      </p>
+                      <button
+                        type="button"
+                        className="text-xs font-semibold text-ocean-teal hover:underline"
+                        onClick={setMax}
                       >
-                        Custom amount
-                      </label>
-                      <input
-                        id="withdraw-custom-amount"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={amount}
-                        onChange={(e) => setAmount(e.target.value)}
-                        className="mt-1 w-full rounded-xl border border-gray-200/80 dark:border-slate-600 bg-white/70 dark:bg-slate-900/60 px-3 py-2.5 text-sm text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-ocean-teal/40"
-                      />
-                      {hasAvailable ? (
-                        <p className="mt-1.5 text-[11px] text-slate-500">
-                          Up to{" "}
-                          {formatNumber(availableNum, {
-                            maximumFractionDigits: 2,
-                          })}{" "}
-                          USDC
-                        </p>
-                      ) : null}
+                        Max
+                      </button>
                     </div>
-                  )}
-
-                  {error && phase === "idle" ? (
-                    <p className="text-sm text-destructive" role="alert">
-                      {error}
-                    </p>
-                  ) : null}
-
-                  <EasyStartCardProviderPicker
-                    value={cashOutProvider}
-                    onChange={(p) =>
-                      setCashOutProvider(p as "moonpay" | "coinbase")
-                    }
-                    label="Cash out with"
-                  />
-
-                  <Button
-                    className="w-full bg-ocean-teal hover:bg-ocean-teal/90 text-white font-semibold"
-                    disabled={
-                      busy ||
-                      !algorandAddress ||
-                      !hasAvailable ||
-                      !amount ||
-                      Number(amount) <= 0
-                    }
-                    onClick={() => void startWithdraw()}
-                  >
-                    {busy ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Working…
-                      </>
-                    ) : (
-                      <>
-                        <Wallet className="mr-2 h-4 w-4" />
-                        Withdraw
-                      </>
-                    )}
-                  </Button>
-
-                  <p className="text-[11px] text-center text-slate-500 leading-relaxed">
-                    {consumerCopy
-                      ? "Then you can cash out in-app with MoonPay or Coinbase."
-                      : "First we move USDC to Base. Then you can cash out in-app with MoonPay or Coinbase (USDC leaves your Easy Start wallet to the provider)."}
-                  </p>
-
-                  {onOpenAdvancedBridge ? (
-                    <button
-                      type="button"
-                      className="w-full text-center text-xs text-slate-500 hover:text-ocean-teal underline-offset-2 hover:underline"
-                      onClick={() => {
-                        handleClose(false);
-                        onOpenAdvancedBridge();
+                    <AmountPresets
+                      amounts={PRESET_AMOUNTS}
+                      value={amount}
+                      onChange={(next) => {
+                        setAmount(next);
+                        setEditingAmount(false);
                       }}
-                    >
-                      Advanced bridge options
-                    </button>
-                  ) : null}
-                </div>
-              )}
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+                      disabledAmount={(preset) => Number(preset) > availableNum}
+                    />
+                    <div className="mt-3">
+                      <AmountHero
+                        id="withdraw-custom-amount"
+                        amount={amount}
+                        onChange={setAmount}
+                        editing={editingAmount}
+                        onEditingChange={setEditingAmount}
+                        display={amountDisplay}
+                        min={0}
+                        step={0.01}
+                      />
+                    </div>
+                    <div className="mt-2.5">
+                      <TrustInline>
+                        Your money is secure and always under your control.
+                      </TrustInline>
+                    </div>
+                  </div>
+                )}
 
-      {phase === "bridging" && bridgeAmount ? (
-        <Suspense fallback={null}>
-          <EasyStartHeadlessBridge
-            enabled
-            amount={bridgeAmount}
-            direction="algo-to-base"
-            onPhaseChange={(p, err) => {
-              setBridgePhase(p);
-              if (p === "error") {
-                setError(err ?? "Bridge failed");
-                setPhase("error");
-              }
-            }}
-            onComplete={() => {
-              setPhase("success");
-              void refetchUsdc();
-              onOpenChange(true);
-              toast({
-                title: "Withdrawal complete",
-                description: consumerCopy
-                  ? "Your funds are ready to cash out."
-                  : "USDC is ready on your Base wallet.",
-              });
-            }}
-          />
-        </Suspense>
-      ) : null}
-    </>
+                {error ? (
+                  <p className="text-sm text-destructive" role="alert">
+                    {error}
+                  </p>
+                ) : null}
+
+                <PayMethodList
+                  label="Choose how to cash out"
+                  options={payMethods}
+                  value={method}
+                  onChange={(id) => setMethod(id as WithdrawPayMethod)}
+                />
+
+                <PrivySecureNote />
+
+                <ChooseSummary
+                  addLabel={`You'll cash out ${amountValid ? amountDisplay : availableDisplay}`}
+                  feeLabel="Fee shown at checkout"
+                  receiveLabel={
+                    method === "bank"
+                      ? "Sent to your bank"
+                      : "Sent to your debit card"
+                  }
+                />
+
+                <FundingPrimaryButton
+                  disabled={!address || !hasAvailable || !amountValid}
+                  onClick={goReview}
+                >
+                  <ContinueLabel>Continue</ContinueLabel>
+                </FundingPrimaryButton>
+
+                {onOpenAdvancedBridge ? (
+                  <button
+                    type="button"
+                    className="w-full text-center text-xs text-muted-foreground hover:text-ocean-teal underline-offset-2 hover:underline"
+                    onClick={() => {
+                      handleClose(false);
+                      onOpenAdvancedBridge();
+                    }}
+                  >
+                    Advanced bridge options
+                  </button>
+                ) : null}
+              </div>
+            </>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

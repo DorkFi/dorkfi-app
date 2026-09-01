@@ -16,6 +16,7 @@ import {
   savingsAccountDisplayLabel,
   consumerAssetDisplayLabel,
   isEasySavingsHighYieldAssetConfigKey,
+  EASY_SAVINGS_HIGH_YIELD_ENABLED,
 } from "@/services/savingsRouteResolver";
 import type { SavingsRoute } from "@/types/easySavings";
 import { useEasySavingsQuote } from "@/hooks/useEasySavingsQuote";
@@ -29,6 +30,7 @@ import DorkFiButton from "@/components/ui/DorkFiButton";
 import WalletModal from "@/components/WalletModal";
 import EasySavingsDepositModal from "@/components/easy-savings/EasySavingsDepositModal";
 import EasySavingsWithdrawModal from "@/components/easy-savings/EasySavingsWithdrawModal";
+import AccountWithdrawChooserModal from "@/components/easy-savings/AccountWithdrawChooserModal";
 import LeveragedWadLpDepositModal from "@/components/easy-savings/LeveragedWadLpDepositModal";
 import SimpleSavingsCalculator from "@/components/easy-savings/SimpleSavingsCalculator";
 import SavingsPositionCard, {
@@ -133,14 +135,17 @@ const SavingsCard = () => {
   const [walletModalOpen, setWalletModalOpen] = useState(false);
   const [depositOpen, setDepositOpen] = useState(false);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [withdrawChooserOpen, setWithdrawChooserOpen] = useState(false);
   /** USDC/WAD: false = leveraged mint+supply, true = plain LP supply */
   const [plainLpSupply, setPlainLpSupply] = useState(false);
 
   const { core: coreAccounts, highYield: highYieldAccounts, all: accounts } =
     useSavingsAccounts(networkId);
   const [assetKey, setAssetKey] = useState<string>("");
-  const { openBridge, openDeposit: openEasyStartCashDeposit } =
-    useEasyStartModals();
+  const {
+    openDeposit: openEasyStartCashDeposit,
+    openWithdraw: openEasyStartCashOut,
+  } = useEasyStartModals();
   const openEasyStartLogin = useEasyStartLogin();
   const openConnect = () => {
     if (consumerCopy) {
@@ -225,6 +230,8 @@ const SavingsCard = () => {
 
   const hasWalletUsdc = walletUsdc != null && walletUsdc > 1e-9;
   const hasBaseUsdc = walletUsdcBase != null && walletUsdcBase > 1e-9;
+  /** Matches EasyStartWithdrawSheet’s cashable Base USDC floor. */
+  const canCashOut = walletUsdcBase != null && walletUsdcBase > 0.01;
   const walletBalanceLoading =
     (Boolean(activeAccount) &&
       usdcQuote.isLoading &&
@@ -580,7 +587,6 @@ const SavingsCard = () => {
     };
 
     const savingsApy = weighted((p) => !p.isHighYield);
-    const higherApy = weighted((p) => p.isHighYield);
     const depositWeight = portfolioSavingsUsd + portfolioHigherYieldUsd;
     const totalApy =
       portfolioTotalUsd > 0 && depositWeight > 0 && positionsWeightedApy != null
@@ -589,7 +595,7 @@ const SavingsCard = () => {
           ? 0
           : positionsWeightedApy;
 
-    return [
+    const series: PortfolioChartSeries[] = [
       {
         id: "total",
         label: "Total Balance",
@@ -617,17 +623,23 @@ const SavingsCard = () => {
         historyEvents: coreEvents,
         historySnapshots: portfolioSnapshots.savings,
       },
-      {
+    ];
+
+    if (EASY_SAVINGS_HIGH_YIELD_ENABLED && !consumerCopy) {
+      series.push({
         id: "higher_yield",
         label: "Higher Yield",
         balanceUsd: portfolioHigherYieldUsd,
-        apyPercent: higherApy,
+        apyPercent: weighted((p) => p.isHighYield),
         earnedInterestUsd: highYieldEarnedUsd,
         historyEvents: highYieldEvents,
         historySnapshots: portfolioSnapshots.higher_yield,
-      },
-    ];
+      });
+    }
+
+    return series;
   }, [
+    consumerCopy,
     portfolioTotalUsd,
     portfolioWalletUsd,
     portfolioSavingsUsd,
@@ -675,6 +687,7 @@ const SavingsCard = () => {
     }
     setPlainLpSupply(Boolean(opts?.plainLp));
     setWithdrawOpen(false);
+    setWithdrawChooserOpen(false);
     setDepositOpen(true);
   };
 
@@ -694,7 +707,18 @@ const SavingsCard = () => {
       setAssetKey(withDeposit.route.asset.configKey);
     }
     setDepositOpen(false);
+    setWithdrawChooserOpen(false);
     setWithdrawOpen(true);
+  };
+
+  const openAccountWithdrawChooser = () => {
+    if (!activeAccount && !evmAddress) {
+      openConnect();
+      return;
+    }
+    setDepositOpen(false);
+    setWithdrawOpen(false);
+    setWithdrawChooserOpen(true);
   };
 
   const renderWalletBalanceRow = () => {
@@ -714,6 +738,7 @@ const SavingsCard = () => {
           setAssetKey(WALLET_USDC_KEY);
           setDepositOpen(false);
           setWithdrawOpen(false);
+          setWithdrawChooserOpen(false);
         }}
         className={cn(
           "flex w-full items-center gap-3 rounded-2xl border bg-card px-4 py-3.5 text-sm shadow-sm transition-colors",
@@ -765,6 +790,7 @@ const SavingsCard = () => {
           setAssetKey(row.route.asset.configKey);
           setDepositOpen(false);
           setWithdrawOpen(false);
+          setWithdrawChooserOpen(false);
         }}
         className={cn(
           "flex w-full items-center gap-3 rounded-2xl border bg-card px-4 py-3.5 text-sm shadow-sm transition-colors",
@@ -893,27 +919,29 @@ const SavingsCard = () => {
                   className="rounded-full h-12 w-full min-w-0 text-base"
                   onClick={() => openDeposit()}
                 >
-                  {isWalletAccount
-                    ? "Deposit to Earn"
-                    : isLeveragedWadUsdc && !consumerCopy
-                      ? "Open position"
-                      : "Deposit"}
+                  {isLeveragedWadUsdc && !consumerCopy && !isWalletAccount
+                    ? "Open position"
+                    : "Deposit to Earn"}
                 </DorkFiButton>
                 <DorkFiButton
                   variant="secondary"
                   className="rounded-full h-12 w-full min-w-0 text-base"
-                  onClick={openWithdraw}
+                  onClick={
+                    isWalletAccount ? openAccountWithdrawChooser : openWithdraw
+                  }
                   disabled={
                     isWalletAccount
-                      ? !hasAnySavingsDeposit
+                      ? !hasAnySavingsDeposit && !canCashOut
                       : false
                   }
                 >
-                  {isWalletAccount && !hasAnySavingsDeposit
-                    ? consumerCopy
-                      ? "Nothing in savings yet"
-                      : "Not supplied"
-                    : "Withdraw"}
+                  {isWalletAccount
+                    ? !hasAnySavingsDeposit && !canCashOut
+                      ? consumerCopy
+                        ? "Nothing to withdraw"
+                        : "Not supplied"
+                      : "Withdraw"
+                    : "Withdraw from Earn"}
                 </DorkFiButton>
               </div>
               {isLeveragedWadUsdc && !consumerCopy ? (
@@ -998,7 +1026,10 @@ const SavingsCard = () => {
                               type="button"
                               onClick={() => {
                                 if (consumerCopy && hasBaseUsdc) {
-                                  openEasyStartCashDeposit();
+                                  openDeposit({
+                                    assetConfigKey:
+                                      usdcRoute?.asset.configKey ?? "USDC",
+                                  });
                                   return;
                                 }
                                 openDeposit({
@@ -1043,10 +1074,15 @@ const SavingsCard = () => {
                             <td className="py-4 text-right">
                               <button
                                 type="button"
-                                onClick={openBridge}
+                                onClick={() =>
+                                  openDeposit({
+                                    assetConfigKey:
+                                      usdcRoute?.asset.configKey ?? "USDC",
+                                  })
+                                }
                                 className="rounded-xl bg-muted px-4 py-2 text-sm font-semibold hover:bg-muted/80 transition-colors"
                               >
-                                Move to Algorand
+                                Deposit to Earn
                               </button>
                             </td>
                           </tr>
@@ -1171,7 +1207,7 @@ const SavingsCard = () => {
                         {walletUsdcBaseUsd > 0
                           ? ` (${formatUsdAmount(walletUsdcBaseUsd)})`
                           : ""}
-                        . Use “Move to Algorand” on Base USDC above, then deposit
+                        . Use Deposit to Earn to swap Base USDC and supply
                         into a savings market.
                       </>
                     ) : (
@@ -1469,19 +1505,17 @@ const SavingsCard = () => {
                         void openEasyStartLogin();
                       }}
                     >
-                      {activeAccount
-                        ? isLeveragedWadUsdc && !consumerCopy
-                          ? "Open position"
-                          : "Deposit"
-                        : "Deposit"}
+                      {activeAccount && isLeveragedWadUsdc && !consumerCopy
+                        ? "Open position"
+                        : "Deposit to Earn"}
                     </DorkFiButton>
-                    {activeAccount ? (
+                    {activeAccount && !isWalletAccount ? (
                       <button
                         type="button"
                         onClick={openWithdraw}
                         className="rounded-xl border border-white/30 bg-white/5 px-6 h-11 min-w-[140px] text-sm font-semibold text-white hover:bg-white/10 transition-colors"
                       >
-                        Withdraw
+                        Withdraw from Earn
                       </button>
                     ) : null}
                     {isLeveragedWadUsdc && activeAccount && !consumerCopy ? (
@@ -1516,6 +1550,22 @@ const SavingsCard = () => {
           ) : null}
         </div>
       </div>
+
+      <AccountWithdrawChooserModal
+        open={withdrawChooserOpen}
+        onOpenChange={setWithdrawChooserOpen}
+        canWithdrawFromEarn={hasAnySavingsDeposit}
+        canCashOut={canCashOut}
+        consumerCopy={consumerCopy}
+        onWithdrawFromEarn={() => {
+          setWithdrawChooserOpen(false);
+          openWithdraw();
+        }}
+        onCashOut={() => {
+          setWithdrawChooserOpen(false);
+          openEasyStartCashOut();
+        }}
+      />
 
       {!consumerCopy ? (
         <WalletModal

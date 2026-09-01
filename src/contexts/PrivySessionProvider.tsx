@@ -194,6 +194,40 @@ interface PrivySessionProviderProps {
   children: ReactNode;
 }
 
+class PrivyMountErrorBoundary extends React.Component<
+  { children: ReactNode; fallback: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error(
+      "[Easy Start] Privy crashed; continuing without Easy Start.",
+      error
+    );
+  }
+
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
+
+function privyMountBlockReason(): string | null {
+  if (typeof window === "undefined") return null;
+  const originHint = getPrivyOriginHint();
+  if (originHint) return originHint;
+  // Privy embedded wallets throw "only available over HTTPS" on LAN HTTP
+  // (10.x / 192.168.x), which unmounted the whole SimplFi tree.
+  if (!window.isSecureContext) {
+    return "Privy embedded wallets need HTTPS or localhost. This page is not a secure context.";
+  }
+  return null;
+}
+
 /**
  * Optional Privy wrapper for Easy Start onboarding. When disabled or unconfigured,
  * children render unchanged (existing wallet flow only).
@@ -206,6 +240,7 @@ export function PrivySessionProvider({ children }: PrivySessionProviderProps) {
   /** Remount Privy after HMR / stuck init so `ready` can recover (once). */
   const [providerKey, setProviderKey] = useState(0);
   const remountCountRef = useRef(0);
+  const mountBlockReason = privyMountBlockReason();
 
   const disabledValue = useMemo(
     (): PrivyEasyStartState => ({
@@ -222,36 +257,43 @@ export function PrivySessionProvider({ children }: PrivySessionProviderProps) {
     setProviderKey((k) => k + 1);
   }, []);
 
-  if (!enabled || !configured) {
-    return (
-      <PrivyEasyStartContext.Provider value={disabledValue}>
-        {children}
-      </PrivyEasyStartContext.Provider>
-    );
+  const fallback = (
+    <PrivyEasyStartContext.Provider value={disabledValue}>
+      {children}
+    </PrivyEasyStartContext.Provider>
+  );
+
+  if (!enabled || !configured || mountBlockReason) {
+    if (mountBlockReason) {
+      console.error("[Easy Start] Privy cannot init on this origin:", mountBlockReason);
+    }
+    return fallback;
   }
 
   return (
-    <PrivyProvider
-      key={providerKey}
-      appId={PRIVY_APP_ID}
-      config={{
-        loginMethods: ["email", "google", "apple", "passkey"],
-        appearance: {
-          theme: "dark",
-          accentColor: "#2d8b78",
-        },
-        embeddedWallets: {
-          ethereum: {
-            createOnLogin: "users-without-wallets",
+    <PrivyMountErrorBoundary fallback={fallback}>
+      <PrivyProvider
+        key={providerKey}
+        appId={PRIVY_APP_ID}
+        config={{
+          loginMethods: ["email", "google", "apple", "passkey"],
+          appearance: {
+            theme: "dark",
+            accentColor: "#2d8b78",
           },
-        },
-        defaultChain: base,
-        supportedChains: [base],
-      }}
-    >
-      <PrivyEasyStartStateBridge onReadyStuck={handleReadyStuck}>
-        {children}
-      </PrivyEasyStartStateBridge>
-    </PrivyProvider>
+          embeddedWallets: {
+            ethereum: {
+              createOnLogin: "users-without-wallets",
+            },
+          },
+          defaultChain: base,
+          supportedChains: [base],
+        }}
+      >
+        <PrivyEasyStartStateBridge onReadyStuck={handleReadyStuck}>
+          {children}
+        </PrivyEasyStartStateBridge>
+      </PrivyProvider>
+    </PrivyMountErrorBoundary>
   );
 }

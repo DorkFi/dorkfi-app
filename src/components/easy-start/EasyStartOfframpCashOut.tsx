@@ -36,6 +36,8 @@ interface EasyStartOfframpCashOutProps {
   provider: CardProvider;
   onProviderChange: (provider: CardProvider) => void;
   onDone?: () => void;
+  hideProviderPicker?: boolean;
+  ctaLabel?: string;
 }
 
 /**
@@ -49,6 +51,8 @@ export function EasyStartOfframpCashOut({
   provider,
   onProviderChange,
   onDone,
+  hideProviderPicker = false,
+  ctaLabel,
 }: EasyStartOfframpCashOutProps) {
   const { sendTransaction } = useSendTransaction();
   const { toast } = useToast();
@@ -148,9 +152,10 @@ export function EasyStartOfframpCashOut({
       window.open(session.sellUrl, "_blank", "noopener,noreferrer");
       setPhase("awaiting_provider");
       toast({
-        title: "Complete sell in Coinbase",
-        description:
-          "After you confirm the cash-out, we’ll prompt you to send funds from your account.",
+        title: consumerCopy ? "Complete cash-out" : "Complete sell in Coinbase",
+        description: consumerCopy
+          ? "After you confirm, we’ll send the funds from your account."
+          : "After you confirm the cash-out, we’ll prompt you to send funds from your account.",
       });
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
@@ -185,30 +190,46 @@ export function EasyStartOfframpCashOut({
       ? Number(amount).toFixed(6).replace(/\.?0+$/, "")
       : undefined;
 
+  const unavailableCopy = consumerCopy
+    ? provider === "coinbase"
+      ? "Bank cash-out isn’t available right now. Try debit card."
+      : "Card cash-out isn’t available right now. Try again later."
+    : provider === "coinbase"
+      ? "Coinbase off-ramp needs CDP_API_KEY_ID + CDP_API_KEY_SECRET on the offramp API."
+      : "MoonPay off-ramp needs VITE_MOONPAY_API_KEY and MOONPAY_SECRET_KEY.";
+
+  const payLabel =
+    ctaLabel ??
+    (consumerCopy
+      ? `Cash out to ${provider === "coinbase" ? "bank" : "debit card"}`
+      : `Cash out with ${provider === "coinbase" ? "Coinbase" : "MoonPay"}`);
+
   const body = (
     <div className="space-y-4 text-left">
-      <EasyStartCardProviderPicker
-        value={provider}
-        onChange={onProviderChange}
-        label="Cash out with"
-      />
+      {hideProviderPicker ? null : (
+        <EasyStartCardProviderPicker
+          value={provider}
+          onChange={onProviderChange}
+          label="Cash out with"
+        />
+      )}
 
       {health && !providerReady ? (
         <p className="text-xs text-amber-600 dark:text-amber-400 text-center">
-          {provider === "coinbase"
-            ? "Coinbase off-ramp needs CDP_API_KEY_ID + CDP_API_KEY_SECRET on the offramp API."
-            : "MoonPay off-ramp needs VITE_MOONPAY_API_KEY and MOONPAY_SECRET_KEY."}
+          {unavailableCopy}
         </p>
       ) : null}
 
       {phase === "awaiting_provider" && provider === "coinbase" ? (
-        <p className="text-sm text-slate-600 dark:text-slate-400 text-center">
-          Waiting for Coinbase sell details…
+        <p className="text-sm text-muted-foreground text-center">
+          {consumerCopy
+            ? "Waiting for bank cash-out details…"
+            : "Waiting for Coinbase sell details…"}
         </p>
       ) : null}
 
       {phase === "sending" ? (
-        <div className="flex items-center justify-center gap-2 text-sm text-slate-700 dark:text-slate-200">
+        <div className="flex items-center justify-center gap-2 text-sm text-foreground">
           <Loader2 className="h-4 w-4 animate-spin text-ocean-teal" />
           Confirming transfer…
         </div>
@@ -217,8 +238,10 @@ export function EasyStartOfframpCashOut({
       {phase === "done" ? (
         <p className="text-sm text-ocean-teal text-center">
           Transfer submitted
-          {txHash && !consumerCopy ? ` (${txHash.slice(0, 10)}…)` : ""}. Fiat payout continues
-          with the provider.
+          {txHash && !consumerCopy ? ` (${txHash.slice(0, 10)}…)` : ""}.
+          {consumerCopy
+            ? " Your payout is processing."
+            : " Fiat payout continues with the provider."}
         </p>
       ) : null}
 
@@ -230,14 +253,14 @@ export function EasyStartOfframpCashOut({
 
       {phase === "done" ? (
         <Button
-          className="w-full bg-ocean-teal hover:bg-ocean-teal/90 text-white"
+          className="h-12 w-full rounded-xl bg-ocean-teal font-semibold text-white hover:bg-ocean-teal/90"
           onClick={() => onDone?.()}
         >
           Done
         </Button>
       ) : (
         <Button
-          className="w-full bg-ocean-teal hover:bg-ocean-teal/90 text-white font-semibold"
+          className="h-12 w-full rounded-xl bg-ocean-teal text-base font-semibold text-white hover:bg-ocean-teal/90"
           disabled={
             !evmAddress ||
             !providerReady ||
@@ -254,8 +277,10 @@ export function EasyStartOfframpCashOut({
             </>
           ) : (
             <>
-              <CreditCard className="mr-2 h-4 w-4" />
-              Cash out with {provider === "coinbase" ? "Coinbase" : "MoonPay"}
+              {hideProviderPicker ? null : (
+                <CreditCard className="mr-2 h-4 w-4" />
+              )}
+              {payLabel}
             </>
           )}
         </Button>
