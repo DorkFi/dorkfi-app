@@ -34,6 +34,7 @@ import {
   type PoolCollateralMarketRow,
 } from "@/utils/poolCollateralMarketRows";
 import { waitForConfirmation } from "algosdk";
+import { TX_CONFIRMATION_WAIT_ROUNDS } from "@/utils/transactionUtils";
 
 function poolMinLiquidationThresholdBps(minPercentField: number): bigint {
   if (!Number.isFinite(minPercentField) || minPercentField <= 0) {
@@ -404,7 +405,11 @@ const PoolLendingModals = ({
       const clients =
         await algorandService.initializeClientsForTransactions(algorandNetwork);
       const res = await clients.algod.sendRawTransaction(stxns).do();
-      await waitForConfirmation(clients.algod, res.txid, 4);
+      await waitForConfirmation(
+        clients.algod,
+        res.txid,
+        TX_CONFIRMATION_WAIT_ROUNDS
+      );
       void refreshBalances();
       return { txId: res.txid };
     },

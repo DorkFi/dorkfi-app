@@ -31,6 +31,7 @@ import type {
   ClaimState,
 } from "@/lib/dorkfi/types";
 import { isTransactionUserRejection } from "@/utils/errorUtils";
+import { TX_CONFIRMATION_WAIT_ROUNDS } from "@/utils/transactionUtils";
 
 function emitProgress(
   onProgress: ((p: ClaimAllProgress) => void) | undefined,
@@ -92,7 +93,7 @@ export async function claimAllRewards<TPosition>(
     onProgress,
     onStateChange,
     signal,
-    waitRounds = 4,
+    waitRounds = TX_CONFIRMATION_WAIT_ROUNDS,
     retryGroupIndices,
     preSignedGroups,
   } = options;
@@ -271,7 +272,7 @@ export async function claimAllFromEncodedGroups(
     onProgress,
     onStateChange,
     signal,
-    waitRounds = 4,
+    waitRounds = TX_CONFIRMATION_WAIT_ROUNDS,
   } = options;
 
   const totalGroups = options.encodedGroups.length;
