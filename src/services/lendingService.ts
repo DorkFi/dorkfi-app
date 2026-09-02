@@ -23,6 +23,7 @@ import {
   getPreFiParameters,
   TokenConfig,
   getEnabledNetworks,
+  getPortfolioVisibleTokens,
   TokenStandard,
   tokenStandardUsesNt200Arc200Balance,
   tokenStandardUsesAsaStyleNt200Txns,
@@ -39,6 +40,12 @@ import {
 import algorandService, { AlgorandNetwork } from "./algorandService";
 import { ARC200Service } from "./arc200Service";
 import { runWithConcurrency } from "@/utils/runWithConcurrency";
+import {
+  configuredMarketsMissingFromUserData,
+  type PortfolioConfiguredMarketRef,
+  type PortfolioPoolRef,
+  type PortfolioUserMarketRef,
+} from "@/utils/portfolioMissingUserMarkets";
 import { abi, CONTRACT } from "ulujs";
 import {
   APP_SPEC as LendingPoolAppSpec,
@@ -1742,6 +1749,108 @@ export const fetchUserDataFromChain = async (
     console.error("[fetchUserDataFromChain] Error:", error);
     return null;
   }
+};
+
+/**
+ * `get_user` for configured markets on pools the user is in that the indexer omitted
+ * from `userData` (not even a 0/0 row). Used so Portfolio can list shared-contract
+ * positions the API dropped (GitHub #646).
+ */
+export const fillMissingUserMarketRowsFromChain = async (
+  userAddress: string,
+  globalUserData: unknown[] | undefined | null,
+  userData: unknown[] | undefined | null
+): Promise<ChainUserDataRow[]> => {
+  const pools = Array.isArray(globalUserData) ? globalUserData : [];
+  const rows = Array.isArray(userData) ? userData : [];
+
+  const networks = new Set<string>();
+  for (const pool of pools) {
+    const network = String(
+      (pool as { network?: string }).network ?? ""
+    ).trim();
+    if (network) networks.add(network);
+  }
+
+  const configured: PortfolioConfiguredMarketRef[] = [];
+  for (const networkId of networks) {
+    if (!isAlgorandCompatibleNetwork(networkId as NetworkId)) continue;
+    for (const token of getPortfolioVisibleTokens(networkId as NetworkId)) {
+      configured.push({
+        network: networkId,
+        poolId: token.poolId,
+        marketId: token.underlyingContractId,
+        underlyingContractId: token.underlyingContractId,
+        originalContractId: token.originalContractId,
+      });
+    }
+  }
+
+  const missing = configuredMarketsMissingFromUserData({
+    pools: pools as PortfolioPoolRef[],
+    userData: rows as PortfolioUserMarketRef[],
+    configured,
+  });
+  if (missing.length === 0) return [];
+
+  const extra: ChainUserDataRow[] = [];
+  const clientsByNetwork = new Map<
+    string,
+    Awaited<ReturnType<typeof algorandService.initializeClientsForReads>>
+  >();
+
+  await runWithConcurrency(missing, 4, async (item) => {
+    try {
+      const networkId = item.network as NetworkId;
+      if (!isAlgorandCompatibleNetwork(networkId)) return;
+      let clients = clientsByNetwork.get(item.network);
+      if (!clients) {
+        const networkConfig = getNetworkConfig(networkId);
+        clients = await algorandService.initializeClientsForReads(
+          networkConfig.walletNetworkId as AlgorandNetwork
+        );
+        clientsByNetwork.set(item.network, clients);
+      }
+
+      const poolIdNum = Number(item.poolId);
+      const ci = new CONTRACT(
+        poolIdNum,
+        clients.algod,
+        undefined,
+        { ...LendingPoolAppSpec.contract, events: [] },
+        {
+          addr: algosdk.encodeAddress(
+            algosdk.getApplicationAddress(poolIdNum).publicKey
+          ),
+          sk: new Uint8Array(),
+        }
+      );
+      ci.setFee(2000);
+      const userDataR = await ci.get_user(userAddress, Number(item.marketId));
+      if (!userDataR.success) return;
+
+      const ud = UserData(userDataR.returnValue);
+      const sd = ud.scaledDeposits ?? 0n;
+      const sb = ud.scaledBorrows ?? 0n;
+      if (sd === 0n && sb === 0n) return;
+
+      extra.push({
+        network: item.network,
+        marketId: item.marketId,
+        underlyingContractId: item.marketId,
+        appId: item.poolId,
+        poolId: item.poolId,
+        scaledDeposits: sd.toString(),
+        scaledBorrows: sb.toString(),
+        depositIndex: (ud.depositIndex ?? 0n).toString(),
+        borrowIndex: (ud.borrowIndex ?? 0n).toString(),
+      });
+    } catch (error) {
+      console.warn("[fillMissingUserMarketRowsFromChain]", item, error);
+    }
+  });
+
+  return extra;
 };
 
 /** Debt split from scaled borrows and borrow indices (matches pool accounting). */

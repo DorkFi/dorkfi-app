@@ -2191,7 +2191,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     assetId: "0",
     poolId: "3345940978",
     contractId: "3207744109",
-    nTokenId: "3333724131",
+    nTokenId: "3493601964",
     migration: {
       poolId: "3207735602",
       contractId: "3207744109",

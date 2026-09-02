@@ -5,12 +5,13 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { NetworkProvider } from "./contexts/NetworkContext";
+import { NetworkProvider } from "./contexts/NetworkProvider";
 import { LocaleSettingsProvider } from "./contexts/LocaleSettingsContext";
 import Index from "./pages/Index";
 import { isFeatureEnabled } from "./config";
 import CountdownPage from "./pages/Countdown";
 import { LazyRouteFallback } from "@/components/LazySuspenseFallback";
+import { AppErrorBoundary } from "@/components/AppErrorBoundary";
 //const LAUNCH_TIMESTAMP = Date.UTC(2025, 10, 21, 2, 0, 0); // Nov 20, 2025 6:00 PM PST (Nov 21, 2025 2:00 AM UTC)
 const LAUNCH_TIMESTAMP = Date.now();
 
@@ -64,12 +65,14 @@ function App() {
       enableSystem
       disableTransitionOnChange
     >
+      <AppErrorBoundary>
       <NetworkProvider>
         <LocaleSettingsProvider>
         <TooltipProvider delayDuration={300} skipDelayDuration={100}>
           <Toaster />
           <Sonner />
           <BrowserRouter>
+            <AppErrorBoundary label="Page">
             <Routes>
               <Route
                 path="/"
@@ -173,10 +176,12 @@ function App() {
               />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
+            </AppErrorBoundary>
           </BrowserRouter>
         </TooltipProvider>
         </LocaleSettingsProvider>
       </NetworkProvider>
+      </AppErrorBoundary>
     </ThemeProvider>
     </QueryClientProvider>
   );
