@@ -297,6 +297,25 @@ const FOLKS_MINT_RATIO_CACHE_TTL_MS = 60_000;
 /** Persist last fast-paint snapshot so remounts can show data before the bulk GET returns. */
 const MARKETS_SESSION_CACHE_TTL_MS = 60_000;
 
+/**
+ * Keep only rows whose cache keys are in the current token set.
+ * Prevents Admin (`includeExcludedPools`) session snapshots from reintroducing
+ * Pool C/E/F TMPOOL2 LP markets onto the Markets table (dorkfi-app#651).
+ */
+export function pickMarketsDataForKeys<T>(
+  data: Record<string, T>,
+  allowedKeys: Iterable<string>
+): Record<string, T> {
+  const allow = allowedKeys instanceof Set ? allowedKeys : new Set(allowedKeys);
+  if (allow.size === 0) return {};
+  const out: Record<string, T> = {};
+  for (const key of allow) {
+    const row = data[key];
+    if (row !== undefined) out[key] = row;
+  }
+  return out;
+}
+
 function folksMintRatioCacheKey(
   networkId: NetworkId,
   poolName: string,
@@ -305,16 +324,28 @@ function folksMintRatioCacheKey(
   return `folksMintRatio:${networkId}:${poolName}:${decimals}`;
 }
 
-function marketsSessionCacheKey(networkId: NetworkId): string {
-  return `dorkfi:marketsHydrate:${networkId}`;
+/**
+ * Session hydrate cache is scoped by whether excluded LP pools are included.
+ * Admin and Markets must not share a bucket — Admin writes TMPOOL2 rows that
+ * Markets would otherwise merge back in.
+ */
+function marketsSessionCacheKey(
+  networkId: NetworkId,
+  includeExcludedPools: boolean
+): string {
+  const scope = includeExcludedPools ? "all" : "table";
+  return `dorkfi:marketsHydrate:${scope}:${networkId}`;
 }
 
 function readMarketsSessionCache(
-  networkId: NetworkId
+  networkId: NetworkId,
+  includeExcludedPools: boolean
 ): Record<string, OnDemandMarketData> | null {
   if (typeof sessionStorage === "undefined") return null;
   try {
-    const raw = sessionStorage.getItem(marketsSessionCacheKey(networkId));
+    const raw = sessionStorage.getItem(
+      marketsSessionCacheKey(networkId, includeExcludedPools)
+    );
     if (!raw) return null;
     const parsed = JSON.parse(raw) as {
       savedAt?: number;
@@ -335,18 +366,21 @@ function readMarketsSessionCache(
 
 function writeMarketsSessionCache(
   networkId: NetworkId,
-  data: Record<string, OnDemandMarketData>
+  includeExcludedPools: boolean,
+  data: Record<string, OnDemandMarketData>,
+  allowedKeys: Iterable<string>
 ): void {
   if (typeof sessionStorage === "undefined") return;
   try {
+    const scoped = pickMarketsDataForKeys(data, allowedKeys);
     const slim: Record<string, OnDemandMarketData> = {};
-    for (const [key, row] of Object.entries(data)) {
+    for (const [key, row] of Object.entries(scoped)) {
       if (row?.isLoaded && !row.error) {
         slim[key] = row;
       }
     }
     sessionStorage.setItem(
-      marketsSessionCacheKey(networkId),
+      marketsSessionCacheKey(networkId, includeExcludedPools),
       JSON.stringify({ savedAt: Date.now(), data: slim })
     );
   } catch {
@@ -476,6 +510,16 @@ export const useOnDemandMarketData = ({
         ? getAllTokensWithDisplayInfo(currentNetwork)
         : getMarketsTableVisibleTokensWithDisplayInfo(currentNetwork),
     [currentNetwork, includeExcludedPools]
+  );
+
+  const tokenMarketKeys = useMemo(
+    () => tokens.map((t) => marketRowCacheKey(t)),
+    [tokens]
+  );
+
+  const tokenMarketKeySet = useMemo(
+    () => new Set(tokenMarketKeys),
+    [tokenMarketKeys]
   );
 
   // Clear markets data when network changes (invalidate in-flight hydrates/loads)
@@ -939,7 +983,7 @@ export const useOnDemandMarketData = ({
       const bypassCache = opts?.bypassCache ?? false;
       if (tokens.length === 0) return;
 
-      const keys = tokens.map((t) => marketRowCacheKey(t));
+      const keys = tokenMarketKeys;
       if (!bypassCache) {
         const allFresh = keys.every((k) => {
           const d = marketsDataRef.current[k];
@@ -969,13 +1013,23 @@ export const useOnDemandMarketData = ({
       try {
         // Instant remount: paint last session snapshot while the bulk GET is in flight.
         if (!bypassCache) {
-          const sessionCached = readMarketsSessionCache(currentNetwork);
+          const sessionCached = readMarketsSessionCache(
+            currentNetwork,
+            includeExcludedPools
+          );
           if (sessionCached && Object.keys(sessionCached).length > 0) {
             if (!isCurrent()) return;
-            setMarketsData((prev) => ({ ...prev, ...sessionCached }));
+            const scopedCached = pickMarketsDataForKeys(
+              sessionCached,
+              tokenMarketKeySet
+            );
+            setMarketsData((prev) => ({
+              ...pickMarketsDataForKeys(prev, tokenMarketKeySet),
+              ...scopedCached,
+            }));
             setLoadingMarkets((prev) => {
               const next = new Set(prev);
-              for (const k of Object.keys(sessionCached)) next.delete(k);
+              for (const k of Object.keys(scopedCached)) next.delete(k);
               return next;
             });
           }
@@ -1081,12 +1135,20 @@ export const useOnDemandMarketData = ({
         if (!isCurrent()) return;
 
         if (Object.keys(phaseAUpdates).length > 0) {
-          const mergedPhaseA = {
-            ...marketsDataRef.current,
-            ...phaseAUpdates,
-          };
+          const mergedPhaseA = pickMarketsDataForKeys(
+            {
+              ...marketsDataRef.current,
+              ...phaseAUpdates,
+            },
+            tokenMarketKeySet
+          );
           setMarketsData(mergedPhaseA);
-          writeMarketsSessionCache(currentNetwork, mergedPhaseA);
+          writeMarketsSessionCache(
+            currentNetwork,
+            includeExcludedPools,
+            mergedPhaseA,
+            tokenMarketKeySet
+          );
           setLoadingMarkets((prev) => {
             const next = new Set(prev);
             for (const k of Object.keys(phaseAUpdates)) next.delete(k);
@@ -1121,10 +1183,15 @@ export const useOnDemandMarketData = ({
                   const next = { ...prev, [job.tokenMarketKey]: row };
                   return next;
                 });
-                writeMarketsSessionCache(currentNetwork, {
-                  ...marketsDataRef.current,
-                  [job.tokenMarketKey]: row,
-                });
+                writeMarketsSessionCache(
+                  currentNetwork,
+                  includeExcludedPools,
+                  {
+                    ...marketsDataRef.current,
+                    [job.tokenMarketKey]: row,
+                  },
+                  tokenMarketKeySet
+                );
               } catch (error) {
                 console.warn(
                   `Background oracle/Folks refine failed for ${job.tokenMarketKey}`,
@@ -1222,7 +1289,15 @@ export const useOnDemandMarketData = ({
         }
       }
     },
-    [tokens, currentNetwork, throttleMs, buildOnDemandRow]
+    [
+      tokens,
+      tokenMarketKeys,
+      tokenMarketKeySet,
+      currentNetwork,
+      includeExcludedPools,
+      throttleMs,
+      buildOnDemandRow,
+    ]
   );
 
   // Auto-hydrate once tokens are ready for the current network.
@@ -1253,14 +1328,23 @@ export const useOnDemandMarketData = ({
     [autoLoad, loadMarketData]
   );
 
-  // Convert markets data to array format (include _sortKey for stable tie-breaking)
+  // Convert markets data to array format (include _sortKey for stable tie-breaking).
+  // Restrict to the current token key set so excluded LP rows never appear in the table.
   const marketDataArray = useMemo(() => {
-    return Object.entries(marketsData).map(([key, market]) => ({
-      ...market,
-      isLoading: loadingMarkets.has(key),
-      _sortKey: key,
-    }));
-  }, [marketsData, loadingMarkets]);
+    const rows: Array<
+      OnDemandMarketData & { isLoading: boolean; _sortKey: string }
+    > = [];
+    for (const key of tokenMarketKeys) {
+      const market = marketsData[key];
+      if (!market) continue;
+      rows.push({
+        ...market,
+        isLoading: loadingMarkets.has(key),
+        _sortKey: key,
+      });
+    }
+    return rows;
+  }, [marketsData, loadingMarkets, tokenMarketKeys]);
 
   /** Lending pool app ids in order: A = [0], B = [1], D = [2] when present. */
   const lendingPools = useMemo(() => {
