@@ -159,6 +159,7 @@ import {
 } from "@/services/adminService";
 import dorkfiAPIService from "@/services/dorkfiAPIService";
 import { useOnDemandMarketData, marketRowCacheKey } from "@/hooks/useOnDemandMarketData";
+import { resolveAdminMarketIds } from "@/utils/adminMarketIds";
 import WalletNetworkButton from "@/components/WalletNetworkButton";
 import { useWallet } from "@txnlab/use-wallet-react";
 import algosdk, { waitForConfirmation } from "algosdk";
@@ -4153,19 +4154,16 @@ export default function AdminDashboard() {
     URL.revokeObjectURL(url);
   }, [marketViewData, selectedMarket, markets, currentNetwork]);
 
-  const handleEditMarket = (market: any) => {
+  const handleEditMarket = (
+    configMarket: { poolId?: string; underlyingContractId?: string },
+    market: any,
+  ) => {
     setSelectedMarket(market);
-
-    // Get the correct contract ID from the token configuration
-    const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-    const token = tokens.find(
-      (t) => t.symbol.toLowerCase() === market.asset?.toLowerCase()
-    );
-    const contractId = token?.underlyingContractId || "";
+    const { poolId, marketId } = resolveAdminMarketIds(configMarket, market);
 
     setPriceUpdateData({
-      marketId: contractId, // Use the token's contract ID, not the market's tokenContractId
-      poolId: market.marketInfo?.poolId || "",
+      marketId,
+      poolId,
       currentPrice: market.marketInfo?.price
         ? (parseFloat(market.marketInfo.price) / Math.pow(10, 6)).toFixed(6)
         : "0",
@@ -4174,15 +4172,12 @@ export default function AdminDashboard() {
     setIsPriceUpdateModalOpen(true);
   };
 
-  const handleEditMaxDeposits = (market: any) => {
+  const handleEditMaxDeposits = (
+    configMarket: { poolId?: string; underlyingContractId?: string },
+    market: any,
+  ) => {
     setSelectedMarket(market);
-
-    // Get the correct contract ID from the token configuration
-    const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-    const token = tokens.find(
-      (t) => t.symbol.toLowerCase() === market.asset?.toLowerCase()
-    );
-    const contractId = token?.underlyingContractId || "";
+    const { poolId, marketId } = resolveAdminMarketIds(configMarket, market);
 
     // Format the current max deposits to show human-readable value
     // Note: maxTotalDeposits is already scaled by token decimals in lendingService.ts
@@ -4201,23 +4196,20 @@ export default function AdminDashboard() {
     })();
 
     setMaxDepositsUpdateData({
-      marketId: contractId, // Use the token's contract ID, not the market's tokenContractId
-      poolId: market.marketInfo?.poolId || "",
+      marketId,
+      poolId,
       currentMaxDeposits: currentMaxDepositsFormatted,
       newMaxDeposits: "",
     });
     setIsMaxDepositsUpdateModalOpen(true);
   };
 
-  const handleEditMaxBorrows = (market: any) => {
+  const handleEditMaxBorrows = (
+    configMarket: { poolId?: string; underlyingContractId?: string },
+    market: any,
+  ) => {
     setSelectedMarket(market);
-
-    // Get the correct contract ID from the token configuration
-    const tokens = getAllTokensWithDisplayInfo(currentNetwork);
-    const token = tokens.find(
-      (t) => t.symbol.toLowerCase() === market.asset?.toLowerCase()
-    );
-    const contractId = token?.underlyingContractId || "";
+    const { poolId, marketId } = resolveAdminMarketIds(configMarket, market);
 
     // Format the current max borrows to show human-readable value
     // Note: maxTotalBorrows is already scaled by token decimals in lendingService.ts
@@ -4236,8 +4228,8 @@ export default function AdminDashboard() {
     })();
 
     setMaxBorrowsUpdateData({
-      marketId: contractId, // Use the token's contract ID, not the market's tokenContractId
-      poolId: market.marketInfo?.poolId || "",
+      marketId,
+      poolId,
       currentMaxBorrows: currentMaxBorrowsFormatted,
       newMaxBorrows: "",
     });
@@ -7942,7 +7934,9 @@ export default function AdminDashboard() {
                                   variant="outline"
                                   size="sm"
                                   className="flex-1"
-                                  onClick={() => handleEditMarket(market || { asset: configMarket.symbol })}
+                                  onClick={() =>
+                                    handleEditMarket(configMarket, market)
+                                  }
                                   disabled={!hasData}
                                 >
                                   <Edit className="h-3 w-3 mr-1" />
@@ -7980,7 +7974,9 @@ export default function AdminDashboard() {
                                   variant="outline"
                                   size="sm"
                                   className="flex-1"
-                                  onClick={() => handleEditMaxDeposits(market || { asset: configMarket.symbol })}
+                                  onClick={() =>
+                                    handleEditMaxDeposits(configMarket, market)
+                                  }
                                   disabled={!hasData}
                                 >
                                   <Edit className="h-3 w-3 mr-1" />
@@ -7990,7 +7986,9 @@ export default function AdminDashboard() {
                                   variant="outline"
                                   size="sm"
                                   className="flex-1"
-                                  onClick={() => handleEditMaxBorrows(market || { asset: configMarket.symbol })}
+                                  onClick={() =>
+                                    handleEditMaxBorrows(configMarket, market)
+                                  }
                                   disabled={!hasData}
                                 >
                                   <Edit className="h-3 w-3 mr-1" />
