@@ -533,6 +533,49 @@ class DorkFiAPIService {
   }
 
   /**
+   * Get all user health records across networks.
+   */
+  async getAllUserHealth(): Promise<ApiListResponse<UserHealth>> {
+    try {
+      const response = await fetch(`${this.baseUrl}/user-health`);
+
+      if (response.ok) {
+        const data = await response.json();
+        if (Array.isArray(data?.data)) {
+          return {
+            success: data.success !== false,
+            count: data.count ?? data.data.length,
+            data: data.data,
+            network: data.network,
+            appId: data.appId,
+          };
+        }
+      }
+    } catch {
+      // Fall through to per-network fetches.
+    }
+
+    try {
+      const [algorand, voi] = await Promise.all([
+        this.getUserHealthByNetwork("algorand-mainnet"),
+        this.getUserHealthByNetwork("voi-mainnet"),
+      ]);
+      const data = [
+        ...(algorand.success ? algorand.data ?? [] : []),
+        ...(voi.success ? voi.data ?? [] : []),
+      ];
+      return {
+        success: algorand.success || voi.success,
+        count: data.length,
+        data,
+      };
+    } catch (error) {
+      console.error("Error fetching all user health records:", error);
+      throw error;
+    }
+  }
+
+  /**
    * Get user health for a specific user address
    * @param userAddress - User address
    * @returns Promise<ApiResponse<UserHealth>>
@@ -813,6 +856,90 @@ class DorkFiAPIService {
   }
 
   /**
+   * Set a user's profile avatar (e.g. a bridged Dork NFT on Algorand). Lets users pick a PFP
+   * without an enVoi (.voi) name by storing the choice against their address.
+   *
+   * Field names match the API profile schema: `avatar` is the image URL and `avatarDorkfi` is the
+   * canonical `arc72:<contract>:<token>` value.
+   * @param userAddress - User address
+   * @param avatar - Avatar selection: canonical `avatarValue` (`arc72:<contract>:<token>`), image URL, and network
+   * @returns Promise<ApiResponse<any>>
+   */
+  async setUserAvatar(
+    userAddress: string,
+    avatar: { avatarValue: string; imageUrl: string; network: string }
+  ): Promise<ApiResponse<any>> {
+    try {
+      const response = await fetch(`${this.baseUrl}/user-profile`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          address: userAddress,
+          avatar: avatar.imageUrl,
+          avatarDorkfi: avatar.avatarValue,
+          network: avatar.network,
+        }),
+      });
+
+      if (!response.ok) {
+        if (
+          response.status === 400 ||
+          response.status === 404 ||
+          response.status === 500
+        ) {
+          const errorData = await response.json();
+          return errorData;
+        }
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error(
+        `Error setting user avatar for address ${userAddress}:`,
+        error
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Get a user's cached profile avatar image URL by address.
+   * Reads `GET /user-profile/{address}` which returns `data.avatar` (or null when not cached).
+   * @param userAddress - User address
+   * @returns Promise<ApiResponse<{ avatar: string | null }>>
+   */
+  async getUserAvatar(
+    userAddress: string
+  ): Promise<ApiResponse<{ avatar: string | null }>> {
+    try {
+      const response = await fetch(
+        `${this.baseUrl}/user-profile/${encodeURIComponent(userAddress)}`
+      );
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          const errorData = await response.json();
+          return errorData;
+        }
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error(
+        `Error fetching user avatar for address ${userAddress}:`,
+        error
+      );
+      throw error;
+    }
+  }
+
+  /**
    * Fetch fresh user data and update store
    * Fetches fresh user data from the blockchain for a specific user, network, app ID, and market ID, then updates the store
    * @param userAddress - User address
@@ -1068,7 +1195,7 @@ class DorkFiAPIService {
    * @param endTime - End timestamp in milliseconds
    * @param limit - Maximum number of results
    * @param network - Optional network filter
-   * @returns Promise<ApiResponse<{ deposits: Array<{ timestamp: number; round: number; depositValueUSD: string; network?: string }>; summary: { totalDepositValueUSD: string } }>>
+   * @returns Promise<ApiResponse<{ deposits: Array<{ timestamp: number; round: number; amount?: string; depositValueUSD: string; network?: string }>; summary: { totalDepositValueUSD: string } }>>
    */
   async getDeposits(
     startTime?: number,
@@ -1080,6 +1207,7 @@ class DorkFiAPIService {
       deposits: Array<{
         timestamp: number;
         round: number;
+        amount?: string;
         depositValueUSD: string;
         network?: string;
       }>;
@@ -1110,7 +1238,7 @@ class DorkFiAPIService {
    * @param endTime - End timestamp in milliseconds
    * @param limit - Maximum number of results
    * @param network - Optional network filter
-   * @returns Promise<ApiResponse<{ withdrawals: Array<{ timestamp: number; round: number; withdrawalValueUSD: string; network?: string }>; summary: { totalWithdrawalValueUSD: string } }>>
+   * @returns Promise<ApiResponse<{ withdrawals: Array<{ timestamp: number; round: number; amount?: string; withdrawValueUSD?: string; withdrawalValueUSD?: string; network?: string }>; summary: { totalWithdrawValueUSD?: string; totalWithdrawalValueUSD?: string } }>>
    */
   async getWithdrawals(
     startTime?: number,
@@ -1122,10 +1250,17 @@ class DorkFiAPIService {
       withdrawals: Array<{
         timestamp: number;
         round: number;
-        withdrawalValueUSD: string;
+        amount?: string;
+        marketId?: string;
+        appId?: number | string;
+        withdrawValueUSD?: string;
+        withdrawalValueUSD?: string;
         network?: string;
       }>;
-      summary: { totalWithdrawalValueUSD: string };
+      summary: {
+        totalWithdrawValueUSD?: string;
+        totalWithdrawalValueUSD?: string;
+      };
     }>
   > {
     try {
@@ -1192,6 +1327,7 @@ class DorkFiAPIService {
       borrows: Array<{
         timestamp: number;
         round: number;
+        amount?: string;
         borrowValueUSD: string;
         network?: string;
       }>;
@@ -1234,6 +1370,7 @@ class DorkFiAPIService {
       repays: Array<{
         timestamp: number;
         round: number;
+        amount?: string;
         repayValueUSD: string;
         network?: string;
       }>;

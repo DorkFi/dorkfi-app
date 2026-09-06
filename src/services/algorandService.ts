@@ -36,7 +36,7 @@ const NETWORK_CONFIGS: Record<
 > = {
   mainnet: {
     algodToken: "",
-    algodServer: "https://mainnet-api.algorand.dork.fi",
+    algodServer: "https://mainnet-api.4160.nodely.dev",
     algodPort: 443,
     indexerToken: "",
     indexerServer: "https://mainnet-idx.4160.nodely.dev",

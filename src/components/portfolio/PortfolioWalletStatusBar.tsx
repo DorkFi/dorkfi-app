@@ -14,7 +14,7 @@ export type PortfolioWalletStatus = {
 
 export type PortfolioWalletStatusBarProps = PortfolioWalletStatus & {
   className?: string;
-  /** When true, content is centered (desktop hero). Otherwise left-aligned (mobile strip). */
+  /** When true, content is centered. Otherwise left-aligned. */
   centered?: boolean;
 };
 
@@ -67,7 +67,7 @@ const PortfolioWalletStatusBar = ({
         </span>
       ) : null}
       {showRiskMetrics ? (
-        <span className={cn(centered ? "ml-2" : "w-full basis-full")}>
+        <span className="shrink-0">
           • Collateral Factor:{" "}
           {formatPercent(weightedCollateralFactor, { maximumFractionDigits: 0 })}{" "}
           • Liquidation Threshold:{" "}

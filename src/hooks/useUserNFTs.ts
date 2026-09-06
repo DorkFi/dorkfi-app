@@ -8,6 +8,7 @@ import {
 import { GovernanceNFT } from "@/components/governance/NFTMultiplierDropdown";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { getContractAddress, GovernanceConfig } from "@/config";
+import { fetchOwnedDorkNftsOnAlgorand } from "@/services/algorandNftService";
 
 // Fallback governance NFT contract IDs when config has no powerMultipliers
 const FALLBACK_GOVERNANCE_NFT_CONTRACTS = [313597, 894888, 313705];
@@ -79,6 +80,24 @@ export const useUserNFTs = (address?: string | null) => {
     setError(null);
 
     try {
+      // On Algorand, Dork NFTs are bridged ARC-69 ASAs (not Voi ARC-72), so discover them from
+      // the account's asset holdings via the registry rather than the Voi NFT indexer.
+      if (currentNetwork === "algorand-mainnet") {
+        const owned = await fetchOwnedDorkNftsOnAlgorand(
+          currentNetwork,
+          targetAddress
+        );
+        const formattedNFTs: UserNFT[] = owned.map((entry) => ({
+          contractId: entry.voiContractId,
+          tokenId: String(entry.voiTokenId),
+          name: entry.name,
+          imageUrl: entry.imageUrl,
+          collectionName: entry.collectionName,
+        }));
+        setNfts(formattedNFTs);
+        return;
+      }
+
       const response = await fetchUserNFTs(
         targetAddress,
         contractIds,
@@ -116,7 +135,13 @@ export const useUserNFTs = (address?: string | null) => {
     } finally {
       setIsLoading(false);
     }
-  }, [targetAddress, contractIds, bonusByContractId, labelByContractId]);
+  }, [
+    targetAddress,
+    contractIds,
+    bonusByContractId,
+    labelByContractId,
+    currentNetwork,
+  ]);
 
   useEffect(() => {
     loadNFTs();

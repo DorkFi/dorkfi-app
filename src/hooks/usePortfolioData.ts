@@ -11,6 +11,7 @@ import { ARC200Service } from "@/services/arc200Service";
 import algorandService from "@/services/algorandService";
 import {
   getTokenConfig,
+  asTokenConfig,
   tokenStandardUsesNativeWalletBalance,
   getPortfolioVisibleTokens,
   getAllTokensWithDisplayInfo,
@@ -38,7 +39,7 @@ export interface PortfolioData {
   } | null;
   marketData: any[];
   userPositions: PortfolioPosition[];
-  walletBalances: Record<string, number>;
+  walletBalances: Record<string, { balance: number; balanceUSD: number }>;
   isLoading: boolean;
   isLoadingPositions: boolean;
   isLoadingWalletBalance: boolean;
@@ -266,10 +267,10 @@ export const usePortfolioData = () => {
         // Get the original token config to access tokenStandard
         // Use originalSymbol to look up the config, as asset might be a display symbol
         const originalSymbol =
-          "originalSymbol" in token ? (token as any).originalSymbol : asset;
-        const originalTokenConfig = getTokenConfig(
-          currentNetwork,
-          originalSymbol
+          "originalSymbol" in token ? (token as { originalSymbol?: string }).originalSymbol : asset;
+        const originalTokenConfig = asTokenConfig(
+          getTokenConfig(currentNetwork, originalSymbol ?? asset),
+          token.poolId
         );
         if (!originalTokenConfig) {
           console.error(

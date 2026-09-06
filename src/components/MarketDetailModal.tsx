@@ -19,9 +19,10 @@ import { useToast } from "@/hooks/use-toast";
 import { isAtBorrowCap as isAtBorrowCapUtil } from "@/constants/lendingCaps";
 import {
   createDebouncedPrefetch,
-  warmBorrowModalMaxAndPool,
+  prefetchSupplyBorrowModalChunk,
   type MarketActionTokenParams,
 } from "@/utils/modalPrefetch";
+import { warmBorrowModalMaxAndPool } from "@/utils/modalPrefetchHeavy";
 import type { NetworkId } from "@/config";
 import {
   borrowApyBadgeClassName,
@@ -107,6 +108,7 @@ const MarketDetailModal = ({ isOpen, onClose, asset, marketData }: MarketDetailM
       networkId: currentNetwork as NetworkId,
       asset,
     };
+    prefetchSupplyBorrowModalChunk();
     debouncedPrefetch(`borrowDetail:${currentNetwork}:${asset}`, () =>
       warmBorrowModalMaxAndPool(params)
     );

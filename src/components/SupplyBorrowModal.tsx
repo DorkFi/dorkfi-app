@@ -14,6 +14,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import SupplyBorrowCongrats from "./SupplyBorrowCongrats";
+import { BorrowSharePanel } from "@/components/borrow/BorrowSharePanel";
 import { MarketRowTokenIcon } from "@/components/markets/MarketRowTokenIcon";
 import SupplyBorrowHeader from "./SupplyBorrowHeader";
 import SupplyBorrowForm from "./SupplyBorrowForm";
@@ -68,7 +69,11 @@ import { useToast } from "@/hooks/use-toast";
 import { useTokenPrice } from "@/hooks/useTokenPrice";
 import { calculateMaxBorrowAmount } from "@/services/adminService";
 import dorkfiAPIService from "@/services/dorkfiAPIService";
-import { updateTransactionMetadata } from "@/utils/transactionUtils";
+import {
+  TX_CONFIRMATION_WAIT_ROUNDS,
+  scheduleTransactionMetadataUpdate,
+} from "@/utils/transactionUtils";
+import { warmBorrowModalMaxAndPool } from "@/utils/modalPrefetchHeavy";
 import type { PoolCollateralMarketRow } from "@/utils/poolCollateralMarketRows";
 import {
   buildLiquidationThresholdSummaryForDeposit,
@@ -85,6 +90,7 @@ import {
 } from "@/wallet/xchainSignUi";
 import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
 import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
+import { getUserFriendlyError } from "@/utils/errorUtils";
 import {
   ALGORAND_MAINNET_NODELY_ALGOD_URL,
   MainnetConsensusConfig,
@@ -108,6 +114,13 @@ import {
 } from "@/services/tinymanTalgoAdapter";
 import { buildXalgoConsensusBorrowAndBurnSingleGroup } from "@/services/xalgoBorrowBurnSingleGroup";
 import type { ConsensusState } from "@folks-finance/algorand-sdk";
+import {
+  resolveSupplyBorrowToken,
+  supplyBorrowTokenConfigLookupKey,
+  type SupplyBorrowTokenRow,
+} from "@/utils/resolveSupplyBorrowToken";
+
+export { resolveSupplyBorrowToken } from "@/utils/resolveSupplyBorrowToken";
 
 /** Built transaction group ready for wallet signature (review step). */
 interface PendingSupplyBorrowSign {
@@ -146,33 +159,6 @@ interface PendingSupplyBorrowSign {
   fAssetIdForFolksStep2?: string;
 }
 
-type SupplyBorrowTokenRow = {
-  symbol: string;
-  poolId?: string;
-  configKey?: string;
-  originalSymbol?: string;
-  underlyingContractId?: string;
-  /** Config `contractId` when it differs from `underlyingContractId` (display ASA). */
-  originalContractId?: string;
-};
-
-/**
- * `getAllTokensWithDisplayInfo` sets `configKey` to the `tokens` map key (e.g. `USDC` for every
- * `tokens.USDC[]` row). Prefer `originalSymbol` (`fiUSDC`, `fUSDC`) so {@link getTokenConfig} hits
- * the correct row or standalone key.
- */
-function supplyBorrowTokenConfigLookupKey(
-  tok: SupplyBorrowTokenRow | null | undefined,
-  fallbackAsset: string
-): string {
-  if (!tok) return fallbackAsset;
-  const orig = String(tok.originalSymbol ?? "").trim();
-  if (orig !== "") return orig;
-  const ck = String(tok.configKey ?? "").trim();
-  if (ck !== "") return ck;
-  return fallbackAsset;
-}
-
 /** Pick one `TokenConfig` from `getTokenConfig` when the symbol maps to an array (e.g. several USDC pools). */
 function pickTokenConfigForSupplyBorrowRow(
   raw: TokenConfig | TokenConfig[] | undefined,
@@ -192,73 +178,6 @@ function pickTokenConfigForSupplyBorrowRow(
     if (byContract) return byContract;
   }
   return raw.find(poolOk) ?? raw[0] ?? null;
-}
-
-/** When display `asset` + `poolId` match multiple config rows (e.g. Algo vs fALGO), pass the tokens map key from the market row (`configSymbol`). */
-export function resolveSupplyBorrowToken<T extends SupplyBorrowTokenRow>(
-  tokens: T[],
-  asset: string,
-  poolId: string | undefined,
-  configSymbol: string | undefined,
-  marketId?: string | null
-): T | undefined {
-  const poolOk = (t: T) =>
-    poolId == null || poolId === "" || String(t.poolId) === String(poolId);
-
-  // Prefer market contract + pool first (e.g. legacy vs V2 wBTC share `wBTC` + pool id).
-  if (marketId != null && marketId !== "" && poolId != null && poolId !== "") {
-    const byContract = tokens.find(
-      (t) =>
-        String(t.underlyingContractId ?? "") === String(marketId) &&
-        String(t.poolId ?? "") === String(poolId)
-    );
-    if (byContract) return byContract;
-    const byOriginal = tokens.find(
-      (t) =>
-        String(t.originalContractId ?? "") === String(marketId) &&
-        String(t.poolId ?? "") === String(poolId)
-    );
-    if (byOriginal) return byOriginal;
-  }
-
-  if (configSymbol) {
-    const keyHits = tokens.filter(
-      (t) =>
-        poolOk(t) &&
-        (t.configKey === configSymbol ||
-          t.originalSymbol === configSymbol ||
-          t.symbol === configSymbol)
-    );
-    if (keyHits.length === 1) return keyHits[0];
-    if (keyHits.length > 1 && marketId != null && String(marketId) !== "") {
-      const mid = String(marketId);
-      const byMid = keyHits.find(
-        (t) =>
-          String(t.underlyingContractId ?? "") === mid ||
-          String(t.originalContractId ?? "") === mid
-      );
-      if (byMid) return byMid;
-    }
-    if (keyHits.length > 0) return keyHits[0];
-  }
-
-  if (poolId != null && poolId !== "") {
-    const poolHits = tokens.filter((t) => t.symbol === asset && poolOk(t));
-    if (poolHits.length <= 1) return poolHits[0];
-    if (marketId != null && String(marketId) !== "") {
-      const mid = String(marketId);
-      const byMid = poolHits.find(
-        (t) => String(t.underlyingContractId ?? "") === mid
-      );
-      if (byMid) return byMid;
-      const byOrig = poolHits.find(
-        (t) => String(t.originalContractId ?? "") === mid
-      );
-      if (byOrig) return byOrig;
-    }
-    return poolHits[0];
-  }
-  return tokens.find((t) => t.symbol === asset);
 }
 
 /** Row in the optional supply/borrow asset picker (same disambiguation idea as Withdraw modal). */
@@ -297,6 +216,32 @@ export function supplyBorrowAssetRowKey(
     return `${a.asset}|${pool}|${net}|i${index}`;
   }
   return `${a.asset}|${pool}|${net}|${mid}|${cfg}`;
+}
+
+/** Max wall time for building unsigned borrow/supply txns before surfacing a retryable error. */
+const BUILD_TRANSACTION_TIMEOUT_MS = 90_000;
+const BUILD_TIMEOUT_MARKER = "BUILD_TXN_TIMEOUT";
+
+function withBuildTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(
+        new Error(
+          `${BUILD_TIMEOUT_MARKER}:${label}: We couldn’t build the transaction. Please try again.`
+        )
+      );
+    }, BUILD_TRANSACTION_TIMEOUT_MS);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
 }
 
 /** Borrow amount field vs protocol: user may enter ALGO (underlying route) or f-asset; caps are in market-token human. */
@@ -425,7 +370,7 @@ const SupplyBorrowModal = ({
   poolCollateralMarkets,
   walletBalanceMarketToken,
   isLoadingWalletBalance = false,
-  isLoadingBorrowGlobalData = false,
+  isLoadingBorrowGlobalData: _isLoadingBorrowGlobalData = false,
   depositNotice,
   assetPairIcons,
 }: SupplyBorrowModalProps) => {
@@ -444,6 +389,10 @@ const SupplyBorrowModal = ({
   );
   const [isLoadingMaxBorrow, setIsLoadingMaxBorrow] = useState(false);
   const [maxBorrowError, setMaxBorrowError] = useState<string | null>(null);
+  /** Bumps on modal close / new build so stale in-flight builds do not update UI. */
+  const buildGenerationRef = useRef(0);
+  /** Bumps when max-borrow deps change so stale in-flight calcs do not update UI. */
+  const maxBorrowGenRef = useRef(0);
   /** Per-pool collateral/borrow (USD) for deposit health estimate; undefined = not loaded */
   const [poolGlobalUserData, setPoolGlobalUserData] = useState<
     | {
@@ -1350,8 +1299,9 @@ const SupplyBorrowModal = ({
   /** Protocol + market liquidity cap in human tokens (always finite in borrow mode). */
   const borrowLiquidityOnlyTokens = useMemo(() => {
     if (mode !== "borrow") return null;
-    const raw =
-      calculatedMaxBorrow !== null ? calculatedMaxBorrow : assetData.liquidity;
+    // Do not fall back to assetData.liquidity when max is unknown/errored — market
+    // liquidity alone can look more permissive than collateral allows.
+    const raw = calculatedMaxBorrow !== null ? calculatedMaxBorrow : 0;
     const safeRaw =
       typeof raw === "number" && Number.isFinite(raw) ? Math.max(0, raw) : 0;
     const borrowCap = assetData.maxTotalBorrows ?? 0;
@@ -1361,7 +1311,6 @@ const SupplyBorrowModal = ({
   }, [
     mode,
     calculatedMaxBorrow,
-    assetData.liquidity,
     assetData.maxTotalBorrows,
     assetData.totalBorrow,
   ]);
@@ -1503,16 +1452,16 @@ const SupplyBorrowModal = ({
 
   const borrowMaxLineLoading = useMemo(() => {
     if (mode !== "borrow") return false;
+    // Any in-flight max calc must hide/clear stale values from a prior asset.
+    const waitingOnMaxCalc = isLoadingMaxBorrow;
     return (
-      isLoadingBorrowGlobalData ||
-      isLoadingMaxBorrow ||
+      waitingOnMaxCalc ||
       (borrowInputReceiveBasis === "underlying" &&
         folksMintRatioStatus === "loading") ||
       (isXalgoConsensusBorrowAlgoRoute && xalgoBorrowConsensusState == null)
     );
   }, [
     mode,
-    isLoadingBorrowGlobalData,
     isLoadingMaxBorrow,
     borrowInputReceiveBasis,
     folksMintRatioStatus,
@@ -1637,6 +1586,7 @@ const SupplyBorrowModal = ({
     const fetchMaxBorrowAmount = async () => {
       // Only calculate for borrow mode
       if (mode !== "borrow" || !isOpen || !activeAccount?.address) {
+        maxBorrowGenRef.current += 1;
         setCalculatedMaxBorrow(null);
         setIsLoadingMaxBorrow(false);
         setMaxBorrowError(null);
@@ -1651,9 +1601,12 @@ const SupplyBorrowModal = ({
         currentNetwork,
       });
 
+      const gen = ++maxBorrowGenRef.current;
       setIsLoadingMaxBorrow(true);
+      setCalculatedMaxBorrow(null);
       setMaxBorrowError(null);
 
+      let keepLoadingForPoolData = false;
       try {
         const tokens = getAllTokensWithDisplayInfo(networkToUse as any);
         // If poolId is provided, find the token that matches both symbol and poolId
@@ -1731,6 +1684,8 @@ const SupplyBorrowModal = ({
           storageAppId ? Number(storageAppId) : undefined
         );
 
+        if (gen !== maxBorrowGenRef.current) return;
+
         console.log("SupplyBorrowModal: maxBorrowBigInt result", {
           maxBorrowBigInt,
           isZero: maxBorrowBigInt === BigInt(0),
@@ -1793,6 +1748,7 @@ const SupplyBorrowModal = ({
             )
           );
 
+          if (gen !== maxBorrowGenRef.current) return;
           setCalculatedMaxBorrow(finalMaxBorrow);
           console.log("SupplyBorrowModal: Max borrow amount calculated:", {
             maxBorrowNumber,
@@ -1805,29 +1761,36 @@ const SupplyBorrowModal = ({
           effectiveUserGlobalData.totalCollateralValue > 0
         ) {
           // Borrowing power must be based on collateral in this pool only (not aggregate across pools)
-          const poolData =
-            poolId != null && poolId !== ""
-              ? await fetchUserGlobalDataForPool(
-                activeAccount.address,
-                networkToUse as NetworkId,
-                Number(poolId)
-              )
-              : null;
-          console.log("SupplyBorrowModal: Pool data", { poolData, poolId });
+          if (
+            poolId != null &&
+            poolId !== "" &&
+            poolGlobalUserData === undefined
+          ) {
+            // Pool totals still loading (separate effect); keep spinner and re-run when ready
+            keepLoadingForPoolData = true;
+            return;
+          }
           const collateralForBorrow =
-            poolData != null
-              ? poolData.totalCollateralValue
+            poolGlobalUserData != null
+              ? poolGlobalUserData.totalCollateralValue
               : effectiveUserGlobalData.totalCollateralValue;
-          const maxBorrowUSD = collateralForBorrow * (assetData.collateralFactor / 100);
-          const calculatedMaxBorrow = capByBorrowCap(
+          console.log("SupplyBorrowModal: Pool data", {
+            poolGlobalUserData,
+            poolId,
+          });
+          const maxBorrowUSD =
+            collateralForBorrow * (assetData.collateralFactor / 100);
+          const nextMaxBorrow = capByBorrowCap(
             tokenPrice != null && tokenPrice > 0
               ? (maxBorrowUSD / tokenPrice) * Math.pow(10, 6) / Math.pow(10, decimals)
               : 0
           );
-          setCalculatedMaxBorrow(calculatedMaxBorrow);
+          if (gen !== maxBorrowGenRef.current) return;
+          setCalculatedMaxBorrow(nextMaxBorrow);
         } else {
           // Even if maxBorrowBigInt is 0, we should still check deposits - borrowed, then cap by borrow cap
           const finalMaxBorrow = capByBorrowCap(Math.max(0, depositsMinusBorrowed));
+          if (gen !== maxBorrowGenRef.current) return;
           setCalculatedMaxBorrow(finalMaxBorrow);
           console.log(
             "SupplyBorrowModal: Max borrow amount (deposits - borrowed):",
@@ -1835,6 +1798,7 @@ const SupplyBorrowModal = ({
           );
         }
       } catch (error) {
+        if (gen !== maxBorrowGenRef.current) return;
         console.error(
           "SupplyBorrowModal: Error calculating max borrow amount:",
           error
@@ -1844,7 +1808,9 @@ const SupplyBorrowModal = ({
         );
         setCalculatedMaxBorrow(null);
       } finally {
-        setIsLoadingMaxBorrow(false);
+        if (gen === maxBorrowGenRef.current && !keepLoadingForPoolData) {
+          setIsLoadingMaxBorrow(false);
+        }
       }
     };
 
@@ -1861,8 +1827,49 @@ const SupplyBorrowModal = ({
     tokenPrice,
     assetData.totalBorrow,
     assetData.maxTotalBorrows,
+    assetData.collateralFactor,
+    assetData.liquidationThreshold,
+    assetData.totalSupply,
     effectiveUserGlobalData?.totalCollateralValue,
+    poolGlobalUserData,
   ]);
+
+  // Warm RPC caches as soon as borrow modal opens (not only on row hover)
+  useEffect(() => {
+    if (
+      !isOpen ||
+      mode !== "borrow" ||
+      !activeAccount?.address ||
+      !asset
+    ) {
+      return;
+    }
+    warmBorrowModalMaxAndPool({
+      userAddress: activeAccount.address,
+      networkId: networkToUse as NetworkId,
+      asset,
+      poolId: poolId != null ? String(poolId) : undefined,
+      configSymbol,
+      marketId: marketId != null ? String(marketId) : undefined,
+    });
+  }, [
+    isOpen,
+    mode,
+    activeAccount?.address,
+    asset,
+    poolId,
+    configSymbol,
+    marketId,
+    networkToUse,
+  ]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      buildGenerationRef.current += 1;
+      maxBorrowGenRef.current += 1;
+      setIsLoading(false);
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     setPendingSign(null);
@@ -1911,7 +1918,11 @@ const SupplyBorrowModal = ({
     }
     const algorandClients =
       await algorandService.initializeClientsForTransactions(algorandNetwork);
-    await waitForConfirmation(algorandClients.algod, res.txid, 4);
+    await waitForConfirmation(
+      algorandClients.algod,
+      res.txid,
+      TX_CONFIRMATION_WAIT_ROUNDS
+    );
 
     if (pending.folksTwoStepPhase === "folks_mint_only") {
       setTransactionId(res.txid);
@@ -2116,57 +2127,18 @@ const SupplyBorrowModal = ({
       .find(
         (txn: any) =>
           txn.txn.type === "appl" &&
-          Number(txn.txn.applicationCall.appIndex) ===
+          Number(txn.txn.applicationCall?.appIndex) ===
             parseInt(pending.poolAppId, 10)
       );
     const poolTxnID = poolTxn?.txn?.txID?.();
-    if (!poolTxnID) {
-      throw new Error("Could not locate pool application transaction in group.");
+    scheduleTransactionMetadataUpdate(poolTxnID ?? res.txid, finalNetwork);
+
+    if (!activeAccount?.address) {
+      setTransactionId(res.txid);
+      setPendingSign(null);
+      setShowSuccess(true);
+      return;
     }
-    await new Promise((resolve) => setTimeout(resolve, 5000));
-    let metadataUpdated = false;
-    let metaRetry = 0;
-    const maxRetries = 10;
-    const apiBaseUrl =
-      import.meta.env.VITE_DORKFI_API_URL || "https://dorkfi-api.nautilus.sh";
-    const networkParam = finalNetwork ? `?network=${finalNetwork}` : "";
-
-    while (!metadataUpdated && metaRetry < maxRetries) {
-      try {
-        const response = await fetch(
-          `${apiBaseUrl}/transaction-metadata/${poolTxnID}${networkParam}`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-          }
-        );
-
-        if (response.ok) {
-          const metaResult = await response.json();
-          console.log("Transaction metadata successfully updated:", metaResult.data);
-          metadataUpdated = true;
-        } else {
-          const errBody = await response.json();
-          throw new Error(errBody.error || "Failed to update transaction metadata");
-        }
-      } catch (err) {
-        metaRetry++;
-        if (metaRetry < maxRetries) {
-          const delay = 1000 * Math.pow(2, metaRetry - 1);
-          console.warn(
-            `Metadata update attempt ${metaRetry} failed, retrying in ${delay}ms:`,
-            err
-          );
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        } else {
-          console.error("Failed to update transaction metadata after all retries:", err);
-        }
-      }
-    }
-
-    if (!activeAccount?.address) return;
 
     const apiNet = pending.actualNetwork;
     Promise.all([
@@ -2329,8 +2301,10 @@ const SupplyBorrowModal = ({
           errorMessage =
             "Transaction failed due to insufficient gas fees. Please ensure you have enough tokens for gas.";
         } else {
-          errorMessage = error.message;
+          errorMessage = getUserFriendlyError(error);
         }
+      } else {
+        errorMessage = getUserFriendlyError(error);
       }
       setError(errorMessage);
     } finally {
@@ -2438,7 +2412,7 @@ const SupplyBorrowModal = ({
           ),
       });
       const res = await algod.sendRawTransaction(stxns).do();
-      await waitForConfirmation(algod, res.txid, 4);
+      await waitForConfirmation(algod, res.txid, TX_CONFIRMATION_WAIT_ROUNDS);
       setFAssetPreOptInStatus("in");
       toast({
         title: "Opt-in complete",
@@ -2486,6 +2460,12 @@ const SupplyBorrowModal = ({
       setError("Please enter a valid amount");
       return;
     }
+
+    if (isLoading) {
+      return;
+    }
+
+    const buildGen = ++buildGenerationRef.current;
 
     // For deposits, check wallet balance (per selected deposit adapter basis).
     // xALGO consensus ALGO route: spendable ALGO loads async; until then effective balance is 0 — do not block.
@@ -2708,8 +2688,8 @@ const SupplyBorrowModal = ({
             .integerValue(BigNumber.ROUND_FLOOR)
             .toFixed(0)
         );
-        const { txnsB64, borrowedXalgoAtomic } =
-          await buildXalgoConsensusBorrowAndBurnSingleGroup({
+        const { txnsB64, borrowedXalgoAtomic } = await withBuildTimeout(
+          buildXalgoConsensusBorrowAndBurnSingleGroup({
             userAddress: activeAccount.address,
             networkId: networkToUse as NetworkId,
             desiredMinAlgoMicros,
@@ -2718,7 +2698,10 @@ const SupplyBorrowModal = ({
             tokenStandard: String(
               resolvedBorrowTokenConfig.tokenStandard
             ) as TokenStandard,
-          });
+          }),
+          "borrow+burn"
+        );
+        if (buildGen !== buildGenerationRef.current) return;
         const dec = resolvedBorrowTokenConfig.decimals ?? 6;
         setPendingSign({
           txnsB64,
@@ -2740,11 +2723,16 @@ const SupplyBorrowModal = ({
           previewAmountHuman: formatXalgoAtomicAsHuman(borrowedXalgoAtomic, dec),
         });
       } catch (e) {
+        if (buildGen !== buildGenerationRef.current) return;
         setError(
-          e instanceof Error ? e.message : "Could not build borrow and burn."
+          e instanceof Error
+            ? e.message
+            : "We couldn’t build the transaction. Please try again."
         );
       } finally {
-        setIsLoading(false);
+        if (buildGen === buildGenerationRef.current) {
+          setIsLoading(false);
+        }
       }
       return;
     }
@@ -2997,16 +2985,19 @@ const SupplyBorrowModal = ({
           depositAdapterTrimmed !== TALGO_TINYMAN_DEPOSIT_ALGO_ROUTE_ID
             ? { depositAdapterId: depositAdapterTrimmed }
             : undefined;
-        result = await deposit(
-          token.poolId,
-          token.underlyingContractId,
-          originalTokenConfig.tokenStandard,
-          amountInAtomicUnits,
-          activeAccount.address,
-          actualNetwork as NetworkId,
-          useFolksTwoStep
-            ? { ...depositBaseOpts, folksTwoStep: "folks_mint_only" as const }
-            : depositBaseOpts
+        result = await withBuildTimeout(
+          deposit(
+            token.poolId,
+            token.underlyingContractId,
+            originalTokenConfig.tokenStandard,
+            amountInAtomicUnits,
+            activeAccount.address,
+            actualNetwork as NetworkId,
+            useFolksTwoStep
+              ? { ...depositBaseOpts, folksTwoStep: "folks_mint_only" as const }
+              : depositBaseOpts
+          ),
+          "deposit"
         );
       } else if (mode === "borrow") {
         // Call the lending service borrow method
@@ -3016,18 +3007,23 @@ const SupplyBorrowModal = ({
           borrowAdTrim !== XALGO_CONSENSUS_BORROW_ALGO_ROUTE_ID
             ? { borrowAdapterId: selectedBorrowAdapterId }
             : undefined;
-        result = await borrow(
-          token.poolId,
-          token.underlyingContractId,
-          originalTokenConfig.tokenStandard,
-          amountInAtomicUnits,
-          activeAccount.address,
-          actualNetwork as NetworkId,
-          borrowOpts
+        result = await withBuildTimeout(
+          borrow(
+            token.poolId,
+            token.underlyingContractId,
+            originalTokenConfig.tokenStandard,
+            amountInAtomicUnits,
+            activeAccount.address,
+            actualNetwork as NetworkId,
+            borrowOpts
+          ),
+          "borrow"
         );
       } else {
         throw new Error(`Unsupported mode: ${mode}`);
       }
+
+      if (buildGen !== buildGenerationRef.current) return;
 
       if (!result.success) {
         throw new Error(result.error || `${mode} failed`);
@@ -3146,57 +3142,63 @@ const SupplyBorrowModal = ({
         },
       });
     } catch (error) {
+      if (buildGen !== buildGenerationRef.current) return;
       console.error(`${mode} error:`, error);
 
       // Enhanced error handling with specific messages
       let errorMessage = `${mode} failed`;
 
       if (error instanceof Error) {
-        const message = error.message.toLowerCase();
+        const message = error.message;
+        const messageLower = message.toLowerCase();
 
-        if (message.includes("compatible wallet")) {
-          errorMessage = error.message;
-        } else if (message.includes("insufficient liquidity for withdraw")) {
+        if (message.startsWith(`${BUILD_TIMEOUT_MARKER}:`)) {
+          errorMessage =
+            "We couldn’t build the transaction. Please try again.";
+        } else if (messageLower.includes("compatible wallet")) {
+          errorMessage = message;
+        } else if (messageLower.includes("insufficient liquidity for withdraw")) {
           errorMessage =
             "Insufficient liquidity for withdraw. Please check your deposit and borrow balances, add collateral, or repay debt and try again.";
-        } else if (message.includes("insufficient collateral for borrow")) {
+        } else if (messageLower.includes("insufficient collateral for borrow")) {
           errorMessage =
             "Insufficient collateral for borrow. Please check your collateral balance, add collateral, or repay debt and try again.";
-        } else if (message.includes("tried to spend")) {
+        } else if (messageLower.includes("tried to spend")) {
           errorMessage = `Insufficient ${networkToUse === "algorand-mainnet" ? "Algorand" : "Voi"
             } Network balance for this transaction. Please check your wallet balance and try again.`;
-        } else if (message.includes("insufficient")) {
+        } else if (
+          messageLower.includes("insufficient liquidity") ||
+          messageLower.includes("insufficient collateral") ||
+          messageLower.includes("insufficient wallet")
+        ) {
           errorMessage =
             mode === "deposit"
               ? "Insufficient wallet balance for this transaction"
               : "Insufficient liquidity or collateral for this transaction";
         } else if (
-          message.includes("network") ||
-          message.includes("connection")
+          messageLower.includes("connection") ||
+          messageLower.includes("network request failed") ||
+          messageLower.includes("failed to fetch")
         ) {
           errorMessage =
             "Network connection issue. Please check your internet connection and try again.";
-        } else if (message.includes("gas") || message.includes("fee")) {
-          errorMessage =
-            "Transaction failed due to insufficient gas fees. Please ensure you have enough tokens for gas.";
-        } else if (message.includes("rejected") || message.includes("user")) {
-          errorMessage = "Transaction was rejected or cancelled by user.";
-        } else if (message.includes("timeout")) {
-          errorMessage = "Transaction timed out. Please try again.";
         } else if (
-          message.includes("invalid") ||
-          message.includes("malformed")
+          messageLower.includes("rejected by user") ||
+          messageLower.includes("user rejected") ||
+          messageLower.includes("user cancelled") ||
+          messageLower.includes("user canceled")
         ) {
-          errorMessage =
-            "Invalid transaction parameters. Please refresh and try again.";
+          errorMessage = "Transaction was rejected or cancelled by user.";
         } else {
-          errorMessage = error.message;
+          errorMessage = getUserFriendlyError(error);
         }
       }
 
       setError(errorMessage);
     } finally {
-      setIsLoading(false);
+      if (buildGen === buildGenerationRef.current) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -3289,6 +3291,17 @@ const SupplyBorrowModal = ({
               onMakeAnother={handleMakeAnother}
               onClose={onClose}
               viewTransactionDisabled={!transactionId}
+              aboveActions={
+                mode === "borrow" ? (
+                  <BorrowSharePanel
+                    active={showSuccess}
+                    amount={amount}
+                    assetSymbol={asset}
+                    assetIconSrc={assetData.icon}
+                    network={networkToUse}
+                  />
+                ) : undefined
+              }
             />
           </div>
         ) : (
@@ -3697,6 +3710,7 @@ const SupplyBorrowModal = ({
                   (mode === "borrow" && borrowSubmitBlockedBelowHfTarget) ||
                   (mode === "borrow" && borrowNoCapacityAtHfTarget) ||
                   (mode === "borrow" && borrowFolksBlockingSubmit) ||
+                  (mode === "borrow" && borrowMaxLineLoading) ||
                   (mode === "borrow" &&
                     isXalgoConsensusBorrowAlgoRoute &&
                     amountBorrowMarketTokenHuman === null)
@@ -3956,6 +3970,7 @@ const SupplyBorrowModal = ({
                         (mode === "borrow" && borrowExceedsEffectiveCap) ||
                         (mode === "borrow" && borrowSubmitBlockedBelowHfTarget) ||
                         (mode === "borrow" && borrowFolksBlockingSubmit) ||
+                        (mode === "borrow" && borrowMaxLineLoading) ||
                         (mode === "borrow" &&
                           isXalgoConsensusBorrowAlgoRoute &&
                           amountBorrowMarketTokenHuman === null) ||

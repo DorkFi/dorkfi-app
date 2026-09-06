@@ -11,7 +11,6 @@ import {
 import { portfolioSectionTitleClassName } from "@/components/portfolio/portfolioSectionTitle";
 import { getHealthFactorStatusPanel } from "@/utils/healthFactorUx";
 import { cn } from "@/lib/utils";
-import type { PortfolioWalletStatus } from "@/components/portfolio/PortfolioWalletStatusBar";
 
 interface EnhancedHealthFactorProps {
   healthFactor: number | null;
@@ -29,7 +28,6 @@ interface EnhancedHealthFactorProps {
   onRepayDebt?: () => void;
   onWithdraw?: () => void;
   insights?: ReactNode;
-  walletStatus?: PortfolioWalletStatus;
 }
 
 const EnhancedHealthFactor = ({
@@ -47,7 +45,6 @@ const EnhancedHealthFactor = ({
   onRepayDebt,
   onWithdraw,
   insights,
-  walletStatus,
 }: EnhancedHealthFactorProps) => {
   const hfStatusPanel = getHealthFactorStatusPanel(healthFactor);
 
@@ -139,7 +136,6 @@ const EnhancedHealthFactor = ({
                 totalCollateral={totalCollateral}
                 totalBorrowed={totalBorrowed}
                 healthFactor={healthFactor}
-                walletStatus={walletStatus}
               />
               
               {/* Action Buttons and Risk Warning */}

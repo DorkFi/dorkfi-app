@@ -88,6 +88,16 @@ export function getUserFriendlyError(error: unknown): string {
     return "Insufficient collateral for borrow. Please check your collateral balance, add collateral, or repay debt and try again.";
   }
 
+  // nt200 createBalanceBox when the user box already exists
+  // (opcodes=intc_0 // 0; ==; assert), e.g. UNIT app 3220125024 pc=886
+  if (
+    /Token balance account already exists/i.test(errorMessage) ||
+    (/logic eval error:\s*assert failed/i.test(errorMessage) &&
+      /opcodes=intc_0\s*\/\/\s*0;\s*==;\s*assert/i.test(errorMessage))
+  ) {
+    return "Borrow setup failed because your token balance account already exists. Please retry — a fresh attempt should succeed.";
+  }
+
   // Handle insufficient ALGO balance for transaction fees
   // Format: "transaction ...: account ... balance X below min Y (1 assets)"
   const balanceBelowMinMatch = errorMessage.match(

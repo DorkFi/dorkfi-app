@@ -2191,7 +2191,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     assetId: "0",
     poolId: "3345940978",
     contractId: "3207744109",
-    nTokenId: "3333724131",
+    nTokenId: "3493601964",
     migration: {
       poolId: "3207735602",
       contractId: "3207744109",
@@ -3276,8 +3276,10 @@ const algorandMainnetProdConfig: NetworkConfig = {
   walletNetworkId: "mainnet",
   name: "Algorand Mainnet",
   networkType: "avm",
-  rpcUrl: "https://mainnet-api.algorand.dork.fi",
-  rpcPublicUrl: "https://mainnet-api.algorand.dork.fi",
+  // Nodely public algod (v5). mainnet-api.algorand.dork.fi proxies to a local
+  // node that is down after the Algorand v5.0 consensus upgrade.
+  rpcUrl: "https://mainnet-api.4160.nodely.dev",
+  rpcPublicUrl: "https://mainnet-api.4160.nodely.dev",
   rpcPort: 443,
   rpcToken: undefined, // Public endpoint, no token required
   indexerUrl: "https://mainnet-idx.4160.nodely.dev",
@@ -4387,6 +4389,31 @@ export const getTokenConfig = (
 ): TokenConfig | TokenConfig[] | undefined => {
   return config.networks[networkId].tokens[symbol];
 };
+
+/**
+ * Unwrap `TokenConfig | TokenConfig[]` to a single row.
+ *
+ * - Single config → returned as-is.
+ * - Array + matching `poolId` → that row.
+ * - Array of length 1 (no pool / unmatched pool) → that row.
+ * - Array of length > 1 without a matching `poolId` → `undefined`
+ *   (never silently pick the wrong market).
+ */
+export function asTokenConfig(
+  raw: TokenConfig | TokenConfig[] | undefined | null,
+  poolId?: string | null
+): TokenConfig | undefined {
+  if (!raw) return undefined;
+  if (!Array.isArray(raw)) return raw;
+  if (raw.length === 0) return undefined;
+  if (raw.length === 1) return raw[0];
+
+  const poolStr =
+    poolId != null && String(poolId) !== "" ? String(poolId) : "";
+  if (poolStr === "") return undefined;
+
+  return raw.find((c) => String(c.poolId ?? "") === poolStr);
+}
 
 /**
  * Map key for {@link getTokenConfig} from a {@link getAllTokensWithDisplayInfo} row.

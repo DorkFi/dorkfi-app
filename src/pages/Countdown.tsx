@@ -228,7 +228,7 @@ export default function CountdownPage() {
       <footer className="relative z-10 text-center py-4">
         <div className="container mx-auto px-4">
           <p className="text-muted-foreground text-sm">
-            © 2025 DorkFi Protocol. Dive into the depths of DeFi.
+            © 2026 DorkFi Protocol. Dive into the depths of DeFi.
           </p>
         </div>
       </footer>

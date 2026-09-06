@@ -460,7 +460,9 @@ const SupplyBorrowForm = ({
                       </span>
                     )}
                   </>
-                ) : userGlobalData
+                ) : isLoadingMaxBorrow
+                  ? "—"
+                  : userGlobalData
                   ? hasCapacityNoLiquidity
                     ? `Your capacity ≈ $${maxBorrowableUSD.toLocaleString(undefined, {
                         minimumFractionDigits: 2,
@@ -497,7 +499,12 @@ const SupplyBorrowForm = ({
       {!hideButton && (
         <Button
           onClick={onSubmit}
-          disabled={!isValidAmount || isLoading || disabled}
+          disabled={
+            !isValidAmount ||
+            isLoading ||
+            disabled ||
+            (mode === "borrow" && isLoadingMaxBorrow)
+          }
           className={`w-full font-semibold text-white h-12 transition-all hover:scale-105 ${mode === "deposit"
             ? "bg-teal-600 hover:bg-teal-700"
             : "bg-whale-gold hover:bg-whale-gold/90 text-black"

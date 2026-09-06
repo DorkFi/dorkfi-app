@@ -74,9 +74,10 @@ const MarketPagination = ({
             onClick={() => onPageChange(currentPage - 1)}
             disabled={currentPage === 1}
             className="border-ocean-teal/30 hover:bg-ocean-teal/10"
+            aria-label="Previous page"
           >
             <ChevronLeft className="h-4 w-4" />
-            Previous
+            <span className="hidden sm:inline">Previous</span>
           </Button>
           
           <div className="flex items-center gap-1">
@@ -108,8 +109,9 @@ const MarketPagination = ({
             onClick={() => onPageChange(currentPage + 1)}
             disabled={currentPage === totalPages}
             className="border-ocean-teal/30 hover:bg-ocean-teal/10"
+            aria-label="Next page"
           >
-            Next
+            <span className="hidden sm:inline">Next</span>
             <ChevronRight className="h-4 w-4" />
           </Button>
         </div>

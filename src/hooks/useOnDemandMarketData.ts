@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useNetwork } from "@/contexts/NetworkContext";
 import {
   getAllTokensWithDisplayInfo,
@@ -19,7 +19,15 @@ import {
   type TokenConfig,
   getAnyFolksAdapter,
 } from "@/config";
-import { fetchMarketInfo, type MarketInfo } from "@/services/lendingService";
+import { runWithConcurrency } from "@/utils/runWithConcurrency";
+import {
+  buildMarketInfoFromRawMarketData,
+  fetchBulkApiMarketDataMap,
+  fetchMarketInfo,
+  marketDataLookupKey,
+  type MarketData,
+  type MarketInfo,
+} from "@/services/lendingService";
 import {
   estimateFolksDepositMintedFAssetAmount,
   folksFAssetHumanToUnderlyingHuman,
@@ -37,6 +45,7 @@ import { useFolksMainnetFiTinyEcosystemPoolLiveApyPercent } from "@/hooks/useFol
 import { useFolksMainnetWbtcNttPoolLiveApyPercent } from "@/hooks/useFolksMainnetWbtcNttPoolLiveApyPercent";
 import { useFolksMainnetWethNttPoolLiveApyPercent } from "@/hooks/useFolksMainnetWethNttPoolLiveApyPercent";
 import { resolveTokenIconBadgeUrl } from "@/utils/tokenImageUtils";
+import { withRpcReadCache, getRpcReadCache } from "@/utils/rpcReadCache";
 
 export interface OnDemandMarketData {
   asset: string;
@@ -282,6 +291,94 @@ interface UseOnDemandMarketDataProps {
 
 // Throttle duration: 2 minute
 const DEFAULT_THROTTLE_MS = 120 * 1000;
+/** Cap parallel per-market work (oracle / Folks / API gap-fills) to avoid RPC stampedes. */
+const MARKET_FETCH_CONCURRENCY = 6;
+const FOLKS_MINT_RATIO_CACHE_TTL_MS = 60_000;
+/** Persist last fast-paint snapshot so remounts can show data before the bulk GET returns. */
+const MARKETS_SESSION_CACHE_TTL_MS = 60_000;
+
+function folksMintRatioCacheKey(
+  networkId: NetworkId,
+  poolName: string,
+  decimals: number
+): string {
+  return `folksMintRatio:${networkId}:${poolName}:${decimals}`;
+}
+
+function marketsSessionCacheKey(networkId: NetworkId): string {
+  return `dorkfi:marketsHydrate:${networkId}`;
+}
+
+function readMarketsSessionCache(
+  networkId: NetworkId
+): Record<string, OnDemandMarketData> | null {
+  if (typeof sessionStorage === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(marketsSessionCacheKey(networkId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as {
+      savedAt?: number;
+      data?: Record<string, OnDemandMarketData>;
+    };
+    if (
+      !parsed?.savedAt ||
+      !parsed.data ||
+      Date.now() - parsed.savedAt > MARKETS_SESSION_CACHE_TTL_MS
+    ) {
+      return null;
+    }
+    return parsed.data;
+  } catch {
+    return null;
+  }
+}
+
+function writeMarketsSessionCache(
+  networkId: NetworkId,
+  data: Record<string, OnDemandMarketData>
+): void {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    const slim: Record<string, OnDemandMarketData> = {};
+    for (const [key, row] of Object.entries(data)) {
+      if (row?.isLoaded && !row.error) {
+        slim[key] = row;
+      }
+    }
+    sessionStorage.setItem(
+      marketsSessionCacheKey(networkId),
+      JSON.stringify({ savedAt: Date.now(), data: slim })
+    );
+  } catch {
+    // Ignore quota / private-mode failures.
+  }
+}
+
+async function getCachedFolksMintedFAssetPerOneUnderlying(input: {
+  poolName: string;
+  decimals: number;
+  networkId: NetworkId;
+}): Promise<bigint | null> {
+  const { poolName, decimals, networkId } = input;
+  return withRpcReadCache(
+    folksMintRatioCacheKey(networkId, poolName, decimals),
+    async () => {
+      const algodNet = getAlgorandNetworkFromNetworkId(networkId);
+      if (!algodNet) return null;
+      const clients = algorandService.initializeClients(algodNet);
+      const oneUnderlyingAtomic = BigInt(
+        new BigNumber(1).shiftedBy(decimals).toFixed(0)
+      );
+      const { mintedFAsset } = await estimateFolksDepositMintedFAssetAmount({
+        poolName,
+        underlyingAmount: oneUnderlyingAtomic,
+        algod: clients.algod,
+      });
+      return mintedFAsset > BigInt(0) ? mintedFAsset : null;
+    },
+    FOLKS_MINT_RATIO_CACHE_TTL_MS
+  );
+}
 
 export const useOnDemandMarketData = ({
   searchTerm = "",
@@ -302,6 +399,15 @@ export const useOnDemandMarketData = ({
   >({});
   const [loadingMarkets, setLoadingMarkets] = useState<Set<string>>(new Set());
   const { currentNetwork } = useNetwork();
+  const marketsDataRef = useRef(marketsData);
+  marketsDataRef.current = marketsData;
+  const loadingMarketsRef = useRef(loadingMarkets);
+  loadingMarketsRef.current = loadingMarkets;
+  /**
+   * Bumped on network change and whenever a new hydrate starts so in-flight
+   * async work cannot write stale rows after a switch / superseding refresh.
+   */
+  const marketsDataEpochRef = useRef(0);
   const algorandMainnetMarkets = currentNetwork === "algorand-mainnet";
   const tinymanLiveIntrinsicApyPct = useTinymanLiquidStakingLiveApyPercent(
     algorandMainnetMarkets
@@ -372,8 +478,9 @@ export const useOnDemandMarketData = ({
     [currentNetwork, includeExcludedPools]
   );
 
-  // Clear markets data when network changes
+  // Clear markets data when network changes (invalidate in-flight hydrates/loads)
   useEffect(() => {
+    marketsDataEpochRef.current += 1;
     setMarketsData({});
     setLoadingMarkets(new Set());
     setCurrentPage(1);
@@ -524,9 +631,182 @@ export const useOnDemandMarketData = ({
     });
   }, [currentNetwork, liveIntrinsicSupplyApy]);
 
+  const buildOnDemandRow = useCallback(
+    async (
+      token: (typeof tokens)[0],
+      marketInfo: MarketInfo,
+      tokenPoolId: string,
+      options?: { deferExtras?: boolean }
+    ): Promise<OnDemandMarketData> => {
+      const deferExtras = options?.deferExtras === true;
+      let tokenPrice = parseFloat(marketInfo.price) || 0;
+      const isWad = token.symbol.toUpperCase() === "WAD";
+      if (isWad) {
+        tokenPrice = normalizeWadUsdPerToken(tokenPrice);
+      }
+      const totalSupplyAmount = parseFloat(marketInfo.totalDeposits) || 0;
+      const totalBorrowAmount = parseFloat(marketInfo.totalBorrows) || 0;
+      const supplyCapAmount = parseFloat(marketInfo.maxTotalDeposits) || 0;
+      const borrowCapAmount = parseFloat(marketInfo.maxTotalBorrows) || 0;
+
+      const networkConfig = getNetworkConfig(currentNetwork);
+      const configSymbol = token.originalSymbol ?? token.symbol;
+      const tokensMapKey = tokenConfigObjectKey(token);
+      const tokenConfigRaw = networkConfig.tokens[tokensMapKey];
+      const tokenConfig = resolveTokenConfigFromMapEntry(
+        tokenConfigRaw,
+        token,
+        tokenPoolId
+      );
+
+      let totalSupplyDisplay = totalSupplyAmount;
+      let totalBorrowDisplay = totalBorrowAmount;
+      let supplyCapDisplay = supplyCapAmount;
+      let borrowCapDisplay = borrowCapAmount;
+      const folksOd = tokenConfig ? getAnyFolksAdapter(tokenConfig) : undefined;
+      if (folksOd && currentNetwork === "algorand-mainnet") {
+        try {
+          const cacheKey = folksMintRatioCacheKey(
+            currentNetwork,
+            folksOd.folksParams.pool,
+            token.decimals
+          );
+          let mintedFAsset: bigint | null = null;
+          if (deferExtras) {
+            // Fast path: only use an already-warmed in-memory cache entry.
+            mintedFAsset = getRpcReadCache<bigint | null>(cacheKey) ?? null;
+          } else {
+            mintedFAsset = await getCachedFolksMintedFAssetPerOneUnderlying({
+              poolName: folksOd.folksParams.pool,
+              decimals: token.decimals,
+              networkId: currentNetwork,
+            });
+          }
+          if (mintedFAsset != null && mintedFAsset > BigInt(0)) {
+            const dec = token.decimals;
+            totalSupplyDisplay = folksFAssetHumanToUnderlyingHuman(
+              totalSupplyAmount,
+              mintedFAsset,
+              dec
+            );
+            totalBorrowDisplay = folksFAssetHumanToUnderlyingHuman(
+              totalBorrowAmount,
+              mintedFAsset,
+              dec
+            );
+            supplyCapDisplay = folksFAssetHumanToUnderlyingHuman(
+              supplyCapAmount,
+              mintedFAsset,
+              dec
+            );
+            borrowCapDisplay = folksFAssetHumanToUnderlyingHuman(
+              borrowCapAmount,
+              mintedFAsset,
+              dec
+            );
+          }
+        } catch (e) {
+          console.warn(
+            "Folks mint ratio for market table underlying display failed",
+            { configSymbol, tokensMapKey, error: e }
+          );
+        }
+      }
+
+      const decScale = Math.pow(10, token.decimals + 6) / Math.pow(10, 12);
+      const totalSupplyUSD = isWad
+        ? Number(totalSupplyDisplay * tokenPrice * 1e6)
+        : Number(totalSupplyDisplay * tokenPrice * decScale);
+      const totalBorrowUSD = isWad
+        ? Number(totalBorrowDisplay * tokenPrice * 1e6)
+        : Number(totalBorrowDisplay * tokenPrice * decScale);
+
+      const rewardsMeta = getRewardsMetaForTokenRow(
+        currentNetwork,
+        tokenConfig as TokenConfig | undefined
+      );
+
+      const intrinsicApr = resolveIntrinsicSupplyApyPercentForTokenConfig(
+        currentNetwork,
+        tokenConfig,
+        liveIntrinsicSupplyApy
+      );
+      const intrinsicBorrowApy = resolveIntrinsicBorrowApyPercentForTokenConfig(
+        currentNetwork,
+        tokenConfig,
+        liveIntrinsicSupplyApy
+      );
+
+      const supplyAPYValue =
+        typeof marketInfo.apyCalculation?.apy === "number" &&
+        !Number.isNaN(marketInfo.apyCalculation.apy)
+          ? marketInfo.apyCalculation.apy
+          : typeof marketInfo.supplyRate === "number" &&
+              !Number.isNaN(marketInfo.supplyRate)
+            ? marketInfo.supplyRate * 100
+            : 0;
+
+      const borrowAPYValue =
+        typeof marketInfo.borrowApyCalculation?.apy === "number" &&
+        !Number.isNaN(marketInfo.borrowApyCalculation.apy)
+          ? marketInfo.borrowApyCalculation.apy
+          : typeof marketInfo.borrowRateCurrent === "number" &&
+              !Number.isNaN(marketInfo.borrowRateCurrent)
+            ? marketInfo.borrowRateCurrent * 100
+            : 0;
+
+      return {
+        asset: token.symbol,
+        configSymbol,
+        icon: token.logoPath,
+        iconBadgeUrl: resolveTokenIconBadgeUrl(
+          tokenConfig?.iconBadgeFromSymbol
+        ),
+        totalSupply: totalSupplyDisplay,
+        totalSupplyUSD,
+        supplyAPY: supplyAPYValue,
+        totalBorrow: totalBorrowDisplay,
+        totalBorrowUSD,
+        borrowAPY: borrowAPYValue,
+        utilization: tokenConfig?.isStoken
+          ? 100.0
+          : marketInfo.utilizationRate * 100,
+        collateralFactor: marketInfo.collateralFactor * 100,
+        walletBalance: 0,
+        supplyCap: supplyCapDisplay,
+        supplyCapUSD: isWad
+          ? supplyCapDisplay * tokenPrice * 1e6
+          : supplyCapDisplay * tokenPrice,
+        borrowCap: borrowCapDisplay,
+        maxLTV: marketInfo.collateralFactor * 100,
+        liquidationThreshold: marketInfo.liquidationThreshold * 100,
+        liquidationPenalty: marketInfo.liquidationBonus * 100,
+        reserveFactor: marketInfo.reserveFactor * 100,
+        collectorContract: "",
+        isLoading: false,
+        isLoaded: true,
+        marketInfo,
+        lastFetched: Date.now(),
+        apyCalculation: marketInfo.apyCalculation,
+        borrowApyCalculation: marketInfo.borrowApyCalculation,
+        isSToken: tokenConfig?.isStoken || false,
+        poolId: tokenPoolId,
+        isNew: token.isNew,
+        ...rewardsMeta,
+        intrinsicSupplyApyPercent: intrinsicApr > 0 ? intrinsicApr : undefined,
+        intrinsicBorrowApyPercent:
+          intrinsicBorrowApy > 0 ? intrinsicBorrowApy : undefined,
+      };
+    },
+    [currentNetwork, liveIntrinsicSupplyApy]
+  );
+
   // Load individual market data
   const loadMarketData = useCallback(
     async (marketKey: string, bypassCache = false) => {
+      const epoch = marketsDataEpochRef.current;
+      const isCurrent = () => marketsDataEpochRef.current === epoch;
+
       const { symbol, poolId: poolIdFromKey, contractId: contractFromKey } =
         parseMarketRowCacheKey(marketKey);
 
@@ -548,25 +828,19 @@ export const useOnDemandMarketData = ({
 
       if (matchingTokens.length === 0) return;
 
-      // Load all matching markets (key must match initialData: symbol-poolId as string)
       for (const token of matchingTokens) {
+        if (!isCurrent()) return;
+
         const tokenMarketKey = marketRowCacheKey(token);
 
-        // Skip if already loading this specific market
-        if (loadingMarkets.has(tokenMarketKey)) {
+        if (loadingMarketsRef.current.has(tokenMarketKey)) {
           continue;
         }
 
-        // Check throttling for this specific market
-        const existingData = marketsData[tokenMarketKey];
+        const existingData = marketsDataRef.current[tokenMarketKey];
         if (!bypassCache && existingData?.lastFetched) {
           const timeSinceLastFetch = Date.now() - existingData.lastFetched;
           if (timeSinceLastFetch < throttleMs) {
-            console.log(
-              `Market ${tokenMarketKey} throttled. Last fetched ${Math.round(
-                timeSinceLastFetch / 1000
-              )}s ago`
-            );
             continue;
           }
         }
@@ -574,7 +848,6 @@ export const useOnDemandMarketData = ({
         setLoadingMarkets((prev) => new Set(prev).add(tokenMarketKey));
 
         try {
-          // Use the pool ID directly from the token config
           const marketId =
             token.underlyingContractId ||
             token.underlyingAssetId ||
@@ -582,7 +855,7 @@ export const useOnDemandMarketData = ({
           const tokenPoolId = token.poolId;
 
           if (!tokenPoolId) {
-            console.log(`No pool ID configured for token ${token.symbol}`);
+            if (!isCurrent()) return;
             setMarketsData((prev) => ({
               ...prev,
               [tokenMarketKey]: {
@@ -593,220 +866,29 @@ export const useOnDemandMarketData = ({
                 lastFetched: Date.now(),
               },
             }));
-            setLoadingMarkets((prev) => {
-              const newSet = new Set(prev);
-              newSet.delete(tokenMarketKey);
-              return newSet;
-            });
             continue;
           }
 
-          console.log(
-            `Loading market ${marketId} for token ${token.symbol} using pool: ${tokenPoolId}`
-          );
-
-          // Fetch market info using the configured pool ID
-          // Use "contract" source when bypassing cache to get fresh blockchain data
           const marketInfo = await fetchMarketInfo(
             tokenPoolId,
             marketId,
             currentNetwork,
             bypassCache ? "contract" : "api"
           );
+          if (!isCurrent()) return;
 
           if (marketInfo) {
-            // Use the pool ID from the token config
-            console.log(
-              `Setting market data for ${token.symbol} with pool ID: ${tokenPoolId}`
-            );
-            // Calculate USD values using the market price
-            let tokenPrice = parseFloat(marketInfo.price) || 0;
-            const isWad = token.symbol.toUpperCase() === "WAD";
-            if (isWad) {
-              tokenPrice = normalizeWadUsdPerToken(tokenPrice);
-            }
-            const totalSupplyAmount = parseFloat(marketInfo.totalDeposits) || 0;
-            const totalBorrowAmount = parseFloat(marketInfo.totalBorrows) || 0;
-            const supplyCapAmount = parseFloat(marketInfo.maxTotalDeposits) || 0;
-            const borrowCapAmount = parseFloat(marketInfo.maxTotalBorrows) || 0;
-
-            // Get the original token config to access isStoken / Folks adapter
-            const networkConfig = getNetworkConfig(currentNetwork);
-            const configSymbol = token.originalSymbol ?? token.symbol;
-            const tokensMapKey = tokenConfigObjectKey(token);
-            const tokenConfigRaw = networkConfig.tokens[tokensMapKey];
-            const tokenConfig = resolveTokenConfigFromMapEntry(
-              tokenConfigRaw,
+            const marketData = await buildOnDemandRow(
               token,
+              marketInfo,
               tokenPoolId
             );
-
-            /** On-chain totals are f-asset; for Folks markets show underlying-equivalent using minted f-asset for 1.0 underlying. */
-            let totalSupplyDisplay = totalSupplyAmount;
-            let totalBorrowDisplay = totalBorrowAmount;
-            let supplyCapDisplay = supplyCapAmount;
-            let borrowCapDisplay = borrowCapAmount;
-            const folksOd = tokenConfig
-              ? getAnyFolksAdapter(tokenConfig)
-              : undefined;
-            if (
-              folksOd &&
-              currentNetwork === "algorand-mainnet"
-            ) {
-              const algodNet = getAlgorandNetworkFromNetworkId(currentNetwork);
-              if (algodNet) {
-                try {
-                  const clients = algorandService.initializeClients(algodNet);
-                  const oneUnderlyingAtomic = BigInt(
-                    new BigNumber(1).shiftedBy(token.decimals).toFixed(0)
-                  );
-                  const { mintedFAsset } =
-                    await estimateFolksDepositMintedFAssetAmount({
-                      poolName: folksOd.folksParams.pool,
-                      underlyingAmount: oneUnderlyingAtomic,
-                      algod: clients.algod,
-                    });
-                  if (mintedFAsset > BigInt(0)) {
-                    const dec = token.decimals;
-                    totalSupplyDisplay = folksFAssetHumanToUnderlyingHuman(
-                      totalSupplyAmount,
-                      mintedFAsset,
-                      dec
-                    );
-                    totalBorrowDisplay = folksFAssetHumanToUnderlyingHuman(
-                      totalBorrowAmount,
-                      mintedFAsset,
-                      dec
-                    );
-                    supplyCapDisplay = folksFAssetHumanToUnderlyingHuman(
-                      supplyCapAmount,
-                      mintedFAsset,
-                      dec
-                    );
-                    borrowCapDisplay = folksFAssetHumanToUnderlyingHuman(
-                      borrowCapAmount,
-                      mintedFAsset,
-                      dec
-                    );
-                  }
-                } catch (e) {
-                  console.warn(
-                    "Folks mint ratio for market table underlying display failed",
-                    { configSymbol, tokensMapKey, error: e }
-                  );
-                }
-              }
-            }
-
-            // WAD: oracle can be micro-USD per token; store TVL as micro-USD (÷1e6 in UI).
-            // All other assets: legacy decimal-scaled formula (do not change — used across the app).
-            const decScale =
-              Math.pow(10, token.decimals + 6) / Math.pow(10, 12);
-            const totalSupplyUSD = isWad
-              ? Number(totalSupplyDisplay * tokenPrice * 1e6)
-              : Number(totalSupplyDisplay * tokenPrice * decScale);
-            const totalBorrowUSD = isWad
-              ? Number(totalBorrowDisplay * tokenPrice * 1e6)
-              : Number(totalBorrowDisplay * tokenPrice * decScale);
-            console.log(`USD calculations for ${token.symbol}:`, {
-              tokenPrice,
-              totalSupplyAmount,
-              totalSupplyDisplay,
-              totalSupplyUSD,
-              totalBorrowAmount,
-              totalBorrowDisplay,
-              totalBorrowUSD,
-            });
-
-            const rewardsMeta = getRewardsMetaForTokenRow(
-              currentNetwork,
-              tokenConfig as TokenConfig | undefined
-            );
-
-            const intrinsicApr = resolveIntrinsicSupplyApyPercentForTokenConfig(
-              currentNetwork,
-              tokenConfig,
-              liveIntrinsicSupplyApy
-            );
-            const intrinsicBorrowApy =
-              resolveIntrinsicBorrowApyPercentForTokenConfig(
-                currentNetwork,
-                tokenConfig,
-                liveIntrinsicSupplyApy
-              );
-
-            // Safely resolve supplyAPY - avoid NaN when supplyRate is undefined
-            const supplyAPYValue =
-              (typeof marketInfo.apyCalculation?.apy === "number" &&
-                !Number.isNaN(marketInfo.apyCalculation.apy))
-                ? marketInfo.apyCalculation.apy
-                : typeof marketInfo.supplyRate === "number" &&
-                  !Number.isNaN(marketInfo.supplyRate)
-                  ? marketInfo.supplyRate * 100
-                  : 0;
-
-            // Safely resolve borrowAPY - avoid NaN when borrowRateCurrent is undefined
-            const borrowAPYValue =
-              (typeof marketInfo.borrowApyCalculation?.apy === "number" &&
-                !Number.isNaN(marketInfo.borrowApyCalculation.apy))
-                ? marketInfo.borrowApyCalculation.apy
-                : typeof marketInfo.borrowRateCurrent === "number" &&
-                  !Number.isNaN(marketInfo.borrowRateCurrent)
-                  ? marketInfo.borrowRateCurrent * 100
-                  : 0;
-
-            const marketData: OnDemandMarketData = {
-              asset: token.symbol,
-              configSymbol,
-              icon: token.logoPath,
-              iconBadgeUrl: resolveTokenIconBadgeUrl(
-                tokenConfig?.iconBadgeFromSymbol
-              ),
-              totalSupply: totalSupplyDisplay,
-              totalSupplyUSD,
-              supplyAPY: supplyAPYValue,
-              totalBorrow: totalBorrowDisplay,
-              totalBorrowUSD,
-              borrowAPY: borrowAPYValue,
-              utilization: tokenConfig?.isStoken
-                ? 100.0
-                : marketInfo.utilizationRate * 100,
-              collateralFactor: marketInfo.collateralFactor * 100,
-              walletBalance: 0, // This would need wallet integration
-              supplyCap: supplyCapDisplay,
-              supplyCapUSD: isWad
-                ? supplyCapDisplay * tokenPrice * 1e6
-                : supplyCapDisplay * tokenPrice,
-              borrowCap: borrowCapDisplay,
-              maxLTV: marketInfo.collateralFactor * 100,
-              liquidationThreshold: marketInfo.liquidationThreshold * 100,
-              liquidationPenalty: marketInfo.liquidationBonus * 100,
-              reserveFactor: marketInfo.reserveFactor * 100,
-              collectorContract: "", // Not available in MarketInfo
-              isLoading: false,
-              isLoaded: true,
-              marketInfo, // This contains the correct poolId for this market
-              lastFetched: Date.now(),
-              apyCalculation: marketInfo.apyCalculation, // Include APY calculation results
-              borrowApyCalculation: marketInfo.borrowApyCalculation, // Include borrow APY calculation results
-              isSToken: tokenConfig?.isStoken || false,
-              poolId: tokenPoolId, // Store poolId for multi-market tokens
-              isNew: token.isNew,
-              ...rewardsMeta,
-              intrinsicSupplyApyPercent:
-                intrinsicApr > 0 ? intrinsicApr : undefined,
-              intrinsicBorrowApyPercent:
-                intrinsicBorrowApy > 0 ? intrinsicBorrowApy : undefined,
-            };
-
-            console.log(`Market data for ${token.symbol}:`, marketData);
-
+            if (!isCurrent()) return;
             setMarketsData((prev) => ({
               ...prev,
               [tokenMarketKey]: marketData,
             }));
           } else {
-            // Handle case where market info couldn't be fetched
             setMarketsData((prev) => ({
               ...prev,
               [tokenMarketKey]: {
@@ -819,7 +901,11 @@ export const useOnDemandMarketData = ({
             }));
           }
         } catch (error) {
-          console.error(`Error loading market data for ${tokenMarketKey}:`, error);
+          if (!isCurrent()) return;
+          console.error(
+            `Error loading market data for ${tokenMarketKey}:`,
+            error
+          );
           setMarketsData((prev) => ({
             ...prev,
             [tokenMarketKey]: {
@@ -831,39 +917,340 @@ export const useOnDemandMarketData = ({
             },
           }));
         } finally {
+          if (isCurrent()) {
+            setLoadingMarkets((prev) => {
+              const newSet = new Set(prev);
+              newSet.delete(tokenMarketKey);
+              return newSet;
+            });
+          }
+        }
+      }
+    },
+    [tokens, currentNetwork, throttleMs, buildOnDemandRow]
+  );
+
+  /**
+   * Hydrate the markets table from a single bulk API response, then gap-fill
+   * any missing rows with capped concurrency.
+   */
+  const hydrateMarkets = useCallback(
+    async (opts?: { bypassCache?: boolean }) => {
+      const bypassCache = opts?.bypassCache ?? false;
+      if (tokens.length === 0) return;
+
+      const keys = tokens.map((t) => marketRowCacheKey(t));
+      if (!bypassCache) {
+        const allFresh = keys.every((k) => {
+          const d = marketsDataRef.current[k];
+          return (
+            d?.isLoaded === true &&
+            d.lastFetched != null &&
+            Date.now() - d.lastFetched < throttleMs
+          );
+        });
+        if (allFresh) return;
+      }
+
+      // Supersede any in-flight hydrate / per-market loads for this network.
+      const epoch = ++marketsDataEpochRef.current;
+      const isCurrent = () => marketsDataEpochRef.current === epoch;
+
+      setLoadingMarkets((prev) => {
+        const next = new Set(prev);
+        for (const k of keys) {
+          if (bypassCache || !marketsDataRef.current[k]?.isLoaded) {
+            next.add(k);
+          }
+        }
+        return next;
+      });
+
+      try {
+        // Instant remount: paint last session snapshot while the bulk GET is in flight.
+        if (!bypassCache) {
+          const sessionCached = readMarketsSessionCache(currentNetwork);
+          if (sessionCached && Object.keys(sessionCached).length > 0) {
+            if (!isCurrent()) return;
+            setMarketsData((prev) => ({ ...prev, ...sessionCached }));
+            setLoadingMarkets((prev) => {
+              const next = new Set(prev);
+              for (const k of Object.keys(sessionCached)) next.delete(k);
+              return next;
+            });
+          }
+        }
+
+        let bulkMap: Map<string, MarketData> | null = null;
+        try {
+          bulkMap = await fetchBulkApiMarketDataMap(currentNetwork);
+        } catch (e) {
+          console.warn(
+            "Bulk market-data fetch failed; falling back to per-market loads",
+            e
+          );
+        }
+        if (!isCurrent()) return;
+
+        const gapFillTokens: (typeof tokens)[0][] = [];
+        type RefineJob = {
+          token: (typeof tokens)[0];
+          raw: MarketData;
+          tokenPoolId: string;
+          marketId: string;
+          tokenMarketKey: string;
+        };
+        const refineJobs: RefineJob[] = [];
+        const phaseAUpdates: Record<string, OnDemandMarketData> = {};
+
+        // Phase A: CPU-only build from bulk API (no oracle / Folks RPC) → paint ASAP.
+        for (const token of tokens) {
+          if (!isCurrent()) return;
+
+          const tokenMarketKey = marketRowCacheKey(token);
+          const existing = marketsDataRef.current[tokenMarketKey];
+          if (
+            !bypassCache &&
+            existing?.isLoaded &&
+            existing.lastFetched != null &&
+            Date.now() - existing.lastFetched < throttleMs
+          ) {
+            continue;
+          }
+
+          const marketId =
+            token.underlyingContractId ||
+            token.underlyingAssetId ||
+            token.originalContractId;
+          const tokenPoolId = token.poolId;
+
+          if (!tokenPoolId || !marketId) {
+            phaseAUpdates[tokenMarketKey] = {
+              ...(existing ?? ({} as OnDemandMarketData)),
+              asset: token.symbol,
+              isLoading: false,
+              isLoaded: true,
+              error: "No pool ID configured for this token",
+              lastFetched: Date.now(),
+            };
+            continue;
+          }
+
+          const raw = bulkMap?.get(marketDataLookupKey(tokenPoolId, marketId));
+          if (!raw) {
+            gapFillTokens.push(token);
+            continue;
+          }
+
+          try {
+            const marketInfo = await buildMarketInfoFromRawMarketData(
+              raw,
+              String(tokenPoolId),
+              String(marketId),
+              currentNetwork,
+              { applyOracle: false }
+            );
+            if (!isCurrent()) return;
+            if (!marketInfo) {
+              gapFillTokens.push(token);
+              continue;
+            }
+            phaseAUpdates[tokenMarketKey] = await buildOnDemandRow(
+              token,
+              marketInfo,
+              String(tokenPoolId),
+              { deferExtras: true }
+            );
+            if (!isCurrent()) return;
+            refineJobs.push({
+              token,
+              raw,
+              tokenPoolId: String(tokenPoolId),
+              marketId: String(marketId),
+              tokenMarketKey,
+            });
+          } catch (error) {
+            console.error(
+              `Error hydrating market ${tokenMarketKey} from bulk (phase A):`,
+              error
+            );
+            gapFillTokens.push(token);
+          }
+        }
+
+        if (!isCurrent()) return;
+
+        if (Object.keys(phaseAUpdates).length > 0) {
+          const mergedPhaseA = {
+            ...marketsDataRef.current,
+            ...phaseAUpdates,
+          };
+          setMarketsData(mergedPhaseA);
+          writeMarketsSessionCache(currentNetwork, mergedPhaseA);
           setLoadingMarkets((prev) => {
-            const newSet = new Set(prev);
-            newSet.delete(tokenMarketKey);
-            return newSet;
+            const next = new Set(prev);
+            for (const k of Object.keys(phaseAUpdates)) next.delete(k);
+            return next;
+          });
+        }
+
+        // Phase B: refine oracle prices + Folks conversions in the background (non-blocking).
+        if (refineJobs.length > 0) {
+          void runWithConcurrency(
+            refineJobs,
+            MARKET_FETCH_CONCURRENCY,
+            async (job) => {
+              if (!isCurrent()) return;
+              try {
+                const marketInfo = await buildMarketInfoFromRawMarketData(
+                  job.raw,
+                  job.tokenPoolId,
+                  job.marketId,
+                  currentNetwork,
+                  { applyOracle: true }
+                );
+                if (!isCurrent() || !marketInfo) return;
+                const row = await buildOnDemandRow(
+                  job.token,
+                  marketInfo,
+                  job.tokenPoolId,
+                  { deferExtras: false }
+                );
+                if (!isCurrent()) return;
+                setMarketsData((prev) => {
+                  const next = { ...prev, [job.tokenMarketKey]: row };
+                  return next;
+                });
+                writeMarketsSessionCache(currentNetwork, {
+                  ...marketsDataRef.current,
+                  [job.tokenMarketKey]: row,
+                });
+              } catch (error) {
+                console.warn(
+                  `Background oracle/Folks refine failed for ${job.tokenMarketKey}`,
+                  error
+                );
+              }
+            }
+          );
+        }
+
+        // Gap-fill markets missing from the bulk response (capped concurrency).
+        if (gapFillTokens.length > 0) {
+          await runWithConcurrency(
+            gapFillTokens,
+            MARKET_FETCH_CONCURRENCY,
+            async (token) => {
+              if (!isCurrent()) return;
+              const tokenMarketKey = marketRowCacheKey(token);
+              const marketId =
+                token.underlyingContractId ||
+                token.underlyingAssetId ||
+                token.originalContractId;
+              const tokenPoolId = token.poolId;
+              if (!tokenPoolId || !marketId) return;
+
+              try {
+                const marketInfo = await fetchMarketInfo(
+                  String(tokenPoolId),
+                  String(marketId),
+                  currentNetwork,
+                  bypassCache ? "contract" : "api"
+                );
+                if (!isCurrent()) return;
+                if (marketInfo) {
+                  const row = await buildOnDemandRow(
+                    token,
+                    marketInfo,
+                    String(tokenPoolId)
+                  );
+                  if (!isCurrent()) return;
+                  setMarketsData((prev) => ({
+                    ...prev,
+                    [tokenMarketKey]: row,
+                  }));
+                } else {
+                  setMarketsData((prev) => ({
+                    ...prev,
+                    [tokenMarketKey]: {
+                      ...prev[tokenMarketKey],
+                      isLoading: false,
+                      isLoaded: true,
+                      error: "Failed to load market data",
+                      lastFetched: Date.now(),
+                    },
+                  }));
+                }
+              } catch (error) {
+                if (!isCurrent()) return;
+                console.error(
+                  `Error gap-filling market ${tokenMarketKey}:`,
+                  error
+                );
+                setMarketsData((prev) => ({
+                  ...prev,
+                  [tokenMarketKey]: {
+                    ...prev[tokenMarketKey],
+                    isLoading: false,
+                    isLoaded: true,
+                    error:
+                      error instanceof Error
+                        ? error.message
+                        : "Unknown error",
+                    lastFetched: Date.now(),
+                  },
+                }));
+              } finally {
+                if (isCurrent()) {
+                  setLoadingMarkets((prev) => {
+                    const next = new Set(prev);
+                    next.delete(tokenMarketKey);
+                    return next;
+                  });
+                }
+              }
+            }
+          );
+        }
+      } finally {
+        if (isCurrent()) {
+          setLoadingMarkets((prev) => {
+            const next = new Set(prev);
+            for (const k of keys) next.delete(k);
+            return next;
           });
         }
       }
     },
-    [
-      tokens,
-      currentNetwork,
-      loadingMarkets,
-      marketsData,
-      throttleMs,
-      liveIntrinsicSupplyApy,
-    ]
+    [tokens, currentNetwork, throttleMs, buildOnDemandRow]
   );
 
-  // Load market data for visible markets
+  // Auto-hydrate once tokens are ready for the current network.
+  useEffect(() => {
+    if (!autoLoad) return;
+    if (tokens.length === 0) return;
+    void hydrateMarkets();
+    // Intentionally keyed on network + token set, not hydrateMarkets identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoLoad, currentNetwork, tokens]);
+
+  // Load market data for visible markets (progressive / page change)
   const loadVisibleMarkets = useCallback(
     (visibleMarketKeys: string[]) => {
       if (!autoLoad) return;
 
-      visibleMarketKeys.forEach((marketKey) => {
-        if (
-          !marketsData[marketKey]?.isLoaded &&
-          !loadingMarkets.has(marketKey)
-        ) {
-          loadMarketData(marketKey);
-        }
+      const toLoad = visibleMarketKeys.filter(
+        (marketKey) =>
+          !marketsDataRef.current[marketKey]?.isLoaded &&
+          !loadingMarketsRef.current.has(marketKey)
+      );
+      if (toLoad.length === 0) return;
+
+      void runWithConcurrency(toLoad, MARKET_FETCH_CONCURRENCY, async (key) => {
+        await loadMarketData(key);
       });
     },
-    [autoLoad, marketsData, loadingMarkets, loadMarketData]
+    [autoLoad, loadMarketData]
   );
 
   // Convert markets data to array format (include _sortKey for stable tie-breaking)
@@ -1108,14 +1495,19 @@ export const useOnDemandMarketData = ({
     [loadMarketData]
   );
 
-  // Load all markets (for cases where you want to preload everything)
-  const loadAllMarkets = useCallback(() => {
-    Object.keys(marketsData).forEach((marketKey) => {
-      if (!loadingMarkets.has(marketKey)) {
-        loadMarketData(marketKey);
-      }
-    });
-  }, [marketsData, loadingMarkets, loadMarketData]);
+  const isLoadingVisible = useMemo(() => {
+    return paginatedData.some(
+      (m) => m._sortKey != null && loadingMarkets.has(m._sortKey)
+    );
+  }, [paginatedData, loadingMarkets]);
+
+  // Load all markets via bulk hydrate (refresh / admin).
+  const loadAllMarkets = useCallback(
+    (bypassCache = false) => {
+      return hydrateMarkets({ bypassCache });
+    },
+    [hydrateMarkets]
+  );
 
   return {
     data: paginatedData,
@@ -1129,7 +1521,9 @@ export const useOnDemandMarketData = ({
     loadMarketDataWithBypass,
     loadVisibleMarkets,
     loadAllMarkets,
+    hydrateMarkets,
     isLoading: loadingMarkets.size > 0,
+    isLoadingVisible,
     marketsData,
     wadMintMarket,
     newMarketsCount,

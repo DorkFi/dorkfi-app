@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
+import { haystackProxyPlugin } from "./vite/haystackProxyPlugin";
 
 const GOVERNANCE_RAILWAY =
   "https://dorkfi-governance-node-production.up.railway.app";
@@ -13,6 +14,8 @@ export default defineConfig(({ mode }) => {
     env.VITE_GOVERNANCE_LOCAL_TARGET || "http://127.0.0.1:8787";
   const governanceNgrokTarget =
     env.VITE_GOVERNANCE_NGROK_TARGET || "http://127.0.0.1:8787";
+  const xShareLocalTarget =
+    env.VITE_X_SHARE_LOCAL_TARGET || "http://127.0.0.1:8788";
 
   return {
   server: {
@@ -47,10 +50,16 @@ export default defineConfig(({ mode }) => {
           });
         },
       },
+      "/api/x-share": {
+        target: xShareLocalTarget,
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/api\/x-share/, "") || "/",
+      },
     },
   },
   plugins: [
     react(),
+    haystackProxyPlugin(env),
     mode === 'development' &&
     componentTagger(),
   ].filter(Boolean),

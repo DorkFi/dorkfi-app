@@ -16,6 +16,8 @@ interface GovernanceDashboardCardProps {
   selectedStatus: ProposalStatus | "all";
   onStatusChange: (status: ProposalStatus | "all") => void;
   userVoterInfo?: Voter | null;
+  sourceTab: "onchain" | "api";
+  onSourceTabChange: (tab: "onchain" | "api") => void;
 }
 
 export const GovernanceDashboardCard = ({
@@ -23,6 +25,8 @@ export const GovernanceDashboardCard = ({
   selectedStatus,
   onStatusChange,
   userVoterInfo,
+  sourceTab,
+  onSourceTabChange,
 }: GovernanceDashboardCardProps) => {
   const statuses: (ProposalStatus | "all")[] = ["all", "active", "passed", "rejected"];
   const nftBoostEnabled = isFeatureEnabled("enableNFTBoost");
@@ -148,18 +152,38 @@ export const GovernanceDashboardCard = ({
 
       {!nftBoostEnabled && <Separator className="my-4" />}
 
-      {/* Status Filter */}
-      <div className="space-y-2">
-        <label className="text-sm font-medium text-foreground">Filter by Status</label>
-        <Tabs value={selectedStatus} onValueChange={(v) => onStatusChange(v as ProposalStatus | "all")}>
-          <TabsList className="grid w-full grid-cols-2 md:grid-cols-4">
-            {statuses.map((status) => (
-              <TabsTrigger key={status} value={status} className="text-xs md:text-sm">
-                {status === "all" ? "All" : status.charAt(0).toUpperCase() + status.slice(1)}
+      {/* Source + Status Filter */}
+      <div className="space-y-3">
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-foreground">Proposal source</label>
+          <Tabs
+            value={sourceTab}
+            onValueChange={(v) => onSourceTabChange(v as "onchain" | "api")}
+          >
+            <TabsList className="grid w-full grid-cols-2 h-auto min-h-10 p-1 gap-1">
+              <TabsTrigger value="onchain" className="text-xs md:text-sm">
+                Live
               </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
+              <TabsTrigger value="api" className="text-xs md:text-sm">
+                Archives
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
+        {sourceTab === "onchain" ? (
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-foreground">Filter by status</label>
+            <Tabs value={selectedStatus} onValueChange={(v) => onStatusChange(v as ProposalStatus | "all")}>
+              <TabsList className="grid w-full grid-cols-2 md:grid-cols-4">
+                {statuses.map((status) => (
+                  <TabsTrigger key={status} value={status} className="text-xs md:text-sm">
+                    {status === "all" ? "All" : status.charAt(0).toUpperCase() + status.slice(1)}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
+          </div>
+        ) : null}
       </div>
     </DorkFiCard>
   );

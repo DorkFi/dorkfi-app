@@ -2,29 +2,43 @@
  * Updates transaction metadata immediately after confirmation
  * This is a non-blocking optimization - failures are logged but don't throw
  * The background task will eventually pick up the transaction if this fails
- * 
+ *
  * @param txId - The transaction ID to fetch and store
  * @param network - Network identifier (e.g., 'algorand-mainnet', 'voi-mainnet'). Optional but recommended for faster lookups.
  * @returns Promise that resolves when metadata is updated (or fails silently)
  */
+
+/** Rounds to poll algod after submit. 4 is too tight when the broadcast node lags Pera. */
+export const TX_CONFIRMATION_WAIT_ROUNDS = 16;
+
+const METADATA_FETCH_TIMEOUT_MS = 15_000;
+
+function postTransactionMetadata(
+  txId: string,
+  network?: string
+): Promise<Response> {
+  const apiBaseUrl =
+    import.meta.env.VITE_DORKFI_API_URL || "https://dorkfi-api.nautilus.sh";
+  const networkParam = network ? `?network=${network}` : "";
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), METADATA_FETCH_TIMEOUT_MS);
+  return fetch(`${apiBaseUrl}/transaction-metadata/${txId}${networkParam}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    signal: controller.signal,
+  }).finally(() => {
+    clearTimeout(timer);
+  });
+}
+
 export const updateTransactionMetadata = async (
   txId: string,
   network?: string
 ): Promise<void> => {
   try {
-    const apiBaseUrl =
-      import.meta.env.VITE_DORKFI_API_URL || "https://dorkfi-api.nautilus.sh";
-    const networkParam = network ? `?network=${network}` : "";
-
-    const response = await fetch(
-      `${apiBaseUrl}/transaction-metadata/${txId}${networkParam}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }
-    );
+    const response = await postTransactionMetadata(txId, network);
 
     if (!response.ok) {
       const error = await response.json();
@@ -46,7 +60,7 @@ export const updateTransactionMetadata = async (
 /**
  * Updates transaction metadata with retry logic until it succeeds
  * Retries with exponential backoff until the update is successful
- * 
+ *
  * @param txId - The transaction ID to fetch and store
  * @param network - Network identifier (e.g., 'algorand-mainnet', 'voi-mainnet'). Optional but recommended for faster lookups.
  * @param maxRetries - Maximum number of retries (default: 10)
@@ -59,21 +73,9 @@ export const updateTransactionMetadataWithRetry = async (
   maxRetries: number = 10,
   initialDelay: number = 1000
 ): Promise<void> => {
-  const apiBaseUrl =
-    import.meta.env.VITE_DORKFI_API_URL || "https://dorkfi-api.nautilus.sh";
-  const networkParam = network ? `?network=${network}` : "";
-
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      const response = await fetch(
-        `${apiBaseUrl}/transaction-metadata/${txId}${networkParam}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-        }
-      );
+      const response = await postTransactionMetadata(txId, network);
 
       if (!response.ok) {
         const error = await response.json();
@@ -85,7 +87,7 @@ export const updateTransactionMetadataWithRetry = async (
       return; // Success, exit retry loop
     } catch (error) {
       const isLastAttempt = attempt === maxRetries - 1;
-      
+
       if (isLastAttempt) {
         console.error(
           `Transaction metadata update failed after ${maxRetries} attempts:`,
@@ -107,3 +109,15 @@ export const updateTransactionMetadataWithRetry = async (
   }
 };
 
+/**
+ * Kick off metadata indexing without blocking the confirmation UI.
+ * Empty / missing ids are ignored.
+ */
+export function scheduleTransactionMetadataUpdate(
+  txId: string | null | undefined,
+  network?: string
+): void {
+  const id = typeof txId === "string" ? txId.trim() : "";
+  if (!id) return;
+  void updateTransactionMetadataWithRetry(id, network);
+}

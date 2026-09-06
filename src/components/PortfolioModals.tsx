@@ -54,9 +54,11 @@ import algosdk, { waitForConfirmation } from "algosdk";
 import BigNumber from "bignumber.js";
 import { getTokenImagePath } from "@/utils/tokenImageUtils";
 import { useToast } from "@/hooks/use-toast";
-import { getUserFriendlyError } from "@/utils/errorUtils";
 import dorkfiAPIService from "@/services/dorkfiAPIService";
-import { updateTransactionMetadata } from "@/utils/transactionUtils";
+import {
+  TX_CONFIRMATION_WAIT_ROUNDS,
+  scheduleTransactionMetadataUpdate,
+} from "@/utils/transactionUtils";
 import { CONTRACT } from "ulujs";
 import {
   APP_SPEC as LendingPoolAppSpec,
@@ -68,8 +70,9 @@ import {
   liquidationThresholdToPercent,
 } from "@/utils/poolCollateralMarketRows";
 import { marketRowForPortfolioPosition } from "@/utils/marketRowForPortfolioPosition";
+import { usdPerTokenFromPortfolioMarketRow } from "@/utils/assetDecimals";
 import { portfolioWalletBalanceCacheKey } from "@/utils/portfolioWalletBalanceCacheKey";
-import { warmWithdrawModalRpc } from "@/utils/modalPrefetch";
+import { warmWithdrawModalRpc } from "@/utils/modalPrefetchHeavy";
 import { withRainbowkitHostDialogDismissed } from "@/wallet/xchainSignUi";
 
 /**
@@ -788,36 +791,31 @@ const PortfolioModals = ({
     // Use the deposit's network so we get the correct token config (e.g. 8 decimals for goBTC on Algorand)
     // and match the Supplied Assets table USD value.
     const depositNetwork = depositAny?.network || currentNetwork;
-    let tokenPrice = deposit?.tokenPrice || 1;
-    if (market?.price) {
-      try {
-        // Get token config from the deposit's network (not currentNetwork)
-        const tokens = getAllTokensWithDisplayInfo(depositNetwork);
-        const token = resolveSupplyBorrowToken(
-          tokens,
-          asset,
-          poolId,
-          (depositAny as { configSymbol?: string })?.configSymbol,
-          marketId
-        );
-
-        const tokenDecimals = token?.decimals ?? 6; // Default to 6 if not found
-
-        // Oracle stores price in 12-decimal scale; convert to human price using token decimals
-        const targetAdjustment = 12 - tokenDecimals;
-        const divisor = Math.pow(10, targetAdjustment);
-
-        const price = parseFloat(market.price);
-        if (price && price > 0) {
-          tokenPrice = price / divisor;
-        }
-      } catch (error) {
-        console.error("Error calculating tokenPrice:", error);
-        // Fallback: use deposit.tokenPrice if available, else 10^6 divisor
-        tokenPrice =
-          deposit?.tokenPrice ||
-          parseFloat(market.price) / Math.pow(10, 6);
-      }
+    let tokenPrice = 0;
+    try {
+      const tokens = getAllTokensWithDisplayInfo(depositNetwork);
+      const token = resolveSupplyBorrowToken(
+        tokens,
+        asset,
+        poolId,
+        (depositAny as { configSymbol?: string })?.configSymbol,
+        marketId
+      );
+      const tokenDecimals = token?.decimals ?? 6;
+      tokenPrice = usdPerTokenFromPortfolioMarketRow(market, tokenDecimals, {
+        displaySymbol: asset,
+      });
+    } catch (error) {
+      console.error("Error calculating tokenPrice:", error);
+    }
+    if (!(tokenPrice > 0)) {
+      const fromDeposit = deposit?.tokenPrice;
+      tokenPrice =
+        typeof fromDeposit === "number" &&
+        Number.isFinite(fromDeposit) &&
+        fromDeposit > 0
+          ? fromDeposit
+          : 0;
     }
 
     // Safely resolve APY - avoid NaN when rates are undefined
@@ -1048,6 +1046,39 @@ const PortfolioModals = ({
       return Number.isFinite(n) && n >= 0 ? n : undefined;
     };
 
+    // Same oracle-aware USD/token path as Portfolio — never invent $1 or hardcode ÷1e6.
+    const borrowNetwork =
+      (borrow as { network?: string } | undefined)?.network || currentNetwork;
+    let tokenPrice = 0;
+    try {
+      const tokens = getAllTokensWithDisplayInfo(borrowNetwork as NetworkId);
+      const token = resolveSupplyBorrowToken(
+        tokens,
+        asset,
+        poolId,
+        (borrow as { configSymbol?: string } | undefined)?.configSymbol,
+        marketId
+      );
+      const tokenDecimals = token?.decimals ?? 6;
+      tokenPrice = usdPerTokenFromPortfolioMarketRow(market, tokenDecimals, {
+        displaySymbol: asset,
+      });
+    } catch (error) {
+      console.error(
+        "[PortfolioModals] getMarketStatsForBorrow tokenPrice:",
+        error
+      );
+    }
+    if (!(tokenPrice > 0)) {
+      const fromBorrow = borrow?.tokenPrice;
+      tokenPrice =
+        typeof fromBorrow === "number" &&
+        Number.isFinite(fromBorrow) &&
+        fromBorrow > 0
+          ? fromBorrow
+          : 0;
+    }
+
     const stats = {
       borrowAPY:
         market?.borrowApyCalculation?.apy ||
@@ -1057,9 +1088,7 @@ const PortfolioModals = ({
       liquidationMargin: liquidationMargin,
       healthFactor: healthFactor,
       currentLTV: currentLTV,
-      tokenPrice: market?.price
-        ? parseFloat(market.price) / Math.pow(10, 6)
-        : borrow?.tokenPrice || 1,
+      tokenPrice,
       collateralFactor: market?.collateralFactor
         ? market.collateralFactor * 100
         : undefined,
@@ -1506,7 +1535,11 @@ const PortfolioModals = ({
             algorandNetwork
           );
         const res = await algorandClients.algod.sendRawTransaction(stxns).do();
-        await waitForConfirmation(algorandClients.algod, res.txid, 4);
+        await waitForConfirmation(
+          algorandClients.algod,
+          res.txid,
+          TX_CONFIRMATION_WAIT_ROUNDS
+        );
 
         const decodedStxns = stxns.map((txn: Uint8Array) =>
           algosdk.decodeSignedTransaction(txn)
@@ -1517,64 +1550,12 @@ const PortfolioModals = ({
           .find(
             (txn: any) =>
               txn.txn.type === "appl" &&
-              Number(txn.txn.applicationCall.appIndex) ===
+              Number(txn.txn.applicationCall?.appIndex) ===
                 parseInt(built.poolAppId, 10)
           )
           ?.txn.txID();
 
-        if (poolTxnID) {
-          await new Promise((resolve) => setTimeout(resolve, 5000));
-          let metadataUpdated = false;
-          let retryCount = 0;
-          const maxRetries = 10;
-          const apiBaseUrl =
-            import.meta.env.VITE_DORKFI_API_URL ||
-            "https://dorkfi-api.nautilus.sh";
-          const networkParam = networkToUse ? `?network=${networkToUse}` : "";
-
-          while (!metadataUpdated && retryCount < maxRetries) {
-            try {
-              const response = await fetch(
-                `${apiBaseUrl}/transaction-metadata/${poolTxnID}${networkParam}`,
-                {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                  },
-                }
-              );
-
-              if (response.ok) {
-                const metaResult = await response.json();
-                console.log(
-                  "Transaction metadata successfully updated:",
-                  metaResult.data
-                );
-                metadataUpdated = true;
-              } else {
-                const error = await response.json();
-                throw new Error(
-                  error.error || "Failed to update transaction metadata"
-                );
-              }
-            } catch (error) {
-              retryCount++;
-              if (retryCount < maxRetries) {
-                const delay = 1000 * Math.pow(2, retryCount - 1);
-                console.warn(
-                  `Metadata update attempt ${retryCount} failed, retrying in ${delay}ms:`,
-                  error
-                );
-                await new Promise((resolve) => setTimeout(resolve, delay));
-              } else {
-                console.error(
-                  "Failed to update transaction metadata after all retries:",
-                  error
-                );
-              }
-            }
-          }
-        }
+        scheduleTransactionMetadataUpdate(poolTxnID ?? res.txid, networkToUse);
 
         if (onRefreshWalletBalance && withdrawModal.asset) {
           onRefreshWalletBalance(withdrawModal.asset);
@@ -1954,7 +1935,11 @@ const PortfolioModals = ({
         await algorandService.initializeClientsForTransactions(algorandNetwork);
       const res = await algorandClients.algod.sendRawTransaction(stxns).do();
 
-      await waitForConfirmation(algorandClients.algod, res.txid, 4);
+      await waitForConfirmation(
+        algorandClients.algod,
+        res.txid,
+        TX_CONFIRMATION_WAIT_ROUNDS
+      );
 
       // Decode transactions to find the pool transaction ID
       const decodedStxns = stxns.map((txn: Uint8Array) => {
@@ -1965,63 +1950,10 @@ const PortfolioModals = ({
         .find(
           (txn: any) =>
             txn.txn.type === "appl" &&
-            Number(txn.txn.applicationCall.appIndex) === parseInt(token.poolId)
+            Number(txn.txn.applicationCall?.appIndex) === parseInt(token.poolId)
         )
         ?.txn.txID();
-      if (poolTxnID) {
-        await new Promise((resolve) => setTimeout(resolve, 5000));
-        // Retry until metadata update succeeds
-        let metadataUpdated = false;
-        let retryCount = 0;
-        const maxRetries = 10;
-        const apiBaseUrl =
-          import.meta.env.VITE_DORKFI_API_URL ||
-          "https://dorkfi-api.nautilus.sh";
-        const networkParam = networkToUse ? `?network=${networkToUse}` : "";
-
-        while (!metadataUpdated && retryCount < maxRetries) {
-          try {
-            const response = await fetch(
-              `${apiBaseUrl}/transaction-metadata/${poolTxnID}${networkParam}`,
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                },
-              }
-            );
-
-            if (response.ok) {
-              const result = await response.json();
-              console.log(
-                "Transaction metadata successfully updated:",
-                result.data
-              );
-              metadataUpdated = true;
-            } else {
-              const error = await response.json();
-              throw new Error(
-                error.error || "Failed to update transaction metadata"
-              );
-            }
-          } catch (error) {
-            retryCount++;
-            if (retryCount < maxRetries) {
-              const delay = 1000 * Math.pow(2, retryCount - 1); // Exponential backoff
-              console.warn(
-                `Metadata update attempt ${retryCount} failed, retrying in ${delay}ms:`,
-                error
-              );
-              await new Promise((resolve) => setTimeout(resolve, delay));
-            } else {
-              console.error(
-                "Failed to update transaction metadata after all retries:",
-                error
-              );
-            }
-          }
-        }
-      }
+      scheduleTransactionMetadataUpdate(poolTxnID ?? res.txid, networkToUse);
 
       console.log("Repay transaction confirmed:", res);
 
@@ -2069,17 +2001,7 @@ const PortfolioModals = ({
     } catch (error) {
       setRepayRainbowkitOverlaySuppressed(false);
       console.error("Repay error:", error);
-      const errorMessage = getUserFriendlyError(error);
-
-      // Show error toast to the user
-      toast({
-        title: "Repay Failed",
-        description: errorMessage,
-        variant: "destructive",
-        duration: 5000,
-      });
-
-      // Re-throw the error so RepayModal can catch it and not show success modal
+      // Re-throw so RepayModal can toast once (avoids duplicate failure toasts).
       throw error;
     }
   };
@@ -2762,8 +2684,19 @@ const PortfolioModals = ({
                 folksMintedOneUnderlyingByKey?.[repayMintKey]
               }
               repayTokenConfig={tcRepayModal ?? undefined}
+              repayMarketId={
+                repayModal.marketId != null &&
+                String(repayModal.marketId).trim() !== ""
+                  ? String(repayModal.marketId)
+                  : repayTokenRow?.underlyingContractId != null
+                    ? String(repayTokenRow.underlyingContractId)
+                    : undefined
+              }
               xalgoConsensusRepayAlgoOption={xalgoConsensusRepayAlgoOption}
               rainbowkitHostOverlaySuppressed={repayRainbowkitOverlaySuppressed}
+              onRainbowkitHostOverlaySuppressed={
+                setRepayRainbowkitOverlaySuppressed
+              }
             />
           );
         })()}
