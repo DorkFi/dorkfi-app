@@ -69,6 +69,7 @@ Indexed guides for repeatable processes:
 **Frontend architecture and feature deep-dives**
 
 Indexed implementation references (pages, services, cross-network behavior):
+- [Pool & market topology](development/POOL_TOPOLOGY.md): A–F / A–B pool map from config, Markets vs Pools, planned markets
 - [Gas Station](development/GAS_STATION.md): minting flow, `GasStationService`, ARC200/ASA/network tokens on Voi and Algorand
 - [xChain Accounts integration plan](XCHAIN_ACCOUNTS_INTEGRATION_PLAN.md): EVM/xChain wallet integration planning for Voi and Algorand (phases, preconditions, QA)
 
@@ -166,18 +167,19 @@ Recorded checks for withdraw modal (desktop and mobile), supplied/borrowed actio
 
 ### For Developers
 1. **Technical Details**: Review [PreFi documentation](prefi/index.md) and [APY Estimation Strategy](prefi/APY_ESTIMATION.md) for calculation methods
-2. **Version Control**: Check [Version Management](VERSION_MANAGEMENT.md) for development setup
-3. **Forks & PRs**: See [Workflows](workflows/index.md) for fork and pull-request steps with GitHub CLI
-4. **Feature deep-dives**: See [Development documentation](development/index.md) for architecture guides (e.g. Gas Station)
-5. **Token Standards**: Review [ARC200 Exchange Extension](ARC200_EXCHANGE.md) for token exchange specifications
-6. **Claim Setup**: Follow [Claim setup (workflow)](workflows/SETUP_NEW_CLAIM.md) to configure reward claims
-7. **Transaction Updates**: Review [Transaction Metadata Integration](TRANSACTION_METADATA.md) for real-time state updates
-8. **Governance**: Read the [Governance User Guide](governance/GOVERNANCE_USER_GUIDE.md) (see [Governance documentation](governance/index.md)); to add a category, use [Adding a governance proposal category](workflows/ADD_PROPOSAL_CATEGORY_TO_GOVERNANCE.md)
-9. **Achievements**: See [Achievements guide](achievements/ACHIEVEMENTS.md) (see [Achievements documentation](achievements/index.md)) for JSON data, catalog families, and portfolio UI
-10. **Health Factor**: See [Health Factor Calculation](HEALTH_FACTOR_CALCULATION.md) for position safety math
-11. **Asset Decimals & Withdraw Value**: See [Asset Decimals and Display](ASSET_DECIMALS_AND_DISPLAY.md) for balance/amount formatting and withdraw modal USD consistency
-12. **Withdraw flow QA**: See [Portfolio Withdraw Flow – Verification](PORTFOLIO_WITHDRAW_FLOW_VERIFICATION.md) for the recorded verification pass
-13. **Codebase**: Explore the React/TypeScript frontend implementation
+2. **Pool topology**: See [Pool & market topology](development/POOL_TOPOLOGY.md) for live A–F / A–B markets and planned expansions
+3. **Version Control**: Check [Version Management](VERSION_MANAGEMENT.md) for development setup
+4. **Forks & PRs**: See [Workflows](workflows/index.md) for fork and pull-request steps with GitHub CLI
+5. **Feature deep-dives**: See [Development documentation](development/index.md) for architecture guides (e.g. Gas Station)
+6. **Token Standards**: Review [ARC200 Exchange Extension](ARC200_EXCHANGE.md) for token exchange specifications
+7. **Claim Setup**: Follow [Claim setup (workflow)](workflows/SETUP_NEW_CLAIM.md) to configure reward claims
+8. **Transaction Updates**: Review [Transaction Metadata Integration](TRANSACTION_METADATA.md) for real-time state updates
+9. **Governance**: Read the [Governance User Guide](governance/GOVERNANCE_USER_GUIDE.md) (see [Governance documentation](governance/index.md)); to add a category, use [Adding a governance proposal category](workflows/ADD_PROPOSAL_CATEGORY_TO_GOVERNANCE.md)
+10. **Achievements**: See [Achievements guide](achievements/ACHIEVEMENTS.md) (see [Achievements documentation](achievements/index.md)) for JSON data, catalog families, and portfolio UI
+11. **Health Factor**: See [Health Factor Calculation](HEALTH_FACTOR_CALCULATION.md) for position safety math
+12. **Asset Decimals & Withdraw Value**: See [Asset Decimals and Display](ASSET_DECIMALS_AND_DISPLAY.md) for balance/amount formatting and withdraw modal USD consistency
+13. **Withdraw flow QA**: See [Portfolio Withdraw Flow – Verification](PORTFOLIO_WITHDRAW_FLOW_VERIFICATION.md) for the recorded verification pass
+14. **Codebase**: Explore the React/TypeScript frontend implementation
 
 ## Key Features
 
