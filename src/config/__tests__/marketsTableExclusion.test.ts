@@ -78,4 +78,16 @@ describe("markets table Pool C exclusion", () => {
       )
     ).toBe(true);
   });
+
+  it("never surfaces TMPOOL2 / LP_TMPOOL2_* on the Markets table token list (dorkfi-app#651)", () => {
+    const visible = getMarketsTableVisibleTokensWithDisplayInfo(
+      "algorand-mainnet"
+    );
+    expect(visible.some((token) => token.symbol === "TMPOOL2")).toBe(false);
+    expect(
+      visible.some((token) =>
+        String(token.configKey ?? "").startsWith("LP_TMPOOL2_")
+      )
+    ).toBe(false);
+  });
 });
