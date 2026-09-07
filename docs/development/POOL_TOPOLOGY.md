@@ -30,7 +30,7 @@ On Algorand prod, specialty risk is split across **C–F** (not only a single �
 
 ## Algorand Mainnet — live topology
 
-Pool constants (`algorandProdAMarket` … `algorandProdFMarket`):
+Pool constants (`algorandProdAMarket` … `algorandProdGMarket`):
 
 | Pool | App ID | Role (config comment) | Primary UI |
 |------|--------|------------------------|------------|
@@ -40,15 +40,19 @@ Pool constants (`algorandProdAMarket` … `algorandProdFMarket`):
 | **D** | `3526240577` | D Folks Markets | Markets |
 | **E** | `3585829377` | WAD Pair LPs | Pools (LP); WAD on Markets |
 | **F** | `3589083110` | USDC Pair LPs | Pools (LP); WAD on Markets |
+| **G** | `3697602173` | USDC-only (deposit + borrow) | Markets (when nToken ID ready) |
 
 `algorandProdCLendingPools` = **C + E + F** (LP lending group).  
 Shared WAD sToken: `3333688448`. Oracle / controller / beacon / governance IDs live on `algorandProdContracts`.
+
+**Pool G readiness:** Pool app id is set (`3697602173`); `algorandProdGUsdcNTokenId` is still TBD. `isAlgorandProdGReady` is true only when both are numeric; until then G is **not** appended to `lendingPools`, `USDC[]`, or `marketLabelMap` (avoids NaN app-id RPC calls). Replace the TBD nToken string in `src/config/index.ts` to activate.
 
 **Visibility rules**
 
 - C / E / F pool IDs are in `MARKETS_TABLE_EXCLUDED_POOL_IDS`.
 - Exception: **WAD** borrow rows on those pools still appear on Markets / Portfolio.
 - `LP_TMPOOL2_*` rows are intended for the **Pools** surface (`features.enablePools: true`; `enablePoolDepositWithdraw: false` today).
+- **G** is a normal Markets pool (not excluded) once enabled — single USDC ASA market (`contractId` `3210682240`).
 
 ### Pool A — Prime (`3333688282`)
 
@@ -127,6 +131,14 @@ Currently sparse relative to the “Folks Markets” label:
 | LP_TMPOOL2_HAY_USDC | HAY–USDC | `3589032117` |
 | LP_TMPOOL2_ALPHA_USDC | ALPHA–USDC | `3589036846` |
 
+### Pool G — USDC-only (`3697602173`)
+
+Pool id live; inactive in UI until USDC nToken id is numeric.
+
+| Key | Role | Market contract | nToken |
+|-----|------|-----------------|--------|
+| USDC | Deposit + borrow (Markets) | `3210682240` (same underlying as A/B) | `TBD_ALGORAND_PROD_G_USDC_NTOKEN` |
+
 Tinyman pair metadata for the Pools UI also lives in `src/constants/liquidityPools.ts` (`CURATED_LIQUIDITY_POOLS`).
 
 ---
@@ -160,6 +172,7 @@ Items below are **not** fully live or are incomplete in config. Treat as directi
 
 | Item | Intent | Status in repo |
 |------|--------|----------------|
+| **Pool G USDC** | Isolated USDC deposit/borrow on Algorand | Pool `3697602173` set; `algorandProdGUsdcNTokenId` still TBD — auto-wires when nToken ID is numeric |
 | **Pool D Folks expansion** | Broader Folks-wrapped / isolated assets on D | Label + pool live; only fALGO, fUSDC, WAD configured |
 | **Additional C/E/F LP markets** | More Tinyman TMPOOL2 pairs as LP collateral → WAD | Pattern established; new rows need token config + `liquidityPools` + borrow helpers |
 | **Pool deposit / withdraw on Pools page** | Direct LP market supply UX | `enablePoolDepositWithdraw: false` |
@@ -178,7 +191,8 @@ Keep letter semantics stable as new pools land:
 | **D** | Folks (and similar) isolated / bridged credit |
 | **E** | WAD-base LP collateral markets |
 | **F** | USDC-base LP collateral markets |
-| **G+** | Next specialty or chain-local isolation buckets (assign via `lendingPools` order + `marketLabelMap`) |
+| **G** | USDC-only isolated deposit/borrow (pool `3697602173`; nToken TBD) |
+| **H+** | Next specialty or chain-local isolation buckets (assign via `lendingPools` order + `marketLabelMap`) |
 
 ### Multichain (placeholders only)
 
@@ -213,7 +227,7 @@ Do not invent pool app IDs in this doc until they land in `src/config/index.ts`.
 
 | Concern | Location in `src/config/index.ts` |
 |---------|-------------------------------------|
-| Algorand pool IDs A–F | `algorandProdAMarket` … `algorandProdFMarket` |
+| Algorand pool IDs A–G | `algorandProdAMarket` … `algorandProdGMarket` (+ `algorandProdGUsdcNTokenId`, `isAlgorandProdGReady`) |
 | Algorand token rows | `algorandProdTokens` |
 | VOI pool IDs / tokens | `prodAMarket`, `prodBMarket`, `prodTokens` |
 | Letter map | `marketLabelMap`, `getMarketLabel` |

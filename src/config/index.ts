@@ -2121,6 +2121,12 @@ const algorandProdCMarket = "3578814346"; // C UNIT Pair LPs
 const algorandProdDMarket = "3526240577"; // D Folks Markets
 const algorandProdEMarket = "3585829377"; // C WAD Pair LPs
 const algorandProdFMarket = "3589083110"; // C USDC Pair LPs
+/** G USDC-only — pool live; replace TBD nToken with deployed USDC nToken app id to activate. */
+const algorandProdGMarket = "3697602173";
+const algorandProdGUsdcNTokenId = "3697694182";
+/** Pool G is omitted from live `lendingPools` / token rows until both ids are numeric. */
+const isAlgorandProdGReady =
+  /^\d+$/.test(algorandProdGMarket) && /^\d+$/.test(algorandProdGUsdcNTokenId);
 const algorandProdPriceOracle = "3333688500";
 const algorandProdLiquidationEngine = undefined;
 const algorandProdTreasury = undefined;
@@ -2138,7 +2144,7 @@ const algorandProdGovernance = {
   powerMultipliers: [],
 }
 
-// A, B, C, D lending pools on prod
+// A–F live; G appends when {@link isAlgorandProdGReady}
 const algorandProdLendingPools = [
   algorandProdAMarket,
   algorandProdBMarket,
@@ -2146,6 +2152,7 @@ const algorandProdLendingPools = [
   algorandProdDMarket,
   algorandProdEMarket,
   algorandProdFMarket,
+  algorandProdGMarket,
 ];
 const algorandProdCLendingPools = [
   algorandProdCMarket,
@@ -2369,7 +2376,21 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     logoPath: "/lovable-uploads/USDC.webp",
     tokenStandard: "asa",
     dataAddedAt: "2026-03-26T00:00:00.000Z",
-  }],
+  },
+  // Pool G — single USDC deposit/borrow market (wired when isAlgorandProdGReady)
+  {
+    assetId: "31566704",
+    poolId: algorandProdGMarket,
+    contractId: "3210682240",
+    nTokenId: algorandProdGUsdcNTokenId,
+    decimals: 6,
+    name: "USD Coin",
+    symbol: "USDC",
+    logoPath: "/lovable-uploads/USDC.webp",
+    tokenStandard: "asa" as const,
+    dataAddedAt: "2026-09-06T00:00:00.000Z",
+  },
+  ],
   fUSDC: [{
     assetId: "971384592",
     poolId: "3333688282",
@@ -3573,6 +3594,10 @@ export const marketLabelMap: Record<string, string> = {
   "algorand-mainnet-3526240577": "D",
   "algorand-mainnet-3585829377": "E",
   "algorand-mainnet-3589083110": "F",
+  // Pool G (USDC-only) — key updates automatically once algorandProdGMarket is numeric
+  ...(isAlgorandProdGReady
+    ? { [`algorand-mainnet-${algorandProdGMarket}`]: "G" }
+    : {}),
 };
 
 /**
