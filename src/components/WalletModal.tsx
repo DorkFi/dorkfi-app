@@ -19,7 +19,7 @@ import {
 } from "@/config";
 import { getNetworkLogoPath } from "@/utils/tokenImageUtils";
 import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
-import { useEasyStartLogin } from "@/hooks/useEasyStartLogin";
+import { afterOverlayClose, useEasyStartLogin } from "@/hooks/useEasyStartLogin";
 import { cn } from "@/lib/utils";
 
 interface WalletModalProps {
@@ -431,6 +431,7 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose }) => {
     setIsEasyStartLoading(true);
     try {
       onClose();
+      await new Promise<void>((resolve) => afterOverlayClose(resolve));
       await openEasyStartLogin();
     } finally {
       setIsEasyStartLoading(false);

@@ -39,7 +39,7 @@ import SavingsPositionCard, {
 import { useSavingsTransactionHistory } from "@/hooks/useSavingsTransactionHistory";
 import { useSavingsUserPositions } from "@/hooks/useSavingsUserPositions";
 import { useEasyStartModals } from "@/contexts/easyStartModals";
-import { useEasyStartLogin } from "@/hooks/useEasyStartLogin";
+import { afterOverlayClose, useEasyStartLogin } from "@/hooks/useEasyStartLogin";
 import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 import { getExplorerTransactionUrl } from "@/utils/explorerLinks";
 import { isLeveragedWadUsdcRoute } from "@/services/leveragedWadLpService";
@@ -1559,11 +1559,13 @@ const SavingsCard = () => {
         consumerCopy={consumerCopy}
         onWithdrawFromEarn={() => {
           setWithdrawChooserOpen(false);
-          openWithdraw();
+          // Let the chooser Dialog unmount before opening the next one
+          // (Radix overlay can swallow clicks if both are open in the same tick).
+          window.setTimeout(() => openWithdraw(), 200);
         }}
         onCashOut={() => {
           setWithdrawChooserOpen(false);
-          openEasyStartCashOut();
+          window.setTimeout(() => openEasyStartCashOut(), 200);
         }}
       />
 
@@ -1582,7 +1584,7 @@ const SavingsCard = () => {
           networkId={networkId}
           onConnectWallet={() => {
             setDepositOpen(false);
-            openConnect();
+            afterOverlayClose(openConnect);
           }}
           onSuccess={(payload) => {
             if (!route) return;
@@ -1605,7 +1607,7 @@ const SavingsCard = () => {
           isHighYield={isWalletAccount ? false : isHighYield}
           onConnectWallet={() => {
             setDepositOpen(false);
-            openConnect();
+            afterOverlayClose(openConnect);
           }}
           onSuccess={(payload) => {
             const r = isWalletAccount ? usdcRoute : route;
@@ -1629,7 +1631,7 @@ const SavingsCard = () => {
         networkId={networkId}
         onConnectWallet={() => {
           setWithdrawOpen(false);
-          openConnect();
+          afterOverlayClose(openConnect);
         }}
         onSuccess={(payload) => {
           const r = isWalletAccount ? usdcRoute : route;
