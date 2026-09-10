@@ -1,13 +1,30 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useToast } from "@/hooks/use-toast";
 import {
+  hasQueuedEasyStartLogin,
   queueEasyStartLogin,
   usePrivyEasyStart,
 } from "@/contexts/privyEasyStartContext";
 import { getPrivyOriginHint } from "@/utils/privyOrigin";
 
+const LOGIN_ATTACH_WAIT_MS = 3_000;
 const READY_WAIT_MS = 15_000;
 const DROPDOWN_RELEASE_MS = 120;
+const OVERLAY_RELEASE_MS = 200;
+
+/** Let a Radix Dialog overlay unmount before opening the Privy modal. */
+export function afterOverlayClose(fn: () => void, ms = OVERLAY_RELEASE_MS) {
+  window.setTimeout(fn, ms);
+}
+
+function currentOrigin(): string {
+  return typeof window !== "undefined" ? window.location.origin : "";
+}
+
+function refreshHint(): string {
+  const origin = currentOrigin() || "this page";
+  return `Hard-refresh (Cmd+Shift+R) on ${origin}. If it persists, check the browser console for blocked requests to auth.privy.io.`;
+}
 
 /**
  * Opens Privy login only after `ready` is true.
@@ -20,12 +37,14 @@ export function useEasyStartLogin() {
   const readyRef = useRef(privy.ready);
   const loginRef = useRef(privy.login);
   const authenticatedRef = useRef(privy.authenticated);
+  const blockReasonRef = useRef(privy.blockReason);
 
   useEffect(() => {
     readyRef.current = privy.ready;
     loginRef.current = privy.login;
     authenticatedRef.current = privy.authenticated;
-  }, [privy.ready, privy.login, privy.authenticated]);
+    blockReasonRef.current = privy.blockReason;
+  }, [privy.ready, privy.login, privy.authenticated, privy.blockReason]);
 
   return useCallback(async () => {
     const originHint = getPrivyOriginHint();
@@ -38,20 +57,44 @@ export function useEasyStartLogin() {
       return;
     }
 
+    if (blockReasonRef.current) {
+      toast({
+        title: "Can't open Get Started",
+        description: blockReasonRef.current,
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (!loginRef.current) {
       queueEasyStartLogin();
       toast({
         title: "Starting Easy Start…",
         description: "Loading sign-in. The login window will open in a moment.",
       });
-      const deadline = Date.now() + READY_WAIT_MS;
-      while (!loginRef.current && Date.now() < deadline) {
+      const deadline = Date.now() + LOGIN_ATTACH_WAIT_MS;
+      while (!loginRef.current && !blockReasonRef.current && Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 100));
       }
     }
 
+    if (blockReasonRef.current) {
+      toast({
+        title: "Can't open Get Started",
+        description: blockReasonRef.current,
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (!loginRef.current) {
-      // Lazy Privy remounts the tree; the new provider opens the queued login.
+      if (hasQueuedEasyStartLogin()) {
+        toast({
+          title: "Privy failed to load",
+          description: refreshHint(),
+          variant: "destructive",
+        });
+      }
       return;
     }
 
@@ -72,7 +115,7 @@ export function useEasyStartLogin() {
       toast({
         title: "Privy failed to load",
         description: alreadyReloaded
-          ? "Hard-refresh (Cmd+Shift+R) on http://localhost:8080 or http://localhost:5173. If it persists, check the browser console for blocked requests to auth.privy.io."
+          ? refreshHint()
           : "Reloading once to recover Privy after hot-reload…",
         variant: "destructive",
       });
@@ -95,6 +138,16 @@ export function useEasyStartLogin() {
     }
 
     await new Promise((r) => setTimeout(r, DROPDOWN_RELEASE_MS));
-    loginRef.current({ loginMethods: ["email"] });
+    try {
+      loginRef.current();
+    } catch (error) {
+      console.error("[Easy Start] login() threw", error);
+      toast({
+        title: "Get Started failed",
+        description:
+          error instanceof Error ? error.message : refreshHint(),
+        variant: "destructive",
+      });
+    }
   }, [toast]);
 }

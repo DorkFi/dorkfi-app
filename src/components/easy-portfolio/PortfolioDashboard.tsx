@@ -14,7 +14,7 @@ import {
 import { useEasyStartPortfolioTotal } from "@/hooks/useEasyStartPortfolioTotal";
 import { useSavingsAccounts } from "@/hooks/useSavingsAccounts";
 import { useSavingsUserPositions } from "@/hooks/useSavingsUserPositions";
-import { useEasyStartLogin } from "@/hooks/useEasyStartLogin";
+import { afterOverlayClose, useEasyStartLogin } from "@/hooks/useEasyStartLogin";
 import EasyBorrowRepayModal from "@/components/easy-borrow/EasyBorrowRepayModal";
 import PortfolioActivityTable, {
   type PortfolioActivityItem,
@@ -876,7 +876,10 @@ const PortfolioDashboard = () => {
         position={repayPosition}
         networkId={networkId}
         onConnectWallet={() => {
-          void openEasyStartLogin();
+          setRepayPosition(null);
+          afterOverlayClose(() => {
+            void openEasyStartLogin();
+          });
         }}
       />
     </section>

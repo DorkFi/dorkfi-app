@@ -12,5 +12,8 @@ if (!(globalThis as unknown as { TronWebProto?: unknown }).TronWebProto) {
 import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./index.css";
+import { redirectDevOriginForPrivy } from "@/utils/privyOrigin";
 
-createRoot(document.getElementById("root")!).render(<App />);
+if (!redirectDevOriginForPrivy()) {
+  createRoot(document.getElementById("root")!).render(<App />);
+}

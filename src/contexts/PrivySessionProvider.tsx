@@ -8,10 +8,12 @@ import React, {
 } from "react";
 import {
   PrivyProvider,
+  useLogin,
   usePrivy,
   useSignTypedData,
   useWallets,
 } from "@privy-io/react-auth";
+import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
 import { base } from "viem/chains";
 import { isFeatureEnabled } from "@/config";
@@ -27,12 +29,6 @@ import {
   PrivyEasyStartContext,
   takeQueuedEasyStartLogin,
   type PrivyEasyStartState,
-} from "@/contexts/privyEasyStartContext";
-
-export type { PrivyEasyStartState } from "@/contexts/privyEasyStartContext";
-export {
-  usePrivyEasyStart,
-  usePrivyEasyStartEnabled,
 } from "@/contexts/privyEasyStartContext";
 
 const PRIVY_APP_ID = getPrivyAppId();
@@ -55,15 +51,25 @@ function PrivyEasyStartStateBridge({
   children: ReactNode;
   onReadyStuck?: () => void;
 }) {
-  const { ready, authenticated, user, login: privyLogin, logout } = usePrivy();
+  const { ready, authenticated, user, logout, error: privyError } = usePrivy();
+  const { toast } = useToast();
+  const { login: privyLogin } = useLogin({
+    onError: (code) => {
+      console.error("[Easy Start] Privy login error", code);
+      toast({
+        title: "Get Started failed",
+        description: String(code),
+        variant: "destructive",
+      });
+    },
+  });
   const { signTypedData } = useSignTypedData();
   const { wallets } = useWallets();
 
   const login = useCallback(
     (options?: { loginMethods?: string[] }) => {
       if (options?.loginMethods?.length) {
-        // Privy v3 LoginModalOptions accepts loginMethods when provided by dashboard support.
-        (privyLogin as (opts?: { loginMethods?: string[] }) => void)(options);
+        privyLogin(options);
       } else {
         privyLogin();
       }
@@ -80,7 +86,7 @@ function PrivyEasyStartStateBridge({
     if (ready) return;
     const t = window.setTimeout(() => {
       console.warn(
-        "[Easy Start] Privy ready is still false after 8s. Use http://localhost:8080 or http://localhost:5173 and hard-refresh.",
+        "[Easy Start] Privy ready is still false after 8s. Hard-refresh this origin.",
         { origin: window.location.origin }
       );
       onReadyStuck?.();
@@ -91,7 +97,11 @@ function PrivyEasyStartStateBridge({
   useEffect(() => {
     if (!ready || !login) return;
     if (takeQueuedEasyStartLogin()) {
-      login({ loginMethods: ["email"] });
+      try {
+        login();
+      } catch (error) {
+        console.error("[Easy Start] queued login() threw", error);
+      }
     }
   }, [ready, login]);
 
@@ -169,6 +179,7 @@ function PrivyEasyStartStateBridge({
       login,
       logout,
       signTransactions: authenticated && evmAddress ? signTransactions : null,
+      blockReason: privyError ? privyError.message : null,
     }),
     [
       algorandAddress,
@@ -177,6 +188,7 @@ function PrivyEasyStartStateBridge({
       evmAddress,
       login,
       logout,
+      privyError,
       ready,
       signTransactions,
       user,
@@ -247,6 +259,24 @@ export function PrivySessionProvider({ children }: PrivySessionProviderProps) {
       ...DEFAULT_PRIVY_EASY_START_STATE,
       enabled,
       configured,
+      blockReason:
+        mountBlockReason ??
+        (!enabled
+          ? "Easy Start is turned off."
+          : !configured
+            ? "Missing Privy app id."
+            : null),
+    }),
+    [configured, enabled, mountBlockReason]
+  );
+
+  const crashValue = useMemo(
+    (): PrivyEasyStartState => ({
+      ...DEFAULT_PRIVY_EASY_START_STATE,
+      enabled,
+      configured,
+      blockReason:
+        "Privy crashed while loading. Check the console, then hard-refresh.",
     }),
     [configured, enabled]
   );
@@ -263,6 +293,12 @@ export function PrivySessionProvider({ children }: PrivySessionProviderProps) {
     </PrivyEasyStartContext.Provider>
   );
 
+  const crashFallback = (
+    <PrivyEasyStartContext.Provider value={crashValue}>
+      {children}
+    </PrivyEasyStartContext.Provider>
+  );
+
   if (!enabled || !configured || mountBlockReason) {
     if (mountBlockReason) {
       console.error("[Easy Start] Privy cannot init on this origin:", mountBlockReason);
@@ -271,7 +307,7 @@ export function PrivySessionProvider({ children }: PrivySessionProviderProps) {
   }
 
   return (
-    <PrivyMountErrorBoundary fallback={fallback}>
+    <PrivyMountErrorBoundary fallback={crashFallback}>
       <PrivyProvider
         key={providerKey}
         appId={PRIVY_APP_ID}

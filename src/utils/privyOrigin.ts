@@ -75,6 +75,22 @@ export function isPrivyOriginAllowed(origin = window.location.origin): boolean {
   return extraAllowedOrigins().includes(normalized);
 }
 
+/**
+ * Privy allowlists `http://localhost:port`, not the numeric IP. Cursor and
+ * Chrome often open `127.0.0.1` (or `[::1]`) from the Vite port.
+ * Returns true when a redirect was started — skip mounting the app.
+ */
+export function redirectDevOriginForPrivy(): boolean {
+  if (!import.meta.env.DEV || typeof window === "undefined") return false;
+  const { hostname, port, protocol, pathname, search, hash } = window.location;
+  if (hostname !== "127.0.0.1" && hostname !== "[::1]") return false;
+  const nextPort = port ? `:${port}` : "";
+  window.location.replace(
+    `${protocol}//localhost${nextPort}${pathname}${search}${hash}`
+  );
+  return true;
+}
+
 /** Actionable hint when the current URL cannot initialize Privy. */
 export function getPrivyOriginHint(origin = window.location.origin): string | null {
   if (isPrivyOriginAllowed(origin)) return null;
