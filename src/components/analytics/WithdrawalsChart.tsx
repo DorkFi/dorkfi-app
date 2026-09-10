@@ -1,91 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Area, AreaChart, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import ChartCard from './ChartCard';
-import { dorkfiAPIService } from '@/services/dorkfiAPIService';
+import { useActivityDailySeries } from '@/hooks/useCachedAnalyticsSeries';
+import { type AnalyticsTimePeriod } from '@/utils/analyticsTimePeriod';
 import { useTheme } from 'next-themes';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
-interface WithdrawalsDataPoint {
-  date: string;
-  amount: number;
-}
-
-type TimePeriod = '7d' | '30d' | '90d';
-
 const WithdrawalsChart = () => {
   const { theme } = useTheme();
-  const [withdrawalsData, setWithdrawalsData] = useState<WithdrawalsDataPoint[]>([]);
-  const [totalWithdrawals, setTotalWithdrawals] = useState<number>(0);
-  const [loading, setLoading] = useState(true);
-  const [timePeriod, setTimePeriod] = useState<TimePeriod>('90d');
-
-  useEffect(() => {
-    const fetchWithdrawalsData = async () => {
-      setLoading(true);
-      try {
-        const now = Date.now();
-        const days = timePeriod === '7d' ? 7 : timePeriod === '30d' ? 30 : 90;
-        const startTime = now - (days * 24 * 60 * 60 * 1000);
-        
-        // Always use total (no network filter)
-        const networkFilter = undefined;
-        const response = await dorkfiAPIService.getWithdrawals(
-          startTime,
-          now,
-          10000,
-          networkFilter
-        );
-
-        if (response.success && response.data?.withdrawals) {
-          const withdrawals = response.data.withdrawals;
-          if (withdrawals.length > 0) {
-            // Group by date and sum amounts (matching demo page approach)
-            const dailyWithdrawals: { [key: string]: number } = {};
-            
-            withdrawals.forEach((withdrawal: any) => {
-              const date = new Date(withdrawal.timestamp).toISOString().split('T')[0];
-              // Convert from micro-units to USD (divide by 1e12, matching demo page)
-              // Demo uses withdrawValueUSD (without "al"), but API types may use withdrawalValueUSD
-              const value = parseFloat(
-                (withdrawal.withdrawValueUSD || withdrawal.withdrawalValueUSD || '0')
-              ) / 1e12;
-              dailyWithdrawals[date] = (dailyWithdrawals[date] || 0) + value;
-            });
-
-            const transformed = Object.entries(dailyWithdrawals)
-              .map(([date, amount]) => ({ date, amount }))
-              .sort((a, b) => a.date.localeCompare(b.date));
-            
-            setWithdrawalsData(transformed);
-            
-            // Calculate total from summary if available, otherwise sum the daily amounts
-            // Handle both field name variations (demo uses totalWithdrawValueUSD, types use totalWithdrawalValueUSD)
-            const summary = response.data.summary as any;
-            const summaryTotal = summary?.totalWithdrawValueUSD || summary?.totalWithdrawalValueUSD || '0';
-            const totalFromSummary = summaryTotal 
-              ? parseFloat(summaryTotal) / 1e12
-              : transformed.reduce((sum, d) => sum + d.amount, 0);
-            setTotalWithdrawals(totalFromSummary);
-          } else {
-            setWithdrawalsData([]);
-            setTotalWithdrawals(0);
-          }
-        } else {
-          console.warn('Withdrawals API returned unsuccessful response');
-          setWithdrawalsData([]);
-          setTotalWithdrawals(0);
-        }
-      } catch (error) {
-        console.error('Error fetching withdrawals data:', error);
-        setWithdrawalsData([]);
-        setTotalWithdrawals(0);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchWithdrawalsData();
-  }, [timePeriod]);
+  const [timePeriod, setTimePeriod] = useState<AnalyticsTimePeriod>('90d');
+  const { series: withdrawalsData, loading, total: totalWithdrawals } =
+    useActivityDailySeries('withdrawals', timePeriod);
 
   const formattedTotal = totalWithdrawals >= 1_000_000 
     ? `$${(totalWithdrawals / 1_000_000).toFixed(1)}M`
@@ -95,14 +20,13 @@ const WithdrawalsChart = () => {
 
   const chartData = withdrawalsData.map(d => ({
     date: new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    amount: d.amount, // Use raw dollar amounts
+    amount: d.amount,
   }));
 
-  // Calculate max value and set Y-axis domain to 1.1x max
   const maxValue = chartData.length > 0 
     ? Math.max(...chartData.map(d => d.amount))
     : 0;
-  const yAxisDomain = [0, maxValue * 1.1 || 5000]; // Default to 5000 if no data
+  const yAxisDomain = [0, maxValue * 1.1 || 5000];
 
   if (loading) {
     return (
@@ -127,7 +51,7 @@ const WithdrawalsChart = () => {
         <ToggleGroup 
           type="single" 
           value={timePeriod} 
-          onValueChange={(value) => value && setTimePeriod(value as TimePeriod)}
+          onValueChange={(value) => value && setTimePeriod(value as AnalyticsTimePeriod)}
           variant="outline"
           size="sm"
         >
@@ -198,4 +122,3 @@ const WithdrawalsChart = () => {
 };
 
 export default WithdrawalsChart;
-

@@ -2,6 +2,7 @@ import { useState } from "react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import Portfolio from "@/components/Portfolio";
+import { AppErrorBoundary } from "@/components/AppErrorBoundary";
 
 const PortfolioPage = () => {
   const [activeTab, setActiveTab] = useState("portfolio");
@@ -23,7 +24,9 @@ const PortfolioPage = () => {
 
       <main className="max-w-[1200px] mx-auto px-2 sm:px-4 md:px-6 py-2 sm:py-4 md:py-8 relative z-10">
         <div className="space-y-4 sm:space-y-6">
-          <Portfolio />
+          <AppErrorBoundary label="Portfolio">
+            <Portfolio />
+          </AppErrorBoundary>
         </div>
       </main>
 

@@ -89,6 +89,12 @@ function portfolioMarketsSessionKey(networkId: NetworkId): string {
 }
 
 function marketsTableSessionKey(networkId: NetworkId): string {
+  // Must match useOnDemandMarketData `marketsSessionCacheKey(network, false)`.
+  return `dorkfi:marketsHydrate:table:${networkId}`;
+}
+
+/** Legacy key before Admin/Markets cache scoping (dorkfi-app#651). */
+function marketsTableSessionKeyLegacy(networkId: NetworkId): string {
   return `dorkfi:marketsHydrate:${networkId}`;
 }
 
@@ -141,7 +147,9 @@ export function marketInfosFromMarketsTableSession(
 ): MarketInfo[] {
   if (typeof sessionStorage === "undefined") return [];
   try {
-    const raw = sessionStorage.getItem(marketsTableSessionKey(networkId));
+    const raw =
+      sessionStorage.getItem(marketsTableSessionKey(networkId)) ??
+      sessionStorage.getItem(marketsTableSessionKeyLegacy(networkId));
     if (!raw) return [];
     const parsed = JSON.parse(raw) as {
       savedAt?: number;

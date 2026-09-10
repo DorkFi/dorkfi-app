@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "@/components/theme-provider";
-import { NetworkProvider } from "@/contexts/NetworkContext";
+import { NetworkProvider } from "@/contexts/NetworkProvider";
 import { EasyStartModalsProvider } from "@/contexts/EasyStartModalsContext";
 import { LocaleSettingsProvider } from "@/contexts/LocaleSettingsContext";
 import { ProductFlavorProvider } from "@/contexts/ProductFlavorContext";

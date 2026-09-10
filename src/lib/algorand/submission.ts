@@ -6,6 +6,7 @@
  */
 
 import algosdk, { type Algodv2 } from "algosdk";
+import { TX_CONFIRMATION_WAIT_ROUNDS } from "@/utils/transactionUtils";
 
 export type GroupSubmitResult = {
   groupIndex: number;
@@ -33,7 +34,7 @@ export async function submitSignedGroups(
   failedGroups: number[];
   confirmedRounds: number[];
 }> {
-  const { algod, signedGroups, waitRounds = 4, onlyGroupIndices, onGroupSubmitted } = options;
+  const { algod, signedGroups, waitRounds = TX_CONFIRMATION_WAIT_ROUNDS, onlyGroupIndices, onGroupSubmitted } = options;
   const indices =
     onlyGroupIndices ?? signedGroups.map((_, i) => i);
 

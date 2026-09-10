@@ -55,7 +55,10 @@ import BigNumber from "bignumber.js";
 import { getTokenImagePath } from "@/utils/tokenImageUtils";
 import { useToast } from "@/hooks/use-toast";
 import dorkfiAPIService from "@/services/dorkfiAPIService";
-import { updateTransactionMetadata } from "@/utils/transactionUtils";
+import {
+  TX_CONFIRMATION_WAIT_ROUNDS,
+  scheduleTransactionMetadataUpdate,
+} from "@/utils/transactionUtils";
 import { CONTRACT } from "ulujs";
 import {
   APP_SPEC as LendingPoolAppSpec,
@@ -1532,7 +1535,11 @@ const PortfolioModals = ({
             algorandNetwork
           );
         const res = await algorandClients.algod.sendRawTransaction(stxns).do();
-        await waitForConfirmation(algorandClients.algod, res.txid, 4);
+        await waitForConfirmation(
+          algorandClients.algod,
+          res.txid,
+          TX_CONFIRMATION_WAIT_ROUNDS
+        );
 
         const decodedStxns = stxns.map((txn: Uint8Array) =>
           algosdk.decodeSignedTransaction(txn)
@@ -1543,64 +1550,12 @@ const PortfolioModals = ({
           .find(
             (txn: any) =>
               txn.txn.type === "appl" &&
-              Number(txn.txn.applicationCall.appIndex) ===
+              Number(txn.txn.applicationCall?.appIndex) ===
                 parseInt(built.poolAppId, 10)
           )
           ?.txn.txID();
 
-        if (poolTxnID) {
-          await new Promise((resolve) => setTimeout(resolve, 5000));
-          let metadataUpdated = false;
-          let retryCount = 0;
-          const maxRetries = 10;
-          const apiBaseUrl =
-            import.meta.env.VITE_DORKFI_API_URL ||
-            "https://dorkfi-api.nautilus.sh";
-          const networkParam = networkToUse ? `?network=${networkToUse}` : "";
-
-          while (!metadataUpdated && retryCount < maxRetries) {
-            try {
-              const response = await fetch(
-                `${apiBaseUrl}/transaction-metadata/${poolTxnID}${networkParam}`,
-                {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                  },
-                }
-              );
-
-              if (response.ok) {
-                const metaResult = await response.json();
-                console.log(
-                  "Transaction metadata successfully updated:",
-                  metaResult.data
-                );
-                metadataUpdated = true;
-              } else {
-                const error = await response.json();
-                throw new Error(
-                  error.error || "Failed to update transaction metadata"
-                );
-              }
-            } catch (error) {
-              retryCount++;
-              if (retryCount < maxRetries) {
-                const delay = 1000 * Math.pow(2, retryCount - 1);
-                console.warn(
-                  `Metadata update attempt ${retryCount} failed, retrying in ${delay}ms:`,
-                  error
-                );
-                await new Promise((resolve) => setTimeout(resolve, delay));
-              } else {
-                console.error(
-                  "Failed to update transaction metadata after all retries:",
-                  error
-                );
-              }
-            }
-          }
-        }
+        scheduleTransactionMetadataUpdate(poolTxnID ?? res.txid, networkToUse);
 
         if (onRefreshWalletBalance && withdrawModal.asset) {
           onRefreshWalletBalance(withdrawModal.asset);
@@ -1980,7 +1935,11 @@ const PortfolioModals = ({
         await algorandService.initializeClientsForTransactions(algorandNetwork);
       const res = await algorandClients.algod.sendRawTransaction(stxns).do();
 
-      await waitForConfirmation(algorandClients.algod, res.txid, 4);
+      await waitForConfirmation(
+        algorandClients.algod,
+        res.txid,
+        TX_CONFIRMATION_WAIT_ROUNDS
+      );
 
       // Decode transactions to find the pool transaction ID
       const decodedStxns = stxns.map((txn: Uint8Array) => {
@@ -1991,63 +1950,10 @@ const PortfolioModals = ({
         .find(
           (txn: any) =>
             txn.txn.type === "appl" &&
-            Number(txn.txn.applicationCall.appIndex) === parseInt(token.poolId)
+            Number(txn.txn.applicationCall?.appIndex) === parseInt(token.poolId)
         )
         ?.txn.txID();
-      if (poolTxnID) {
-        await new Promise((resolve) => setTimeout(resolve, 5000));
-        // Retry until metadata update succeeds
-        let metadataUpdated = false;
-        let retryCount = 0;
-        const maxRetries = 10;
-        const apiBaseUrl =
-          import.meta.env.VITE_DORKFI_API_URL ||
-          "https://dorkfi-api.nautilus.sh";
-        const networkParam = networkToUse ? `?network=${networkToUse}` : "";
-
-        while (!metadataUpdated && retryCount < maxRetries) {
-          try {
-            const response = await fetch(
-              `${apiBaseUrl}/transaction-metadata/${poolTxnID}${networkParam}`,
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                },
-              }
-            );
-
-            if (response.ok) {
-              const result = await response.json();
-              console.log(
-                "Transaction metadata successfully updated:",
-                result.data
-              );
-              metadataUpdated = true;
-            } else {
-              const error = await response.json();
-              throw new Error(
-                error.error || "Failed to update transaction metadata"
-              );
-            }
-          } catch (error) {
-            retryCount++;
-            if (retryCount < maxRetries) {
-              const delay = 1000 * Math.pow(2, retryCount - 1); // Exponential backoff
-              console.warn(
-                `Metadata update attempt ${retryCount} failed, retrying in ${delay}ms:`,
-                error
-              );
-              await new Promise((resolve) => setTimeout(resolve, delay));
-            } else {
-              console.error(
-                "Failed to update transaction metadata after all retries:",
-                error
-              );
-            }
-          }
-        }
-      }
+      scheduleTransactionMetadataUpdate(poolTxnID ?? res.txid, networkToUse);
 
       console.log("Repay transaction confirmed:", res);
 

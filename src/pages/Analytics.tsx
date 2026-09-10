@@ -16,6 +16,8 @@ import DepositsChart from "@/components/analytics/DepositsChart";
 import WithdrawalsChart from "@/components/analytics/WithdrawalsChart";
 import BorrowsChart from "@/components/analytics/BorrowsChart";
 import RepaysChart from "@/components/analytics/RepaysChart";
+import NetLiquidityFlowsChart from "@/components/analytics/NetLiquidityFlowsChart";
+import NetLoansFlowsChart from "@/components/analytics/NetLoansFlowsChart";
 
 interface AnalyticsProps {
   activeTab: string;
@@ -58,6 +60,11 @@ const Analytics = ({
               <WithdrawalsChart />
               <BorrowsChart />
               <RepaysChart />
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <NetLiquidityFlowsChart />
+              <NetLoansFlowsChart />
             </div>
             
             <HealthFactorChart />

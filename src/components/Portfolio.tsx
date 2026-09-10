@@ -37,6 +37,7 @@ import {
   repayOnBehalf,
   liquidateCrossMarket,
   fetchUserDataFromChain,
+  fillMissingUserMarketRowsFromChain,
   postRefreshMarketDataSnapshot,
   type MarketInfo,
 } from "@/services/lendingService";
@@ -114,6 +115,7 @@ import {
   portfolioUsdCacheKey,
   resolveWithLastGoodPortfolioUsd,
 } from "@/utils/portfolioUsdCache";
+import { unionPortfolioPositionRows } from "@/utils/portfolioMissingUserMarkets";
 import {
   createDebouncedPrefetch,
   warmRepayModalRpc,
@@ -1733,17 +1735,16 @@ const Portfolio = () => {
     folksMintedOneUnderlyingByKey,
   ]);
 
-  // Use transformed deposits and borrows from user.computed, fallback to userPositions
-  // If user.computed exists but transformation resulted in empty arrays, fall back to userPositions
-  const hasComputedData = user?.computed?.deposits || user?.computed?.borrows;
-  const rawDeposits =
-    hasComputedData && transformedDepositsAndBorrows.deposits.length > 0
-      ? transformedDepositsAndBorrows.deposits
-      : userPositions.filter((pos) => pos.type === "deposit");
-  const rawBorrows =
-    hasComputedData && transformedDepositsAndBorrows.borrows.length > 0
-      ? transformedDepositsAndBorrows.borrows
-      : userPositions.filter((pos) => pos.type === "borrow");
+  // Prefer API-computed rows; keep on-chain-only positions the indexer omitted
+  // (shared-contract markets such as pool B ALGO — GitHub #646).
+  const rawDeposits = unionPortfolioPositionRows(
+    transformedDepositsAndBorrows.deposits,
+    userPositions.filter((pos) => pos.type === "deposit")
+  );
+  const rawBorrows = unionPortfolioPositionRows(
+    transformedDepositsAndBorrows.borrows,
+    userPositions.filter((pos) => pos.type === "borrow")
+  );
   const deposits = rawDeposits.filter(
     (pos) => !isExcludedPortfolioPositionRow(pos as ItemWithNetwork)
   );
@@ -1853,7 +1854,7 @@ const Portfolio = () => {
 
   // Debug logging
   console.log("[Portfolio] Final deposits and borrows:", {
-    hasComputedData,
+    hasComputedData: Boolean(user?.computed),
     transformedDepositsCount: transformedDepositsAndBorrows.deposits.length,
     transformedBorrowsCount: transformedDepositsAndBorrows.borrows.length,
     userPositionsDepositsCount: userPositions.filter(
@@ -4133,7 +4134,40 @@ const Portfolio = () => {
           setUserProfileAvatar(null);
         }
 
-        applyPortfolioComputed(user);
+        const apiUserData = Array.isArray(user.userData)
+          ? (user.userData as unknown[])
+          : [];
+        const apiGlobalUserData = Array.isArray(user.globalUserData)
+          ? (user.globalUserData as unknown[])
+          : [];
+        // Paint indexer rows first so chain fill cannot block / crash the page.
+        try {
+          applyPortfolioComputed({ ...user, userData: apiUserData });
+        } catch (applyError) {
+          console.error("[Portfolio] applyPortfolioComputed failed:", applyError);
+        }
+        try {
+          const filled = await fillMissingUserMarketRowsFromChain(
+            userAddress,
+            apiGlobalUserData,
+            apiUserData
+          );
+          if (filled.length > 0 && isCurrentFetchUser()) {
+            console.log(
+              "[Portfolio] Filled indexer-omitted user markets from chain:",
+              filled.map((r) => `${r.appId}:${r.marketId}`)
+            );
+            applyPortfolioComputed({
+              ...user,
+              userData: [...apiUserData, ...filled],
+            });
+          }
+        } catch (fillError) {
+          console.warn(
+            "[Portfolio] fillMissingUserMarketRowsFromChain failed:",
+            fillError
+          );
+        }
         return;
       }
 
@@ -5599,8 +5633,9 @@ const Portfolio = () => {
     );
   }
 
-  // Show no wallet connected state (Easy Start may still show Base USDC while Algorand derives)
-  if (!activeAccount?.address) {
+  // Show no wallet connected state (skip when viewing another address via /portfolio/:address).
+  // Easy Start may still show Base USDC while Algorand derives.
+  if (!displayAddress) {
     const easyStartPending =
       isPrivyEasyStartSession ||
       (privyEasyStart.authenticated && Boolean(privyEasyStart.evmAddress));
@@ -5694,7 +5729,9 @@ const Portfolio = () => {
 
           const walletAddressLabel =
             addressName ||
-            `${activeAccount?.address.slice(0, 8)}...${activeAccount?.address.slice(-8)}`;
+            (displayAddress
+              ? `${displayAddress.slice(0, 8)}...${displayAddress.slice(-8)}`
+              : "");
 
           return (
             <>

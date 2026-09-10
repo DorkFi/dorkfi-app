@@ -7,6 +7,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { isFeatureEnabled } from "@/config";
 import { cn } from "@/lib/utils";
 import { LazyRouteFallback } from "@/components/LazySuspenseFallback";
+import { AppErrorBoundary } from "@/components/AppErrorBoundary";
 
 const MarketsTable = lazy(() => import("@/components/MarketsTable"));
 const Dashboard = lazy(() => import("@/components/Dashboard"));
@@ -81,7 +82,9 @@ const Index = ({ activeTab, onTabChange }: IndexProps) => {
       case "portfolio":
         return (
           <Suspense fallback={<LazyRouteFallback />}>
-            <Portfolio />
+            <AppErrorBoundary label="Portfolio">
+              <Portfolio />
+            </AppErrorBoundary>
           </Suspense>
         );
       case "liquidations":
