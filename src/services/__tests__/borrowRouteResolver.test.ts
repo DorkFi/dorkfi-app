@@ -25,6 +25,7 @@ const POOL_A = "3333688282";
 const POOL_B = "3345940978";
 const POOL_C = "3578814346";
 const POOL_D = "3526240577";
+const POOL_G = "3697602173";
 
 describe("borrowRouteResolver (v1 WAD/USDC)", () => {
   it("defaults to WAD and USDC borrow assets only", () => {
@@ -317,11 +318,70 @@ describe("borrowRouteResolver (v1 WAD/USDC)", () => {
       true
     );
     expect(poolIds.has(POOL_C)).toBe(false);
+    expect(poolIds.has(POOL_G)).toBe(true);
     expect(
       markets.some(
         (m) => m.configKey === "fUSDC" && m.poolId === POOL_A
       )
     ).toBe(true);
+  });
+
+  it("allows native USDC → USDC on isolated Pool G only", () => {
+    const routes = listBorrowRoutes(NETWORK);
+    const poolG = routes.filter((r) => r.poolId === POOL_G);
+    expect(poolG.length).toBeGreaterThan(0);
+    expect(
+      poolG.every(
+        (r) =>
+          r.marketLabel === "G" &&
+          r.collateral.configKey === "USDC" &&
+          r.borrow.configKey === "USDC" &&
+          r.collateral.contractId === r.borrow.contractId &&
+          r.collateral.nTokenId === r.borrow.nTokenId
+      )
+    ).toBe(true);
+
+    const sameMarketOnA = routes.some(
+      (r) =>
+        r.poolId === POOL_A &&
+        r.collateral.configKey === "USDC" &&
+        r.borrow.configKey === "USDC" &&
+        r.collateral.nTokenId === r.borrow.nTokenId
+    );
+    expect(sameMarketOnA).toBe(false);
+  });
+
+  it("lists only Pool G USDC for SimplFi supply and borrow", () => {
+    const supply = listUsdcCollateralSupplyOptions(NETWORK, {
+      scope: "simplfi",
+    });
+    expect(supply.map((o) => o.uiKey)).toEqual(["USDC"]);
+    expect(supply[0]!.collateralPoolId).toBe(POOL_G);
+
+    const options = listBorrowAssetOptionsForCollateral(NETWORK, "USDC", {
+      scope: "simplfi",
+      collateralPoolId: supply[0]!.collateralPoolId,
+      collateralContractId: supply[0]!.collateralContractId,
+      preferredPoolIds: supply[0]!.preferredPoolIds,
+    });
+    expect(options.map((o) => o.uiKey)).toEqual(["USDC"]);
+    expect(options[0]!.borrowConfigKey).toBe("USDC");
+    expect(options[0]!.preferredPoolIds?.[0]).toBe(POOL_G);
+
+    const route = resolveBorrowRoute({
+      networkId: NETWORK,
+      collateralConfigKey: "USDC",
+      borrowConfigKey: "USDC",
+      collateralPoolId: POOL_G,
+      collateralContractId: supply[0]!.collateralContractId,
+      preferredPoolIds: [POOL_G],
+    });
+    expect(route).not.toBeNull();
+    expect(route!.poolId).toBe(POOL_G);
+    expect(route!.marketLabel).toBe("G");
+    expect(route!.collateral.configKey).toBe("USDC");
+    expect(route!.borrow.configKey).toBe("USDC");
+    expect(route!.borrow.configKey).not.toBe("fUSDC");
   });
 
   it("returns null for completely unknown pairs", () => {

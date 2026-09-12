@@ -3,7 +3,7 @@ import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
 import type { NetworkId } from "@/config";
 import { useWadUsdcTinymanApyPercent } from "@/hooks/useWadUsdcTinymanApyPercent";
 import {
-  fetchMarketInfo,
+  fetchLiveMarketInfo,
   fetchUserDepositBalance,
   fetchUserWalletBalance,
   type MarketInfo,
@@ -54,6 +54,7 @@ function parseHuman(cap: string | undefined): number | null {
 
 /**
  * Live quote for Easy Savings (supply). Amount changes are local math.
+ * Market APY is read on-chain so it matches DorkFi G, not a stale GET snapshot.
  */
 export function useEasySavingsQuote(
   input: EasySavingsQuoteInput
@@ -67,15 +68,16 @@ export function useEasySavingsQuote(
     queryKey: [
       "easySavings",
       "market",
+      "live",
       networkId,
       route?.poolId,
       route?.asset.contractId,
     ],
     enabled: Boolean(route),
-    staleTime: 60_000,
+    staleTime: 30_000,
     queryFn: async () => {
       if (!route) return null;
-      return fetchMarketInfo(
+      return fetchLiveMarketInfo(
         route.poolId,
         route.asset.contractId,
         networkId

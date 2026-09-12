@@ -15,16 +15,16 @@ import {
 } from "@/components/ui/dialog";
 import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
+import { IsolateErrorBoundary } from "@/components/IsolateErrorBoundary";
+import { Button } from "@/components/ui/button";
 import {
   EasyStartModalsContext,
   type EasyStartModalsContextValue,
 } from "@/contexts/easyStartModals";
 
 /**
- * Lazy-load all Easy Start sheets so:
- * - `@privy-io/wagmi` never enters the initial App graph
- * - Fast Refresh churn on bridge helpers does not remount the whole app
- * Sheets only mount while open (avoids idle Dialog mounts when signed in).
+ * Lazy-load Easy Start sheets so `@privy-io/wagmi` stays out of first paint.
+ * IsolateErrorBoundary keeps a failed sheet fetch from blanking the app.
  */
 const EasyStartDepositSheet = lazy(() =>
   import("@/components/easy-start/EasyStartDepositSheet").then((m) => ({
@@ -44,6 +44,41 @@ const EasyStartBridgeSheet = lazy(() =>
 
 const SHEET_FALLBACK_CLASS =
   "bg-background text-foreground rounded-2xl border border-border/60 shadow-xl max-w-[95vw] md:max-w-md p-0";
+
+function EasyStartSheetError({
+  open,
+  onOpenChange,
+  title,
+  error,
+  retry,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  error: Error;
+  retry: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={SHEET_FALLBACK_CLASS}>
+        <div className="flex flex-col items-center justify-center gap-3 px-6 py-10 text-center">
+          <DialogHeader>
+            <DialogTitle>{title} failed</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-destructive" role="alert">
+            {error.message || "Something went wrong."}
+          </p>
+          <Button
+            className="h-11 w-full rounded-xl bg-ocean-teal font-semibold text-white hover:bg-ocean-teal/90"
+            onClick={retry}
+          >
+            Try again
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 function EasyStartSheetFallback({
   open,
@@ -109,58 +144,97 @@ export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
       {showSheets ? (
         <>
           {depositOpen ? (
-            <Suspense
-              fallback={
-                <EasyStartSheetFallback
+            <IsolateErrorBoundary
+              label="Add money"
+              fallback={({ error, retry }) => (
+                <EasyStartSheetError
                   open={depositOpen}
                   onOpenChange={setDepositOpen}
                   title="Add money"
+                  error={error}
+                  retry={retry}
                 />
-              }
+              )}
             >
-              <EasyStartDepositSheet
-                open={depositOpen}
-                onOpenChange={setDepositOpen}
-                onOpenAdvancedBridge={
-                  consumerCopy ? undefined : openAdvancedBridge
+              <Suspense
+                fallback={
+                  <EasyStartSheetFallback
+                    open={depositOpen}
+                    onOpenChange={setDepositOpen}
+                    title="Add money"
+                  />
                 }
-              />
-            </Suspense>
+              >
+                <EasyStartDepositSheet
+                  open={depositOpen}
+                  onOpenChange={setDepositOpen}
+                  onOpenAdvancedBridge={
+                    consumerCopy ? undefined : openAdvancedBridge
+                  }
+                />
+              </Suspense>
+            </IsolateErrorBoundary>
           ) : null}
           {withdrawOpen ? (
-            <Suspense
-              fallback={
-                <EasyStartSheetFallback
+            <IsolateErrorBoundary
+              label="Cash out"
+              fallback={({ error, retry }) => (
+                <EasyStartSheetError
                   open={withdrawOpen}
                   onOpenChange={setWithdrawOpen}
                   title="Cash out"
+                  error={error}
+                  retry={retry}
                 />
-              }
+              )}
             >
-              <EasyStartWithdrawSheet
-                open={withdrawOpen}
-                onOpenChange={setWithdrawOpen}
-                onOpenAdvancedBridge={
-                  consumerCopy ? undefined : openAdvancedBridge
+              <Suspense
+                fallback={
+                  <EasyStartSheetFallback
+                    open={withdrawOpen}
+                    onOpenChange={setWithdrawOpen}
+                    title="Cash out"
+                  />
                 }
-              />
-            </Suspense>
+              >
+                <EasyStartWithdrawSheet
+                  open={withdrawOpen}
+                  onOpenChange={setWithdrawOpen}
+                  onOpenAdvancedBridge={
+                    consumerCopy ? undefined : openAdvancedBridge
+                  }
+                />
+              </Suspense>
+            </IsolateErrorBoundary>
           ) : null}
           {bridgeOpen && !consumerCopy ? (
-            <Suspense
-              fallback={
-                <EasyStartSheetFallback
+            <IsolateErrorBoundary
+              label="Bridge"
+              fallback={({ error, retry }) => (
+                <EasyStartSheetError
                   open={bridgeOpen}
                   onOpenChange={setBridgeOpen}
                   title="Bridge"
+                  error={error}
+                  retry={retry}
                 />
-              }
+              )}
             >
-              <EasyStartBridgeSheet
-                open={bridgeOpen}
-                onOpenChange={setBridgeOpen}
-              />
-            </Suspense>
+              <Suspense
+                fallback={
+                  <EasyStartSheetFallback
+                    open={bridgeOpen}
+                    onOpenChange={setBridgeOpen}
+                    title="Bridge"
+                  />
+                }
+              >
+                <EasyStartBridgeSheet
+                  open={bridgeOpen}
+                  onOpenChange={setBridgeOpen}
+                />
+              </Suspense>
+            </IsolateErrorBoundary>
           ) : null}
         </>
       ) : null}

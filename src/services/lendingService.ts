@@ -1072,6 +1072,27 @@ export function collectPositionMarketKeys(
 }
 
 /**
+ * Live market snapshot for product APYs (Easy Savings Earn).
+ * Prefers on-chain `get_market` — same as the DorkFi G market modal — because GET
+ * `/market-data` can succeed with a stale store (`refreshQueued: false`).
+ * Falls back to the GET path if the contract read fails.
+ */
+export async function fetchLiveMarketInfo(
+  poolId: string,
+  marketId: string,
+  networkId: NetworkId
+): Promise<MarketInfo | null> {
+  const live = await fetchMarketInfo(
+    poolId,
+    marketId,
+    networkId,
+    "contract"
+  );
+  if (live) return live;
+  return fetchMarketInfo(poolId, marketId, networkId, "api");
+}
+
+/**
  * POST `/market-data/{network}/{appId}/{marketId}` so the API refreshes its chain snapshot.
  * Use before `fetchAllMarkets` when you want the GET path to reflect the latest on-chain state.
  */

@@ -183,7 +183,7 @@ export async function handleCoinbaseStatus(
     const path = `/onramp/v1/sell/user/${encodeURIComponent(ref)}/transactions`;
     const jwt = await cdpBearer(env, "GET", path);
     const url = new URL(`https://${CDP_HOST}${path}`);
-    url.searchParams.set("pageSize", "5");
+    url.searchParams.set("page_size", "5");
 
     const upstream = await fetch(url.toString(), {
       headers: { Authorization: `Bearer ${jwt}` },

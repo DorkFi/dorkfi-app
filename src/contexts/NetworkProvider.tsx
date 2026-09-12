@@ -229,13 +229,25 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({
     return [];
   };
 
-  const [walletManager, setWalletManager] = useState(() =>
-    createWalletManager(currentNetwork)
-  );
+  const [walletManager, setWalletManager] = useState(() => {
+    try {
+      return createWalletManager(currentNetwork);
+    } catch (error) {
+      console.error(
+        `Error creating WalletManager for ${currentNetwork}; falling back to algorand-mainnet`,
+        error
+      );
+      return createWalletManager("algorand-mainnet");
+    }
+  });
 
   useEffect(() => {
     if (consumerCopy || !rainbowKitWallet) return;
-    setWalletManager(createWalletManager(currentNetwork));
+    try {
+      setWalletManager(createWalletManager(currentNetwork));
+    } catch (error) {
+      console.error("Failed to recreate WalletManager after RainbowKit load", error);
+    }
     // Recreate once RainbowKit config is available (DorkFi xChain wallet).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rainbowKitWallet]);

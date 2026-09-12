@@ -12,12 +12,20 @@ export type CoinbaseSessionResult = {
   sellUrl: string;
 };
 
+/** MoonPay Sell currency code for Circle USDC on Base (not Ethereum `usdc`). */
+export const MOONPAY_SELL_BASE_USDC = "usdc_base";
+
+export type CoinbaseAmount = {
+  value?: string;
+  currency?: string;
+};
+
 export type CoinbaseSellTx = {
   status?: string;
   to_address?: string;
   toAddress?: string;
-  sell_amount?: string;
-  sellAmount?: string;
+  sell_amount?: string | CoinbaseAmount;
+  sellAmount?: string | CoinbaseAmount;
   asset?: string;
   network?: string;
   from_address?: string;
@@ -93,10 +101,27 @@ export function coinbaseDepositAddress(tx: CoinbaseSellTx | null): string | null
   return typeof addr === "string" && addr.startsWith("0x") ? addr : null;
 }
 
+/** CDP returns `{ value, currency }` in live payloads; older docs called it a string. */
+export function parseCoinbaseAmount(amt: unknown): string | null {
+  if (amt == null) return null;
+  if (typeof amt === "number") {
+    return Number.isFinite(amt) && amt > 0 ? String(amt) : null;
+  }
+  if (typeof amt === "string") {
+    const trimmed = amt.trim();
+    if (!trimmed || trimmed === "[object Object]") return null;
+    const n = Number(trimmed);
+    return Number.isFinite(n) && n > 0 ? trimmed : null;
+  }
+  if (typeof amt === "object" && "value" in (amt as object)) {
+    return parseCoinbaseAmount((amt as CoinbaseAmount).value);
+  }
+  return null;
+}
+
 export function coinbaseSellAmount(tx: CoinbaseSellTx | null): string | null {
   if (!tx) return null;
-  const amt = tx.sell_amount || tx.sellAmount;
-  return amt != null ? String(amt) : null;
+  return parseCoinbaseAmount(tx.sell_amount ?? tx.sellAmount);
 }
 
 export function moonpayPublishableKey(): string | null {

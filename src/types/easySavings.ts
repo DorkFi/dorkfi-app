@@ -17,11 +17,14 @@ export type EasySavingsMarketRef = {
 export type SavingsRoute = {
   networkId: NetworkId;
   poolId: string;
-  /** A / B / C / D / E / F from {@link getLendingPoolLabel}. */
+  /** A / B / C / D / E / F / G from {@link getLendingPoolLabel}. */
   marketLabel: string;
   asset: EasySavingsMarketRef;
   assetToken: TokenConfig;
 };
+
+/** `simplfi` = isolated Pool G USDC. `full` = Easy Savings v1 (A first). */
+export type EasyProductScope = "full" | "simplfi";
 
 export type ResolveSavingsRouteInput = {
   networkId: NetworkId;
@@ -31,4 +34,9 @@ export type ResolveSavingsRouteInput = {
   assetPoolId?: string;
   /** Prefer a pool where the user already has deposits. */
   preferredPoolIds?: readonly string[];
+  /**
+   * `simplfi` ranks isolated Pool G USDC first for native USDC deposits.
+   * Defaults to `full` (Pool A first).
+   */
+  scope?: EasyProductScope;
 };

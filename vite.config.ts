@@ -101,6 +101,7 @@ export default defineConfig(({ mode }) => {
       "@rainbow-me/rainbowkit",
       "@privy-io/react-auth",
       "@privy-io/wagmi",
+      "@moonpay/moonpay-react",
     ],
   },
   define: {
@@ -109,6 +110,8 @@ export default defineConfig(({ mode }) => {
   optimizeDeps: {
     include: [
       "buffer",
+      "@privy-io/react-auth",
+      "@moonpay/moonpay-react",
       "@txnlab/use-wallet-react",
       "@walletconnect/modal",
       "@walletconnect/sign-client",
@@ -117,7 +120,6 @@ export default defineConfig(({ mode }) => {
       "algosdk",
       "@algorandfoundation/algokit-utils",
     ],
-    force: true, // Force re-optimization on next dev server start
   },
 };
 });

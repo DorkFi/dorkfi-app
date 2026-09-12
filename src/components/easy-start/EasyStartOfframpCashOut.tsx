@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
-import { useSendTransaction } from "@privy-io/react-auth";
-import { MoonPayProvider, MoonPaySellWidget } from "@moonpay/moonpay-react";
+import { useCallback, useEffect, useState, lazy, Suspense } from "react";
+import { useFundWallet, useSendTransaction } from "@privy-io/react-auth";
+import { base } from "viem/chains";
+import type { Address } from "viem";
 import { CreditCard, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { IsolateErrorBoundary } from "@/components/IsolateErrorBoundary";
 import { useToast } from "@/hooks/use-toast";
 import {
   EasyStartCardProviderPicker,
@@ -19,11 +21,24 @@ import {
   type OfframpHealth,
 } from "@/lib/easyStart/offrampApi";
 import { sendBaseUsdc } from "@/lib/easyStart/sendBaseUsdc";
+import {
+  fetchBaseEthBalance,
+  hasEnoughBaseEth,
+} from "@/lib/easyStart/baseBalances";
 import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
+
+const EasyStartMoonPaySellHost = lazy(() =>
+  import("@/components/easy-start/EasyStartMoonPaySellHost").then((m) => ({
+    default: m.EasyStartMoonPaySellHost,
+  }))
+);
+
+const GAS_TOPUP_USD = "3";
 
 type CashOutPhase =
   | "idle"
   | "opening"
+  | "gas"
   | "awaiting_provider"
   | "sending"
   | "done"
@@ -40,10 +55,23 @@ interface EasyStartOfframpCashOutProps {
   ctaLabel?: string;
 }
 
+function isUserCanceledFunding(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("cancel") ||
+    lower.includes("close") ||
+    lower.includes("exited") ||
+    lower.includes("dismiss")
+  );
+}
+
 /**
  * In-app cash-out after Base USDC arrives:
  * - Coinbase: CDP session → sell widget → poll to_address → Privy USDC transfer
  * - MoonPay: sell widget + signed URL → onInitiateDeposit → Privy USDC transfer
+ *
+ * MoonPay’s React SDK is lazy-mounted only while the sell overlay is open so it
+ * cannot crash Privy during review, Coinbase cash-out, or gas top-up.
  */
 export function EasyStartOfframpCashOut({
   evmAddress,
@@ -55,6 +83,7 @@ export function EasyStartOfframpCashOut({
   ctaLabel,
 }: EasyStartOfframpCashOutProps) {
   const { sendTransaction } = useSendTransaction();
+  const { fundWallet } = useFundWallet();
   const { toast } = useToast();
   const consumerCopy = useConsumerCopy();
 
@@ -66,6 +95,9 @@ export function EasyStartOfframpCashOut({
   const [txHash, setTxHash] = useState<string | null>(null);
 
   const moonpayKey = moonpayPublishableKey();
+  const address = evmAddress as Address | null;
+  const showMoonpay =
+    moonpayVisible && provider === "moonpay" && Boolean(moonpayKey);
 
   useEffect(() => {
     void fetchOfframpHealth()
@@ -75,22 +107,28 @@ export function EasyStartOfframpCashOut({
       );
   }, []);
 
+  useEffect(() => {
+    if (provider !== "moonpay" && moonpayVisible) {
+      setMoonpayVisible(false);
+    }
+  }, [moonpayVisible, provider]);
+
   const providerReady =
     provider === "coinbase"
       ? Boolean(health?.coinbase)
       : Boolean(health?.moonpay && moonpayKey);
 
+  const walletHasGas = useCallback(async (): Promise<boolean> => {
+    if (!address) return false;
+    const eth = await fetchBaseEthBalance(address);
+    return hasEnoughBaseEth(eth.value);
+  }, [address]);
+
   const sendUsdcTo = useCallback(
     async (to: string, cryptoAmount: string) => {
       setPhase("sending");
       const hash = await sendBaseUsdc({
-        sendTransaction: (input) =>
-          sendTransaction({
-            to: input.to as `0x${string}`,
-            data: input.data,
-            value: input.value != null ? `0x${input.value.toString(16)}` : "0x0",
-            chainId: input.chainId,
-          }),
+        sendTransaction,
         to,
         amount: cryptoAmount,
         fromAddress: evmAddress ?? undefined,
@@ -106,6 +144,13 @@ export function EasyStartOfframpCashOut({
     [evmAddress, sendTransaction, toast]
   );
 
+  const closeMoonpay = useCallback(() => {
+    setMoonpayVisible(false);
+    setPhase((current) =>
+      current === "awaiting_provider" ? "idle" : current
+    );
+  }, []);
+
   // Poll Coinbase for deposit address after widget session starts.
   useEffect(() => {
     if (provider !== "coinbase" || !partnerUserRef) return;
@@ -119,7 +164,14 @@ export function EasyStartOfframpCashOut({
         const to = coinbaseDepositAddress(latest);
         const sellAmt = coinbaseSellAmount(latest) || amount;
         if (to && sellAmt && !cancelled) {
-          await sendUsdcTo(to, sellAmt);
+          try {
+            await sendUsdcTo(to, sellAmt);
+          } catch (e: unknown) {
+            if (cancelled) return;
+            const message = e instanceof Error ? e.message : String(e);
+            setError(message);
+            setPhase("error");
+          }
           return;
         }
       } catch {
@@ -149,7 +201,20 @@ export function EasyStartOfframpCashOut({
         amount: amount ?? undefined,
       });
       setPartnerUserRef(session.partnerUserRef);
-      window.open(session.sellUrl, "_blank", "noopener,noreferrer");
+      const popup = window.open(
+        session.sellUrl,
+        "_blank",
+        "noopener,noreferrer"
+      );
+      if (!popup) {
+        setError(
+          consumerCopy
+            ? "Allow pop-ups to continue cash-out."
+            : "Allow pop-ups to open Coinbase cash-out."
+        );
+        setPhase("error");
+        return;
+      }
       setPhase("awaiting_provider");
       toast({
         title: consumerCopy ? "Complete cash-out" : "Complete sell in Coinbase",
@@ -180,9 +245,73 @@ export function EasyStartOfframpCashOut({
     setPhase("awaiting_provider");
   };
 
-  const handleCashOut = () => {
+  const startProvider = () => {
     if (provider === "coinbase") void startCoinbase();
     else startMoonpay();
+  };
+
+  const handleCashOut = async () => {
+    if (!address) return;
+    setError(null);
+    setPhase("opening");
+    try {
+      if (!(await walletHasGas())) {
+        setPhase("gas");
+        return;
+      }
+      startProvider();
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message || "Couldn’t check processing fees");
+      setPhase("error");
+    }
+  };
+
+  const handleFundGas = async () => {
+    if (!address) return;
+    setError(null);
+    setPhase("opening");
+    try {
+      await fundWallet({
+        address,
+        options: {
+          chain: base,
+          asset: "native-currency",
+          amount: GAS_TOPUP_USD,
+          defaultFundingMethod: "card",
+          card: { preferredProvider: "moonpay" },
+        },
+      });
+      if (await walletHasGas()) {
+        startProvider();
+        return;
+      }
+      setPhase("gas");
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      if (isUserCanceledFunding(message)) {
+        setPhase("gas");
+        return;
+      }
+      setError(message || "Couldn’t add processing fee");
+      setPhase("error");
+    }
+  };
+
+  const retryGasCheck = async () => {
+    setError(null);
+    setPhase("opening");
+    try {
+      if (await walletHasGas()) {
+        startProvider();
+        return;
+      }
+      setPhase("gas");
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message || "Couldn’t check processing fees");
+      setPhase("error");
+    }
   };
 
   const moonpayAmount =
@@ -204,148 +333,182 @@ export function EasyStartOfframpCashOut({
       ? `Cash out to ${provider === "coinbase" ? "bank" : "debit card"}`
       : `Cash out with ${provider === "coinbase" ? "Coinbase" : "MoonPay"}`);
 
-  const body = (
-    <div className="space-y-4 text-left">
-      {hideProviderPicker ? null : (
-        <EasyStartCardProviderPicker
-          value={provider}
-          onChange={onProviderChange}
-          label="Cash out with"
-        />
-      )}
-
-      {health && !providerReady ? (
-        <p className="text-xs text-amber-600 dark:text-amber-400 text-center">
-          {unavailableCopy}
-        </p>
-      ) : null}
-
-      {phase === "awaiting_provider" && provider === "coinbase" ? (
-        <p className="text-sm text-muted-foreground text-center">
-          {consumerCopy
-            ? "Waiting for bank cash-out details…"
-            : "Waiting for Coinbase sell details…"}
-        </p>
-      ) : null}
-
-      {phase === "sending" ? (
-        <div className="flex items-center justify-center gap-2 text-sm text-foreground">
-          <Loader2 className="h-4 w-4 animate-spin text-ocean-teal" />
-          Confirming transfer…
-        </div>
-      ) : null}
-
-      {phase === "done" ? (
-        <p className="text-sm text-ocean-teal text-center">
-          Transfer submitted
-          {txHash && !consumerCopy ? ` (${txHash.slice(0, 10)}…)` : ""}.
-          {consumerCopy
-            ? " Your payout is processing."
-            : " Fiat payout continues with the provider."}
-        </p>
-      ) : null}
-
-      {error || phase === "error" ? (
-        <p className="text-sm text-destructive text-center" role="alert">
-          {error ?? "Cash-out failed"}
-        </p>
-      ) : null}
-
-      {phase === "done" ? (
-        <Button
-          className="h-12 w-full rounded-xl bg-ocean-teal font-semibold text-white hover:bg-ocean-teal/90"
-          onClick={() => onDone?.()}
-        >
-          Done
-        </Button>
-      ) : (
-        <Button
-          className="h-12 w-full rounded-xl bg-ocean-teal text-base font-semibold text-white hover:bg-ocean-teal/90"
-          disabled={
-            !evmAddress ||
-            !providerReady ||
-            phase === "opening" ||
-            phase === "sending" ||
-            phase === "awaiting_provider"
-          }
-          onClick={handleCashOut}
-        >
-          {phase === "opening" || phase === "sending" ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Working…
-            </>
-          ) : (
-            <>
-              {hideProviderPicker ? null : (
-                <CreditCard className="mr-2 h-4 w-4" />
-              )}
-              {payLabel}
-            </>
-          )}
-        </Button>
-      )}
-
-      {phase === "awaiting_provider" && provider === "coinbase" ? (
-        <Button
-          variant="ghost"
-          className="w-full"
-          onClick={() => {
-            setPartnerUserRef(null);
-            setPhase("idle");
-          }}
-        >
-          Cancel wait
-        </Button>
-      ) : null}
-    </div>
-  );
-
-  if (!moonpayKey) {
-    return body;
-  }
+  const busy =
+    phase === "opening" || phase === "sending" || phase === "awaiting_provider";
 
   return (
-    <MoonPayProvider apiKey={moonpayKey} debug={import.meta.env.DEV}>
-      {body}
-      <MoonPaySellWidget
-        variant="overlay"
-        visible={moonpayVisible}
-        baseCurrencyCode="usdc"
-        baseCurrencyAmount={moonpayAmount}
-        walletAddress={evmAddress ?? undefined}
-        onClose={async () => {
-          setMoonpayVisible(false);
-          if (phase === "awaiting_provider") setPhase("idle");
-        }}
-        onUrlSignatureRequested={async (url) => {
-          try {
-            return await signMoonpayWidgetUrl(url);
-          } catch (e: unknown) {
-            const message = e instanceof Error ? e.message : String(e);
-            setError(message);
-            setPhase("error");
-            setMoonpayVisible(false);
-            return "";
-          }
-        }}
-        onInitiateDeposit={async (props) => {
-          try {
-            const hash = await sendUsdcTo(
-              props.depositWalletAddress,
-              props.cryptoCurrencyAmount
-            );
-            setMoonpayVisible(false);
-            return { depositId: hash, cancelTransactionOnError: false };
-          } catch (e: unknown) {
-            const message = e instanceof Error ? e.message : String(e);
-            setError(message);
-            setPhase("error");
-            setMoonpayVisible(false);
-            return { depositId: "", cancelTransactionOnError: true };
-          }
-        }}
-      />
-    </MoonPayProvider>
+    <>
+      <div className="space-y-4 text-left">
+        {hideProviderPicker ? null : (
+          <EasyStartCardProviderPicker
+            value={provider}
+            onChange={onProviderChange}
+            label="Cash out with"
+          />
+        )}
+
+        {health && !providerReady ? (
+          <p className="text-xs text-amber-600 dark:text-amber-400 text-center">
+            {unavailableCopy}
+          </p>
+        ) : null}
+
+        {phase === "gas" ? (
+          <p className="text-sm text-muted-foreground text-center">
+            {consumerCopy
+              ? "A small network fee is needed on Base to send your cash-out."
+              : "A small amount of ETH on Base is needed to pay the transfer fee."}
+          </p>
+        ) : null}
+
+        {phase === "awaiting_provider" && provider === "coinbase" ? (
+          <p className="text-sm text-muted-foreground text-center">
+            {consumerCopy
+              ? "Waiting for bank cash-out details…"
+              : "Waiting for Coinbase sell details…"}
+          </p>
+        ) : null}
+
+        {phase === "sending" ? (
+          <div className="flex items-center justify-center gap-2 text-sm text-foreground">
+            <Loader2 className="h-4 w-4 animate-spin text-ocean-teal" />
+            Confirming transfer…
+          </div>
+        ) : null}
+
+        {phase === "done" ? (
+          <p className="text-sm text-ocean-teal text-center">
+            Transfer submitted
+            {txHash && !consumerCopy ? ` (${txHash.slice(0, 10)}…)` : ""}.
+            {consumerCopy
+              ? " Your payout is processing."
+              : " Fiat payout continues with the provider."}
+          </p>
+        ) : null}
+
+        {error || phase === "error" ? (
+          <p className="text-sm text-destructive text-center" role="alert">
+            {error ?? "Cash-out failed"}
+          </p>
+        ) : null}
+
+        {phase === "done" ? (
+          <Button
+            className="h-12 w-full rounded-xl bg-ocean-teal font-semibold text-white hover:bg-ocean-teal/90"
+            onClick={() => onDone?.()}
+          >
+            Done
+          </Button>
+        ) : phase === "gas" ? (
+          <>
+            <Button
+              className="h-12 w-full rounded-xl bg-ocean-teal text-base font-semibold text-white hover:bg-ocean-teal/90"
+              onClick={() => void handleFundGas()}
+            >
+              Add processing fee
+            </Button>
+            <Button
+              variant="ghost"
+              className="w-full"
+              onClick={() => void retryGasCheck()}
+            >
+              I already paid — continue
+            </Button>
+          </>
+        ) : (
+          <Button
+            className="h-12 w-full rounded-xl bg-ocean-teal text-base font-semibold text-white hover:bg-ocean-teal/90"
+            disabled={!evmAddress || !providerReady || busy}
+            onClick={() => void handleCashOut()}
+          >
+            {busy ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Working…
+              </>
+            ) : (
+              <>
+                {hideProviderPicker ? null : (
+                  <CreditCard className="mr-2 h-4 w-4" />
+                )}
+                {payLabel}
+              </>
+            )}
+          </Button>
+        )}
+
+        {phase === "awaiting_provider" && provider === "coinbase" ? (
+          <Button
+            variant="ghost"
+            className="w-full"
+            onClick={() => {
+              setPartnerUserRef(null);
+              setPhase("idle");
+            }}
+          >
+            Cancel wait
+          </Button>
+        ) : null}
+      </div>
+
+      {showMoonpay && moonpayKey ? (
+        <Suspense fallback={null}>
+          <IsolateErrorBoundary
+            label="MoonPay"
+            fallback={({ error: moonpayError, retry }) => (
+              <div className="mt-3 space-y-2 text-center">
+                <p className="text-sm text-destructive" role="alert">
+                  {moonpayError.message || "Couldn’t open debit-card cash-out."}
+                </p>
+                <Button
+                  variant="ghost"
+                  className="w-full"
+                  onClick={() => {
+                    closeMoonpay();
+                    retry();
+                  }}
+                >
+                  Close
+                </Button>
+              </div>
+            )}
+          >
+            <EasyStartMoonPaySellHost
+              apiKey={moonpayKey}
+              evmAddress={evmAddress}
+              amount={moonpayAmount}
+              onClose={closeMoonpay}
+              onUrlSignatureRequested={async (url) => {
+                try {
+                  return await signMoonpayWidgetUrl(url);
+                } catch (e: unknown) {
+                  const message = e instanceof Error ? e.message : String(e);
+                  setError(message);
+                  setPhase("error");
+                  setMoonpayVisible(false);
+                  return "";
+                }
+              }}
+              onInitiateDeposit={async (props) => {
+                try {
+                  const hash = await sendUsdcTo(
+                    props.depositWalletAddress,
+                    props.cryptoCurrencyAmount
+                  );
+                  setMoonpayVisible(false);
+                  return { depositId: hash, cancelTransactionOnError: false };
+                } catch (e: unknown) {
+                  const message = e instanceof Error ? e.message : String(e);
+                  setError(message);
+                  setPhase("error");
+                  setMoonpayVisible(false);
+                  return { depositId: "", cancelTransactionOnError: true };
+                }
+              }}
+            />
+          </IsolateErrorBoundary>
+        </Suspense>
+      ) : null}
+    </>
   );
 }

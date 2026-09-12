@@ -14,6 +14,8 @@ import {
 import {
   EASY_BORROW_POOL_A_FOLKS_USDC_UI_KEY,
   EASY_BORROW_POOL_D_USDC_UI_KEY,
+  EASY_BORROW_POOL_G_USDC_UI_KEY,
+  easyProductScope,
   listBorrowAssetOptionsForCollateral,
   listUsdcCollateralSupplyOptions,
   resolveBorrowRoute,
@@ -104,14 +106,15 @@ function lendingTxnsFromResult(
   return result.txns;
 }
 
-/** Prefer Pool D USDC, then native USDC, then Pool A Folks USDC, then first. */
+/** Prefer isolated Pool G USDC, then Pool D Folks, then native USDC, then Pool A Folks. */
 function preferredBorrowUiKey(
   options: { uiKey: string }[]
 ): string | undefined {
   if (options.length === 0) return undefined;
   return (
-    options.find((o) => o.uiKey === EASY_BORROW_POOL_D_USDC_UI_KEY)?.uiKey ??
+    options.find((o) => o.uiKey === EASY_BORROW_POOL_G_USDC_UI_KEY)?.uiKey ??
     options.find((o) => o.uiKey === "USDC")?.uiKey ??
+    options.find((o) => o.uiKey === EASY_BORROW_POOL_D_USDC_UI_KEY)?.uiKey ??
     options.find((o) => o.uiKey === EASY_BORROW_POOL_A_FOLKS_USDC_UI_KEY)
       ?.uiKey ??
     options[0]?.uiKey
@@ -148,6 +151,7 @@ const BorrowCard = () => {
   const openEasyStartLogin = useEasyStartLogin();
   const { toast } = useToast();
   const consumerCopy = useConsumerCopy();
+  const borrowScope = easyProductScope(consumerCopy);
   const displaySymbol = (symbol?: string | null) => {
     if (!symbol) return "—";
     return consumerCopy ? consumerAssetDisplayLabel(symbol) : symbol;
@@ -162,12 +166,17 @@ const BorrowCard = () => {
   const [, setRainbowkitSignDialogSuppressed] = useState(false);
 
   const supplyOptions = useMemo(
-    () => listUsdcCollateralSupplyOptions(networkId),
-    [networkId]
+    () => listUsdcCollateralSupplyOptions(networkId, { scope: borrowScope }),
+    [networkId, borrowScope]
   );
 
   const [collateralUiKey, setCollateralUiKey] = useState(
-    () => pickDefaultCollateralOption(listUsdcCollateralSupplyOptions(networkId))?.uiKey ?? "USDC"
+    () =>
+      pickDefaultCollateralOption(
+        listUsdcCollateralSupplyOptions(networkId, {
+          scope: easyProductScope(consumerCopy),
+        })
+      )?.uiKey ?? "USDC"
   );
   const selectedCollateral =
     supplyOptions.find((o) => o.uiKey === collateralUiKey) ??
@@ -181,10 +190,11 @@ const BorrowCard = () => {
   }, [supplyOptions, collateralUiKey]);
 
   const [borrowUiKey, setBorrowUiKey] = useState(() => {
+    const scope = easyProductScope(consumerCopy);
     const collateral = pickDefaultCollateralOption(
-      listUsdcCollateralSupplyOptions(networkId)
+      listUsdcCollateralSupplyOptions(networkId, { scope })
     );
-    if (!collateral) return EASY_BORROW_POOL_D_USDC_UI_KEY;
+    if (!collateral) return "USDC";
     const opts = listBorrowAssetOptionsForCollateral(
       networkId,
       collateral.collateralConfigKey,
@@ -192,9 +202,10 @@ const BorrowCard = () => {
         collateralPoolId: collateral.collateralPoolId,
         collateralContractId: collateral.collateralContractId,
         preferredPoolIds: collateral.preferredPoolIds,
+        scope,
       }
     );
-    return preferredBorrowUiKey(opts) ?? opts[0]?.uiKey ?? "WAD";
+    return preferredBorrowUiKey(opts) ?? opts[0]?.uiKey ?? "USDC";
   });
   const [collateralAmount, setCollateralAmount] = useState("");
   const [borrowAmount, setBorrowAmount] = useState("");
@@ -210,9 +221,10 @@ const BorrowCard = () => {
         collateralPoolId: selectedCollateral.collateralPoolId,
         collateralContractId: selectedCollateral.collateralContractId,
         preferredPoolIds: selectedCollateral.preferredPoolIds,
+        scope: borrowScope,
       }
     );
-  }, [networkId, selectedCollateral]);
+  }, [networkId, selectedCollateral, borrowScope]);
 
   // Keep borrow selection valid for the selected USDC supply market.
   useEffect(() => {
@@ -736,6 +748,7 @@ const BorrowCard = () => {
                     collateralPoolId: collateral.collateralPoolId,
                     collateralContractId: collateral.collateralContractId,
                     preferredPoolIds: collateral.preferredPoolIds,
+                    scope: borrowScope,
                   }
                 );
                 const preferred = preferredBorrowUiKey(opts);

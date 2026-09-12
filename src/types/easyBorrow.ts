@@ -26,7 +26,7 @@ export type EasyBorrowMarketRef = {
 export type BorrowRoute = {
   networkId: NetworkId;
   poolId: string;
-  /** A / B / C / D / E / F from {@link getLendingPoolLabel}. */
+  /** A / B / C / D / E / F / G from {@link getLendingPoolLabel}. */
   marketLabel: string;
   collateral: EasyBorrowMarketRef;
   borrow: EasyBorrowMarketRef;
@@ -54,6 +54,9 @@ export type ResolveBorrowRouteInput = {
    */
   preferredPoolIds?: readonly string[];
 };
+
+/** `simplfi` = isolated Pool G USDC only (no WAD / Folks). `full` = Easy Borrow v1. */
+export type EasyProductScope = "full" | "simplfi";
 
 export type BorrowRouteLiveParams = {
   collateralFactor: number | null;

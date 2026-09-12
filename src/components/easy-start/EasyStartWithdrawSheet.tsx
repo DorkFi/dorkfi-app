@@ -8,7 +8,6 @@ import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import { fetchBaseUsdcBalance } from "@/lib/easyStart/baseBalances";
 import type { CardProvider } from "@/components/easy-start/EasyStartCardProviderPicker";
-import { EasyStartOfframpCashOut } from "@/components/easy-start/EasyStartOfframpCashOut";
 import type { Address } from "viem";
 import {
   AmountHero,
@@ -29,6 +28,7 @@ import {
   TrustValueList,
   type PayMethodOption,
 } from "@/components/easy-start/EasyStartFundingUi";
+import { EasyStartOfframpCashOutSlot } from "@/components/easy-start/EasyStartOfframpCashOutSlot";
 
 const PRESET_AMOUNTS = ["25", "50", "100", "250"] as const;
 
@@ -223,7 +223,7 @@ export function EasyStartWithdrawSheet({
                 />
                 <TrustValueList />
                 <TermsNote />
-                <EasyStartOfframpCashOut
+                <EasyStartOfframpCashOutSlot
                   evmAddress={evmAddress}
                   amount={cashOutAmount}
                   provider={cashOutProvider}
