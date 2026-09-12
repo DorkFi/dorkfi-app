@@ -3,7 +3,7 @@ import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
 import { getNetworkConfig, type NetworkId } from "@/config";
 import { calculateMaxBorrowAmount } from "@/services/adminService";
 import {
-  fetchMarketInfo,
+  fetchLiveMarketInfo,
   fetchUserDepositBalance,
   fetchUserGlobalDataForPool,
   fetchUserWalletBalance,
@@ -99,18 +99,23 @@ export function useEasyBorrowQuote(
     queryKey: [
       "easyBorrow",
       "markets",
+      "live",
       networkId,
       route?.poolId,
       route?.collateral.contractId,
       route?.borrow.contractId,
     ],
     enabled: Boolean(route),
-    staleTime: 60_000,
+    staleTime: 30_000,
     queryFn: async () => {
       if (!route) return null;
       const [collateralMarket, borrowMarket] = await Promise.all([
-        fetchMarketInfo(route.poolId, route.collateral.contractId, networkId),
-        fetchMarketInfo(route.poolId, route.borrow.contractId, networkId),
+        fetchLiveMarketInfo(
+          route.poolId,
+          route.collateral.contractId,
+          networkId
+        ),
+        fetchLiveMarketInfo(route.poolId, route.borrow.contractId, networkId),
       ]);
       return { collateralMarket, borrowMarket };
     },

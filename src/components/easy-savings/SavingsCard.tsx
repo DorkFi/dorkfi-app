@@ -17,6 +17,7 @@ import {
   consumerAssetDisplayLabel,
   isEasySavingsHighYieldAssetConfigKey,
   EASY_SAVINGS_HIGH_YIELD_ENABLED,
+  easySavingsProductScope,
 } from "@/services/savingsRouteResolver";
 import type { SavingsRoute } from "@/types/easySavings";
 import { useEasySavingsQuote } from "@/hooks/useEasySavingsQuote";
@@ -132,6 +133,7 @@ const SavingsCard = () => {
   const { activeAccount } = useDorkFiWalletAdapter();
   const privy = usePrivyEasyStart();
   const consumerCopy = useConsumerCopy();
+  const savingsScope = easySavingsProductScope(consumerCopy);
   const [walletModalOpen, setWalletModalOpen] = useState(false);
   const [depositOpen, setDepositOpen] = useState(false);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
@@ -161,8 +163,9 @@ const SavingsCard = () => {
       resolveSavingsRoute({
         networkId,
         assetConfigKey: "USDC",
+        scope: savingsScope,
       }),
-    [networkId]
+    [networkId, savingsScope]
   );
 
   const {
@@ -269,8 +272,9 @@ const SavingsCard = () => {
     return resolveSavingsRoute({
       networkId,
       assetConfigKey: effectiveAssetKey,
+      scope: savingsScope,
     });
-  }, [networkId, effectiveAssetKey, isWalletAccount, usdcRoute]);
+  }, [networkId, effectiveAssetKey, isWalletAccount, usdcRoute, savingsScope]);
 
   // Same USDC market data when viewing wallet cash (avoids a second market query).
   const quote = useEasySavingsQuote({

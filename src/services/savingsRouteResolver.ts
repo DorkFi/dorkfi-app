@@ -12,10 +12,13 @@ import {
   type TokenConfig,
 } from "@/config";
 import type {
+  EasyProductScope,
   EasySavingsMarketRef,
   ResolveSavingsRouteInput,
   SavingsRoute,
 } from "@/types/easySavings";
+
+export type { EasyProductScope };
 
 /**
  * Core savings deposit assets (single-asset markets).
@@ -199,7 +202,25 @@ const POOL_PRIORITY: Record<string, number> = {
   C: 3,
   E: 4,
   F: 5,
+  G: 6,
 };
+
+/** SimplFi Earn: isolated Pool G native USDC first. */
+const SIMPLFI_POOL_PRIORITY: Record<string, number> = {
+  G: 0,
+  A: 1,
+  B: 2,
+  D: 3,
+  C: 4,
+  E: 5,
+  F: 6,
+};
+
+export function easySavingsProductScope(
+  consumerCopy: boolean
+): EasyProductScope {
+  return consumerCopy ? "simplfi" : "full";
+}
 
 const ASSET_UI_ORDER = [
   ...EASY_SAVINGS_CORE_ASSET_CONFIG_KEYS,
@@ -249,16 +270,19 @@ export function listSavingsRoutes(
 
 export function rankSavingsRoutes(
   routes: SavingsRoute[],
-  preferredPoolIds?: readonly string[]
+  preferredPoolIds?: readonly string[],
+  scope: EasyProductScope = "full"
 ): SavingsRoute[] {
   const preferred = new Set((preferredPoolIds ?? []).map(String));
+  const letterRank =
+    scope === "simplfi" ? SIMPLFI_POOL_PRIORITY : POOL_PRIORITY;
   return [...routes].sort((a, b) => {
     const aPref = preferred.has(a.poolId) ? 0 : 1;
     const bPref = preferred.has(b.poolId) ? 0 : 1;
     if (aPref !== bPref) return aPref - bPref;
 
-    const aLetter = POOL_PRIORITY[a.marketLabel] ?? 99;
-    const bLetter = POOL_PRIORITY[b.marketLabel] ?? 99;
+    const aLetter = letterRank[a.marketLabel] ?? 99;
+    const bLetter = letterRank[b.marketLabel] ?? 99;
     if (aLetter !== bLetter) return aLetter - bLetter;
 
     const aUi = assetUiRank(a.asset.configKey);
@@ -295,7 +319,7 @@ export function resolveSavingsRoutes(
   const matched = listSavingsRoutes(input.networkId).filter((route) =>
     matchesAsset(route, input)
   );
-  return rankSavingsRoutes(matched, input.preferredPoolIds);
+  return rankSavingsRoutes(matched, input.preferredPoolIds, input.scope);
 }
 
 export function resolveSavingsRoute(

@@ -1,8 +1,10 @@
 import { useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
 import type { NetworkId } from "@/config";
+import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 import { useWadUsdcTinymanApyPercent } from "@/hooks/useWadUsdcTinymanApyPercent";
 import {
+  easySavingsProductScope,
   listCoreSavingsAssetConfigKeys,
   listHighYieldSavingsAssetConfigKeys,
   resolveSavingsRoute,
@@ -12,7 +14,7 @@ import {
   LEVERAGED_WAD_USDC_SAVINGS_KEY,
 } from "@/services/leveragedWadLpService";
 import type { SavingsRoute } from "@/types/easySavings";
-import { fetchMarketInfo, type MarketInfo } from "@/services/lendingService";
+import { fetchLiveMarketInfo, type MarketInfo } from "@/services/lendingService";
 import { usdPerTokenFromMarketInfoPrice } from "@/utils/assetDecimals";
 
 export type SavingsAccountRow = {
@@ -44,13 +46,15 @@ function apyFromMarket(market: MarketInfo | null | undefined): number | null {
 
 function routesForKeys(
   networkId: NetworkId,
-  keys: string[]
+  keys: string[],
+  scope: ReturnType<typeof easySavingsProductScope>
 ): SavingsRoute[] {
   const out: SavingsRoute[] = [];
   for (const key of keys) {
     const route = resolveSavingsRoute({
       networkId,
       assetConfigKey: key,
+      scope,
     });
     if (route) out.push(route);
   }
@@ -112,14 +116,25 @@ export function useSavingsAccounts(networkId: NetworkId): {
   highYield: SavingsAccountRow[];
   all: SavingsAccountRow[];
 } {
+  const consumerCopy = useConsumerCopy();
+  const scope = easySavingsProductScope(consumerCopy);
   const coreRoutes = useMemo(
-    () => routesForKeys(networkId, listCoreSavingsAssetConfigKeys(networkId)),
-    [networkId]
+    () =>
+      routesForKeys(
+        networkId,
+        listCoreSavingsAssetConfigKeys(networkId),
+        scope
+      ),
+    [networkId, scope]
   );
   const highYieldRoutes = useMemo(
     () =>
-      routesForKeys(networkId, listHighYieldSavingsAssetConfigKeys(networkId)),
-    [networkId]
+      routesForKeys(
+        networkId,
+        listHighYieldSavingsAssetConfigKeys(networkId),
+        scope
+      ),
+    [networkId, scope]
   );
 
   const allRoutes = useMemo(
@@ -140,13 +155,14 @@ export function useSavingsAccounts(networkId: NetworkId): {
       queryKey: [
         "easySavings",
         "sidebarMarket",
+        "live",
         networkId,
         route.poolId,
         route.asset.contractId,
       ],
       queryFn: () =>
-        fetchMarketInfo(route.poolId, route.asset.contractId, networkId),
-      staleTime: 60_000,
+        fetchLiveMarketInfo(route.poolId, route.asset.contractId, networkId),
+      staleTime: 30_000,
     })),
   });
 

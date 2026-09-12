@@ -55,9 +55,9 @@ const EasyStartHeadlessBridge = lazy(() =>
   }))
 );
 
-const EasyStartOfframpCashOut = lazy(() =>
-  import("@/components/easy-start/EasyStartOfframpCashOut").then((m) => ({
-    default: m.EasyStartOfframpCashOut,
+const EasyStartOfframpCashOutSlot = lazy(() =>
+  import("@/components/easy-start/EasyStartOfframpCashOutSlot").then((m) => ({
+    default: m.EasyStartOfframpCashOutSlot,
   }))
 );
 
@@ -429,7 +429,7 @@ const EasySavingsWithdrawModal = ({
                     </DialogDescription>
                   </DialogHeader>
                   <Suspense fallback={null}>
-                    <EasyStartOfframpCashOut
+                    <EasyStartOfframpCashOutSlot
                       evmAddress={privy.evmAddress}
                       amount={confirmedAmount || amount}
                       provider={cashOutProvider}

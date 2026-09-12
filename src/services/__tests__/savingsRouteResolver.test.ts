@@ -19,6 +19,7 @@ const NETWORK = "algorand-mainnet" as const;
 const POOL_A = "3333688282";
 const POOL_B = "3345940978";
 const POOL_E = "3585829377";
+const POOL_G = "3697602173";
 
 describe("savingsRouteResolver (core + high-yield)", () => {
   it("includes core singles and high-yield LP keys", () => {
@@ -107,7 +108,7 @@ describe("savingsRouteResolver (core + high-yield)", () => {
     expect(route!.asset.symbol).toBe("USDC");
   });
 
-  it("returns USDC candidates on A and B", () => {
+  it("returns USDC candidates on A, B, and G", () => {
     const routes = resolveSavingsRoutes({
       networkId: NETWORK,
       assetConfigKey: "USDC",
@@ -115,6 +116,20 @@ describe("savingsRouteResolver (core + high-yield)", () => {
     const pools = new Set(routes.map((r) => r.poolId));
     expect(pools.has(POOL_A)).toBe(true);
     expect(pools.has(POOL_B)).toBe(true);
+    expect(pools.has(POOL_G)).toBe(true);
+  });
+
+  it("resolves SimplFi USDC onto isolated Pool G", () => {
+    const route = resolveSavingsRoute({
+      networkId: NETWORK,
+      assetConfigKey: "USDC",
+      scope: "simplfi",
+    });
+    expect(route).not.toBeNull();
+    expect(route!.poolId).toBe(POOL_G);
+    expect(route!.marketLabel).toBe("G");
+    expect(route!.asset.symbol).toBe("USDC");
+    expect(route!.asset.configKey).toBe("USDC");
   });
 
   it("prefers an existing-position pool when preferredPoolIds is set", () => {

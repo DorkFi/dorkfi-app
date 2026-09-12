@@ -15,12 +15,15 @@ const erc20TransferAbi = [
   },
 ] as const;
 
-export type SendUsdcFn = (input: {
-  to: string;
-  value?: bigint;
-  data?: Hex;
-  chainId?: number;
-}) => Promise<{ hash: Hex }>;
+export type SendUsdcFn = (
+  input: {
+    to: string;
+    value?: bigint;
+    data?: Hex;
+    chainId?: number;
+  },
+  options?: { address?: string }
+) => Promise<{ hash: Hex }>;
 
 /** Build + send USDC transfer on Base via Privy `useSendTransaction`. */
 export async function sendBaseUsdc(args: {
@@ -48,11 +51,14 @@ export async function sendBaseUsdc(args: {
     args: [to, units],
   });
 
-  const { hash } = await args.sendTransaction({
-    to: BASE_MAINNET_USDC,
-    data,
-    value: 0n,
-    chainId: base.id,
-  });
+  const { hash } = await args.sendTransaction(
+    {
+      to: BASE_MAINNET_USDC,
+      data,
+      value: 0n,
+      chainId: base.id,
+    },
+    args.fromAddress ? { address: args.fromAddress } : undefined
+  );
   return hash;
 }

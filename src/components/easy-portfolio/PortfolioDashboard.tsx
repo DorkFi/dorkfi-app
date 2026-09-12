@@ -42,6 +42,61 @@ function formatUsd(n: number | null | undefined): string {
   return formatUsdAmount(n);
 }
 
+function BalanceSummary({
+  walletUsd,
+  depositUsd,
+  borrowUsd,
+  consumerCopy,
+  isLoading,
+}: {
+  walletUsd: number;
+  depositUsd: number;
+  borrowUsd: number;
+  consumerCopy: boolean;
+  isLoading: boolean;
+}) {
+  const netUsd = walletUsd + depositUsd - borrowUsd;
+  const show =
+    walletUsd > 0.01 || depositUsd > 0.01 || borrowUsd > 0.01;
+  if (!show && !isLoading) return null;
+
+  const savingsLabel = consumerCopy ? "in savings" : "supplied";
+  const parts: string[] = [];
+  if (show) {
+    parts.push(`${formatUsd(Math.max(0, walletUsd))} transferable`);
+    if (depositUsd > 0.01) {
+      parts.push(`${formatUsd(depositUsd)} ${savingsLabel}`);
+    }
+    if (borrowUsd > 0.01) {
+      parts.push(`${formatUsd(borrowUsd)} borrowed`);
+    }
+  }
+
+  return (
+    <div className="space-y-1 px-1">
+      {show ? (
+        <>
+          <p className="text-3xl font-semibold tracking-tight tabular-nums text-foreground leading-tight">
+            {formatUsd(netUsd)}
+            {isLoading ? "…" : ""}
+          </p>
+          <p className="text-sm text-muted-foreground">
+            {borrowUsd > 0.01 ? "Net balance" : "Total balance"}
+          </p>
+          {parts.length > 0 ? (
+            <p className="text-xs text-muted-foreground">{parts.join(" · ")}</p>
+          ) : null}
+        </>
+      ) : (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" />
+          Loading balances…
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** Horizontal scale ticks under position bars. */
 function ScaleTicks({ max }: { max: number }) {
   const ticks =
@@ -299,7 +354,7 @@ const PortfolioDashboard = () => {
   const networkId = currentNetwork as NetworkId;
   const navigate = useNavigate();
   const [walletModalOpen, setWalletModalOpen] = useState(false);
-  const [includeSupplied, setIncludeSupplied] = useState(true);
+  const [includeSupplied, setIncludeSupplied] = useState(false);
   const [repayPosition, setRepayPosition] =
     useState<EasyStartBorrowPosition | null>(null);
   const openEasyStartLogin = useEasyStartLogin();
@@ -315,7 +370,10 @@ const PortfolioDashboard = () => {
     isLoading: debtLoading,
   } = useEasyStartBorrowDebt();
   const {
+    walletUsd,
+    depositUsd,
     algoWalletUsd,
+    baseWalletUsd,
     isLoading: walletLoading,
   } = useEasyStartPortfolioTotal();
   const { all: savingsAccounts } = useSavingsAccounts(networkId);
@@ -413,7 +471,7 @@ const PortfolioDashboard = () => {
       };
     });
 
-    const usdcWallet = algoWalletUsd ?? 0;
+    const usdcWallet = (algoWalletUsd ?? 0) + (baseWalletUsd ?? 0);
     if (usdcWallet > 0.005) {
       const hasUsdcSupply = rows.some((r) =>
         r.symbol.toUpperCase().includes("USDC")
@@ -436,7 +494,7 @@ const PortfolioDashboard = () => {
         const usdcRow = rows.find((r) =>
           r.symbol.toUpperCase().includes("USDC")
         );
-        if (usdcRow && usdcRow.wallet <= 0) {
+        if (usdcRow) {
           usdcRow.wallet = usdcWallet;
           usdcRow.walletUsd = usdcWallet;
         }
@@ -447,7 +505,7 @@ const PortfolioDashboard = () => {
       if (b.suppliedUsd !== a.suppliedUsd) return b.suppliedUsd - a.suppliedUsd;
       return b.walletUsd - a.walletUsd;
     });
-  }, [fundedSavings, algoWalletUsd]);
+  }, [fundedSavings, algoWalletUsd, baseWalletUsd]);
 
   const borrows = useMemo(
     () =>
@@ -487,8 +545,15 @@ const PortfolioDashboard = () => {
 
   const walletSegments = useMemo(() => {
     const segments: Array<{ name: string; value: number }> = [];
-    if ((algoWalletUsd ?? 0) > 0.005) {
-      segments.push({ name: "USDC", value: algoWalletUsd ?? 0 });
+    const algo = algoWalletUsd ?? 0;
+    const base = baseWalletUsd ?? 0;
+    if (algo > 0.005 && base > 0.005) {
+      segments.push({ name: "USDC (Algorand)", value: algo });
+      segments.push({ name: "USDC (Base)", value: base });
+    } else if (algo > 0.005) {
+      segments.push({ name: "USDC", value: algo });
+    } else if (base > 0.005) {
+      segments.push({ name: "USDC", value: base });
     }
     if (includeSupplied) {
       for (const p of fundedSavings) {
@@ -503,9 +568,14 @@ const PortfolioDashboard = () => {
       }
     }
     return segments.sort((a, b) => b.value - a.value);
-  }, [algoWalletUsd, fundedSavings, includeSupplied, consumerCopy]);
+  }, [algoWalletUsd, baseWalletUsd, fundedSavings, includeSupplied, consumerCopy]);
 
   const walletTotal = walletSegments.reduce((s, x) => s + x.value, 0);
+  const showTransferableZero =
+    walletTotal <= 0 &&
+    !includeSupplied &&
+    (depositUsd > 0.01 || totalBorrowed > 0.01);
+  const balancesLoading = walletLoading || debtLoading || savingsLoading;
   const shellLoading =
     (debtLoading || savingsLoading || walletLoading) &&
     supplyRows.length === 0 &&
@@ -545,6 +615,14 @@ const PortfolioDashboard = () => {
 
   return (
     <section className="w-full max-w-6xl mx-auto space-y-4">
+      <BalanceSummary
+        walletUsd={walletUsd}
+        depositUsd={depositUsd}
+        borrowUsd={totalBorrowed}
+        consumerCopy={consumerCopy}
+        isLoading={balancesLoading}
+      />
+
       {shellLoading ? (
         <p className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="size-4 animate-spin" />
@@ -781,7 +859,7 @@ const PortfolioDashboard = () => {
           ) : null}
         </div>
 
-        {/* My Wallet */}
+        {/* Transferable / wallet */}
         <div className="rounded-[24px] border border-border/60 bg-card p-5 sm:p-6 shadow-sm">
           <div className="flex items-center justify-between gap-3 mb-2">
             <h2 className="text-lg font-semibold tracking-tight">
@@ -818,22 +896,28 @@ const PortfolioDashboard = () => {
                   </Pie>
                 </PieChart>
               </ResponsiveContainer>
-            ) : (
+            ) : showTransferableZero ? null : (
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                {consumerCopy ? "Nothing available yet" : "No wallet assets"}
+                {consumerCopy ? "Nothing transferable yet" : "No wallet assets"}
               </div>
             )}
-            {walletTotal > 0 ? (
+            {walletTotal > 0 || showTransferableZero ? (
               <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
                 <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                  Total
+                  {includeSupplied ? "Total" : "Transferable"}
                 </span>
                 <span className="text-xl font-semibold tabular-nums">
-                  {formatUsd(walletTotal)}
+                  {formatUsd(includeSupplied ? walletTotal : walletUsd)}
                 </span>
               </div>
             ) : null}
           </div>
+
+          {includeSupplied && walletUsd > 0.01 ? (
+            <p className="mt-2 text-center text-xs text-muted-foreground tabular-nums">
+              {formatUsd(walletUsd)} transferable
+            </p>
+          ) : null}
 
           {walletSegments.length > 0 ? (
             <ul className="mt-4 space-y-1.5 text-xs">

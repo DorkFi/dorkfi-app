@@ -17,8 +17,11 @@ import type {
   BorrowRoute,
   BorrowTransactionMechanism,
   EasyBorrowMarketRef,
+  EasyProductScope,
   ResolveBorrowRouteInput,
 } from "@/types/easyBorrow";
+
+export type { EasyProductScope };
 
 /**
  * Easy Borrow v1 only exposes these borrow assets in the UI.
@@ -162,7 +165,7 @@ export function getExplicitLpWadCollateralContractIds(
 
 /**
  * Flatten network token config into one listing per market row on an active
- * lending pool (A–F). Skips migration-only / unlabeled pool ids.
+ * lending pool (A–G). Skips migration-only / unlabeled pool ids.
  */
 export function listActiveMarketListings(
   networkId: NetworkId
@@ -190,6 +193,31 @@ function isExplicitLpWadRoute(
   return lpIds.has(String(collateral.token.contractId));
 }
 
+/** Isolated Pool G: native USDC may be both collateral and debt on the same market. */
+function isIsolatedSameAssetUsdcMarket(
+  networkId: NetworkId,
+  poolId: string,
+  listing: MarketListing
+): boolean {
+  if (listing.configKey !== "USDC") return false;
+  return getMarketLabel(networkId, poolId) === "G";
+}
+
+function isSameMarketBothLegs(
+  collateral: MarketListing,
+  borrow: MarketListing
+): boolean {
+  if (
+    String(collateral.token.contractId) !== String(borrow.token.contractId)
+  ) {
+    return false;
+  }
+  return (
+    collateral.configKey === borrow.configKey ||
+    String(collateral.token.nTokenId) === String(borrow.token.nTokenId)
+  );
+}
+
 /**
  * All valid same-pool collateral → borrow routes for Easy Borrow.
  * A route exists when both assets are listed in the same lending pool with
@@ -200,6 +228,9 @@ function isExplicitLpWadRoute(
  *
  * Pool A and Pool D Folks USDC (`fUSDC`) are included whenever USDC is in the
  * borrow filter. Isolated `fiUSDC` is not.
+ *
+ * Pool G is USDC-only: same-market USDC → USDC is allowed there so SimplFi can
+ * offer a native USDC credit line without Folks.
  */
 export function listBorrowRoutes(
   networkId: NetworkId,
@@ -236,20 +267,11 @@ export function listBorrowRoutes(
         ) {
           continue;
         }
-        if (
-          String(collateral.token.contractId) ===
-            String(borrow.token.contractId) &&
-          collateral.configKey === borrow.configKey
-        ) {
-          continue;
-        }
-        // Same market row (identical pool+contract) cannot be both legs.
-        if (
-          String(collateral.token.contractId) ===
-            String(borrow.token.contractId) &&
-          String(collateral.token.nTokenId) === String(borrow.token.nTokenId)
-        ) {
-          continue;
+        if (isSameMarketBothLegs(collateral, borrow)) {
+          const allowIsolatedUsdc =
+            isIsolatedSameAssetUsdcMarket(networkId, poolId, collateral) &&
+            isIsolatedSameAssetUsdcMarket(networkId, poolId, borrow);
+          if (!allowIsolatedUsdc) continue;
         }
 
         routes.push({
@@ -332,7 +354,7 @@ function matchesBorrow(
   return true;
 }
 
-/** Pool letter sort: A before B before D before C/E/F (prime markets first). */
+/** Pool letter sort: A before B before D before C/E/F before G (prime first). */
 const POOL_PRIORITY: Record<string, number> = {
   A: 0,
   B: 1,
@@ -340,6 +362,7 @@ const POOL_PRIORITY: Record<string, number> = {
   C: 3,
   E: 4,
   F: 5,
+  G: 6,
 };
 
 /**
@@ -426,8 +449,21 @@ export const EASY_BORROW_POOL_A_FOLKS_USDC_UI_KEY = "USDC_A_FOLKS";
 /** Synthetic UI key for Pool D Folks USDC (own row in the supply/borrow dropdown). */
 export const EASY_BORROW_POOL_D_USDC_UI_KEY = "USDC_D";
 
-/** Curated Easy Borrow supply markets: A, B, and Pool D USDC only. */
+/** Synthetic UI key for isolated Pool G native USDC. */
+export const EASY_BORROW_POOL_G_USDC_UI_KEY = "USDC_G";
+
+/** Curated Easy Borrow supply markets: A, B, and Pool D USDC. */
 const EASY_BORROW_USDC_SUPPLY_MARKET_LABELS = ["A", "B", "D"] as const;
+
+/** SimplFi supply/borrow: isolated Pool G native USDC only. */
+const SIMPLFI_USDC_SUPPLY_MARKET_LABELS = ["G"] as const;
+
+/** Account repay scans G plus legacy A/B/D so leftover Folks debt stays visible. */
+const EASY_BORROW_DEBT_MARKET_LABELS = ["A", "B", "D", "G"] as const;
+
+export function easyProductScope(consumerCopy: boolean): EasyProductScope {
+  return consumerCopy ? "simplfi" : "full";
+}
 
 export type EasyBorrowAssetOption = {
   /** Stable id used by AssetSelector. */
@@ -483,23 +519,26 @@ function isUsdcCollateralRef(
 }
 
 /**
- * Curated Supply dropdown: one USDC row per market A, B, and D.
+ * Curated Supply dropdown: one USDC row per market A, B, and D (DorkFi),
+ * or isolated Pool G only (SimplFi).
  * Prefers native `USDC` listings over Folks f-/fi- rows on the same pool.
  */
 export function listUsdcCollateralSupplyOptions(
-  networkId: NetworkId
+  networkId: NetworkId,
+  options?: { scope?: EasyProductScope }
 ): EasyBorrowCollateralOption[] {
+  const scope = options?.scope ?? "full";
+  const labels =
+    scope === "simplfi"
+      ? SIMPLFI_USDC_SUPPLY_MARKET_LABELS
+      : EASY_BORROW_USDC_SUPPLY_MARKET_LABELS;
   type Ranked = EasyBorrowMarketRef & { marketLabel: string };
   const bestByLabel = new Map<string, Ranked>();
 
   for (const route of listBorrowRoutes(networkId)) {
     const ref = route.collateral;
     if (!isUsdcCollateralRef(networkId, ref)) continue;
-    if (
-      !(
-        EASY_BORROW_USDC_SUPPLY_MARKET_LABELS as readonly string[]
-      ).includes(route.marketLabel)
-    ) {
+    if (!(labels as readonly string[]).includes(route.marketLabel)) {
       continue;
     }
 
@@ -517,9 +556,24 @@ export function listUsdcCollateralSupplyOptions(
   }
 
   const out: EasyBorrowCollateralOption[] = [];
-  for (const label of EASY_BORROW_USDC_SUPPLY_MARKET_LABELS) {
+  for (const label of labels) {
     const ref = bestByLabel.get(label);
     if (!ref) continue;
+
+    if (label === "G") {
+      out.push({
+        uiKey:
+          scope === "simplfi" ? "USDC" : EASY_BORROW_POOL_G_USDC_UI_KEY,
+        symbol: "USDC",
+        subtitle: scope === "simplfi" ? "USD Coin" : "Isolated USDC market",
+        logoPath: ref.logoPath || "/lovable-uploads/USDC.webp",
+        collateralConfigKey: "USDC",
+        collateralPoolId: ref.poolId,
+        collateralContractId: ref.contractId,
+        preferredPoolIds: [ref.poolId],
+      });
+      continue;
+    }
 
     if (label === "D") {
       out.push({
@@ -570,6 +624,7 @@ export function listUsdcCollateralSupplyOptions(
  * so users can pin market D instead of default A/B USDC.
  * Pool A Folks V2 USDC ({@link EASY_BORROW_POOL_A_FOLKS_USDC_UI_KEY}) is listed
  * only when native USDC is not a valid borrow for that collateral (USDC A).
+ * SimplFi (`scope: "simplfi"`) lists native USDC only — no WAD or Folks.
  */
 export function listBorrowAssetOptionsForCollateral(
   networkId: NetworkId,
@@ -578,8 +633,11 @@ export function listBorrowAssetOptionsForCollateral(
     collateralContractId?: string;
     collateralPoolId?: string;
     preferredPoolIds?: readonly string[];
+    scope?: EasyProductScope;
   }
 ): EasyBorrowAssetOption[] {
+  const scope = opts?.scope ?? "full";
+  const simplfi = scope === "simplfi";
   const routes = rankBorrowRoutes(
     listBorrowRoutes(networkId).filter((route) =>
       matchesCollateral(route, {
@@ -597,10 +655,11 @@ export function listBorrowAssetOptionsForCollateral(
   let usdc: EasyBorrowAssetOption | null = null;
   let usdcAFolks: EasyBorrowAssetOption | null = null;
   let usdcD: EasyBorrowAssetOption | null = null;
+  let usdcG: EasyBorrowAssetOption | null = null;
 
   for (const route of routes) {
     if (route.borrow.configKey === "WAD" || route.borrow.symbol === "WAD") {
-      if (!wad) {
+      if (!simplfi && !wad) {
         wad = {
           uiKey: "WAD",
           symbol: "WAD",
@@ -616,7 +675,7 @@ export function listBorrowAssetOptionsForCollateral(
       route.marketLabel === "A" && route.borrow.configKey === "fUSDC";
 
     if (isPoolAFolksUsdc) {
-      if (!usdcAFolks) {
+      if (!simplfi && !usdcAFolks) {
         usdcAFolks = {
           uiKey: EASY_BORROW_POOL_A_FOLKS_USDC_UI_KEY,
           symbol: "Folks USDC",
@@ -638,11 +697,33 @@ export function listBorrowAssetOptionsForCollateral(
       );
 
     if (isPoolDUsdc) {
-      if (!usdcD) {
+      if (!simplfi && !usdcD) {
         usdcD = {
           uiKey: EASY_BORROW_POOL_D_USDC_UI_KEY,
           symbol: "Pool D USDC",
           subtitle: "Folks USDC market",
+          logoPath: route.borrow.logoPath || "/lovable-uploads/USDC.webp",
+          borrowConfigKey: "USDC",
+          preferredPoolIds: [route.poolId],
+        };
+      }
+      continue;
+    }
+
+    const isPoolGUsdc =
+      route.marketLabel === "G" &&
+      isEasyBorrowUsdcEquivalentConfigKey(
+        networkId,
+        route.borrow.configKey,
+        route.borrow.poolId
+      );
+
+    if (isPoolGUsdc) {
+      if (!usdcG) {
+        usdcG = {
+          uiKey: simplfi ? "USDC" : EASY_BORROW_POOL_G_USDC_UI_KEY,
+          symbol: "USDC",
+          subtitle: simplfi ? "USD Coin" : "Isolated USDC market",
           logoPath: route.borrow.logoPath || "/lovable-uploads/USDC.webp",
           borrowConfigKey: "USDC",
           preferredPoolIds: [route.poolId],
@@ -671,7 +752,13 @@ export function listBorrowAssetOptionsForCollateral(
     }
   }
 
-  return [wad, usdc ?? usdcAFolks, usdcD].filter(
+  if (simplfi) {
+    return [usdcG ?? usdc].filter(
+      (o): o is EasyBorrowAssetOption => o != null
+    );
+  }
+
+  return [wad, usdc ?? usdcAFolks, usdcG, usdcD].filter(
     (o): o is EasyBorrowAssetOption => o != null
   );
 }
@@ -684,6 +771,7 @@ export function listBorrowConfigKeysForCollateral(
     collateralContractId?: string;
     collateralPoolId?: string;
     preferredPoolIds?: readonly string[];
+    scope?: EasyProductScope;
   }
 ): string[] {
   return listBorrowAssetOptionsForCollateral(
@@ -709,8 +797,9 @@ export function listCollateralMarketRefs(
 }
 
 /**
- * Unique Easy Borrow debt markets (WAD / USDC on curated A/B/D pools).
+ * Unique Easy Borrow debt markets (WAD / USDC on curated A/B/D/G pools).
  * Deduped by pool + contract so Account can fetch balances without repeating pairs.
+ * Includes Pool G plus legacy A/B/D so leftover Folks debt remains repayable.
  */
 export function listEasyBorrowDebtMarkets(
   networkId: NetworkId
@@ -719,13 +808,13 @@ export function listEasyBorrowDebtMarkets(
   const out: EasyBorrowMarketRef[] = [];
   for (const route of listBorrowRoutes(networkId)) {
     if (
-      !(
-        EASY_BORROW_USDC_SUPPLY_MARKET_LABELS as readonly string[]
-      ).includes(route.marketLabel)
+      !(EASY_BORROW_DEBT_MARKET_LABELS as readonly string[]).includes(
+        route.marketLabel
+      )
     ) {
       continue;
     }
-    const key = `${route.borrow.poolId}:${route.borrow.contractId}`;
+    const key = `${route.borrow.poolId}:${route.borrow.contractId}:${route.borrow.nTokenId}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(route.borrow);
