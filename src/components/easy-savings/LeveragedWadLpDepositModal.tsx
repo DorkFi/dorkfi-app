@@ -38,6 +38,10 @@ import {
 } from "@/wallet/xchainSignUi";
 import LpPairIconStack from "@/components/pools/LpPairIconStack";
 import { getTokenImagePath } from "@/utils/tokenImageUtils";
+import {
+  applyOptimisticSavingsPosition,
+  invalidateEasySavingsAfterTx,
+} from "@/utils/easySavingsCache";
 
 const MODAL_SHELL =
   "w-full max-w-[98vw] sm:max-w-md rounded-t-2xl sm:rounded-xl p-0 max-h-[min(90vh,90dvh)] overflow-hidden flex flex-col";
@@ -60,6 +64,7 @@ type LeveragedWadLpDepositModalProps = {
     kind: "deposit";
     amount: string;
     symbol: string;
+    balanceAfterUsd?: number;
   }) => void;
 };
 
@@ -156,9 +161,34 @@ const LeveragedWadLpDepositModal = ({
   const ctaDisabled =
     isSubmitting || (ctaState !== "connect" && ctaState !== "deploy");
 
-  const invalidate = () => {
-    void queryClient.invalidateQueries({ queryKey: ["easySavings"] });
+  const invalidate = (lpDelta?: number): number | undefined => {
+    const address = activeAccount?.address?.trim();
+    let balanceAfterUsd: number | undefined;
+    if (
+      address &&
+      route &&
+      lpDelta != null &&
+      Number.isFinite(lpDelta) &&
+      lpDelta > 0
+    ) {
+      const { nextBalance } = applyOptimisticSavingsPosition({
+        queryClient,
+        networkId,
+        address,
+        poolId: route.poolId,
+        contractId: route.asset.contractId,
+        configKey: route.asset.configKey,
+        delta: lpDelta,
+      });
+      const price =
+        savingsQuote.price != null && savingsQuote.price > 0
+          ? savingsQuote.price
+          : 1;
+      balanceAfterUsd = nextBalance * price;
+    }
+    invalidateEasySavingsAfterTx({ queryClient, networkId, address });
     void queryClient.invalidateQueries({ queryKey: ["leveragedWadLp"] });
+    return balanceAfterUsd;
   };
 
   const signAndSend = async (bytes: Uint8Array[], label: string) => {
@@ -254,7 +284,7 @@ const LeveragedWadLpDepositModal = ({
       setShowSuccess(true);
       setPhase("done");
       setRainbowkitSignDialogSuppressed(false);
-      invalidate();
+      const balanceAfterUsd = invalidate(lpToSupply);
       const finalTxId = supplyTxId || mintTxId;
       if (finalTxId) {
         onSuccess?.({
@@ -262,6 +292,7 @@ const LeveragedWadLpDepositModal = ({
           kind: "deposit",
           amount: usdcAmount,
           symbol: "USDC",
+          balanceAfterUsd,
         });
       }
       toast({

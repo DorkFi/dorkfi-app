@@ -69,4 +69,31 @@ describe("invalidateUserPositionRpcCache", () => {
     expect(getRpcReadCache("userGlobalPool:net:pool:addr")).toBeUndefined();
     expect(getRpcReadCache("userDeposit:net:other:pool:mkt")).toBe(9);
   });
+
+  it("does not let an in-flight stale read rewrite the cache after invalidate", async () => {
+    let resolveStale!: (v: { balance: number; interest: number }) => void;
+    const stale = withRpcReadCache(
+      "userDeposit:net:addr:pool:mkt",
+      () =>
+        new Promise<{ balance: number; interest: number }>((r) => {
+          resolveStale = r;
+        })
+    );
+
+    invalidateUserPositionRpcCache("net", "addr");
+
+    const freshFetcher = vi.fn().mockResolvedValue({ balance: 25, interest: 0 });
+    const fresh = withRpcReadCache(
+      "userDeposit:net:addr:pool:mkt",
+      freshFetcher
+    );
+
+    resolveStale({ balance: 0, interest: 0 });
+    await expect(stale).resolves.toEqual({ balance: 0, interest: 0 });
+    await expect(fresh).resolves.toEqual({ balance: 25, interest: 0 });
+    expect(getRpcReadCache("userDeposit:net:addr:pool:mkt")).toEqual({
+      balance: 25,
+      interest: 0,
+    });
+  });
 });

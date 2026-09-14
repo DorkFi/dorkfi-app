@@ -12,6 +12,10 @@ import { isLeveragedWadUsdcRoute } from "@/services/leveragedWadLpService";
 import type { SavingsRoute } from "@/types/easySavings";
 import { usdPerTokenFromMarketInfoPrice } from "@/utils/assetDecimals";
 import { floorTokenAmount } from "@/utils/easyBorrowMath";
+import {
+  easySavingsDepositQueryKey,
+  easySavingsWalletQueryKey,
+} from "@/utils/easySavingsCache";
 
 export type EasySavingsQuoteInput = {
   networkId: NetworkId;
@@ -86,13 +90,11 @@ export function useEasySavingsQuote(
   });
 
   const balanceQuery = useQuery({
-    queryKey: [
-      "easySavings",
-      "wallet",
+    queryKey: easySavingsWalletQueryKey(
       networkId,
       address,
-      route?.asset.configKey,
-    ],
+      route?.asset.configKey
+    ),
     enabled: Boolean(route && address),
     staleTime: 30_000,
     queryFn: async () => {
@@ -106,14 +108,12 @@ export function useEasySavingsQuote(
   });
 
   const positionQuery = useQuery({
-    queryKey: [
-      "easySavings",
-      "deposit",
+    queryKey: easySavingsDepositQueryKey(
       networkId,
       address,
       route?.poolId,
-      route?.asset.contractId,
-    ],
+      route?.asset.contractId
+    ),
     enabled: Boolean(route && address),
     staleTime: 30_000,
     queryFn: async () => {

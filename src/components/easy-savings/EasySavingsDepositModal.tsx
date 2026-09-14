@@ -51,6 +51,10 @@ import {
 } from "@/components/easy-start/easyStartBridgePhase";
 import { isXoGeoRestricted } from "@/lib/easyStart/xoSwap/errors";
 import type { Address } from "viem";
+import {
+  applyOptimisticSavingsPosition,
+  invalidateEasySavingsAfterTx,
+} from "@/utils/easySavingsCache";
 
 const EasyStartHeadlessBridge = lazy(() =>
   import("@/components/easy-start/EasyStartHeadlessBridge").then((m) => ({
@@ -75,6 +79,8 @@ export type SavingsTxSuccessPayload = {
   kind: "deposit" | "withdraw";
   amount: string;
   symbol: string;
+  /** USD savings balance after this tx, for an instant Earn card update. */
+  balanceAfterUsd?: number;
 };
 
 type EasySavingsDepositModalProps = {
@@ -224,10 +230,27 @@ const EasySavingsDepositModal = ({
   const ctaDisabled =
     busy || (ctaState !== "connect" && ctaState !== "supply");
 
-  const invalidateQuotes = () => {
-    void queryClient.invalidateQueries({ queryKey: ["easySavings"] });
-    void queryClient.invalidateQueries({ queryKey: ["easy-start-base-usdc"] });
-    void queryClient.invalidateQueries({ queryKey: ["easy-start-algo-usdc"] });
+  const refreshAfterConfirmedSupply = (
+    supplyAmount: string
+  ): number | undefined => {
+    const address = activeAccount?.address?.trim();
+    const amountDelta = Number.parseFloat(supplyAmount);
+    let balanceAfterUsd: number | undefined;
+    if (address && route && Number.isFinite(amountDelta) && amountDelta > 0) {
+      const { nextBalance } = applyOptimisticSavingsPosition({
+        queryClient,
+        networkId,
+        address,
+        poolId: route.poolId,
+        contractId: route.asset.contractId,
+        configKey: route.asset.configKey,
+        delta: amountDelta,
+      });
+      const price = quote.price != null && quote.price > 0 ? quote.price : 1;
+      balanceAfterUsd = nextBalance * price;
+    }
+    invalidateEasySavingsAfterTx({ queryClient, networkId, address });
+    return balanceAfterUsd;
   };
 
   const runSupply = async (supplyAmount: string) => {
@@ -303,12 +326,13 @@ const EasySavingsDepositModal = ({
     setRainbowkitSignDialogSuppressed(false);
     setFlowPhase("idle");
     setBridgeAmount(null);
-    invalidateQuotes();
+    const balanceAfterUsd = refreshAfterConfirmedSupply(supplyAmount);
     onSuccess?.({
       txId: res.txid,
       kind: "deposit",
       amount: supplyAmount,
       symbol,
+      balanceAfterUsd,
     });
     toast({
       title: "Deposit confirmed",
