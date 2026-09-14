@@ -1,5 +1,5 @@
 import React from "react";
-import { CheckCircle2, Sparkles } from "lucide-react";
+import { Check, CheckCircle2, Sparkles } from "lucide-react";
 import DorkFiButton from "@/components/ui/DorkFiButton";
 import LpPairIconStack from "@/components/pools/LpPairIconStack";
 import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
@@ -22,6 +22,37 @@ interface SupplyBorrowCongratsProps {
   aboveActions?: React.ReactNode;
 }
 
+const MAKE_ANOTHER_LABEL: Record<
+  SupplyBorrowCongratsProps["transactionType"],
+  string
+> = {
+  borrow: "Make another borrow",
+  deposit: "Make another deposit",
+  withdraw: "Make another withdrawal",
+  repay: "Make another repay",
+};
+
+function formatPacificDateTime(date: Date): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).formatToParts(date);
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  return `${get("month")} ${get("day")}, ${get("year")} · ${get("hour")}:${get("minute")} ${get("dayPeriod")} PT`;
+}
+
+function formatConsumerAmount(amount: string, assetLabel: string): string {
+  const numeric = amount.trim().replace(/^\$/, "");
+  const isUsd = /\bUSD\b/i.test(assetLabel) && !/\bLP\b/i.test(assetLabel);
+  return isUsd ? `$${numeric} ${assetLabel}` : `${numeric} ${assetLabel}`;
+}
+
 const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
   transactionType,
   asset,
@@ -36,6 +67,7 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
   aboveActions,
 }) => {
   const consumerCopy = useConsumerCopy();
+  const completedAt = React.useMemo(() => new Date(), []);
   const getTransactionMessage = () => {
     switch (transactionType) {
       case "deposit":
@@ -56,6 +88,79 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
     ? consumerAssetDisplayLabel(asset)
     : asset;
   const assetLabel = assetPairIcons ? `${displayAsset} LP` : displayAsset;
+
+  if (consumerCopy) {
+    return (
+      <div className="flex w-full flex-col items-center text-center animate-fade-in">
+        <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-[#E5F8EF]">
+          <Check
+            className="h-9 w-9 text-[#4ADE80]"
+            strokeWidth={2.5}
+            aria-hidden
+          />
+        </div>
+
+        <h2 className="text-2xl font-bold tracking-tight text-slate-900">
+          Transaction complete
+        </h2>
+        <p className="mt-1.5 text-sm text-slate-500">
+          You successfully {action}
+        </p>
+        <p className="mt-3 text-3xl font-semibold leading-none text-ocean-teal">
+          {formatConsumerAmount(amount, assetLabel)}
+        </p>
+
+        <div className="mt-6 w-full overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <div className="flex items-center justify-between gap-3 px-4 py-3">
+            <span className="text-sm text-slate-500">Asset</span>
+            <span className="flex items-center gap-2 text-sm font-medium text-slate-800">
+              {assetPairIcons ? (
+                <LpPairIconStack
+                  asset1Icon={assetPairIcons.asset1Icon}
+                  asset2Icon={assetPairIcons.asset2Icon}
+                  fallbackIcon={assetIcon}
+                  alt={asset}
+                  size="sm"
+                />
+              ) : (
+                <img
+                  src={assetIcon}
+                  alt=""
+                  className="h-5 w-5 rounded-full object-cover"
+                />
+              )}
+              {assetLabel}
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-4 py-3">
+            <span className="text-sm text-slate-500">Date & time</span>
+            <span className="text-sm font-medium text-slate-800">
+              {formatPacificDateTime(completedAt)}
+            </span>
+          </div>
+        </div>
+
+        {aboveActions}
+
+        <DorkFiButton
+          variant="primary"
+          size="lg"
+          className="mt-6 w-full rounded-xl bg-ocean-teal text-base hover:bg-ocean-teal/90"
+          onClick={onMakeAnother}
+        >
+          {MAKE_ANOTHER_LABEL[transactionType]}
+        </DorkFiButton>
+
+        <button
+          type="button"
+          className="mt-3 text-sm font-medium text-ocean-teal underline underline-offset-2 transition-colors hover:text-ocean-teal/80"
+          onClick={onGoToPortfolio}
+        >
+          View portfolio
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col items-center justify-center gap-4 animate-fade-in">
@@ -85,7 +190,7 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
       </div>
 
       <h2 className="text-xl font-bold text-center mb-1">
-        {consumerCopy ? "Success!" : "Transaction Successful!"}
+        Transaction Successful!
       </h2>
 
       <div className="text-center text-base text-slate-700 dark:text-slate-200 mb-2 font-medium">
@@ -93,33 +198,27 @@ const SupplyBorrowCongrats: React.FC<SupplyBorrowCongratsProps> = ({
         <span className="text-whale-gold">
           {amount} {assetLabel}
         </span>
-        {consumerCopy ? "." : ` ${preposition} the protocol.`}
+        {` ${preposition} the protocol.`}
       </div>
 
       {aboveActions}
 
       <div className="flex flex-col gap-2 w-full mt-2">
-        {!consumerCopy ? (
-          <DorkFiButton
-            variant="primary"
-            className="w-full bg-ocean-teal hover:bg-ocean-teal/90 text-white rounded-xl py-3 text-lg"
-            onClick={onViewTransaction}
-            disabled={viewTransactionDisabled}
-          >
-            View Transaction
-          </DorkFiButton>
-        ) : null}
+        <DorkFiButton
+          variant="primary"
+          className="w-full bg-ocean-teal hover:bg-ocean-teal/90 text-white rounded-xl py-3 text-lg"
+          onClick={onViewTransaction}
+          disabled={viewTransactionDisabled}
+        >
+          View Transaction
+        </DorkFiButton>
 
         <DorkFiButton
-          variant={consumerCopy ? "primary" : "secondary"}
-          className={
-            consumerCopy
-              ? "w-full bg-ocean-teal hover:bg-ocean-teal/90 text-white rounded-xl py-3 text-lg"
-              : "w-full border-ocean-teal text-ocean-teal dark:border-whale-gold dark:text-whale-gold"
-          }
+          variant="secondary"
+          className="w-full border-ocean-teal text-ocean-teal dark:border-whale-gold dark:text-whale-gold"
           onClick={onMakeAnother}
         >
-          {consumerCopy ? "Make another" : "Make Another Transaction"}
+          Make Another Transaction
         </DorkFiButton>
       </div>
 
