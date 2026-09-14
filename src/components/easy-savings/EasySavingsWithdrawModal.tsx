@@ -48,6 +48,10 @@ import {
   type CardProvider,
 } from "@/components/easy-start/EasyStartCardProviderPicker";
 import { Button } from "@/components/ui/button";
+import {
+  applyOptimisticSavingsPosition,
+  invalidateEasySavingsAfterTx,
+} from "@/utils/easySavingsCache";
 
 const EasyStartHeadlessBridge = lazy(() =>
   import("@/components/easy-start/EasyStartHeadlessBridge").then((m) => ({
@@ -78,6 +82,8 @@ export type SavingsTxSuccessPayload = {
   kind: "deposit" | "withdraw";
   amount: string;
   symbol: string;
+  /** USD savings balance after this tx, for an instant Earn card update. */
+  balanceAfterUsd?: number;
 };
 
 type EasySavingsWithdrawModalProps = {
@@ -228,10 +234,26 @@ const EasySavingsWithdrawModal = ({
   const ctaDisabled =
     busy || (ctaState !== "connect" && ctaState !== "withdraw");
 
-  const invalidateQuotes = () => {
-    void queryClient.invalidateQueries({ queryKey: ["easySavings"] });
-    void queryClient.invalidateQueries({ queryKey: ["easy-start-base-usdc"] });
-    void queryClient.invalidateQueries({ queryKey: ["easy-start-algo-usdc"] });
+  const refreshAfterConfirmedWithdraw = (
+    withdrawAmount: number
+  ): number | undefined => {
+    const address = activeAccount?.address?.trim();
+    let balanceAfterUsd: number | undefined;
+    if (address && route && Number.isFinite(withdrawAmount) && withdrawAmount > 0) {
+      const { nextBalance } = applyOptimisticSavingsPosition({
+        queryClient,
+        networkId,
+        address,
+        poolId: route.poolId,
+        contractId: route.asset.contractId,
+        configKey: route.asset.configKey,
+        delta: -withdrawAmount,
+      });
+      const price = quote.price != null && quote.price > 0 ? quote.price : 1;
+      balanceAfterUsd = nextBalance * price;
+    }
+    invalidateEasySavingsAfterTx({ queryClient, networkId, address });
+    return balanceAfterUsd;
   };
 
   const handleWithdraw = async () => {
@@ -343,12 +365,13 @@ const EasySavingsWithdrawModal = ({
       setTxId(res.txid);
       setConfirmedAmount(formatUsdcHuman(amountNum));
       setRainbowkitSignDialogSuppressed(false);
-      invalidateQuotes();
+      const balanceAfterUsd = refreshAfterConfirmedWithdraw(amountNum);
       onSuccess?.({
         txId: res.txid,
         kind: "withdraw",
         amount: amountHuman,
         symbol,
+        balanceAfterUsd,
       });
 
       if (bridgeToBase) {
@@ -665,7 +688,11 @@ const EasySavingsWithdrawModal = ({
             onComplete={() => {
               setFlowPhase("idle");
               setShowSuccess(true);
-              invalidateQuotes();
+              invalidateEasySavingsAfterTx({
+                queryClient,
+                networkId,
+                address: activeAccount?.address,
+              });
               toast({
                 title: consumerCopy ? "Back in your account" : "On Base",
                 description: consumerCopy

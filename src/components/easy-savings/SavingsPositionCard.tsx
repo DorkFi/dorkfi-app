@@ -46,6 +46,8 @@ type SavingsPositionCardProps = {
   balanceLabel?: string;
   /** Header above the balance figure. */
   title?: string;
+  /** True while the live Earn/savings balance is still loading. */
+  isLoading?: boolean;
   /**
    * Optional chart series toggles (Wallet balances page).
    * When set, the card switches balance/APY/chart with the selected series.
@@ -94,6 +96,7 @@ const SavingsPositionCard = ({
   earnedInterestUsd = 0,
   balanceLabel,
   title = "Current Balance",
+  isLoading = false,
   chartSeries,
   historyEvents,
   historySnapshots,
@@ -177,9 +180,16 @@ const SavingsPositionCard = ({
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="text-sm text-muted-foreground">{seriesTitle}</p>
-          <p className="mt-1 text-3xl sm:text-4xl font-semibold tracking-tight tabular-nums">
-            {displayBalance}
-          </p>
+          {isLoading ? (
+            <p
+              className="mt-1 h-9 w-36 rounded-md bg-muted animate-pulse"
+              aria-label="Loading balance"
+            />
+          ) : (
+            <p className="mt-1 text-3xl sm:text-4xl font-semibold tracking-tight tabular-nums">
+              {displayBalance}
+            </p>
+          )}
         </div>
         <p className="pt-1 text-sm font-medium tabular-nums shrink-0">
           {apyLabel}

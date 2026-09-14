@@ -659,6 +659,13 @@ const SavingsCard = () => {
     portfolioSnapshots,
   ]);
 
+  /** Avoid flashing $0.00 on Earn while the deposit query is still in flight. */
+  const earnBalancePending =
+    !isWalletAccount &&
+    Boolean(activeAccount) &&
+    activeQuote.existingDeposit == null &&
+    activeQuote.isLoading;
+
   /** Funded view: supply position and/or wallet cash (for wallet / USDC accounts). */
   const hasPosition =
     Boolean(activeAccount || evmAddress) &&
@@ -891,6 +898,7 @@ const SavingsCard = () => {
                   isWalletAccount ? portfolioTotalUsd : chartBalanceUsd
                 }
                 title={isWalletAccount ? "Portfolio Balance" : undefined}
+                isLoading={earnBalancePending}
                 chartSeries={isWalletAccount ? portfolioChartSeries : undefined}
                 historyEvents={
                   isWalletAccount ? undefined : marketHistoryEvents
@@ -1599,6 +1607,7 @@ const SavingsCard = () => {
               symbol: payload.symbol,
               poolId: route.poolId,
               assetConfigKey: route.asset.configKey,
+              balanceAfterUsd: payload.balanceAfterUsd,
             });
           }}
         />
@@ -1623,6 +1632,7 @@ const SavingsCard = () => {
               symbol: payload.symbol,
               poolId: r.poolId,
               assetConfigKey: r.asset.configKey,
+              balanceAfterUsd: payload.balanceAfterUsd,
             });
           }}
         />
@@ -1647,6 +1657,7 @@ const SavingsCard = () => {
             symbol: payload.symbol,
             poolId: r.poolId,
             assetConfigKey: r.asset.configKey,
+            balanceAfterUsd: payload.balanceAfterUsd,
           });
         }}
       />

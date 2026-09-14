@@ -10,6 +10,10 @@ import {
 } from "@/services/savingsRouteResolver";
 import type { SavingsRoute } from "@/types/easySavings";
 import type { SavingsAccountRow } from "@/hooks/useSavingsAccounts";
+import {
+  easySavingsDepositQueryKey,
+  easySavingsWalletQueryKey,
+} from "@/utils/easySavingsCache";
 
 export type SavingsUserPosition = {
   route: SavingsRoute;
@@ -43,14 +47,12 @@ export function useSavingsUserPositions(
 } {
   const depositQueries = useQueries({
     queries: accounts.map((row) => ({
-      queryKey: [
-        "easySavings",
-        "deposit",
+      queryKey: easySavingsDepositQueryKey(
         networkId,
         address,
         row.route.poolId,
-        row.route.asset.contractId,
-      ],
+        row.route.asset.contractId
+      ),
       queryFn: async () => {
         if (!address) return { balance: 0, interest: 0 };
         return (
@@ -69,13 +71,11 @@ export function useSavingsUserPositions(
 
   const walletQueries = useQueries({
     queries: accounts.map((row) => ({
-      queryKey: [
-        "easySavings",
-        "wallet",
+      queryKey: easySavingsWalletQueryKey(
         networkId,
         address,
-        row.route.asset.configKey,
-      ],
+        row.route.asset.configKey
+      ),
       queryFn: async () => {
         if (!address) return null;
         return fetchUserWalletBalance(

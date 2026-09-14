@@ -9,8 +9,31 @@ type CacheEntry<T> = {
 };
 
 const cache = new Map<string, CacheEntry<unknown>>();
+/** Bumped on invalidate so in-flight fetches cannot rewrite a cleared key. */
+const keyGeneration = new Map<string, number>();
+/** Deduplicate concurrent in-flight requests for the same key. */
+const inflight = new Map<string, Promise<unknown>>();
 
 const DEFAULT_TTL_MS = 30_000;
+
+function bumpKeyGeneration(key: string): void {
+  keyGeneration.set(key, (keyGeneration.get(key) ?? 0) + 1);
+}
+
+function dropKeysWhere(predicate: (key: string) => boolean): void {
+  const keys = new Set<string>();
+  for (const key of cache.keys()) {
+    if (predicate(key)) keys.add(key);
+  }
+  for (const key of inflight.keys()) {
+    if (predicate(key)) keys.add(key);
+  }
+  for (const key of keys) {
+    cache.delete(key);
+    inflight.delete(key);
+    bumpKeyGeneration(key);
+  }
+}
 
 export function getRpcReadCache<T>(key: string): T | undefined {
   const entry = cache.get(key);
@@ -33,20 +56,18 @@ export function setRpcReadCache<T>(
 export function invalidateRpcReadCache(prefix?: string): void {
   if (!prefix) {
     cache.clear();
+    inflight.clear();
+    keyGeneration.clear();
     return;
   }
-  for (const key of cache.keys()) {
-    if (key.startsWith(prefix)) cache.delete(key);
-  }
+  dropKeysWhere((key) => key.startsWith(prefix));
 }
 
 /** Delete keys matching a predicate (for mid-key patterns like userGlobalPool). */
 export function invalidateRpcReadCacheWhere(
   predicate: (key: string) => boolean
 ): void {
-  for (const key of cache.keys()) {
-    if (predicate(key)) cache.delete(key);
-  }
+  dropKeysWhere(predicate);
 }
 
 /**
@@ -69,9 +90,6 @@ export function invalidateUserPositionRpcCache(
   );
 }
 
-/** Deduplicate concurrent in-flight requests for the same key. */
-const inflight = new Map<string, Promise<unknown>>();
-
 export type WithRpcReadCacheOptions<T> = {
   /**
    * Return false to skip caching (e.g. failed `null` reads).
@@ -92,18 +110,22 @@ export async function withRpcReadCache<T>(
   const pending = inflight.get(key) as Promise<T> | undefined;
   if (pending) return pending;
 
+  const generation = keyGeneration.get(key) ?? 0;
   const shouldCache =
     options?.shouldCache ?? ((value: T) => value !== null);
 
   const promise = fetcher()
     .then((value) => {
-      if (shouldCache(value)) {
+      if (
+        shouldCache(value) &&
+        (keyGeneration.get(key) ?? 0) === generation
+      ) {
         setRpcReadCache(key, value, ttlMs);
       }
       return value;
     })
     .finally(() => {
-      inflight.delete(key);
+      if (inflight.get(key) === promise) inflight.delete(key);
     });
 
   inflight.set(key, promise);
@@ -114,4 +136,5 @@ export async function withRpcReadCache<T>(
 export function __resetRpcReadCacheForTests(): void {
   cache.clear();
   inflight.clear();
+  keyGeneration.clear();
 }
