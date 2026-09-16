@@ -5,16 +5,21 @@
  * Env (server-only, never VITE_*):
  *   CDP_API_KEY_ID / CDP_API_KEY_SECRET  (or COINBASE_CDP_API_KEY_ID / COINBASE_CDP_API_KEY_SECRET)
  *   MOONPAY_SECRET_KEY
+ *   PRIVY_APP_ID (or VITE_PRIVY_APP_ID) — verifies user JWTs before Coinbase calls
  */
 import { createHmac } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { AuthError, requirePrivyAuth } from "./privyAuth.js";
 
 const CDP_HOST = "api.developer.coinbase.com";
+/** Keep in sync with DEFAULT_PRIVY_APP_ID in src/utils/privyOrigin.ts */
+const DEFAULT_PRIVY_APP_ID = "cmrfehwv300ix0ci8uh0tnm8q";
 
 export type OfframpEnv = {
   cdpApiKeyId?: string;
   cdpApiKeySecret?: string;
   moonpaySecretKey?: string;
+  privyAppId?: string;
 };
 
 export function loadOfframpEnv(
@@ -32,6 +37,10 @@ export function loadOfframpEnv(
       env.CDP_API_SECRET ??
       undefined,
     moonpaySecretKey: env.MOONPAY_SECRET_KEY ?? undefined,
+    privyAppId:
+      env.PRIVY_APP_ID?.trim() ||
+      env.VITE_PRIVY_APP_ID?.trim() ||
+      DEFAULT_PRIVY_APP_ID,
   };
 }
 
@@ -55,6 +64,23 @@ function sendJson(
   res.setHeader("Content-Type", "application/json");
   res.setHeader("Cache-Control", "no-store");
   res.end(payload);
+}
+
+async function ensurePrivyUser(
+  req: IncomingMessage,
+  res: ServerResponse,
+  env: OfframpEnv
+): Promise<boolean> {
+  try {
+    await requirePrivyAuth(req, env.privyAppId);
+    return true;
+  } catch (error) {
+    const status = error instanceof AuthError ? error.status : 401;
+    const message =
+      error instanceof AuthError ? error.message : "Authentication required";
+    sendJson(res, status, { error: message });
+    return false;
+  }
 }
 
 function clientIp(req: IncomingMessage): string {
@@ -95,6 +121,7 @@ export async function handleCoinbaseSession(
   env: OfframpEnv
 ): Promise<void> {
   try {
+    if (!(await ensurePrivyUser(req, res, env))) return;
     const body = (await readJsonBody(req)) as {
       address?: string;
       clientIp?: string;
@@ -175,6 +202,7 @@ export async function handleCoinbaseStatus(
   partnerUserRef: string
 ): Promise<void> {
   try {
+    if (!(await ensurePrivyUser(req, res, env))) return;
     const ref = decodeURIComponent(partnerUserRef).trim();
     if (!ref) {
       sendJson(res, 400, { error: "partnerUserRef required" });
@@ -217,6 +245,7 @@ export async function handleMoonpaySign(
   env: OfframpEnv
 ): Promise<void> {
   try {
+    if (!(await ensurePrivyUser(req, res, env))) return;
     if (!env.moonpaySecretKey) {
       sendJson(res, 503, {
         error: "MoonPay secret missing. Set MOONPAY_SECRET_KEY.",

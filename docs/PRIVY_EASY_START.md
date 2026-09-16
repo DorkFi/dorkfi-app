@@ -22,6 +22,7 @@ Advanced XO Swap UI remains available as an escape hatch (Portfolio **Move USDC*
 | `MOONPAY_SECRET_KEY` | For MoonPay sell | Server-only secret for widget URL signing |
 | `CDP_API_KEY_ID` | For Coinbase Offramp | Coinbase Developer Platform secret API key id |
 | `CDP_API_KEY_SECRET` | For Coinbase Offramp | CDP secret (PEM / multiline OK in `.env`) |
+| `PRIVY_APP_ID` | For Coinbase Offramp | Optional. Verifies the user's Privy JWT before minting a session token. Falls back to `VITE_PRIVY_APP_ID` / baked app id |
 | `VITE_OFFRAMP_API_BASE` | No | Defaults to `/api/offramp` (Vite plugin in dev). Point at your API in production. |
 | `VITE_OFFRAMP_REDIRECT_URL` | No | Coinbase Offramp redirect (allowlist in CDP). Defaults to `{origin}/portfolio`. |
 | `XO_SWAP_APP_NAME` | For USDC move | Exodus XO Swap partner `App-Name` (server-only) |
@@ -37,11 +38,13 @@ In local development, Easy Start defaults on. On **https://beta.dork.fi** it als
 The Vite plugin `plugins/offrampApiPlugin.ts` serves:
 
 - `GET /api/offramp/health`
-- `POST /api/offramp/coinbase/session`
-- `GET /api/offramp/coinbase/status/:partnerUserRef`
-- `POST /api/offramp/moonpay/sign`
+- `POST /api/offramp/coinbase/session` (requires `Authorization: Bearer <Privy access token>`)
+- `GET /api/offramp/coinbase/status/:partnerUserRef` (same Bearer token)
+- `POST /api/offramp/moonpay/sign` (same Bearer token)
 
 Put CDP / MoonPay **secrets in `.env`** (not `VITE_*`). Restart `npm run dev` after changing them. For production, mount the same handlers from `server/offramp/handlers.ts` on your API and set `VITE_OFFRAMP_API_BASE`.
+
+Session-token routes refuse unauthenticated callers so only a signed-in Get Started user can mint a Coinbase Onramp/Offramp session.
 
 ### XO Swap API (dev)
 
