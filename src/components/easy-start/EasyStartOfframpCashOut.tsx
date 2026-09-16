@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useState, lazy, Suspense } from "react";
-import { useFundWallet, useSendTransaction } from "@privy-io/react-auth";
+import {
+  useFundWallet,
+  usePrivy,
+  useSendTransaction,
+} from "@privy-io/react-auth";
 import { base } from "viem/chains";
 import type { Address } from "viem";
 import { CreditCard, Loader2 } from "lucide-react";
@@ -84,8 +88,21 @@ export function EasyStartOfframpCashOut({
 }: EasyStartOfframpCashOutProps) {
   const { sendTransaction } = useSendTransaction();
   const { fundWallet } = useFundWallet();
+  const { getAccessToken } = usePrivy();
   const { toast } = useToast();
   const consumerCopy = useConsumerCopy();
+
+  const requireAccessToken = useCallback(async (): Promise<string> => {
+    const token = await getAccessToken();
+    if (!token) {
+      throw new Error(
+        consumerCopy
+          ? "Sign in to cash out."
+          : "Sign in to create a Coinbase session."
+      );
+    }
+    return token;
+  }, [consumerCopy, getAccessToken]);
 
   const [health, setHealth] = useState<OfframpHealth | null>(null);
   const [phase, setPhase] = useState<CashOutPhase>("idle");
@@ -160,7 +177,12 @@ export function EasyStartOfframpCashOut({
     const started = Date.now();
     const tick = async () => {
       try {
-        const { latest } = await fetchCoinbaseOfframpStatus(partnerUserRef);
+        const accessToken = await getAccessToken();
+        if (!accessToken || cancelled) return;
+        const { latest } = await fetchCoinbaseOfframpStatus(
+          partnerUserRef,
+          accessToken
+        );
         const to = coinbaseDepositAddress(latest);
         const sellAmt = coinbaseSellAmount(latest) || amount;
         if (to && sellAmt && !cancelled) {
@@ -189,15 +211,17 @@ export function EasyStartOfframpCashOut({
     return () => {
       cancelled = true;
     };
-  }, [amount, partnerUserRef, phase, provider, sendUsdcTo]);
+  }, [amount, getAccessToken, partnerUserRef, phase, provider, sendUsdcTo]);
 
   const startCoinbase = async () => {
     if (!evmAddress) return;
     setError(null);
     setPhase("opening");
     try {
+      const accessToken = await requireAccessToken();
       const session = await createCoinbaseOfframpSession({
         address: evmAddress,
+        accessToken,
         amount: amount ?? undefined,
       });
       setPartnerUserRef(session.partnerUserRef);
@@ -480,7 +504,8 @@ export function EasyStartOfframpCashOut({
               onClose={closeMoonpay}
               onUrlSignatureRequested={async (url) => {
                 try {
-                  return await signMoonpayWidgetUrl(url);
+                  const accessToken = await requireAccessToken();
+                  return await signMoonpayWidgetUrl(url, accessToken);
                 } catch (e: unknown) {
                   const message = e instanceof Error ? e.message : String(e);
                   setError(message);

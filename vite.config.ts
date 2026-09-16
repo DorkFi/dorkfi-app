@@ -25,6 +25,8 @@ export default defineConfig(({ mode }) => {
     "XO_SWAP_APP_VERSION",
     "XO_SWAP_API_KEY",
     "XO_SWAP_API_BASE",
+    "PRIVY_APP_ID",
+    "VITE_PRIVY_APP_ID",
   ] as const) {
     if (env[key] && !process.env[key]) process.env[key] = env[key];
   }

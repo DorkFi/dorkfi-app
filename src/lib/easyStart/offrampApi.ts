@@ -49,6 +49,13 @@ async function parseJson<T>(res: Response): Promise<T> {
   return data;
 }
 
+function authHeaders(accessToken: string): HeadersInit {
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${accessToken}`,
+  };
+}
+
 export async function fetchOfframpHealth(): Promise<OfframpHealth> {
   const res = await fetch(`${offrampBase()}/health`);
   return parseJson<OfframpHealth>(res);
@@ -56,13 +63,14 @@ export async function fetchOfframpHealth(): Promise<OfframpHealth> {
 
 export async function createCoinbaseOfframpSession(args: {
   address: string;
+  accessToken: string;
   amount?: string;
   partnerUserRef?: string;
   redirectUrl?: string;
 }): Promise<CoinbaseSessionResult> {
   const res = await fetch(`${offrampBase()}/coinbase/session`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders(args.accessToken),
     body: JSON.stringify({
       address: args.address,
       amount: args.amount,
@@ -77,18 +85,23 @@ export async function createCoinbaseOfframpSession(args: {
 }
 
 export async function fetchCoinbaseOfframpStatus(
-  partnerUserRef: string
+  partnerUserRef: string,
+  accessToken: string
 ): Promise<{ transactions: CoinbaseSellTx[]; latest: CoinbaseSellTx | null }> {
   const res = await fetch(
-    `${offrampBase()}/coinbase/status/${encodeURIComponent(partnerUserRef)}`
+    `${offrampBase()}/coinbase/status/${encodeURIComponent(partnerUserRef)}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
   );
   return parseJson(res);
 }
 
-export async function signMoonpayWidgetUrl(url: string): Promise<string> {
+export async function signMoonpayWidgetUrl(
+  url: string,
+  accessToken: string
+): Promise<string> {
   const res = await fetch(`${offrampBase()}/moonpay/sign`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders(accessToken),
     body: JSON.stringify({ url }),
   });
   const data = await parseJson<{ signature: string }>(res);
