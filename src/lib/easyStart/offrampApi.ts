@@ -4,11 +4,15 @@ export type OfframpHealth = {
   ok: boolean;
   coinbase: boolean;
   moonpay: boolean;
+  walletBind?: boolean;
 };
 
 export type CoinbaseSessionResult = {
   sessionToken: string;
   partnerUserRef: string;
+  /** Coinbase-hosted Onramp (buy USDC on Base). */
+  buyUrl: string;
+  /** Coinbase-hosted Offramp (sell USDC). */
   sellUrl: string;
 };
 
@@ -61,11 +65,11 @@ export async function fetchOfframpHealth(): Promise<OfframpHealth> {
   return parseJson<OfframpHealth>(res);
 }
 
-export async function createCoinbaseOfframpSession(args: {
+/** Mint a CDP session token and Coinbase-hosted buy + sell URLs. */
+export async function createCoinbaseSession(args: {
   address: string;
   accessToken: string;
   amount?: string;
-  partnerUserRef?: string;
   redirectUrl?: string;
 }): Promise<CoinbaseSessionResult> {
   const res = await fetch(`${offrampBase()}/coinbase/session`, {
@@ -74,7 +78,6 @@ export async function createCoinbaseOfframpSession(args: {
     body: JSON.stringify({
       address: args.address,
       amount: args.amount,
-      partnerUserRef: args.partnerUserRef,
       redirectUrl:
         args.redirectUrl ||
         import.meta.env.VITE_OFFRAMP_REDIRECT_URL ||
@@ -83,6 +86,9 @@ export async function createCoinbaseOfframpSession(args: {
   });
   return parseJson<CoinbaseSessionResult>(res);
 }
+
+/** @deprecated Use createCoinbaseSession */
+export const createCoinbaseOfframpSession = createCoinbaseSession;
 
 export async function fetchCoinbaseOfframpStatus(
   partnerUserRef: string,

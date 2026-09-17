@@ -6,7 +6,7 @@ Optional email / social onboarding path for **Algorand Mainnet only**. Existing 
 
 1. **Get Started** → Privy login (email, Google, Apple, passkey)
 2. Embedded EVM wallet created on **Base**
-3. **Deposit** → one sheet: amount → card/Apple Pay → (ETH gas top-up if needed) → automatic Base→Algorand USDC via **XO Swap**
+3. **Deposit** → one sheet: amount → Coinbase Onramp / Apple Pay / card → (ETH gas top-up if needed) → Deposit to Earn (XO Swap + supply)
 4. Algorand xChain address derived from EVM wallet → DorkFi markets (supply signing: Phase 5)
 5. **Withdraw** → one sheet: amount → automatic Algorand→Base USDC via **XO Swap** → optional **in-app cash-out** (Coinbase Offramp or MoonPay Sell) via Privy USDC transfer
 
@@ -20,10 +20,10 @@ Advanced XO Swap UI remains available as an escape hatch (Portfolio **Move USDC*
 | `VITE_ENABLE_PRIVY_ONBOARDING` | No | `true` / `1` to enable in production; `false` / `0` to force off. **beta.dork.fi** auto-enables without this. |
 | `VITE_MOONPAY_API_KEY` | For MoonPay sell | Publishable MoonPay key (`pk_test_…` / `pk_live_…`) |
 | `MOONPAY_SECRET_KEY` | For MoonPay sell | Server-only secret for widget URL signing |
-| `CDP_API_KEY_ID` | For Coinbase Offramp | Coinbase Developer Platform secret API key id |
-| `CDP_API_KEY_SECRET` | For Coinbase Offramp | CDP secret (PEM / multiline OK in `.env`) |
+| `CDP_API_KEY_ID` | For Coinbase Onramp + Offramp | Coinbase Developer Platform secret API key id |
+| `CDP_API_KEY_SECRET` | For Coinbase Onramp + Offramp | CDP secret (PEM / multiline OK in `.env`) |
 | `PRIVY_APP_ID` | For Coinbase Offramp / sponsor | Optional. Verifies the user's Privy JWT. Falls back to `VITE_PRIVY_APP_ID` / baked app id |
-| `PRIVY_APP_SECRET` | For sponsor | Privy app secret. Binds `POST /api/easy-start/sponsor` to the user's embedded wallet |
+| `PRIVY_APP_SECRET` | Sponsor / Coinbase | Privy app secret. Binds sponsor and Coinbase Onramp destinations to the user's embedded wallet |
 | `SPONSOR_ENABLED` | For sponsor | `true` to send dust Base ETH + Algorand ALGO to new Easy Start wallets |
 | `SPONSOR_ETH_PRIVATE_KEY` | For sponsor | Dedicated Base treasury private key (never `VITE_`) |
 | `SPONSOR_ALGO_MNEMONIC` | For sponsor | Dedicated Algorand 25-word mnemonic |
@@ -41,14 +41,16 @@ In local development, Easy Start defaults on. On **https://beta.dork.fi** it als
 
 The Vite plugin `plugins/offrampApiPlugin.ts` serves:
 
-- `GET /api/offramp/health`
-- `POST /api/offramp/coinbase/session` (requires `Authorization: Bearer <Privy access token>`)
+- `GET /api/offramp/health` (`coinbase`, `moonpay`, `walletBind` = `PRIVY_APP_SECRET` present)
+- `POST /api/offramp/coinbase/session` (requires `Authorization: Bearer <Privy access token>`). Returns `buyUrl` (Onramp) and `sellUrl` (Offramp).
 - `GET /api/offramp/coinbase/status/:partnerUserRef` (same Bearer token)
 - `POST /api/offramp/moonpay/sign` (same Bearer token)
 
 Put CDP / MoonPay **secrets in `.env`** (not `VITE_*`). Restart `npm run dev` after changing them. For production, mount the same handlers from `server/offramp/handlers.ts` on your API and set `VITE_OFFRAMP_API_BASE`.
 
 Session-token routes refuse unauthenticated callers so only a signed-in Get Started user can mint a Coinbase Onramp/Offramp session.
+
+Deposit → **Coinbase** (default pay method) opens `buyUrl` (`https://pay.coinbase.com/buy/select-asset?sessionToken=…&defaultExperience=buy`). The destination `0x` must be a Privy wallet on the JWT (`PRIVY_APP_SECRET`). `clientIp` is taken from edge headers (`cf-connecting-ip` / `x-real-ip`), never the JSON body or `X-Forwarded-For`. `partnerUserRef` is the Privy user id. `redirectUrl` must match the request origin or `VITE_OFFRAMP_REDIRECT_URL` (allowlist that URL in CDP). Cash-out still uses `sellUrl`.
 
 ### XO Swap API (dev)
 
@@ -111,7 +113,7 @@ Cash-out flow after bridge:
 | Unified session | `src/hooks/useDorkFiSession.ts` |
 | xChain address derivation | `src/services/xchainAddressService.ts` |
 | Header UI | `WalletNetworkButton` — Get Started dropdown with Email + Connect Wallet |
-| Fiat + auto-swap | `src/components/easy-start/EasyStartDepositSheet.tsx` — Cash Stash–style orchestrated Deposit |
+| Fiat + Coinbase Onramp | `src/components/easy-start/EasyStartDepositSheet.tsx` — Cash Stash–style Deposit; Coinbase opens `pay.coinbase.com/buy/select-asset` |
 | Withdraw auto-swap | `src/components/easy-start/EasyStartWithdrawSheet.tsx` — Algorand→Base USDC |
 | In-app cash-out | `src/components/easy-start/EasyStartOfframpCashOut.tsx` — Coinbase + MoonPay |
 | Off-ramp API (dev) | `server/offramp/handlers.ts` + `plugins/offrampApiPlugin.ts` |
