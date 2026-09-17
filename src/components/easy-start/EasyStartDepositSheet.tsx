@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFiatOnramp, useFundWallet } from "@privy-io/react-auth";
 import { useQuery } from "@tanstack/react-query";
 import { base } from "viem/chains";
@@ -23,11 +23,13 @@ import {
 } from "@/lib/easyStart/baseBalances";
 import { isXoGeoRestricted } from "@/lib/easyStart/xoSwap/errors";
 import type { DepositCardProvider } from "@/components/easy-start/EasyStartCardProviderPicker";
+import { createCoinbaseSession } from "@/lib/easyStart/offrampApi";
 import {
   AmountHero,
   AmountPresets,
   ApplePayGlyph,
   ChooseSummary,
+  CoinbaseGlyph,
   ContinueLabel,
   EASY_START_FUNDING_DIALOG_CLASS,
   FundingPrimaryButton,
@@ -49,9 +51,15 @@ const PRIVY_MODAL_HANDOFF_MS = 200;
 /** Small USD native top-up so Base can pay gas when the user later Deposits to Earn. */
 const GAS_TOPUP_USD = "3";
 
-type DepositPhase = "idle" | "funding" | "gas" | "success" | "error";
+type DepositPhase =
+  | "idle"
+  | "funding"
+  | "awaiting_coinbase"
+  | "gas"
+  | "success"
+  | "error";
 type DepositStep = "choose" | "review";
-type DepositPayMethod = "apple_pay" | "card" | "balance";
+type DepositPayMethod = "apple_pay" | "card" | "coinbase" | "balance";
 
 interface EasyStartDepositSheetProps {
   open: boolean;
@@ -71,7 +79,9 @@ function isUserCanceledFunding(message: string): boolean {
 }
 
 function methodToProvider(method: DepositPayMethod): DepositCardProvider {
-  return method === "apple_pay" ? "stripe" : "moonpay";
+  if (method === "apple_pay") return "stripe";
+  if (method === "coinbase") return "coinbase";
+  return "moonpay";
 }
 
 /**
@@ -86,13 +96,13 @@ export function EasyStartDepositSheet({
 }: EasyStartDepositSheetProps) {
   const { fundWallet } = useFundWallet();
   const { fund: fundFiatOnramp } = useFiatOnramp();
-  const { evmAddress } = usePrivyEasyStart();
+  const { evmAddress, getAccessToken } = usePrivyEasyStart();
   const consumerCopy = useConsumerCopy();
   const { formatCurrency } = useNumberI18n();
   const { toast } = useToast();
 
   const [amount, setAmount] = useState("100");
-  const [method, setMethod] = useState<DepositPayMethod>("apple_pay");
+  const [method, setMethod] = useState<DepositPayMethod>("coinbase");
   const [step, setStep] = useState<DepositStep>("choose");
   const [editingAmount, setEditingAmount] = useState(false);
   const [phase, setPhase] = useState<DepositPhase>("idle");
@@ -101,12 +111,17 @@ export function EasyStartDepositSheet({
   const address = evmAddress as Address | null;
   const cardProvider = methodToProvider(method);
   const skipFiat = method === "balance";
+  const usdcBeforeRef = useRef(0);
 
   const { data: baseUsdc, refetch: refetchUsdc } = useQuery({
     queryKey: ["easy-start-base-usdc", address],
     queryFn: () => fetchBaseUsdcBalance(address!),
     enabled: Boolean(open && address),
-    refetchInterval: open ? 10_000 : false,
+    refetchInterval: open
+      ? phase === "awaiting_coinbase"
+        ? 4_000
+        : 10_000
+      : false,
   });
 
   const baseUsdcNum = baseUsdc ? Number.parseFloat(baseUsdc.formatted) : 0;
@@ -114,7 +129,7 @@ export function EasyStartDepositSheet({
 
   useEffect(() => {
     if (method === "balance" && !hasUsdcOnBase) {
-      setMethod("apple_pay");
+      setMethod("coinbase");
       setAmount("100");
     }
   }, [hasUsdcOnBase, method]);
@@ -132,7 +147,7 @@ export function EasyStartDepositSheet({
     setError(null);
     setStep("choose");
     setEditingAmount(false);
-    setMethod("apple_pay");
+    setMethod("coinbase");
     setAmount("100");
   }, []);
 
@@ -156,7 +171,7 @@ export function EasyStartDepositSheet({
     onOpenChange(true);
   };
 
-  const ensureGasThenFinish = async () => {
+  const ensureGasThenFinish = useCallback(async () => {
     if (!address) return;
     try {
       const eth = await fetchBaseEthBalance(address);
@@ -172,7 +187,21 @@ export function EasyStartDepositSheet({
       setPhase("error");
       onOpenChange(true);
     }
-  };
+  }, [address, onOpenChange]);
+
+  useEffect(() => {
+    if (phase !== "awaiting_coinbase") return;
+    const gained = baseUsdcNum - usdcBeforeRef.current;
+    if (gained < 0.5) return;
+    setPhase("funding");
+    toast({
+      title: "Payment received",
+      description: consumerCopy
+        ? "Funds are in your account."
+        : "USDC is in your Base wallet.",
+    });
+    void ensureGasThenFinish();
+  }, [baseUsdcNum, consumerCopy, ensureGasThenFinish, phase, toast]);
 
   const fundWithCardProvider = async (options: {
     asset: "USDC" | "native-currency";
@@ -209,6 +238,64 @@ export function EasyStartDepositSheet({
       environment: import.meta.env.DEV ? "sandbox" : "production",
       defaultAmount: usdAmount,
     });
+  };
+
+  const handleCoinbaseOnramp = async () => {
+    if (!address) return;
+    setError(null);
+    if (!getAccessToken) {
+      setError("Sign in to add money with Coinbase.");
+      setPhase("error");
+      return;
+    }
+    setPhase("funding");
+    try {
+      const accessToken = await getAccessToken();
+      if (!accessToken) {
+        throw new Error("Sign in to add money with Coinbase.");
+      }
+      usdcBeforeRef.current = Number.isFinite(baseUsdcNum) ? baseUsdcNum : 0;
+      const session = await createCoinbaseSession({
+        address,
+        accessToken,
+        amount,
+      });
+      if (!session.buyUrl) {
+        throw new Error("Coinbase Onramp URL missing. Redeploy the API.");
+      }
+      const popup = window.open(
+        session.buyUrl,
+        "_blank",
+        "noopener,noreferrer"
+      );
+      if (!popup) {
+        setError(
+          consumerCopy
+            ? "Allow pop-ups to continue with Coinbase."
+            : "Allow pop-ups to open Coinbase Onramp."
+        );
+        setPhase("error");
+        return;
+      }
+      setPhase("awaiting_coinbase");
+      toast({
+        title: consumerCopy
+          ? "Complete purchase in Coinbase"
+          : "Complete Coinbase Onramp",
+        description: consumerCopy
+          ? "Buy USDC, then return here. We’ll detect the funds automatically."
+          : "Finish the buy on pay.coinbase.com, then return here.",
+      });
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message || "Couldn’t open Coinbase Onramp");
+      setPhase("error");
+      toast({
+        title: "Coinbase Onramp couldn’t start",
+        description: message,
+        variant: "destructive",
+      });
+    }
   };
 
   const handleFundGas = async () => {
@@ -252,6 +339,11 @@ export function EasyStartDepositSheet({
       }
       setPhase("funding");
       await ensureGasThenFinish();
+      return;
+    }
+
+    if (method === "coinbase") {
+      await handleCoinbaseOnramp();
       return;
     }
 
@@ -309,12 +401,18 @@ export function EasyStartDepositSheet({
   const payMethods: PayMethodOption[] = useMemo(() => {
     const methods: PayMethodOption[] = [
       {
+        id: "coinbase",
+        title: "Coinbase",
+        description: "Buy USDC on Base with Coinbase Onramp",
+        icon: <CoinbaseGlyph />,
+        badge: "Coinbase Onramp",
+        tag: { label: "Buy USDC", tone: "fast" },
+      },
+      {
         id: "apple_pay",
         title: "Apple Pay",
         description: "Instant · Fee shown at checkout",
         icon: <ApplePayGlyph />,
-        badge: "Recommended",
-        tag: { label: "Fastest", tone: "fast" },
       },
       {
         id: "card",
@@ -341,9 +439,11 @@ export function EasyStartDepositSheet({
   const payCta =
     method === "apple_pay"
       ? `Pay ${amountDisplay} with Apple Pay`
-      : method === "card"
-        ? `Pay ${amountDisplay} with card`
-        : `Continue with ${amountDisplay}`;
+      : method === "coinbase"
+        ? `Pay ${amountDisplay} with Coinbase`
+        : method === "card"
+          ? `Pay ${amountDisplay} with card`
+          : `Continue with ${amountDisplay}`;
 
   const busy = phase === "funding";
   const canContinue = Boolean(address) && amountValid && !busy;
@@ -396,6 +496,36 @@ export function EasyStartDepositSheet({
                     {error}
                   </p>
                 ) : null}
+              </div>
+            </>
+          ) : phase === "awaiting_coinbase" ? (
+            <>
+              <FundingSheetHeader
+                title="Complete purchase in Coinbase"
+                subtitle="A Coinbase Onramp tab opened. Buy USDC on Base, then return here."
+              />
+              <div className="px-6 pb-6 pt-2 space-y-4">
+                {error ? (
+                  <p className="text-sm text-destructive" role="alert">
+                    {error}
+                  </p>
+                ) : null}
+                <p className="text-sm text-muted-foreground text-center">
+                  We’ll detect the funds automatically. If the tab didn’t open,
+                  allow pop-ups and tap Reopen Coinbase.
+                </p>
+                <FundingPrimaryButton
+                  onClick={() => void handleCoinbaseOnramp()}
+                >
+                  Reopen Coinbase
+                </FundingPrimaryButton>
+                <Button
+                  variant="ghost"
+                  className="w-full"
+                  onClick={() => void ensureGasThenFinish()}
+                >
+                  I completed purchase — continue
+                </Button>
               </div>
             </>
           ) : phase === "gas" ? (
@@ -509,6 +639,11 @@ export function EasyStartDepositSheet({
                       <ApplePayGlyph className="h-4 w-4 text-white" />
                       {payCta}
                     </span>
+                  ) : method === "coinbase" ? (
+                    <span className="inline-flex items-center gap-2">
+                      <CoinbaseGlyph className="h-4 w-4 text-white" />
+                      {payCta}
+                    </span>
                   ) : (
                     payCta
                   )}
@@ -522,8 +657,8 @@ export function EasyStartDepositSheet({
                 title={consumerCopy ? "Add money" : "Deposit"}
                 subtitle={
                   consumerCopy
-                    ? "Add cash to your SimplFi balance and start earning."
-                    : "Add cash to your account, then Deposit to Earn."
+                    ? "Coinbase Onramp is selected. Apple Pay and card are also available."
+                    : "Coinbase Onramp (pay.coinbase.com) is selected. Apple Pay and card are also available."
                 }
               />
               <div className="px-6 pb-6 pt-3 space-y-5">

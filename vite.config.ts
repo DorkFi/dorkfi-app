@@ -29,6 +29,8 @@ export default defineConfig(({ mode }) => {
     "PRIVY_APP_ID",
     "VITE_PRIVY_APP_ID",
     "PRIVY_APP_SECRET",
+    "VITE_OFFRAMP_REDIRECT_URL",
+    "OFFRAMP_REDIRECT_URL",
     "SPONSOR_ENABLED",
     "SPONSOR_ETH_PRIVATE_KEY",
     "SPONSOR_ETH_AMOUNT_WEI",

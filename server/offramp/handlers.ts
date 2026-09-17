@@ -1,5 +1,5 @@
 /**
- * Node handlers for Easy Start off-ramp (Coinbase CDP + MoonPay URL signing).
+ * Node handlers for Easy Start Coinbase Onramp/Offramp + MoonPay URL signing.
  * Used by the Vite dev plugin; the same logic can be mounted on a production API.
  *
  * Env (server-only, never VITE_*):
@@ -10,6 +10,16 @@
 import { createHmac } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { AuthError, requirePrivyAuth } from "./privyAuth.js";
+import {
+  buildCoinbaseOfframpSellUrl,
+  buildCoinbaseOnrampBuyUrl,
+} from "./coinbaseUrls.ts";
+import { endUserIp, partnerUserRefFromUserId } from "./clientIp.ts";
+import { resolveCoinbaseRedirectUrl } from "./redirectUrl.ts";
+import {
+  assertWalletOwnedByUser,
+  fetchPrivyWalletAddresses,
+} from "../sponsor/privyWallets.ts";
 
 const CDP_HOST = "api.developer.coinbase.com";
 /** Keep in sync with DEFAULT_PRIVY_APP_ID in src/utils/privyOrigin.ts */
@@ -20,6 +30,8 @@ export type OfframpEnv = {
   cdpApiKeySecret?: string;
   moonpaySecretKey?: string;
   privyAppId?: string;
+  privyAppSecret?: string;
+  redirectUrl?: string;
 };
 
 export function loadOfframpEnv(
@@ -41,6 +53,11 @@ export function loadOfframpEnv(
       env.PRIVY_APP_ID?.trim() ||
       env.VITE_PRIVY_APP_ID?.trim() ||
       DEFAULT_PRIVY_APP_ID,
+    privyAppSecret: env.PRIVY_APP_SECRET?.trim() || undefined,
+    redirectUrl:
+      env.OFFRAMP_REDIRECT_URL?.trim() ||
+      env.VITE_OFFRAMP_REDIRECT_URL?.trim() ||
+      undefined,
   };
 }
 
@@ -83,17 +100,6 @@ async function ensurePrivyUser(
   }
 }
 
-function clientIp(req: IncomingMessage): string {
-  const forwarded = req.headers["x-forwarded-for"];
-  if (typeof forwarded === "string" && forwarded.length > 0) {
-    return forwarded.split(",")[0]!.trim();
-  }
-  if (Array.isArray(forwarded) && forwarded[0]) {
-    return forwarded[0].split(",")[0]!.trim();
-  }
-  return req.socket.remoteAddress?.replace(/^::ffff:/, "") || "127.0.0.1";
-}
-
 async function cdpBearer(
   env: OfframpEnv,
   method: string,
@@ -121,11 +127,9 @@ export async function handleCoinbaseSession(
   env: OfframpEnv
 ): Promise<void> {
   try {
-    if (!(await ensurePrivyUser(req, res, env))) return;
+    const { userId } = await requirePrivyAuth(req, env.privyAppId);
     const body = (await readJsonBody(req)) as {
       address?: string;
-      clientIp?: string;
-      partnerUserRef?: string;
       redirectUrl?: string;
       amount?: string | number;
     };
@@ -135,9 +139,23 @@ export async function handleCoinbaseSession(
       return;
     }
 
+    if (!env.privyAppSecret) {
+      sendJson(res, 503, {
+        error:
+          "PRIVY_APP_SECRET is required to bind Coinbase destinations to the signed-in wallet",
+      });
+      return;
+    }
+    const owned = await fetchPrivyWalletAddresses({
+      userId,
+      privyAppId: env.privyAppId || DEFAULT_PRIVY_APP_ID,
+      privyAppSecret: env.privyAppSecret,
+    });
+    assertWalletOwnedByUser(address, owned);
+
     const path = "/onramp/v1/token";
     const jwt = await cdpBearer(env, "POST", path);
-    const ip = body.clientIp?.trim() || clientIp(req);
+    const ip = endUserIp(req);
 
     const upstream = await fetch(`https://${CDP_HOST}${path}`, {
       method: "POST",
@@ -167,29 +185,29 @@ export async function handleCoinbaseSession(
       return;
     }
 
-    const partnerUserRef = (
-      body.partnerUserRef ||
-      `df-${address.slice(2, 10)}-${Date.now().toString(36)}`
-    ).slice(0, 50);
-    const redirectUrl =
-      body.redirectUrl || "http://localhost:8080/portfolio";
+    const partnerUserRef = partnerUserRefFromUserId(userId);
+    const redirectUrl = resolveCoinbaseRedirectUrl(req, body.redirectUrl, {
+      OFFRAMP_REDIRECT_URL: env.redirectUrl,
+    });
 
-    const sellUrl = new URL("https://pay.coinbase.com/v3/sell/input");
-    sellUrl.searchParams.set("sessionToken", data.token);
-    sellUrl.searchParams.set("partnerUserRef", partnerUserRef);
-    sellUrl.searchParams.set("redirectUrl", redirectUrl);
-    sellUrl.searchParams.set("defaultNetwork", "base");
-    sellUrl.searchParams.set("defaultAsset", "USDC");
-    if (body.amount != null && Number(body.amount) > 0) {
-      sellUrl.searchParams.set("presetCryptoAmount", String(body.amount));
-    }
+    const widgetArgs = {
+      sessionToken: data.token,
+      partnerUserRef,
+      redirectUrl,
+      amount: body.amount,
+    };
 
     sendJson(res, 200, {
       sessionToken: data.token,
       partnerUserRef,
-      sellUrl: sellUrl.toString(),
+      buyUrl: buildCoinbaseOnrampBuyUrl(widgetArgs),
+      sellUrl: buildCoinbaseOfframpSellUrl(widgetArgs),
     });
   } catch (e: unknown) {
+    if (e instanceof AuthError) {
+      sendJson(res, e.status, { error: e.message });
+      return;
+    }
     const message = e instanceof Error ? e.message : String(e);
     sendJson(res, 500, { error: message });
   }
@@ -278,6 +296,7 @@ export async function handleOfframpHealth(
     ok: true,
     coinbase: Boolean(env.cdpApiKeyId && env.cdpApiKeySecret),
     moonpay: Boolean(env.moonpaySecretKey),
+    walletBind: Boolean(env.privyAppSecret),
   });
 }
 

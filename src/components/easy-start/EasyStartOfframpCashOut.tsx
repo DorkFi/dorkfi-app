@@ -225,6 +225,9 @@ export function EasyStartOfframpCashOut({
         amount: amount ?? undefined,
       });
       setPartnerUserRef(session.partnerUserRef);
+      if (!session.sellUrl) {
+        throw new Error("Coinbase cash-out URL missing. Redeploy the API.");
+      }
       const popup = window.open(
         session.sellUrl,
         "_blank",
