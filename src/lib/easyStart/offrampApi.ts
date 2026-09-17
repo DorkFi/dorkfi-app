@@ -44,11 +44,22 @@ function offrampBase(): string {
 }
 
 async function parseJson<T>(res: Response): Promise<T> {
-  const data = (await res.json()) as T & { error?: string };
+  const text = await res.text();
+  let data: (T & { error?: string }) | null = null;
+  if (text.trim()) {
+    try {
+      data = JSON.parse(text) as T & { error?: string };
+    } catch {
+      throw new Error(text.trim() || `Off-ramp API ${res.status}`);
+    }
+  }
   if (!res.ok) {
     throw new Error(
-      (data as { error?: string }).error || `Off-ramp API ${res.status}`
+      data?.error || text.trim() || `Off-ramp API ${res.status}`
     );
+  }
+  if (!data) {
+    throw new Error(`Off-ramp API ${res.status}`);
   }
   return data;
 }

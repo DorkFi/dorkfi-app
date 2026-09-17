@@ -16,6 +16,7 @@ import {
 } from "./coinbaseUrls.ts";
 import { endUserIp, partnerUserRefFromUserId } from "./clientIp.ts";
 import { resolveCoinbaseRedirectUrl } from "./redirectUrl.ts";
+import { cdpFailureMessage, parseCdpBody } from "./cdpResponse.ts";
 import {
   assertWalletOwnedByUser,
   fetchPrivyWalletAddresses,
@@ -170,17 +171,14 @@ export async function handleCoinbaseSession(
       }),
     });
 
-    const data = (await upstream.json()) as {
-      token?: string;
-      error?: string;
-      message?: string;
-    };
-    if (!upstream.ok || !data.token) {
+    const data = parseCdpBody(await upstream.text());
+    if (!upstream.ok || typeof data.token !== "string" || !data.token) {
       sendJson(res, upstream.status || 502, {
-        error:
-          data.error ||
-          data.message ||
-          `Coinbase session failed (${upstream.status})`,
+        error: cdpFailureMessage(
+          upstream.status || 502,
+          data,
+          "Coinbase session failed"
+        ),
       });
       return;
     }
@@ -234,13 +232,14 @@ export async function handleCoinbaseStatus(
     const upstream = await fetch(url.toString(), {
       headers: { Authorization: `Bearer ${jwt}` },
     });
-    const data = (await upstream.json()) as Record<string, unknown>;
+    const data = parseCdpBody(await upstream.text());
     if (!upstream.ok) {
       sendJson(res, upstream.status || 502, {
-        error:
-          (data.error as string) ||
-          (data.message as string) ||
-          `Status fetch failed (${upstream.status})`,
+        error: cdpFailureMessage(
+          upstream.status || 502,
+          data,
+          "Status fetch failed"
+        ),
         raw: data,
       });
       return;
