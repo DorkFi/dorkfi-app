@@ -22,7 +22,11 @@ Advanced XO Swap UI remains available as an escape hatch (Portfolio **Move USDC*
 | `MOONPAY_SECRET_KEY` | For MoonPay sell | Server-only secret for widget URL signing |
 | `CDP_API_KEY_ID` | For Coinbase Offramp | Coinbase Developer Platform secret API key id |
 | `CDP_API_KEY_SECRET` | For Coinbase Offramp | CDP secret (PEM / multiline OK in `.env`) |
-| `PRIVY_APP_ID` | For Coinbase Offramp | Optional. Verifies the user's Privy JWT before minting a session token. Falls back to `VITE_PRIVY_APP_ID` / baked app id |
+| `PRIVY_APP_ID` | For Coinbase Offramp / sponsor | Optional. Verifies the user's Privy JWT. Falls back to `VITE_PRIVY_APP_ID` / baked app id |
+| `PRIVY_APP_SECRET` | For sponsor | Privy app secret. Binds `POST /api/easy-start/sponsor` to the user's embedded wallet |
+| `SPONSOR_ENABLED` | For sponsor | `true` to send dust Base ETH + Algorand ALGO to new Easy Start wallets |
+| `SPONSOR_ETH_PRIVATE_KEY` | For sponsor | Dedicated Base treasury private key (never `VITE_`) |
+| `SPONSOR_ALGO_MNEMONIC` | For sponsor | Dedicated Algorand 25-word mnemonic |
 | `VITE_OFFRAMP_API_BASE` | No | Defaults to `/api/offramp` (Vite plugin in dev). Point at your API in production. |
 | `VITE_OFFRAMP_REDIRECT_URL` | No | Coinbase Offramp redirect (allowlist in CDP). Defaults to `{origin}/portfolio`. |
 | `XO_SWAP_APP_NAME` | For USDC move | Exodus XO Swap partner `App-Name` (server-only) |
@@ -65,6 +69,19 @@ Confirm with Exodus that Direct Swap pairs exist for:
 
 `/pairs`, `/rates`, and `/orders` are geo-gated. Local `npm run dev` uses your machine’s IP, so a `RESTRICTED_GEOLOCATION` response means Exodus is blocking this region — retrying will not help. Test from an allowed network or ask Exodus to enable the pair for `XO_SWAP_APP_NAME`.
 
+### Gas sponsor API (dev)
+
+The Vite plugin `plugins/sponsorApiPlugin.ts` serves:
+
+- `GET /api/easy-start/health`
+- `POST /api/easy-start/sponsor` (requires `Authorization: Bearer <Privy access token>`)
+
+Off until `SPONSOR_ENABLED=true`. When a signed-in Easy Start wallet is below the Deposit to Earn floors (0.00005 ETH on Base / 0.1 spendable ALGO), the handler sends **0.0001 ETH** and **1 ALGO** from dedicated treasuries. The Algorand address is re-derived server-side; the EVM destination must match a Privy wallet on the JWT.
+
+Put treasury keys in `.env` (never `VITE_*`). Create dedicated treasuries — do not reuse personal or offramp keys. The client calls this on login and again before Deposit to Earn; a missed or failed send still falls through to the existing ETH/ALGO balance checks.
+
+SimplFi production mounts the same handlers in `server/index.ts`. Railway/Docker only include this code after `dorkfi-app` is pushed and SimplFi `DORKFI_REF` is updated.
+
 ## Privy dashboard setup
 
 - Enable login methods: email, Google, Apple, passkey
@@ -99,6 +116,7 @@ Cash-out flow after bridge:
 | In-app cash-out | `src/components/easy-start/EasyStartOfframpCashOut.tsx` — Coinbase + MoonPay |
 | Off-ramp API (dev) | `server/offramp/handlers.ts` + `plugins/offrampApiPlugin.ts` |
 | XO Swap API (dev) | `server/xoSwap/handlers.ts` + `plugins/xoSwapApiPlugin.ts` |
+| Gas sponsor (ETH + ALGO) | `server/sponsor/handlers.ts` + `plugins/sponsorApiPlugin.ts` — `POST /api/easy-start/sponsor` |
 | Headless XO Swap | `src/components/easy-start/EasyStartHeadlessBridge.tsx` (both directions) |
 | Swap orchestrator | `src/lib/easyStart/xoSwap/runUsdcSwap.ts` |
 | Advanced swap UI | `src/components/easy-start/EasyStartBridgeSheet.tsx` — escape hatch |
@@ -123,7 +141,7 @@ Synthetic wallet id: `privy-easy-start` (treated like RainbowKit xChain for netw
 ## Not in scope (follow-ups)
 - Profile setup (preferred name, avatar)
 - Voi / Voi bridge
-- Production hosting of `/api/offramp` and `/api/xo-swap` outside Vite (wire handlers into dorkfi-api or similar)
+- Production hosting of `/api/offramp`, `/api/xo-swap`, and `/api/easy-start` outside Vite (SimplFi `server/index.ts` already mounts them)
 - RainbowKit `XchainUsdcBridgeControls` still uses the legacy Allbridge dialog — migrate separately
 
 See implementation plan in team docs for full phasing.

@@ -37,6 +37,7 @@ import {
 import { getTransactionErrorFeedback } from "@/utils/errorUtils";
 import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
+import { requestEasyStartSponsor } from "@/lib/easyStart/sponsorApi";
 import {
   fetchAlgorandAlgoBalance,
   fetchAlgorandUsdcBalance,
@@ -414,6 +415,20 @@ const EasySavingsDepositModal = ({
     setIsSubmitting(true);
     let holdBusy = false;
     try {
+      if (privy.getAccessToken && privy.evmAddress) {
+        try {
+          const token = await privy.getAccessToken();
+          if (token) {
+            await requestEasyStartSponsor({
+              accessToken: token,
+              evmAddress: privy.evmAddress,
+            });
+          }
+        } catch (sponsorError) {
+          console.warn("[Easy Start] sponsor before deposit", sponsorError);
+        }
+      }
+
       if (needsSwap && evmAddress) {
         const eth = await fetchBaseEthBalance(evmAddress);
         if (!hasEnoughBaseEth(eth.value)) {

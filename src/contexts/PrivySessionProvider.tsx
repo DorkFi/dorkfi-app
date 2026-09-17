@@ -30,6 +30,7 @@ import {
   takeQueuedEasyStartLogin,
   type PrivyEasyStartState,
 } from "@/contexts/privyEasyStartContext";
+import { requestEasyStartSponsor } from "@/lib/easyStart/sponsorApi";
 
 const PRIVY_APP_ID = getPrivyAppId();
 
@@ -51,7 +52,14 @@ function PrivyEasyStartStateBridge({
   children: ReactNode;
   onReadyStuck?: () => void;
 }) {
-  const { ready, authenticated, user, logout, error: privyError } = usePrivy();
+  const {
+    ready,
+    authenticated,
+    user,
+    logout,
+    error: privyError,
+    getAccessToken,
+  } = usePrivy();
   const { toast } = useToast();
   const { login: privyLogin } = useLogin({
     onError: (code) => {
@@ -165,6 +173,36 @@ function PrivyEasyStartStateBridge({
     ? algorandQuery.data ?? stableAlgorandAddress
     : null;
 
+  const sponsoredEvmRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!authenticated) {
+      sponsoredEvmRef.current = null;
+    }
+  }, [authenticated]);
+
+  useEffect(() => {
+    if (!authenticated || !evmAddress || !algorandAddress) return;
+    if (sponsoredEvmRef.current === evmAddress) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const token = await getAccessToken();
+        if (!token || cancelled) return;
+        await requestEasyStartSponsor({
+          accessToken: token,
+          evmAddress,
+        });
+        if (!cancelled) sponsoredEvmRef.current = evmAddress;
+      } catch (error) {
+        console.warn("[Easy Start] sponsor", error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authenticated, evmAddress, algorandAddress, getAccessToken]);
+
   const value = useMemo(
     (): PrivyEasyStartState => ({
       enabled: true,
@@ -179,6 +217,7 @@ function PrivyEasyStartStateBridge({
       login,
       logout,
       signTransactions: authenticated && evmAddress ? signTransactions : null,
+      getAccessToken: authenticated ? getAccessToken : null,
       blockReason: privyError ? privyError.message : null,
     }),
     [
@@ -186,6 +225,7 @@ function PrivyEasyStartStateBridge({
       algorandQuery.isLoading,
       authenticated,
       evmAddress,
+      getAccessToken,
       login,
       logout,
       privyError,

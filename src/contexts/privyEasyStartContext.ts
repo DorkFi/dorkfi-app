@@ -13,6 +13,8 @@ export type PrivyEasyStartState = {
   logout: (() => Promise<void>) | null;
   /** xChain EIP-712 signing for Algorand txn groups (Privy embedded wallet). */
   signTransactions: ((txns: Uint8Array[]) => Promise<Uint8Array[]>) | null;
+  /** Privy access token for Easy Start APIs (sponsor, offramp). */
+  getAccessToken: (() => Promise<string | null>) | null;
   /** Why Easy Start cannot open (origin block, crash, or missing config). */
   blockReason: string | null;
 };
@@ -29,6 +31,7 @@ export const DEFAULT_PRIVY_EASY_START_STATE: PrivyEasyStartState = {
   login: null,
   logout: null,
   signTransactions: null,
+  getAccessToken: null,
   blockReason: null,
 };
 

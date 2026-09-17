@@ -5,6 +5,7 @@ import { componentTagger } from "lovable-tagger";
 import { haystackProxyPlugin } from "./vite/haystackProxyPlugin";
 import { offrampApiPlugin } from "./plugins/offrampApiPlugin";
 import { xoSwapApiPlugin } from "./plugins/xoSwapApiPlugin";
+import { sponsorApiPlugin } from "./plugins/sponsorApiPlugin";
 
 const GOVERNANCE_RAILWAY =
   "https://dorkfi-governance-node-production.up.railway.app";
@@ -27,6 +28,14 @@ export default defineConfig(({ mode }) => {
     "XO_SWAP_API_BASE",
     "PRIVY_APP_ID",
     "VITE_PRIVY_APP_ID",
+    "PRIVY_APP_SECRET",
+    "SPONSOR_ENABLED",
+    "SPONSOR_ETH_PRIVATE_KEY",
+    "SPONSOR_ETH_AMOUNT_WEI",
+    "SPONSOR_ETH_RPC",
+    "SPONSOR_ALGO_MNEMONIC",
+    "SPONSOR_ALGO_MICRO",
+    "SPONSOR_ALGOD_URL",
   ] as const) {
     if (env[key] && !process.env[key]) process.env[key] = env[key];
   }
@@ -85,6 +94,7 @@ export default defineConfig(({ mode }) => {
     haystackProxyPlugin(env),
     offrampApiPlugin(),
     xoSwapApiPlugin(),
+    sponsorApiPlugin(),
     mode === 'development' &&
     componentTagger(),
   ].filter(Boolean),

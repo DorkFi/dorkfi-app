@@ -27,7 +27,6 @@ interface ImportMetaEnv {
   readonly VITE_ENABLE_POOLS?: string;
   /** When `true` or `1`, show Deposit / Withdraw LP actions on pool cards (Supply / Withdraw always shown). */
   readonly VITE_ENABLE_POOL_DEPOSIT_WITHDRAW?: string;
-  readonly VITE_ENABLE_POOL_DEPOSIT_WITHDRAW?: string;
   /**
    * When `true` or `1`, enable cross-asset repay via Haystack (Algorand mainnet).
    * Defaults on in Vite DEV; off in production builds unless set (safe beta dark-ship).
@@ -57,4 +56,6 @@ interface ImportMetaEnv {
   readonly VITE_OFFRAMP_REDIRECT_URL?: string;
   /** Optional origin for XO Swap proxy (default `/api/xo-swap` via Vite plugin). */
   readonly VITE_XO_SWAP_API_BASE?: string;
+  /** Optional origin for Easy Start sponsor API (default `/api/easy-start`). */
+  readonly VITE_EASY_START_API_BASE?: string;
 }
