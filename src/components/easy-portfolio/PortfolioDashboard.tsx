@@ -31,6 +31,7 @@ import { getTokenImagePath } from "@/utils/tokenImageUtils";
 import { Switch } from "@/components/ui/switch";
 import WalletModal from "@/components/WalletModal";
 import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
+import { consumerAssetDisplayLabel } from "@/services/savingsRouteResolver";
 
 function formatTokenAmt(n: number | null | undefined, digits = 5): string {
   if (n == null || !Number.isFinite(n) || n === 0) return "—";
@@ -40,6 +41,10 @@ function formatTokenAmt(n: number | null | undefined, digits = 5): string {
 function formatUsd(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
   return formatUsdAmount(n);
+}
+
+function assetLabel(label: string, consumerCopy: boolean): string {
+  return consumerCopy ? consumerAssetDisplayLabel(label) : label;
 }
 
 function BalanceSummary({
@@ -548,19 +553,25 @@ const PortfolioDashboard = () => {
     const algo = algoWalletUsd ?? 0;
     const base = baseWalletUsd ?? 0;
     if (algo > 0.005 && base > 0.005) {
-      segments.push({ name: "USDC (Algorand)", value: algo });
-      segments.push({ name: "USDC (Base)", value: base });
+      segments.push({
+        name: assetLabel("USDC (Algorand)", consumerCopy),
+        value: algo,
+      });
+      segments.push({
+        name: assetLabel("USDC (Base)", consumerCopy),
+        value: base,
+      });
     } else if (algo > 0.005) {
-      segments.push({ name: "USDC", value: algo });
+      segments.push({ name: assetLabel("USDC", consumerCopy), value: algo });
     } else if (base > 0.005) {
-      segments.push({ name: "USDC", value: base });
+      segments.push({ name: assetLabel("USDC", consumerCopy), value: base });
     }
     if (includeSupplied) {
       for (const p of fundedSavings) {
         if (p.depositUsd > 0.005) {
           segments.push({
             name: consumerCopy
-              ? `${p.label} (in savings)`
+              ? `${assetLabel(p.label, true)} (in savings)`
               : `${p.label} (supplied)`,
             value: p.depositUsd,
           });
@@ -700,7 +711,7 @@ const PortfolioDashboard = () => {
                           alt=""
                           className="size-7 rounded-full"
                         />
-                        {row.symbol}
+                        {assetLabel(row.symbol, consumerCopy)}
                       </span>
                     </td>
                     <td className="py-3.5 tabular-nums">
@@ -811,7 +822,7 @@ const PortfolioDashboard = () => {
                               alt=""
                               className="size-7 rounded-full"
                             />
-                            {b.asset}
+                            {assetLabel(b.asset, consumerCopy)}
                           </span>
                         </td>
                         <td className="py-3.5 tabular-nums">
