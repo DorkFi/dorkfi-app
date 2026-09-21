@@ -12,6 +12,7 @@ type RateRow = {
 type RatesPanelProps = {
   borrow: RateRow;
   supply: RateRow;
+  net?: RateRow;
   borrowHint?: ReactNode;
 };
 
@@ -50,7 +51,7 @@ function RateBlock({
   );
 }
 
-const RatesPanel = ({ borrow, supply, borrowHint }: RatesPanelProps) => {
+const RatesPanel = ({ borrow, supply, net, borrowHint }: RatesPanelProps) => {
   const consumerCopy = useConsumerCopy();
   return (
     <aside className="rounded-[28px] bg-[#0c1927] p-5 sm:p-6 space-y-8 h-full">
@@ -65,6 +66,13 @@ const RatesPanel = ({ borrow, supply, borrowHint }: RatesPanelProps) => {
         row={supply}
         consumerCopy={consumerCopy}
       />
+      {net ? (
+        <RateBlock
+          title={consumerCopy ? "Net borrow rate" : "Net Borrow Rate"}
+          row={net}
+          consumerCopy={consumerCopy}
+        />
+      ) : null}
     </aside>
   );
 };
