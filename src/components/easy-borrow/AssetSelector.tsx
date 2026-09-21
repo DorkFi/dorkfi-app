@@ -63,6 +63,7 @@ const AssetSelector = ({
     consumerCopy ? consumerAssetDisplayLabel(symbol) : symbol;
 
   const selected = options.find((o) => o.configKey === value) ?? options[0];
+  const canChoose = options.filter((option) => !option.disabled).length > 1;
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -112,8 +113,13 @@ const AssetSelector = ({
           <div className="relative">
             <button
               type="button"
-              onClick={() => setOpen((v) => !v)}
-              className="flex items-center gap-2 rounded-xl bg-card border border-border px-2.5 py-2 text-sm font-medium shadow-sm hover:bg-accent/40"
+              onClick={() => {
+                if (canChoose) setOpen((v) => !v);
+              }}
+              className={cn(
+                "flex items-center gap-2 rounded-xl bg-card border border-border px-2.5 py-2 text-sm font-medium shadow-sm",
+                canChoose ? "hover:bg-accent/40" : "cursor-default"
+              )}
             >
               {selected ? (
                 <img
@@ -129,10 +135,12 @@ const AssetSelector = ({
               <span>
                 {selected ? displaySymbol(selected.symbol) : "Select"}
               </span>
-              <ChevronDown className="size-4 text-muted-foreground" />
+              {canChoose ? (
+                <ChevronDown className="size-4 text-muted-foreground" />
+              ) : null}
             </button>
 
-            {open ? (
+            {open && canChoose ? (
               <div className="absolute left-0 top-full z-30 mt-2 w-72 overflow-hidden rounded-2xl border border-border bg-card shadow-lg">
                 <div className="flex items-center gap-2 border-b border-border px-3 py-2">
                   <Search className="size-4 text-muted-foreground" />

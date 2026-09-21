@@ -102,7 +102,7 @@ const SavingsPositionCard = ({
   historySnapshots,
   className,
 }: SavingsPositionCardProps) => {
-  const [range, setRange] = useState<BalanceRange>("Y");
+  const [range, setRange] = useState<BalanceRange>("W");
   const [seriesId, setSeriesId] = useState<PortfolioChartSeriesId>("total");
 
   const hasSeries = Boolean(chartSeries && chartSeries.length > 0);

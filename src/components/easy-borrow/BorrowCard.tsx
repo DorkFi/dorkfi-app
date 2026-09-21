@@ -41,6 +41,11 @@ import {
 } from "@/wallet/xchainSignUi";
 import { getTransactionErrorFeedback } from "@/utils/errorUtils";
 import DorkFiButton from "@/components/ui/DorkFiButton";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 import { consumerAssetDisplayLabel } from "@/services/savingsRouteResolver";
 import {
@@ -649,70 +654,85 @@ const BorrowCard = () => {
 
   return (
     <section className="w-full max-w-5xl mx-auto space-y-5">
-      {hasExisting ? (
-        <div className="rounded-xl border border-border/60 bg-card p-3 space-y-2">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-            {consumerCopy ? "Use" : "Collateral source"}
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => setCollateralSource("existing")}
-              className={`rounded-lg border px-3 py-2 text-left text-sm ${
-                collateralSource === "existing"
-                  ? "border-ocean-teal bg-ocean-teal/10"
-                  : "border-border"
-              }`}
-            >
-              <div className="font-medium">
-                {consumerCopy ? "Savings already deposited" : "Existing collateral"}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                {formatToken(quote.existingDeposit)}{" "}
-                {displaySymbol(route?.collateral.symbol)}{" "}
-                {consumerCopy ? "in savings" : "supplied"}
-              </div>
-            </button>
-            <button
-              type="button"
-              onClick={() => setCollateralSource("wallet")}
-              className={`rounded-lg border px-3 py-2 text-left text-sm ${
-                collateralSource === "wallet"
-                  ? "border-ocean-teal bg-ocean-teal/10"
-                  : "border-border"
-              }`}
-            >
-              <div className="font-medium">
-                {consumerCopy ? "Use available cash" : "Add from wallet"}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                Balance {formatToken(quote.walletBalance)}{" "}
-                {displaySymbol(route?.collateral.symbol)}
-              </div>
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_240px] lg:items-stretch">
+      <div
+        className={`grid gap-4 ${
+          consumerCopy
+            ? "lg:grid-cols-[minmax(0,1fr)_minmax(320px,26rem)] lg:items-start"
+            : "lg:grid-cols-[minmax(0,1fr)_240px] lg:items-stretch"
+        }`}
+      >
         <div className="space-y-4 min-w-0">
+          {hasExisting && !consumerCopy ? (
+            <div className="rounded-xl border border-border/60 bg-card p-3 space-y-2">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                {consumerCopy ? "Use" : "Collateral source"}
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCollateralSource("existing")}
+                  className={`rounded-lg border px-3 py-2 text-left text-sm ${
+                    collateralSource === "existing"
+                      ? "border-ocean-teal bg-ocean-teal/10"
+                      : "border-border"
+                  }`}
+                >
+                  <div className="font-medium">
+                    {consumerCopy ? "Savings already deposited" : "Existing collateral"}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {formatToken(quote.existingDeposit)}{" "}
+                    {displaySymbol(route?.collateral.symbol)}{" "}
+                    {consumerCopy ? "in savings" : "supplied"}
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCollateralSource("wallet")}
+                  className={`rounded-lg border px-3 py-2 text-left text-sm ${
+                    collateralSource === "wallet"
+                      ? "border-ocean-teal bg-ocean-teal/10"
+                      : "border-border"
+                  }`}
+                >
+                  <div className="font-medium">
+                    {consumerCopy ? "Use available cash" : "Add from wallet"}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Balance {formatToken(quote.walletBalance)}{" "}
+                    {displaySymbol(route?.collateral.symbol)}
+                  </div>
+                </button>
+              </div>
+            </div>
+          ) : null}
           <div className="grid gap-4 sm:grid-cols-2">
             <AssetSelector
               card
-              label={consumerCopy ? "From savings" : "Supply"}
+              label={consumerCopy ? "From earn" : "Supply"}
               headerAction={
                 <div className="flex items-center gap-2">
-                  <span
-                    className="text-muted-foreground"
-                    title={
-                      consumerCopy
-                        ? "Savings you deposit backs this loan."
-                        : "Assets you supply become collateral for this borrow."
-                    }
-                  >
-                    <Info className="size-4" />
-                  </span>
-                  {collateralSource === "existing" ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        className="text-muted-foreground"
+                        aria-label={
+                          consumerCopy
+                            ? "About this earn balance"
+                            : "About this collateral"
+                        }
+                      >
+                        <Info className="size-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs text-sm">
+                      {consumerCopy
+                        ? "Savings already in earn. This balance backs your loan and keeps earning while you borrow."
+                        : "Assets you supply become collateral for this borrow."}
+                    </TooltipContent>
+                  </Tooltip>
+                  {!consumerCopy && collateralSource === "existing" ? (
                     <button
                       type="button"
                       onClick={() => setCollateralSource("wallet")}
@@ -720,7 +740,9 @@ const BorrowCard = () => {
                     >
                       Add more +
                     </button>
-                  ) : quote.walletBalance != null && quote.walletBalance > 0 ? (
+                  ) : !consumerCopy &&
+                    quote.walletBalance != null &&
+                    quote.walletBalance > 0 ? (
                     <button
                       type="button"
                       onClick={() =>
@@ -785,7 +807,7 @@ const BorrowCard = () => {
                 ) : (
                   <span>
                     {consumerCopy
-                      ? "Using savings already deposited"
+                      ? "Using savings already deposited to earn"
                       : "Using existing position"}
                     {quote.poolGlobal && !consumerCopy
                       ? ` · pool collateral ${formatUsdAmount(quote.poolGlobal.totalCollateralValue)}`
