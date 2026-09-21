@@ -13,6 +13,7 @@ import { AuthError, requirePrivyAuth } from "./privyAuth.js";
 import {
   buildCoinbaseOfframpSellUrl,
   buildCoinbaseOnrampBuyUrl,
+  withCoinbaseOfframpReturnQuery,
 } from "./coinbaseUrls.ts";
 import { endUserIp, partnerUserRefFromUserId } from "./clientIp.ts";
 import { resolveCoinbaseRedirectUrl } from "./redirectUrl.ts";
@@ -199,7 +200,13 @@ export async function handleCoinbaseSession(
       sessionToken: data.token,
       partnerUserRef,
       buyUrl: buildCoinbaseOnrampBuyUrl(widgetArgs),
-      sellUrl: buildCoinbaseOfframpSellUrl(widgetArgs),
+      sellUrl: buildCoinbaseOfframpSellUrl({
+        ...widgetArgs,
+        redirectUrl: withCoinbaseOfframpReturnQuery(
+          redirectUrl,
+          partnerUserRef
+        ),
+      }),
     });
   } catch (e: unknown) {
     if (e instanceof AuthError) {

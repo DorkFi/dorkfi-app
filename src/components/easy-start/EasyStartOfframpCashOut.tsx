@@ -29,6 +29,11 @@ import {
   fetchBaseEthBalance,
   hasEnoughBaseEth,
 } from "@/lib/easyStart/baseBalances";
+import {
+  clearCoinbaseOfframpPending,
+  patchCoinbaseOfframpPending,
+  saveCoinbaseOfframpPending,
+} from "@/lib/easyStart/coinbaseOfframpResume";
 import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 
 const EasyStartMoonPaySellHost = lazy(() =>
@@ -57,6 +62,10 @@ interface EasyStartOfframpCashOutProps {
   onDone?: () => void;
   hideProviderPicker?: boolean;
   ctaLabel?: string;
+  /** Skip reopening Coinbase; poll and send on this tab after return. */
+  resumePartnerUserRef?: string | null;
+  resumeSendTxHash?: string | null;
+  onResumeConsumed?: () => void;
 }
 
 function isUserCanceledFunding(message: string): boolean {
@@ -71,7 +80,8 @@ function isUserCanceledFunding(message: string): boolean {
 
 /**
  * In-app cash-out after Base USDC arrives:
- * - Coinbase: CDP session → sell widget → poll to_address → Privy USDC transfer
+ * - Coinbase: CDP session → same-tab sell widget → return to /portfolio →
+ *   poll to_address → Privy USDC transfer
  * - MoonPay: sell widget + signed URL → onInitiateDeposit → Privy USDC transfer
  *
  * MoonPay’s React SDK is lazy-mounted only while the sell overlay is open so it
@@ -85,6 +95,9 @@ export function EasyStartOfframpCashOut({
   onDone,
   hideProviderPicker = false,
   ctaLabel,
+  resumePartnerUserRef = null,
+  resumeSendTxHash = null,
+  onResumeConsumed,
 }: EasyStartOfframpCashOutProps) {
   const { sendTransaction } = useSendTransaction();
   const { fundWallet } = useFundWallet();
@@ -151,6 +164,7 @@ export function EasyStartOfframpCashOut({
         fromAddress: evmAddress ?? undefined,
       });
       setTxHash(hash);
+      patchCoinbaseOfframpPending({ sendTxHash: hash });
       setPhase("done");
       toast({
         title: "Sent",
@@ -160,6 +174,46 @@ export function EasyStartOfframpCashOut({
     },
     [evmAddress, sendTransaction, toast]
   );
+
+  useEffect(() => {
+    if (provider !== "coinbase" || !resumePartnerUserRef) return;
+    if (resumeSendTxHash) {
+      setPartnerUserRef(resumePartnerUserRef);
+      setTxHash(resumeSendTxHash);
+      setPhase("done");
+      return;
+    }
+    let cancelled = false;
+    setPartnerUserRef(resumePartnerUserRef);
+    void (async () => {
+      try {
+        const hasGas = await walletHasGas();
+        if (cancelled) return;
+        setPhase(hasGas ? "awaiting_provider" : "gas");
+      } catch (e: unknown) {
+        if (cancelled) return;
+        const message = e instanceof Error ? e.message : String(e);
+        setError(message || "Couldn’t check processing fees");
+        setPhase("error");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [provider, resumePartnerUserRef, resumeSendTxHash, walletHasGas]);
+
+  const finishCashOut = useCallback(() => {
+    clearCoinbaseOfframpPending();
+    onResumeConsumed?.();
+    onDone?.();
+  }, [onDone, onResumeConsumed]);
+
+  const cancelCoinbaseWait = useCallback(() => {
+    clearCoinbaseOfframpPending();
+    onResumeConsumed?.();
+    setPartnerUserRef(null);
+    setPhase("idle");
+  }, [onResumeConsumed]);
 
   const closeMoonpay = useCallback(() => {
     setMoonpayVisible(false);
@@ -215,6 +269,11 @@ export function EasyStartOfframpCashOut({
 
   const startCoinbase = async () => {
     if (!evmAddress) return;
+    if (resumePartnerUserRef && !resumeSendTxHash) {
+      setPartnerUserRef(resumePartnerUserRef);
+      setPhase("awaiting_provider");
+      return;
+    }
     setError(null);
     setPhase("opening");
     try {
@@ -224,31 +283,14 @@ export function EasyStartOfframpCashOut({
         accessToken,
         amount: amount ?? undefined,
       });
-      setPartnerUserRef(session.partnerUserRef);
       if (!session.sellUrl) {
         throw new Error("Coinbase cash-out URL missing. Redeploy the API.");
       }
-      const popup = window.open(
-        session.sellUrl,
-        "_blank",
-        "noopener,noreferrer"
-      );
-      if (!popup) {
-        setError(
-          consumerCopy
-            ? "Allow pop-ups to continue cash-out."
-            : "Allow pop-ups to open Coinbase cash-out."
-        );
-        setPhase("error");
-        return;
-      }
-      setPhase("awaiting_provider");
-      toast({
-        title: consumerCopy ? "Complete cash-out" : "Complete sell in Coinbase",
-        description: consumerCopy
-          ? "After you confirm, we’ll send the funds from your account."
-          : "After you confirm the cash-out, we’ll prompt you to send funds from your account.",
+      saveCoinbaseOfframpPending({
+        partnerUserRef: session.partnerUserRef,
+        amount: amount ?? null,
       });
+      window.location.assign(session.sellUrl);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
       setError(message);
@@ -391,8 +433,8 @@ export function EasyStartOfframpCashOut({
         {phase === "awaiting_provider" && provider === "coinbase" ? (
           <p className="text-sm text-muted-foreground text-center">
             {consumerCopy
-              ? "Waiting for bank cash-out details…"
-              : "Waiting for Coinbase sell details…"}
+              ? "Waiting for bank cash-out details. Confirm the send when prompted."
+              : "Waiting for Coinbase sell details. Confirm the USDC send when prompted."}
           </p>
         ) : null}
 
@@ -422,7 +464,7 @@ export function EasyStartOfframpCashOut({
         {phase === "done" ? (
           <Button
             className="h-12 w-full rounded-xl bg-ocean-teal font-semibold text-white hover:bg-ocean-teal/90"
-            onClick={() => onDone?.()}
+            onClick={() => finishCashOut()}
           >
             Done
           </Button>
@@ -468,10 +510,7 @@ export function EasyStartOfframpCashOut({
           <Button
             variant="ghost"
             className="w-full"
-            onClick={() => {
-              setPartnerUserRef(null);
-              setPhase("idle");
-            }}
+            onClick={cancelCoinbaseWait}
           >
             Cancel wait
           </Button>

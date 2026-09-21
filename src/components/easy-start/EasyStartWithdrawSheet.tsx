@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Building2, CreditCard } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -40,6 +40,13 @@ interface EasyStartWithdrawSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onOpenAdvancedBridge?: () => void;
+  /** Resume Coinbase cash-out after same-tab return to /portfolio. */
+  resumeOfframp?: {
+    partnerUserRef: string;
+    amount: string | null;
+    sendTxHash?: string | null;
+  } | null;
+  onResumeConsumed?: () => void;
 }
 
 function methodToProvider(method: WithdrawPayMethod): CardProvider {
@@ -54,14 +61,20 @@ export function EasyStartWithdrawSheet({
   open,
   onOpenChange,
   onOpenAdvancedBridge,
+  resumeOfframp = null,
+  onResumeConsumed,
 }: EasyStartWithdrawSheetProps) {
   const { evmAddress } = usePrivyEasyStart();
   const consumerCopy = useConsumerCopy();
   const { formatCurrency } = useNumberI18n();
 
-  const [amount, setAmount] = useState("");
-  const [method, setMethod] = useState<WithdrawPayMethod>("debit_card");
-  const [step, setStep] = useState<WithdrawStep>("choose");
+  const [amount, setAmount] = useState(resumeOfframp?.amount ?? "");
+  const [method, setMethod] = useState<WithdrawPayMethod>(
+    resumeOfframp ? "bank" : "debit_card"
+  );
+  const [step, setStep] = useState<WithdrawStep>(
+    resumeOfframp ? "review" : "choose"
+  );
   const [editingAmount, setEditingAmount] = useState(false);
   const [phase, setPhase] = useState<WithdrawPhase>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -90,6 +103,16 @@ export function EasyStartWithdrawSheet({
     { minimumFractionDigits: 2, maximumFractionDigits: 2 }
   );
 
+  const applyResume = useCallback(() => {
+    if (!resumeOfframp) return;
+    setMethod("bank");
+    if (resumeOfframp.amount) setAmount(resumeOfframp.amount);
+    setStep("review");
+    setEditingAmount(false);
+    setPhase("idle");
+    setError(null);
+  }, [resumeOfframp]);
+
   const resetLocal = useCallback(() => {
     setPhase("idle");
     setError(null);
@@ -105,6 +128,11 @@ export function EasyStartWithdrawSheet({
     }
     onOpenChange(next);
   };
+
+  useEffect(() => {
+    if (!open || !resumeOfframp) return;
+    applyResume();
+  }, [applyResume, open, resumeOfframp]);
 
   const setMax = () => {
     if (!hasAvailable) return;
@@ -232,6 +260,9 @@ export function EasyStartWithdrawSheet({
                   }
                   hideProviderPicker
                   ctaLabel={`Cash out ${amountDisplay} to ${methodTitle}`}
+                  resumePartnerUserRef={resumeOfframp?.partnerUserRef ?? null}
+                  resumeSendTxHash={resumeOfframp?.sendTxHash ?? null}
+                  onResumeConsumed={onResumeConsumed}
                   onDone={() => handleClose(false)}
                 />
                 <Button
