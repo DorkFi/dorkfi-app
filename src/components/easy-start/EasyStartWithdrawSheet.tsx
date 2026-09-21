@@ -17,7 +17,6 @@ import {
   EASY_START_FUNDING_DIALOG_CLASS,
   FundingPrimaryButton,
   FundingSheetHeader,
-  InstantTagIcon,
   PayMethodList,
   PrivySecureNote,
   ReviewBreakdown,
@@ -49,12 +48,8 @@ interface EasyStartWithdrawSheetProps {
   onResumeConsumed?: () => void;
 }
 
-function methodToProvider(method: WithdrawPayMethod): CardProvider {
-  return method === "bank" ? "coinbase" : "moonpay";
-}
-
 /**
- * Cash out Base USDC (MoonPay / Coinbase). Earn withdraws should already
+ * Cash out Base USDC through Coinbase. Earn withdraws should already
  * have swapped Algorand → Base before this sheet.
  */
 export function EasyStartWithdrawSheet({
@@ -80,7 +75,7 @@ export function EasyStartWithdrawSheet({
   const [error, setError] = useState<string | null>(null);
 
   const address = evmAddress as Address | null;
-  const cashOutProvider = methodToProvider(method);
+  const cashOutProvider: CardProvider = "coinbase";
 
   const { data: baseUsdc } = useQuery({
     queryKey: ["easy-start-base-usdc", address],
@@ -169,10 +164,9 @@ export function EasyStartWithdrawSheet({
       {
         id: "debit_card",
         title: "Debit card",
-        description: "Instant · Fee shown at checkout",
+        description: "Fee shown at checkout",
         icon: <CreditCard className="h-5 w-5" />,
         badge: "Recommended",
-        tag: { label: "Fastest", tone: "fast" },
       },
       {
         id: "bank",
@@ -229,10 +223,7 @@ export function EasyStartWithdrawSheet({
                   tags={
                     method === "bank"
                       ? [{ label: "1–3 business days" }, { label: "Fee shown at checkout" }]
-                      : [
-                          { label: "Instant", icon: <InstantTagIcon /> },
-                          { label: "Fee shown at checkout" },
-                        ]
+                      : [{ label: "Fee shown at checkout" }]
                   }
                   onChange={() => setStep("choose")}
                 />
@@ -255,9 +246,9 @@ export function EasyStartWithdrawSheet({
                   evmAddress={evmAddress}
                   amount={cashOutAmount}
                   provider={cashOutProvider}
-                  onProviderChange={(p) =>
-                    setMethod(p === "coinbase" ? "bank" : "debit_card")
-                  }
+                  onProviderChange={() => {
+                    // Debit card and bank both cash out through Coinbase.
+                  }}
                   hideProviderPicker
                   ctaLabel={`Cash out ${amountDisplay} to ${methodTitle}`}
                   resumePartnerUserRef={resumeOfframp?.partnerUserRef ?? null}
