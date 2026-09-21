@@ -10,6 +10,34 @@ export type CoinbaseWidgetUrlArgs = {
   amount?: string | number;
 };
 
+/** Query flag on the SimplFi return URL after Coinbase sell. */
+export const CB_OFFRAMP_QUERY = "cb_offramp";
+/** partnerUserRef on the SimplFi return URL after Coinbase sell. */
+export const CB_OFFRAMP_REF_QUERY = "ref";
+
+/** Append return params so /portfolio can resume the USDC send after Coinbase. */
+export function withCoinbaseOfframpReturnQuery(
+  redirectUrl: string,
+  partnerUserRef: string
+): string {
+  const url = new URL(redirectUrl);
+  url.searchParams.set(CB_OFFRAMP_QUERY, "1");
+  url.searchParams.set(CB_OFFRAMP_REF_QUERY, partnerUserRef);
+  return url.toString();
+}
+
+export function parseCoinbaseOfframpReturnSearch(
+  search: string
+): { partnerUserRef: string } | null {
+  const params = new URLSearchParams(
+    search.startsWith("?") ? search.slice(1) : search
+  );
+  if (params.get(CB_OFFRAMP_QUERY) !== "1") return null;
+  const partnerUserRef = params.get(CB_OFFRAMP_REF_QUERY)?.trim();
+  if (!partnerUserRef) return null;
+  return { partnerUserRef };
+}
+
 function applySharedParams(
   url: URL,
   args: CoinbaseWidgetUrlArgs

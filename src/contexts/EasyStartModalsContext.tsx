@@ -2,6 +2,7 @@ import {
   lazy,
   Suspense,
   useCallback,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -21,6 +22,11 @@ import {
   EasyStartModalsContext,
   type EasyStartModalsContextValue,
 } from "@/contexts/easyStartModals";
+import {
+  consumeCoinbaseOfframpReturn,
+  readCoinbaseOfframpPending,
+  type CoinbaseOfframpPending,
+} from "@/lib/easyStart/coinbaseOfframpResume";
 
 /**
  * Lazy-load Easy Start sheets so `@privy-io/wagmi` stays out of first paint.
@@ -116,10 +122,21 @@ export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
   const [depositOpen, setDepositOpen] = useState(false);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [bridgeOpen, setBridgeOpen] = useState(false);
+  const [offrampResume, setOfframpResume] =
+    useState<CoinbaseOfframpPending | null>(null);
 
   const openDeposit = useCallback(() => setDepositOpen(true), []);
-  const openWithdraw = useCallback(() => setWithdrawOpen(true), []);
+  const openWithdraw = useCallback(() => {
+    const pending = readCoinbaseOfframpPending();
+    if (pending) setOfframpResume(pending);
+    setWithdrawOpen(true);
+  }, []);
   const openBridge = useCallback(() => setBridgeOpen(true), []);
+
+  useEffect(() => {
+    const pending = consumeCoinbaseOfframpReturn();
+    if (pending) setOfframpResume(pending);
+  }, []);
 
   const value = useMemo(
     (): EasyStartModalsContextValue => ({
@@ -131,6 +148,10 @@ export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
   );
 
   const showSheets = privy.enabled && privy.configured && privy.authenticated;
+
+  useEffect(() => {
+    if (offrampResume && showSheets) setWithdrawOpen(true);
+  }, [offrampResume, showSheets]);
 
   const openAdvancedBridge = useCallback(() => {
     setDepositOpen(false);
@@ -200,6 +221,8 @@ export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
                 <EasyStartWithdrawSheet
                   open={withdrawOpen}
                   onOpenChange={setWithdrawOpen}
+                  resumeOfframp={offrampResume}
+                  onResumeConsumed={() => setOfframpResume(null)}
                   onOpenAdvancedBridge={
                     consumerCopy ? undefined : openAdvancedBridge
                   }

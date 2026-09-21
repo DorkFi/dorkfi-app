@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildCoinbaseOfframpSellUrl,
   buildCoinbaseOnrampBuyUrl,
+  parseCoinbaseOfframpReturnSearch,
+  withCoinbaseOfframpReturnQuery,
 } from "./coinbaseUrls";
 
 const args = {
@@ -38,5 +40,36 @@ describe("buildCoinbaseOfframpSellUrl", () => {
     );
     expect(url.searchParams.get("presetCryptoAmount")).toBe("100");
     expect(url.searchParams.get("presetFiatAmount")).toBeNull();
+  });
+
+  it("sends cash-out back to /portfolio with resume query params", () => {
+    const redirectUrl = withCoinbaseOfframpReturnQuery(
+      args.redirectUrl,
+      args.partnerUserRef
+    );
+    const url = new URL(
+      buildCoinbaseOfframpSellUrl({ ...args, redirectUrl })
+    );
+    expect(url.searchParams.get("redirectUrl")).toBe(redirectUrl);
+    expect(parseCoinbaseOfframpReturnSearch(new URL(redirectUrl).search)).toEqual(
+      { partnerUserRef: args.partnerUserRef }
+    );
+  });
+});
+
+describe("withCoinbaseOfframpReturnQuery", () => {
+  it("tags the SimplFi return URL so cash-out can resume after Coinbase", () => {
+    const next = withCoinbaseOfframpReturnQuery(
+      "https://beta.simplfi.xyz/portfolio",
+      "privy-user-1"
+    );
+    expect(parseCoinbaseOfframpReturnSearch(new URL(next).search)).toEqual({
+      partnerUserRef: "privy-user-1",
+    });
+    expect(new URL(next).pathname).toBe("/portfolio");
+  });
+
+  it("returns null when the resume flag is missing", () => {
+    expect(parseCoinbaseOfframpReturnSearch("?ref=privy-user-1")).toBeNull();
   });
 });

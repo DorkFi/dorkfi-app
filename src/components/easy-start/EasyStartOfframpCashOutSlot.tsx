@@ -18,6 +18,9 @@ type EasyStartOfframpCashOutSlotProps = {
   onDone?: () => void;
   hideProviderPicker?: boolean;
   ctaLabel?: string;
+  resumePartnerUserRef?: string | null;
+  resumeSendTxHash?: string | null;
+  onResumeConsumed?: () => void;
 };
 
 /**
