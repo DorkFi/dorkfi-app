@@ -389,9 +389,7 @@ export function EasyStartOfframpCashOut({
       : undefined;
 
   const unavailableCopy = consumerCopy
-    ? provider === "coinbase"
-      ? "Bank cash-out isn’t available right now. Try debit card."
-      : "Card cash-out isn’t available right now. Try again later."
+    ? "Cash-out isn’t available right now. Try again later."
     : provider === "coinbase"
       ? "Coinbase off-ramp needs CDP_API_KEY_ID + CDP_API_KEY_SECRET on the offramp API."
       : "MoonPay off-ramp needs VITE_MOONPAY_API_KEY and MOONPAY_SECRET_KEY.";
@@ -433,7 +431,7 @@ export function EasyStartOfframpCashOut({
         {phase === "awaiting_provider" && provider === "coinbase" ? (
           <p className="text-sm text-muted-foreground text-center">
             {consumerCopy
-              ? "Waiting for bank cash-out details. Confirm the send when prompted."
+              ? "Waiting for cash-out details. Confirm the send when prompted."
               : "Waiting for Coinbase sell details. Confirm the USDC send when prompted."}
           </p>
         ) : null}
