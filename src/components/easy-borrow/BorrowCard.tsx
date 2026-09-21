@@ -850,6 +850,15 @@ const BorrowCard = () => {
             logoPath: route?.collateral.logoPath,
             rateLabel: formatApr(quote.supplyAprPercent),
           }}
+          net={{
+            symbol: route?.borrow.symbol ?? selectedBorrowOption?.symbol ?? "—",
+            rateLabel: formatApr(
+              quote.borrowAprPercent != null &&
+                quote.supplyAprPercent != null
+                ? quote.borrowAprPercent - quote.supplyAprPercent
+                : null
+            ),
+          }}
           borrowHint={consumerCopy ? undefined : borrowHint}
         />
       </div>
