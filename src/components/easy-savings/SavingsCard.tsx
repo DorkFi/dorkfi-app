@@ -1433,7 +1433,7 @@ const SavingsCard = () => {
             </>
           ) : showEmptyHero ? (
             <>
-              <section className="rounded-[28px] bg-[#0c1927] p-8 sm:p-10 text-white">
+              <section className="rounded-[28px] border border-transparent bg-[#0c1927] p-8 sm:p-10 text-white dark:border-border/60 dark:bg-card dark:shadow-sm">
                 <h2 className="max-w-xl text-3xl sm:text-4xl font-semibold leading-tight tracking-tight">
                   Deposit and earn{" "}
                   <span className="text-emerald-400">
