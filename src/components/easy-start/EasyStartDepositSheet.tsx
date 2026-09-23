@@ -6,6 +6,7 @@ import type { Address } from "viem";
 import {
   CheckCircle2,
   CreditCard,
+  Landmark,
   Loader2,
   Wallet,
 } from "lucide-react";
@@ -29,7 +30,6 @@ import {
   AmountPresets,
   ApplePayGlyph,
   ChooseSummary,
-  CoinbaseGlyph,
   ContinueLabel,
   EASY_START_FUNDING_DIALOG_CLASS,
   FundingPrimaryButton,
@@ -402,11 +402,10 @@ export function EasyStartDepositSheet({
     const methods: PayMethodOption[] = [
       {
         id: "coinbase",
-        title: "Coinbase",
-        description: "Buy USDC on Base with Coinbase Onramp",
-        icon: <CoinbaseGlyph />,
-        badge: "Coinbase Onramp",
-        tag: { label: "Buy USDC", tone: "fast" },
+        title: "Bank Deposits",
+        description: "Transfer from your bank account",
+        icon: <Landmark className="h-5 w-5" />,
+        badge: "Lowest Fees",
       },
       {
         id: "apple_pay",
@@ -440,7 +439,7 @@ export function EasyStartDepositSheet({
     method === "apple_pay"
       ? `Pay ${amountDisplay} with Apple Pay`
       : method === "coinbase"
-        ? `Pay ${amountDisplay} with Coinbase`
+        ? `Pay ${amountDisplay} with bank deposit`
         : method === "card"
           ? `Pay ${amountDisplay} with card`
           : `Continue with ${amountDisplay}`;
@@ -603,10 +602,15 @@ export function EasyStartDepositSheet({
                   tags={
                     method === "balance"
                       ? [{ label: "In your account" }]
-                      : [
-                          { label: "Instant", icon: <InstantTagIcon /> },
-                          { label: "Fee shown at checkout" },
-                        ]
+                      : method === "coinbase"
+                        ? [
+                            { label: "Lowest fees" },
+                            { label: "Fee shown at checkout" },
+                          ]
+                        : [
+                            { label: "Instant", icon: <InstantTagIcon /> },
+                            { label: "Fee shown at checkout" },
+                          ]
                   }
                   onChange={() => setStep("choose")}
                 />
@@ -641,7 +645,7 @@ export function EasyStartDepositSheet({
                     </span>
                   ) : method === "coinbase" ? (
                     <span className="inline-flex items-center gap-2">
-                      <CoinbaseGlyph className="h-4 w-4 text-white" />
+                      <Landmark className="h-4 w-4 text-white" />
                       {payCta}
                     </span>
                   ) : (
@@ -655,11 +659,7 @@ export function EasyStartDepositSheet({
             <>
               <FundingSheetHeader
                 title={consumerCopy ? "Add money" : "Deposit"}
-                subtitle={
-                  consumerCopy
-                    ? "Coinbase Onramp is selected. Apple Pay and card are also available."
-                    : "Coinbase Onramp (pay.coinbase.com) is selected. Apple Pay and card are also available."
-                }
+                subtitle="Bank deposit is selected. Apple Pay and card are also available."
               />
               <div className="px-6 pb-6 pt-3 space-y-5">
                 <div>
