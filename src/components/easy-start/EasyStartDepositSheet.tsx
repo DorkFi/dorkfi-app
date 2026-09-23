@@ -107,6 +107,7 @@ export function EasyStartDepositSheet({
   const [editingAmount, setEditingAmount] = useState(false);
   const [phase, setPhase] = useState<DepositPhase>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [popupBlocked, setPopupBlocked] = useState(false);
 
   const address = evmAddress as Address | null;
   const cardProvider = methodToProvider(method);
@@ -145,6 +146,7 @@ export function EasyStartDepositSheet({
   const resetLocal = useCallback(() => {
     setPhase("idle");
     setError(null);
+    setPopupBlocked(false);
     setStep("choose");
     setEditingAmount(false);
     setMethod("coinbase");
@@ -243,6 +245,7 @@ export function EasyStartDepositSheet({
   const handleCoinbaseOnramp = async () => {
     if (!address) return;
     setError(null);
+    setPopupBlocked(false);
     if (!getAccessToken) {
       setError("Sign in to add money with Coinbase.");
       setPhase("error");
@@ -268,23 +271,16 @@ export function EasyStartDepositSheet({
         "_blank",
         "noopener,noreferrer"
       );
-      if (!popup) {
-        setError(
-          consumerCopy
-            ? "Allow pop-ups to continue with Coinbase."
-            : "Allow pop-ups to open Coinbase Onramp."
-        );
-        setPhase("error");
-        return;
-      }
+      // Browsers often return null even when the tab opened (especially with
+      // noopener). Treat a missing handle as waiting, not a failed deposit.
+      const opened = Boolean(popup);
+      setPopupBlocked(!opened);
       setPhase("awaiting_coinbase");
       toast({
-        title: consumerCopy
-          ? "Complete purchase in Coinbase"
-          : "Complete Coinbase Onramp",
-        description: consumerCopy
-          ? "Buy USDC, then return here. We’ll detect the funds automatically."
-          : "Finish the buy on pay.coinbase.com, then return here.",
+        title: "Finish your bank deposit",
+        description: opened
+          ? "Complete the transfer in the new tab. We’ll detect the funds automatically."
+          : "If a new tab didn’t open, tap Reopen bank deposit.",
       });
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
@@ -500,8 +496,8 @@ export function EasyStartDepositSheet({
           ) : phase === "awaiting_coinbase" ? (
             <>
               <FundingSheetHeader
-                title="Complete purchase in Coinbase"
-                subtitle="A Coinbase Onramp tab opened. Buy USDC on Base, then return here."
+                title="Finish your bank deposit"
+                subtitle="A new tab should have opened. Complete the transfer there, then return here."
               />
               <div className="px-6 pb-6 pt-2 space-y-4">
                 {error ? (
@@ -510,20 +506,24 @@ export function EasyStartDepositSheet({
                   </p>
                 ) : null}
                 <p className="text-sm text-muted-foreground text-center">
-                  We’ll detect the funds automatically. If the tab didn’t open,
-                  allow pop-ups and tap Reopen Coinbase.
+                  We’ll detect the funds automatically.
                 </p>
+                {popupBlocked ? (
+                  <p className="text-sm text-muted-foreground text-center">
+                    Your browser may have blocked it. Tap below to try again.
+                  </p>
+                ) : null}
                 <FundingPrimaryButton
                   onClick={() => void handleCoinbaseOnramp()}
                 >
-                  Reopen Coinbase
+                  Reopen bank deposit
                 </FundingPrimaryButton>
                 <Button
                   variant="ghost"
                   className="w-full"
                   onClick={() => void ensureGasThenFinish()}
                 >
-                  I completed purchase — continue
+                  I already deposited
                 </Button>
               </div>
             </>
