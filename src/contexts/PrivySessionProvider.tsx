@@ -30,7 +30,10 @@ import {
   takeQueuedEasyStartLogin,
   type PrivyEasyStartState,
 } from "@/contexts/privyEasyStartContext";
-import { requestEasyStartSponsor } from "@/lib/easyStart/sponsorApi";
+import {
+  isSponsorFullyFunded,
+  requestEasyStartSponsor,
+} from "@/lib/easyStart/sponsorApi";
 
 const PRIVY_APP_ID = getPrivyAppId();
 
@@ -186,16 +189,28 @@ function PrivyEasyStartStateBridge({
     if (sponsoredEvmRef.current === evmAddress) return;
     let cancelled = false;
     void (async () => {
-      try {
-        const token = await getAccessToken();
-        if (!token || cancelled) return;
-        await requestEasyStartSponsor({
-          accessToken: token,
-          evmAddress,
-        });
-        if (!cancelled) sponsoredEvmRef.current = evmAddress;
-      } catch (error) {
-        console.warn("[Easy Start] sponsor", error);
+      const delaysMs = [0, 2_000, 5_000];
+      for (const delayMs of delaysMs) {
+        if (cancelled) return;
+        if (delayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          if (cancelled) return;
+        }
+        try {
+          const token = await getAccessToken();
+          if (!token || cancelled) return;
+          const result = await requestEasyStartSponsor({
+            accessToken: token,
+            evmAddress,
+          });
+          if (cancelled) return;
+          if (isSponsorFullyFunded(result)) {
+            sponsoredEvmRef.current = evmAddress;
+            return;
+          }
+        } catch (error) {
+          console.warn("[Easy Start] sponsor", error);
+        }
       }
     })();
     return () => {
