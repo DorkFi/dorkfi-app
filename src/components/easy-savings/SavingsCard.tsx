@@ -620,7 +620,7 @@ const SavingsCard = () => {
       },
       {
         id: "savings",
-        label: "Savings",
+        label: "Earning",
         balanceUsd: portfolioSavingsUsd,
         apyPercent: savingsApy,
         earnedInterestUsd: coreEarnedUsd,
@@ -1433,10 +1433,10 @@ const SavingsCard = () => {
             </>
           ) : showEmptyHero ? (
             <>
-              <section className="rounded-[28px] border border-transparent bg-[#0c1927] p-8 sm:p-10 text-white dark:border-border/60 dark:bg-card dark:shadow-sm">
+              <section className="rounded-[28px] border border-border/60 bg-card p-8 sm:p-10 text-foreground shadow-sm dark:text-white">
                 <h2 className="max-w-xl text-3xl sm:text-4xl font-semibold leading-tight tracking-tight">
                   Deposit and earn{" "}
-                  <span className="text-emerald-400">
+                  <span className="text-emerald-600 dark:text-emerald-400">
                     {apy != null ? `${apy.toFixed(2)}%` : "—"}
                   </span>{" "}
                   APY!
@@ -1456,12 +1456,12 @@ const SavingsCard = () => {
                       ) : (
                         <>
                           <img src={logo} alt="" className="size-8 rounded-full" />
-                          <ChevronsRight className="size-5 text-white/40" />
+                          <ChevronsRight className="size-5 text-muted-foreground/70 dark:text-white/40" />
                           <img src={logo} alt="" className="size-8 rounded-full" />
                         </>
                       )}
                     </div>
-                    <p className="mt-4 max-w-md text-sm text-white/65 leading-relaxed">
+                    <p className="mt-4 max-w-md text-sm text-muted-foreground leading-relaxed dark:text-white/65">
                       {isLeveragedWadUsdc ? (
                         consumerCopy ? (
                           <>
@@ -1525,7 +1525,7 @@ const SavingsCard = () => {
                       <button
                         type="button"
                         onClick={openWithdraw}
-                        className="rounded-xl border border-white/30 bg-white/5 px-6 h-11 min-w-[140px] text-sm font-semibold text-white hover:bg-white/10 transition-colors"
+                        className="rounded-xl border border-[#d7e2f0] bg-white px-6 h-11 min-w-[140px] text-sm font-semibold text-foreground hover:bg-white/70 transition-colors dark:border-white/30 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
                       >
                         Withdraw from Earn
                       </button>
@@ -1534,7 +1534,7 @@ const SavingsCard = () => {
                       <button
                         type="button"
                         onClick={() => openDeposit({ plainLp: true })}
-                        className="rounded-xl px-4 h-11 text-sm font-medium text-white/70 hover:text-white underline-offset-4 hover:underline"
+                        className="rounded-xl px-4 h-11 text-sm font-medium text-muted-foreground hover:text-foreground underline-offset-4 hover:underline dark:text-white/70 dark:hover:text-white"
                       >
                         Supply existing LP
                       </button>
