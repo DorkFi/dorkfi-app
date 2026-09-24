@@ -76,6 +76,14 @@ function formatAlgo(microAlgos: number): string {
 export function getUserFriendlyError(error: unknown): string {
   const errorMessage = error instanceof Error ? error.message : String(error);
 
+  if (
+    error instanceof Error &&
+    (error.name === "SponsorFundingError" ||
+      errorMessage.startsWith("Could not set up this account"))
+  ) {
+    return errorMessage;
+  }
+
   if (errorMessage.includes("compatible wallet")) {
     return errorMessage;
   }

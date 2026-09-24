@@ -416,17 +416,18 @@ const EasySavingsDepositModal = ({
     let holdBusy = false;
     try {
       if (privy.getAccessToken && privy.evmAddress) {
-        try {
-          const token = await privy.getAccessToken();
-          if (token) {
-            await requestEasyStartSponsor({
-              accessToken: token,
-              evmAddress: privy.evmAddress,
-            });
-          }
-        } catch (sponsorError) {
-          console.warn("[Easy Start] sponsor before deposit", sponsorError);
+        const token = await privy.getAccessToken();
+        if (!token) {
+          throw new Error(
+            consumerCopy
+              ? "Sign in again, then retry."
+              : "Sign in to fund this account before depositing."
+          );
         }
+        await requestEasyStartSponsor({
+          accessToken: token,
+          evmAddress: privy.evmAddress,
+        });
       }
 
       if (needsSwap && evmAddress) {
@@ -434,16 +435,16 @@ const EasySavingsDepositModal = ({
         if (!hasEnoughBaseEth(eth.value)) {
           throw new Error(
             consumerCopy
-              ? "A small processing fee is needed. Add cash with Deposit first, then try again."
-              : "Base wallet needs a little ETH for network fees. Deposit (card) includes a fee top-up."
+              ? "This account is still being set up on Base. Try again in a moment."
+              : "Base wallet needs a little ETH before the USDC move."
           );
         }
         const algo = await fetchAlgorandAlgoBalance(activeAccount.address);
         if (!hasEnoughAlgorandAlgo(algo.valueMicro)) {
           throw new Error(
             consumerCopy
-              ? "A small processing fee is needed on this account. Deposit a little more, then retry."
-              : "Algorand account needs ~0.1 ALGO for network fees."
+              ? "This account is still being set up on Algorand. Try again in a moment."
+              : "Algorand account needs ~0.1 ALGO before the USDC move."
           );
         }
         const fromBase = Math.max(0, amountNum - algoWallet);
