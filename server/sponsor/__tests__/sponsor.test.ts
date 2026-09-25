@@ -11,7 +11,12 @@ import {
 import { assertWalletOwnedByUser, collectWalletAddresses } from "../privyWallets";
 import { AuthError } from "../../offramp/privyAuth";
 import { createRateLimiter, withInflightLock } from "../rateLimit";
-import { spendableAlgoMicroAlgosFromAccount } from "../spendable";
+import {
+  spendableAlgoMicroAlgosFromAccount,
+  sponsorPaymentFeeMicro,
+  sponsorSendErrorMessage,
+  sponsorTreasuryShortfall,
+} from "../spendable";
 import { runSponsorJob, type SponsorResult } from "../handlers";
 import type { SponsorChain } from "../chain";
 
@@ -113,6 +118,39 @@ describe("spendableAlgoMicroAlgosFromAccount", () => {
   });
 });
 
+describe("sponsor treasury preflight", () => {
+  it("uses the suggested min fee, otherwise 1000 microALGO", () => {
+    expect(sponsorPaymentFeeMicro({ minFee: 1000n, fee: 0 })).toBe(1000n);
+    expect(sponsorPaymentFeeMicro({})).toBe(1000n);
+  });
+
+  it("rejects a treasury that cannot cover the payment plus fee", () => {
+    expect(
+      sponsorTreasuryShortfall({
+        spendableMicro: 1_000_000n,
+        amountMicro: 5_000_000n,
+        feeMicro: 1_000n,
+      })
+    ).toMatch(/treasury is short/);
+    expect(
+      sponsorTreasuryShortfall({
+        spendableMicro: 5_001_000n,
+        amountMicro: 5_000_000n,
+        feeMicro: 1_000n,
+      })
+    ).toBeNull();
+  });
+
+  it("keeps the algod message for the sponsor log", () => {
+    expect(sponsorSendErrorMessage(new Error("overspend"), "Could not send ALGO")).toBe(
+      "overspend"
+    );
+    expect(sponsorSendErrorMessage(new Error("  "), "Could not send ALGO")).toBe(
+      "Could not send ALGO"
+    );
+  });
+});
+
 describe("createRateLimiter", () => {
   it("caps hits inside the window", () => {
     const limiter = createRateLimiter({ max: 2, windowMs: 1_000 });
@@ -195,6 +233,7 @@ describe("runSponsorJob", () => {
     );
     expect(result.eth.status).toBe("sent");
     expect(result.algo.status).toBe("error");
+    expect(result.algo.error).toBe("algod down");
   });
 });
 
