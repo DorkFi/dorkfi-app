@@ -8,7 +8,11 @@ import {
   waitForConfirmation,
 } from "algosdk";
 import type { SponsorEnv } from "./env.ts";
-import { spendableAlgoMicroAlgosFromAccount } from "./spendable.ts";
+import {
+  spendableAlgoMicroAlgosFromAccount,
+  sponsorPaymentFeeMicro,
+  sponsorTreasuryShortfall,
+} from "./spendable.ts";
 
 export type SponsorChain = {
   deriveAlgorandAddress: (evmAddress: string) => Promise<string>;
@@ -127,6 +131,28 @@ export function createSponsorChain(env: SponsorEnv): SponsorChain {
         typeof account.addr === "string"
           ? account.addr
           : account.addr.toString();
+      const feeMicro = sponsorPaymentFeeMicro(suggestedParams);
+      let treasurySpendable = 0n;
+      try {
+        const treasury = await algod.accountInformation(sender).do();
+        treasurySpendable = spendableAlgoMicroAlgosFromAccount(
+          treasury as {
+            amount?: unknown;
+            minBalance?: unknown;
+            "min-balance"?: unknown;
+          }
+        );
+      } catch (error) {
+        const status = httpStatus(error);
+        const message = error instanceof Error ? error.message : String(error);
+        if (status !== 404 && !/not found|no such/i.test(message)) throw error;
+      }
+      const shortfall = sponsorTreasuryShortfall({
+        spendableMicro: treasurySpendable,
+        amountMicro,
+        feeMicro,
+      });
+      if (shortfall) throw new Error(shortfall);
       const txn = makePaymentTxnWithSuggestedParamsFromObject({
         sender,
         receiver: to,

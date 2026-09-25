@@ -22,6 +22,7 @@ import {
   MIN_BASE_ETH_WEI,
   type SponsorEnv,
 } from "./env.ts";
+import { sponsorSendErrorMessage } from "./spendable.ts";
 import {
   assertWalletOwnedByUser,
   fetchPrivyWalletAddresses,
@@ -127,7 +128,7 @@ export async function runSponsorJob(
       });
       result.algo = {
         status: "error",
-        error: "Could not send ALGO",
+        error: sponsorSendErrorMessage(error, "Could not send ALGO"),
       };
     }
   }
