@@ -41,6 +41,19 @@ export function EasyStartHeadlessBridge({
   const startedRef = useRef(false);
   const completedRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
+  // Privy replaces these callbacks after a signature. Reading them from refs
+  // keeps the in-flight swap alive; putting them in the effect deps aborted
+  // the Exodus call right after the USDC opt-in and left the spinner up.
+  const signTransactionsRef = useRef(signTransactions);
+  signTransactionsRef.current = signTransactions;
+  const sendTransactionRef = useRef(sendTransaction);
+  sendTransactionRef.current = sendTransaction;
+  const onPhaseChangeRef = useRef(onPhaseChange);
+  onPhaseChangeRef.current = onPhaseChange;
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+  const queryClientRef = useRef(queryClient);
+  queryClientRef.current = queryClient;
 
   useEffect(() => {
     if (!enabled) {
@@ -52,18 +65,24 @@ export function EasyStartHeadlessBridge({
     }
 
     if (startedRef.current) return;
-    if (!authenticated || !evmAddress || !algorandAddress || !signTransactions) {
-      onPhaseChange?.("preparing");
+    if (
+      !authenticated ||
+      !evmAddress ||
+      !algorandAddress ||
+      !signTransactionsRef.current
+    ) {
+      onPhaseChangeRef.current?.("preparing");
       return;
     }
     if (!amount || Number(amount) <= 0) {
-      onPhaseChange?.("error", "Invalid amount");
+      onPhaseChangeRef.current?.("error", "Invalid amount");
       return;
     }
 
     startedRef.current = true;
     const ac = new AbortController();
     abortRef.current = ac;
+    const report = onPhaseChangeRef.current;
 
     void (async () => {
       try {
@@ -72,52 +91,62 @@ export function EasyStartHeadlessBridge({
           amount,
           evmAddress,
           algorandAddress,
-          sendTransaction,
-          signTransactions,
+          sendTransaction: (input, options) =>
+            sendTransactionRef.current(input, options),
+          signTransactions: (txns) => {
+            const sign = signTransactionsRef.current;
+            if (!sign) throw new Error("Easy Start wallet not ready");
+            return sign(txns);
+          },
           signal: ac.signal,
           onPhase: (phase, detail) => {
+            if (ac.signal.aborted) return;
             if (phase === "error") {
-              onPhaseChange?.(phase, detail ?? "Swap failed");
+              report?.(phase, detail ?? "Swap failed");
             } else {
-              onPhaseChange?.(phase, null);
+              report?.(phase, null);
             }
           },
         });
 
         if (ac.signal.aborted || completedRef.current) return;
         completedRef.current = true;
-        onPhaseChange?.("success");
-        void queryClient.invalidateQueries({
+        report?.("success");
+        void queryClientRef.current.invalidateQueries({
           queryKey: ["easy-start-base-usdc"],
         });
-        void queryClient.invalidateQueries({
+        void queryClientRef.current.invalidateQueries({
           queryKey: ["easy-start-algo-usdc"],
         });
-        void queryClient.invalidateQueries({ queryKey: ["account-info"] });
-        void queryClient.invalidateQueries({ queryKey: ["account-balance"] });
-        onComplete?.();
+        void queryClientRef.current.invalidateQueries({
+          queryKey: ["account-info"],
+        });
+        void queryClientRef.current.invalidateQueries({
+          queryKey: ["account-balance"],
+        });
+        onCompleteRef.current?.();
       } catch (err) {
         if (ac.signal.aborted) return;
-        const message =
-          err instanceof Error ? err.message : "XO Swap failed";
-        if (message === "Aborted" || (err as { name?: string })?.name === "AbortError") {
+        const message = err instanceof Error ? err.message : "XO Swap failed";
+        if (
+          message === "Aborted" ||
+          (err as { name?: string })?.name === "AbortError"
+        ) {
           return;
         }
-        onPhaseChange?.("error", message);
+        report?.("error", message);
       }
     })();
 
     return () => {
       ac.abort();
+      startedRef.current = false;
     };
-    // Intentionally run once per enabled mount with the given amount/direction.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     enabled,
     authenticated,
     evmAddress,
     algorandAddress,
-    signTransactions,
     amount,
     direction,
   ]);

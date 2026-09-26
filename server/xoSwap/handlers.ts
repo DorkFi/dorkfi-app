@@ -10,8 +10,11 @@
  *   XO_SWAP_API_BASE     — optional override (default https://exchange.exodus.io)
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { endUserIp } from "../offramp/clientIp.ts";
 
 const DEFAULT_XO_API_BASE = "https://exchange.exodus.io";
+/** Exodus rate/order calls. A hung upstream must not leave Deposit to Earn spinning. */
+const XO_UPSTREAM_TIMEOUT_MS = 20_000;
 
 export type XoSwapEnv = {
   appName?: string;
@@ -56,17 +59,49 @@ function sendJson(
   res.end(payload);
 }
 
-function clientIp(req: IncomingMessage): string | undefined {
-  const forwarded = req.headers["x-forwarded-for"];
-  if (typeof forwarded === "string" && forwarded.trim()) {
-    return forwarded.split(",")[0]?.trim();
+function isNonPublicIp(ip: string): boolean {
+  const value = ip.toLowerCase();
+  if (
+    value === "localhost" ||
+    value === "::" ||
+    value === "::1" ||
+    value === "0.0.0.0"
+  ) {
+    return true;
   }
-  if (Array.isArray(forwarded) && forwarded[0]) {
-    return forwarded[0].split(",")[0]?.trim();
+  if (value.startsWith("127.") || value.startsWith("10.")) return true;
+  if (value.startsWith("192.168.") || value.startsWith("169.254.")) return true;
+  const rfc1918 = /^172\.(\d{1,3})\./.exec(value);
+  if (rfc1918) {
+    const second = Number(rfc1918[1]);
+    if (second >= 16 && second <= 31) return true;
   }
-  const raw = req.socket.remoteAddress?.replace(/^::ffff:/, "");
-  if (!raw || raw === "127.0.0.1" || raw === "::1") return undefined;
-  return raw;
+  if (value.startsWith("fc") || value.startsWith("fd") || value.startsWith("fe80:")) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * RFC 7239 Forwarded value. IPv6 must be quoted or Exodus ignores the header
+ * and geo-checks the server instead of the visitor.
+ * Returns undefined for loopback and private addresses.
+ */
+export function forwardedHeaderForIp(ip: string | undefined): string | undefined {
+  if (!ip) return undefined;
+  let value = ip.trim();
+  if (value.startsWith("[") && value.endsWith("]")) {
+    value = value.slice(1, -1).trim();
+  }
+  value = value.replace(/^::ffff:/i, "");
+  if (!value || isNonPublicIp(value)) return undefined;
+  if (value.includes(":")) return `for="[${value}]"`;
+  return `for=${value}`;
+}
+
+/** Visitor IP from the edge (cf-connecting-ip / x-real-ip), not X-Forwarded-For. */
+export function xoClientForwardedHeader(req: IncomingMessage): string | undefined {
+  return forwardedHeaderForIp(endUserIp(req));
 }
 
 function xoHeaders(
@@ -82,11 +117,18 @@ function xoHeaders(
   if (env.apiKey) {
     headers.Authorization = `Bearer ${env.apiKey}`;
   }
-  const ip = req ? clientIp(req) : undefined;
-  if (ip) {
-    headers.Forwarded = `for=${ip}`;
+  const forwarded = req ? xoClientForwardedHeader(req) : undefined;
+  if (forwarded) {
+    headers.Forwarded = forwarded;
   }
   return headers;
+}
+
+function isUpstreamTimeout(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const name = "name" in err ? String((err as { name: unknown }).name) : "";
+  const message = err instanceof Error ? err.message : "";
+  return name === "TimeoutError" || /timeout/i.test(message);
 }
 
 async function proxyXo(
@@ -97,11 +139,23 @@ async function proxyXo(
   body?: unknown
 ): Promise<{ status: number; data: unknown }> {
   const url = `${env.apiBase}${path.startsWith("/") ? path : `/${path}`}`;
-  const res = await fetch(url, {
-    method,
-    headers: xoHeaders(env, req),
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: xoHeaders(env, req),
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(XO_UPSTREAM_TIMEOUT_MS),
+    });
+  } catch (err) {
+    if (isUpstreamTimeout(err)) {
+      return {
+        status: 504,
+        data: { error: "The USDC move timed out. Try again." },
+      };
+    }
+    throw err;
+  }
   const text = await res.text();
   let data: unknown = null;
   if (text) {
