@@ -98,7 +98,8 @@ export async function runXoUsdcSwap(
 
   report("preparing");
 
-  const health = await fetchXoSwapHealth();
+  const xoReq = { signal: args.signal };
+  const health = await fetchXoSwapHealth(xoReq);
   if (!health.configured) {
     throw new Error(
       "XO Swap is not configured. Set XO_SWAP_APP_NAME on the API host."
@@ -115,11 +116,15 @@ export async function runXoUsdcSwap(
     report("preparing");
   }
 
+  if (args.signal?.aborted) {
+    throw new DOMException("Aborted", "AbortError");
+  }
+
   let toAmount: number;
   let useFloating = false;
 
   try {
-    const rates = await fetchXoPairRates(pairId);
+    const rates = await fetchXoPairRates(pairId, xoReq);
     const best = selectBestXoRate(rates, fromAmount);
     if (!best) {
       throw new Error("No fixed rate for this amount");
@@ -131,9 +136,18 @@ export async function runXoUsdcSwap(
         ? err
         : new Error("USDC moves aren’t available in your region yet.");
     }
+    const name = (err as { name?: string })?.name;
+    if (
+      name === "AbortError" ||
+      name === "TimeoutError" ||
+      (err instanceof Error &&
+        (err.message === "Aborted" || /timed out/i.test(err.message)))
+    ) {
+      throw err;
+    }
     // Fall back to floating quote when fixed rates unavailable / amount too large.
     console.warn("XO Swap fixed rates unavailable, trying quote", err);
-    const quote = await fetchXoPairQuote(pairId, fromAmount);
+    const quote = await fetchXoPairQuote(pairId, fromAmount, xoReq);
     const quoted = quote.toAmount?.value;
     if (typeof quoted !== "number" || quoted <= 0) {
       throw new Error(
@@ -152,13 +166,16 @@ export async function runXoUsdcSwap(
 
   report("preparing", "Creating swap order…");
   const create = useFloating ? createXoFloatingOrder : createXoFixedOrder;
-  const order = await create({
-    pairId,
-    fromAmount,
-    fromAddress,
-    toAddress,
-    toAmount,
-  });
+  const order = await create(
+    {
+      pairId,
+      fromAmount,
+      fromAddress,
+      toAddress,
+      toAmount,
+    },
+    xoReq
+  );
 
   const payIn = order.payInAddress;
   if (!payIn) {
@@ -184,14 +201,14 @@ export async function runXoUsdcSwap(
   }
 
   report("sending");
-  await updateXoOrder(order.id, { fromTransactionId: fromTxId });
+  await updateXoOrder(order.id, { fromTransactionId: fromTxId }, xoReq);
 
   report("waiting");
   for (let i = 0; i < XO_SWAP_MAX_POLLS; i++) {
     if (args.signal?.aborted) {
       throw new DOMException("Aborted", "AbortError");
     }
-    const latest = await fetchXoOrder(order.id);
+    const latest = await fetchXoOrder(order.id, xoReq);
     const status = (latest.status || "").toLowerCase();
     if (status === "complete" || status === "completed") {
       report("success");
