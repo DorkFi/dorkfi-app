@@ -128,7 +128,12 @@ export interface TokenConfig {
     contractId: string;
     nTokenId: string;
   };
-  /** When true, this token row participates in a DorkFi bonus rewards program (CTAs, badges, links). */
+  /**
+   * When true, this token row participates in a DorkFi bonus rewards program (CTAs, badges, links).
+   * Algorand A market rows are still gated in the UI until market excess (supply − borrow) is
+   * at least 30k ALGO (validator requirement); see `effectiveHasRewards` in
+   * `src/constants/algorandAMarketRewards.ts`.
+   */
   hasRewards?: boolean;
   /**
    * Optional deployment instance id for this row (`https://{id}.{provider host}`). Used when

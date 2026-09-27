@@ -203,6 +203,7 @@ import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import {
   useRewardsAprBonusMap,
   getRewardsBonusSupplyAprPercent,
+  rewardsBonusTotalsFromMarketRow,
 } from "@/hooks/useRewardsAprBonusMap";
 import { useTinymanLiquidStakingLiveApyPercent } from "@/hooks/useTinymanLiquidStakingLiveApyPercent";
 import { useXalgoGovernanceLiveApyPercent } from "@/hooks/useXalgoGovernanceLiveApyPercent";
@@ -2677,23 +2678,31 @@ const Portfolio = () => {
   const modalDeposits = useMemo(() => {
     return deposits
       .filter((deposit) => deposit.value > 0)
-      .map((deposit) => ({
-        asset: deposit.asset,
-        icon: deposit.icon,
-        iconBadgeUrl: (deposit as { iconBadgeUrl?: string }).iconBadgeUrl,
-        value: deposit.value,
-        apy:
-          deposit.apy +
-          getRewardsBonusSupplyAprPercent(
-            (deposit as ItemWithNetwork).network ?? currentNetwork,
-            (deposit as ItemWithNetwork).configSymbol ??
-              (deposit as ItemWithNetwork).originalSymbol ??
-              deposit.asset,
-            deposit.poolId != null ? String(deposit.poolId) : undefined,
-            rewardsAprByBaseUrl
-          ),
-      }));
-  }, [deposits, rewardsAprByBaseUrl, currentNetwork]);
+      .map((deposit) => {
+        const market = marketRowForPortfolioPosition(marketData, {
+          marketId: (deposit as ItemWithNetwork).marketId,
+          poolId: deposit.poolId,
+          displaySymbol: deposit.asset,
+        });
+        return {
+          asset: deposit.asset,
+          icon: deposit.icon,
+          iconBadgeUrl: (deposit as { iconBadgeUrl?: string }).iconBadgeUrl,
+          value: deposit.value,
+          apy:
+            deposit.apy +
+            getRewardsBonusSupplyAprPercent(
+              (deposit as ItemWithNetwork).network ?? currentNetwork,
+              (deposit as ItemWithNetwork).configSymbol ??
+                (deposit as ItemWithNetwork).originalSymbol ??
+                deposit.asset,
+              deposit.poolId != null ? String(deposit.poolId) : undefined,
+              rewardsAprByBaseUrl,
+              rewardsBonusTotalsFromMarketRow(market)
+            ),
+        };
+      });
+  }, [deposits, rewardsAprByBaseUrl, currentNetwork, marketData]);
 
   const modalBorrows = useMemo(() => {
     return borrows
@@ -6073,6 +6082,16 @@ const Portfolio = () => {
                                   deposit.asset,
                                   (deposit as ItemWithNetwork).marketId
                                 );
+                              const market = marketRowForPortfolioPosition(
+                                marketData,
+                                {
+                                  marketId: (deposit as ItemWithNetwork).marketId,
+                                  poolId: deposit.poolId,
+                                  displaySymbol: deposit.asset,
+                                }
+                              );
+                              const rewardsMarketTotals =
+                                rewardsBonusTotalsFromMarketRow(market);
                               const rewardsBonusApr = getRewardsBonusSupplyAprPercent(
                                 (deposit as ItemWithNetwork).network ??
                                   currentNetwork,
@@ -6082,18 +6101,11 @@ const Portfolio = () => {
                                 deposit.poolId != null
                                   ? String(deposit.poolId)
                                   : undefined,
-                                rewardsAprByBaseUrl
+                                rewardsAprByBaseUrl,
+                                rewardsMarketTotals
                               );
                               const depositApyWithRewards =
                                 deposit.apy + rewardsBonusApr;
-                              const market = marketRowForPortfolioPosition(
-                                marketData,
-                                {
-                                  marketId: (deposit as ItemWithNetwork).marketId,
-                                  poolId: deposit.poolId,
-                                  displaySymbol: deposit.asset,
-                                }
-                              );
                               const depositCapReached = isAtDepositCap(
                                 Number(market?.totalDeposits ?? 0),
                                 Number(market?.maxTotalDeposits ?? 0),
@@ -6112,7 +6124,8 @@ const Portfolio = () => {
                                   deposit.poolId
                                     ? String(deposit.poolId)
                                     : undefined,
-                                  rewardsAprByBaseUrl
+                                  rewardsAprByBaseUrl,
+                                  rewardsMarketTotals
                                 );
                               const intrinsicAprMobile =
                                 resolveIntrinsicSupplyApyPercent(
@@ -6611,7 +6624,8 @@ const Portfolio = () => {
                                 deposit.poolId != null
                                   ? String(deposit.poolId)
                                   : undefined,
-                                rewardsAprByBaseUrl
+                                rewardsAprByBaseUrl,
+                                rewardsBonusTotalsFromMarketRow(market)
                               );
                               const intrinsicApr =
                                 resolveIntrinsicSupplyApyPercent(
