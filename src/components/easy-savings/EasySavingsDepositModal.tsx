@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
 import { waitForConfirmation } from "algosdk";
@@ -850,6 +851,20 @@ const EasySavingsDepositModal = ({
                   {isXoGeoRestricted(flowError) ? (
                     <p className="text-xs text-destructive">
                       USDC moves aren’t available in your region yet.
+                    </p>
+                  ) : null}
+
+                  {consumerCopy ? (
+                    <p className="text-[11px] text-muted-foreground text-center leading-relaxed">
+                      Depositing supplies your {symbol} to a shared lending
+                      market that other people can borrow from. The APY is an
+                      estimate and can change. This is not a bank account.{" "}
+                      <Link
+                        to="/disclosures"
+                        className="text-ocean-teal underline-offset-2 hover:underline"
+                      >
+                        Disclosures
+                      </Link>
                     </p>
                   ) : null}
 
