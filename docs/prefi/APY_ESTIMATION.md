@@ -63,6 +63,8 @@ For example: "5–8%" → "8%".
 - **POW** → 15%
 
 #### Algorand A Market
+> Live lending **bonus supply APR** for ALGO on A Prime (rewards program + excess gate) is documented separately: [Algorand A market ALGO bonus interest](../development/ALGORAND_A_MARKET_BONUS_INTEREST.md). Values below are PreFi display-normalized estimates, not that bonus APR.
+
 - **USDC** → 4%
 - **ALGO** → 4%
 - **VOI** → 12%

@@ -70,10 +70,18 @@ Indexed guides for repeatable processes:
 
 Indexed implementation references (pages, services, cross-network behavior):
 - [Pool & market topology](development/POOL_TOPOLOGY.md): A–F / A–B pool map from config, Markets vs Pools, planned markets
+- [Algorand A market ALGO bonus interest](development/ALGORAND_A_MARKET_BONUS_INTEREST.md): bonus supply APR for ALGO @ A Prime, excess gate, rewards API, APY composition
 - [Gas Station](development/GAS_STATION.md): minting flow, `GasStationService`, ARC200/ASA/network tokens on Voi and Algorand
 - [xChain Accounts integration plan](XCHAIN_ACCOUNTS_INTEGRATION_PLAN.md): EVM/xChain wallet integration planning for Voi and Algorand (phases, preconditions, QA)
 
 **Perfect for:** Developers extending the Gas Station, multi-network minting, or similar app features
+
+### 💡 [Proposals](proposals/index.md)
+**Product / mechanism proposals (not yet implemented)**
+
+- [Block rewards → borrow demand → competitive supply APR](proposals/BLOCK_REWARDS_BORROW_DEMAND.md): stake-safe rate-targeted ALGO A PoL (`stg 01 40`); optional Folks; ~1.45%→~2.15%; sunset airdrops on gates
+
+**Perfect for:** Product, governance, and engineers evaluating a rewards-model change
 
 ### 🔗 [ARC200 Exchange Extension](ARC200_EXCHANGE.md)
 **Technical specification for ARC200 token exchange standard**
