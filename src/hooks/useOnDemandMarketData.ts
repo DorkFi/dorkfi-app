@@ -46,6 +46,7 @@ import { useFolksMainnetWbtcNttPoolLiveApyPercent } from "@/hooks/useFolksMainne
 import { useFolksMainnetWethNttPoolLiveApyPercent } from "@/hooks/useFolksMainnetWethNttPoolLiveApyPercent";
 import { resolveTokenIconBadgeUrl } from "@/utils/tokenImageUtils";
 import { withRpcReadCache, getRpcReadCache } from "@/utils/rpcReadCache";
+import { effectiveHasRewards } from "@/constants/algorandAMarketRewards";
 
 export interface OnDemandMarketData {
   asset: string;
@@ -246,7 +247,8 @@ export type MarketFilter = "all" | "A" | "B" | "D";
 
 function getRewardsMetaForTokenRow(
   networkId: NetworkId,
-  tokenConfig: TokenConfig | undefined
+  tokenConfig: TokenConfig | undefined,
+  totals?: { totalSupply?: number; totalBorrow?: number }
 ): {
   hasRewards?: boolean;
   rewardsPublicBaseUrlResolved: string | null;
@@ -254,9 +256,15 @@ function getRewardsMetaForTokenRow(
   if (!tokenConfig) {
     return { rewardsPublicBaseUrlResolved: null };
   }
-  const hasRewards = tokenConfig.hasRewards === true;
   const poolId = tokenConfig.poolId;
   const contractId = tokenConfig.contractId;
+  const hasRewards = effectiveHasRewards({
+    hasRewards: tokenConfig.hasRewards === true,
+    networkId,
+    poolId,
+    totalSupply: totals?.totalSupply,
+    totalBorrow: totals?.totalBorrow,
+  });
   if (!hasRewards || poolId == null || contractId == null) {
     return { hasRewards, rewardsPublicBaseUrlResolved: null };
   }
@@ -281,7 +289,7 @@ interface UseOnDemandMarketDataProps {
   marketFilter?: MarketFilter; // "all" | "A" | "B" | "D" (third lending pool when configured)
   /** When true, only markets flagged as new (recent `dataAddedAt` in config) are shown. */
   newMarketsOnly?: boolean;
-  /** When true, only markets with `hasRewards` in config are shown. */
+  /** When true, only markets with effective `hasRewards` (config + excess gate) are shown. */
   rewardMarketsOnly?: boolean;
   /** When true, only assets that have a market in more than one lending pool are shown. */
   multiPoolOnly?: boolean;
@@ -767,7 +775,11 @@ export const useOnDemandMarketData = ({
 
       const rewardsMeta = getRewardsMetaForTokenRow(
         currentNetwork,
-        tokenConfig as TokenConfig | undefined
+        tokenConfig as TokenConfig | undefined,
+        {
+          totalSupply: totalSupplyDisplay,
+          totalBorrow: totalBorrowDisplay,
+        }
       );
 
       const intrinsicApr = resolveIntrinsicSupplyApyPercentForTokenConfig(
@@ -1428,7 +1440,7 @@ export const useOnDemandMarketData = ({
     if (newMarketsOnly) {
       filtered = filtered.filter((market) => market.isNew);
     }
-    // Reward markets only (config `hasRewards`)
+    // Reward markets only (effective hasRewards after excess gate)
     if (rewardMarketsOnly) {
       filtered = filtered.filter((market) => market.hasRewards === true);
     }

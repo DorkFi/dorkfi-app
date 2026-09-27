@@ -7,6 +7,7 @@ import {
   type NetworkId,
 } from "@/config";
 import { fetchRewardAprStats } from "@/services/rewardAprStatsService";
+import { effectiveHasRewards } from "@/constants/algorandAMarketRewards";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -64,12 +65,35 @@ export function useRewardsAprBonusMap(networkIds: NetworkId[]) {
   }, [baseUrls, queries]);
 }
 
+/** Optional market totals for Algorand A excess gate (supply − borrow). */
+export type RewardsBonusMarketTotals = {
+  totalSupply?: number;
+  totalBorrow?: number;
+};
+
+/** Map `fetchAllMarkets` / Portfolio row fields to bonus-APR excess totals. */
+export function rewardsBonusTotalsFromMarketRow(
+  market:
+    | {
+        totalDeposits?: string | number | null;
+        totalBorrows?: string | number | null;
+      }
+    | null
+    | undefined
+): RewardsBonusMarketTotals {
+  return {
+    totalSupply: Number(market?.totalDeposits ?? 0) || 0,
+    totalBorrow: Number(market?.totalBorrows ?? 0) || 0,
+  };
+}
+
 /** Bonus supply APR (% points) for a token row when `hasRewards` + registry resolve. */
 export function getRewardsBonusSupplyAprPercent(
   networkId: NetworkId | string | undefined,
   asset: string,
   poolId: string | undefined,
-  rewardsAprByBaseUrl: Record<string, number>
+  rewardsAprByBaseUrl: Record<string, number>,
+  marketTotals?: RewardsBonusMarketTotals
 ): number {
   if (!networkId || !poolId) return 0;
   const nid = networkId as NetworkId;
@@ -77,7 +101,18 @@ export function getRewardsBonusSupplyAprPercent(
   const config = Array.isArray(raw)
     ? raw.find((c) => String(c.poolId) === String(poolId)) ?? raw[0]
     : raw;
-  if (!config?.hasRewards || config.contractId == null) return 0;
+  if (
+    !effectiveHasRewards({
+      hasRewards: config?.hasRewards === true,
+      networkId: nid,
+      poolId,
+      totalSupply: marketTotals?.totalSupply,
+      totalBorrow: marketTotals?.totalBorrow,
+    }) ||
+    config?.contractId == null
+  ) {
+    return 0;
+  }
   const origin = getRewardsProgramPublicBaseUrl(
     nid,
     poolId,
