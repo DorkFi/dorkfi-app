@@ -52,6 +52,11 @@ import {
   savingsTxRecordsToEvents,
 } from "@/services/savingsBalanceHistory";
 import { fetchBaseUsdcBalance } from "@/lib/easyStart/baseBalances";
+import {
+  isPendingEarnFunded,
+  pendingEarnSupplyAmount,
+  readPendingEarnDeposit,
+} from "@/lib/easyStart/pendingEarnDeposit";
 
 /** Synthetic sidebar account: native ASA USDC still in the wallet (not supplied). */
 const WALLET_USDC_KEY = "WALLET_USDC";
@@ -685,6 +690,24 @@ const SavingsCard = () => {
         (isWalletAccount && positionsLoading))
     );
 
+  const pendingEarnJob = readPendingEarnDeposit(activeAccount?.address);
+  const pendingEarnLeftover =
+    pendingEarnJob && walletUsdcAlgo != null
+      ? pendingEarnSupplyAmount(pendingEarnJob, walletUsdcAlgo)
+      : 0;
+  const pendingEarnReady = Boolean(
+    pendingEarnJob &&
+      walletUsdcAlgo != null &&
+      (isPendingEarnFunded(pendingEarnJob, walletUsdcAlgo) ||
+        walletUsdcAlgo >= pendingEarnJob.wantedAmount - 0.01)
+  );
+  const showPendingEarnBanner = Boolean(
+    pendingEarnJob &&
+      (pendingEarnReady
+        ? pendingEarnLeftover > 0.01
+        : Boolean(pendingEarnJob.fromTxId))
+  );
+
   const openDeposit = (opts?: {
     plainLp?: boolean;
     assetConfigKey?: string;
@@ -891,6 +914,35 @@ const SavingsCard = () => {
 
         {/* Main column */}
         <div className="space-y-6 min-w-0">
+          {showPendingEarnBanner ? (
+            <div className="rounded-2xl border border-ocean-teal/40 bg-ocean-teal/5 px-4 py-3 sm:px-5">
+              <p className="text-sm font-medium">
+                {consumerCopy
+                  ? pendingEarnReady
+                    ? `Finish depositing ${formatToken(pendingEarnLeftover)} into Earn.`
+                    : "Your USDC move is still finishing. Keep this tab open."
+                  : pendingEarnReady
+                    ? `Finish supplying ${formatToken(pendingEarnLeftover)} USDC.`
+                    : "XO Swap is still settling. Keep this tab open."}
+              </p>
+              <DorkFiButton
+                className="mt-3 h-10 rounded-full px-4"
+                onClick={() =>
+                  openDeposit({
+                    assetConfigKey: usdcRoute?.asset.configKey ?? "USDC",
+                  })
+                }
+              >
+                {pendingEarnReady
+                  ? consumerCopy
+                    ? "Finish deposit"
+                    : "Finish supply"
+                  : consumerCopy
+                    ? "Check status"
+                    : "Resume"}
+              </DorkFiButton>
+            </div>
+          ) : null}
           {hasPosition ? (
             <>
               <SavingsPositionCard

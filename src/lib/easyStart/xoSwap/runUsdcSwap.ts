@@ -18,6 +18,11 @@ import {
 import { isXoGeoRestricted } from "@/lib/easyStart/xoSwap/errors";
 import { selectBestXoRate } from "@/lib/easyStart/xoSwap/selectRate";
 import {
+  isAlgoCreditArrived,
+  isXoOrderFailed,
+  isXoOrderSettled,
+} from "@/lib/easyStart/xoSwap/settle";
+import {
   ensureAlgorandUsdcOptIn,
   sendAlgorandUsdc,
   type SignAlgorandTxns,
@@ -26,6 +31,7 @@ import {
   sendBaseUsdc,
   type SendUsdcFn,
 } from "@/lib/easyStart/sendBaseUsdc";
+import { fetchAlgorandUsdcBalance } from "@/lib/easyStart/baseBalances";
 
 export type RunXoUsdcSwapArgs = {
   direction: EasyStartBridgeDirection;
@@ -37,6 +43,13 @@ export type RunXoUsdcSwapArgs = {
   signTransactions: SignAlgorandTxns;
   signal?: AbortSignal;
   onPhase?: (phase: EasyStartBridgePhase, detail?: string | null) => void;
+  /** Algorand USDC before this Base → Algo swap. Used to detect payout. */
+  baselineAlgoUsdc?: number;
+  onFundsSent?: (info: {
+    orderId: string;
+    fromTxId: string;
+    expectedToAmount: number;
+  }) => void;
 };
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -202,6 +215,30 @@ export async function runXoUsdcSwap(
 
   report("sending");
   await updateXoOrder(order.id, { fromTransactionId: fromTxId }, xoReq);
+  args.onFundsSent?.({
+    orderId: order.id,
+    fromTxId,
+    expectedToAmount: toAmount,
+  });
+
+  const watchAlgoCredit =
+    args.direction === "base-to-algo" &&
+    typeof args.baselineAlgoUsdc === "number" &&
+    Number.isFinite(args.baselineAlgoUsdc);
+
+  const algoCreditReady = async (): Promise<boolean> => {
+    if (!watchAlgoCredit) return false;
+    try {
+      const bal = await fetchAlgorandUsdcBalance(args.algorandAddress);
+      return isAlgoCreditArrived({
+        current: Number.parseFloat(bal.formatted),
+        baseline: args.baselineAlgoUsdc!,
+        expectedToAmount: toAmount,
+      });
+    } catch {
+      return false;
+    }
+  };
 
   report("waiting");
   for (let i = 0; i < XO_SWAP_MAX_POLLS; i++) {
@@ -209,21 +246,19 @@ export async function runXoUsdcSwap(
       throw new DOMException("Aborted", "AbortError");
     }
     const latest = await fetchXoOrder(order.id, xoReq);
-    const status = (latest.status || "").toLowerCase();
-    if (status === "complete" || status === "completed") {
+    if (isXoOrderSettled(latest) || (await algoCreditReady())) {
       report("success");
       return { orderId: order.id };
     }
-    if (
-      status === "failed" ||
-      status === "expired" ||
-      status === "refunded"
-    ) {
-      throw new Error(
-        latest.message || `Swap ${latest.status || "failed"}`
-      );
+    if (isXoOrderFailed(latest)) {
+      throw new Error(latest.message || `Swap ${latest.status || "failed"}`);
     }
     await sleep(XO_SWAP_POLL_MS, args.signal);
+  }
+
+  if (await algoCreditReady()) {
+    report("success");
+    return { orderId: order.id };
   }
 
   throw new Error("Swap timed out waiting for XO Swap confirmation");
