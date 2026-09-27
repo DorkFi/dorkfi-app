@@ -14,6 +14,13 @@ interface EasyStartHeadlessBridgeProps {
   enabled: boolean;
   /** Default Base → Algorand (deposit). Use algo-to-base for withdraw. */
   direction?: EasyStartBridgeDirection;
+  /** Algorand USDC before a Base → Algo swap. Detects payout without Exodus. */
+  baselineAlgoUsdc?: number;
+  onFundsSent?: (info: {
+    orderId: string;
+    fromTxId: string;
+    expectedToAmount: number;
+  }) => void;
   onPhaseChange?: (phase: EasyStartBridgePhase, error?: string | null) => void;
   onComplete?: () => void;
 }
@@ -26,6 +33,8 @@ export function EasyStartHeadlessBridge({
   amount,
   enabled,
   direction = "base-to-algo",
+  baselineAlgoUsdc,
+  onFundsSent,
   onPhaseChange,
   onComplete,
 }: EasyStartHeadlessBridgeProps) {
@@ -52,13 +61,17 @@ export function EasyStartHeadlessBridge({
   onPhaseChangeRef.current = onPhaseChange;
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
+  const onFundsSentRef = useRef(onFundsSent);
+  onFundsSentRef.current = onFundsSent;
   const queryClientRef = useRef(queryClient);
   queryClientRef.current = queryClient;
+  const fundsSentRef = useRef(false);
 
   useEffect(() => {
     if (!enabled) {
       startedRef.current = false;
       completedRef.current = false;
+      fundsSentRef.current = false;
       abortRef.current?.abort();
       abortRef.current = null;
       return;
@@ -99,7 +112,15 @@ export function EasyStartHeadlessBridge({
             return sign(txns);
           },
           signal: ac.signal,
+          baselineAlgoUsdc,
+          onFundsSent: (info) => {
+            fundsSentRef.current = true;
+            onFundsSentRef.current?.(info);
+          },
           onPhase: (phase, detail) => {
+            if (phase === "sending" || phase === "waiting") {
+              fundsSentRef.current = true;
+            }
             if (ac.signal.aborted) return;
             if (phase === "error") {
               report?.(phase, detail ?? "Swap failed");
@@ -139,6 +160,11 @@ export function EasyStartHeadlessBridge({
     })();
 
     return () => {
+      if (fundsSentRef.current) {
+        // Money already left. Keep polling so Earn can finish; a remount
+        // must not start a second Exodus send.
+        return;
+      }
       ac.abort();
       startedRef.current = false;
     };
@@ -149,6 +175,7 @@ export function EasyStartHeadlessBridge({
     algorandAddress,
     amount,
     direction,
+    baselineAlgoUsdc,
   ]);
 
   return null;

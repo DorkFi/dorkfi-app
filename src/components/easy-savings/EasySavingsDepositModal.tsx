@@ -51,6 +51,15 @@ import {
   type EasyStartBridgePhase,
 } from "@/components/easy-start/easyStartBridgePhase";
 import { isXoGeoRestricted } from "@/lib/easyStart/xoSwap/errors";
+import {
+  clearPendingEarnDeposit,
+  isPendingEarnFunded,
+  patchPendingEarnDeposit,
+  pendingEarnBlocksNewSwap,
+  pendingEarnSupplyAmount,
+  readPendingEarnDeposit,
+  savePendingEarnDeposit,
+} from "@/lib/easyStart/pendingEarnDeposit";
 import type { Address } from "viem";
 import {
   applyOptimisticSavingsPosition,
@@ -131,7 +140,11 @@ const EasySavingsDepositModal = ({
     useState<EasyStartBridgePhase>("preparing");
   const [bridgeAmount, setBridgeAmount] = useState<string | null>(null);
   const [flowError, setFlowError] = useState<string | null>(null);
+  const [baselineAlgoUsdc, setBaselineAlgoUsdc] = useState<number | null>(null);
+  const [watchOnly, setWatchOnly] = useState(false);
   const pendingSupplyRef = useRef<string | null>(null);
+  const resumeAttemptedRef = useRef(false);
+  const supplyingLockRef = useRef(false);
 
   const quote = useEasySavingsQuote({
     networkId,
@@ -171,19 +184,35 @@ const EasySavingsDepositModal = ({
   const logo = route?.asset.logoPath || "/placeholder.svg";
   const amountNum = parseFloat(amount) || 0;
 
+  const pendingEarn = readPendingEarnDeposit(activeAccount?.address);
+
   useEffect(() => {
-    if (!isOpen) return;
-    setAmount("");
+    if (!isOpen) {
+      resumeAttemptedRef.current = false;
+      return;
+    }
     setAdvancedOpen(false);
-    setIsSubmitting(false);
     setShowSuccess(false);
     setTxId(null);
     setRainbowkitSignDialogSuppressed(false);
+    setFlowError(null);
+
+    const job = readPendingEarnDeposit(activeAccount?.address);
+    if (job && route?.asset.configKey === "USDC") {
+      setAmount(String(job.wantedAmount));
+      pendingSupplyRef.current = String(job.wantedAmount);
+      setBaselineAlgoUsdc(job.algoUsdcBefore);
+      return;
+    }
+
+    setAmount("");
+    setIsSubmitting(false);
     setFlowPhase("idle");
     setBridgeAmount(null);
-    setFlowError(null);
+    setBaselineAlgoUsdc(null);
+    setWatchOnly(false);
     pendingSupplyRef.current = null;
-  }, [isOpen, route?.asset.configKey, route?.poolId]);
+  }, [isOpen, route?.asset.configKey, route?.poolId, activeAccount?.address]);
 
   const ctaState: CtaState = (() => {
     if (!activeAccount) return "connect";
@@ -201,7 +230,9 @@ const EasySavingsDepositModal = ({
   })();
 
   const needsSwap =
-    enableBaseBridge && amountNum > algoWallet + 0.01;
+    enableBaseBridge &&
+    amountNum > algoWallet + 0.01 &&
+    !pendingEarnBlocksNewSwap(pendingEarn, amountNum);
 
   const ctaLabel: Record<CtaState, string> = {
     connect: consumerCopy ? "Get Started" : "Connect Wallet",
@@ -327,6 +358,8 @@ const EasySavingsDepositModal = ({
     setRainbowkitSignDialogSuppressed(false);
     setFlowPhase("idle");
     setBridgeAmount(null);
+    setWatchOnly(false);
+    clearPendingEarnDeposit();
     const balanceAfterUsd = refreshAfterConfirmedSupply(supplyAmount);
     onSuccess?.({
       txId: res.txid,
@@ -344,17 +377,22 @@ const EasySavingsDepositModal = ({
   };
 
   const supplyAfterBridge = async () => {
+    if (supplyingLockRef.current) return;
+    supplyingLockRef.current = true;
     setFlowPhase("supplying");
     setIsSubmitting(true);
     try {
-      const wanted = pendingSupplyRef.current ?? amount;
-      const wantedNum = Number.parseFloat(wanted);
+      const job = readPendingEarnDeposit(activeAccount?.address);
       const algo = await fetchAlgorandUsdcBalance(activeAccount!.address);
       const available = Number.parseFloat(algo.formatted);
-      const toSupply = Math.min(
-        Number.isFinite(wantedNum) ? wantedNum : 0,
-        Number.isFinite(available) ? available : 0
-      );
+      const wanted = pendingSupplyRef.current ?? amount;
+      const wantedNum = Number.parseFloat(wanted);
+      const toSupply = job
+        ? pendingEarnSupplyAmount(job, available)
+        : Math.min(
+            Number.isFinite(wantedNum) ? wantedNum : 0,
+            Number.isFinite(available) ? available : 0
+          );
       if (!(toSupply > 0.000001)) {
         throw new Error(
           consumerCopy
@@ -377,10 +415,87 @@ const EasySavingsDepositModal = ({
         duration: 14_000,
       });
     } finally {
+      supplyingLockRef.current = false;
       setIsSubmitting(false);
       setBridgeAmount(null);
+      setWatchOnly(false);
     }
   };
+
+  const supplyAfterBridgeRef = useRef(supplyAfterBridge);
+  supplyAfterBridgeRef.current = supplyAfterBridge;
+
+  useEffect(() => {
+    if (!isOpen || resumeAttemptedRef.current) return;
+    if (!activeAccount?.address || route?.asset.configKey !== "USDC") return;
+    const job = readPendingEarnDeposit(activeAccount.address);
+    if (!job) return;
+    resumeAttemptedRef.current = true;
+    void (async () => {
+      const bal = await fetchAlgorandUsdcBalance(activeAccount.address);
+      const current = Number.parseFloat(bal.formatted);
+      if (
+        isPendingEarnFunded(job, current) ||
+        current >= job.wantedAmount - 0.01
+      ) {
+        await supplyAfterBridgeRef.current();
+        return;
+      }
+      if (job.fromTxId) {
+        setWatchOnly(true);
+        setBridgeAmount(formatUsdcHuman(job.fromBaseAmount));
+        setFlowPhase("bridging");
+        setIsSubmitting(true);
+      }
+    })();
+  }, [isOpen, activeAccount?.address, route?.asset.configKey]);
+
+  useEffect(() => {
+    if (!isOpen || flowPhase !== "bridging" || !watchOnly) return;
+    const address = activeAccount?.address;
+    const job = readPendingEarnDeposit(address);
+    if (!address || !job) return;
+    let cancelled = false;
+    void (async () => {
+      for (let i = 0; i < 120 && !cancelled; i++) {
+        const bal = await fetchAlgorandUsdcBalance(address);
+        const current = Number.parseFloat(bal.formatted);
+        if (cancelled) return;
+        if (
+          isPendingEarnFunded(job, current) ||
+          current >= job.wantedAmount - 0.01
+        ) {
+          await supplyAfterBridgeRef.current();
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 5_000));
+      }
+      if (cancelled) return;
+      const bal = await fetchAlgorandUsdcBalance(address);
+      const current = Number.parseFloat(bal.formatted);
+      if (pendingEarnSupplyAmount(job, current) > 0.000001) {
+        await supplyAfterBridgeRef.current();
+        return;
+      }
+      setFlowError(
+        consumerCopy
+          ? "The USDC move is still finishing. Try Deposit to Earn again."
+          : "Swap timed out waiting for Algorand USDC."
+      );
+      setFlowPhase("idle");
+      setIsSubmitting(false);
+      setWatchOnly(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isOpen,
+    flowPhase,
+    watchOnly,
+    activeAccount?.address,
+    consumerCopy,
+  ]);
 
   const handleSupply = async () => {
     if (ctaState === "connect") {
@@ -430,6 +545,27 @@ const EasySavingsDepositModal = ({
         });
       }
 
+      const existing = readPendingEarnDeposit(activeAccount.address);
+      if (existing && pendingEarnBlocksNewSwap(existing, amountNum)) {
+        pendingSupplyRef.current = String(existing.wantedAmount);
+        const live = await fetchAlgorandUsdcBalance(activeAccount.address);
+        const current = Number.parseFloat(live.formatted);
+        if (
+          isPendingEarnFunded(existing, current) ||
+          current >= existing.wantedAmount - 0.01
+        ) {
+          holdBusy = true;
+          await supplyAfterBridge();
+          return;
+        }
+        setWatchOnly(true);
+        setBridgeAmount(formatUsdcHuman(existing.fromBaseAmount));
+        setBaselineAlgoUsdc(existing.algoUsdcBefore);
+        setFlowPhase("bridging");
+        holdBusy = true;
+        return;
+      }
+
       if (needsSwap && evmAddress) {
         const eth = await fetchBaseEthBalance(evmAddress);
         if (!hasEnoughBaseEth(eth.value)) {
@@ -448,7 +584,22 @@ const EasySavingsDepositModal = ({
           );
         }
         const fromBase = Math.max(0, amountNum - algoWallet);
+        const liveUsdc = await fetchAlgorandUsdcBalance(activeAccount.address);
+        const baseline = Number.parseFloat(liveUsdc.formatted);
+        const baselineSafe = Number.isFinite(baseline) ? baseline : algoWallet;
+        savePendingEarnDeposit({
+          algorandAddress: activeAccount.address,
+          evmAddress: evmAddress ?? undefined,
+          wantedAmount: amountNum,
+          fromBaseAmount: fromBase,
+          expectedToAmount: fromBase,
+          algoUsdcBefore: baselineSafe,
+          poolId: route.poolId,
+          assetConfigKey: route.asset.configKey,
+        });
         pendingSupplyRef.current = amount;
+        setBaselineAlgoUsdc(baselineSafe);
+        setWatchOnly(false);
         setBridgeAmount(formatUsdcHuman(fromBase));
         setFlowPhase("bridging");
         holdBusy = true;
@@ -482,6 +633,7 @@ const EasySavingsDepositModal = ({
     setAdvancedOpen(false);
     setFlowPhase("idle");
     setBridgeAmount(null);
+    setWatchOnly(false);
     pendingSupplyRef.current = null;
   };
 
@@ -724,15 +876,42 @@ const EasySavingsDepositModal = ({
         </DialogContent>
       </Dialog>
 
-      {flowPhase === "bridging" && bridgeAmount ? (
+      {flowPhase === "bridging" && bridgeAmount && !watchOnly ? (
         <Suspense fallback={null}>
           <EasyStartHeadlessBridge
             enabled
             amount={bridgeAmount}
             direction="base-to-algo"
+            baselineAlgoUsdc={baselineAlgoUsdc ?? undefined}
+            onFundsSent={(info) => {
+              patchPendingEarnDeposit({
+                orderId: info.orderId,
+                fromTxId: info.fromTxId,
+                expectedToAmount: info.expectedToAmount,
+              });
+            }}
             onPhaseChange={(p, err) => {
               setBridgePhase(p);
               if (p === "error") {
+                const job = readPendingEarnDeposit(activeAccount?.address);
+                if (job && activeAccount?.address) {
+                  void fetchAlgorandUsdcBalance(activeAccount.address).then(
+                    (bal) => {
+                      const current = Number.parseFloat(bal.formatted);
+                      if (
+                        isPendingEarnFunded(job, current) ||
+                        current >= job.wantedAmount - 0.01
+                      ) {
+                        void supplyAfterBridge();
+                        return;
+                      }
+                      setWatchOnly(true);
+                      setFlowPhase("bridging");
+                      setIsSubmitting(true);
+                    }
+                  );
+                  return;
+                }
                 setFlowError(err ?? "Swap failed");
                 setFlowPhase("idle");
                 setBridgeAmount(null);
