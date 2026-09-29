@@ -165,6 +165,26 @@ export function marketContractIdFromRowCacheKey(
     : undefined;
 }
 
+/**
+ * A failed refresh must not replace a good row with an error flag.
+ * The markets table renders `error` in every stat column.
+ */
+export function marketRowAfterFailedLoad(
+  existing: OnDemandMarketData | undefined,
+  errorMessage: string
+): OnDemandMarketData {
+  if (existing?.marketInfo && !existing.error) {
+    return { ...existing, isLoading: false };
+  }
+  return {
+    ...(existing ?? {}),
+    isLoading: false,
+    isLoaded: true,
+    error: errorMessage,
+    lastFetched: Date.now(),
+  } as OnDemandMarketData;
+}
+
 /** `network.tokens` object key (e.g. `ALGO` when the row's `originalSymbol` is `fALGO`). */
 function tokenConfigObjectKey(token: {
   configKey?: string;
@@ -947,13 +967,10 @@ export const useOnDemandMarketData = ({
           } else {
             setMarketsData((prev) => ({
               ...prev,
-              [tokenMarketKey]: {
-                ...prev[tokenMarketKey],
-                isLoading: false,
-                isLoaded: true,
-                error: "Failed to load market data",
-                lastFetched: Date.now(),
-              },
+              [tokenMarketKey]: marketRowAfterFailedLoad(
+                prev[tokenMarketKey],
+                "Failed to load market data"
+              ),
             }));
           }
         } catch (error) {
@@ -964,13 +981,10 @@ export const useOnDemandMarketData = ({
           );
           setMarketsData((prev) => ({
             ...prev,
-            [tokenMarketKey]: {
-              ...prev[tokenMarketKey],
-              isLoading: false,
-              isLoaded: true,
-              error: error instanceof Error ? error.message : "Unknown error",
-              lastFetched: Date.now(),
-            },
+            [tokenMarketKey]: marketRowAfterFailedLoad(
+              prev[tokenMarketKey],
+              error instanceof Error ? error.message : "Unknown error"
+            ),
           }));
         } finally {
           if (isCurrent()) {
@@ -1251,13 +1265,10 @@ export const useOnDemandMarketData = ({
                 } else {
                   setMarketsData((prev) => ({
                     ...prev,
-                    [tokenMarketKey]: {
-                      ...prev[tokenMarketKey],
-                      isLoading: false,
-                      isLoaded: true,
-                      error: "Failed to load market data",
-                      lastFetched: Date.now(),
-                    },
+                    [tokenMarketKey]: marketRowAfterFailedLoad(
+                      prev[tokenMarketKey],
+                      "Failed to load market data"
+                    ),
                   }));
                 }
               } catch (error) {
@@ -1268,16 +1279,10 @@ export const useOnDemandMarketData = ({
                 );
                 setMarketsData((prev) => ({
                   ...prev,
-                  [tokenMarketKey]: {
-                    ...prev[tokenMarketKey],
-                    isLoading: false,
-                    isLoaded: true,
-                    error:
-                      error instanceof Error
-                        ? error.message
-                        : "Unknown error",
-                    lastFetched: Date.now(),
-                  },
+                  [tokenMarketKey]: marketRowAfterFailedLoad(
+                    prev[tokenMarketKey],
+                    error instanceof Error ? error.message : "Unknown error"
+                  ),
                 }));
               } finally {
                 if (isCurrent()) {

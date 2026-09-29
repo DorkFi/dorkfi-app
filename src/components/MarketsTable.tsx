@@ -1532,9 +1532,6 @@ const MarketsTable = () => {
   };
 
   const handleCloseDepositModal = () => {
-    const asset = depositModal.asset;
-    const poolId = depositModal.poolId;
-    const rowKey = depositModal.marketRowKey;
     setDepositModal({
       isOpen: false,
       asset: null,
@@ -1544,16 +1541,6 @@ const MarketsTable = () => {
       marketId: undefined,
     });
     setDepositPoolCollateralMarkets([]);
-
-    // Refresh market data and wallet balance after deposit
-    if (asset) {
-      loadMarketDataWithBypass(
-        rowKey ??
-          marketKeyForOnDemandLoad(poolId, undefined, asset)
-      );
-      // Refresh wallet balance to show updated amount after deposit
-      void refreshWalletBalance(asset, poolId, rowKey);
-    }
   };
 
   const handleCloseWithdrawModal = () => {
@@ -1561,9 +1548,6 @@ const MarketsTable = () => {
   };
 
   const handleCloseBorrowModal = () => {
-    const asset = borrowModal.asset;
-    const poolId = borrowModal.poolId;
-    const rowKey = borrowModal.marketRowKey;
     setBorrowModal({
       isOpen: false,
       asset: null,
@@ -1571,18 +1555,6 @@ const MarketsTable = () => {
       marketRowKey: undefined,
       configSymbol: undefined,
     });
-
-    // Refresh market data and user global data after borrow
-    if (asset) {
-      loadMarketDataWithBypass(
-        rowKey ??
-          marketKeyForOnDemandLoad(poolId, undefined, asset)
-      );
-      // Refresh user global data to show updated collateral/borrow values
-      if (activeAccount?.address) {
-        refreshUserGlobalData();
-      }
-    }
   };
 
   // Single owner for borrow-open position reads (wallet connect / asset switch).
@@ -1708,27 +1680,12 @@ const MarketsTable = () => {
   ]);
 
   const handleCloseMintModal = () => {
-    const asset = mintModal.asset;
-    const poolId = mintModal.poolId;
-    const rowKey = mintModal.marketRowKey;
     setMintModal({
       isOpen: false,
       asset: null,
       poolId: undefined,
       marketRowKey: undefined,
     });
-
-    // Refresh market data and user global data after mint
-    if (asset) {
-      loadMarketDataWithBypass(
-        rowKey ??
-          marketKeyForOnDemandLoad(poolId, undefined, asset)
-      );
-      // Refresh user global data to show updated collateral/borrow values
-      if (activeAccount?.address) {
-        refreshUserGlobalData();
-      }
-    }
   };
 
   const openMarketDetailModal = (market: Record<string, unknown>) => {
@@ -4206,6 +4163,7 @@ const MarketsTable = () => {
                     currentNetwork,
                     activeAccount.address
                   );
+                  void refreshUserGlobalData();
                 }
                 // Refresh market data after successful borrow
                 if (borrowModal.asset) {
@@ -4248,6 +4206,7 @@ const MarketsTable = () => {
                     currentNetwork,
                     activeAccount.address
                   );
+                  void refreshUserGlobalData();
                 }
                 // Refresh market data after successful mint
                 if (mintModal.asset) {

@@ -6,7 +6,12 @@ import { useTokenPrice } from "@/hooks/useTokenPrice";
 import { formatRelativeTime } from "@/utils/timeUtils";
 import { getTokenConfig, NetworkId } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { usdValueForHumanTokenAmount } from "@/utils/assetDecimals";
+import {
+  floorHumanTokenAmount,
+  HUMAN_AMOUNT_QUICK_SELECTS,
+  percentOfHumanTokenAmount,
+  usdValueForHumanTokenAmount,
+} from "@/utils/assetDecimals";
 
 interface SupplyBorrowFormProps {
   mode: "deposit" | "borrow";
@@ -217,44 +222,37 @@ const SupplyBorrowForm = ({
     calculateMaxBorrowable() === 0 &&
     maxBorrowableUSD > 0;
 
+  const maxDepositableAmount = () => {
+    let maxDepositable = walletBalance;
+    if (
+      maxTotalDeposits &&
+      maxTotalDeposits > 0 &&
+      totalSupply !== undefined
+    ) {
+      const remainingCapacity = Math.max(0, maxTotalDeposits - totalSupply);
+      maxDepositable = Math.min(walletBalance, remainingCapacity);
+    }
+    return maxDepositable;
+  };
+
   const handleMaxClick = () => {
     if (mode === "deposit") {
-      let maxDepositable = walletBalance;
-
-      if (
-        maxTotalDeposits &&
-        maxTotalDeposits > 0 &&
-        totalSupply !== undefined
-      ) {
-        const remainingCapacity = Math.max(0, maxTotalDeposits - totalSupply);
-        maxDepositable = Math.min(walletBalance, remainingCapacity);
-      }
-
-      setAmount(Number(maxDepositable.toFixed(decimals)));
+      setAmount(floorHumanTokenAmount(maxDepositableAmount(), decimals));
     } else {
       const maxBorrowAmount = calculateMaxBorrowable();
       setAmount(Number(maxBorrowAmount.toFixed(decimals)));
     }
   };
 
+  const handleDepositPercent = (ratio: string) => {
+    const cap = floorHumanTokenAmount(maxDepositableAmount(), decimals);
+    const portion = percentOfHumanTokenAmount(walletBalance, ratio, decimals);
+    setAmount(Math.min(portion, cap));
+  };
+
   const handleQuickAmount = (percentage: number) => {
-    if (mode === "deposit") {
-      let maxDepositable = walletBalance;
-
-      if (
-        maxTotalDeposits &&
-        maxTotalDeposits > 0 &&
-        totalSupply !== undefined
-      ) {
-        const remainingCapacity = Math.max(0, maxTotalDeposits - totalSupply);
-        maxDepositable = Math.min(walletBalance, remainingCapacity);
-      }
-
-      setAmount(Number((maxDepositable * percentage).toFixed(decimals)));
-    } else {
-      const maxBorrowAmount = calculateMaxBorrowable();
-      setAmount(Number((maxBorrowAmount * percentage).toFixed(decimals)));
-    }
+    const maxBorrowAmount = calculateMaxBorrowable();
+    setAmount(Number((maxBorrowAmount * percentage).toFixed(decimals)));
   };
 
   const isValidAmount = numAmount !== null && numAmount > 0 && !validationError;
@@ -278,24 +276,29 @@ const SupplyBorrowForm = ({
             formatOptions={{ maximumFractionDigits: decimals }}
             showValidationMessage={true}
             className={`bg-white/70 dark:bg-slate-800 border-gray-300 dark:border-slate-600 text-slate-800 dark:text-white text-lg h-12 ${
-              amountFieldEndAdornment != null ? "pr-36" : "pr-16"
+              amountFieldEndAdornment != null
+                ? "pr-36"
+                : mode === "borrow"
+                  ? "pr-16"
+                  : ""
             } ${validationError ? "border-red-300 dark:border-red-600" : ""}`}
           />
           {amountFieldEndAdornment != null ? (
             <div className="absolute right-1 top-1/2 flex max-w-[calc(100%-3rem)] -translate-y-1/2 items-center justify-end">
               {amountFieldEndAdornment}
             </div>
-          ) : (
+          ) : mode === "borrow" ? (
             <Button
+              type="button"
               size="sm"
               variant="ghost"
               onClick={handleMaxClick}
-              disabled={mode === "borrow" && isLoadingMaxBorrow}
+              disabled={isLoadingMaxBorrow}
               className="absolute right-2 top-1/2 -translate-y-1/2 text-teal-400 hover:bg-teal-400/10 h-8 px-3 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {mode === "borrow" && isLoadingMaxBorrow ? "..." : "MAX"}
+              {isLoadingMaxBorrow ? "..." : "MAX"}
             </Button>
-          )}
+          ) : null}
         </div>
 
         {/* Validation Error */}
@@ -305,26 +308,48 @@ const SupplyBorrowForm = ({
           </p>
         )}
 
-        {/* Quick Amount Buttons */}
-        {((mode === "deposit" && walletBalance > 0) ||
-          (mode === "borrow" && calculateMaxBorrowable() > 0)) && (
-            <div className="flex gap-2">
-              {[0.25, 0.5, 0.75, 1].map((percentage) => (
-                <Button
-                  key={percentage}
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleQuickAmount(percentage)}
-                  className={`flex-1 text-xs h-8 ${mode === "deposit"
-                    ? "border-teal-200 text-teal-600 hover:bg-teal-50 dark:border-teal-800 dark:text-teal-400 dark:hover:bg-teal-900/20"
-                    : "border-whale-gold/30 text-whale-gold hover:bg-whale-gold/10 dark:border-whale-gold/50 dark:text-whale-gold dark:hover:bg-whale-gold/20"
-                    }`}
-                >
-                  {percentage === 1 ? "100%" : `${percentage * 100}%`}
-                </Button>
-              ))}
-            </div>
-          )}
+        {mode === "deposit" && walletBalance > 0 && (
+          <div className="flex gap-1.5">
+            {HUMAN_AMOUNT_QUICK_SELECTS.map(({ ratio, label }) => (
+              <Button
+                key={ratio}
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => handleDepositPercent(ratio)}
+                className="h-8 min-w-0 flex-1 px-1 text-xs border-teal-200 text-teal-600 hover:bg-teal-50 dark:border-teal-800 dark:text-teal-400 dark:hover:bg-teal-900/20"
+              >
+                {label}
+              </Button>
+            ))}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={handleMaxClick}
+              className="h-8 min-w-0 flex-1 px-1 text-xs border-teal-200 text-teal-600 hover:bg-teal-50 dark:border-teal-800 dark:text-teal-400 dark:hover:bg-teal-900/20"
+            >
+              MAX
+            </Button>
+          </div>
+        )}
+
+        {mode === "borrow" && calculateMaxBorrowable() > 0 && (
+          <div className="flex gap-2">
+            {[0.25, 0.5, 0.75, 1].map((percentage) => (
+              <Button
+                key={percentage}
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => handleQuickAmount(percentage)}
+                className="h-8 flex-1 text-xs border-whale-gold/30 text-whale-gold hover:bg-whale-gold/10 dark:border-whale-gold/50 dark:text-whale-gold dark:hover:bg-whale-gold/20"
+              >
+                {percentage === 1 ? "100%" : `${percentage * 100}%`}
+              </Button>
+            ))}
+          </div>
+        )}
 
         {/* USD Value */}
         {fiatValue > 0 && (

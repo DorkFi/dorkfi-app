@@ -186,6 +186,48 @@ export function usdPerTokenFromMarketInfoPrice(
   return usdPerTokenFromMarketInfoFormattedPrice(postWadStr, tokenDecimals);
 }
 
+/** Quick-select fractions of a wallet or deposited balance. Ratios are decimal strings so 10% is exact. */
+export const HUMAN_AMOUNT_QUICK_SELECTS = [
+  { ratio: "0.1", label: "10%" },
+  { ratio: "0.25", label: "25%" },
+  { ratio: "0.5", label: "50%" },
+  { ratio: "0.75", label: "75%" },
+] as const;
+
+/**
+ * Floor a human token amount to `decimals` places.
+ * Quick-select uses this so a percentage cannot round above the source balance.
+ */
+export function floorHumanTokenAmount(value: number, decimals: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  const places = Math.max(0, Math.min(18, Math.floor(decimals)));
+  const floored = new BigNumber(value).decimalPlaces(
+    places,
+    BigNumber.ROUND_DOWN
+  );
+  const n = floored.toNumber();
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * `ratio` is a decimal string (`"0.1"` for 10%). Result is floored to `decimals`.
+ */
+export function percentOfHumanTokenAmount(
+  amount: number,
+  ratio: string,
+  decimals: number
+): number {
+  if (!Number.isFinite(amount) || amount <= 0) return 0;
+  const fraction = new BigNumber(ratio);
+  if (!fraction.isFinite() || fraction.lte(0)) return 0;
+  const places = Math.max(0, Math.min(18, Math.floor(decimals)));
+  const n = new BigNumber(amount)
+    .times(fraction)
+    .decimalPlaces(places, BigNumber.ROUND_DOWN)
+    .toNumber();
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 /**
  * USD value for a **human** token amount (not smallest units) × USD per token from
  * `useTokenPrice`. Used by SupplyBorrowForm for the "≈ $…" line above the wallet balance.

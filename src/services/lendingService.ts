@@ -977,52 +977,70 @@ export const fetchMarketInfo = async (
     }
 
     if (isAlgorandCompatibleNetwork(networkId)) {
-      let marketData: MarketData | null = null;
-      if (source === "contract") {
-        marketData = await fetchMarketInfoFromContract(
+      const readFromContract = () =>
+        fetchMarketInfoFromContract(
           poolId,
           marketId,
           networkId,
           contractReadMethod
         );
+
+      const buildOrNull = async (
+        marketData: MarketData
+      ): Promise<MarketInfo | null> => {
+        try {
+          return await buildMarketInfoFromRawMarketData(
+            marketData,
+            poolId,
+            marketId,
+            networkId
+          );
+        } catch (buildError) {
+          console.error("buildMarketInfoFromRawMarketData failed", {
+            poolId,
+            marketId,
+            networkId,
+            buildError,
+          });
+          return null;
+        }
+      };
+
+      let marketData: MarketData | null = null;
+      let fromApi = false;
+      if (source === "contract") {
+        marketData = await readFromContract();
       } else if (source === "api") {
         const getMarketResponse = await dorkfiAPIService.getMarketData(
           networkId,
           Number(poolId),
           Number(marketId)
         );
-        if (!getMarketResponse?.success || !getMarketResponse?.data) {
-          marketData = await fetchMarketInfoFromContract(
-            poolId,
-            marketId,
-            networkId,
-            contractReadMethod
-          );
+        if (getMarketResponse?.success && getMarketResponse?.data) {
+          console.log({ apiMarket: getMarketResponse.data });
+          marketData = getMarketResponse.data as unknown as MarketData;
+          fromApi = true;
         } else {
-          const apiMarket = getMarketResponse.data;
-          console.log({ apiMarket });
-          marketData = apiMarket as unknown as MarketData;
+          marketData = await readFromContract();
         }
       }
 
       console.log(
         "=============== [fetchMarketInfo] marketData ===============",
-        { marketData }
+        { marketData, fromApi }
       );
 
-      if (!marketData) {
-        return null;
+      let marketInfo = marketData ? await buildOrNull(marketData) : null;
+      if (!marketInfo && fromApi) {
+        console.warn(
+          "API market snapshot unusable; reading market from chain",
+          { poolId, marketId, networkId }
+        );
+        const chainData = await readFromContract();
+        marketInfo = chainData ? await buildOrNull(chainData) : null;
       }
 
-      const marketInfo = await buildMarketInfoFromRawMarketData(
-        marketData,
-        poolId,
-        marketId,
-        networkId
-      );
-
-      console.log("fetchMarketInfo marketInfo", { marketInfo, marketData });
-
+      console.log("fetchMarketInfo marketInfo", { marketInfo });
       return marketInfo;
     } else if (isEVMNetwork(networkId)) {
       // For EVM networks, we need to implement contract interaction
@@ -1039,6 +1057,36 @@ export const fetchMarketInfo = async (
     return null;
   }
 };
+
+/**
+ * Transaction builders only need `ntokenId` from this read (deposit cap checks are off).
+ * When the API and chain snapshot both fail, use the id already stored on the token config.
+ */
+export function marketInfoOrConfigNtoken(
+  marketInfo: MarketInfo | null,
+  nTokenId: string | null | undefined,
+  where: { action: string; poolId: string; marketId: string; networkId: string }
+): MarketInfo {
+  const fromRead = String(marketInfo?.ntokenId ?? "").trim();
+  if (marketInfo && /^\d+$/.test(fromRead) && fromRead !== "0") {
+    return marketInfo;
+  }
+  const fromConfig = String(nTokenId ?? "").trim();
+  if (/^\d+$/.test(fromConfig) && fromConfig !== "0") {
+    console.warn(
+      `${where.action}: market info unavailable; using config nTokenId ${fromConfig}`,
+      where
+    );
+    return {
+      ...(marketInfo ?? {}),
+      ntokenId: fromConfig,
+      isPaused: marketInfo?.isPaused ?? false,
+    } as MarketInfo;
+  }
+  throw new Error(
+    `${where.action} could not read market info for pool ${where.poolId}, market ${where.marketId} (${where.networkId}).`
+  );
+}
 
 export type UserPositionMarketKey = {
   networkId: NetworkId;
@@ -3177,16 +3225,17 @@ export const withdraw = async (
       console.log("withdraw:amountInSmallestUnit", { amountInSmallestUnit });
 
       // Get market info (sync_market for index-based accrued supply interest math)
-      const marketInfo = await fetchMarketInfo(
-        poolId,
-        marketId,
-        networkId,
-        "contract",
-        "sync_market"
+      const marketInfo = marketInfoOrConfigNtoken(
+        await fetchMarketInfo(
+          poolId,
+          marketId,
+          networkId,
+          "contract",
+          "sync_market"
+        ),
+        tokenConfigForWithdraw?.nTokenId,
+        { action: "Withdraw", poolId, marketId, networkId }
       );
-      if (!marketInfo) {
-        throw new Error("Failed to fetch market info");
-      }
       console.log("withdraw:marketInfo", { marketInfo });
 
       // Calculate accrued interest for logging/validation
@@ -4735,15 +4784,11 @@ export const deposit = async (
         marketId,
         networkId,
       });
-      const marketInfo = await fetchMarketInfo(poolId, marketId, networkId);
-      if (!marketInfo) {
-        console.error("Failed to fetch market info for:", {
-          poolId,
-          marketId,
-          networkId,
-        });
-        throw new Error("Failed to fetch market info");
-      }
+      const marketInfo = marketInfoOrConfigNtoken(
+        await fetchMarketInfo(poolId, marketId, networkId),
+        tokenConfigForDeposit?.nTokenId,
+        { action: "Supply", poolId, marketId, networkId }
+      );
       console.log("Market info retrieved:", {
         ntokenId: marketInfo.ntokenId,
         totalDeposits: marketInfo.totalDeposits?.toString(),
@@ -6008,7 +6053,7 @@ export const borrow = async (
             })
         : Promise.resolve({} as Record<string, unknown>);
 
-      const [optIn, marketInfo, boxStatusEarly] = await Promise.all([
+      const [optIn, fetchedMarketInfo, boxStatusEarly] = await Promise.all([
         optInCheckPromise,
         fetchMarketInfo(poolId, marketId, networkId),
         tokenStandard == "network" ||
@@ -6021,9 +6066,11 @@ export const borrow = async (
           : Promise.resolve("unknown" as const),
       ]);
 
-      if (!marketInfo) {
-        throw new Error("Failed to fetch market info");
-      }
+      const marketInfo = marketInfoOrConfigNtoken(
+        fetchedMarketInfo,
+        resolveTokenConfigFromDisplayToken(networkId, token)?.nTokenId,
+        { action: "Borrow", poolId, marketId, networkId }
+      );
       if (marketInfo.isPaused) {
         throw new Error("Market is paused");
       }
@@ -6644,10 +6691,11 @@ export const repay = async (
           networkId,
         },
       });
-      const marketInfo = await fetchMarketInfo(poolId, marketId, networkId);
-      if (!marketInfo) {
-        throw new Error("Failed to fetch market info");
-      }
+      const marketInfo = marketInfoOrConfigNtoken(
+        await fetchMarketInfo(poolId, marketId, networkId),
+        tokenConfigForRepay?.nTokenId,
+        { action: "Repay", poolId, marketId, networkId }
+      );
       console.log("marketInfo", { marketInfo });
       const userPosition = await fetchUserPosition(
         userAddress,
@@ -7000,10 +7048,11 @@ export const repayOnBehalf = async (
           networkId,
         },
       });
-      const marketInfo = await fetchMarketInfo(poolId, marketId, networkId);
-      if (!marketInfo) {
-        throw new Error("Failed to fetch market info");
-      }
+      const marketInfo = marketInfoOrConfigNtoken(
+        await fetchMarketInfo(poolId, marketId, networkId),
+        resolveTokenConfigFromDisplayToken(networkId, token)?.nTokenId,
+        { action: "Repay", poolId, marketId, networkId }
+      );
       console.log("marketInfo", { marketInfo });
       const userPosition = await fetchUserPosition(
         beneficiaryAddress,
@@ -7470,10 +7519,11 @@ export const repayAll = async (
           networkId,
         },
       });
-      const marketInfo = await fetchMarketInfo(poolId, marketId, networkId);
-      if (!marketInfo) {
-        throw new Error("Failed to fetch market info");
-      }
+      const marketInfo = marketInfoOrConfigNtoken(
+        await fetchMarketInfo(poolId, marketId, networkId),
+        tokenConfigForRepay?.nTokenId,
+        { action: "Repay", poolId, marketId, networkId }
+      );
       console.log("marketInfo", { marketInfo });
       const userPosition = await fetchUserPosition(
         userAddress,
