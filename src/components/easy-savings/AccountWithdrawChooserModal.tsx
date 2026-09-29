@@ -130,8 +130,8 @@ const AccountWithdrawChooserModal = ({
               description={
                 canCashOut
                   ? consumerCopy
-                    ? "Send money from your account to a debit card or bank."
-                    : "Off-ramp USDC from your account to a card or bank."
+                    ? "Send money from your account. Fee and arrival time are shown on the next screen."
+                    : "Cash out USDC. Fee and arrival time are shown on the next screen."
                   : (cashOutEmptyDescription({
                       consumerCopy,
                       baseUsd: 0,

@@ -1365,16 +1365,16 @@ const SavingsCard = () => {
                               <span className="font-medium text-foreground tabular-nums">
                                 {formatUsdAmount(walletUsdcAlgoUsd)}
                               </span>{" "}
-                              on Algorand is not ready to cash out. Move it to
-                              your account first.
+                              isn’t ready to cash out. Move it to your account
+                              first.
                             </>
                           ) : null}
                         </>
                       ) : walletUsdcAlgo != null &&
                         walletUsdcAlgo > CASH_OUT_MIN_USD ? (
                         <>
-                          This balance is on Algorand. Move it to your account
-                          first.
+                          This balance isn’t ready to cash out. Move it to your
+                          account first.
                         </>
                       ) : (
                         <>Nothing to cash out.</>

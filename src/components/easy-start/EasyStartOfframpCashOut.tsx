@@ -255,7 +255,7 @@ export function EasyStartOfframpCashOut({
       }
       if (cancelled) return;
       if (Date.now() - started > 30 * 60 * 1000) {
-        setError("Timed out waiting for Coinbase sell details. Try again.");
+        setError("Timed out waiting for cash-out details. Try again.");
         setPhase("error");
         return;
       }
@@ -284,7 +284,11 @@ export function EasyStartOfframpCashOut({
         amount: amount ?? undefined,
       });
       if (!session.sellUrl) {
-        throw new Error("Coinbase cash-out URL missing. Redeploy the API.");
+        throw new Error(
+          consumerCopy
+            ? "Cash-out isn’t available right now. Try again later."
+            : "Coinbase cash-out URL missing. Redeploy the API."
+        );
       }
       saveCoinbaseOfframpPending({
         partnerUserRef: session.partnerUserRef,
@@ -397,7 +401,7 @@ export function EasyStartOfframpCashOut({
   const payLabel =
     ctaLabel ??
     (consumerCopy
-      ? `Cash out to ${provider === "coinbase" ? "bank" : "debit card"}`
+      ? "Cash out"
       : `Cash out with ${provider === "coinbase" ? "Coinbase" : "MoonPay"}`);
 
   const busy =
@@ -423,7 +427,7 @@ export function EasyStartOfframpCashOut({
         {phase === "gas" ? (
           <p className="text-sm text-muted-foreground text-center">
             {consumerCopy
-              ? "A small network fee is needed on Base to send your cash-out."
+              ? "A small network fee is needed to send your cash-out."
               : "A small amount of ETH on Base is needed to pay the transfer fee."}
           </p>
         ) : null}

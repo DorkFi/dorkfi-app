@@ -31,7 +31,7 @@ describe("cashOutEmptyBucket", () => {
 });
 
 describe("cashOutEmptyDescription", () => {
-  it("tells consumer users to move Algorand funds before cashing out", () => {
+  it("tells consumer users to move funds into the account before cashing out", () => {
     expect(
       cashOutEmptyDescription({
         consumerCopy: true,
@@ -39,7 +39,9 @@ describe("cashOutEmptyDescription", () => {
         earnUsd: 0,
         algorandUsd: 18,
       })
-    ).toBe("This balance is on Algorand. Move it to your account first.");
+    ).toBe(
+      "This balance isn’t ready to cash out. Move it to your account first."
+    );
   });
 
   it("does not say withdraw from Earn after the funds have left", () => {

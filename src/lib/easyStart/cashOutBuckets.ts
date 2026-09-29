@@ -37,7 +37,7 @@ export function cashOutEmptyDescription(input: {
       return "Nothing available to cash out. Withdraw from Earn first.";
     }
     if (bucket === "algorand") {
-      return "This balance is on Algorand. Move it to your account first.";
+      return "This balance isn’t ready to cash out. Move it to your account first.";
     }
     return "Nothing to cash out.";
   }

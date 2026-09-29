@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Building2, CreditCard } from "lucide-react";
+import { Landmark } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
@@ -22,7 +22,6 @@ import {
   EASY_START_FUNDING_DIALOG_CLASS,
   FundingPrimaryButton,
   FundingSheetHeader,
-  PayMethodList,
   PrivySecureNote,
   ReviewBreakdown,
   ReviewPayWithCard,
@@ -30,7 +29,6 @@ import {
   TermsNote,
   TrustInline,
   TrustValueList,
-  type PayMethodOption,
 } from "@/components/easy-start/EasyStartFundingUi";
 import { EasyStartOfframpCashOutSlot } from "@/components/easy-start/EasyStartOfframpCashOutSlot";
 
@@ -38,7 +36,6 @@ const PRESET_AMOUNTS = ["25", "50", "100", "250"] as const;
 
 type WithdrawPhase = "idle" | "error";
 type WithdrawStep = "choose" | "review";
-type WithdrawPayMethod = "debit_card" | "bank";
 
 interface EasyStartWithdrawSheetProps {
   open: boolean;
@@ -69,9 +66,6 @@ export function EasyStartWithdrawSheet({
   const { formatCurrency } = useNumberI18n();
 
   const [amount, setAmount] = useState(resumeOfframp?.amount ?? "");
-  const [method, setMethod] = useState<WithdrawPayMethod>(
-    resumeOfframp ? "bank" : "debit_card"
-  );
   const [step, setStep] = useState<WithdrawStep>(
     resumeOfframp ? "review" : "choose"
   );
@@ -119,7 +113,6 @@ export function EasyStartWithdrawSheet({
 
   const applyResume = useCallback(() => {
     if (!resumeOfframp) return;
-    setMethod("bank");
     if (resumeOfframp.amount) setAmount(resumeOfframp.amount);
     setStep("review");
     setEditingAmount(false);
@@ -132,7 +125,6 @@ export function EasyStartWithdrawSheet({
     setError(null);
     setStep("choose");
     setEditingAmount(false);
-    setMethod("debit_card");
     setAmount("");
   }, []);
 
@@ -177,7 +169,7 @@ export function EasyStartWithdrawSheet({
             : " Withdraw from savings first."
           : elsewhere === "algorand"
             ? consumerCopy
-              ? " The rest is on Algorand. Move it to your account first."
+              ? " The rest isn’t ready to cash out. Move it to your account first."
               : " The rest is on Algorand. Move it to Base before cashing out."
             : "";
       setError(`${ready}${hint}`);
@@ -191,31 +183,6 @@ export function EasyStartWithdrawSheet({
     (hasAvailable
       ? availableNum.toFixed(6).replace(/\.?0+$/, "")
       : null);
-
-  const payMethods: PayMethodOption[] = useMemo(
-    () => [
-      {
-        id: "debit_card",
-        title: "Debit card",
-        description: "Fee shown at checkout",
-        icon: <CreditCard className="h-5 w-5" />,
-        badge: "Recommended",
-      },
-      {
-        id: "bank",
-        title: "Bank account",
-        description: "Usually 1–3 business days · Fee shown at checkout",
-        icon: <Building2 className="h-5 w-5" />,
-        tag: { label: "Bank", tone: "muted" },
-      },
-    ],
-    []
-  );
-
-  const selectedMethod =
-    payMethods.find((m) => m.id === method) ?? payMethods[0];
-  const methodTitle =
-    method === "bank" ? "bank" : "debit card";
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -246,32 +213,21 @@ export function EasyStartWithdrawSheet({
             <>
               <FundingSheetHeader
                 onBack={() => setStep("choose")}
-                title={`Cash out ${amountDisplay}`}
-                subtitle="Review your cash-out details"
+                title="Review cash-out"
+                subtitle="Amount to send. Fee and arrival time are shown on the next screen."
               />
               <div className="px-6 pb-6 pt-3 space-y-4">
                 <ReviewPayWithCard
-                  icon={selectedMethod.icon}
-                  title={selectedMethod.title}
-                  tags={
-                    method === "bank"
-                      ? [{ label: "1–3 business days" }, { label: "Fee shown at checkout" }]
-                      : [{ label: "Fee shown at checkout" }]
-                  }
-                  onChange={() => setStep("choose")}
+                  icon={<Landmark className="h-5 w-5" />}
+                  title="Cash out"
+                  tags={[{ label: "Fee and arrival time shown on the next screen" }]}
                 />
                 <ReviewBreakdown
-                  amountLabel="Amount"
+                  amountLabel="Amount to send"
                   amountValue={amountDisplay}
-                  feeLabel="Processing fee"
-                  feeValue="Shown at checkout"
-                  receiveLabel="You'll cash out"
-                  receiveValue={amountDisplay}
-                  footnote={
-                    method === "bank"
-                      ? "Sent to your bank. Timing depends on the payout."
-                      : "Sent to your debit card. Timing depends on the payout."
-                  }
+                  feeLabel="Fee and arrival"
+                  feeValue="Shown on the next screen"
+                  footnote="You’ll pick the payout on the next screen. Fee and arrival time are shown there."
                 />
                 <TrustValueList />
                 <TermsNote />
@@ -280,10 +236,10 @@ export function EasyStartWithdrawSheet({
                   amount={cashOutAmount}
                   provider={cashOutProvider}
                   onProviderChange={() => {
-                    // Debit card and bank both cash out through Coinbase.
+                    // One Coinbase session. Payout method is chosen there.
                   }}
                   hideProviderPicker
-                  ctaLabel={`Cash out ${amountDisplay} to ${methodTitle}`}
+                  ctaLabel="Continue"
                   resumePartnerUserRef={resumeOfframp?.partnerUserRef ?? null}
                   resumeSendTxHash={resumeOfframp?.sendTxHash ?? null}
                   onResumeConsumed={onResumeConsumed}
@@ -374,23 +330,20 @@ export function EasyStartWithdrawSheet({
                   </p>
                 ) : null}
 
-                <PayMethodList
-                  label="Choose how to cash out"
-                  options={payMethods}
-                  value={method}
-                  onChange={(id) => setMethod(id as WithdrawPayMethod)}
-                />
+                <div className="rounded-xl border border-border bg-background px-4 py-3.5">
+                  <p className="text-sm font-semibold">Cash out</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    You’ll pick the payout on the next screen. Fee and arrival
+                    time are shown there.
+                  </p>
+                </div>
 
                 <PrivySecureNote />
 
                 <ChooseSummary
-                  addLabel={`You'll cash out ${amountValid ? amountDisplay : availableDisplay}`}
-                  feeLabel="Fee shown at checkout"
-                  receiveLabel={
-                    method === "bank"
-                      ? "Sent to your bank"
-                      : "Sent to your debit card"
-                  }
+                  addLabel={`Amount to send ${amountValid ? amountDisplay : availableDisplay}`}
+                  feeLabel="Fee and arrival time shown on the next screen"
+                  receiveLabel="Payout chosen on the next screen"
                 />
 
                 <FundingPrimaryButton
@@ -400,7 +353,7 @@ export function EasyStartWithdrawSheet({
                   <ContinueLabel>Continue</ContinueLabel>
                 </FundingPrimaryButton>
 
-                {onOpenAdvancedBridge ? (
+                {onOpenAdvancedBridge && !consumerCopy ? (
                   <button
                     type="button"
                     className="w-full text-center text-xs text-muted-foreground hover:text-ocean-teal underline-offset-2 hover:underline"

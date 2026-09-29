@@ -293,7 +293,7 @@ export function ReviewPayWithCard({
   icon: ReactNode;
   title: string;
   tags: readonly { label: string; icon?: ReactNode }[];
-  onChange: () => void;
+  onChange?: () => void;
 }) {
   return (
     <div className="rounded-xl border border-border bg-background px-4 py-3.5">
@@ -302,13 +302,15 @@ export function ReviewPayWithCard({
           {icon}
         </span>
         <span className="min-w-0 flex-1 text-sm font-semibold">{title}</span>
-        <button
-          type="button"
-          onClick={onChange}
-          className="text-sm font-semibold text-blue-600 hover:underline dark:text-blue-400"
-        >
-          Change
-        </button>
+        {onChange ? (
+          <button
+            type="button"
+            onClick={onChange}
+            className="text-sm font-semibold text-blue-600 hover:underline dark:text-blue-400"
+          >
+            Change
+          </button>
+        ) : null}
       </div>
       {tags.length > 0 ? (
         <div className="mt-2.5 flex flex-wrap gap-1.5">
@@ -340,10 +342,12 @@ export function ReviewBreakdown({
   amountValue: string;
   feeLabel: string;
   feeValue: string;
-  receiveLabel: string;
-  receiveValue: string;
+  /** Omit when the partner quote is unknown, so the send amount is not shown as cash received. */
+  receiveLabel?: string;
+  receiveValue?: string;
   footnote: string;
 }) {
+  const showReceive = Boolean(receiveLabel || receiveValue);
   return (
     <div className="rounded-xl border border-border bg-background px-4 py-3.5 space-y-2.5">
       <div className="flex items-center justify-between text-sm">
@@ -357,12 +361,18 @@ export function ReviewBreakdown({
         </span>
         <span className="font-medium text-muted-foreground">{feeValue}</span>
       </div>
-      <div className="border-t border-border pt-2.5">
-        <p className="text-lg font-bold tabular-nums text-ocean-teal">
-          {receiveLabel} {receiveValue}
+      {showReceive ? (
+        <div className="border-t border-border pt-2.5">
+          <p className="text-lg font-bold tabular-nums text-ocean-teal">
+            {receiveLabel} {receiveValue}
+          </p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{footnote}</p>
+        </div>
+      ) : (
+        <p className="border-t border-border pt-2.5 text-xs text-muted-foreground">
+          {footnote}
         </p>
-        <p className="mt-0.5 text-xs text-muted-foreground">{footnote}</p>
-      </div>
+      )}
     </div>
   );
 }

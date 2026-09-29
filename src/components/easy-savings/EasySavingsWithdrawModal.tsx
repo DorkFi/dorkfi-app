@@ -56,9 +56,6 @@ import {
   type EasyStartBridgePhase,
 } from "@/components/easy-start/easyStartBridgePhase";
 import { isXoGeoRestricted } from "@/lib/easyStart/xoSwap/errors";
-import {
-  type CardProvider,
-} from "@/components/easy-start/EasyStartCardProviderPicker";
 import { Button } from "@/components/ui/button";
 import {
   applyOptimisticSavingsPosition,
@@ -142,8 +139,6 @@ const EasySavingsWithdrawModal = ({
     useState<EasyStartBridgePhase>("preparing");
   const [bridgeAmount, setBridgeAmount] = useState<string | null>(null);
   const [flowError, setFlowError] = useState<string | null>(null);
-  const [cashOutProvider, setCashOutProvider] =
-    useState<CardProvider>("moonpay");
   const [confirmedAmount, setConfirmedAmount] = useState("");
   const [baselineBaseUsdc, setBaselineBaseUsdc] = useState<number | null>(null);
   const [watchOnly, setWatchOnly] = useState(false);
@@ -674,16 +669,20 @@ const EasySavingsWithdrawModal = ({
                     </DialogTitle>
                     <DialogDescription className="text-sm text-muted-foreground">
                       {consumerCopy
-                        ? "Cash out with MoonPay or Coinbase, or keep the funds in your account."
-                        : "Cash out in-app or keep USDC on Base."}
+                        ? "Cash out, or keep the funds in your account."
+                        : "Cash out, or keep USDC on Base."}
                     </DialogDescription>
                   </DialogHeader>
                   <Suspense fallback={null}>
                     <EasyStartOfframpCashOutSlot
                       evmAddress={privy.evmAddress}
                       amount={confirmedAmount || amount}
-                      provider={cashOutProvider}
-                      onProviderChange={setCashOutProvider}
+                      provider="coinbase"
+                      onProviderChange={() => {
+                        // Earn success uses the same Coinbase-only cash-out as the sheet.
+                      }}
+                      hideProviderPicker
+                      ctaLabel="Cash out"
                       onDone={onClose}
                     />
                   </Suspense>
