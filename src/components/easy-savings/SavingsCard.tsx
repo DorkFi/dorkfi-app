@@ -52,6 +52,7 @@ import {
   savingsTxRecordsToEvents,
 } from "@/services/savingsBalanceHistory";
 import { fetchBaseUsdcBalance } from "@/lib/easyStart/baseBalances";
+import { CASH_OUT_MIN_USD } from "@/lib/easyStart/cashOutBuckets";
 import {
   isPendingEarnFunded,
   pendingEarnSupplyAmount,
@@ -351,7 +352,10 @@ const SavingsCard = () => {
   const hasAnySavingsDeposit = userPositions.some((p) => p.deposit > 1e-12);
 
   /** Portfolio USD when viewing the Wallet balances account. */
-  const portfolioWalletUsd = Math.max(0, walletUsdcUsd);
+  const portfolioCashOutUsd = Math.max(0, walletUsdcBaseUsd);
+  const portfolioAlgorandUsd = Math.max(0, walletUsdcAlgoUsd);
+  /** Undeposited USDC on both chains. Cash out spends only the Base portion. */
+  const portfolioWalletUsd = portfolioCashOutUsd + portfolioAlgorandUsd;
   const portfolioSavingsUsd = Math.max(0, coreDepositUsd);
   const portfolioHigherYieldUsd = Math.max(0, highYieldDepositUsd);
   const portfolioTotalUsd =
@@ -473,6 +477,8 @@ const SavingsCard = () => {
       return {
         total: [] as Array<{ timestamp: number; balanceUsd: number }>,
         wallet: [] as Array<{ timestamp: number; balanceUsd: number }>,
+        cash_out: [] as Array<{ timestamp: number; balanceUsd: number }>,
+        algorand: [] as Array<{ timestamp: number; balanceUsd: number }>,
         savings: [] as Array<{ timestamp: number; balanceUsd: number }>,
         higher_yield: [] as Array<{ timestamp: number; balanceUsd: number }>,
       };
@@ -489,6 +495,8 @@ const SavingsCard = () => {
     return {
       total: mapKey("portfolio"),
       wallet: mapKey("wallet"),
+      cash_out: mapKey("cash_out"),
+      algorand: mapKey("algorand_wallet"),
       savings: mapKey("savings"),
       higher_yield: mapKey("higher_yield"),
     };
@@ -513,6 +521,8 @@ const SavingsCard = () => {
     // Portfolio keys always (even while browsing a market) so Total / Wallet series grow.
     write("portfolio", portfolioTotalUsd);
     write("wallet", portfolioWalletUsd);
+    write("cash_out", portfolioCashOutUsd);
+    write("algorand_wallet", portfolioAlgorandUsd);
     write("savings", portfolioSavingsUsd);
     write("higher_yield", portfolioHigherYieldUsd);
 
@@ -525,6 +535,8 @@ const SavingsCard = () => {
     isWalletAccount,
     portfolioTotalUsd,
     portfolioWalletUsd,
+    portfolioCashOutUsd,
+    portfolioAlgorandUsd,
     portfolioSavingsUsd,
     portfolioHigherYieldUsd,
     route?.poolId,
@@ -636,13 +648,22 @@ const SavingsCard = () => {
         historySnapshots: portfolioSnapshots.total,
       },
       {
-        id: "wallet",
-        label: "Transferrable",
-        balanceUsd: portfolioWalletUsd,
-        apyPercent: portfolioWalletUsd > 0 ? 0 : null,
+        id: consumerCopy ? "cash_out" : "wallet",
+        label: consumerCopy ? "Ready to cash out" : "Transferrable",
+        balanceUsd: portfolioCashOutUsd,
+        apyPercent: portfolioCashOutUsd > 0 ? 0 : null,
         earnedInterestUsd: 0,
         historyEvents: [],
-        historySnapshots: portfolioSnapshots.wallet,
+        historySnapshots: portfolioSnapshots.cash_out,
+      },
+      {
+        id: "algorand",
+        label: "On Algorand",
+        balanceUsd: portfolioAlgorandUsd,
+        apyPercent: portfolioAlgorandUsd > 0 ? 0 : null,
+        earnedInterestUsd: 0,
+        historyEvents: [],
+        historySnapshots: portfolioSnapshots.algorand,
       },
       {
         id: "savings",
@@ -671,7 +692,8 @@ const SavingsCard = () => {
   }, [
     consumerCopy,
     portfolioTotalUsd,
-    portfolioWalletUsd,
+    portfolioCashOutUsd,
+    portfolioAlgorandUsd,
     portfolioSavingsUsd,
     portfolioHigherYieldUsd,
     portfolioEarnedUsd,
@@ -1094,7 +1116,7 @@ const SavingsCard = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {/* Algorand wallet USDC */}
+                        {/* Cash-out balance is Base only. Algorand wallet USDC is a separate row. */}
                         <tr className="border-b border-border/40">
                           <td className="py-4">
                             <span className="flex items-center gap-2 font-medium">
@@ -1111,27 +1133,21 @@ const SavingsCard = () => {
                                   />
                                 </span>
                               </span>
-                              {consumerCopy ? "Transferrable" : "USDC"}
-                              {!consumerCopy ? (
-                                <span className="text-xs font-normal text-muted-foreground">
-                                  Algorand
-                                </span>
-                              ) : (
-                                <span className="text-xs font-normal text-muted-foreground">
-                                  Available
-                                </span>
-                              )}
+                              {consumerCopy ? "Ready to cash out" : "USDC"}
+                              <span className="text-xs font-normal text-muted-foreground">
+                                {consumerCopy ? "Base" : "Algorand"}
+                              </span>
                             </span>
                           </td>
                           <td className="py-4 text-muted-foreground tabular-nums">
                             {consumerCopy
-                              ? walletUsdc != null
-                                ? formatToken(walletUsdc)
-                                : activeAccount || evmAddress
-                                  ? walletBalanceLoading
-                                    ? "…"
-                                    : "0"
-                                  : "—"
+                              ? baseUsdcLoading && walletUsdcBase == null
+                                ? "…"
+                                : walletUsdcBase != null
+                                  ? formatToken(walletUsdcBase)
+                                  : evmAddress
+                                    ? "0"
+                                    : "—"
                               : walletUsdcAlgo != null
                                 ? formatToken(walletUsdcAlgo)
                                 : activeAccount
@@ -1147,25 +1163,63 @@ const SavingsCard = () => {
                           <td className="py-4 text-right">
                             <button
                               type="button"
-                              onClick={() => {
-                                if (consumerCopy && hasBaseUsdc) {
-                                  openDeposit({
-                                    assetConfigKey:
-                                      usdcRoute?.asset.configKey ?? "USDC",
-                                  });
-                                  return;
-                                }
+                              onClick={() =>
                                 openDeposit({
                                   assetConfigKey:
                                     usdcRoute?.asset.configKey ?? "USDC",
-                                });
-                              }}
+                                })
+                              }
                               className="rounded-xl bg-muted px-4 py-2 text-sm font-semibold hover:bg-muted/80 transition-colors"
                             >
                               Deposit
                             </button>
                           </td>
                         </tr>
+
+                        {consumerCopy ? (
+                          <tr className="border-b border-border/40">
+                            <td className="py-4">
+                              <span className="flex items-center gap-2 font-medium">
+                                <img
+                                  src={logo}
+                                  alt=""
+                                  className="size-6 rounded-full"
+                                />
+                                On Algorand
+                                <span className="text-xs font-normal text-muted-foreground">
+                                  Not in Earn
+                                </span>
+                              </span>
+                            </td>
+                            <td className="py-4 text-muted-foreground tabular-nums">
+                              {walletUsdcAlgo != null
+                                ? formatToken(walletUsdcAlgo)
+                                : activeAccount
+                                  ? usdcQuote.isLoading
+                                    ? "…"
+                                    : "0"
+                                  : "—"}
+                            </td>
+                            <td className="py-4 tabular-nums">—</td>
+                            <td className="py-4 tabular-nums text-muted-foreground">
+                              —
+                            </td>
+                            <td className="py-4 text-right">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  openDeposit({
+                                    assetConfigKey:
+                                      usdcRoute?.asset.configKey ?? "USDC",
+                                  })
+                                }
+                                className="rounded-xl bg-muted px-4 py-2 text-sm font-semibold hover:bg-muted/80 transition-colors"
+                              >
+                                Deposit
+                              </button>
+                            </td>
+                          </tr>
+                        ) : null}
 
                         {/* Base Easy Start USDC — bridge before supply */}
                         {evmAddress && !consumerCopy ? (
@@ -1297,20 +1351,33 @@ const SavingsCard = () => {
                   </div>
                   <p className="mt-5 text-sm text-muted-foreground leading-relaxed">
                     {consumerCopy ? (
-                      hasBaseUsdc ? (
+                      walletUsdcBase != null &&
+                      walletUsdcBase > CASH_OUT_MIN_USD ? (
                         <>
-                          You have{" "}
                           <span className="font-medium text-foreground tabular-nums">
-                            {formatUsdAmount(walletUsdcUsd)}
+                            {formatUsdAmount(walletUsdcBaseUsd)}
                           </span>{" "}
-                          available. Deposit to finish adding it to your account
-                          and start earning.
+                          ready to cash out.
+                          {walletUsdcAlgo != null &&
+                          walletUsdcAlgo > CASH_OUT_MIN_USD ? (
+                            <>
+                              {" "}
+                              <span className="font-medium text-foreground tabular-nums">
+                                {formatUsdAmount(walletUsdcAlgoUsd)}
+                              </span>{" "}
+                              on Algorand is not ready to cash out. Move it to
+                              your account first.
+                            </>
+                          ) : null}
+                        </>
+                      ) : walletUsdcAlgo != null &&
+                        walletUsdcAlgo > CASH_OUT_MIN_USD ? (
+                        <>
+                          This balance is on Algorand. Move it to your account
+                          first.
                         </>
                       ) : (
-                        <>
-                          You have undeposited funds. Deposit into savings to
-                          start earning yield.
-                        </>
+                        <>Nothing to cash out.</>
                       )
                     ) : hasBaseUsdc ? (
                       <>
@@ -1679,6 +1746,8 @@ const SavingsCard = () => {
         onOpenChange={setWithdrawChooserOpen}
         canWithdrawFromEarn={hasAnySavingsDeposit}
         canCashOut={canCashOut}
+        earnUsd={portfolioSavingsUsd + portfolioHigherYieldUsd}
+        algorandUsd={portfolioAlgorandUsd}
         finishEarnMove={Boolean(pendingWithdraw)}
         consumerCopy={consumerCopy}
         onWithdrawFromEarn={() => {

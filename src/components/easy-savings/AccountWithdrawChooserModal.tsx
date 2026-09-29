@@ -7,6 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { cashOutEmptyDescription } from "@/lib/easyStart/cashOutBuckets";
 import { cn } from "@/lib/utils";
 
 type AccountWithdrawChooserModalProps = {
@@ -14,6 +15,10 @@ type AccountWithdrawChooserModalProps = {
   onOpenChange: (open: boolean) => void;
   canWithdrawFromEarn: boolean;
   canCashOut: boolean;
+  /** Supplied Earn balance. Used only for the disabled Cash out message. */
+  earnUsd?: number;
+  /** Algorand wallet USDC that has already left Earn. */
+  algorandUsd?: number;
   /** Redeemed USDC is still on Algorand and needs the Base swap. */
   finishEarnMove?: boolean;
   onWithdrawFromEarn: () => void;
@@ -69,6 +74,8 @@ const AccountWithdrawChooserModal = ({
   onOpenChange,
   canWithdrawFromEarn,
   canCashOut,
+  earnUsd = 0,
+  algorandUsd = 0,
   finishEarnMove = false,
   onWithdrawFromEarn,
   onCashOut,
@@ -125,9 +132,12 @@ const AccountWithdrawChooserModal = ({
                   ? consumerCopy
                     ? "Send money from your account to a debit card or bank."
                     : "Off-ramp USDC from your account to a card or bank."
-                  : consumerCopy
-                    ? "Nothing available to cash out. Withdraw from Earn first if funds are still earning."
-                    : "No USDC available to cash out. Withdraw from savings first."
+                  : (cashOutEmptyDescription({
+                      consumerCopy,
+                      baseUsd: 0,
+                      earnUsd,
+                      algorandUsd,
+                    }) ?? "Nothing to cash out.")
               }
               icon={<ArrowDownToLine className="h-5 w-5" />}
               disabled={!canCashOut}

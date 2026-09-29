@@ -7,6 +7,11 @@ import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import { fetchBaseUsdcBalance } from "@/lib/easyStart/baseBalances";
+import {
+  cashOutEmptyBucket,
+  cashOutEmptyDescription,
+} from "@/lib/easyStart/cashOutBuckets";
+import { useEasyStartPortfolioTotal } from "@/hooks/useEasyStartPortfolioTotal";
 import type { CardProvider } from "@/components/easy-start/EasyStartCardProviderPicker";
 import type { Address } from "viem";
 import {
@@ -77,7 +82,7 @@ export function EasyStartWithdrawSheet({
   const address = evmAddress as Address | null;
   const cashOutProvider: CardProvider = "coinbase";
 
-  const { data: baseUsdc } = useQuery({
+  const { data: baseUsdc, isLoading: baseUsdcLoading } = useQuery({
     queryKey: ["easy-start-base-usdc", address],
     queryFn: () => fetchBaseUsdcBalance(address!),
     enabled: Boolean(open && address),
@@ -86,6 +91,20 @@ export function EasyStartWithdrawSheet({
 
   const availableNum = baseUsdc ? Number.parseFloat(baseUsdc.formatted) : 0;
   const hasAvailable = Number.isFinite(availableNum) && availableNum > 0.01;
+  const portfolio = useEasyStartPortfolioTotal();
+  const earnUsd = portfolio.depositUsd;
+  const algorandUsd = portfolio.algoWalletUsd ?? 0;
+  const bucketsLoading =
+    !hasAvailable &&
+    (portfolio.isLoading || (Boolean(address) && baseUsdcLoading && !baseUsdc));
+  const emptyDescription = bucketsLoading
+    ? null
+    : cashOutEmptyDescription({
+        consumerCopy,
+        baseUsd: Number.isFinite(availableNum) ? availableNum : 0,
+        earnUsd,
+        algorandUsd,
+      });
   const amountNum = Number(amount);
   const amountValid = Number.isFinite(amountNum) && amountNum > 0;
   const amountDisplay = formatCurrency(amountValid ? amountNum : 0, "USD", {
@@ -143,11 +162,25 @@ export function EasyStartWithdrawSheet({
       return;
     }
     if (amountNum > availableNum + 1e-9) {
-      setError(
-        consumerCopy
-          ? `You only have ${availableDisplay} available. If funds are in savings, withdraw from earn first.`
-          : `You only have ${availableDisplay} available. Withdraw from savings first if funds are still earning.`
-      );
+      const elsewhere = cashOutEmptyBucket({
+        baseUsd: 0,
+        earnUsd,
+        algorandUsd,
+      });
+      const ready = consumerCopy
+        ? `You only have ${availableDisplay} ready to cash out.`
+        : `You only have ${availableDisplay} available.`;
+      const hint =
+        elsewhere === "earn"
+          ? consumerCopy
+            ? " Withdraw from Earn first."
+            : " Withdraw from savings first."
+          : elsewhere === "algorand"
+            ? consumerCopy
+              ? " The rest is on Algorand. Move it to your account first."
+              : " The rest is on Algorand. Move it to Base before cashing out."
+            : "";
+      setError(`${ready}${hint}`);
       return;
     }
     setStep("review");
@@ -288,9 +321,9 @@ export function EasyStartWithdrawSheet({
 
                 {!hasAvailable ? (
                   <p className="text-sm text-amber-600 dark:text-amber-400 text-center">
-                    {consumerCopy
-                      ? "Nothing available to cash out yet. If funds are in savings, withdraw from earn first."
-                      : "Nothing available to cash out yet. Withdraw from savings first, then cash out here."}
+                    {bucketsLoading
+                      ? "Checking your balances…"
+                      : (emptyDescription ?? "Nothing to cash out.")}
                   </p>
                 ) : (
                   <div>

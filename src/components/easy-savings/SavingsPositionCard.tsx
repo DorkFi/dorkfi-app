@@ -20,6 +20,8 @@ type BalanceRange = (typeof BALANCE_RANGES)[number];
 export type PortfolioChartSeriesId =
   | "total"
   | "wallet"
+  | "cash_out"
+  | "algorand"
   | "savings"
   | "higher_yield";
 
