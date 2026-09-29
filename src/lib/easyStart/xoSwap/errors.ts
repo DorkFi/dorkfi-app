@@ -23,6 +23,16 @@ export function isXoGeoRestricted(error: unknown): boolean {
   );
 }
 
+export function isXoAbortError(error: unknown): boolean {
+  const name =
+    error && typeof error === "object" && "name" in error
+      ? String((error as { name: unknown }).name)
+      : "";
+  if (name === "AbortError" || name === "TimeoutError") return true;
+  if (!(error instanceof Error)) return false;
+  return error.message === "Aborted" || /timed out/i.test(error.message);
+}
+
 export function formatXoSwapError(error: unknown, fallback: string): string {
   if (isXoGeoRestricted(error)) return XO_GEO_RESTRICTED_MESSAGE;
   if (error instanceof Error && error.message.trim()) return error.message;

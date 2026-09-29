@@ -30,6 +30,7 @@ import {
   takeQueuedEasyStartLogin,
   type PrivyEasyStartState,
 } from "@/contexts/privyEasyStartContext";
+import { useSyncPendingEarnDeposit } from "@/hooks/usePendingEarnDeposit";
 import {
   isSponsorFullyFunded,
   requestEasyStartSponsor,
@@ -76,6 +77,7 @@ function PrivyEasyStartStateBridge({
   });
   const { signTypedData } = useSignTypedData();
   const { wallets } = useWallets();
+  useSyncPendingEarnDeposit();
 
   const login = useCallback(
     (options?: { loginMethods?: string[] }) => {

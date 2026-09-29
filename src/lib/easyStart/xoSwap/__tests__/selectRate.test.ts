@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { selectBestXoRate } from "@/lib/easyStart/xoSwap/selectRate";
+import { selectBestXoRate, xoRateBounds } from "@/lib/easyStart/xoSwap/selectRate";
 import type { XoRate } from "@/lib/easyStart/xoSwap/types";
 
 function rate(partial: Partial<XoRate> & { multiplier: number }): XoRate {
@@ -36,5 +36,22 @@ describe("selectBestXoRate", () => {
       10
     );
     expect(best?.toAmount).toBeCloseTo(98);
+  });
+
+  it("returns the live min/max envelope", () => {
+    const bounds = xoRateBounds(
+      [
+        rate({ multiplier: 0.99, min: { value: 5 }, max: { value: 50 } }),
+        rate({ multiplier: 0.98, min: { value: 20 }, max: { value: 200 } }),
+        rate({
+          multiplier: 1,
+          min: { value: 1 },
+          max: { value: 10_000 },
+          expiry: 1,
+        }),
+      ],
+      10
+    );
+    expect(bounds).toEqual({ min: 5, max: 200 });
   });
 });

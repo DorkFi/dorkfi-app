@@ -4,8 +4,6 @@ import {
   createXoFixedOrder,
   createXoFloatingOrder,
   fetchXoOrder,
-  fetchXoPairQuote,
-  fetchXoPairRates,
   fetchXoSwapHealth,
   updateXoOrder,
 } from "@/lib/easyStart/xoSwap/api";
@@ -15,8 +13,11 @@ import {
   XO_SWAP_MAX_POLLS,
   XO_SWAP_POLL_MS,
 } from "@/lib/easyStart/xoSwap/constants";
-import { isXoGeoRestricted } from "@/lib/easyStart/xoSwap/errors";
-import { selectBestXoRate } from "@/lib/easyStart/xoSwap/selectRate";
+import {
+  isXoAbortError,
+  isXoGeoRestricted,
+} from "@/lib/easyStart/xoSwap/errors";
+import { quoteXoPair } from "@/lib/easyStart/xoSwap/quotePair";
 import {
   isAlgoCreditArrived,
   isBaseCreditArrived,
@@ -140,45 +141,31 @@ export async function runXoUsdcSwap(
     throw new DOMException("Aborted", "AbortError");
   }
 
-  let toAmount: number;
-  let useFloating = false;
-
+  let quoted;
   try {
-    const rates = await fetchXoPairRates(pairId, xoReq);
-    const best = selectBestXoRate(rates, fromAmount);
-    if (!best) {
-      throw new Error("No fixed rate for this amount");
-    }
-    toAmount = best.toAmount;
+    quoted = await quoteXoPair(pairId, fromAmount, xoReq);
   } catch (err) {
     if (isXoGeoRestricted(err)) {
       throw err instanceof Error
         ? err
         : new Error("USDC moves aren’t available in your region yet.");
     }
-    const name = (err as { name?: string })?.name;
-    if (
-      name === "AbortError" ||
-      name === "TimeoutError" ||
-      (err instanceof Error &&
-        (err.message === "Aborted" || /timed out/i.test(err.message)))
-    ) {
-      throw err;
-    }
-    // Fall back to floating quote when fixed rates unavailable / amount too large.
-    console.warn("XO Swap fixed rates unavailable, trying quote", err);
-    const quote = await fetchXoPairQuote(pairId, fromAmount, xoReq);
-    const quoted = quote.toAmount?.value;
-    if (typeof quoted !== "number" || quoted <= 0) {
-      throw new Error(
-        err instanceof Error
-          ? err.message
-          : "Could not get an XO Swap rate for this pair"
-      );
-    }
-    toAmount = quoted;
-    useFloating = true;
+    if (isXoAbortError(err)) throw err;
+    throw err;
   }
+
+  if (!quoted.inRange || quoted.toAmount == null) {
+    if (quoted.min != null && fromAmount < quoted.min) {
+      throw new Error(`Amount is below the ${quoted.min} USDC minimum`);
+    }
+    if (quoted.max != null && fromAmount > quoted.max) {
+      throw new Error(`Amount is above the ${quoted.max} USDC maximum`);
+    }
+    throw new Error("No XO Swap rate for this amount");
+  }
+
+  const toAmount = quoted.toAmount;
+  const useFloating = quoted.useFloating;
 
   if (args.signal?.aborted) {
     throw new DOMException("Aborted", "AbortError");

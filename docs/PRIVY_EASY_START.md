@@ -77,8 +77,11 @@ The Vite plugin `plugins/sponsorApiPlugin.ts` serves:
 
 - `GET /api/easy-start/health`
 - `POST /api/easy-start/sponsor` (requires `Authorization: Bearer <Privy access token>`)
+- `GET|PUT|DELETE /api/easy-start/pending-deposit` (same Bearer token)
 
 Off until `SPONSOR_ENABLED=true`. When a signed-in Easy Start wallet is below the Deposit to Earn floors (0.00005 ETH on Base / 0.1 spendable ALGO), the handler sends **0.0001 ETH** and **1 ALGO** from dedicated treasuries. The Algorand address is re-derived server-side; the EVM destination must match a Privy wallet on the JWT.
+
+Pending Deposit to Earn is stored in `localStorage` for 7 days, keyed by Algorand address (this browser only). Login merges that job with `GET /api/easy-start/pending-deposit` so a second device can finish supply. PUT/DELETE keep the server copy in sync. The Savings banner resumes once the job is visible.
 
 Put treasury keys in `.env` (never `VITE_*`). Create dedicated treasuries — do not reuse personal or offramp keys. The client calls this on login and again before Deposit to Earn; a missed or failed send still falls through to the existing ETH/ALGO balance checks.
 
@@ -119,6 +122,7 @@ Cash-out flow after bridge:
 | Off-ramp API (dev) | `server/offramp/handlers.ts` + `plugins/offrampApiPlugin.ts` |
 | XO Swap API (dev) | `server/xoSwap/handlers.ts` + `plugins/xoSwapApiPlugin.ts` |
 | Gas sponsor (ETH + ALGO) | `server/sponsor/handlers.ts` + `plugins/sponsorApiPlugin.ts` — `POST /api/easy-start/sponsor` |
+| Pending Deposit to Earn | `server/sponsor/pendingDepositStore.ts` — `GET|PUT|DELETE /api/easy-start/pending-deposit` |
 | Headless XO Swap | `src/components/easy-start/EasyStartHeadlessBridge.tsx` (both directions) |
 | Swap orchestrator | `src/lib/easyStart/xoSwap/runUsdcSwap.ts` |
 | Advanced swap UI | `src/components/easy-start/EasyStartBridgeSheet.tsx` — escape hatch |

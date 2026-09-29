@@ -56,8 +56,8 @@ import { CASH_OUT_MIN_USD } from "@/lib/easyStart/cashOutBuckets";
 import {
   isPendingEarnFunded,
   pendingEarnSupplyAmount,
-  readPendingEarnDeposit,
 } from "@/lib/easyStart/pendingEarnDeposit";
+import { usePendingEarnDeposit } from "@/hooks/usePendingEarnDeposit";
 import {
   clearPendingEarnWithdraw,
   isPendingEarnWithdrawComplete,
@@ -250,6 +250,7 @@ const SavingsCard = () => {
     () => readPendingEarnWithdraw(activeAccount?.address),
     [activeAccount?.address, outboundRev]
   );
+  const pendingEarnJob = usePendingEarnDeposit(activeAccount?.address);
 
   useEffect(() => {
     if (!pendingWithdraw || walletUsdcBase == null) return;
@@ -733,7 +734,6 @@ const SavingsCard = () => {
         (isWalletAccount && positionsLoading))
     );
 
-  const pendingEarnJob = readPendingEarnDeposit(activeAccount?.address);
   const pendingEarnLeftover =
     pendingEarnJob && walletUsdcAlgo != null
       ? pendingEarnSupplyAmount(pendingEarnJob, walletUsdcAlgo)

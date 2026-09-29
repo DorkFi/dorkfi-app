@@ -1,10 +1,15 @@
 /**
  * Resume Deposit to Earn after Exodus has paid Algorand but the supply
  * step never ran (tab close, delayed order status, poll abort).
+ *
+ * localStorage is keyed by Algorand address and only lasts 7 days in this
+ * browser. Cross-device resume is GET/PUT `/api/easy-start/pending-deposit`
+ * (Privy JWT), merged into local on login.
  */
 import { isAlgoCreditArrived } from "@/lib/easyStart/xoSwap/settle";
 
 export const PENDING_EARN_DEPOSIT_KEY = "simplfi.earn.pending_deposit";
+export const PENDING_EARN_DEPOSIT_EVENT = "simplfi.earn.pending_deposit";
 const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type PendingEarnDeposit = {
@@ -30,7 +35,23 @@ function getLocalStorage(): Storage | null {
   }
 }
 
-function isPendingEarnDeposit(value: unknown): value is PendingEarnDeposit {
+function notifyPendingEarnDepositChanged(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(PENDING_EARN_DEPOSIT_EVENT));
+}
+
+export function parsePendingEarnDeposit(
+  value: unknown,
+  now = Date.now()
+): PendingEarnDeposit | null {
+  if (!isPendingEarnDeposit(value, now)) return null;
+  return value;
+}
+
+function isPendingEarnDeposit(
+  value: unknown,
+  now = Date.now()
+): value is PendingEarnDeposit {
   if (!value || typeof value !== "object") return false;
   const job = value as PendingEarnDeposit;
   if (typeof job.algorandAddress !== "string" || !job.algorandAddress.trim()) {
@@ -47,7 +68,7 @@ function isPendingEarnDeposit(value: unknown): value is PendingEarnDeposit {
     return false;
   }
   if (typeof job.at !== "number" || !Number.isFinite(job.at)) return false;
-  if (Date.now() - job.at > MAX_AGE_MS) return false;
+  if (now - job.at > MAX_AGE_MS) return false;
   return true;
 }
 
@@ -68,6 +89,7 @@ export function savePendingEarnDeposit(
     at: job.at ?? Date.now(),
   };
   getLocalStorage()?.setItem(PENDING_EARN_DEPOSIT_KEY, JSON.stringify(next));
+  notifyPendingEarnDepositChanged();
   return next;
 }
 
@@ -79,7 +101,7 @@ export function readPendingEarnDeposit(
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!isPendingEarnDeposit(parsed)) {
-      clearPendingEarnDeposit();
+      getLocalStorage()?.removeItem(PENDING_EARN_DEPOSIT_KEY);
       return null;
     }
     if (
@@ -90,7 +112,7 @@ export function readPendingEarnDeposit(
     }
     return parsed;
   } catch {
-    clearPendingEarnDeposit();
+    getLocalStorage()?.removeItem(PENDING_EARN_DEPOSIT_KEY);
     return null;
   }
 }
@@ -108,6 +130,41 @@ export function patchPendingEarnDeposit(
 
 export function clearPendingEarnDeposit(): void {
   getLocalStorage()?.removeItem(PENDING_EARN_DEPOSIT_KEY);
+  notifyPendingEarnDepositChanged();
+}
+
+export function subscribePendingEarnDeposit(onStoreChange: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === PENDING_EARN_DEPOSIT_KEY || event.key === null) {
+      onStoreChange();
+    }
+  };
+  window.addEventListener(PENDING_EARN_DEPOSIT_EVENT, onStoreChange);
+  window.addEventListener("storage", onStorage);
+  return () => {
+    window.removeEventListener(PENDING_EARN_DEPOSIT_EVENT, onStoreChange);
+    window.removeEventListener("storage", onStorage);
+  };
+}
+
+function jobInFlight(job: PendingEarnDeposit): boolean {
+  return Boolean(job.fromTxId || job.orderId);
+}
+
+/** Prefer an in-flight Exodus job, then the newer `at`. */
+export function mergePendingEarnDeposits(
+  local: PendingEarnDeposit | null,
+  remote: PendingEarnDeposit | null
+): PendingEarnDeposit | null {
+  if (!local) return remote;
+  if (!remote) return local;
+  const localFlying = jobInFlight(local);
+  const remoteFlying = jobInFlight(remote);
+  if (localFlying !== remoteFlying) {
+    return localFlying ? local : remote;
+  }
+  return local.at >= remote.at ? local : remote;
 }
 
 export function isPendingEarnFunded(

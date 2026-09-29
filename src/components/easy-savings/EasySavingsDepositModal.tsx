@@ -51,7 +51,13 @@ import {
   bridgePhaseLabel,
   type EasyStartBridgePhase,
 } from "@/components/easy-start/easyStartBridgePhase";
-import { isXoGeoRestricted } from "@/lib/easyStart/xoSwap/errors";
+import { isXoGeoRestricted, XO_GEO_RESTRICTED_MESSAGE } from "@/lib/easyStart/xoSwap/errors";
+import { XO_PAIR_BASE_TO_ALGO } from "@/lib/easyStart/xoSwap/constants";
+import {
+  quoteXoPair,
+  xoPairQuoteExpired,
+  xoPairQuoteOutOfRangeMessage,
+} from "@/lib/easyStart/xoSwap/quotePair";
 import {
   clearPendingEarnDeposit,
   isPendingEarnFunded,
@@ -61,6 +67,8 @@ import {
   readPendingEarnDeposit,
   savePendingEarnDeposit,
 } from "@/lib/easyStart/pendingEarnDeposit";
+import { usePendingEarnDeposit } from "@/hooks/usePendingEarnDeposit";
+import { useXoDepositQuote } from "@/hooks/useXoDepositQuote";
 import type { Address } from "viem";
 import {
   applyOptimisticSavingsPosition,
@@ -81,6 +89,8 @@ type CtaState =
   | "enter_amount"
   | "insufficient_balance"
   | "cap_exceeded"
+  | "swap_below_min"
+  | "swap_above_max"
   | "supply";
 
 type FlowPhase = "idle" | "bridging" | "supplying";
@@ -185,7 +195,7 @@ const EasySavingsDepositModal = ({
   const logo = route?.asset.logoPath || "/placeholder.svg";
   const amountNum = parseFloat(amount) || 0;
 
-  const pendingEarn = readPendingEarnDeposit(activeAccount?.address);
+  const pendingEarn = usePendingEarnDeposit(activeAccount?.address);
 
   useEffect(() => {
     if (!isOpen) {
@@ -198,7 +208,7 @@ const EasySavingsDepositModal = ({
     setRainbowkitSignDialogSuppressed(false);
     setFlowError(null);
 
-    const job = readPendingEarnDeposit(activeAccount?.address);
+    const job = pendingEarn ?? readPendingEarnDeposit(activeAccount?.address);
     if (job && route?.asset.configKey === "USDC") {
       setAmount(String(job.wantedAmount));
       pendingSupplyRef.current = String(job.wantedAmount);
@@ -213,7 +223,25 @@ const EasySavingsDepositModal = ({
     setBaselineAlgoUsdc(null);
     setWatchOnly(false);
     pendingSupplyRef.current = null;
-  }, [isOpen, route?.asset.configKey, route?.poolId, activeAccount?.address]);
+  }, [
+    isOpen,
+    route?.asset.configKey,
+    route?.poolId,
+    activeAccount?.address,
+    pendingEarn?.at,
+    pendingEarn?.fromTxId,
+  ]);
+
+  const needsSwap =
+    enableBaseBridge &&
+    amountNum > algoWallet + 0.01 &&
+    !pendingEarnBlocksNewSwap(pendingEarn, amountNum);
+  const swapFromAmount = Math.max(0, amountNum - algoWallet);
+  const xoQuote = useXoDepositQuote({
+    enabled: Boolean(isOpen && needsSwap && swapFromAmount > 0),
+    fromAmount: swapFromAmount,
+  });
+  const xoGeoBlocked = isXoGeoRestricted(xoQuote.error) || isXoGeoRestricted(flowError);
 
   const ctaState: CtaState = (() => {
     if (!activeAccount) return "connect";
@@ -227,19 +255,36 @@ const EasySavingsDepositModal = ({
     ) {
       return "cap_exceeded";
     }
+    if (needsSwap && xoQuote.data && !xoQuote.data.inRange) {
+      if (
+        xoQuote.data.min != null &&
+        swapFromAmount < xoQuote.data.min
+      ) {
+        return "swap_below_min";
+      }
+      if (
+        xoQuote.data.max != null &&
+        swapFromAmount > xoQuote.data.max
+      ) {
+        return "swap_above_max";
+      }
+    }
     return "supply";
   })();
-
-  const needsSwap =
-    enableBaseBridge &&
-    amountNum > algoWallet + 0.01 &&
-    !pendingEarnBlocksNewSwap(pendingEarn, amountNum);
 
   const ctaLabel: Record<CtaState, string> = {
     connect: consumerCopy ? "Get Started" : "Connect Wallet",
     enter_amount: "Enter Amount",
     insufficient_balance: "Insufficient Balance",
     cap_exceeded: consumerCopy ? "Limit Reached" : "Supply Cap Reached",
+    swap_below_min:
+      xoQuote.data?.min != null
+        ? `Minimum is ${formatToken(xoQuote.data.min)} USDC`
+        : "Amount too small",
+    swap_above_max:
+      xoQuote.data?.max != null
+        ? `Maximum is ${formatToken(xoQuote.data.max)} USDC`
+        : "Amount too large",
     supply: isSubmitting
       ? flowPhase === "bridging"
         ? consumerCopy
@@ -260,8 +305,18 @@ const EasySavingsDepositModal = ({
   const busy =
     isSubmitting || flowPhase === "bridging" || flowPhase === "supplying";
 
+  const swapQuoteBlocksConfirm =
+    needsSwap &&
+    (xoGeoBlocked ||
+      xoQuote.isError ||
+      (xoQuote.isPending && !xoQuote.data) ||
+      (xoQuote.data != null &&
+        (!xoQuote.data.inRange || xoQuote.data.toAmount == null)));
+
   const ctaDisabled =
-    busy || (ctaState !== "connect" && ctaState !== "supply");
+    busy ||
+    (ctaState !== "connect" && ctaState !== "supply") ||
+    swapQuoteBlocksConfirm;
 
   const refreshAfterConfirmedSupply = (
     supplyAmount: string
@@ -429,7 +484,7 @@ const EasySavingsDepositModal = ({
   useEffect(() => {
     if (!isOpen || resumeAttemptedRef.current) return;
     if (!activeAccount?.address || route?.asset.configKey !== "USDC") return;
-    const job = readPendingEarnDeposit(activeAccount.address);
+    const job = pendingEarn ?? readPendingEarnDeposit(activeAccount.address);
     if (!job) return;
     resumeAttemptedRef.current = true;
     void (async () => {
@@ -449,7 +504,7 @@ const EasySavingsDepositModal = ({
         setIsSubmitting(true);
       }
     })();
-  }, [isOpen, activeAccount?.address, route?.asset.configKey]);
+  }, [isOpen, activeAccount?.address, route?.asset.configKey, pendingEarn]);
 
   useEffect(() => {
     if (!isOpen || flowPhase !== "bridging" || !watchOnly) return;
@@ -588,12 +643,26 @@ const EasySavingsDepositModal = ({
         const liveUsdc = await fetchAlgorandUsdcBalance(activeAccount.address);
         const baseline = Number.parseFloat(liveUsdc.formatted);
         const baselineSafe = Number.isFinite(baseline) ? baseline : algoWallet;
+        let preview = xoQuote.data;
+        if (
+          !preview?.toAmount ||
+          !preview.inRange ||
+          xoPairQuoteExpired(preview)
+        ) {
+          preview = await quoteXoPair(XO_PAIR_BASE_TO_ALGO, fromBase);
+        }
+        if (!preview.inRange || preview.toAmount == null) {
+          throw new Error(
+            xoPairQuoteOutOfRangeMessage(preview) ??
+              "This amount is outside the USDC move range"
+          );
+        }
         savePendingEarnDeposit({
           algorandAddress: activeAccount.address,
           evmAddress: evmAddress ?? undefined,
           wantedAmount: amountNum,
           fromBaseAmount: fromBase,
-          expectedToAmount: fromBase,
+          expectedToAmount: preview.toAmount,
           algoUsdcBefore: baselineSafe,
           poolId: route.poolId,
           assetConfigKey: route.asset.configKey,
@@ -612,14 +681,18 @@ const EasySavingsDepositModal = ({
       if (isRainbowkitXchainWallet(activeWallet)) {
         setRainbowkitSignDialogSuppressed(false);
       }
-      const { userRejected, message } = getTransactionErrorFeedback(e);
+      const { userRejected, message: raw } = getTransactionErrorFeedback(e);
+      const geo = isXoGeoRestricted(e) || isXoGeoRestricted(raw);
+      const message = geo ? XO_GEO_RESTRICTED_MESSAGE : raw;
       setFlowError(message);
-      toast({
-        title: userRejected ? "Deposit cancelled" : "Deposit failed",
-        description: message,
-        variant: "destructive",
-        duration: 14_000,
-      });
+      if (!geo) {
+        toast({
+          title: userRejected ? "Deposit cancelled" : "Deposit failed",
+          description: message,
+          variant: "destructive",
+          duration: 14_000,
+        });
+      }
     } finally {
       if (!holdBusy) {
         setIsSubmitting(false);
@@ -793,11 +866,63 @@ const EasySavingsDepositModal = ({
                   <SavingsSummary route={route} amount={amount} quote={quote} />
 
                   {needsSwap ? (
-                    <p className="text-[11px] text-muted-foreground text-center">
-                      {consumerCopy
-                        ? "We’ll move funds from your account into savings. A small conversion fee may apply."
-                        : "We’ll XO Swap Base USDC to Algorand, then supply. Spread/fees apply."}
-                    </p>
+                    <div className="rounded-2xl border border-border/60 divide-y divide-border/50 text-sm">
+                      <div className="flex items-start justify-between gap-3 px-4 py-2.5">
+                        <span className="text-muted-foreground shrink-0">
+                          {consumerCopy ? "Send" : "Send from Base"}
+                        </span>
+                        <span className="font-medium text-right">
+                          {formatToken(swapFromAmount, 6)} USDC
+                        </span>
+                      </div>
+                      <div className="flex items-start justify-between gap-3 px-4 py-2.5">
+                        <span className="text-muted-foreground shrink-0">
+                          {consumerCopy
+                            ? "Estimated receive"
+                            : "Estimated Algorand USDC"}
+                        </span>
+                        <span className="font-medium text-right">
+                          {xoQuote.data?.toAmount != null
+                            ? `~${formatToken(xoQuote.data.toAmount, 6)} USDC`
+                            : xoGeoBlocked
+                              ? "—"
+                              : xoQuote.isPending
+                                ? "Getting a receive amount…"
+                                : "—"}
+                        </span>
+                      </div>
+                      <div className="flex items-start justify-between gap-3 px-4 py-2.5">
+                        <span className="text-muted-foreground shrink-0">
+                          {consumerCopy
+                            ? "Conversion fee"
+                            : "Spread / miner fee"}
+                        </span>
+                        <span className="font-medium text-right">
+                          {xoQuote.data?.toAmount != null
+                            ? `${formatToken(
+                                Math.max(
+                                  0,
+                                  swapFromAmount - xoQuote.data.toAmount
+                                ),
+                                6
+                              )} USDC`
+                            : "—"}
+                        </span>
+                      </div>
+                      <div className="flex items-start justify-between gap-3 px-4 py-2.5">
+                        <span className="text-muted-foreground shrink-0">
+                          Min / max
+                        </span>
+                        <span className="font-medium text-right">
+                          {xoQuote.data?.min != null &&
+                          xoQuote.data.max != null
+                            ? `${formatToken(xoQuote.data.min)} – ${formatToken(
+                                xoQuote.data.max
+                              )} USDC`
+                            : "—"}
+                        </span>
+                      </div>
+                    </div>
                   ) : null}
 
                   {!consumerCopy ? (
@@ -845,12 +970,19 @@ const EasySavingsDepositModal = ({
                   {quote.error ? (
                     <p className="text-xs text-destructive">{quote.error}</p>
                   ) : null}
-                  {flowError ? (
+                  {flowError && !isXoGeoRestricted(flowError) ? (
                     <p className="text-xs text-destructive">{flowError}</p>
                   ) : null}
-                  {isXoGeoRestricted(flowError) ? (
+                  {xoQuote.isError &&
+                  !xoGeoBlocked &&
+                  !isXoGeoRestricted(flowError) ? (
                     <p className="text-xs text-destructive">
-                      USDC moves aren’t available in your region yet.
+                      Couldn’t get a receive amount. Try again.
+                    </p>
+                  ) : null}
+                  {xoGeoBlocked ? (
+                    <p className="text-xs text-destructive">
+                      {XO_GEO_RESTRICTED_MESSAGE}
                     </p>
                   ) : null}
 

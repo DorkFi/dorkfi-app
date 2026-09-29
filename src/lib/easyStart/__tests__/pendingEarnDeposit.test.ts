@@ -3,6 +3,7 @@ import {
   PENDING_EARN_DEPOSIT_KEY,
   clearPendingEarnDeposit,
   isPendingEarnFunded,
+  mergePendingEarnDeposits,
   patchPendingEarnDeposit,
   pendingEarnBlocksNewSwap,
   pendingEarnSupplyAmount,
@@ -70,5 +71,24 @@ describe("pendingEarnDeposit amounts", () => {
     expect(pendingEarnBlocksNewSwap({ ...job, fromTxId: "0xabc" }, 120)).toBe(
       false
     );
+  });
+});
+
+describe("mergePendingEarnDeposits", () => {
+  it("prefers the job that already opened an Exodus order", () => {
+    const local = { ...job, at: 1 };
+    const remote = { ...job, at: 2, fromTxId: "0xabc", expectedToAmount: 29.9 };
+    expect(mergePendingEarnDeposits(local, remote)?.fromTxId).toBe("0xabc");
+    expect(
+      mergePendingEarnDeposits({ ...remote, at: 1 }, { ...local, at: 9 })
+        ?.fromTxId
+    ).toBe("0xabc");
+  });
+
+  it("prefers the newer job when neither is in flight", () => {
+    expect(
+      mergePendingEarnDeposits({ ...job, at: 1 }, { ...job, at: 5, wantedAmount: 80 })
+        ?.wantedAmount
+    ).toBe(80);
   });
 });

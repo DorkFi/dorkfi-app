@@ -28,6 +28,11 @@ import {
   fetchPrivyWalletAddresses,
 } from "./privyWallets.ts";
 import { createRateLimiter, withInflightLock } from "./rateLimit.ts";
+import {
+  deletePendingEarnDepositJob,
+  getPendingEarnDepositJob,
+  setPendingEarnDepositJob,
+} from "./pendingDepositStore.ts";
 
 export type SponsorLegStatus = "sent" | "skipped" | "error";
 
@@ -79,6 +84,7 @@ function parseEvmAddress(raw: unknown): string {
 }
 
 const userRateLimit = createRateLimiter({ max: 5, windowMs: 60_000 });
+const pendingDepositRateLimit = createRateLimiter({ max: 30, windowMs: 60_000 });
 
 export async function runSponsorJob(
   env: SponsorEnv,
@@ -194,6 +200,53 @@ export async function handleSponsor(
   }
 }
 
+async function handlePendingDeposit(
+  req: IncomingMessage,
+  res: ServerResponse,
+  env: SponsorEnv
+): Promise<void> {
+  try {
+    const { userId } = await requirePrivyAuth(req, env.privyAppId);
+    if (!pendingDepositRateLimit.allow(userId)) {
+      sendJson(res, 429, { error: "Too many pending deposit requests" });
+      return;
+    }
+    const method = (req.method || "GET").toUpperCase();
+    if (method === "GET") {
+      sendJson(res, 200, { job: getPendingEarnDepositJob(userId) });
+      return;
+    }
+    if (method === "DELETE") {
+      deletePendingEarnDepositJob(userId);
+      sendJson(res, 200, { ok: true, job: null });
+      return;
+    }
+    if (method === "PUT") {
+      const body = await readJsonBody(req);
+      const job = setPendingEarnDepositJob(userId, body);
+      if (!job) {
+        sendJson(res, 400, { error: "Invalid pending deposit" });
+        return;
+      }
+      sendJson(res, 200, { job });
+      return;
+    }
+    sendJson(res, 405, { error: "Method not allowed" });
+  } catch (error) {
+    if (error instanceof AuthError) {
+      sendJson(res, error.status, { error: error.message });
+      return;
+    }
+    if (error instanceof SyntaxError) {
+      sendJson(res, 400, { error: "Invalid JSON" });
+      return;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[pending-deposit] request failed", message);
+    sendJson(res, 500, { error: "Pending deposit request failed" });
+  }
+}
+
 export async function handleSponsorHealth(
   _req: IncomingMessage,
   res: ServerResponse,
@@ -219,6 +272,15 @@ export function routeSponsorRequest(
   }
   if (path === "/api/easy-start/sponsor" && req.method === "POST") {
     return handleSponsor(req, res, env).then(() => true);
+  }
+  if (path === "/api/easy-start/pending-deposit") {
+    const method = (req.method || "GET").toUpperCase();
+    if (method === "OPTIONS") {
+      res.statusCode = 204;
+      res.end();
+      return Promise.resolve(true);
+    }
+    return handlePendingDeposit(req, res, env).then(() => true);
   }
   return Promise.resolve(false);
 }
