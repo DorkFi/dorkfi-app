@@ -36,6 +36,15 @@ export function isTransactionUserRejection(error: unknown): boolean {
   return false;
 }
 
+/** True when the failure is a market snapshot read, not a dropped connection. */
+export function isMarketInfoReadFailure(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("could not read market info") ||
+    lower.includes("failed to fetch market info")
+  );
+}
+
 /** Wallet rejected txn list because atomic group structure is invalid (ARC-0001 / Lute 4300). */
 export function isInvalidGroupSignError(error: unknown): boolean {
   const msg = errorMessageString(error).toLowerCase();
@@ -119,6 +128,11 @@ export function getUserFriendlyError(error: unknown): string {
     errorMessage.toLowerCase().includes("balance")
   ) {
     return "Insufficient balance for this transaction. Please check your wallet balance and try again.";
+  }
+
+  // Market snapshot failures name the pool and market. Do not rewrite them as an internet outage.
+  if (isMarketInfoReadFailure(errorMessage)) {
+    return errorMessage;
   }
 
   // Handle network/connection errors

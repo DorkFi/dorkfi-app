@@ -67,6 +67,10 @@ import {
   folksUnderlyingHumanToFAssetHuman,
 } from "@/services/folksDepositAdapter";
 import { getExplorerTransactionUrl } from "@/utils/explorerLinks";
+import {
+  HUMAN_AMOUNT_QUICK_SELECTS,
+  percentOfHumanTokenAmount,
+} from "@/utils/assetDecimals";
 import TransactionSignPreview from "./TransactionSignPreview";
 import { useToast } from "@/hooks/use-toast";
 
@@ -890,10 +894,19 @@ const WithdrawModal = ({
   }, [amount, marketStats.tokenPrice, oracleTokenPrice]);
 
   const handleMaxClick = () => {
-    // Use health-factor-safe max when available (getMaxWithdrawable), else full deposit
+    // Use health-factor-safe max when available (getMaxWithdrawable), else full deposit.
+    // Sets withdrawViaMax so a full exit uses the scaled nToken amount.
     setWithdrawViaMax(true);
     const formattedAmount = parseFloat(effectiveMaxWithdraw.toFixed(displayDecimals));
     setAmount(formattedAmount);
+  };
+
+  const handlePercentClick = (ratio: string) => {
+    // Partial amounts stay on the specific-amount path. Health-factor checks still apply.
+    setWithdrawViaMax(false);
+    setAmount(
+      percentOfHumanTokenAmount(currentDepositValue, ratio, displayDecimals)
+    );
   };
 
   const handleViewTransaction = () => {
@@ -1533,7 +1546,7 @@ const WithdrawModal = ({
                     }}
                     formatOptions={{ maximumFractionDigits: displayDecimals }}
                     className={`bg-white/80 dark:bg-slate-800 border-gray-300 dark:border-slate-600 text-slate-800 dark:text-white text-lg h-12 ${
-                      withdrawMultiRoute ? "pr-36" : "pr-16"
+                      withdrawMultiRoute ? "pr-36" : ""
                     }`}
                   />
                   {withdrawMultiRoute ? (
@@ -1555,17 +1568,33 @@ const WithdrawModal = ({
                         />
                       </Button>
                     </div>
-                  ) : (
+                  ) : null}
+                </div>
+                {currentDepositValue > 0 && (
+                  <div className="flex gap-1.5">
+                    {HUMAN_AMOUNT_QUICK_SELECTS.map(({ ratio, label }) => (
+                      <Button
+                        key={ratio}
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handlePercentClick(ratio)}
+                        className="h-8 min-w-0 flex-1 px-1 text-xs border-red-200 text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-900/20"
+                      >
+                        {label}
+                      </Button>
+                    ))}
                     <Button
+                      type="button"
                       size="sm"
-                      variant="ghost"
+                      variant="outline"
                       onClick={handleMaxClick}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-red-400 hover:bg-red-400/10 h-8 px-3"
+                      className="h-8 min-w-0 flex-1 px-1 text-xs border-red-200 text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-900/20"
                     >
                       MAX
                     </Button>
-                  )}
-                </div>
+                  </div>
+                )}
                 {fiatValue > 0 && (
                   <p className="text-sm text-slate-500 dark:text-slate-400">
                     ≈ $

@@ -90,7 +90,10 @@ import {
 } from "@/wallet/xchainSignUi";
 import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
 import { spendableAlgoHumanFromAccount } from "@/utils/algorandWalletBalance";
-import { getUserFriendlyError } from "@/utils/errorUtils";
+import {
+  getUserFriendlyError,
+  isMarketInfoReadFailure,
+} from "@/utils/errorUtils";
 import {
   ALGORAND_MAINNET_NODELY_ALGOD_URL,
   MainnetConsensusConfig,
@@ -3175,6 +3178,8 @@ const SupplyBorrowModal = ({
             mode === "deposit"
               ? "Insufficient wallet balance for this transaction"
               : "Insufficient liquidity or collateral for this transaction";
+        } else if (isMarketInfoReadFailure(message)) {
+          errorMessage = message;
         } else if (
           messageLower.includes("connection") ||
           messageLower.includes("network request failed") ||

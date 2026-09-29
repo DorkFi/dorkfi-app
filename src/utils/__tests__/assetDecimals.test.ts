@@ -14,6 +14,8 @@ import {
   resolveUsdPerTokenFromMarketInfo,
   usdPerTokenFromPortfolioMarketRow,
   usdValueForHumanTokenAmount,
+  floorHumanTokenAmount,
+  percentOfHumanTokenAmount,
 } from "../assetDecimals";
 
 describe("getDisplayDecimals", () => {
@@ -207,6 +209,33 @@ describe("usdPerTokenFromPortfolioMarketRow", () => {
         { displaySymbol: "WAD" }
       )
     ).toBeCloseTo(1, 5);
+  });
+});
+
+describe("floorHumanTokenAmount", () => {
+  it("floors to token decimals instead of rounding up", () => {
+    expect(floorHumanTokenAmount(1.23456789, 6)).toBe(1.234567);
+    expect(floorHumanTokenAmount(250.0000009, 6)).toBe(250);
+  });
+
+  it("returns 0 for non-positive or non-finite values", () => {
+    expect(floorHumanTokenAmount(0, 6)).toBe(0);
+    expect(floorHumanTokenAmount(-1, 6)).toBe(0);
+    expect(floorHumanTokenAmount(Number.NaN, 6)).toBe(0);
+  });
+});
+
+describe("percentOfHumanTokenAmount", () => {
+  it("matches supply and withdraw quick-select examples", () => {
+    expect(percentOfHumanTokenAmount(1000, "0.25", 6)).toBe(250);
+    expect(percentOfHumanTokenAmount(1000, "0.1", 6)).toBe(100);
+    expect(percentOfHumanTokenAmount(1000, "0.5", 6)).toBe(500);
+    expect(percentOfHumanTokenAmount(1000, "0.75", 6)).toBe(750);
+  });
+
+  it("floors so the result cannot exceed the source balance", () => {
+    expect(percentOfHumanTokenAmount(1.0000004, "0.1", 6)).toBe(0.1);
+    expect(percentOfHumanTokenAmount(0.000001, "0.1", 6)).toBe(0);
   });
 });
 
