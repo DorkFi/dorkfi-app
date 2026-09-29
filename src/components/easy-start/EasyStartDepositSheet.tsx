@@ -26,6 +26,15 @@ import { isXoGeoRestricted } from "@/lib/easyStart/xoSwap/errors";
 import type { DepositCardProvider } from "@/components/easy-start/EasyStartCardProviderPicker";
 import { createCoinbaseSession } from "@/lib/easyStart/offrampApi";
 import {
+  BANK_DEPOSIT_MIN_GAIN_USDC,
+  BANK_DEPOSIT_POLL_MS,
+  bankDepositBaseline,
+  clearPendingBankDeposit,
+  readPendingBankDeposit,
+  savePendingBankDeposit,
+  type PendingBankDeposit,
+} from "@/lib/easyStart/pendingBankDeposit";
+import {
   AmountHero,
   AmountPresets,
   ApplePayGlyph,
@@ -66,6 +75,14 @@ interface EasyStartDepositSheetProps {
   onOpenChange: (open: boolean) => void;
   /** Optional escape hatch to the advanced XO Swap UI. */
   onOpenAdvancedBridge?: () => void;
+  /** Saved bank deposit to restore after the sheet was closed. */
+  resumeBankDeposit?: PendingBankDeposit | null;
+  /** Fired when the user dismisses the follow-through and the watch should stop. */
+  onBankDepositSettled?: () => void;
+  /** Funds were seen. Stops the closed-sheet watcher from opening Add money again. */
+  onBankDepositDetected?: () => void;
+  /** The closed-sheet watch already saw the USDC credit. Skip the waiting screen. */
+  bankDepositArrived?: boolean;
 }
 
 function isUserCanceledFunding(message: string): boolean {
@@ -93,6 +110,10 @@ export function EasyStartDepositSheet({
   open,
   onOpenChange,
   onOpenAdvancedBridge,
+  resumeBankDeposit = null,
+  onBankDepositSettled,
+  onBankDepositDetected,
+  bankDepositArrived = false,
 }: EasyStartDepositSheetProps) {
   const { fundWallet } = useFundWallet();
   const { fund: fundFiatOnramp } = useFiatOnramp();
@@ -101,18 +122,25 @@ export function EasyStartDepositSheet({
   const { formatCurrency } = useNumberI18n();
   const { toast } = useToast();
 
-  const [amount, setAmount] = useState("100");
+  const [amount, setAmount] = useState(resumeBankDeposit?.amount ?? "100");
   const [method, setMethod] = useState<DepositPayMethod>("coinbase");
   const [step, setStep] = useState<DepositStep>("choose");
   const [editingAmount, setEditingAmount] = useState(false);
-  const [phase, setPhase] = useState<DepositPhase>("idle");
+  const [phase, setPhase] = useState<DepositPhase>(
+    bankDepositArrived
+      ? "funding"
+      : resumeBankDeposit
+        ? "awaiting_coinbase"
+        : "idle"
+  );
   const [error, setError] = useState<string | null>(null);
   const [popupBlocked, setPopupBlocked] = useState(false);
 
   const address = evmAddress as Address | null;
   const cardProvider = methodToProvider(method);
   const skipFiat = method === "balance";
-  const usdcBeforeRef = useRef(0);
+  const usdcBeforeRef = useRef(resumeBankDeposit?.usdcBefore ?? 0);
+  const resumeAt = resumeBankDeposit?.at ?? null;
 
   const { data: baseUsdc, refetch: refetchUsdc } = useQuery({
     queryKey: ["easy-start-base-usdc", address],
@@ -120,7 +148,7 @@ export function EasyStartDepositSheet({
     enabled: Boolean(open && address),
     refetchInterval: open
       ? phase === "awaiting_coinbase"
-        ? 4_000
+        ? BANK_DEPOSIT_POLL_MS
         : 10_000
       : false,
   });
@@ -134,6 +162,25 @@ export function EasyStartDepositSheet({
       setAmount("100");
     }
   }, [hasUsdcOnBase, method]);
+
+  useEffect(() => {
+    if (!resumeBankDeposit || resumeAt == null) return;
+    if (
+      address &&
+      resumeBankDeposit.address.toLowerCase() !== address.toLowerCase()
+    ) {
+      return;
+    }
+    usdcBeforeRef.current = resumeBankDeposit.usdcBefore;
+    setAmount(resumeBankDeposit.amount);
+    setMethod("coinbase");
+    setPhase((current) => {
+      if (bankDepositArrived) return current;
+      return current === "idle" || current === "awaiting_coinbase"
+        ? "awaiting_coinbase"
+        : current;
+    });
+  }, [address, bankDepositArrived, resumeAt, resumeBankDeposit]);
 
   const amountNum = Number(amount);
   const amountValid = Number.isFinite(amountNum) && amountNum > 0;
@@ -153,14 +200,23 @@ export function EasyStartDepositSheet({
     setAmount("100");
   }, []);
 
+  const settleBankDeposit = () => {
+    clearPendingBankDeposit();
+    onBankDepositSettled?.();
+  };
+
   const handleClose = (next: boolean) => {
     if (!next) {
-      if (
-        phase === "idle" ||
-        phase === "success" ||
-        phase === "error" ||
-        phase === "gas"
-      ) {
+      if (phase === "awaiting_coinbase") {
+        toast({
+          title: "Still watching for your deposit",
+          description:
+            "You can close this. We’ll let you know when the money arrives.",
+        });
+      } else if (phase === "success" || phase === "gas") {
+        settleBankDeposit();
+        resetLocal();
+      } else if (phase === "error" || phase === "idle") {
         resetLocal();
       }
     }
@@ -191,11 +247,11 @@ export function EasyStartDepositSheet({
     }
   }, [address, onOpenChange]);
 
-  useEffect(() => {
-    if (phase !== "awaiting_coinbase") return;
-    const gained = baseUsdcNum - usdcBeforeRef.current;
-    if (gained < 0.5) return;
-    setPhase("funding");
+  const notedArrival = useRef(false);
+  const noteArrival = useCallback(() => {
+    if (notedArrival.current || !address) return;
+    notedArrival.current = true;
+    onBankDepositDetected?.();
     toast({
       title: "Payment received",
       description: consumerCopy
@@ -203,7 +259,25 @@ export function EasyStartDepositSheet({
         : "USDC is in your Base wallet.",
     });
     void ensureGasThenFinish();
-  }, [baseUsdcNum, consumerCopy, ensureGasThenFinish, phase, toast]);
+  }, [
+    address,
+    consumerCopy,
+    ensureGasThenFinish,
+    onBankDepositDetected,
+    toast,
+  ]);
+
+  useEffect(() => {
+    if (bankDepositArrived && phase === "funding") {
+      noteArrival();
+      return;
+    }
+    if (phase !== "awaiting_coinbase") return;
+    const gained = baseUsdcNum - usdcBeforeRef.current;
+    if (gained < BANK_DEPOSIT_MIN_GAIN_USDC) return;
+    setPhase("funding");
+    noteArrival();
+  }, [bankDepositArrived, baseUsdcNum, noteArrival, phase]);
 
   const fundWithCardProvider = async (options: {
     asset: "USDC" | "native-currency";
@@ -257,7 +331,11 @@ export function EasyStartDepositSheet({
       if (!accessToken) {
         throw new Error("Sign in to add money with Coinbase.");
       }
-      usdcBeforeRef.current = Number.isFinite(baseUsdcNum) ? baseUsdcNum : 0;
+      const baseline = bankDepositBaseline({
+        existing: readPendingBankDeposit(address),
+        currentUsdc: baseUsdcNum,
+      });
+      usdcBeforeRef.current = baseline;
       const session = await createCoinbaseSession({
         address,
         accessToken,
@@ -266,6 +344,12 @@ export function EasyStartDepositSheet({
       if (!session.buyUrl) {
         throw new Error("Coinbase Onramp URL missing. Redeploy the API.");
       }
+      savePendingBankDeposit({
+        address,
+        amount,
+        usdcBefore: baseline,
+        partnerUserRef: session.partnerUserRef,
+      });
       const popup = window.open(
         session.buyUrl,
         "_blank",
@@ -482,7 +566,11 @@ export function EasyStartDepositSheet({
             <>
               <FundingSheetHeader
                 title={consumerCopy ? "Add money" : "Deposit"}
-                subtitle="Opening payment…"
+                subtitle={
+                  bankDepositArrived
+                    ? "Confirming your deposit…"
+                    : "Opening payment…"
+                }
               />
               <div className="px-6 pb-10 pt-4 flex flex-col items-center gap-3 text-center">
                 <Loader2 className="h-8 w-8 animate-spin text-ocean-teal" />

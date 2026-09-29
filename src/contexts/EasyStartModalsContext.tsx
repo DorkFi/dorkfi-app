@@ -27,6 +27,11 @@ import {
   readCoinbaseOfframpPending,
   type CoinbaseOfframpPending,
 } from "@/lib/easyStart/coinbaseOfframpResume";
+import {
+  readPendingBankDeposit,
+  type PendingBankDeposit,
+} from "@/lib/easyStart/pendingBankDeposit";
+import { usePendingBankDepositWatch } from "@/hooks/usePendingBankDepositWatch";
 
 /**
  * Lazy-load Easy Start sheets so `@privy-io/wagmi` stays out of first paint.
@@ -124,8 +129,29 @@ export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
   const [bridgeOpen, setBridgeOpen] = useState(false);
   const [offrampResume, setOfframpResume] =
     useState<CoinbaseOfframpPending | null>(null);
+  const [bankResume, setBankResume] = useState<PendingBankDeposit | null>(null);
+  const [bankDepositArrived, setBankDepositArrived] = useState(false);
 
-  const openDeposit = useCallback(() => setDepositOpen(true), []);
+  const showSheets = privy.enabled && privy.configured && privy.authenticated;
+
+  const openDeposit = useCallback(() => {
+    setBankDepositArrived(false);
+    setBankResume(readPendingBankDeposit(privy.evmAddress));
+    setDepositOpen(true);
+  }, [privy.evmAddress]);
+
+  const handleBankDepositArrived = useCallback((job: PendingBankDeposit) => {
+    setBankDepositArrived(true);
+    setBankResume(job);
+    setDepositOpen(true);
+  }, []);
+
+  const { markPrompted: markBankDepositPrompted } = usePendingBankDepositWatch({
+    enabled: showSheets,
+    sheetOpen: depositOpen,
+    address: privy.evmAddress,
+    onArrive: handleBankDepositArrived,
+  });
   const openWithdraw = useCallback(() => {
     const pending = readCoinbaseOfframpPending();
     if (pending) setOfframpResume(pending);
@@ -146,8 +172,6 @@ export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
     }),
     [openDeposit, openWithdraw, openBridge]
   );
-
-  const showSheets = privy.enabled && privy.configured && privy.authenticated;
 
   useEffect(() => {
     if (offrampResume && showSheets) setWithdrawOpen(true);
@@ -189,6 +213,13 @@ export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
                 <EasyStartDepositSheet
                   open={depositOpen}
                   onOpenChange={setDepositOpen}
+                  resumeBankDeposit={bankResume}
+                  bankDepositArrived={bankDepositArrived}
+                  onBankDepositSettled={() => {
+                    setBankResume(null);
+                    setBankDepositArrived(false);
+                  }}
+                  onBankDepositDetected={markBankDepositPrompted}
                   onOpenAdvancedBridge={
                     consumerCopy ? undefined : openAdvancedBridge
                   }
