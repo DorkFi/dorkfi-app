@@ -80,7 +80,7 @@ function isUserCanceledFunding(message: string): boolean {
 
 /**
  * In-app cash-out after Base USDC arrives:
- * - Coinbase: CDP session → same-tab sell widget → return to /portfolio →
+ * - Coinbase: CDP session → same-tab sell widget → return to /savings →
  *   poll to_address → Privy USDC transfer
  * - MoonPay: sell widget + signed URL → onInitiateDeposit → Privy USDC transfer
  *

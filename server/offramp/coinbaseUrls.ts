@@ -15,7 +15,7 @@ export const CB_OFFRAMP_QUERY = "cb_offramp";
 /** partnerUserRef on the SimplFi return URL after Coinbase sell. */
 export const CB_OFFRAMP_REF_QUERY = "ref";
 
-/** Append return params so /portfolio can resume the USDC send after Coinbase. */
+/** Append return params so /savings can resume the USDC send after Coinbase. */
 export function withCoinbaseOfframpReturnQuery(
   redirectUrl: string,
   partnerUserRef: string

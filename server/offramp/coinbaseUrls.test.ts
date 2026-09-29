@@ -9,7 +9,7 @@ import {
 const args = {
   sessionToken: "sess_test_token",
   partnerUserRef: "df-aabbccdd-xyz",
-  redirectUrl: "https://beta.simplfi.xyz/portfolio",
+  redirectUrl: "https://beta.simplfi.xyz/savings",
   amount: "100",
 };
 
@@ -27,7 +27,7 @@ describe("buildCoinbaseOnrampBuyUrl", () => {
     expect(url.searchParams.get("presetFiatAmount")).toBe("100");
     expect(url.searchParams.get("partnerUserRef")).toBe("df-aabbccdd-xyz");
     expect(url.searchParams.get("redirectUrl")).toBe(
-      "https://beta.simplfi.xyz/portfolio"
+      "https://beta.simplfi.xyz/savings"
     );
   });
 });
@@ -42,7 +42,7 @@ describe("buildCoinbaseOfframpSellUrl", () => {
     expect(url.searchParams.get("presetFiatAmount")).toBeNull();
   });
 
-  it("sends cash-out back to /portfolio with resume query params", () => {
+  it("sends cash-out back to /savings with resume query params", () => {
     const redirectUrl = withCoinbaseOfframpReturnQuery(
       args.redirectUrl,
       args.partnerUserRef
@@ -60,13 +60,13 @@ describe("buildCoinbaseOfframpSellUrl", () => {
 describe("withCoinbaseOfframpReturnQuery", () => {
   it("tags the SimplFi return URL so cash-out can resume after Coinbase", () => {
     const next = withCoinbaseOfframpReturnQuery(
-      "https://beta.simplfi.xyz/portfolio",
+      "https://beta.simplfi.xyz/savings",
       "privy-user-1"
     );
     expect(parseCoinbaseOfframpReturnSearch(new URL(next).search)).toEqual({
       partnerUserRef: "privy-user-1",
     });
-    expect(new URL(next).pathname).toBe("/portfolio");
+    expect(new URL(next).pathname).toBe("/savings");
   });
 
   it("returns null when the resume flag is missing", () => {

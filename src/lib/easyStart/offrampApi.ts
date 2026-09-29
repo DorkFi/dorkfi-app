@@ -92,7 +92,7 @@ export async function createCoinbaseSession(args: {
       redirectUrl:
         args.redirectUrl ||
         import.meta.env.VITE_OFFRAMP_REDIRECT_URL ||
-        `${window.location.origin}/portfolio`,
+        `${window.location.origin}/savings`,
     }),
   });
   return parseJson<CoinbaseSessionResult>(res);

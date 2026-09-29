@@ -69,7 +69,8 @@ export function resolveCoinbaseRedirectUrl(
   if (configured && (!site || originFromUrl(configured) === site)) {
     return configured;
   }
-  if (site) return `${site}/portfolio`;
+  // /savings stays mounted for savers. /portfolio is hidden until a borrow exists.
+  if (site) return `${site}/savings`;
   if (configured) return configured;
-  return "http://localhost:5173/portfolio";
+  return "http://localhost:5173/savings";
 }

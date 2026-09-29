@@ -24,7 +24,7 @@ describe("resolveCoinbaseRedirectUrl", () => {
         "https://evil.example/hack",
         {}
       )
-    ).toBe("https://beta.simplfi.xyz/portfolio");
+    ).toBe("https://beta.simplfi.xyz/savings");
   });
 
   it("accepts a requested URL on the same origin", () => {

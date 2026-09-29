@@ -39,7 +39,7 @@ interface EasyStartWithdrawSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onOpenAdvancedBridge?: () => void;
-  /** Resume Coinbase cash-out after same-tab return to /portfolio. */
+  /** Resume Coinbase cash-out after same-tab return to /savings. */
   resumeOfframp?: {
     partnerUserRef: string;
     amount: string | null;
