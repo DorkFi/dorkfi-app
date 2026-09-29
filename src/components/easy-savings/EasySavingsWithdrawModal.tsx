@@ -1,5 +1,6 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { Address } from "viem";
 import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
 import { waitForConfirmation } from "algosdk";
 import { Loader2 } from "lucide-react";
@@ -37,8 +38,19 @@ import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 import {
   fetchAlgorandAlgoBalance,
+  fetchAlgorandUsdcBalance,
+  fetchBaseUsdcBalance,
   hasEnoughAlgorandAlgo,
 } from "@/lib/easyStart/baseBalances";
+import {
+  clearPendingEarnWithdraw,
+  isPendingEarnWithdrawComplete,
+  patchPendingEarnWithdraw,
+  pendingWithdrawBlocksNewSwap,
+  readPendingEarnWithdraw,
+  savePendingEarnWithdraw,
+  type PendingEarnWithdraw,
+} from "@/lib/easyStart/pendingEarnWithdraw";
 import {
   bridgePhaseLabel,
   type EasyStartBridgePhase,
@@ -133,6 +145,9 @@ const EasySavingsWithdrawModal = ({
   const [cashOutProvider, setCashOutProvider] =
     useState<CardProvider>("moonpay");
   const [confirmedAmount, setConfirmedAmount] = useState("");
+  const [baselineBaseUsdc, setBaselineBaseUsdc] = useState<number | null>(null);
+  const [watchOnly, setWatchOnly] = useState(false);
+  const finishedRef = useRef(false);
 
   const quote = useEasySavingsQuote({
     networkId,
@@ -183,10 +198,37 @@ const EasySavingsWithdrawModal = ({
     return quote.existingDeposit ?? 0;
   })();
 
+  const resumeOutboundJob = useCallback((job: PendingEarnWithdraw) => {
+    setAmount(String(job.amount));
+    setConfirmedAmount(formatUsdcHuman(job.amount));
+    setBridgeAmount(formatUsdcHuman(job.amount));
+    setBaselineBaseUsdc(
+      typeof job.baseUsdcBefore === "number" ? job.baseUsdcBefore : null
+    );
+    setFlowError(null);
+    setIsSubmitting(false);
+    if (pendingWithdrawBlocksNewSwap(job)) {
+      setWatchOnly(true);
+      setFlowPhase("bridging");
+      return;
+    }
+    setWatchOnly(false);
+    setFlowPhase("swap_failed");
+  }, []);
+
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      finishedRef.current = false;
+      return;
+    }
     if (flowPhase === "bridging" || flowPhase === "swap_failed" || showSuccess)
       return;
+    if (
+      route?.asset.configKey === "USDC" &&
+      readPendingEarnWithdraw(activeAccount?.address)
+    ) {
+      return;
+    }
     setAmount("");
     setIsSubmitting(false);
     setShowSuccess(false);
@@ -196,12 +238,32 @@ const EasySavingsWithdrawModal = ({
     setBridgeAmount(null);
     setFlowError(null);
     setConfirmedAmount("");
+    setBaselineBaseUsdc(null);
+    setWatchOnly(false);
   }, [
     isOpen,
     route?.asset.configKey,
     route?.poolId,
     flowPhase,
     showSuccess,
+    activeAccount?.address,
+  ]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (flowPhase === "bridging" || flowPhase === "swap_failed" || showSuccess)
+      return;
+    if (route?.asset.configKey !== "USDC") return;
+    const job = readPendingEarnWithdraw(activeAccount?.address);
+    if (!job) return;
+    resumeOutboundJob(job);
+  }, [
+    isOpen,
+    flowPhase,
+    showSuccess,
+    activeAccount?.address,
+    route?.asset.configKey,
+    resumeOutboundJob,
   ]);
 
   const ctaState: CtaState = (() => {
@@ -282,6 +344,15 @@ const EasySavingsWithdrawModal = ({
           : "This network is not Algorand-compatible.",
         variant: "destructive",
       });
+      return;
+    }
+
+    const existingOutbound =
+      route.asset.configKey === "USDC"
+        ? readPendingEarnWithdraw(activeAccount.address)
+        : null;
+    if (existingOutbound) {
+      resumeOutboundJob(existingOutbound);
       return;
     }
 
@@ -375,7 +446,43 @@ const EasySavingsWithdrawModal = ({
       });
 
       if (bridgeToBase) {
-        setBridgeAmount(formatUsdcHuman(amountNum));
+        const redeemed = amountNum;
+        savePendingEarnWithdraw({
+          algorandAddress: activeAccount.address,
+          evmAddress: privy.evmAddress ?? undefined,
+          amount: redeemed,
+          algoUsdcBefore: redeemed,
+          expectedToAmount: redeemed,
+        });
+        let algoUsdcBefore = redeemed;
+        let baseUsdcBefore: number | undefined;
+        try {
+          const algoBal = await fetchAlgorandUsdcBalance(
+            activeAccount.address
+          );
+          const n = Number.parseFloat(algoBal.formatted);
+          if (Number.isFinite(n) && n >= 0) algoUsdcBefore = n;
+        } catch {
+          algoUsdcBefore = redeemed;
+        }
+        if (privy.evmAddress) {
+          try {
+            const baseBal = await fetchBaseUsdcBalance(
+              privy.evmAddress as Address
+            );
+            const n = Number.parseFloat(baseBal.formatted);
+            if (Number.isFinite(n) && n >= 0) baseUsdcBefore = n;
+          } catch {
+            baseUsdcBefore = undefined;
+          }
+        }
+        patchPendingEarnWithdraw({
+          algoUsdcBefore,
+          ...(typeof baseUsdcBefore === "number" ? { baseUsdcBefore } : {}),
+        });
+        setBaselineBaseUsdc(baseUsdcBefore ?? null);
+        setWatchOnly(false);
+        setBridgeAmount(formatUsdcHuman(redeemed));
         setFlowPhase("bridging");
         toast({
           title: consumerCopy ? "Moving to your account" : "Bridging to Base",
@@ -407,9 +514,127 @@ const EasySavingsWithdrawModal = ({
     }
   };
 
-  const retrySwap = () => {
-    if (!bridgeAmount) return;
+  const finishOutbound = () => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    clearPendingEarnWithdraw();
+    setWatchOnly(false);
+    setFlowPhase("idle");
     setFlowError(null);
+    setBridgeAmount(null);
+    setIsSubmitting(false);
+    setShowSuccess(true);
+    invalidateEasySavingsAfterTx({
+      queryClient,
+      networkId,
+      address: activeAccount?.address,
+    });
+    void queryClient.invalidateQueries({ queryKey: ["easy-start-base-usdc"] });
+    toast({
+      title: consumerCopy ? "Back in your account" : "On Base",
+      description: consumerCopy
+        ? "You can cash out or keep the funds in your account."
+        : "USDC is in your Base wallet.",
+    });
+  };
+  const finishOutboundRef = useRef(finishOutbound);
+  finishOutboundRef.current = finishOutbound;
+
+  useEffect(() => {
+    if (!isOpen || !privy.evmAddress) return;
+    if (flowPhase !== "bridging" && flowPhase !== "swap_failed") return;
+    const job = readPendingEarnWithdraw(activeAccount?.address);
+    if (!job) return;
+    let cancelled = false;
+    const evm = privy.evmAddress;
+    void (async () => {
+      try {
+        const bal = await fetchBaseUsdcBalance(evm as Address);
+        if (cancelled) return;
+        const current = Number.parseFloat(bal.formatted);
+        if (isPendingEarnWithdrawComplete(job, current)) {
+          finishOutboundRef.current();
+        }
+      } catch {
+        // Leave the job. Retry or the watch poll can read Base later.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, flowPhase, activeAccount?.address, privy.evmAddress]);
+
+  useEffect(() => {
+    if (!isOpen || flowPhase !== "bridging" || !watchOnly || !privy.evmAddress) {
+      return;
+    }
+    const evm = privy.evmAddress;
+    const job = readPendingEarnWithdraw(activeAccount?.address);
+    if (!job) return;
+    let cancelled = false;
+    void (async () => {
+      for (let i = 0; i < 120 && !cancelled; i++) {
+        try {
+          const bal = await fetchBaseUsdcBalance(evm as Address);
+          if (cancelled) return;
+          const current = Number.parseFloat(bal.formatted);
+          if (isPendingEarnWithdrawComplete(job, current)) {
+            finishOutboundRef.current();
+            return;
+          }
+        } catch {
+          // Keep polling. A single RPC miss should not drop the job.
+        }
+        await new Promise((resolve) => setTimeout(resolve, 5_000));
+      }
+      if (cancelled) return;
+      setFlowError(
+        consumerCopy
+          ? "Funds left Earn. Finish moving them to your account."
+          : "Base USDC hasn’t arrived yet. Retry the swap — don’t withdraw from savings again."
+      );
+      setWatchOnly(false);
+      setFlowPhase("swap_failed");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isOpen,
+    flowPhase,
+    watchOnly,
+    activeAccount?.address,
+    privy.evmAddress,
+    consumerCopy,
+  ]);
+
+  useEffect(() => {
+    if (isOpen) return;
+    if (flowPhase !== "swap_failed" && flowPhase !== "bridging") return;
+    if (readPendingEarnWithdraw(activeAccount?.address)) return;
+    setFlowPhase("idle");
+    setWatchOnly(false);
+    setBridgeAmount(null);
+    setFlowError(null);
+  }, [isOpen, flowPhase, activeAccount?.address]);
+
+  const retrySwap = () => {
+    const job = readPendingEarnWithdraw(activeAccount?.address);
+    const nextAmount = job ? formatUsdcHuman(job.amount) : bridgeAmount;
+    if (!nextAmount) return;
+    setBridgeAmount(nextAmount);
+    if (job) setConfirmedAmount(formatUsdcHuman(job.amount));
+    setFlowError(null);
+    if (job && typeof job.baseUsdcBefore === "number") {
+      setBaselineBaseUsdc(job.baseUsdcBefore);
+    }
+    if (job && pendingWithdrawBlocksNewSwap(job)) {
+      setWatchOnly(true);
+      setFlowPhase("bridging");
+      return;
+    }
+    finishedRef.current = false;
+    setWatchOnly(false);
     setFlowPhase("bridging");
   };
 
@@ -420,6 +645,8 @@ const EasySavingsWithdrawModal = ({
     setFlowPhase("idle");
     setBridgeAmount(null);
     setConfirmedAmount("");
+    setBaselineBaseUsdc(null);
+    setWatchOnly(false);
   };
 
   const showFlowStatus =
@@ -672,33 +899,52 @@ const EasySavingsWithdrawModal = ({
         </DialogContent>
       </Dialog>
 
-      {flowPhase === "bridging" && bridgeAmount ? (
+      {flowPhase === "bridging" && bridgeAmount && !watchOnly ? (
         <Suspense fallback={null}>
           <EasyStartHeadlessBridge
             enabled
             amount={bridgeAmount}
             direction="algo-to-base"
+            baselineBaseUsdc={baselineBaseUsdc ?? undefined}
+            onFundsSent={(info) => {
+              patchPendingEarnWithdraw({
+                orderId: info.orderId,
+                fromTxId: info.fromTxId,
+                expectedToAmount: info.expectedToAmount,
+              });
+            }}
             onPhaseChange={(p, err) => {
               setBridgePhase(p);
-              if (p === "error") {
-                setFlowError(err ?? "Swap failed");
+              if (p !== "error") return;
+              const message = err ?? "Swap failed";
+              void (async () => {
+                const job = readPendingEarnWithdraw(activeAccount?.address);
+                const evm = privy.evmAddress;
+                if (job && evm) {
+                  try {
+                    const bal = await fetchBaseUsdcBalance(evm as Address);
+                    const current = Number.parseFloat(bal.formatted);
+                    if (isPendingEarnWithdrawComplete(job, current)) {
+                      finishOutboundRef.current();
+                      return;
+                    }
+                  } catch {
+                    // Fall through to watch or retry. The job stays.
+                  }
+                  if (pendingWithdrawBlocksNewSwap(job)) {
+                    setFlowError(null);
+                    setWatchOnly(true);
+                    setFlowPhase("bridging");
+                    return;
+                  }
+                }
+                setFlowError(message);
+                setWatchOnly(false);
                 setFlowPhase("swap_failed");
-              }
+              })();
             }}
             onComplete={() => {
-              setFlowPhase("idle");
-              setShowSuccess(true);
-              invalidateEasySavingsAfterTx({
-                queryClient,
-                networkId,
-                address: activeAccount?.address,
-              });
-              toast({
-                title: consumerCopy ? "Back in your account" : "On Base",
-                description: consumerCopy
-                  ? "You can cash out or keep the funds in your account."
-                  : "USDC is in your Base wallet.",
-              });
+              finishOutboundRef.current();
             }}
           />
         </Suspense>

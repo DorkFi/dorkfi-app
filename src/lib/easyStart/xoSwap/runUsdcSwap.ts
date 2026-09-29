@@ -19,6 +19,7 @@ import { isXoGeoRestricted } from "@/lib/easyStart/xoSwap/errors";
 import { selectBestXoRate } from "@/lib/easyStart/xoSwap/selectRate";
 import {
   isAlgoCreditArrived,
+  isBaseCreditArrived,
   isXoOrderFailed,
   isXoOrderSettled,
 } from "@/lib/easyStart/xoSwap/settle";
@@ -31,7 +32,11 @@ import {
   sendBaseUsdc,
   type SendUsdcFn,
 } from "@/lib/easyStart/sendBaseUsdc";
-import { fetchAlgorandUsdcBalance } from "@/lib/easyStart/baseBalances";
+import {
+  fetchAlgorandUsdcBalance,
+  fetchBaseUsdcBalance,
+} from "@/lib/easyStart/baseBalances";
+import type { Address } from "viem";
 
 export type RunXoUsdcSwapArgs = {
   direction: EasyStartBridgeDirection;
@@ -45,6 +50,8 @@ export type RunXoUsdcSwapArgs = {
   onPhase?: (phase: EasyStartBridgePhase, detail?: string | null) => void;
   /** Algorand USDC before this Base → Algo swap. Used to detect payout. */
   baselineAlgoUsdc?: number;
+  /** Base USDC before this Algo → Base swap. Used to detect payout. */
+  baselineBaseUsdc?: number;
   onFundsSent?: (info: {
     orderId: string;
     fromTxId: string;
@@ -214,12 +221,12 @@ export async function runXoUsdcSwap(
   }
 
   report("sending");
-  await updateXoOrder(order.id, { fromTransactionId: fromTxId }, xoReq);
   args.onFundsSent?.({
     orderId: order.id,
     fromTxId,
     expectedToAmount: toAmount,
   });
+  await updateXoOrder(order.id, { fromTransactionId: fromTxId }, xoReq);
 
   const watchAlgoCredit =
     args.direction === "base-to-algo" &&
@@ -240,13 +247,35 @@ export async function runXoUsdcSwap(
     }
   };
 
+  const watchBaseCredit =
+    args.direction === "algo-to-base" &&
+    typeof args.baselineBaseUsdc === "number" &&
+    Number.isFinite(args.baselineBaseUsdc);
+
+  const baseCreditReady = async (): Promise<boolean> => {
+    if (!watchBaseCredit) return false;
+    try {
+      const bal = await fetchBaseUsdcBalance(args.evmAddress as Address);
+      return isBaseCreditArrived({
+        current: Number.parseFloat(bal.formatted),
+        baseline: args.baselineBaseUsdc!,
+        expectedToAmount: toAmount,
+      });
+    } catch {
+      return false;
+    }
+  };
+
+  const payoutReady = async (): Promise<boolean> =>
+    (await algoCreditReady()) || (await baseCreditReady());
+
   report("waiting");
   for (let i = 0; i < XO_SWAP_MAX_POLLS; i++) {
     if (args.signal?.aborted) {
       throw new DOMException("Aborted", "AbortError");
     }
     const latest = await fetchXoOrder(order.id, xoReq);
-    if (isXoOrderSettled(latest) || (await algoCreditReady())) {
+    if (isXoOrderSettled(latest) || (await payoutReady())) {
       report("success");
       return { orderId: order.id };
     }
@@ -256,7 +285,7 @@ export async function runXoUsdcSwap(
     await sleep(XO_SWAP_POLL_MS, args.signal);
   }
 
-  if (await algoCreditReady()) {
+  if (await payoutReady()) {
     report("success");
     return { orderId: order.id };
   }

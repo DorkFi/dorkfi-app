@@ -1,8 +1,18 @@
 import type { NetworkId } from "@/config";
 import { getAlgorandNetworkFromNetworkId } from "@/config";
 import algorandService from "@/services/algorandService";
+import {
+  describeIndexedLendingCall,
+  lendingMarketAssetLookup,
+  type LendingCallKind,
+} from "@/services/indexedApplTxn";
 
-export type SavingsTxKind = "deposit" | "withdraw" | "activity";
+export type SavingsTxKind =
+  | "deposit"
+  | "withdraw"
+  | "borrow"
+  | "repay"
+  | "activity";
 
 export type SavingsTxRecord = {
   txId: string;
@@ -74,10 +84,24 @@ export function appendLocalSavingsTx(
   return next;
 }
 
+function savingsKind(
+  kind: LendingCallKind
+): SavingsTxKind {
+  if (
+    kind === "deposit" ||
+    kind === "withdraw" ||
+    kind === "borrow" ||
+    kind === "repay"
+  ) {
+    return kind;
+  }
+  return "activity";
+}
+
 /**
- * Best-effort chain history: application calls the user made against the savings pool.
- * Amounts/kind are incomplete on-chain without ABI decoding, so records are "activity"
- * unless we already saved richer local metadata for the same txId.
+ * Chain history: application calls the user made against the savings pool.
+ * Kind and amount come from the `lending deposit` / `lending withdraw` note.
+ * A local record for the same txId still wins in {@link mergeSavingsTxHistory}.
  */
 export async function fetchPoolSavingsTxns(params: {
   networkId: NetworkId;
@@ -103,41 +127,26 @@ export async function fetchPoolSavingsTxns(params: {
     .limit(params.limit ?? 25)
     .do();
 
-  const txs = (response as { transactions?: unknown[] }).transactions ?? [];
+  const txs = response.transactions ?? [];
   const out: SavingsTxRecord[] = [];
+  const assetForMarket = lendingMarketAssetLookup(
+    params.networkId,
+    params.poolId
+  );
 
   for (const raw of txs) {
-    const tx = raw as {
-      id?: string;
-      "tx-type"?: string;
-      "round-time"?: number;
-      "confirmed-round"?: number;
-      sender?: string;
-      "application-transaction"?: {
-        "application-id"?: number | bigint;
-      };
-    };
-    const txId = tx.id;
-    if (!txId) continue;
-
-    const appId = Number(
-      tx["application-transaction"]?.["application-id"] ?? 0
-    );
-    if (appId !== poolIdNum) continue;
-
-    const tsSec = tx["round-time"];
-    const timestamp =
-      typeof tsSec === "number" && tsSec > 0
-        ? tsSec * 1000
-        : Date.now();
+    const tx = describeIndexedLendingCall(raw, assetForMarket);
+    if (!tx || tx.applicationId !== poolIdNum) continue;
 
     out.push({
-      txId,
+      txId: tx.txId,
       networkId: params.networkId,
       address: params.address,
       poolId: params.poolId,
-      kind: "activity",
-      timestamp,
+      kind: savingsKind(tx.kind),
+      amount: tx.amount,
+      symbol: tx.symbol,
+      timestamp: tx.roundTimeSec > 0 ? tx.roundTimeSec * 1000 : Date.now(),
       source: "chain",
     });
   }

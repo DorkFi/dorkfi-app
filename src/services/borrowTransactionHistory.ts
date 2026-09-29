@@ -1,6 +1,11 @@
 import type { NetworkId } from "@/config";
 import { getAlgorandNetworkFromNetworkId } from "@/config";
 import algorandService from "@/services/algorandService";
+import {
+  describeIndexedLendingCall,
+  lendingMarketAssetLookup,
+  type LendingCallKind,
+} from "@/services/indexedApplTxn";
 
 export type BorrowTxKind = "borrow" | "repay" | "supply" | "activity";
 
@@ -73,10 +78,16 @@ export function appendLocalBorrowTx(
   return next;
 }
 
+function borrowKind(kind: LendingCallKind): BorrowTxKind {
+  if (kind === "borrow" || kind === "repay") return kind;
+  if (kind === "deposit") return "supply";
+  return "activity";
+}
+
 /**
- * Best-effort chain history: application calls the user made against the lending pool.
- * Kind/amount are incomplete without ABI decoding, so chain rows are "activity"
- * unless local metadata already exists for the same txId.
+ * Chain history: application calls the user made against the lending pool.
+ * Kind and amount come from the pool call note (`lending borrow`, `lending repay`, …).
+ * A local record for the same txId still wins in {@link mergeBorrowTxHistory}.
  */
 export async function fetchPoolBorrowTxns(params: {
   networkId: NetworkId;
@@ -102,37 +113,26 @@ export async function fetchPoolBorrowTxns(params: {
     .limit(params.limit ?? 25)
     .do();
 
-  const txs = (response as { transactions?: unknown[] }).transactions ?? [];
+  const txs = response.transactions ?? [];
   const out: BorrowTxRecord[] = [];
+  const assetForMarket = lendingMarketAssetLookup(
+    params.networkId,
+    params.poolId
+  );
 
   for (const raw of txs) {
-    const tx = raw as {
-      id?: string;
-      "round-time"?: number;
-      sender?: string;
-      "application-transaction"?: {
-        "application-id"?: number | bigint;
-      };
-    };
-    const txId = tx.id;
-    if (!txId) continue;
-
-    const appId = Number(
-      tx["application-transaction"]?.["application-id"] ?? 0
-    );
-    if (appId !== poolIdNum) continue;
-
-    const tsSec = tx["round-time"];
-    const timestamp =
-      typeof tsSec === "number" && tsSec > 0 ? tsSec * 1000 : Date.now();
+    const tx = describeIndexedLendingCall(raw, assetForMarket);
+    if (!tx || tx.applicationId !== poolIdNum) continue;
 
     out.push({
-      txId,
+      txId: tx.txId,
       networkId: params.networkId,
       address: params.address,
       poolId: params.poolId,
-      kind: "activity",
-      timestamp,
+      kind: borrowKind(tx.kind),
+      amount: tx.amount,
+      symbol: tx.symbol,
+      timestamp: tx.roundTimeSec > 0 ? tx.roundTimeSec * 1000 : Date.now(),
       source: "chain",
     });
   }

@@ -19,6 +19,10 @@ function kindLabel(kind: SavingsTxRecord["kind"]): string {
       return "Deposit";
     case "withdraw":
       return "Withdraw";
+    case "borrow":
+      return "Borrow";
+    case "repay":
+      return "Repay";
     default:
       return "Activity";
   }

@@ -16,6 +16,8 @@ interface EasyStartHeadlessBridgeProps {
   direction?: EasyStartBridgeDirection;
   /** Algorand USDC before a Base → Algo swap. Detects payout without Exodus. */
   baselineAlgoUsdc?: number;
+  /** Base USDC before an Algo → Base swap. Detects payout without Exodus. */
+  baselineBaseUsdc?: number;
   onFundsSent?: (info: {
     orderId: string;
     fromTxId: string;
@@ -34,6 +36,7 @@ export function EasyStartHeadlessBridge({
   enabled,
   direction = "base-to-algo",
   baselineAlgoUsdc,
+  baselineBaseUsdc,
   onFundsSent,
   onPhaseChange,
   onComplete,
@@ -113,6 +116,7 @@ export function EasyStartHeadlessBridge({
           },
           signal: ac.signal,
           baselineAlgoUsdc,
+          baselineBaseUsdc,
           onFundsSent: (info) => {
             fundsSentRef.current = true;
             onFundsSentRef.current?.(info);
@@ -176,6 +180,7 @@ export function EasyStartHeadlessBridge({
     amount,
     direction,
     baselineAlgoUsdc,
+    baselineBaseUsdc,
   ]);
 
   return null;

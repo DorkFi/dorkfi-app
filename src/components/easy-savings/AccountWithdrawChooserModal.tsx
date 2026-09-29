@@ -14,6 +14,8 @@ type AccountWithdrawChooserModalProps = {
   onOpenChange: (open: boolean) => void;
   canWithdrawFromEarn: boolean;
   canCashOut: boolean;
+  /** Redeemed USDC is still on Algorand and needs the Base swap. */
+  finishEarnMove?: boolean;
   onWithdrawFromEarn: () => void;
   onCashOut: () => void;
   consumerCopy: boolean;
@@ -67,6 +69,7 @@ const AccountWithdrawChooserModal = ({
   onOpenChange,
   canWithdrawFromEarn,
   canCashOut,
+  finishEarnMove = false,
   onWithdrawFromEarn,
   onCashOut,
   consumerCopy,
@@ -85,19 +88,34 @@ const AccountWithdrawChooserModal = ({
           </DialogHeader>
 
           <div className="space-y-2">
+            {finishEarnMove ? (
+              <p className="rounded-xl border border-ocean-teal/40 bg-ocean-teal/5 px-3.5 py-3 text-sm text-foreground">
+                Funds left Earn. Finish moving them to your account.
+              </p>
+            ) : null}
             <ChoiceButton
-              title="Withdraw from Earn"
-              description={
-                canWithdrawFromEarn
+              title={
+                finishEarnMove
                   ? consumerCopy
-                    ? "Move funds from Earn back to your account."
-                    : "Withdraw supplied funds back to your wallet."
-                  : consumerCopy
-                    ? "Nothing in Earn yet."
-                    : "No supplied balance to withdraw."
+                    ? "Finish move"
+                    : "Finish swap to Base"
+                  : "Withdraw from Earn"
+              }
+              description={
+                finishEarnMove
+                  ? consumerCopy
+                    ? "Funds already left Earn. This finishes the move — it won’t withdraw again."
+                    : "USDC is already in your Algorand wallet. Resume the Base swap — don’t redeem again."
+                  : canWithdrawFromEarn
+                    ? consumerCopy
+                      ? "Move funds from Earn back to your account."
+                      : "Withdraw supplied funds back to your wallet."
+                    : consumerCopy
+                      ? "Nothing in Earn yet."
+                      : "No supplied balance to withdraw."
               }
               icon={<PiggyBank className="h-5 w-5" />}
-              disabled={!canWithdrawFromEarn}
+              disabled={!canWithdrawFromEarn && !finishEarnMove}
               onClick={onWithdrawFromEarn}
             />
             <ChoiceButton

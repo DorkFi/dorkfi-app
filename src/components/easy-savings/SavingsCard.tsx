@@ -57,6 +57,11 @@ import {
   pendingEarnSupplyAmount,
   readPendingEarnDeposit,
 } from "@/lib/easyStart/pendingEarnDeposit";
+import {
+  clearPendingEarnWithdraw,
+  isPendingEarnWithdrawComplete,
+  readPendingEarnWithdraw,
+} from "@/lib/easyStart/pendingEarnWithdraw";
 
 /** Synthetic sidebar account: native ASA USDC still in the wallet (not supplied). */
 const WALLET_USDC_KEY = "WALLET_USDC";
@@ -93,6 +98,8 @@ function shortTxId(txId: string): string {
 function txKindLabel(kind: SavingsTxRecord["kind"]): string {
   if (kind === "deposit") return "Deposit";
   if (kind === "withdraw") return "Withdraw";
+  if (kind === "borrow") return "Borrow";
+  if (kind === "repay") return "Repay";
   return "Activity";
 }
 
@@ -143,6 +150,8 @@ const SavingsCard = () => {
   const [depositOpen, setDepositOpen] = useState(false);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [withdrawChooserOpen, setWithdrawChooserOpen] = useState(false);
+  /** Bumps after a pending Earn → Base job is cleared or the withdraw modal closes. */
+  const [outboundRev, setOutboundRev] = useState(0);
   /** USDC/WAD: false = leveraged mint+supply, true = plain LP supply */
   const [plainLpSupply, setPlainLpSupply] = useState(false);
 
@@ -235,6 +244,18 @@ const SavingsCard = () => {
     walletUsdcAlgo != null ? walletUsdcAlgo * priceForWallet : 0;
   const walletUsdcBaseUsd =
     walletUsdcBase != null ? walletUsdcBase * priceForWallet : 0;
+
+  const pendingWithdraw = useMemo(
+    () => readPendingEarnWithdraw(activeAccount?.address),
+    [activeAccount?.address, outboundRev]
+  );
+
+  useEffect(() => {
+    if (!pendingWithdraw || walletUsdcBase == null) return;
+    if (!isPendingEarnWithdrawComplete(pendingWithdraw, walletUsdcBase)) return;
+    clearPendingEarnWithdraw();
+    setOutboundRev((n) => n + 1);
+  }, [pendingWithdraw, walletUsdcBase]);
 
   const hasWalletUsdc = walletUsdc != null && walletUsdc > 1e-9;
   const hasBaseUsdc = walletUsdcBase != null && walletUsdcBase > 1e-9;
@@ -725,9 +746,28 @@ const SavingsCard = () => {
     setDepositOpen(true);
   };
 
+  const openResumeEarnWithdraw = () => {
+    if (!activeAccount) {
+      openConnect();
+      return;
+    }
+    setAssetKey(usdcRoute?.asset.configKey ?? "USDC");
+    setPlainLpSupply(false);
+    setDepositOpen(false);
+    setWithdrawChooserOpen(false);
+    setWithdrawOpen(true);
+  };
+
   const openWithdraw = () => {
     if (!activeAccount) {
       openConnect();
+      return;
+    }
+    if (
+      pendingWithdraw &&
+      (isWalletAccount || effectiveAssetKey === "USDC" || !hasAnySavingsDeposit)
+    ) {
+      openResumeEarnWithdraw();
       return;
     }
     if (isWalletAccount) {
@@ -943,6 +983,25 @@ const SavingsCard = () => {
               </DorkFiButton>
             </div>
           ) : null}
+          {pendingWithdraw ? (
+            <div className="rounded-2xl border border-ocean-teal/40 bg-ocean-teal/5 px-4 py-3 sm:px-5">
+              <p className="text-sm font-medium">
+                Funds left Earn. Finish moving them to your account.
+              </p>
+              <DorkFiButton
+                className="mt-3 h-10 rounded-full px-4"
+                onClick={openResumeEarnWithdraw}
+              >
+                {pendingWithdraw.fromTxId || pendingWithdraw.orderId
+                  ? consumerCopy
+                    ? "Check status"
+                    : "Resume"
+                  : consumerCopy
+                    ? "Finish move"
+                    : "Resume swap"}
+              </DorkFiButton>
+            </div>
+          ) : null}
           {hasPosition ? (
             <>
               <SavingsPositionCard
@@ -995,12 +1054,12 @@ const SavingsCard = () => {
                   }
                   disabled={
                     isWalletAccount
-                      ? !hasAnySavingsDeposit && !canCashOut
+                      ? !hasAnySavingsDeposit && !canCashOut && !pendingWithdraw
                       : false
                   }
                 >
                   {isWalletAccount
-                    ? !hasAnySavingsDeposit && !canCashOut
+                    ? !hasAnySavingsDeposit && !canCashOut && !pendingWithdraw
                       ? consumerCopy
                         ? "Nothing to withdraw"
                         : "Not supplied"
@@ -1620,12 +1679,14 @@ const SavingsCard = () => {
         onOpenChange={setWithdrawChooserOpen}
         canWithdrawFromEarn={hasAnySavingsDeposit}
         canCashOut={canCashOut}
+        finishEarnMove={Boolean(pendingWithdraw)}
         consumerCopy={consumerCopy}
         onWithdrawFromEarn={() => {
           setWithdrawChooserOpen(false);
-          // Let the chooser Dialog unmount before opening the next one
-          // (Radix overlay can swallow clicks if both are open in the same tick).
-          window.setTimeout(() => openWithdraw(), 200);
+          window.setTimeout(() => {
+            if (pendingWithdraw) openResumeEarnWithdraw();
+            else openWithdraw();
+          }, 200);
         }}
         onCashOut={() => {
           setWithdrawChooserOpen(false);
@@ -1692,7 +1753,10 @@ const SavingsCard = () => {
 
       <EasySavingsWithdrawModal
         isOpen={withdrawOpen}
-        onClose={() => setWithdrawOpen(false)}
+        onClose={() => {
+          setWithdrawOpen(false);
+          setOutboundRev((n) => n + 1);
+        }}
         route={isWalletAccount ? usdcRoute : route}
         networkId={networkId}
         onConnectWallet={() => {

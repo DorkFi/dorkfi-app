@@ -32,3 +32,12 @@ export function isAlgoCreditArrived(args: {
   const minCredit = Math.max(0.01, expected * 0.9);
   return args.current + 1e-9 >= args.baseline + minCredit;
 }
+
+/** Base USDC rose by most of the quoted Exodus output (spread allowed). */
+export function isBaseCreditArrived(args: {
+  current: number;
+  baseline: number;
+  expectedToAmount: number;
+}): boolean {
+  return isAlgoCreditArrived(args);
+}

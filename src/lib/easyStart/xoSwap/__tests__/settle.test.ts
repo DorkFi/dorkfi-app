@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isAlgoCreditArrived,
+  isBaseCreditArrived,
   isXoOrderFailed,
   isXoOrderSettled,
 } from "@/lib/easyStart/xoSwap/settle";
@@ -46,6 +47,25 @@ describe("isAlgoCreditArrived", () => {
       isAlgoCreditArrived({
         current: 29.06,
         baseline: 29.05,
+        expectedToAmount: 30.28,
+      })
+    ).toBe(false);
+  });
+});
+
+describe("isBaseCreditArrived", () => {
+  it("uses the same threshold as an Algorand credit", () => {
+    expect(
+      isBaseCreditArrived({
+        current: 40.2,
+        baseline: 10,
+        expectedToAmount: 30.28,
+      })
+    ).toBe(true);
+    expect(
+      isBaseCreditArrived({
+        current: 10.02,
+        baseline: 10,
         expectedToAmount: 30.28,
       })
     ).toBe(false);

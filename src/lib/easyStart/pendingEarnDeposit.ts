@@ -130,9 +130,16 @@ export function pendingEarnSupplyAmount(
   return Math.min(job.wantedAmount, currentAlgoUsdc);
 }
 
+/** Enough to know an Exodus order was already opened. */
+export type PendingSwapInFlight = {
+  wantedAmount: number;
+  fromTxId?: string;
+  orderId?: string;
+};
+
 /** Same Earn request is already in flight — do not open a second Exodus order. */
 export function pendingEarnBlocksNewSwap(
-  job: PendingEarnDeposit | null,
+  job: PendingSwapInFlight | null,
   wantedAmount: number
 ): boolean {
   if (!job) return false;
