@@ -19,6 +19,8 @@ export function useEasyStartPortfolioTotal(): {
   totalUsd: number;
   walletUsd: number;
   depositUsd: number;
+  /** USDC Earn only. Higher yield uses its own withdraw. */
+  coreDepositUsd: number;
   algoWalletUsd: number | null;
   baseWalletUsd: number | null;
   isLoading: boolean;
@@ -103,6 +105,7 @@ export function useEasyStartPortfolioTotal(): {
     totalUsd,
     walletUsd,
     depositUsd,
+    coreDepositUsd: Math.max(0, coreDepositUsd),
     algoWalletUsd,
     baseWalletUsd,
     isLoading,

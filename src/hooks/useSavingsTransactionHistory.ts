@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { NetworkId } from "@/config";
+import { ACCOUNT_ACTIVITY_EVENT } from "@/lib/easyStart/accountActivity";
 import {
   appendLocalSavingsTx,
   fetchPoolSavingsTxns,
@@ -118,6 +119,15 @@ export function useSavingsTransactionHistory(params: {
       return;
     }
     void reload();
+  }, [canQuery, reload]);
+
+  useEffect(() => {
+    if (!canQuery || typeof window === "undefined") return;
+    const onActivity = () => {
+      void reload();
+    };
+    window.addEventListener(ACCOUNT_ACTIVITY_EVENT, onActivity);
+    return () => window.removeEventListener(ACCOUNT_ACTIVITY_EVENT, onActivity);
   }, [canQuery, reload]);
 
   const recordTx = useCallback(

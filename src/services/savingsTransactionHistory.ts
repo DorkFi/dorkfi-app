@@ -24,6 +24,10 @@ export type SavingsTxRecord = {
   /** Human-readable amount, if known. */
   amount?: string;
   symbol?: string;
+  /** Consumer label for account moves that are not a protocol supply or withdraw. */
+  title?: string;
+  /** Partner order, send hash, or status. Shown as View details. */
+  detail?: string;
   timestamp: number;
   source: "local" | "chain";
 };

@@ -35,6 +35,10 @@ import {
   saveCoinbaseOfframpPending,
 } from "@/lib/easyStart/coinbaseOfframpResume";
 import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
+import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
+import { useNetwork } from "@/contexts/NetworkContext";
+import type { NetworkId } from "@/config";
+import { recordAccountActivity } from "@/lib/easyStart/accountActivity";
 
 const EasyStartMoonPaySellHost = lazy(() =>
   import("@/components/easy-start/EasyStartMoonPaySellHost").then((m) => ({
@@ -104,6 +108,8 @@ export function EasyStartOfframpCashOut({
   const { getAccessToken } = usePrivy();
   const { toast } = useToast();
   const consumerCopy = useConsumerCopy();
+  const privy = usePrivyEasyStart();
+  const { currentNetwork } = useNetwork();
 
   const requireAccessToken = useCallback(async (): Promise<string> => {
     const token = await getAccessToken();
@@ -165,6 +171,18 @@ export function EasyStartOfframpCashOut({
       });
       setTxHash(hash);
       patchCoinbaseOfframpPending({ sendTxHash: hash });
+      const activityAddress = privy.algorandAddress ?? evmAddress;
+      if (activityAddress) {
+        recordAccountActivity({
+          id: hash,
+          address: activityAddress,
+          networkId: currentNetwork as NetworkId,
+          title: "Cash out",
+          amount: cryptoAmount,
+          symbol: "USDC",
+          detail: `Send ${hash}`,
+        });
+      }
       setPhase("done");
       toast({
         title: "Sent",
@@ -172,7 +190,7 @@ export function EasyStartOfframpCashOut({
       });
       return hash;
     },
-    [evmAddress, sendTransaction, toast]
+    [currentNetwork, evmAddress, privy.algorandAddress, sendTransaction, toast]
   );
 
   useEffect(() => {

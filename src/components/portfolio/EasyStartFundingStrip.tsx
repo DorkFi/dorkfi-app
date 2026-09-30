@@ -133,7 +133,7 @@ export function EasyStartFundingStrip() {
               type="button"
               variant="outline"
               className="border-ocean-teal/40"
-              onClick={openWithdraw}
+              onClick={() => openWithdraw()}
             >
               <ArrowDownToLine className="mr-2 h-4 w-4" />
               {consumerCopy ? "Cash out" : "Withdraw"}

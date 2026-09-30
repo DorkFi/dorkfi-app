@@ -47,6 +47,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
+import { useEasyStartModals } from "@/contexts/easyStartModals";
 import { consumerAssetDisplayLabel } from "@/services/savingsRouteResolver";
 import {
   Dialog,
@@ -156,6 +157,7 @@ const BorrowCard = () => {
   const openEasyStartLogin = useEasyStartLogin();
   const { toast } = useToast();
   const consumerCopy = useConsumerCopy();
+  const { openWithdraw: openCashOut } = useEasyStartModals();
   const borrowScope = easyProductScope(consumerCopy);
   const displaySymbol = (symbol?: string | null) => {
     if (!symbol) return "—";
@@ -1074,6 +1076,31 @@ const BorrowCard = () => {
                 asset={displaySymbol(route.borrow.symbol)}
                 assetIcon={route.borrow.logoPath}
                 amount={successAmount}
+                aboveActions={
+                  consumerCopy ? (
+                    <div className="mt-4 flex w-full flex-col gap-2">
+                      <DorkFiButton
+                        className="w-full"
+                        onClick={() => {
+                          handleMakeAnother();
+                          openCashOut({
+                            source: "algorand",
+                            amount: successAmount,
+                          });
+                        }}
+                      >
+                        Cash out
+                      </DorkFiButton>
+                      <DorkFiButton
+                        variant="secondary"
+                        className="w-full"
+                        onClick={handleMakeAnother}
+                      >
+                        Keep in account
+                      </DorkFiButton>
+                    </div>
+                  ) : undefined
+                }
                 onViewTransaction={() => {
                   if (!txId) return;
                   window.open(

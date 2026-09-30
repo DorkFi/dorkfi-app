@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { Address } from "viem";
 import { useDorkFiWalletAdapter } from "@/hooks/useDorkFiWalletAdapter";
 import { waitForConfirmation } from "algosdk";
 import { Loader2 } from "lucide-react";
@@ -20,8 +21,10 @@ import {
 } from "@/config";
 import {
   fetchUserWalletBalance,
+  getMaxWithdrawableForMarket,
   repay,
   repayAll,
+  withdraw,
 } from "@/services/lendingService";
 import algorandService from "@/services/algorandService";
 import { formatUsdAmount } from "@/lib/utils";
@@ -34,12 +37,35 @@ import { getTransactionErrorFeedback } from "@/utils/errorUtils";
 import { invalidateUserPositionRpcCache } from "@/utils/rpcReadCache";
 import { appendLocalBorrowTx } from "@/services/borrowTransactionHistory";
 import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
-import { consumerAssetDisplayLabel } from "@/services/savingsRouteResolver";
+import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
+import { consumerAssetDisplayLabel, easySavingsProductScope, resolveSavingsRoute } from "@/services/savingsRouteResolver";
+import {
+  fetchAlgorandAlgoBalance,
+  fetchAlgorandUsdcBalance,
+  fetchBaseUsdcBalance,
+  hasEnoughAlgorandAlgo,
+} from "@/lib/easyStart/baseBalances";
+import {
+  EARN_REPAY_UNSAFE_MESSAGE,
+  earnRedeemKeepsLoanSafe,
+  maxEarnRedeemKeepingLoanSafe,
+  repaySourceLabel,
+  type RepaySource,
+} from "@/lib/easyStart/repayFromBucket";
+import { recordAccountActivity } from "@/lib/easyStart/accountActivity";
+import { useEasySavingsQuote } from "@/hooks/useEasySavingsQuote";
+import { useEasyStartBorrowDebt } from "@/hooks/useEasyStartBorrowDebt";
 import {
   formatBorrowApyLabel,
   isAccruedDisplayable,
   type EasyStartBorrowPosition,
 } from "@/hooks/useEasyStartBorrowDebt";
+
+const EasyStartHeadlessBridge = lazy(() =>
+  import("@/components/easy-start/EasyStartHeadlessBridge").then((m) => ({
+    default: m.EasyStartHeadlessBridge,
+  }))
+);
 
 const MODAL_SHELL =
   "w-full max-w-[98vw] sm:max-w-md rounded-t-2xl sm:rounded-xl p-0 max-h-[min(90vh,90dvh)] overflow-hidden flex flex-col";
@@ -82,8 +108,14 @@ const EasyBorrowRepayModal = ({
   const { toast } = useToast();
   const consumerCopy = useConsumerCopy();
   const queryClient = useQueryClient();
+  const privy = usePrivyEasyStart();
+  const loan = useEasyStartBorrowDebt();
 
   const [amount, setAmount] = useState("");
+  const [repaySource, setRepaySource] = useState<RepaySource>("algorand");
+  const [repayPhase, setRepayPhase] = useState<"form" | "bridging">("form");
+  const [bridgeAmount, setBridgeAmount] = useState<string | null>(null);
+  const [baselineAlgoUsdc, setBaselineAlgoUsdc] = useState<number | undefined>();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [txId, setTxId] = useState<string | null>(null);
@@ -122,11 +154,59 @@ const EasyBorrowRepayModal = ({
     },
   });
 
+  const usdcRoute = useMemo(
+    () =>
+      resolveSavingsRoute({
+        networkId,
+        assetConfigKey: "USDC",
+        scope: easySavingsProductScope(consumerCopy),
+      }),
+    [networkId, consumerCopy]
+  );
+  const earnQuote = useEasySavingsQuote({
+    networkId,
+    route: usdcRoute,
+    amount: "",
+  });
+  const earnBalance = earnQuote.existingDeposit ?? 0;
+  const baseQuery = useQuery({
+    queryKey: ["easy-start-base-usdc", privy.evmAddress],
+    queryFn: () => fetchBaseUsdcBalance(privy.evmAddress as Address),
+    enabled: Boolean(isOpen && privy.evmAddress),
+    staleTime: 15_000,
+  });
+  const baseBalance = baseQuery.data
+    ? Number.parseFloat(baseQuery.data.formatted)
+    : 0;
+  const earnUnsafe =
+    repaySource === "earn" &&
+    amountNum > 0 &&
+    !loan.isLoading &&
+    !earnRedeemKeepsLoanSafe({
+      collateralUsd: loan.collateralUsd,
+      borrowUsd: loan.totalUsd,
+      redeemUsd: amountNum,
+    });
+
   const walletBalance = walletQuery.data ?? null;
   const walletBalanceReady = !walletQuery.isLoading && walletBalance != null;
+  const sourceBalance =
+    repaySource === "base"
+      ? baseBalance
+      : repaySource === "earn"
+        ? earnBalance
+        : walletBalance;
   const maxRepay = (() => {
-    if (debt <= 0 || walletBalance == null) return 0;
-    return Math.max(0, Math.min(debt, walletBalance));
+    if (debt <= 0) return 0;
+    const cap = sourceBalance ?? 0;
+    if (repaySource === "earn") {
+      const safe = maxEarnRedeemKeepingLoanSafe({
+        collateralUsd: loan.collateralUsd,
+        borrowUsd: loan.totalUsd,
+      });
+      return Math.max(0, Math.min(debt, cap, safe));
+    }
+    return Math.max(0, Math.min(debt, cap));
   })();
 
   useEffect(() => {
@@ -136,17 +216,20 @@ const EasyBorrowRepayModal = ({
     setShowSuccess(false);
     setTxId(null);
     setRainbowkitSignDialogSuppressed(false);
+    setRepaySource("algorand");
+    setRepayPhase("form");
+    setBridgeAmount(null);
   }, [isOpen, position?.id]);
 
   const ctaState: CtaState = (() => {
     if (!activeAccount) return "connect";
     if (debt <= 1e-12) return "no_debt";
     if (!position || amountNum <= 0) return "enter_amount";
-    if (!walletBalanceReady) return "enter_amount";
-    if (amountNum > walletBalance + 1e-8) {
-      return "insufficient_balance";
-    }
     if (amountNum > debt + 1e-8) return "insufficient_balance";
+    if (repaySource === "algorand" && !walletBalanceReady) return "enter_amount";
+    if (sourceBalance == null) return "enter_amount";
+    if (amountNum > sourceBalance + 1e-8) return "insufficient_balance";
+    if (earnUnsafe) return "insufficient_balance";
     return "repay";
   })();
 
@@ -159,11 +242,19 @@ const EasyBorrowRepayModal = ({
       ? consumerCopy
         ? "Confirming…"
         : "Confirm in wallet…"
-      : "Repay",
+      : repaySource === "base"
+        ? "Move and repay"
+        : repaySource === "earn"
+          ? consumerCopy
+            ? "Use Earn"
+            : "Withdraw and repay"
+          : "Repay",
   };
 
   const ctaDisabled =
-    isSubmitting || (ctaState !== "connect" && ctaState !== "repay");
+    isSubmitting ||
+    repayPhase === "bridging" ||
+    (ctaState !== "connect" && ctaState !== "repay");
 
   const invalidateAfterRepay = () => {
     const address = activeAccount?.address?.trim();
@@ -177,14 +268,18 @@ const EasyBorrowRepayModal = ({
     void queryClient.invalidateQueries({ queryKey: ["easySavings"] });
   };
 
-  const handleRepay = async () => {
-    if (ctaState === "connect") {
+  const handleRepay = async (opts?: { skipBalanceCheck?: boolean }) => {
+    if (!opts?.skipBalanceCheck && ctaState === "connect") {
       onConnectWallet?.();
       return;
     }
-    if (ctaState !== "repay" || !position || !market || !activeAccount?.address) {
+    if (
+      !opts?.skipBalanceCheck &&
+      (ctaState !== "repay" || !position || !market || !activeAccount?.address)
+    ) {
       return;
     }
+    if (!position || !market || !activeAccount?.address) return;
     if (!signTransactions) {
       toast({
         title: "Cannot repay",
@@ -226,6 +321,7 @@ const EasyBorrowRepayModal = ({
       const roundedAmount = Math.round(amountNum * 1e6) / 1e6;
       const roundedDebt = Math.round(debt * 1e6) / 1e6;
       const closeLoan =
+        !opts?.skipBalanceCheck &&
         debt > 0 &&
         roundedAmount === roundedDebt &&
         walletBalance != null &&
@@ -325,6 +421,112 @@ const EasyBorrowRepayModal = ({
     }
   };
 
+  const startBaseRepay = async () => {
+    if (!activeAccount?.address || !privy.evmAddress) return;
+    const algo = await fetchAlgorandUsdcBalance(activeAccount.address);
+    const baseline = Number.parseFloat(algo.formatted);
+    setBaselineAlgoUsdc(Number.isFinite(baseline) ? baseline : 0);
+    setBridgeAmount(amount.trim());
+    setRepayPhase("bridging");
+  };
+
+  const redeemEarnThenRepay = async () => {
+    if (!activeAccount?.address || !signTransactions || !usdcRoute) return;
+    if (earnUnsafe) return;
+    setIsSubmitting(true);
+    try {
+      const algo = await fetchAlgorandAlgoBalance(activeAccount.address);
+      if (!hasEnoughAlgorandAlgo(algo.valueMicro)) {
+        throw new Error(
+          consumerCopy
+            ? "A small processing fee is needed before this repay."
+            : "Algorand account needs ~0.1 ALGO for network fees."
+        );
+      }
+      const max = await getMaxWithdrawableForMarket(
+        usdcRoute.poolId,
+        usdcRoute.asset.contractId,
+        activeAccount.address,
+        networkId,
+        usdcRoute.asset.decimals
+      );
+      const maxUnderlying = max?.maxWithdrawUnderlying ?? amountNum;
+      const withdrawAll =
+        amountNum >= maxUnderlying * 0.999 ||
+        Math.abs(amountNum - maxUnderlying) < 1e-8;
+      const result = await withdraw(
+        usdcRoute.poolId,
+        usdcRoute.asset.contractId,
+        usdcRoute.asset.tokenStandard,
+        amount.trim(),
+        activeAccount.address,
+        networkId,
+        {
+          withdrawAll,
+          maxWithdrawScaled: withdrawAll ? max?.maxWithdrawScaled : undefined,
+        }
+      );
+      if (!result.success || !("txns" in result) || !result.txns?.length) {
+        throw new Error(
+          "error" in result && result.error
+            ? String(result.error)
+            : "Withdraw failed to build."
+        );
+      }
+      const signed = await withRainbowkitHostDialogDismissed({
+        wallet: activeWallet,
+        setSuppressed: setRainbowkitSignDialogSuppressed,
+        leaveOverlayDismissedOnSuccess: true,
+        run: () =>
+          signTransactions(
+            result.txns.map((txn) =>
+              Uint8Array.from(atob(txn), (c) => c.charCodeAt(0))
+            )
+          ),
+      });
+      const algorandNetwork = getAlgorandNetworkFromNetworkId(networkId);
+      if (!algorandNetwork) throw new Error("This network is not Algorand-compatible.");
+      const { algod } =
+        await algorandService.initializeClientsForTransactions(algorandNetwork);
+      const res = await algod.sendRawTransaction(signed).do();
+      await waitForConfirmation(algod, res.txid, 4);
+      recordAccountActivity({
+        id: res.txid,
+        address: activeAccount.address,
+        networkId,
+        title: consumerCopy ? "Used Earn to repay" : "Withdrew to repay",
+        amount: amount.trim(),
+        symbol: "USDC",
+      });
+      await handleRepay({ skipBalanceCheck: true });
+    } catch (e: unknown) {
+      const { message } = getTransactionErrorFeedback(e);
+      toast({
+        title: "Couldn’t use Earn",
+        description: message,
+        variant: "destructive",
+      });
+      setIsSubmitting(false);
+    }
+  };
+
+  const handlePrimary = () => {
+    if (ctaState === "connect") {
+      onConnectWallet?.();
+      return;
+    }
+    if (ctaState !== "repay") return;
+    if (repaySource === "base") {
+      void startBaseRepay();
+      return;
+    }
+    if (repaySource === "earn") {
+      void redeemEarnThenRepay();
+      return;
+    }
+    void handleRepay();
+  };
+
   const handleMakeAnother = () => {
     setShowSuccess(false);
     setTxId(null);
@@ -334,15 +536,28 @@ const EasyBorrowRepayModal = ({
   if (!position) return null;
 
   return (
+    <>
     <Dialog
       open={isOpen && !rainbowkitSignDialogSuppressed}
       onOpenChange={(open) => {
-        if (!open && !isSubmitting) onClose();
+        if (!open && !isSubmitting && repayPhase !== "bridging") onClose();
       }}
     >
       <DialogContent className={MODAL_SHELL}>
         <div className="max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain px-5 pt-10 pb-6 sm:px-7 sm:pb-7">
-          {showSuccess ? (
+          {repayPhase === "bridging" ? (
+            <div className="py-10 flex flex-col items-center gap-3 text-center">
+              <Loader2 className="h-8 w-8 animate-spin text-ocean-teal" />
+              <DialogHeader className="space-y-2">
+                <DialogTitle className="text-xl font-bold">
+                  {consumerCopy ? "Moving funds to repay" : "Swapping to Algorand"}
+                </DialogTitle>
+                <DialogDescription>
+                  This can take a few minutes. Repay starts when the USDC arrives.
+                </DialogDescription>
+              </DialogHeader>
+            </div>
+          ) : showSuccess ? (
             <SupplyBorrowCongrats
               transactionType="repay"
               asset={symbol}
@@ -474,13 +689,47 @@ const EasyBorrowRepayModal = ({
                   ) : null}
                 </div>
 
-                {walletBalance != null &&
-                walletBalance + 1e-8 < debt &&
-                debt > 0 ? (
+                <div className="grid grid-cols-3 gap-2">
+                  {(["algorand", "base", "earn"] as const).map((source) => (
+                    <button
+                      key={source}
+                      type="button"
+                      onClick={() => setRepaySource(source)}
+                      className={
+                        repaySource === source
+                          ? "rounded-xl border border-ocean-teal bg-ocean-teal/5 px-2 py-2 text-left"
+                          : "rounded-xl border border-border px-2 py-2 text-left"
+                      }
+                    >
+                      <span className="block text-xs font-semibold">
+                        {repaySourceLabel(source, consumerCopy)}
+                      </span>
+                      <span className="block text-[11px] tabular-nums text-muted-foreground">
+                        {formatToken(
+                          source === "algorand"
+                            ? walletBalance
+                            : source === "base"
+                              ? baseBalance
+                              : earnBalance
+                        )}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+
+                {earnUnsafe ? (
+                  <p className="text-xs text-destructive" role="alert">
+                    {EARN_REPAY_UNSAFE_MESSAGE}
+                  </p>
+                ) : repaySource === "earn" && amountNum > 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    This withdraw stays above the loan safety line.
+                  </p>
+                ) : repaySource === "base" ? (
                   <p className="text-xs text-muted-foreground">
                     {consumerCopy
-                      ? `You need ${symbol} available to repay. This does not pull from savings.`
-                      : `You need ${symbol} in your Algorand wallet to repay. This does not pull from savings collateral.`}
+                      ? "We’ll move this into the account that can repay, then repay."
+                      : "Base USDC is swapped to Algorand, then repaid."}
                   </p>
                 ) : null}
 
@@ -488,9 +737,7 @@ const EasyBorrowRepayModal = ({
                   variant="borrow"
                   className="w-full h-12"
                   disabled={ctaDisabled}
-                  onClick={() => {
-                    void handleRepay();
-                  }}
+                  onClick={handlePrimary}
                 >
                   {isSubmitting ? (
                     <span className="inline-flex items-center gap-2">
@@ -507,6 +754,44 @@ const EasyBorrowRepayModal = ({
         </div>
       </DialogContent>
     </Dialog>
+    {repayPhase === "bridging" && bridgeAmount ? (
+      <Suspense fallback={null}>
+        <EasyStartHeadlessBridge
+          enabled
+          amount={bridgeAmount}
+          direction="base-to-algo"
+          baselineAlgoUsdc={baselineAlgoUsdc}
+          onFundsSent={(info) => {
+            if (!activeAccount?.address) return;
+            recordAccountActivity({
+              id: info.fromTxId || info.orderId,
+              address: activeAccount.address,
+              networkId,
+              title: consumerCopy ? "Moved to repay" : "Swap to Algorand",
+              amount: String(info.expectedToAmount),
+              symbol: "USDC",
+              detail: info.orderId ? `Order ${info.orderId}` : undefined,
+            });
+          }}
+          onPhaseChange={(phase, err) => {
+            if (phase !== "error") return;
+            setRepayPhase("form");
+            setBridgeAmount(null);
+            toast({
+              title: "Couldn’t move funds",
+              description: err ?? "Swap failed",
+              variant: "destructive",
+            });
+          }}
+          onComplete={() => {
+            setRepayPhase("form");
+            setBridgeAmount(null);
+            void handleRepay({ skipBalanceCheck: true });
+          }}
+        />
+      </Suspense>
+    ) : null}
+    </>
   );
 };
 

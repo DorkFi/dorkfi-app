@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Landmark } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -31,11 +31,22 @@ import {
   TrustValueList,
 } from "@/components/easy-start/EasyStartFundingUi";
 import { EasyStartOfframpCashOutSlot } from "@/components/easy-start/EasyStartOfframpCashOutSlot";
+import { CashOutMovePanel } from "@/components/easy-start/CashOutMovePanel";
+import {
+  cashOutNeedsMove,
+  cashOutSourceLabel,
+  cashOutSourceOptions,
+  cashOutSourcesWithLaunch,
+  defaultCashOutSource,
+  type CashOutDestination,
+  type CashOutLaunch,
+  type CashOutSource,
+} from "@/lib/easyStart/cashOutSources";
 
 const PRESET_AMOUNTS = ["25", "50", "100", "250"] as const;
 
 type WithdrawPhase = "idle" | "error";
-type WithdrawStep = "choose" | "review";
+type WithdrawStep = "plan" | "choose" | "review" | "move";
 
 interface EasyStartWithdrawSheetProps {
   open: boolean;
@@ -48,6 +59,8 @@ interface EasyStartWithdrawSheetProps {
     sendTxHash?: string | null;
   } | null;
   onResumeConsumed?: () => void;
+  /** Borrow success can open this on leftover Algorand USDC. */
+  launch?: CashOutLaunch | null;
 }
 
 /**
@@ -60,6 +73,7 @@ export function EasyStartWithdrawSheet({
   onOpenAdvancedBridge,
   resumeOfframp = null,
   onResumeConsumed,
+  launch = null,
 }: EasyStartWithdrawSheetProps) {
   const { evmAddress } = usePrivyEasyStart();
   const consumerCopy = useConsumerCopy();
@@ -69,6 +83,10 @@ export function EasyStartWithdrawSheet({
   const [step, setStep] = useState<WithdrawStep>(
     resumeOfframp ? "review" : "choose"
   );
+  const [source, setSource] = useState<CashOutSource>(launch?.source ?? "base");
+  const [destination, setDestination] =
+    useState<CashOutDestination>("coinbase");
+  const plannedRef = useRef(false);
   const [editingAmount, setEditingAmount] = useState(false);
   const [phase, setPhase] = useState<WithdrawPhase>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -88,6 +106,16 @@ export function EasyStartWithdrawSheet({
   const portfolio = useEasyStartPortfolioTotal();
   const earnUsd = portfolio.depositUsd;
   const algorandUsd = portfolio.algoWalletUsd ?? 0;
+  const sourceOptions = cashOutSourcesWithLaunch(
+    cashOutSourceOptions({
+      baseUsd: Number.isFinite(availableNum) ? availableNum : 0,
+      earnUsd: portfolio.coreDepositUsd,
+      algorandUsd,
+    }),
+    launch
+  );
+  const selectedSource =
+    sourceOptions.find((row) => row.source === source) ?? sourceOptions[0] ?? null;
   const bucketsLoading =
     !hasAvailable &&
     (portfolio.isLoading || (Boolean(address) && baseUsdcLoading && !baseUsdc));
@@ -126,6 +154,8 @@ export function EasyStartWithdrawSheet({
     setStep("choose");
     setEditingAmount(false);
     setAmount("");
+    setDestination("coinbase");
+    plannedRef.current = false;
   }, []);
 
   const handleClose = (next: boolean) => {
@@ -139,6 +169,32 @@ export function EasyStartWithdrawSheet({
     if (!open || !resumeOfframp) return;
     applyResume();
   }, [applyResume, open, resumeOfframp]);
+
+  useEffect(() => {
+    if (!open || resumeOfframp || plannedRef.current) return;
+    if (portfolio.isLoading || bucketsLoading) return;
+    const movable = sourceOptions.some((row) => cashOutNeedsMove(row.source));
+    if (!movable && !launch?.source) return;
+    const next = defaultCashOutSource(sourceOptions, launch?.source ?? null);
+    if (!next) return;
+    setSource(next);
+    const row = sourceOptions.find((item) => item.source === next);
+    const launched = Number(launch?.amount);
+    if (launch?.source === next && Number.isFinite(launched) && launched > 0) {
+      setAmount(String(Math.floor(launched * 100) / 100));
+    } else if (row) {
+      setAmount(String(Math.max(0, Math.floor(row.usd * 100) / 100)));
+    }
+    setStep("plan");
+    plannedRef.current = true;
+  }, [
+    open,
+    resumeOfframp,
+    portfolio.isLoading,
+    bucketsLoading,
+    sourceOptions,
+    launch,
+  ]);
 
   const setMax = () => {
     if (!hasAvailable) return;
@@ -178,6 +234,36 @@ export function EasyStartWithdrawSheet({
     setStep("review");
   };
 
+  const continueFromPlan = () => {
+    setError(null);
+    if (!selectedSource) {
+      setError("Nothing to cash out.");
+      return;
+    }
+    if (!amountValid) {
+      setError("Enter an amount to cash out.");
+      return;
+    }
+    if (amountNum > selectedSource.usd + 1e-9) {
+      setError(
+        `You only have ${formatCurrency(selectedSource.usd, "USD", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })} in ${cashOutSourceLabel(selectedSource.source, consumerCopy)}.`
+      );
+      return;
+    }
+    if (!cashOutNeedsMove(selectedSource.source)) {
+      if (destination === "account") {
+        handleClose(false);
+        return;
+      }
+      setStep("review");
+      return;
+    }
+    setStep("move");
+  };
+
   const cashOutAmount =
     amount.trim() ||
     (hasAvailable
@@ -188,7 +274,110 @@ export function EasyStartWithdrawSheet({
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className={EASY_START_FUNDING_DIALOG_CLASS}>
         <div className="flex flex-col min-h-0">
-          {phase === "error" ? (
+          {step === "move" && cashOutNeedsMove(source) ? (
+            <>
+              <FundingSheetHeader
+                title="Cash out"
+                subtitle={
+                  destination === "account"
+                    ? "Moving this into your account."
+                    : "Moving this, then cashing out."
+                }
+              />
+              {source === "earn" || source === "algorand" ? (
+                <CashOutMovePanel
+                  amount={amount}
+                  source={source}
+                  destination={destination}
+                  onDone={() => handleClose(false)}
+                />
+              ) : null}
+            </>
+          ) : step === "plan" ? (
+            <>
+              <FundingSheetHeader
+                title="Cash out"
+                subtitle="Choose where the money is, and whether to send it out."
+              />
+              <div className="px-6 pb-6 pt-3 space-y-4">
+                <div className="space-y-2">
+                  {sourceOptions.map((row) => (
+                    <button
+                      key={row.source}
+                      type="button"
+                      onClick={() => {
+                        setSource(row.source);
+                        setAmount(
+                          String(Math.max(0, Math.floor(row.usd * 100) / 100))
+                        );
+                        setEditingAmount(false);
+                      }}
+                      className={
+                        row.source === source
+                          ? "flex w-full items-center justify-between rounded-xl border border-ocean-teal bg-ocean-teal/5 px-3.5 py-3 text-left"
+                          : "flex w-full items-center justify-between rounded-xl border border-border px-3.5 py-3 text-left"
+                      }
+                    >
+                      <span className="text-sm font-semibold">
+                        {cashOutSourceLabel(row.source, consumerCopy)}
+                      </span>
+                      <span className="text-sm tabular-nums">
+                        {formatCurrency(row.usd, "USD", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <AmountHero
+                  id="cash-out-plan-amount"
+                  amount={amount}
+                  onChange={setAmount}
+                  editing={editingAmount}
+                  onEditingChange={setEditingAmount}
+                  display={amountDisplay}
+                  min={0}
+                  step={0.01}
+                />
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDestination("coinbase")}
+                    className={
+                      destination === "coinbase"
+                        ? "rounded-xl border border-ocean-teal bg-ocean-teal/5 px-3 py-3 text-sm font-semibold"
+                        : "rounded-xl border border-border px-3 py-3 text-sm font-semibold"
+                    }
+                  >
+                    Cash out
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDestination("account")}
+                    className={
+                      destination === "account"
+                        ? "rounded-xl border border-ocean-teal bg-ocean-teal/5 px-3 py-3 text-sm font-semibold"
+                        : "rounded-xl border border-border px-3 py-3 text-sm font-semibold"
+                    }
+                  >
+                    {consumerCopy ? "Keep in account" : "Keep on Base"}
+                  </button>
+                </div>
+                {error ? (
+                  <p className="text-sm text-destructive" role="alert">
+                    {error}
+                  </p>
+                ) : null}
+                <FundingPrimaryButton
+                  disabled={!selectedSource || !amountValid}
+                  onClick={continueFromPlan}
+                >
+                  <ContinueLabel>Continue</ContinueLabel>
+                </FundingPrimaryButton>
+              </div>
+            </>
+          ) : phase === "error" ? (
             <>
               <FundingSheetHeader
                 title="Couldn’t cash out"

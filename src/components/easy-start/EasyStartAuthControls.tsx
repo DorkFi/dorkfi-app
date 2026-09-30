@@ -139,7 +139,7 @@ export function EasyStartConnectMenu() {
           <CreditCard className="mr-2 h-4 w-4" />
           Add money
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={openWithdraw}>
+        <DropdownMenuItem onClick={() => openWithdraw()}>
           <ArrowDownToLine className="mr-2 h-4 w-4" />
           Cash out
         </DropdownMenuItem>

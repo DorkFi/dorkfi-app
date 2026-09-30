@@ -1,8 +1,9 @@
 import { createContext, useContext } from "react";
+import type { CashOutLaunch } from "@/lib/easyStart/cashOutSources";
 
 export type EasyStartModalsContextValue = {
   openDeposit: () => void;
-  openWithdraw: () => void;
+  openWithdraw: (launch?: CashOutLaunch | null) => void;
   /** Advanced Base ↔ Algorand USDC move via XO Swap (escape hatch). */
   openBridge: () => void;
 };

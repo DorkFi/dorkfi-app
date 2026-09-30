@@ -56,6 +56,7 @@ import {
   type EasyStartBridgePhase,
 } from "@/components/easy-start/easyStartBridgePhase";
 import { isXoGeoRestricted } from "@/lib/easyStart/xoSwap/errors";
+import { recordAccountActivity } from "@/lib/easyStart/accountActivity";
 import { Button } from "@/components/ui/button";
 import {
   applyOptimisticSavingsPosition,
@@ -911,6 +912,17 @@ const EasySavingsWithdrawModal = ({
                 fromTxId: info.fromTxId,
                 expectedToAmount: info.expectedToAmount,
               });
+              if (activeAccount?.address) {
+                recordAccountActivity({
+                  id: info.fromTxId || info.orderId,
+                  address: activeAccount.address,
+                  networkId,
+                  title: consumerCopy ? "Moved to account" : "Swap to Base",
+                  amount: String(info.expectedToAmount),
+                  symbol: "USDC",
+                  detail: info.orderId ? `Order ${info.orderId}` : undefined,
+                });
+              }
             }}
             onPhaseChange={(p, err) => {
               setBridgePhase(p);

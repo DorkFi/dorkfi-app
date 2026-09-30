@@ -32,6 +32,11 @@ import {
   type PendingBankDeposit,
 } from "@/lib/easyStart/pendingBankDeposit";
 import { usePendingBankDepositWatch } from "@/hooks/usePendingBankDepositWatch";
+import { useToast } from "@/hooks/use-toast";
+import { useNetwork } from "@/contexts/NetworkContext";
+import type { NetworkId } from "@/config";
+import { recordAccountActivity } from "@/lib/easyStart/accountActivity";
+import type { CashOutLaunch } from "@/lib/easyStart/cashOutSources";
 
 /**
  * Lazy-load Easy Start sheets so `@privy-io/wagmi` stays out of first paint.
@@ -124,8 +129,13 @@ function EasyStartSheetFallback({
 export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
   const privy = usePrivyEasyStart();
   const consumerCopy = useConsumerCopy();
+  const { toast } = useToast();
+  const { currentNetwork } = useNetwork();
   const [depositOpen, setDepositOpen] = useState(false);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [cashOutLaunch, setCashOutLaunch] = useState<CashOutLaunch | null>(
+    null
+  );
   const [bridgeOpen, setBridgeOpen] = useState(false);
   const [offrampResume, setOfframpResume] =
     useState<CoinbaseOfframpPending | null>(null);
@@ -140,11 +150,30 @@ export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
     setDepositOpen(true);
   }, [privy.evmAddress]);
 
-  const handleBankDepositArrived = useCallback((job: PendingBankDeposit) => {
-    setBankDepositArrived(true);
-    setBankResume(job);
-    setDepositOpen(true);
-  }, []);
+  const handleBankDepositArrived = useCallback(
+    (job: PendingBankDeposit) => {
+      setBankDepositArrived(true);
+      setBankResume(job);
+      setDepositOpen(true);
+      const address = privy.algorandAddress;
+      if (address) {
+        recordAccountActivity({
+          id: `add-money:${job.at}`,
+          address,
+          networkId: currentNetwork as NetworkId,
+          title: "Added money",
+          amount: job.amount ?? undefined,
+          symbol: "USDC",
+          detail: "Bank deposit arrived",
+        });
+      }
+      toast({
+        title: "Money arrived",
+        description: "Your deposit is in your account.",
+      });
+    },
+    [currentNetwork, privy.algorandAddress, toast]
+  );
 
   const { markPrompted: markBankDepositPrompted } = usePendingBankDepositWatch({
     enabled: showSheets,
@@ -152,9 +181,10 @@ export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
     address: privy.evmAddress,
     onArrive: handleBankDepositArrived,
   });
-  const openWithdraw = useCallback(() => {
+  const openWithdraw = useCallback((launch?: CashOutLaunch | null) => {
     const pending = readCoinbaseOfframpPending();
     if (pending) setOfframpResume(pending);
+    setCashOutLaunch(launch ?? null);
     setWithdrawOpen(true);
   }, []);
   const openBridge = useCallback(() => setBridgeOpen(true), []);
@@ -251,7 +281,11 @@ export function EasyStartModalsProvider({ children }: { children: ReactNode }) {
               >
                 <EasyStartWithdrawSheet
                   open={withdrawOpen}
-                  onOpenChange={setWithdrawOpen}
+                  onOpenChange={(next) => {
+                    setWithdrawOpen(next);
+                    if (!next) setCashOutLaunch(null);
+                  }}
+                  launch={cashOutLaunch}
                   resumeOfframp={offrampResume}
                   onResumeConsumed={() => setOfframpResume(null)}
                   onOpenAdvancedBridge={

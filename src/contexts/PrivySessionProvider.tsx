@@ -35,6 +35,7 @@ import {
   isSponsorFullyFunded,
   requestEasyStartSponsor,
 } from "@/lib/easyStart/sponsorApi";
+import { recordAccountActivity } from "@/lib/easyStart/accountActivity";
 
 const PRIVY_APP_ID = getPrivyAppId();
 
@@ -208,6 +209,15 @@ function PrivyEasyStartStateBridge({
           if (cancelled) return;
           if (isSponsorFullyFunded(result)) {
             sponsoredEvmRef.current = evmAddress;
+            if (result.algo.status === "sent" && result.algo.txHash) {
+              recordAccountActivity({
+                id: result.algo.txHash,
+                address: algorandAddress,
+                networkId: "algorand-mainnet",
+                title: "Account funded",
+                detail: `Processing fee ${result.algo.txHash}`,
+              });
+            }
             return;
           }
         } catch (error) {

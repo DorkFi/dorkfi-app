@@ -53,6 +53,8 @@ import {
 } from "@/services/savingsBalanceHistory";
 import { fetchBaseUsdcBalance } from "@/lib/easyStart/baseBalances";
 import { CASH_OUT_MIN_USD } from "@/lib/easyStart/cashOutBuckets";
+import { cashOutSourceOptions } from "@/lib/easyStart/cashOutSources";
+import { useToast } from "@/hooks/use-toast";
 import {
   isPendingEarnFunded,
   pendingEarnSupplyAmount,
@@ -96,11 +98,12 @@ function shortTxId(txId: string): string {
   return `${txId.slice(0, 6)}…${txId.slice(-4)}`;
 }
 
-function txKindLabel(kind: SavingsTxRecord["kind"]): string {
-  if (kind === "deposit") return "Deposit";
-  if (kind === "withdraw") return "Withdraw";
-  if (kind === "borrow") return "Borrow";
-  if (kind === "repay") return "Repay";
+function txKindLabel(item: SavingsTxRecord): string {
+  if (item.title) return item.title;
+  if (item.kind === "deposit") return "Deposit";
+  if (item.kind === "withdraw") return "Withdraw";
+  if (item.kind === "borrow") return "Borrow";
+  if (item.kind === "repay") return "Repay";
   return "Activity";
 }
 
@@ -145,6 +148,7 @@ const SavingsCard = () => {
   const networkId = currentNetwork as NetworkId;
   const { activeAccount } = useDorkFiWalletAdapter();
   const privy = usePrivyEasyStart();
+  const { toast } = useToast();
   const consumerCopy = useConsumerCopy();
   const savingsScope = easySavingsProductScope(consumerCopy);
   const [walletModalOpen, setWalletModalOpen] = useState(false);
@@ -257,12 +261,23 @@ const SavingsCard = () => {
     if (!isPendingEarnWithdrawComplete(pendingWithdraw, walletUsdcBase)) return;
     clearPendingEarnWithdraw();
     setOutboundRev((n) => n + 1);
-  }, [pendingWithdraw, walletUsdcBase]);
+    toast({
+      title: consumerCopy ? "Back in your account" : "On Base",
+      description: consumerCopy
+        ? "The move from Earn finished."
+        : "The Algorand to Base swap finished.",
+    });
+  }, [pendingWithdraw, walletUsdcBase, toast, consumerCopy]);
 
   const hasWalletUsdc = walletUsdc != null && walletUsdc > 1e-9;
   const hasBaseUsdc = walletUsdcBase != null && walletUsdcBase > 1e-9;
-  /** Matches EasyStartWithdrawSheet’s cashable Base USDC floor. */
-  const canCashOut = walletUsdcBase != null && walletUsdcBase > 0.01;
+  /** Cash out can start from Base, Earn, or leftover Algorand USDC. */
+  const canCashOut =
+    cashOutSourceOptions({
+      baseUsd: walletUsdcBase ?? 0,
+      earnUsd: coreDepositUsd,
+      algorandUsd: walletUsdcAlgo ?? 0,
+    }).length > 0;
   const walletBalanceLoading =
     (Boolean(activeAccount) &&
       usdcQuote.isLoading &&
@@ -659,7 +674,7 @@ const SavingsCard = () => {
       },
       {
         id: "algorand",
-        label: "On Algorand",
+        label: consumerCopy ? "Available to move" : "On Algorand",
         balanceUsd: portfolioAlgorandUsd,
         apyPercent: portfolioAlgorandUsd > 0 ? 0 : null,
         earnedInterestUsd: 0,
@@ -1185,7 +1200,7 @@ const SavingsCard = () => {
                                   alt=""
                                   className="size-6 rounded-full"
                                 />
-                                On Algorand
+                                Available to move
                                 <span className="text-xs font-normal text-muted-foreground">
                                   Not in Earn
                                 </span>
@@ -1365,16 +1380,15 @@ const SavingsCard = () => {
                               <span className="font-medium text-foreground tabular-nums">
                                 {formatUsdAmount(walletUsdcAlgoUsd)}
                               </span>{" "}
-                              isn’t ready to cash out. Move it to your account
-                              first.
+                              is available to move and can be cashed out from there too.
                             </>
                           ) : null}
                         </>
                       ) : walletUsdcAlgo != null &&
                         walletUsdcAlgo > CASH_OUT_MIN_USD ? (
                         <>
-                          This balance isn’t ready to cash out. Move it to your
-                          account first.
+                          This balance is available to move. Cash out can move it,
+                          then send it.
                         </>
                       ) : (
                         <>Nothing to cash out.</>
@@ -1473,8 +1487,18 @@ const SavingsCard = () => {
                                         "text-orange-600 dark:text-orange-400"
                                     )}
                                   >
-                                    {txKindLabel(item.kind)}
+                                    {txKindLabel(item)}
                                   </span>
+                                  {item.detail ? (
+                                    <details className="mt-1">
+                                      <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+                                        View details
+                                      </summary>
+                                      <p className="mt-1 text-xs text-muted-foreground">
+                                        {item.detail}
+                                      </p>
+                                    </details>
+                                  ) : null}
                                 </td>
                                 <td className="py-4 font-medium">
                                   {txAssetLabel(item, accounts, consumerCopy)}
@@ -1494,7 +1518,7 @@ const SavingsCard = () => {
                                 <td className="py-4 text-muted-foreground">
                                   {formatTxWhen(item.timestamp)}
                                 </td>
-                                {!consumerCopy ? (
+                                {!consumerCopy && item.kind !== "activity" ? (
                                   <td className="py-4 text-right">
                                     <a
                                       href={url}
@@ -1574,8 +1598,18 @@ const SavingsCard = () => {
                                     "text-orange-600 dark:text-orange-400"
                                 )}
                               >
-                                {txKindLabel(item.kind)}
+                                {txKindLabel(item)}
                               </span>
+                              {item.detail ? (
+                                <details className="mt-1">
+                                  <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+                                    View details
+                                  </summary>
+                                  <p className="mt-1 text-xs text-muted-foreground">
+                                    {item.detail}
+                                  </p>
+                                </details>
+                              ) : null}
                               {amountText ? (
                                 <span className="text-sm tabular-nums font-medium">
                                   {isOut ? "−" : isIn ? "+" : ""}
@@ -1587,7 +1621,7 @@ const SavingsCard = () => {
                               {formatTxWhen(item.timestamp)}
                             </p>
                           </div>
-                          {!consumerCopy ? (
+                          {!consumerCopy && item.kind !== "activity" ? (
                             <a
                               href={url}
                               target="_blank"
@@ -1745,7 +1779,8 @@ const SavingsCard = () => {
         open={withdrawChooserOpen}
         onOpenChange={setWithdrawChooserOpen}
         canWithdrawFromEarn={hasAnySavingsDeposit}
-        canCashOut={canCashOut}
+        canCashOut={canCashOut || Boolean(pendingWithdraw)}
+        baseUsd={portfolioCashOutUsd}
         earnUsd={portfolioSavingsUsd + portfolioHigherYieldUsd}
         algorandUsd={portfolioAlgorandUsd}
         finishEarnMove={Boolean(pendingWithdraw)}

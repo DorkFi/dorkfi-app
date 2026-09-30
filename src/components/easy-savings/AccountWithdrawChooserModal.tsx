@@ -15,6 +15,8 @@ type AccountWithdrawChooserModalProps = {
   onOpenChange: (open: boolean) => void;
   canWithdrawFromEarn: boolean;
   canCashOut: boolean;
+  /** Base USDC. When cash out is enabled and this is empty, the next step moves funds first. */
+  baseUsd?: number;
   /** Supplied Earn balance. Used only for the disabled Cash out message. */
   earnUsd?: number;
   /** Algorand wallet USDC that has already left Earn. */
@@ -74,6 +76,7 @@ const AccountWithdrawChooserModal = ({
   onOpenChange,
   canWithdrawFromEarn,
   canCashOut,
+  baseUsd = 0,
   earnUsd = 0,
   algorandUsd = 0,
   finishEarnMove = false,
@@ -129,9 +132,13 @@ const AccountWithdrawChooserModal = ({
               title="Cash Out"
               description={
                 canCashOut
-                  ? consumerCopy
-                    ? "Send money from your account. Fee and arrival time are shown on the next screen."
-                    : "Cash out USDC. Fee and arrival time are shown on the next screen."
+                  ? baseUsd > 0.01
+                    ? consumerCopy
+                      ? "Send money from your account. Fee and arrival time are shown on the next screen."
+                      : "Cash out USDC. Fee and arrival time are shown on the next screen."
+                    : consumerCopy
+                      ? "We’ll move it from Earn or the balance available to move, then you can cash out or keep it."
+                      : "Move USDC to Base, then cash out or keep it there."
                   : (cashOutEmptyDescription({
                       consumerCopy,
                       baseUsd: 0,

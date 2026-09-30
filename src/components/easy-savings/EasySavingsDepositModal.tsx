@@ -52,6 +52,7 @@ import {
   type EasyStartBridgePhase,
 } from "@/components/easy-start/easyStartBridgePhase";
 import { isXoGeoRestricted, XO_GEO_RESTRICTED_MESSAGE } from "@/lib/easyStart/xoSwap/errors";
+import { recordAccountActivity } from "@/lib/easyStart/accountActivity";
 import { XO_PAIR_BASE_TO_ALGO } from "@/lib/easyStart/xoSwap/constants";
 import {
   quoteXoPair,
@@ -1036,6 +1037,17 @@ const EasySavingsDepositModal = ({
                 fromTxId: info.fromTxId,
                 expectedToAmount: info.expectedToAmount,
               });
+              if (activeAccount?.address) {
+                recordAccountActivity({
+                  id: info.fromTxId || info.orderId,
+                  address: activeAccount.address,
+                  networkId,
+                  title: consumerCopy ? "Moved to Earn" : "Swap to Algorand",
+                  amount: String(info.expectedToAmount),
+                  symbol: "USDC",
+                  detail: info.orderId ? `Order ${info.orderId}` : undefined,
+                });
+              }
             }}
             onPhaseChange={(p, err) => {
               setBridgePhase(p);
