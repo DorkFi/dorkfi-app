@@ -84,8 +84,6 @@ export default defineConfig(({ mode }) => {
       "wagmi",
       "@wagmi/core",
       "@rainbow-me/rainbowkit",
-      "@privy-io/react-auth",
-      "@privy-io/wagmi",
     ],
   },
   define: {

@@ -10,6 +10,7 @@ if (!(globalThis as unknown as { TronWebProto?: unknown }).TronWebProto) {
 }
 
 import { createRoot } from "react-dom/client";
+import "@/dynamic/dynamicClient";
 import App from "./App.tsx";
 import "./index.css";
 

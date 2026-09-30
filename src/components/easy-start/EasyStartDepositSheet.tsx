@@ -1,11 +1,8 @@
 import { lazy, Suspense, useCallback, useState } from "react";
-import { useFundWallet } from "@privy-io/react-auth";
 import { useQuery } from "@tanstack/react-query";
-import { base } from "viem/chains";
 import type { Address } from "viem";
 import {
   CheckCircle2,
-  CreditCard,
   Loader2,
   Sparkles,
 } from "lucide-react";
@@ -29,12 +26,7 @@ import {
   bridgePhaseLabel,
   type EasyStartBridgePhase,
 } from "@/components/easy-start/easyStartBridgePhase";
-import {
-  EasyStartCardProviderPicker,
-  type CardProvider,
-} from "@/components/easy-start/EasyStartCardProviderPicker";
-
-/** Loaded only while bridging so opening Deposit never waits on `@privy-io/wagmi`. */
+/** Loaded only while bridging. */
 const EasyStartHeadlessBridge = lazy(() =>
   import("@/components/easy-start/EasyStartHeadlessBridge").then((m) => ({
     default: m.EasyStartHeadlessBridge,
@@ -42,9 +34,6 @@ const EasyStartHeadlessBridge = lazy(() =>
 );
 
 const PRESET_AMOUNTS = ["50", "100", "250", "500"];
-const PRIVY_MODAL_HANDOFF_MS = 200;
-/** Small USD native top-up so Allbridge can pay Base gas. */
-const GAS_TOPUP_USD = "3";
 
 const EASY_START_DIALOG_CONTENT_CLASS =
   "bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-white rounded-xl border border-gray-200/50 dark:border-ocean-teal/20 shadow-xl max-w-[95vw] md:max-w-md max-h-[min(90vh,90dvh)] min-h-0 overflow-x-hidden overflow-y-auto flex flex-col p-0 overscroll-contain";
@@ -64,31 +53,18 @@ interface EasyStartDepositSheetProps {
   onOpenAdvancedBridge?: () => void;
 }
 
-function isUserCanceledFunding(message: string): boolean {
-  const lower = message.toLowerCase();
-  return (
-    lower.includes("cancel") ||
-    lower.includes("close") ||
-    lower.includes("exited") ||
-    lower.includes("dismiss")
-  );
-}
-
 /**
- * Cash Stash–style single Deposit: amount → pay → (gas if needed) → auto-bridge → done.
- * Must render under PrivyProvider.
+ * Deposit: move Base USDC to Algorand. Card buy is not wired for Dynamic yet.
  */
 export function EasyStartDepositSheet({
   open,
   onOpenChange,
   onOpenAdvancedBridge,
 }: EasyStartDepositSheetProps) {
-  const { fundWallet } = useFundWallet();
   const { evmAddress, algorandAddress } = usePrivyEasyStart();
   const { toast } = useToast();
 
   const [amount, setAmount] = useState("100");
-  const [cardProvider, setCardProvider] = useState<CardProvider>("moonpay");
   const [phase, setPhase] = useState<DepositPhase>("idle");
   const [bridgePhase, setBridgePhase] =
     useState<EasyStartBridgePhase>("preparing");
@@ -154,34 +130,6 @@ export function EasyStartDepositSheet({
     }
   };
 
-  const handleFundGas = async () => {
-    if (!address) return;
-    setError(null);
-    onOpenChange(false);
-    await new Promise((r) => setTimeout(r, PRIVY_MODAL_HANDOFF_MS));
-    try {
-      await fundWallet(address, {
-        chain: base,
-        asset: "native-currency",
-        amount: GAS_TOPUP_USD,
-        defaultFundingMethod: "card",
-        card: { preferredProvider: cardProvider },
-      });
-      const usdc = bridgeAmount ?? amount;
-      await ensureGasThenBridge(usdc);
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      if (isUserCanceledFunding(message)) {
-        setPhase("gas");
-        onOpenChange(true);
-        return;
-      }
-      setError(message || "Couldn’t add network fee funds");
-      setPhase("error");
-      onOpenChange(true);
-    }
-  };
-
   const startBridgeWithExisting = async () => {
     if (!address) return;
     setError(null);
@@ -212,40 +160,10 @@ export function EasyStartDepositSheet({
       return;
     }
 
-    setPhase("funding");
-    onOpenChange(false);
-    await new Promise((r) => setTimeout(r, PRIVY_MODAL_HANDOFF_MS));
-
-    try {
-      await fundWallet(address, {
-        chain: base,
-        asset: "USDC",
-        amount,
-        defaultFundingMethod: "card",
-        card: { preferredProvider: cardProvider },
-      });
-      await new Promise((r) => setTimeout(r, 1500));
-      await refetchUsdc();
-      await ensureGasThenBridge(amount);
-      toast({
-        title: "Payment received",
-        description: "Finishing your deposit…",
-      });
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      if (isUserCanceledFunding(message)) {
-        resetLocal();
-        return;
-      }
-      setError(message || "Something went wrong opening payment");
-      setPhase("error");
-      onOpenChange(true);
-      toast({
-        title: "Payment couldn’t start",
-        description: message,
-        variant: "destructive",
-      });
-    }
+    setError(
+      "Card deposits aren’t available in this Dynamic test. Send USDC to your Base address, then deposit again."
+    );
+    setPhase("error");
   };
 
   const busy =
@@ -269,9 +187,9 @@ export function EasyStartDepositSheet({
                 </div>
                 <DialogDescription className="text-center text-sm text-slate-600 dark:text-slate-400">
                   {phase === "idle"
-                    ? "Choose MoonPay or Coinbase, then pay with card. We’ll move your USDC to Algorand automatically."
+                    ? "Move USDC you already have on Base to Algorand. Card buy isn’t connected in this test."
                     : phase === "gas"
-                      ? "One quick step: add a little ETH for network fees, then we finish the deposit."
+                      ? "Send a little ETH to your Base address for network fees, then continue."
                       : phase === "bridging"
                         ? bridgePhaseLabel(bridgePhase)
                         : phase === "success"
@@ -321,13 +239,14 @@ export function EasyStartDepositSheet({
               ) : phase === "gas" ? (
                 <div className="space-y-4 py-2">
                   <p className="text-sm text-slate-600 dark:text-slate-400 text-center">
-                    Bridging needs a tiny bit of ETH on Base for gas (separate
-                    from your USDC). About ${GAS_TOPUP_USD} is enough.
+                    Bridging needs a little ETH on Base for gas (separate from
+                    your USDC). Send some to your Base address, then continue.
                   </p>
-                  <EasyStartCardProviderPicker
-                    value={cardProvider}
-                    onChange={setCardProvider}
-                  />
+                  {address ? (
+                    <p className="text-xs font-mono text-center break-all text-slate-500">
+                      {address}
+                    </p>
+                  ) : null}
                   {error ? (
                     <p className="text-sm text-destructive" role="alert">
                       {error}
@@ -335,19 +254,11 @@ export function EasyStartDepositSheet({
                   ) : null}
                   <Button
                     className="w-full bg-ocean-teal hover:bg-ocean-teal/90 text-white font-semibold"
-                    onClick={() => void handleFundGas()}
-                  >
-                    <CreditCard className="mr-2 h-4 w-4" />
-                    Add network fee
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    className="w-full"
                     onClick={() =>
                       void ensureGasThenBridge(bridgeAmount ?? amount)
                     }
                   >
-                    I already added ETH — continue
+                    I added ETH — continue
                   </Button>
                 </div>
               ) : phase === "error" ? (
@@ -434,13 +345,6 @@ export function EasyStartDepositSheet({
                     </label>
                   ) : null}
 
-                  {!skipFiat ? (
-                    <EasyStartCardProviderPicker
-                      value={cardProvider}
-                      onChange={setCardProvider}
-                    />
-                  ) : null}
-
                   {!address ? (
                     <p className="text-sm text-amber-600 dark:text-amber-400">
                       Waiting for your Easy Start wallet…
@@ -461,7 +365,6 @@ export function EasyStartDepositSheet({
                       </>
                     ) : (
                       <>
-                        <CreditCard className="mr-2 h-4 w-4" />
                         Deposit
                       </>
                     )}

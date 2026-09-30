@@ -9,23 +9,41 @@ import React, {
   type ReactNode,
 } from "react";
 import {
-  PrivyProvider,
-  usePrivy,
-  useSignTypedData,
-  useWallets,
-} from "@privy-io/react-auth";
-import { useQuery } from "@tanstack/react-query";
-import { base } from "viem/chains";
-import { isFeatureEnabled } from "@/config";
-import { deriveAlgorandXchainAddress } from "@/services/xchainAddressService";
-import { signPrivyXchainTransactions } from "@/wallet/privyXchainSignTransactions";
+  createWaasWalletAccounts,
+  getChainsMissingWaasWalletAccounts,
+} from "@dynamic-labs-sdk/client/waas";
+import { isEvmWalletAccount, type EvmWalletAccount } from "@dynamic-labs-sdk/evm";
 import {
-  getPrivyAppId,
-  getPrivyOriginHint,
-  resolvePrivyOnboardingEnabled,
-} from "@/utils/privyOrigin";
+  DynamicProvider,
+  useGetWalletAccounts,
+  useInitStatus,
+  useLogout,
+  useOnEvent,
+  useUser,
+} from "@dynamic-labs-sdk/react-hooks";
+import { useQuery } from "@tanstack/react-query";
+import type { Address, Hex } from "viem";
+import { isFeatureEnabled } from "@/config";
+import { EasyStartLoginDialog } from "@/components/easy-start/EasyStartLoginDialog";
+import { dynamicClient, dynamicEnvironmentId } from "@/dynamic/dynamicClient";
+import { deriveAlgorandXchainAddress } from "@/services/xchainAddressService";
+import { useToast } from "@/hooks/use-toast";
+import {
+  createDynamicBaseProvider,
+  type DynamicEip1193Provider,
+} from "@/wallet/dynamicBaseProvider";
+import {
+  getDynamicWalletClient,
+  signDynamicXchainTransactions,
+} from "@/wallet/dynamicXchainSignTransactions";
+import { resolvePrivyOnboardingEnabled } from "@/utils/privyOrigin";
 
-const PRIVY_APP_ID = getPrivyAppId();
+export type EasyStartSendTransaction = (input: {
+  to: string;
+  value?: bigint;
+  data?: Hex;
+  chainId?: number;
+}) => Promise<{ hash: Hex }>;
 
 export type PrivyEasyStartState = {
   enabled: boolean;
@@ -38,8 +56,12 @@ export type PrivyEasyStartState = {
   displayName: string | null;
   login: (() => void) | null;
   logout: (() => Promise<void>) | null;
-  /** xChain EIP-712 signing for Algorand txn groups (Privy embedded wallet). */
+  /** xChain EIP-712 signing for Algorand txn groups (Dynamic embedded wallet). */
   signTransactions: ((txns: Uint8Array[]) => Promise<Uint8Array[]>) | null;
+  /** Base USDC transfer used by cash-out. */
+  sendBaseTransaction: EasyStartSendTransaction | null;
+  /** EIP-1193 provider for the Allbridge Base leg. */
+  getEvmProvider: (() => Promise<DynamicEip1193Provider>) | null;
 };
 
 const DEFAULT_STATE: PrivyEasyStartState = {
@@ -54,6 +76,8 @@ const DEFAULT_STATE: PrivyEasyStartState = {
   login: null,
   logout: null,
   signTransactions: null,
+  sendBaseTransaction: null,
+  getEvmProvider: null,
 };
 
 const PrivyEasyStartContext = createContext<PrivyEasyStartState>(DEFAULT_STATE);
@@ -71,59 +95,72 @@ export function usePrivyEasyStartEnabled(): {
   return { enabled, configured };
 }
 
-function privyDisplayName(
-  user: ReturnType<typeof usePrivy>["user"]
-): string | null {
+function displayNameFromUser(user: { email?: string | null; firstName?: string | null } | null): string | null {
   if (!user) return null;
-  return (
-    user.google?.name?.split(" ")[0] ??
-    user.email?.address?.split("@")[0] ??
-    null
-  );
+  return user.firstName ?? user.email?.split("@")[0] ?? null;
 }
 
-function PrivyEasyStartStateBridge({
-  children,
-  onReadyStuck,
-}: {
-  children: ReactNode;
-  onReadyStuck?: () => void;
-}) {
-  const { ready, authenticated, user, login, logout } = usePrivy();
-  const { signTypedData } = useSignTypedData();
-  const { wallets } = useWallets();
+function WaasBootstrap() {
+  const { toast } = useToast();
+  const creatingRef = useRef(false);
 
-  useEffect(() => {
-    const originHint = getPrivyOriginHint();
-    if (originHint) {
-      console.error("[Easy Start] Privy cannot init on this origin:", originHint);
-      return;
-    }
-    if (ready) return;
-    const t = window.setTimeout(() => {
-      console.warn(
-        "[Easy Start] Privy ready is still false after 8s. Use http://localhost:8080 and hard-refresh.",
-        { origin: window.location.origin }
-      );
-      onReadyStuck?.();
-    }, 8000);
-    return () => window.clearTimeout(t);
-  }, [ready, onReadyStuck]);
+  useOnEvent({
+    event: "userChanged",
+    listener: async ({ user }) => {
+      if (!user || creatingRef.current) return;
+      let missingChains: ReturnType<typeof getChainsMissingWaasWalletAccounts>;
+      try {
+        missingChains = getChainsMissingWaasWalletAccounts();
+      } catch (err) {
+        console.error("[Easy Start] could not check embedded wallets", err);
+        return;
+      }
+      if (missingChains.length === 0) return;
+      creatingRef.current = true;
+      try {
+        await createWaasWalletAccounts({ chains: missingChains });
+      } catch (err) {
+        console.error("[Easy Start] embedded wallet creation failed", err);
+        toast({
+          title: "Wallet wasn’t created",
+          description:
+            err instanceof Error
+              ? err.message
+              : "Dynamic couldn’t create an embedded wallet. Check that embedded wallets and Base are enabled.",
+          variant: "destructive",
+        });
+      } finally {
+        creatingRef.current = false;
+      }
+    },
+  });
 
-  /** Survive Privy wallets[] blips (e.g. after Allbridge chain switch). */
+  return null;
+}
+
+function DynamicEasyStartBridge({ children }: { children: ReactNode }) {
+  const { data: initStatus } = useInitStatus();
+  const { data: user } = useUser();
+  const { data: accounts = [] } = useGetWalletAccounts();
+  const logoutMutation = useLogout();
+  const [loginOpen, setLoginOpen] = useState(false);
+
+  const ready = initStatus === "finished";
+  const authenticated = Boolean(user);
+
+  const evmAccount = useMemo((): EvmWalletAccount | null => {
+    return accounts.find(isEvmWalletAccount) ?? null;
+  }, [accounts]);
+
+  const accountRef = useRef(evmAccount);
+  accountRef.current = evmAccount;
+
   const [stableEvmAddress, setStableEvmAddress] = useState<string | null>(null);
   const [stableAlgorandAddress, setStableAlgorandAddress] = useState<
     string | null
   >(null);
 
-  const liveWallet = useMemo(() => {
-    if (!ready || !authenticated) return null;
-    return (
-      wallets.find((w) => w.walletClientType === "privy") ?? wallets[0] ?? null
-    );
-  }, [authenticated, ready, wallets]);
-
-  const liveEvmAddress = liveWallet?.address ?? null;
+  const liveEvmAddress = evmAccount?.address ?? null;
 
   useEffect(() => {
     if (!authenticated) {
@@ -131,27 +168,51 @@ function PrivyEasyStartStateBridge({
       setStableAlgorandAddress(null);
       return;
     }
-    if (liveEvmAddress) {
-      setStableEvmAddress(liveEvmAddress);
-    }
+    if (liveEvmAddress) setStableEvmAddress(liveEvmAddress);
   }, [authenticated, liveEvmAddress]);
 
   const evmAddress = authenticated
     ? liveEvmAddress ?? stableEvmAddress
     : null;
 
+  const getWalletClient = useCallback(async () => {
+    const account = accountRef.current;
+    if (!account) throw new Error("Easy Start wallet not ready");
+    return getDynamicWalletClient(account);
+  }, []);
+
   const signTransactions = useCallback(
     async (txns: Uint8Array[]) => {
-      if (!evmAddress) {
-        throw new Error("Easy Start wallet not ready");
-      }
-      return signPrivyXchainTransactions(evmAddress, txns, signTypedData);
+      if (!evmAddress) throw new Error("Easy Start wallet not ready");
+      return signDynamicXchainTransactions(evmAddress, txns, getWalletClient);
     },
-    [evmAddress, signTypedData]
+    [evmAddress, getWalletClient]
   );
 
+  const sendBaseTransaction = useCallback<EasyStartSendTransaction>(
+    async (input) => {
+      const walletClient = await getWalletClient();
+      const hash = await walletClient.sendTransaction({
+        account: walletClient.account,
+        to: input.to as Address,
+        data: input.data,
+        value: input.value ?? 0n,
+      } as unknown as Parameters<typeof walletClient.sendTransaction>[0]);
+      return { hash };
+    },
+    [getWalletClient]
+  );
+
+  const getEvmProvider = useCallback(async () => {
+    if (!evmAddress) throw new Error("Easy Start wallet not ready");
+    return createDynamicBaseProvider({
+      address: evmAddress as Address,
+      getWalletClient,
+    });
+  }, [evmAddress, getWalletClient]);
+
   const algorandQuery = useQuery({
-    queryKey: ["privy-xchain-address", evmAddress],
+    queryKey: ["dynamic-xchain-address", evmAddress],
     queryFn: () => deriveAlgorandXchainAddress(evmAddress!),
     enabled: Boolean(authenticated && evmAddress),
     staleTime: Infinity,
@@ -161,14 +222,22 @@ function PrivyEasyStartStateBridge({
 
   useEffect(() => {
     if (!authenticated) return;
-    if (algorandQuery.data) {
-      setStableAlgorandAddress(algorandQuery.data);
-    }
+    if (algorandQuery.data) setStableAlgorandAddress(algorandQuery.data);
   }, [authenticated, algorandQuery.data]);
 
   const algorandAddress = authenticated
     ? algorandQuery.data ?? stableAlgorandAddress
     : null;
+
+  const login = useCallback(() => {
+    setLoginOpen(true);
+  }, []);
+
+  const logout = useCallback(async () => {
+    await logoutMutation.mutateAsync();
+  }, [logoutMutation]);
+
+  const walletReady = authenticated && Boolean(evmAddress);
 
   const value = useMemo(
     (): PrivyEasyStartState => ({
@@ -178,28 +247,34 @@ function PrivyEasyStartStateBridge({
       authenticated,
       evmAddress,
       algorandAddress,
-      algorandAddressLoading:
-        algorandQuery.isLoading && !algorandAddress,
-      displayName: privyDisplayName(user),
+      algorandAddressLoading: algorandQuery.isLoading && !algorandAddress,
+      displayName: displayNameFromUser(user ?? null),
       login,
       logout,
-      signTransactions: authenticated && evmAddress ? signTransactions : null,
+      signTransactions: walletReady ? signTransactions : null,
+      sendBaseTransaction: walletReady ? sendBaseTransaction : null,
+      getEvmProvider: walletReady ? getEvmProvider : null,
     }),
     [
       algorandAddress,
       algorandQuery.isLoading,
       authenticated,
       evmAddress,
+      getEvmProvider,
       login,
       logout,
       ready,
+      sendBaseTransaction,
       signTransactions,
       user,
+      walletReady,
     ]
   );
 
   return (
     <PrivyEasyStartContext.Provider value={value}>
+      <WaasBootstrap />
+      <EasyStartLoginDialog open={loginOpen} onOpenChange={setLoginOpen} />
       {children}
     </PrivyEasyStartContext.Provider>
   );
@@ -210,17 +285,15 @@ interface PrivySessionProviderProps {
 }
 
 /**
- * Optional Privy wrapper for Easy Start onboarding. When disabled or unconfigured,
- * children render unchanged (existing wallet flow only).
+ * Easy Start session. Dynamic embedded EVM wallet on Base, Algorand address
+ * derived with xChain. When disabled or missing an environment id, children
+ * render with the existing wallet flow only.
  */
 export function PrivySessionProvider({ children }: PrivySessionProviderProps) {
   const enabled = resolvePrivyOnboardingEnabled(
     isFeatureEnabled("enablePrivyOnboarding")
   );
-  const configured = PRIVY_APP_ID.length > 0;
-  /** Remount Privy after HMR / stuck init so `ready` can recover (once). */
-  const [providerKey, setProviderKey] = useState(0);
-  const remountCountRef = useRef(0);
+  const configured = dynamicEnvironmentId.length > 0 && dynamicClient != null;
 
   const disabledValue = useMemo(
     (): PrivyEasyStartState => ({
@@ -231,13 +304,7 @@ export function PrivySessionProvider({ children }: PrivySessionProviderProps) {
     [configured, enabled]
   );
 
-  const handleReadyStuck = useCallback(() => {
-    if (remountCountRef.current >= 1) return;
-    remountCountRef.current += 1;
-    setProviderKey((k) => k + 1);
-  }, []);
-
-  if (!enabled || !configured) {
+  if (!enabled || !configured || !dynamicClient) {
     return (
       <PrivyEasyStartContext.Provider value={disabledValue}>
         {children}
@@ -246,26 +313,8 @@ export function PrivySessionProvider({ children }: PrivySessionProviderProps) {
   }
 
   return (
-    <PrivyProvider
-      key={providerKey}
-      appId={PRIVY_APP_ID}
-      config={{
-        loginMethods: ["email", "google", "apple", "passkey"],
-        appearance: {
-          theme: "dark",
-          accentColor: "#2d8b78",
-        },
-        embeddedWallets: {
-          createOnLogin: "users-without-wallets",
-          requireUserPasswordOnCreate: false,
-        },
-        defaultChain: base,
-        supportedChains: [base],
-      }}
-    >
-      <PrivyEasyStartStateBridge onReadyStuck={handleReadyStuck}>
-        {children}
-      </PrivyEasyStartStateBridge>
-    </PrivyProvider>
+    <DynamicProvider client={dynamicClient}>
+      <DynamicEasyStartBridge>{children}</DynamicEasyStartBridge>
+    </DynamicProvider>
   );
 }

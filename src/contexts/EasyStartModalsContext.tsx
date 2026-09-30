@@ -21,7 +21,7 @@ import {
 
 /**
  * Lazy-load all Easy Start sheets so:
- * - `@privy-io/wagmi` never enters the initial App graph
+ * - Allbridge UI stays out of the initial App graph
  * - Fast Refresh churn on bridge helpers does not remount the whole app
  * Sheets only mount while open (avoids idle Dialog mounts when signed in).
  */

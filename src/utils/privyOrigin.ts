@@ -56,18 +56,18 @@ export function getPrivyOriginHint(origin = window.location.origin): string | nu
 
   if (import.meta.env.DEV) {
     if (origin === "http://localhost:8081") {
-      return `Privy only allowlists port 8080 locally. Open ${LOCAL_PRIVY_ORIGIN} (not :8081).`;
+      return `Easy Start only allowlists port 8080 locally. Open ${LOCAL_PRIVY_ORIGIN} (not :8081).`;
     }
     if (
       origin.startsWith("http://127.0.0.1:") ||
       origin.startsWith("http://[::1]:")
     ) {
-      return `Privy allowlists localhost, not the numeric IP. Open ${LOCAL_PRIVY_ORIGIN}.`;
+      return `Easy Start allowlists localhost, not the numeric IP. Open ${LOCAL_PRIVY_ORIGIN}.`;
     }
     if (origin.startsWith("http://10.") || origin.startsWith("http://192.168.")) {
       return `LAN URLs are not allowlisted. On this machine use ${LOCAL_PRIVY_ORIGIN}.`;
     }
   }
 
-  return `Add ${origin} to Allowed origins in the Privy dashboard, then hard-refresh.`;
+  return `Add ${origin} to Allowed origins in the Dynamic dashboard, then hard-refresh.`;
 }

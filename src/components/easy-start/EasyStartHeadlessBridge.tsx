@@ -1,12 +1,7 @@
 import { useEffect, useRef } from "react";
-import { WagmiProvider as PrivyWagmiProvider } from "@privy-io/wagmi";
-import { useSetActiveWallet } from "@privy-io/wagmi";
-import { useWallets } from "@privy-io/react-auth";
 import { useQueryClient } from "@tanstack/react-query";
 import { useBridgePanel } from "@d13co/algo-x-evm-ui";
 import { WalletUIProvider } from "@txnlab/use-wallet-ui-react";
-import { privyBridgeWagmiConfig } from "@/wallet/privyBridgeWagmiConfig";
-import { usePrivyEmbeddedWallet } from "@/hooks/usePrivyEmbeddedWallet";
 import { usePrivyBridgeWalletAdapter } from "@/hooks/usePrivyBridgeWalletAdapter";
 import {
   mapBridgeStatusToPhase,
@@ -35,26 +30,12 @@ function EasyStartHeadlessBridgeInner({
   onPhaseChange,
   onComplete,
 }: EasyStartHeadlessBridgeProps) {
-  const { wallets } = useWallets();
-  const { setActiveWallet } = useSetActiveWallet();
-  const { wallet: embeddedWallet } = usePrivyEmbeddedWallet();
   const adapter = usePrivyBridgeWalletAdapter();
   const bridge = useBridgePanel(adapter, { enabled });
 
   const startedRef = useRef(false);
   const completedRef = useRef(false);
   const presetDoneRef = useRef(false);
-
-  useEffect(() => {
-    if (!embeddedWallet) return;
-    const match =
-      wallets.find(
-        (w) => w.address.toLowerCase() === embeddedWallet.address.toLowerCase()
-      ) ?? embeddedWallet;
-    void setActiveWallet(match).catch((err: unknown) => {
-      console.warn("Easy Start headless bridge: setActiveWallet failed", err);
-    });
-  }, [embeddedWallet, setActiveWallet, wallets]);
 
   useEffect(() => {
     if (!enabled || presetDoneRef.current) return;
@@ -147,7 +128,7 @@ function EasyStartHeadlessBridgeInner({
 
 /**
  * Invisible Allbridge runner for Easy Start orchestrated deposit/withdraw.
- * Mount only while bridging; keeps Privy wagmi isolated from RainbowKit.
+ * Mount only while bridging.
  */
 export function EasyStartHeadlessBridge(props: EasyStartHeadlessBridgeProps) {
   const queryClient = useQueryClient();
@@ -155,10 +136,8 @@ export function EasyStartHeadlessBridge(props: EasyStartHeadlessBridgeProps) {
   if (!props.enabled) return null;
 
   return (
-    <PrivyWagmiProvider config={privyBridgeWagmiConfig}>
-      <WalletUIProvider theme="dark" queryClient={queryClient}>
-        <EasyStartHeadlessBridgeInner {...props} />
-      </WalletUIProvider>
-    </PrivyWagmiProvider>
+    <WalletUIProvider theme="dark" queryClient={queryClient}>
+      <EasyStartHeadlessBridgeInner {...props} />
+    </WalletUIProvider>
   );
 }

@@ -2,9 +2,7 @@ import { useCallback, useMemo } from "react";
 import { Algodv2 } from "algosdk";
 import { useQueryClient } from "@tanstack/react-query";
 import type { BridgeWalletAdapter } from "@d13co/algo-x-evm-ui";
-import { base } from "viem/chains";
 import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
-import { usePrivyEmbeddedWallet } from "@/hooks/usePrivyEmbeddedWallet";
 
 /**
  * Allbridge Base→Algorand always targets Algorand Mainnet ASA opt-in / receive.
@@ -18,14 +16,13 @@ const ALGORAND_MAINNET_ALGOD = new Algodv2(
 );
 
 /**
- * Bridge wallet adapter for Privy Easy Start (separate from RainbowKit xChain).
- * Feeds Allbridge `useBridgePanel` with Privy EVM provider + EIP-712 Algorand signing.
+ * Bridge wallet adapter for Dynamic Easy Start (separate from RainbowKit xChain).
+ * Feeds Allbridge `useBridgePanel` with the embedded EVM provider + EIP-712 signing.
  */
 export function usePrivyBridgeWalletAdapter(): BridgeWalletAdapter & {
   ready: boolean;
 } {
   const privy = usePrivyEasyStart();
-  const { wallet } = usePrivyEmbeddedWallet();
   const queryClient = useQueryClient();
 
   const signTransactions = useCallback(
@@ -39,17 +36,11 @@ export function usePrivyBridgeWalletAdapter(): BridgeWalletAdapter & {
   );
 
   const getEvmProvider = useCallback(async () => {
-    if (!wallet) {
+    if (!privy.getEvmProvider) {
       throw new Error("Easy Start EVM wallet is not ready");
     }
-    // Allbridge Base→ALG expects the embedded wallet on Base before approve/send.
-    try {
-      await wallet.switchChain(base.id);
-    } catch (err) {
-      console.warn("Easy Start bridge: switchChain(Base) failed", err);
-    }
-    return wallet.getEthereumProvider();
-  }, [wallet]);
+    return privy.getEvmProvider();
+  }, [privy.getEvmProvider]);
 
   const onTransactionSuccess = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ["account-info"] });
@@ -63,7 +54,7 @@ export function usePrivyBridgeWalletAdapter(): BridgeWalletAdapter & {
       privy.evmAddress &&
       privy.algorandAddress &&
       privy.signTransactions &&
-      wallet
+      privy.getEvmProvider
   );
 
   return useMemo(

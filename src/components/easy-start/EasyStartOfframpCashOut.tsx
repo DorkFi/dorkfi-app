@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useSendTransaction } from "@privy-io/react-auth";
+import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
 import { MoonPayProvider, MoonPaySellWidget } from "@moonpay/moonpay-react";
 import { CreditCard, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -39,8 +39,8 @@ interface EasyStartOfframpCashOutProps {
 
 /**
  * In-app cash-out after Base USDC arrives:
- * - Coinbase: CDP session → sell widget → poll to_address → Privy USDC transfer
- * - MoonPay: sell widget + signed URL → onInitiateDeposit → Privy USDC transfer
+ * - Coinbase: CDP session → sell widget → poll to_address → Dynamic USDC transfer
+ * - MoonPay: sell widget + signed URL → onInitiateDeposit → Dynamic USDC transfer
  */
 export function EasyStartOfframpCashOut({
   evmAddress,
@@ -49,7 +49,7 @@ export function EasyStartOfframpCashOut({
   onProviderChange,
   onDone,
 }: EasyStartOfframpCashOutProps) {
-  const { sendTransaction } = useSendTransaction();
+  const { sendBaseTransaction } = usePrivyEasyStart();
   const { toast } = useToast();
 
   const [health, setHealth] = useState<OfframpHealth | null>(null);
@@ -77,14 +77,11 @@ export function EasyStartOfframpCashOut({
   const sendUsdcTo = useCallback(
     async (to: string, cryptoAmount: string) => {
       setPhase("sending");
+      if (!sendBaseTransaction) {
+        throw new Error("Easy Start wallet is not ready to send");
+      }
       const hash = await sendBaseUsdc({
-        sendTransaction: (input) =>
-          sendTransaction({
-            to: input.to as `0x${string}`,
-            data: input.data,
-            value: input.value != null ? `0x${input.value.toString(16)}` : "0x0",
-            chainId: input.chainId,
-          }),
+        sendTransaction: sendBaseTransaction,
         to,
         amount: cryptoAmount,
         fromAddress: evmAddress ?? undefined,
@@ -97,7 +94,7 @@ export function EasyStartOfframpCashOut({
       });
       return hash;
     },
-    [evmAddress, sendTransaction, toast]
+    [evmAddress, sendBaseTransaction, toast]
   );
 
   // Poll Coinbase for deposit address after widget session starts.

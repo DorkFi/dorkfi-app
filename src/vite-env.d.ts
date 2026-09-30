@@ -29,6 +29,8 @@ interface ImportMetaEnv {
   readonly VITE_ENABLE_POOL_DEPOSIT_WITHDRAW?: string;
   /** Privy app id for Easy Start email / social onboarding. */
   readonly VITE_PRIVY_APP_ID?: string;
+  /** Dynamic environment id for Easy Start embedded wallets. */
+  readonly VITE_DYNAMIC_ENVIRONMENT_ID?: string;
   /** When `true` or `1`, show Get Started (Privy) alongside Connect Wallet. */
   readonly VITE_ENABLE_PRIVY_ONBOARDING?: string;
   /** MoonPay publishable key (`pk_test_…` / `pk_live_…`) for Easy Start sell widget. */

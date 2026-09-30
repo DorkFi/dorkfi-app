@@ -7,8 +7,7 @@ const READY_WAIT_MS = 15_000;
 const DROPDOWN_RELEASE_MS = 120;
 
 /**
- * Opens Privy login only after `ready` is true.
- * Calling `login()` while Privy is not ready waits forever (no modal).
+ * Opens the Easy Start email dialog only after Dynamic has finished init.
  */
 export function useEasyStartLogin() {
   const privy = usePrivyEasyStart();
@@ -39,7 +38,7 @@ export function useEasyStartLogin() {
       toast({
         title: "Easy Start unavailable",
         description:
-          "Privy did not initialize. Confirm VITE_PRIVY_APP_ID, then hard-refresh on http://localhost:8080.",
+          "Dynamic did not initialize. Confirm VITE_DYNAMIC_ENVIRONMENT_ID, then hard-refresh on http://localhost:8080.",
         variant: "destructive",
       });
       return;
@@ -48,7 +47,7 @@ export function useEasyStartLogin() {
     if (!readyRef.current) {
       toast({
         title: "Starting Easy Start…",
-        description: "Waiting for Privy to finish loading.",
+        description: "Waiting for Dynamic to finish loading.",
       });
       const deadline = Date.now() + READY_WAIT_MS;
       while (!readyRef.current && Date.now() < deadline) {
@@ -57,13 +56,13 @@ export function useEasyStartLogin() {
     }
 
     if (!readyRef.current) {
-      const reloadKey = "easy-start-privy-reload";
+      const reloadKey = "easy-start-dynamic-reload";
       const alreadyReloaded = sessionStorage.getItem(reloadKey) === "1";
       toast({
-        title: "Privy failed to load",
+        title: "Dynamic failed to load",
         description: alreadyReloaded
-          ? "Hard-refresh (Cmd+Shift+R) on http://localhost:8080. If it persists, check the browser console for blocked requests to auth.privy.io."
-          : "Reloading once to recover Privy after hot-reload…",
+          ? "Hard-refresh (Cmd+Shift+R) on http://localhost:8080. If it persists, allowlist that origin in the Dynamic dashboard."
+          : "Reloading once to recover Dynamic after hot-reload…",
         variant: "destructive",
       });
       if (!alreadyReloaded && import.meta.env.DEV) {
@@ -73,7 +72,7 @@ export function useEasyStartLogin() {
       return;
     }
 
-    sessionStorage.removeItem("easy-start-privy-reload");
+    sessionStorage.removeItem("easy-start-dynamic-reload");
 
     if (authenticatedRef.current) {
       toast({
@@ -85,6 +84,6 @@ export function useEasyStartLogin() {
     }
 
     await new Promise((r) => setTimeout(r, DROPDOWN_RELEASE_MS));
-    loginRef.current({ loginMethods: ["email"] });
+    loginRef.current();
   }, [toast]);
 }

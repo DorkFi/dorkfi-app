@@ -1,8 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { WagmiProvider as PrivyWagmiProvider } from "@privy-io/wagmi";
-import { useSetActiveWallet } from "@privy-io/wagmi";
-import { useWallets } from "@privy-io/react-auth";
 import { useQueryClient } from "@tanstack/react-query";
 import { BridgePanel, useBridgePanel } from "@d13co/algo-x-evm-ui";
 import {
@@ -18,8 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { privyBridgeWagmiConfig } from "@/wallet/privyBridgeWagmiConfig";
-import { usePrivyEmbeddedWallet } from "@/hooks/usePrivyEmbeddedWallet";
+import { usePrivyEasyStart } from "@/contexts/PrivySessionProvider";
 import { usePrivyBridgeWalletAdapter } from "@/hooks/usePrivyBridgeWalletAdapter";
 import { useToast } from "@/hooks/use-toast";
 import type { XchainUsdcBridgeDirection } from "@/components/xchain/XchainUsdcBridgeControls";
@@ -40,9 +36,7 @@ function EasyStartBridgeSheetInner({
   open,
   onOpenChange,
 }: EasyStartBridgeSheetProps) {
-  const { wallets } = useWallets();
-  const { setActiveWallet } = useSetActiveWallet();
-  const { wallet: embeddedWallet, evmAddress } = usePrivyEmbeddedWallet();
+  const { evmAddress } = usePrivyEasyStart();
   const adapter = usePrivyBridgeWalletAdapter();
   const { toast } = useToast();
 
@@ -54,17 +48,6 @@ function EasyStartBridgeSheetInner({
   const notReadyToastShownRef = useRef(false);
 
   const bridge = useBridgePanel(adapter, { enabled: open });
-
-  useEffect(() => {
-    if (!embeddedWallet) return;
-    const match =
-      wallets.find(
-        (w) => w.address.toLowerCase() === embeddedWallet.address.toLowerCase()
-      ) ?? embeddedWallet;
-    void setActiveWallet(match).catch((err: unknown) => {
-      console.warn("Easy Start bridge: setActiveWallet failed", err);
-    });
-  }, [embeddedWallet, setActiveWallet, wallets]);
 
   // Open straight into Allbridge with Base→Algorand (Portfolio "Move to Algorand").
   useEffect(() => {
@@ -218,7 +201,7 @@ function EasyStartBridgeSheetInner({
 }
 
 /**
- * Privy Easy Start bridge host — isolated from RainbowKit/WalletConnect.
+ * Easy Start bridge host — isolated from RainbowKit/WalletConnect.
  * Mount only once via EasyStartModalsProvider (not from Portfolio + header).
  */
 export function EasyStartBridgeSheet(props: EasyStartBridgeSheetProps) {
@@ -227,10 +210,8 @@ export function EasyStartBridgeSheet(props: EasyStartBridgeSheetProps) {
   if (!props.open) return null;
 
   return (
-    <PrivyWagmiProvider config={privyBridgeWagmiConfig}>
-      <WalletUIProvider theme="dark" queryClient={queryClient}>
-        <EasyStartBridgeSheetInner {...props} />
-      </WalletUIProvider>
-    </PrivyWagmiProvider>
+    <WalletUIProvider theme="dark" queryClient={queryClient}>
+      <EasyStartBridgeSheetInner {...props} />
+    </WalletUIProvider>
   );
 }

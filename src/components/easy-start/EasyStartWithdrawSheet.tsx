@@ -33,7 +33,7 @@ import {
 } from "@/components/easy-start/EasyStartCardProviderPicker";
 import { EasyStartOfframpCashOut } from "@/components/easy-start/EasyStartOfframpCashOut";
 
-/** Loaded only while bridging so opening Withdraw never waits on `@privy-io/wagmi`. */
+/** Loaded only while bridging. */
 const EasyStartHeadlessBridge = lazy(() =>
   import("@/components/easy-start/EasyStartHeadlessBridge").then((m) => ({
     default: m.EasyStartHeadlessBridge,
