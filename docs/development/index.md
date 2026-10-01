@@ -5,6 +5,7 @@ Deep dives for **frontend features and architecture** in this repository: pages,
 | Document | Summary |
 |----------|---------|
 | [Pool & market topology](POOL_TOPOLOGY.md) | Live A–F (Algorand) / A–B (Voi) pool map from `src/config/index.ts`, Markets vs Pools visibility, and planned / forward-looking markets. |
+| [Algorand A market ALGO bonus interest](ALGORAND_A_MARKET_BONUS_INTEREST.md) | Bonus supply APR for native ALGO on Algorand A (Prime): `hasRewards`, 30k ALGO excess gate (Dork Algorand DORK stake), rewards API, and APY display composition. Proposed successor: [block rewards → borrow demand](../proposals/BLOCK_REWARDS_BORROW_DEMAND.md). |
 | [Algorand Service](ALGORAND_SERVICE.md) | Centralized Algod/Indexer client management across Mainnet, Testnet, Local, and VOI Mainnet; network switching and wallet network IDs. |
 | [Gas Station](GAS_STATION.md) | Gas Station page and `GasStationService`: minting network, ARC200, and ASA tokens across Voi/Algorand networks; UI, validation, and architecture. |
 | [Haystack proxy](HAYSTACK_PROXY.md) | Keep `HAYSTACK_API_KEY` server-only; local Vite middleware vs beta/production standalone proxy; feature-flag and CORS checklist. |

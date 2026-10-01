@@ -60,7 +60,7 @@ Core collateral and stables (non-exhaustive of display overrides; keys from `alg
 
 | Key / display | Market contract | Notes |
 |---------------|-----------------|-------|
-| ALGO | `3207744109` | Native |
+| ALGO | `3207744109` | Native; bonus rewards program (`hasRewards`) — see [Algorand A market ALGO bonus interest](ALGORAND_A_MARKET_BONUS_INTEREST.md) |
 | fALGO | `3524740731` | Folks V2 ALGO (also appears on D) |
 | tALGO | `3490783147` | Tinyman liquid staking |
 | xALGO | `3490854290` | Governance xALGO |
