@@ -117,6 +117,13 @@ Complete guide for integrating the transaction-metadata endpoint to update appli
 
 **Perfect for:** UNIT holders using Governance, anyone reviewing how proposals appear in the UI; use the index to find all governance docs in one place
 
+### 📋 [Protocol proposals (index)](proposals/index.md)
+**Draft and active protocol change proposals**
+
+- [Increase $ALGO A Base Borrow Rate](proposals/INCREASE_ALGO_A_BASE_BORROW_RATE.md): raise ALGO A base borrow rate from 0.50% to 2.45% (slope, CF, and borrow cap unchanged)
+
+**Perfect for:** UNIT holders and operators reviewing market-parameter proposals before or during governance
+
 ### 🏅 [Achievements documentation (index)](achievements/index.md)
 **Catalog of achievement guides in this repo**
 
