@@ -53,7 +53,11 @@ import {
 } from "@/components/easy-start/easyStartBridgePhase";
 import { isXoGeoRestricted, XO_GEO_RESTRICTED_MESSAGE } from "@/lib/easyStart/xoSwap/errors";
 import { recordAccountActivity } from "@/lib/easyStart/accountActivity";
-import { XO_PAIR_BASE_TO_ALGO } from "@/lib/easyStart/xoSwap/constants";
+import {
+  formatXoSwapMinUsd,
+  XO_PAIR_BASE_TO_ALGO,
+  XO_SWAP_MIN_USDC,
+} from "@/lib/easyStart/xoSwap/constants";
 import {
   quoteXoPair,
   xoPairQuoteExpired,
@@ -243,6 +247,11 @@ const EasySavingsDepositModal = ({
     fromAmount: swapFromAmount,
   });
   const xoGeoBlocked = isXoGeoRestricted(xoQuote.error) || isXoGeoRestricted(flowError);
+  const quotedSwapMin = xoQuote.data?.min;
+  const xoSwapMin =
+    quotedSwapMin != null && Number.isFinite(quotedSwapMin)
+      ? quotedSwapMin
+      : XO_SWAP_MIN_USDC;
 
   const ctaState: CtaState = (() => {
     if (!activeAccount) return "connect";
@@ -256,14 +265,22 @@ const EasySavingsDepositModal = ({
     ) {
       return "cap_exceeded";
     }
-    if (needsSwap && xoQuote.data && !xoQuote.data.inRange) {
+    if (needsSwap) {
+      const quotedMin = xoQuote.data?.min;
       if (
-        xoQuote.data.min != null &&
-        swapFromAmount < xoQuote.data.min
+        quotedMin != null &&
+        Number.isFinite(quotedMin) &&
+        swapFromAmount + 1e-9 < quotedMin
       ) {
         return "swap_below_min";
       }
+      // Tell them before the quote returns. A live min replaces this once it loads.
+      if (xoQuote.data == null && swapFromAmount + 1e-9 < XO_SWAP_MIN_USDC) {
+        return "swap_below_min";
+      }
       if (
+        xoQuote.data &&
+        !xoQuote.data.inRange &&
         xoQuote.data.max != null &&
         swapFromAmount > xoQuote.data.max
       ) {
@@ -278,10 +295,7 @@ const EasySavingsDepositModal = ({
     enter_amount: "Enter Amount",
     insufficient_balance: "Insufficient Balance",
     cap_exceeded: consumerCopy ? "Limit Reached" : "Supply Cap Reached",
-    swap_below_min:
-      xoQuote.data?.min != null
-        ? `Minimum is ${formatToken(xoQuote.data.min)} USDC`
-        : "Amount too small",
+    swap_below_min: `XO Swap minimum is ${formatXoSwapMinUsd(xoSwapMin)}`,
     swap_above_max:
       xoQuote.data?.max != null
         ? `Maximum is ${formatToken(xoQuote.data.max)} USDC`
@@ -863,6 +877,14 @@ const EasySavingsDepositModal = ({
                       </span>
                     }
                   />
+
+                  {enableBaseBridge ? (
+                    <p className="text-[11px] text-muted-foreground text-center leading-relaxed">
+                      {consumerCopy
+                        ? `Moving USDC from your account uses Exodus XO Swap. That move has a ${formatXoSwapMinUsd(xoSwapMin)} minimum.`
+                        : `Moving USDC from Base uses Exodus XO Swap. That move has a ${formatXoSwapMinUsd(xoSwapMin)} minimum.`}
+                    </p>
+                  ) : null}
 
                   <SavingsSummary route={route} amount={amount} quote={quote} />
 

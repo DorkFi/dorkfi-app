@@ -8,3 +8,17 @@ export const XO_PAIR_ALGO_TO_BASE = `${XO_ASSET_ALGORAND_USDC}_${XO_ASSET_BASE_U
 
 export const XO_SWAP_POLL_MS = 5_000;
 export const XO_SWAP_MAX_POLLS = 120; // ~10 minutes
+
+/** Known Exodus minimum for a Base → Algorand USDC move, until a live quote returns its own min. */
+export const XO_SWAP_MIN_USDC = 10;
+
+export function formatXoSwapMinUsd(minUsdc: number): string {
+  const whole =
+    Number.isFinite(minUsdc) && Math.abs(minUsdc - Math.round(minUsdc)) < 1e-6;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: whole ? 0 : 2,
+    maximumFractionDigits: 2,
+  }).format(minUsdc);
+}

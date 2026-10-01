@@ -1328,11 +1328,13 @@ const SavingsCard = () => {
                                 </span>
                               </td>
                               <td className="py-4 text-muted-foreground tabular-nums">
-                                {pos.isLoading
-                                  ? "…"
-                                  : pos.walletBalance != null
-                                    ? formatToken(pos.walletBalance)
-                                    : "—"}
+                                {consumerCopy && cfg === "USDC"
+                                  ? "—"
+                                  : pos.isLoading
+                                    ? "…"
+                                    : pos.walletBalance != null
+                                      ? formatToken(pos.walletBalance)
+                                      : "—"}
                               </td>
                               <td className="py-4 tabular-nums">
                                 {pos.isLoading

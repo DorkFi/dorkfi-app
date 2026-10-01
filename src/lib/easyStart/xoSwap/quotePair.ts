@@ -3,6 +3,7 @@ import {
   fetchXoPairRates,
   type XoRequest,
 } from "@/lib/easyStart/xoSwap/api";
+import { formatXoSwapMinUsd } from "@/lib/easyStart/xoSwap/constants";
 import {
   isXoAbortError,
   isXoGeoRestricted,
@@ -133,7 +134,7 @@ export function xoPairQuoteOutOfRangeMessage(
 ): string | null {
   if (preview.inRange) return null;
   if (preview.min != null && preview.fromAmount < preview.min) {
-    return `Minimum is ${preview.min} USDC`;
+    return `XO Swap minimum is ${formatXoSwapMinUsd(preview.min)}`;
   }
   if (preview.max != null && preview.fromAmount > preview.max) {
     return `Maximum is ${preview.max} USDC`;

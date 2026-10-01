@@ -8,6 +8,7 @@ import {
   updateXoOrder,
 } from "@/lib/easyStart/xoSwap/api";
 import {
+  formatXoSwapMinUsd,
   XO_PAIR_ALGO_TO_BASE,
   XO_PAIR_BASE_TO_ALGO,
   XO_SWAP_MAX_POLLS,
@@ -156,7 +157,7 @@ export async function runXoUsdcSwap(
 
   if (!quoted.inRange || quoted.toAmount == null) {
     if (quoted.min != null && fromAmount < quoted.min) {
-      throw new Error(`Amount is below the ${quoted.min} USDC minimum`);
+      throw new Error(`XO Swap minimum is ${formatXoSwapMinUsd(quoted.min)}`);
     }
     if (quoted.max != null && fromAmount > quoted.max) {
       throw new Error(`Amount is above the ${quoted.max} USDC maximum`);
