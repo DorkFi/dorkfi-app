@@ -139,6 +139,24 @@ function txAmountText(
   return `${item.amount} ${symbol}`;
 }
 
+function useIsLgUp(): boolean {
+  const [isLgUp, setIsLgUp] = useState(() =>
+    typeof window !== "undefined"
+      ? window.matchMedia("(min-width: 1024px)").matches
+      : true
+  );
+
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 1024px)");
+    const update = () => setIsLgUp(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  return isLgUp;
+}
+
 /**
  * Easy Savings — account sidebar; empty-state hero CTA with savings calculator,
  * or funded balance summary with position charts. Deposit opens a signed supply modal.
@@ -147,6 +165,7 @@ const SavingsCard = () => {
   const { currentNetwork } = useNetwork();
   const networkId = currentNetwork as NetworkId;
   const { activeAccount } = useDorkFiWalletAdapter();
+  const isLgUp = useIsLgUp();
   const privy = usePrivyEasyStart();
   const { toast } = useToast();
   const consumerCopy = useConsumerCopy();
@@ -285,6 +304,8 @@ const SavingsCard = () => {
     (Boolean(evmAddress) && baseUsdcLoading && walletUsdcBase == null);
 
   const effectiveAssetKey = (() => {
+    // Phones have no account switcher, so the portfolio card stays on screen.
+    if (!isLgUp && (activeAccount || evmAddress)) return WALLET_USDC_KEY;
     if (assetKey === WALLET_USDC_KEY) return WALLET_USDC_KEY;
     if (assetKey && accounts.some((a) => a.route.asset.configKey === assetKey)) {
       return assetKey;
@@ -951,7 +972,7 @@ const SavingsCard = () => {
             </span>
           </h1>
 
-          <div>
+          <div className="hidden lg:block">
             <p className="mb-3 flex items-center gap-1.5 text-sm text-muted-foreground">
               Savings accounts
               <Info className="size-3.5" />
@@ -969,7 +990,7 @@ const SavingsCard = () => {
           </div>
 
           {highYieldAccounts.length > 0 && !consumerCopy ? (
-            <div>
+            <div className="hidden lg:block">
               <p className="mb-3 flex items-center gap-1.5 text-sm text-muted-foreground">
                 Higher-yield Opportunities
                 <span
