@@ -1115,7 +1115,7 @@ const SavingsCard = () => {
               ) : null}
 
               {isWalletAccount ? (
-                <section className="rounded-[28px] border border-border/60 bg-card p-5 sm:p-6 shadow-sm">
+                <section className="hidden rounded-[28px] border border-border/60 bg-card p-5 sm:block sm:p-6 shadow-sm">
                   <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight">
                     {consumerCopy ? "Savings account" : "Portfolio assets"}
                   </h2>
