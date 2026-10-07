@@ -22,6 +22,8 @@ import algorandService from "@/services/algorandService";
 import { folksMintTxnsToArccjsExtraTxns } from "@/services/folksDepositAdapter";
 import { tinymanRateFractionToPercentPoints } from "@/services/tinymanLiquidStakingService";
 import type { LiquidityPoolPairConfig } from "@/constants/liquidityPools";
+import { pairHasLendingContract } from "@/constants/liquidityPools";
+import { fetchMythDualStakeSnapshot, mythPoolSharePercent } from "@/services/mythLiquidityService";
 import { getAccountAssetHoldingAmountAtomic } from "@/utils/algodAccountAssetAmount";
 import { spendableAlgoMicroAlgosFromAccount } from "@/utils/algorandWalletBalance";
 
@@ -57,8 +59,9 @@ export interface LiquidityPoolApr {
 
 export interface LiquidityPoolSnapshot {
   pair: LiquidityPoolPairConfig;
-  pool: V2PoolInfo;
-  reserves: PoolReserves;
+  /** Tinyman v2 pool; null for Myth dualSTAKE (and other non-Tinyman venues). */
+  pool: V2PoolInfo | null;
+  reserves: PoolReserves | null;
   asset1: LiquidityPoolAssetMeta;
   asset2: LiquidityPoolAssetMeta;
   poolTokenId: number;
@@ -72,6 +75,8 @@ export interface LiquidityPoolSnapshot {
 export interface LiquidityPoolUserPosition {
   /** Wallet-held LP token (ASA) balance. */
   poolTokenBalance: bigint;
+  /** Sum of {@link LiquidityPoolPairConfig.alternateLpTokenIds} wallet balances. */
+  alternatePoolTokenBalance: bigint;
   /** LP balance deposited in the nt200 market (`lpContractId`). */
   nt200LpBalance: bigint;
   /** LP committed to a Tinyman farm program (wallet-held, tracked by Tinyman). */
@@ -246,6 +251,9 @@ function fromAtomic(amount: bigint, decimals: number): string {
 export async function fetchLiquidityPoolSnapshot(
   pair: LiquidityPoolPairConfig
 ): Promise<LiquidityPoolSnapshot | null> {
+  if (pair.platform === "myth") {
+    return fetchMythDualStakeSnapshot(pair);
+  }
   if (pair.platform !== "tinyman") return null;
 
   const tinymanNet = tinymanNetworkFromNetworkId(pair.networkId);
@@ -375,29 +383,56 @@ export async function fetchLiquidityPoolUserPosition(
   userAddress: string
 ): Promise<LiquidityPoolUserPosition | null> {
   const snapshot = await fetchLiquidityPoolSnapshot(pair);
-  if (!snapshot) return null;
+  if (pair.platform === "tinyman" && !snapshot) return null;
 
   const farmProgramId = pair.farms?.[0];
-  const poolAddress = pair.poolAddr ?? snapshot.poolAddress;
+  const poolAddress = pair.poolAddr ?? snapshot?.poolAddress;
+  const lpAssetId = snapshot?.poolTokenId ?? pair.lpTokenId;
+  const alternateIds = pair.alternateLpTokenIds ?? [];
 
-  const [poolTokenBalance, nt200LpBalance, farmLpBalance] = await Promise.all([
-    fetchAlgorandAssetBalance(pair.networkId, userAddress, snapshot.poolTokenId),
-    fetchNt200Arc200Balance(pair.networkId, pair.lpContractId, userAddress),
-    farmProgramId != null && poolAddress
-      ? fetchTinymanFarmLpCommitment(
-          pair,
-          userAddress,
-          poolAddress,
-          farmProgramId
-        )
-      : Promise.resolve(0n),
-  ]);
-  const poolSharePercent = poolUtils.v2.getPoolShare(
-    snapshot.totalLiquidity,
-    poolTokenBalance
+  const [poolTokenBalance, nt200LpBalance, farmLpBalance, ...alternateBalances] =
+    await Promise.all([
+      fetchAlgorandAssetBalance(pair.networkId, userAddress, lpAssetId),
+      pairHasLendingContract(pair)
+        ? fetchNt200Arc200Balance(
+            pair.networkId,
+            pair.lpContractId as number,
+            userAddress
+          )
+        : Promise.resolve(0n),
+      farmProgramId != null && poolAddress && pair.platform === "tinyman"
+        ? fetchTinymanFarmLpCommitment(
+            pair,
+            userAddress,
+            poolAddress,
+            farmProgramId
+          )
+        : Promise.resolve(0n),
+      ...alternateIds.map((assetId) =>
+        fetchAlgorandAssetBalance(pair.networkId, userAddress, assetId)
+      ),
+    ]);
+
+  const alternatePoolTokenBalance = alternateBalances.reduce(
+    (sum, amount) => sum + amount,
+    0n
   );
 
-  return { poolTokenBalance, nt200LpBalance, farmLpBalance, poolSharePercent };
+  const poolSharePercent =
+    pair.platform === "tinyman" && snapshot
+      ? poolUtils.v2.getPoolShare(snapshot.totalLiquidity, poolTokenBalance)
+      : mythPoolSharePercent(
+          snapshot?.totalLiquidity ?? 0n,
+          poolTokenBalance
+        );
+
+  return {
+    poolTokenBalance,
+    alternatePoolTokenBalance,
+    nt200LpBalance,
+    farmLpBalance,
+    poolSharePercent,
+  };
 }
 
 async function isAccountOptedIntoAsset(
@@ -437,7 +472,7 @@ export async function buildAddLiquidityTransactions(params: {
 
   tinymanJSSDKConfig.setClientName("DorkFi-PreFi");
   const snapshot = await fetchLiquidityPoolSnapshot(pair);
-  if (!snapshot) throw new Error("Pool is not ready for deposits.");
+  if (!snapshot?.pool) throw new Error("Pool is not ready for deposits.");
 
   const assetIn =
     assetInId === snapshot.asset1.assetId ? snapshot.asset1 : snapshot.asset2;
@@ -711,7 +746,9 @@ export async function buildRemoveLiquidityTransactions(params: {
 
   tinymanJSSDKConfig.setClientName("DorkFi-PreFi");
   const snapshot = await fetchLiquidityPoolSnapshot(pair);
-  if (!snapshot) throw new Error("Pool is not ready for withdrawals.");
+  if (!snapshot?.pool || !snapshot.reserves) {
+    throw new Error("Pool is not ready for withdrawals.");
+  }
 
   const poolTokenDecimals = 6;
   const poolTokenIn = toAtomic(poolTokenAmountHuman, poolTokenDecimals);
@@ -744,6 +781,7 @@ export function quoteAddLiquidity(
   amountHuman: string,
   slippage = DEFAULT_SLIPPAGE
 ) {
+  if (!snapshot.pool) return null;
   const assetIn =
     assetInId === snapshot.asset1.assetId ? snapshot.asset1 : snapshot.asset2;
   const atomic = toAtomic(amountHuman, assetIn.decimals);
@@ -763,6 +801,7 @@ export function quoteRemoveLiquidity(
   snapshot: LiquidityPoolSnapshot,
   poolTokenAmountHuman: string
 ) {
+  if (!snapshot.pool || !snapshot.reserves) return null;
   const poolTokenIn = toAtomic(poolTokenAmountHuman, 6);
   if (poolTokenIn <= 0n) return null;
   return RemoveLiquidity.v2.getQuote({

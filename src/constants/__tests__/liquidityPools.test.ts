@@ -1,11 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
   CURATED_LIQUIDITY_POOLS,
+  FINITE_ASA_ID,
+  MYTH_FINITE_ALGO_APP_ADDR,
+  MYTH_FINITE_ALGO_LST_ID,
+  countPoolsByBaseTokenFilter,
+  getDexAddButtonLabel,
+  getDexAddLiquidityUrl,
+  getMythAddLiquidityUrl,
+  pairHasLendingContract,
   pairHasPoolsPageLendingPosition,
   pairHasUsdcLpCollateralLendingMarket,
   pairHasUsdcLpLendingMarket,
   pairHasWadLpCollateralLendingMarket,
   pairHasWadLpLendingMarket,
+  poolMatchesBaseTokenFilter,
   resolvePoolsPageLendingMarket,
   resolveUsdcLendingPoolIdsForFilter,
   resolveWadLendingPoolIdsForFilter,
@@ -150,5 +159,39 @@ describe("resolveUsdcLendingPoolIdsForFilter", () => {
     expect(resolveUsdcLendingPoolIdsForFilter(NETWORK, usdcPairs)).toEqual([
       POOL_F,
     ]);
+  });
+});
+
+describe("Myth FINITE/ALGO dualSTAKE pair", () => {
+  it("is curated as a Myth pool with an Add on Myth Finance link", () => {
+    const pair = pairById("myth-finite-algo");
+    expect(pair.platform).toBe("myth");
+    expect(pair.label).toBe("FINITE / ALGO");
+    expect(pair.asset1Id).toBe(FINITE_ASA_ID);
+    expect(pair.asset2Id).toBe(0);
+    expect(pair.lpTokenId).toBe(MYTH_FINITE_ALGO_LST_ID);
+    expect(pair.poolAddr).toBe(MYTH_FINITE_ALGO_APP_ADDR);
+    expect(pairHasLendingContract(pair)).toBe(false);
+    expect(resolvePoolsPageLendingMarket(NETWORK, pair)).toBeNull();
+    expect(getDexAddButtonLabel(pair.platform)).toBe("Add on Myth Finance");
+    expect(getDexAddLiquidityUrl(pair)).toBe(
+      getMythAddLiquidityUrl(MYTH_FINITE_ALGO_LST_ID)
+    );
+  });
+
+  it("shows up on All and FINITE filters, not UNIT/WAD/USDC", () => {
+    const pair = pairById("myth-finite-algo");
+    const counts = countPoolsByBaseTokenFilter(CURATED_LIQUIDITY_POOLS);
+    expect(counts.finite).toBeGreaterThanOrEqual(1);
+    expect(poolMatchesBaseTokenFilter(pair, FINITE_ASA_ID)).toBe(true);
+    expect(poolMatchesBaseTokenFilter(pair, 3121954282)).toBe(false);
+    expect(poolMatchesBaseTokenFilter(pair, 3334160924)).toBe(false);
+    expect(poolMatchesBaseTokenFilter(pair, 31566704)).toBe(false);
+  });
+
+  it("keeps Tinyman add URLs on existing pairs", () => {
+    const pair = pairById("unit-algo");
+    expect(getDexAddLiquidityUrl(pair)).toContain("tinyman.org/pool/");
+    expect(getDexAddButtonLabel(pair.platform)).toBe("Add on Tinyman");
   });
 });

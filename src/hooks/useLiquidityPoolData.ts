@@ -110,9 +110,11 @@ export function useInvalidateLiquidityPools(pairs: LiquidityPoolPairConfig[]) {
       void queryClient.invalidateQueries({
         queryKey: ["algorand-asset-balance", pair.networkId],
       });
-      void queryClient.invalidateQueries({
-        queryKey: ["nt200-arc200-balance", pair.networkId, pair.lpContractId],
-      });
+      if (pair.lpContractId) {
+        void queryClient.invalidateQueries({
+          queryKey: ["nt200-arc200-balance", pair.networkId, pair.lpContractId],
+        });
+      }
     });
   };
 }

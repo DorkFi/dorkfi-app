@@ -16,11 +16,18 @@ import {
 } from "@/config";
 
 /** Supported liquidity DEX integrations on the Pools page. */
-export type LiquidityPlatformId = "tinyman";
+export type LiquidityPlatformId = "tinyman" | "myth";
 
 export const LIQUIDITY_PLATFORM_LABELS: Record<LiquidityPlatformId, string> = {
   tinyman: "Tinyman",
+  myth: "Myth",
 };
+
+/** Extra Add button when the same pair also exists on another DEX. */
+export interface LiquidityPoolExtraAddLink {
+  platform: LiquidityPlatformId;
+  url: string;
+}
 
 /** Curated liquidity pair on a supported AVM network + DEX platform. */
 export interface LiquidityPoolPairConfig {
@@ -35,14 +42,30 @@ export interface LiquidityPoolPairConfig {
   asset2Symbol?: string;
   asset2Decimals?: number;
   asset2LogoPath?: string;
-  /** Tinyman LP token ASA id for this pool (TMPOOL2). */
+  /** LP / LST token ASA id (Tinyman TMPOOL2, or Myth dualSTAKE LST). */
   lpTokenId: number;
-  /** nt200 market application id for the LP token (ASA deposit target). */
-  lpContractId: number;
-  /** DEX pool account address (add liquidity / farm deep links). */
+  /** LP token decimals (Tinyman TMPOOL2 and Myth LSTs are 6). */
+  lpDecimals?: number;
+  /**
+   * nt200 market application id for the LP token (ASA deposit target).
+   * Omit until a DorkFi market exists — Supply/Withdraw still render, but
+   * Supply only completes when this is set.
+   */
+  lpContractId?: number;
+  /** DEX pool account (Tinyman pool, or Myth dualSTAKE app account). */
   poolAddr?: string;
+  /** Override Add URL (Myth mint page, etc.). */
+  addUrl?: string;
   /** LP farm program ids on the platform — uses {@link poolAddr}. */
   farms?: number[];
+  /**
+   * More Add buttons under the primary DEX link. Use when another venue lists
+   * the same pair (not necessarily the same LP ASA). Supply should later light
+   * if either LP token is in the wallet — add those ids on `alternateLpTokenIds`.
+   */
+  extraAddLinks?: LiquidityPoolExtraAddLink[];
+  /** Other LP ASAs that also enable Supply on this card. */
+  alternateLpTokenIds?: number[];
 }
 
 /** True when the curated pair has at least one Tinyman farm program configured. */
@@ -56,11 +79,12 @@ export function poolHasTinymanFarm(
 export const POOL_FARM_SUPPLY_NOTICE =
   "If pool has an active Tinyman farm. Supplying LP to the platform may disqualify your LP from farm rewards.";
 
-/** Base-token filters for the Pools page (UNIT / WAD / USDC curated pairs). */
+/** Base-token filters for the Pools page (UNIT / WAD / USDC / FINITE curated pairs). */
 export const POOL_BASE_TOKEN_FILTERS = [
   { id: "unit", symbol: "UNIT", assetId: 3121954282 },
   { id: "wad", symbol: "WAD", assetId: 3334160924 },
   { id: "usdc", symbol: "USDC", assetId: 31566704 },
+  { id: "finite", symbol: "FINITE", assetId: 400593267 },
 ] as const;
 
 export type PoolBaseTokenFilterId =
@@ -105,6 +129,7 @@ export function countPoolsByBaseTokenFilter(
     unit: 0,
     wad: 0,
     usdc: 0,
+    finite: 0,
   };
 
   for (const filter of POOL_BASE_TOKEN_FILTERS) {
@@ -134,13 +159,29 @@ export function getTinymanFarmingProgramUrl(
   return `${TINYMAN_APP_POOL_BASE}/${poolAddr}/farming-programs/${farmId}`;
 }
 
+export const MYTH_ASSET_BASE = "https://myth.finance/asset";
+
+export function getMythAddLiquidityUrl(lpTokenId: number): string {
+  return `${MYTH_ASSET_BASE}/${lpTokenId}`;
+}
+
+export function getDexAddButtonLabel(platform: LiquidityPlatformId): string {
+  if (platform === "myth") return "Add on Myth Finance";
+  return `Add on ${LIQUIDITY_PLATFORM_LABELS[platform]}`;
+}
+
 export function getDexAddLiquidityUrl(
-  platform: LiquidityPlatformId,
-  poolAddr: string
+  pair: Pick<
+    LiquidityPoolPairConfig,
+    "platform" | "poolAddr" | "addUrl" | "lpTokenId"
+  >
 ): string | null {
-  switch (platform) {
+  if (pair.addUrl) return pair.addUrl;
+  switch (pair.platform) {
     case "tinyman":
-      return getTinymanAddLiquidityUrl(poolAddr);
+      return pair.poolAddr ? getTinymanAddLiquidityUrl(pair.poolAddr) : null;
+    case "myth":
+      return pair.lpTokenId ? getMythAddLiquidityUrl(pair.lpTokenId) : null;
     default:
       return null;
   }
@@ -159,9 +200,18 @@ export function getDexFarmingProgramUrl(
   }
 }
 
+export const FINITE_ASA_ID = 400593267;
+/** Myth finiteALGO dualSTAKE LST (ALGO + FINITE). */
+export const MYTH_FINITE_ALGO_LST_ID = 3012888000;
+/** dualSTAKE app account that holds staked ALGO + paired FINITE. */
+export const MYTH_FINITE_ALGO_APP_ADDR =
+  "QVNUOH7G6MZINPTVLHSLZL53SCXVFA3PTHDJUMGPS6GPBLI5GPZVUYYX6I";
+
 /**
  * Select liquidity pairs exposed on the Pools page.
- * Use underlying ASA ids for asset1Id/asset2Id (ALGO = 0); lpTokenId / lpContractId are Tinyman LP metadata.
+ * Use underlying ASA ids for asset1Id/asset2Id (ALGO = 0).
+ * Tinyman: lpTokenId / lpContractId are TMPOOL2 + nt200.
+ * Myth dualSTAKE: lpTokenId is the LST ASA; omit lpContractId until a DorkFi market exists.
  */
 export const CURATED_LIQUIDITY_POOLS: LiquidityPoolPairConfig[] = [
   // TMPOOL2 3157974960 6 3577729953
@@ -318,12 +368,35 @@ export const CURATED_LIQUIDITY_POOLS: LiquidityPoolPairConfig[] = [
       "J7CN6WTMUWXY2KODKAMM5BLZ42FEIQLM4D32FRQ23VOOJC2SEUHKE565T4",
     farms: [],
   },
+  // Myth finiteALGO dualSTAKE — LST 3012888000 (6). No DorkFi nt200 yet.
+  {
+    id: "myth-finite-algo",
+    platform: "myth",
+    networkId: "algorand-mainnet",
+    lpTokenId: MYTH_FINITE_ALGO_LST_ID,
+    lpDecimals: 6,
+    asset1Id: FINITE_ASA_ID,
+    asset2Id: 0,
+    label: "FINITE / ALGO",
+    poolAddr: MYTH_FINITE_ALGO_APP_ADDR,
+    addUrl: getMythAddLiquidityUrl(MYTH_FINITE_ALGO_LST_ID),
+  },
 ];
 
 export function getCuratedLiquidityPoolsForNetwork(
   networkId: NetworkId
 ): LiquidityPoolPairConfig[] {
   return CURATED_LIQUIDITY_POOLS.filter((p) => p.networkId === networkId);
+}
+
+export function pairLpDecimals(pair: Pick<LiquidityPoolPairConfig, "lpDecimals">): number {
+  return pair.lpDecimals ?? 6;
+}
+
+export function pairHasLendingContract(
+  pair: Pick<LiquidityPoolPairConfig, "lpContractId">
+): boolean {
+  return typeof pair.lpContractId === "number" && pair.lpContractId > 0;
 }
 
 /** Lending market row in config (`LP_*`) matching a curated Tinyman pool. */
@@ -347,7 +420,7 @@ export function resolveLiquidityPoolLendingMarket(
   pair: LiquidityPoolPairConfig
 ): LiquidityPoolLendingMarket | null {
   const tokens = getNetworkConfig(networkId).tokens;
-  if (!tokens) return null;
+  if (!tokens || pair.lpContractId == null) return null;
 
   for (const [key, tokenConfig] of Object.entries(tokens)) {
     if (!key.startsWith("LP_")) continue;
