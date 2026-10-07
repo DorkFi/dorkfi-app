@@ -380,6 +380,62 @@ export function resolveLiquidityPoolLendingMarket(
   return null;
 }
 
+function logoPathForPairAsset(
+  networkId: NetworkId,
+  assetId: number,
+  overrideLogoPath?: string
+): string | undefined {
+  if (overrideLogoPath) return overrideLogoPath;
+  if (assetId === 0) return "/lovable-uploads/Algo.webp";
+  const tokens = getNetworkConfig(networkId).tokens;
+  if (!tokens) return undefined;
+  for (const tokenConfig of Object.values(tokens)) {
+    const rows = Array.isArray(tokenConfig) ? tokenConfig : [tokenConfig];
+    for (const row of rows) {
+      if (
+        row?.assetId != null &&
+        String(row.assetId) === String(assetId) &&
+        row.logoPath
+      ) {
+        return row.logoPath;
+      }
+    }
+  }
+  return undefined;
+}
+
+/** Underlying pair logos for an LP config key (e.g. `LP_TMPOOL2_USDC_ALGO` → USDC + ALGO). */
+export function resolveLpPairIcons(
+  networkId: NetworkId | string | null | undefined,
+  configKey?: string | null,
+  displaySymbol?: string | null
+): { asset1Icon: string; asset2Icon: string } | null {
+  if (!networkId) return null;
+  const nid = networkId as NetworkId;
+  const display = displaySymbol?.trim();
+  for (const pair of getCuratedLiquidityPoolsForNetwork(nid)) {
+    const market = resolveLiquidityPoolLendingMarket(nid, pair);
+    const keyMatch =
+      Boolean(configKey?.startsWith("LP_")) &&
+      market?.configSymbol === configKey;
+    const labelMatch =
+      Boolean(display) &&
+      (market?.displaySymbol === display ||
+        market?.displayName === display ||
+        pair.label === display);
+    if (!keyMatch && !labelMatch) continue;
+    const asset1Icon = logoPathForPairAsset(nid, pair.asset1Id);
+    const asset2Icon = logoPathForPairAsset(
+      nid,
+      pair.asset2Id,
+      pair.asset2LogoPath
+    );
+    if (!asset1Icon || !asset2Icon) return null;
+    return { asset1Icon, asset2Icon };
+  }
+  return null;
+}
+
 /** True when the curated pair supplies UNIT LP collateral on Pool C. */
 export function pairHasUnitLpLendingMarket(
   networkId: NetworkId,

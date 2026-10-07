@@ -39,6 +39,24 @@ describe("positionMatchesMarketFilter", () => {
     ).toBe(true);
   });
 
+  it("matches LP for Pool C/E/F and not A/B/D", () => {
+    expect(
+      positionMatchesMarketFilter("algorand-mainnet", "3578814346", "LP")
+    ).toBe(true);
+    expect(
+      positionMatchesMarketFilter("algorand-mainnet", "3585829377", "LP")
+    ).toBe(true);
+    expect(
+      positionMatchesMarketFilter("algorand-mainnet", "3589083110", "LP")
+    ).toBe(true);
+    expect(
+      positionMatchesMarketFilter("algorand-mainnet", "3333688282", "LP")
+    ).toBe(false);
+    expect(
+      positionMatchesMarketFilter("algorand-mainnet", "3578814346", "A")
+    ).toBe(false);
+  });
+
   it("returns false when network or pool is missing for tier filter", () => {
     expect(positionMatchesMarketFilter(undefined, "123", "A")).toBe(false);
     expect(positionMatchesMarketFilter("algorand-mainnet", undefined, "A")).toBe(
@@ -103,6 +121,28 @@ describe("itemMatchesPortfolioPositionFilters", () => {
         networkFilter: "all",
       })
     ).toBe(true);
+  });
+
+  it("filters LP positions by market tier", () => {
+    expect(
+      itemMatchesPortfolioPositionFilters(
+        {
+          asset: "UNIT/ALGO LP",
+          poolId: "3578814346",
+          network: "algorand-mainnet",
+        },
+        {
+          networkFilter: "all",
+          marketFilter: "LP",
+        }
+      )
+    ).toBe(true);
+    expect(
+      itemMatchesPortfolioPositionFilters(baseItem, {
+        networkFilter: "all",
+        marketFilter: "LP",
+      })
+    ).toBe(false);
   });
 
   it("filters by network and market tier together", () => {

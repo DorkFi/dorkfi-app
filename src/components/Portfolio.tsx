@@ -40,6 +40,10 @@ import {
   type MarketInfo,
 } from "@/services/lendingService";
 import {
+  fetchPortfolioChainOverlay,
+  mergeGlobalUserRowsPreferChain,
+} from "@/utils/portfolioChainOverlay";
+import {
   hydratePortfolioNetworkMarketsPhaseA,
   refinePortfolioMarketsPhaseB,
   gapFillPortfolioMarkets,
@@ -69,7 +73,7 @@ import {
   getEnabledNetworks,
   getAlgorandNetworkFromNetworkId,
   getNetworkConfig,
-  getMarketLabel,
+  getPortfolioMarketLabel,
   getNetworkDisplayName,
   NetworkId,
   TokenConfig,
@@ -78,8 +82,9 @@ import {
   getFolksAdapterForPhase,
   getPortfolioVisibleTokens,
   filterPortfolioVisibleMarketRows,
-  isMarketsTableExcludedMarket,
   getAllTokensWithDisplayInfo,
+  getWadBorrowMarketConfigForPool,
+  isLpTmpoolConfigKey,
 } from "@/config";
 import {
   getTokenImagePath,
@@ -97,6 +102,7 @@ import type {
 } from "@/types/portfolio";
 import {
   enabledNetworksHaveDMarket,
+  enabledNetworksHaveLpMarket,
   itemMatchesPortfolioPositionFilters,
   type PortfolioNetworkFilterValue,
 } from "@/utils/portfolioMarketFilter";
@@ -113,7 +119,10 @@ import {
   portfolioUsdCacheKey,
   resolveWithLastGoodPortfolioUsd,
 } from "@/utils/portfolioUsdCache";
-import { unionPortfolioPositionRows } from "@/utils/portfolioMissingUserMarkets";
+import {
+  bigintOrZero,
+  unionPortfolioPositionRows,
+} from "@/utils/portfolioMissingUserMarkets";
 import {
   createDebouncedPrefetch,
   warmRepayModalRpc,
@@ -224,7 +233,8 @@ function formatUserMarketLine(
 ): string | null {
   if (!networkId || !poolId) return null;
   const net = getNetworkDisplayName(networkId);
-  const letter = getMarketLabel(networkId as NetworkId, poolId);
+  const letter = getPortfolioMarketLabel(networkId as NetworkId, poolId);
+  if (letter === "LP") return `${net} · LP`;
   if (letter) return `${net} · Market ${letter}`;
   return `${net} · Pool ${poolId}`;
 }
@@ -404,21 +414,123 @@ function resolvePortfolioPositionUsdPerToken(options: {
   return resolveWithLastGoodPortfolioUsd(0, cacheKey);
 }
 
-function isExcludedPortfolioPositionRow(pos: {
+function isExcludedPortfolioPositionRow(_pos: {
   poolId?: string | null;
   network?: string;
   configSymbol?: string;
   configKey?: string;
 }): boolean {
-  const networkId = pos.network;
-  if (!networkId || pos.poolId == null || String(pos.poolId) === "") {
-    return false;
+  return false;
+}
+
+function lpWadBorrowTarget(
+  network?: string,
+  poolId?: string,
+  configKey?: string
+): { poolId: string; contractId: string } | null {
+  if (!network || !poolId || !isLpTmpoolConfigKey(configKey)) return null;
+  const wad = getWadBorrowMarketConfigForPool(network, poolId);
+  if (!wad?.poolId || !wad.contractId) return null;
+  return { poolId: String(wad.poolId), contractId: String(wad.contractId) };
+}
+
+function portfolioPositionDedupeKey(pos: {
+  network?: string;
+  poolId?: string;
+  appId?: string;
+  marketId?: string;
+}): string {
+  return `${pos.network ?? ""}|${String(pos.poolId || pos.appId || "")}|${String(pos.marketId || "")}`;
+}
+
+function mergePortfolioPositions<T extends {
+  network?: string;
+  poolId?: string;
+  appId?: string;
+  marketId?: string;
+}>(primary: T[], extra: T[]): T[] {
+  const map = new Map<string, T>();
+  for (const pos of primary) {
+    map.set(portfolioPositionDedupeKey(pos), pos);
   }
-  return isMarketsTableExcludedMarket(
-    networkId,
-    pos.poolId,
-    pos.configSymbol ?? pos.configKey
-  );
+  for (const pos of extra) {
+    const key = portfolioPositionDedupeKey(pos);
+    if (!map.has(key)) map.set(key, pos);
+  }
+  return [...map.values()];
+}
+
+function buildPortfolioComputed(
+  user: Record<string, unknown>
+): Record<string, unknown> | null {
+  if (!user.globalUserData || !Array.isArray(user.globalUserData)) {
+    return null;
+  }
+
+  const globalCollateralValue =
+    user.globalUserData
+      .map((item: Record<string, unknown>) =>
+        bigintOrZero(item.totalCollateralValue)
+      )
+      .reduce((acc: bigint, curr: bigint) => acc + curr, BigInt(0)) /
+    BigInt(1e12);
+  const globalBorrowValue =
+    user.globalUserData
+      .map((item: Record<string, unknown>) =>
+        bigintOrZero(item.totalBorrowValue)
+      )
+      .reduce((acc: bigint, curr: bigint) => acc + curr, BigInt(0)) /
+    BigInt(1e12);
+  const globalNetPortfolioValue = globalCollateralValue - globalBorrowValue;
+
+  const networkValues: Record<
+    string,
+    { collateral: number; borrow: number; netValue: number }
+  > = {};
+
+  user.globalUserData.forEach((item: Record<string, unknown>) => {
+    const network = String(item.network || "unknown");
+    const collateralValue = Number(
+      bigintOrZero(item.totalCollateralValue) / BigInt(1e12)
+    );
+    const borrowValue = Number(
+      bigintOrZero(item.totalBorrowValue) / BigInt(1e12)
+    );
+    const netValue = collateralValue - borrowValue;
+
+    if (!networkValues[network]) {
+      networkValues[network] = { collateral: 0, borrow: 0, netValue: 0 };
+    }
+
+    networkValues[network].collateral += collateralValue;
+    networkValues[network].borrow += borrowValue;
+    networkValues[network].netValue += netValue;
+  });
+
+  const deposits: Record<string, unknown>[] = [];
+  const borrows: Record<string, unknown>[] = [];
+  if (user.userData && Array.isArray(user.userData)) {
+    user.userData.forEach((item: Record<string, unknown>) => {
+      if (bigintOrZero(item.scaledDeposits) > BigInt(0)) {
+        deposits.push(item);
+      }
+      if (bigintOrZero(item.scaledBorrows) > BigInt(0)) {
+        borrows.push(item);
+      }
+    });
+  }
+
+  return {
+    ...user,
+    computed: {
+      globalCollateralValue: Number(globalCollateralValue),
+      globalBorrowValue: Number(globalBorrowValue),
+      globalNetPortfolioValue: Number(globalNetPortfolioValue),
+      networkValues,
+      deposits,
+      borrows,
+    },
+  };
 }
 
 /** Standalone "Accrued Interest" summary card + table (below Supplied/Borrowed). */
@@ -776,11 +888,16 @@ const Portfolio = () => {
     useState<MarketFilter>("all");
   const [positionsSearchTerm, setPositionsSearchTerm] = useState("");
   const hasDMarketTab = useMemo(() => enabledNetworksHaveDMarket(), []);
+  const hasLpMarketTab = useMemo(() => enabledNetworksHaveLpMarket(), []);
 
   useEffect(() => {
-    if (hasDMarketTab) return;
-    if (positionsMarketFilter === "D") setPositionsMarketFilter("all");
-  }, [hasDMarketTab, positionsMarketFilter]);
+    if (!hasDMarketTab && positionsMarketFilter === "D") {
+      setPositionsMarketFilter("all");
+    }
+    if (!hasLpMarketTab && positionsMarketFilter === "LP") {
+      setPositionsMarketFilter("all");
+    }
+  }, [hasDMarketTab, hasLpMarketTab, positionsMarketFilter]);
 
   const clearPositionsFilters = useCallback(() => {
     setPositionsNetworkFilter("all");
@@ -1011,15 +1128,6 @@ const Portfolio = () => {
 
       for (const token of tokens) {
         if (token.underlyingContractId && token.poolId) {
-          if (
-            isMarketsTableExcludedMarket(
-              networkId as NetworkId,
-              token.poolId,
-              token.configKey
-            )
-          ) {
-            continue;
-          }
           const rowTokenConfigRaw = getTokenConfig(
             networkId as NetworkId,
             token.configKey ?? token.originalSymbol ?? token.symbol
@@ -1303,16 +1411,6 @@ const Portfolio = () => {
             return;
           }
 
-          if (
-            isMarketsTableExcludedMarket(
-              networkId as NetworkId,
-              appId,
-              token.configKey
-            )
-          ) {
-            return;
-          }
-
           // Find market data (do not match display symbol only — ALGO vs fALGO both "Algo" on same pool)
           const market = marketRowForPortfolioPosition(marketData, {
             marketId,
@@ -1545,16 +1643,6 @@ const Portfolio = () => {
             return;
           }
 
-          if (
-            isMarketsTableExcludedMarket(
-              networkId as NetworkId,
-              appId,
-              token.configKey
-            )
-          ) {
-            return;
-          }
-
           const market = marketRowForPortfolioPosition(marketData, {
             marketId,
             poolId: appId,
@@ -1727,7 +1815,7 @@ const Portfolio = () => {
   ]);
 
   // Prefer API-computed rows; keep on-chain-only positions the indexer omitted
-  // (shared-contract markets such as pool B ALGO — GitHub #646).
+  // (#646 shared-contract borrows) plus LP overlay rows.
   const rawDeposits = unionPortfolioPositionRows(
     transformedDepositsAndBorrows.deposits,
     userPositions.filter((pos) => pos.type === "deposit")
@@ -1858,21 +1946,30 @@ const Portfolio = () => {
     finalBorrowsCount: borrows.length,
   });
 
-  // Calculate totals - prioritize computed global values from API, then fallback to local calculations
-  const totalCollateral =
-    user?.computed?.globalCollateralValue !== undefined
-      ? Number(user.computed.globalCollateralValue)
-      : userGlobalData?.totalCollateralValue ||
-      deposits.reduce((sum, deposit) => sum + deposit.value, 0);
+  // API `get_global_user` / user index lags new LP pools. Visible rows (chain overlay)
+  // are the live floor so headline totals don't sit on stale $150 while LP is listed.
+  const depositsUsd = deposits.reduce(
+    (sum, deposit) => sum + (Number(deposit.value) || 0),
+    0
+  );
+  const borrowsUsd = borrows.reduce(
+    (sum, borrow) => sum + (Number(borrow.value) || 0),
+    0
+  );
+  const totalCollateral = Math.max(
+    Number(user?.computed?.globalCollateralValue ?? 0),
+    Number(userGlobalData?.totalCollateralValue ?? 0),
+    depositsUsd
+  );
 
   console.log({
   });
 
-  const totalBorrowed =
-    user?.computed?.globalBorrowValue !== undefined
-      ? Number(user.computed.globalBorrowValue)
-      : userGlobalData?.totalBorrowValue ||
-      borrows.reduce((sum, borrow) => sum + borrow.value, 0);
+  const totalBorrowed = Math.max(
+    Number(user?.computed?.globalBorrowValue ?? 0),
+    Number(userGlobalData?.totalBorrowValue ?? 0),
+    borrowsUsd
+  );
 
   // Calculate weighted liquidation threshold based on borrowed assets only
   // This is more accurate because liquidation risk only applies to markets with active debt
@@ -2346,10 +2443,13 @@ const Portfolio = () => {
         .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
         .join(" ");
 
-      const marketLabel = getMarketLabel(network, poolId);
-      const title = marketLabel
-        ? `${networkDisplayName} · Market ${marketLabel}`
-        : `${networkDisplayName} · Pool ${poolId}`;
+      const marketLabel = getPortfolioMarketLabel(network, poolId);
+      const title =
+        marketLabel === "LP"
+          ? `${networkDisplayName} · LP`
+          : marketLabel
+            ? `${networkDisplayName} · Market ${marketLabel}`
+            : `${networkDisplayName} · Pool ${poolId}`;
 
       const shortNet = network.toLowerCase().includes("algorand")
         ? "Algorand"
@@ -3201,6 +3301,37 @@ const Portfolio = () => {
         return;
       }
 
+      try {
+        const overlay = await fetchPortfolioChainOverlay(displayAddress);
+        if (overlay.markets.length > 0) {
+          setMarketData((prev) =>
+            mergePortfolioMarketRows(prev, overlay.markets)
+          );
+        }
+        if (overlay.positions.length > 0) {
+          setUserPositions((prev) =>
+            mergePortfolioPositions(prev, overlay.positions)
+          );
+        }
+        setUser((prev) => {
+          if (!prev) return prev;
+          const next = buildPortfolioComputed({
+            ...(prev as Record<string, unknown>),
+            globalUserData: mergeGlobalUserRowsPreferChain(
+              ((prev as { globalUserData?: { network?: string; poolId?: string }[] })
+                .globalUserData) ?? [],
+              overlay.globalUserData
+            ),
+          });
+          return (next as typeof prev) ?? prev;
+        });
+      } catch (overlayError) {
+        console.warn(
+          "[Portfolio] Chain overlay on refresh failed:",
+          overlayError
+        );
+      }
+
       const freshGlobalData = await fetchUserGlobalData(
         displayAddress,
         currentNetwork,
@@ -4038,105 +4169,42 @@ const Portfolio = () => {
 
     const applyPortfolioComputed = (user: Record<string, unknown>) => {
       if (!isCurrentFetchUser()) return;
-      if (!user.globalUserData || !Array.isArray(user.globalUserData)) {
-        return;
+      try {
+        const computedUser = buildPortfolioComputed(user);
+        if (!computedUser) return;
+        console.log("[Portfolio] User data globalUserData:", user.globalUserData);
+        console.log("[Portfolio] User:", computedUser);
+        setUser(computedUser);
+      } catch (applyError) {
+        console.error("[Portfolio] applyPortfolioComputed failed:", applyError);
       }
-      console.log(
-        "[Portfolio] User data globalUserData:",
-        user.globalUserData
-      );
-      const globalCollateralValue =
-        user.globalUserData
-          .map((item: Record<string, unknown>) => {
-            try {
-              return BigInt(String(item.totalCollateralValue ?? 0).split(".")[0]);
-            } catch {
-              return BigInt(0);
-            }
-          })
-          .reduce((acc: bigint, curr: bigint) => acc + curr, BigInt(0)) /
-        BigInt(1e12);
-      console.log(
-        "[Portfolio] Global collateral value:",
-        globalCollateralValue
-      );
-      const globalBorrowValue =
-        user.globalUserData
-          .map((item: Record<string, unknown>) => {
-            try {
-              return BigInt(String(item.totalBorrowValue ?? 0).split(".")[0]);
-            } catch {
-              return BigInt(0);
-            }
-          })
-          .reduce((acc: bigint, curr: bigint) => acc + curr, BigInt(0)) /
-        BigInt(1e12);
-      console.log("[Portfolio] Global borrow value:", globalBorrowValue);
-      const globalNetPortfolioValue = globalCollateralValue - globalBorrowValue;
-      console.log(
-        "[Portfolio] Global net portfolio value:",
-        globalNetPortfolioValue
-      );
+    };
 
-      const networkValues: Record<
-        string,
-        {
-          collateral: number;
-          borrow: number;
-          netValue: number;
-        }
-      > = {};
-
-      user.globalUserData.forEach((item: Record<string, unknown>) => {
-        const network = String(item.network || "unknown");
-        const collateralValue = Number(
-          BigInt(String(item.totalCollateralValue ?? 0)) / BigInt(1e12)
-        );
-        const borrowValue = Number(
-          BigInt(String(item.totalBorrowValue ?? 0)) / BigInt(1e12)
-        );
-        const netValue = collateralValue - borrowValue;
-
-        if (!networkValues[network]) {
-          networkValues[network] = {
-            collateral: 0,
-            borrow: 0,
-            netValue: 0,
-          };
-        }
-
-        networkValues[network].collateral += collateralValue;
-        networkValues[network].borrow += borrowValue;
-        networkValues[network].netValue += netValue;
-      });
-
-      const deposits: Record<string, unknown>[] = [];
-      const borrows: Record<string, unknown>[] = [];
-      if (user.userData && Array.isArray(user.userData)) {
-        user.userData.forEach((item: Record<string, unknown>) => {
-          if (BigInt(String(item.scaledDeposits ?? 0)) > BigInt(0)) {
-            deposits.push(item);
-          }
-          if (BigInt(String(item.scaledBorrows ?? 0)) > BigInt(0)) {
-            borrows.push(item);
-          }
+    const applyChainOverlay = async (baseUser: Record<string, unknown>) => {
+      try {
+        const overlay = await fetchPortfolioChainOverlay(userAddress);
+        if (!isCurrentFetchUser()) return;
+        applyPortfolioComputed({
+          ...baseUser,
+          globalUserData: mergeGlobalUserRowsPreferChain(
+            (baseUser.globalUserData as { network?: string; poolId?: string }[]) ??
+              [],
+            overlay.globalUserData
+          ),
         });
+        if (overlay.markets.length > 0) {
+          setMarketData((prev) =>
+            mergePortfolioMarketRows(prev, overlay.markets)
+          );
+        }
+        if (overlay.positions.length > 0) {
+          setUserPositions((prev) =>
+            mergePortfolioPositions(prev, overlay.positions)
+          );
+        }
+      } catch (error) {
+        console.warn("[Portfolio] Chain overlay failed:", error);
       }
-      const computedUser = {
-        ...user,
-        computed: {
-          globalCollateralValue: Number(globalCollateralValue),
-          globalBorrowValue: Number(globalBorrowValue),
-          globalNetPortfolioValue: Number(globalNetPortfolioValue),
-          networkValues: networkValues,
-          deposits,
-          borrows,
-        },
-      };
-      console.log("[Portfolio] User:", computedUser);
-      if (!isCurrentFetchUser()) return;
-      setUser(computedUser);
-      console.log("[Portfolio] Network values:", networkValues);
     };
 
     try {
@@ -4167,27 +4235,28 @@ const Portfolio = () => {
         const apiGlobalUserData = Array.isArray(user.globalUserData)
           ? (user.globalUserData as unknown[])
           : [];
+        let workingUser: Record<string, unknown> = {
+          ...user,
+          userData: apiUserData,
+        };
         // Paint indexer rows first so chain fill cannot block / crash the page.
-        try {
-          applyPortfolioComputed({ ...user, userData: apiUserData });
-        } catch (applyError) {
-          console.error("[Portfolio] applyPortfolioComputed failed:", applyError);
-        }
+        applyPortfolioComputed(workingUser);
         try {
           const filled = await fillMissingUserMarketRowsFromChain(
             userAddress,
             apiGlobalUserData,
             apiUserData
           );
-          if (filled.length > 0 && isCurrentFetchUser()) {
+          if (filled.length > 0) {
             console.log(
               "[Portfolio] Filled indexer-omitted user markets from chain:",
               filled.map((r) => `${r.appId}:${r.marketId}`)
             );
-            applyPortfolioComputed({
+            workingUser = {
               ...user,
               userData: [...apiUserData, ...filled],
-            });
+            };
+            applyPortfolioComputed(workingUser);
           }
         } catch (fillError) {
           console.warn(
@@ -4195,6 +4264,7 @@ const Portfolio = () => {
             fillError
           );
         }
+        void applyChainOverlay(workingUser);
         return;
       }
 
@@ -4212,6 +4282,12 @@ const Portfolio = () => {
           userData: chain.userData,
           userDataSource: "chain",
         });
+        void applyChainOverlay({
+          address: userAddress,
+          globalUserData: chain.globalUserData,
+          userData: chain.userData,
+          userDataSource: "chain",
+        });
       }
     } catch (error) {
       console.error("Error fetching user global data:", error);
@@ -4219,6 +4295,12 @@ const Portfolio = () => {
       if (chain && isCurrentFetchUser()) {
         setUserProfileAvatar(null);
         applyPortfolioComputed({
+          address: userAddress,
+          globalUserData: chain.globalUserData,
+          userData: chain.userData,
+          userDataSource: "chain",
+        });
+        void applyChainOverlay({
           address: userAddress,
           globalUserData: chain.globalUserData,
           userData: chain.userData,
@@ -5866,6 +5948,7 @@ const Portfolio = () => {
                     searchTerm={positionsSearchTerm}
                     onSearchTermChange={setPositionsSearchTerm}
                     hasDMarketTab={hasDMarketTab}
+                    hasLpMarketTab={hasLpMarketTab}
                     isMobile={isNarrowPositionsViewport}
                   />
               {/* Supplied Assets Table */}
@@ -6220,6 +6303,30 @@ const Portfolio = () => {
                                           (deposit as ItemWithNetwork).marketId,
                                           (deposit as ItemWithNetwork).configSymbol
                                         )
+                                      : undefined
+                                  }
+                                  onMintWadClick={
+                                    !isViewOnly &&
+                                    lpWadBorrowTarget(
+                                      (deposit as ItemWithNetwork).network,
+                                      deposit.poolId,
+                                      (deposit as ItemWithNetwork).configSymbol
+                                    )
+                                      ? () => {
+                                          const wad = lpWadBorrowTarget(
+                                            (deposit as ItemWithNetwork).network,
+                                            deposit.poolId,
+                                            (deposit as ItemWithNetwork).configSymbol
+                                          );
+                                          if (!wad) return;
+                                          handleBorrowClick(
+                                            "WAD",
+                                            wad.poolId,
+                                            (deposit as ItemWithNetwork).network,
+                                            "WAD",
+                                            wad.contractId
+                                          );
+                                        }
                                       : undefined
                                   }
                                   type="deposit"
@@ -6592,7 +6699,7 @@ const Portfolio = () => {
                               // Get market label using the deposit's network, not currentNetwork
                               const depositNetworkForMarket =
                                 (deposit as ItemWithNetwork).network || currentNetwork;
-                              const depositMarketLabel = getMarketLabel(
+                              const depositMarketLabel = getPortfolioMarketLabel(
                                 depositNetworkForMarket,
                                 deposit.poolId
                               );
@@ -6724,6 +6831,12 @@ const Portfolio = () => {
                                           iconBadgeUrl: (
                                             deposit as { iconBadgeUrl?: string }
                                           ).iconBadgeUrl,
+                                          configSymbol: (
+                                            deposit as ItemWithNetwork
+                                          ).configSymbol,
+                                          network:
+                                            (deposit as ItemWithNetwork)
+                                              .network || currentNetwork,
                                         }}
                                         poolLetterLabel={
                                           depositMarketLabel ?? null
@@ -6878,6 +6991,38 @@ const Portfolio = () => {
                                             <span className="text-base leading-none">−</span>
                                             <span className="hidden lg:inline text-xs">Withdraw</span>
                                           </DorkFiButton>
+                                          {lpWadBorrowTarget(
+                                            (deposit as ItemWithNetwork).network,
+                                            deposit.poolId,
+                                            (deposit as ItemWithNetwork).configSymbol
+                                          ) && (
+                                            <DorkFiButton
+                                              size="sm"
+                                              variant="mint"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                const wad = lpWadBorrowTarget(
+                                                  (deposit as ItemWithNetwork).network,
+                                                  deposit.poolId,
+                                                  (deposit as ItemWithNetwork).configSymbol
+                                                );
+                                                if (!wad) return;
+                                                handleBorrowClick(
+                                                  "WAD",
+                                                  wad.poolId,
+                                                  (deposit as ItemWithNetwork).network,
+                                                  "WAD",
+                                                  wad.contractId
+                                                );
+                                              }}
+                                              title="Borrow (mint) WAD against this LP collateral"
+                                              aria-label="Mint WAD"
+                                              className="min-w-[92px] h-8 shrink-0 px-2 gap-1"
+                                            >
+                                              <span className="hidden lg:inline text-xs">Mint WAD</span>
+                                              <span className="lg:hidden text-xs">WAD</span>
+                                            </DorkFiButton>
+                                          )}
                                         </>
                                       )}
                                     </div>
@@ -7467,7 +7612,7 @@ const Portfolio = () => {
                               // Calculate market label using the borrow's network, not currentNetwork
                               const borrowNetwork =
                                 (borrow as ItemWithNetwork).network || currentNetwork;
-                              const borrowMarketLabel = getMarketLabel(
+                              const borrowMarketLabel = getPortfolioMarketLabel(
                                 borrowNetwork,
                                 borrow.poolId
                               );
@@ -7574,6 +7719,12 @@ const Portfolio = () => {
                                           iconBadgeUrl: (
                                             borrow as { iconBadgeUrl?: string }
                                           ).iconBadgeUrl,
+                                          configSymbol: (
+                                            borrow as ItemWithNetwork
+                                          ).configSymbol,
+                                          network:
+                                            (borrow as ItemWithNetwork)
+                                              .network || currentNetwork,
                                         }}
                                         poolLetterLabel={
                                           borrowMarketLabel ?? null
@@ -8170,7 +8321,7 @@ const Portfolio = () => {
                                   // Get market label using the asset's network, not currentNetwork
                                   const assetNetwork =
                                     (asset as ItemWithNetwork).network || currentNetwork;
-                                  const marketLabel = getMarketLabel(
+                                  const marketLabel = getPortfolioMarketLabel(
                                     assetNetwork,
                                     asset.poolId
                                   );
@@ -8190,6 +8341,12 @@ const Portfolio = () => {
                                               iconBadgeUrl: (
                                                 asset as { iconBadgeUrl?: string }
                                               ).iconBadgeUrl,
+                                              configSymbol: (
+                                                asset as ItemWithNetwork
+                                              ).configSymbol,
+                                              network:
+                                                (asset as ItemWithNetwork)
+                                                  .network || currentNetwork,
                                             }}
                                             poolLetterLabel={marketLabel}
                                             imgClassName="h-6 w-6 shrink-0 rounded-full object-contain"
@@ -8726,7 +8883,7 @@ const Portfolio = () => {
                               const hasDeposits =
                                 (item.earnedInterest || 0) > 0;
                               const hasBorrows = (item.owedInterest || 0) > 0;
-                              const accruedMarketLabel = getMarketLabel(
+                              const accruedMarketLabel = getPortfolioMarketLabel(
                                 itemNetwork || currentNetwork,
                                 item.poolId
                               );
@@ -8745,6 +8902,12 @@ const Portfolio = () => {
                                           iconBadgeUrl: (
                                             item as { iconBadgeUrl?: string }
                                           ).iconBadgeUrl,
+                                          configSymbol: (
+                                            item as ItemWithNetwork
+                                          ).configSymbol,
+                                          network:
+                                            (item as { network?: string })
+                                              .network || currentNetwork,
                                         }}
                                         poolLetterLabel={
                                           accruedMarketLabel ?? null
@@ -8977,6 +9140,11 @@ const Portfolio = () => {
                             asset: borrow.asset,
                             iconBadgeUrl: (borrow as { iconBadgeUrl?: string })
                               .iconBadgeUrl,
+                            configSymbol: (borrow as ItemWithNetwork)
+                              .configSymbol,
+                            network:
+                              (borrow as ItemWithNetwork).network ||
+                              currentNetwork,
                           }}
                           poolLetterLabel={null}
                           imgClassName="h-6 w-6 shrink-0 rounded-full object-contain"

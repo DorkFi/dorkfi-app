@@ -48,80 +48,97 @@ const HealthFactorActions = ({
         </DorkFiButton>
       )}
 
-      {/* Actions: Supply and Repay */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+      {/* Supply + Withdraw side by side from md up; stacked on mobile. Repay sits next to Supply when there is no Withdraw, otherwise full width below. */}
+      <div
+        className={cn(
+          "grid grid-cols-1 gap-3 pt-1",
+          (onAddCollateral && onWithdraw) ||
+            (onAddCollateral && totalBorrowed > 0 && onRepayDebt) ||
+            (onWithdraw && totalBorrowed > 0 && onRepayDebt)
+            ? "md:grid-cols-2"
+            : null
+        )}
+      >
         {onAddCollateral && (
-          <DesktopTooltip
-            side="top"
-            className="max-w-xs"
-            content={
-              <p>
-                Add assets to earn yield and use as collateral. Improves health
-                factor.
-              </p>
-            }
-          >
-            <DorkFiButton
-              onClick={onAddCollateral}
-              variant={isHighRisk ? "danger" : "primary"}
-              size="lg"
-              className="w-full min-w-0 h-12 gap-2"
+          <div className="min-w-0">
+            <DesktopTooltip
+              side="top"
+              className="max-w-xs"
+              content={
+                <p>
+                  Add assets to earn yield and use as collateral. Improves health
+                  factor.
+                </p>
+              }
             >
-              <Plus className="w-5 h-5 shrink-0" />
-              Supply
-            </DorkFiButton>
-          </DesktopTooltip>
+              <DorkFiButton
+                onClick={onAddCollateral}
+                variant={isHighRisk ? "danger" : "primary"}
+                size="lg"
+                className="w-full min-w-0 h-12 gap-2"
+              >
+                <Plus className="w-5 h-5 shrink-0" />
+                Supply
+              </DorkFiButton>
+            </DesktopTooltip>
+          </div>
+        )}
+        {onWithdraw && (
+          <div className="min-w-0">
+            <DesktopTooltip
+              side="top"
+              className="max-w-xs"
+              content={
+                <p>
+                  {isCritical
+                    ? "Withdrawals are blocked while health factor is at or below 1.0. Supply collateral or repay debt first."
+                    : "Withdraw supplied assets to your wallet (up to the HF-safe maximum)."}
+                </p>
+              }
+            >
+              <DorkFiButton
+                variant="withdraw"
+                size="lg"
+                onClick={onWithdraw}
+                disabled={isCritical}
+                className="w-full min-w-0 h-12 gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ArrowUpFromLine className="w-5 h-5 shrink-0" />
+                Withdraw
+              </DorkFiButton>
+            </DesktopTooltip>
+          </div>
         )}
         {totalBorrowed > 0 && onRepayDebt && (
-          <DesktopTooltip
-            side="top"
-            className="max-w-xs"
-            content={
-              <p>
-                Pay down debt to improve health factor and reduce liquidation
-                risk.
-              </p>
-            }
+          <div
+            className={cn(
+              "min-w-0",
+              onAddCollateral && onWithdraw && "md:col-span-2"
+            )}
           >
-            <DorkFiButton
-              variant={isHighRisk ? "danger-outline" : "secondary"}
-              size="lg"
-              onClick={onRepayDebt}
-              className="w-full min-w-0 h-12 gap-2"
+            <DesktopTooltip
+              side="top"
+              className="max-w-xs"
+              content={
+                <p>
+                  Pay down debt to improve health factor and reduce liquidation
+                  risk.
+                </p>
+              }
             >
-              <ArrowDownToLine className="w-5 h-5 shrink-0" />
-              Repay
-            </DorkFiButton>
-          </DesktopTooltip>
+              <DorkFiButton
+                variant={isHighRisk ? "danger-outline" : "secondary"}
+                size="lg"
+                onClick={onRepayDebt}
+                className="w-full min-w-0 h-12 gap-2"
+              >
+                <ArrowDownToLine className="w-5 h-5 shrink-0" />
+                Repay
+              </DorkFiButton>
+            </DesktopTooltip>
+          </div>
         )}
       </div>
-
-      {onWithdraw && (
-        <DesktopTooltip
-          side="top"
-          className="max-w-xs"
-          content={
-            <p>
-              {isCritical
-                ? "Withdrawals are blocked while health factor is at or below 1.0. Supply collateral or repay debt first."
-                : "Withdraw supplied assets to your wallet (up to the HF-safe maximum)."}
-            </p>
-          }
-        >
-          <span className="block w-full">
-            <DorkFiButton
-              variant="withdraw"
-              size="lg"
-              onClick={onWithdraw}
-              disabled={isCritical}
-              className="w-full min-w-0 h-12 gap-2 mt-1 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <ArrowUpFromLine className="w-5 h-5 shrink-0" />
-              Withdraw
-            </DorkFiButton>
-          </span>
-        </DesktopTooltip>
-      )}
 
       {isHighRisk && (
         <p className="text-xs text-muted-foreground mt-3">

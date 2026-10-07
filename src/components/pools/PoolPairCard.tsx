@@ -13,6 +13,7 @@ import {
 import {
   formatLiquidityAtomic,
   resolveLiquidityAssetMeta,
+  usdPerLpTokenFromSnapshot,
   type LiquidityPoolSnapshot,
   type LiquidityPoolUserPosition,
 } from "@/services/tinymanLiquidityService";
@@ -98,6 +99,15 @@ const PoolPairCard = ({
   );
   const apr = snapshot?.apr;
   const displayApr = apr?.totalAprPercent ?? apr?.feeAprPercent ?? null;
+  const usdPerLp = usdPerLpTokenFromSnapshot(snapshot);
+  const suppliedLpUsd =
+    usdPerLp != null && suppliedLpBalance > 0
+      ? suppliedLpBalance * usdPerLp
+      : null;
+  const walletLpUsd =
+    usdPerLp != null && position && position.poolTokenBalance > 0n
+      ? (Number(position.poolTokenBalance) / 1e6) * usdPerLp
+      : null;
   const platformLabel = LIQUIDITY_PLATFORM_LABELS[pair.platform];
   const dexLink = useMemo(() => {
     if (!pair.poolAddr) return null;
@@ -201,6 +211,16 @@ const PoolPairCard = ({
                 <p className="text-xs text-muted-foreground">Your position</p>
                 <p className="font-medium tabular-nums text-sm">
                   {formatLiquidityAtomic(position.poolTokenBalance, 6)} LP in wallet
+                  {walletLpUsd != null ? (
+                    <span className="ml-1 text-muted-foreground">
+                      (
+                      {formatCurrency(walletLpUsd, "USD", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                      )
+                    </span>
+                  ) : null}
                 </p>
                 {suppliedLpBalance > 0 ? (
                   <p className="font-medium tabular-nums text-sm">
@@ -208,6 +228,16 @@ const PoolPairCard = ({
                       maximumFractionDigits: 6,
                     })}{" "}
                     LP in platform
+                    {suppliedLpUsd != null ? (
+                      <span className="ml-1 text-muted-foreground">
+                        (
+                        {formatCurrency(suppliedLpUsd, "USD", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                        )
+                      </span>
+                    ) : null}
                   </p>
                 ) : null}
                 {position.poolTokenBalance > 0n ? (

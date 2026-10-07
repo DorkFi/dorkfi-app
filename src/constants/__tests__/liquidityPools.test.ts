@@ -6,6 +6,7 @@ import {
   pairHasUsdcLpLendingMarket,
   pairHasWadLpCollateralLendingMarket,
   pairHasWadLpLendingMarket,
+  resolveLpPairIcons,
   resolvePoolsPageLendingMarket,
   resolveUsdcLendingPoolIdsForFilter,
   resolveWadLendingPoolIdsForFilter,
@@ -44,8 +45,8 @@ describe("resolvePoolsPageLendingMarket", () => {
       configSymbol: "LP_TMPOOL2_WAD_UNIT",
       poolId: POOL_C,
       marketId: LP_WAD_UNIT,
-      displaySymbol: "TMPOOL2",
-      displayName: "TinymanPool2.0 WAD-UNIT",
+      displaySymbol: "WAD/UNIT LP",
+      displayName: "WAD / UNIT LP",
       logoPath: "/lovable-uploads/LP_TMPOOL2_WAD_UNIT.png",
       decimals: 6,
       assetId: "3334546641",
@@ -126,6 +127,23 @@ describe("resolvePoolsPageLendingMarket", () => {
         ...expected,
       });
     }
+  });
+});
+
+describe("resolveLpPairIcons", () => {
+  it("uses on-file USDC and ALGO logos for USDC/ALGO LP", () => {
+    expect(
+      resolveLpPairIcons("algorand-mainnet", "LP_TMPOOL2_USDC_ALGO")
+    ).toEqual({
+      asset1Icon: "/lovable-uploads/USDC.webp",
+      asset2Icon: "/lovable-uploads/Algo.webp",
+    });
+    expect(
+      resolveLpPairIcons("algorand-mainnet", undefined, "USDC/ALGO LP")
+    ).toEqual({
+      asset1Icon: "/lovable-uploads/USDC.webp",
+      asset2Icon: "/lovable-uploads/Algo.webp",
+    });
   });
 });
 

@@ -4,6 +4,7 @@ import {
   getLendingPools,
   getMarketLabel,
   getNetworkConfig,
+  isLpPortfolioPool,
   type NetworkId,
 } from "@/config";
 
@@ -17,6 +18,14 @@ export function enabledNetworksHaveDMarket(): boolean {
   );
 }
 
+export function enabledNetworksHaveLpMarket(): boolean {
+  return (getEnabledNetworks() as NetworkId[]).some((networkId) =>
+    getLendingPools(networkId).some((poolId) =>
+      isLpPortfolioPool(networkId, poolId)
+    )
+  );
+}
+
 export function positionMatchesMarketFilter(
   networkId: string | null | undefined,
   poolId: string | null | undefined,
@@ -24,6 +33,9 @@ export function positionMatchesMarketFilter(
 ): boolean {
   if (marketFilter === "all") return true;
   if (!networkId || !poolId) return false;
+  if (marketFilter === "LP") {
+    return isLpPortfolioPool(networkId, poolId);
+  }
   return getMarketLabel(networkId as NetworkId, poolId) === marketFilter;
 }
 
@@ -55,6 +67,7 @@ export function portfolioNetworkFilterLabel(
 
 export function portfolioMarketFilterLabel(value: MarketFilter): string {
   if (value === "all") return "All Markets";
+  if (value === "LP") return "LP Pools";
   return `${value} Market`;
 }
 

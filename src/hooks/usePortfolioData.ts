@@ -117,7 +117,12 @@ export const usePortfolioData = () => {
 
         for (const token of tokens) {
           if (token.underlyingContractId && token.poolId) {
-            const market = markets.find((m) => m.symbol === token.symbol);
+            const market = markets.find(
+              (m) =>
+                String(m.marketId ?? "") ===
+                  String(token.underlyingContractId ?? "") &&
+                String(m.poolId ?? "") === String(token.poolId ?? "")
+            ) ?? markets.find((m) => m.symbol === token.symbol);
 
             // Fetch both deposit and borrow balances for this token
             const [depositBalance, borrowData] = await Promise.all([
@@ -145,7 +150,7 @@ export const usePortfolioData = () => {
               // For multi-market tokens (array), find the one matching the token's poolId
               const originalTokenConfigRaw = getTokenConfig(
                 networkId as any,
-                token.symbol
+                token.configKey ?? token.originalSymbol ?? token.symbol
               );
               
               // Handle array of token configs (multiple markets)

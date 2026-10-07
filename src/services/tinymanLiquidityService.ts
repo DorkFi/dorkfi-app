@@ -79,6 +79,19 @@ export interface LiquidityPoolUserPosition {
   poolSharePercent: number;
 }
 
+/** USD per 1 LP token from Tinyman pool TVL / issued LP supply (6 decimals). */
+export function usdPerLpTokenFromSnapshot(
+  snapshot: Pick<LiquidityPoolSnapshot, "apr" | "totalLiquidity"> | null | undefined
+): number | null {
+  const tvlUsd = snapshot?.apr?.liquidityUsd;
+  const issued = snapshot?.totalLiquidity;
+  if (tvlUsd == null || !Number.isFinite(tvlUsd) || tvlUsd <= 0) return null;
+  if (issued == null || issued <= 0n) return null;
+  const humanSupply = Number(issued) / 1e6;
+  if (!Number.isFinite(humanSupply) || humanSupply <= 0) return null;
+  return tvlUsd / humanSupply;
+}
+
 export function tinymanNetworkFromNetworkId(
   networkId: NetworkId
 ): SupportedNetwork | null {

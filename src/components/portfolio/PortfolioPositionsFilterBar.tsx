@@ -20,6 +20,7 @@ interface PortfolioPositionsFilterBarProps {
   searchTerm: string;
   onSearchTermChange: (value: string) => void;
   hasDMarketTab: boolean;
+  hasLpMarketTab?: boolean;
   isMobile?: boolean;
   className?: string;
 }
@@ -52,6 +53,7 @@ const PortfolioPositionsFilterBar = ({
   searchTerm,
   onSearchTermChange,
   hasDMarketTab,
+  hasLpMarketTab = false,
   isMobile = false,
   className,
 }: PortfolioPositionsFilterBarProps) => {
@@ -81,6 +83,7 @@ const PortfolioPositionsFilterBar = ({
             value={marketFilter}
             onChange={onMarketFilterChange}
             hasDMarketTab={hasDMarketTab}
+            hasLpMarketTab={hasLpMarketTab}
             isMobile={isMobile}
             className="min-w-0"
           />

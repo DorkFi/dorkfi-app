@@ -2176,6 +2176,18 @@ const algorandProdContracts: ContractConfig = {
   appStorageId: algorandProdAppStorageId,
 };
 
+/** Distinct Portfolio / Pools labels — on-chain ASA symbol is still TMPOOL2. */
+function tinymanLpOverride(
+  displayName: string,
+  displaySymbol: string
+): NonNullable<TokenConfig["marketOverride"]> {
+  return {
+    displayName,
+    displaySymbol,
+    isSmartContract: false,
+  };
+}
+
 const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
   ALGO: [{
     assetId: "0",
@@ -3120,6 +3132,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     symbol: "TMPOOL2",
     logoPath: "/lovable-uploads/LP_TMPOOL2_UNIT_ALGO.png",
     tokenStandard: "asa",
+    marketOverride: tinymanLpOverride("UNIT / ALGO LP", "UNIT/ALGO LP"),
     dataAddedAt: "2026-05-29T00:00:00.000Z",
   },
   // TMPOOL2 3159132330 6 3577777819
@@ -3137,6 +3150,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     symbol: "TMPOOL2",
     logoPath: "/lovable-uploads/LP_TMPOOL2_UNIT_GOBTC.png",
     tokenStandard: "asa",
+    marketOverride: tinymanLpOverride("UNIT / goBTC LP", "UNIT/goBTC LP"),
     dataAddedAt: "2026-05-29T00:00:00.000Z",
   },
   // TMPOOL2 3334546641 6 3577783311
@@ -3154,6 +3168,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     symbol: "TMPOOL2",
     logoPath: "/lovable-uploads/LP_TMPOOL2_WAD_UNIT.png",
     tokenStandard: "asa",
+    marketOverride: tinymanLpOverride("WAD / UNIT LP", "WAD/UNIT LP"),
     dataAddedAt: "2026-05-29T00:00:00.000Z",
   },
   // TMPOOL2 3346320836 6 3578405588
@@ -3171,6 +3186,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     symbol: "TMPOOL2",
     logoPath: "/lovable-uploads/LP_TMPOOL2_WAD_ALGO.png",
     tokenStandard: "asa",
+    marketOverride: tinymanLpOverride("WAD / ALGO LP", "WAD/ALGO LP"),
     dataAddedAt: "2026-06-03T00:00:00.000Z",
   },
   // TMPOOL2 3334448440 6 3577799583
@@ -3188,6 +3204,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     symbol: "TMPOOL2",
     logoPath: "/lovable-uploads/LP_TMPOOL2_WAD_USDC.png",
     tokenStandard: "asa",
+    marketOverride: tinymanLpOverride("WAD / USDC LP", "WAD/USDC LP"),
     dataAddedAt: "2026-06-03T00:00:00.000Z",
   },
   // TMPOOL2 3495913115 6 3578394082
@@ -3205,6 +3222,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     symbol: "TMPOOL2",
     logoPath: "/lovable-uploads/LP_TMPOOL2_WAD_GOETH.png",
     tokenStandard: "asa",
+    marketOverride: tinymanLpOverride("WAD / goETH LP", "WAD/goETH LP"),
     dataAddedAt: "2026-06-03T00:00:00.000Z",
   },
   // TMPOOL2 3355755995 6 3578387558
@@ -3222,6 +3240,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     symbol: "TMPOOL2",
     logoPath: "/lovable-uploads/LP_TMPOOL2_WAD_GOBTC.png",
     tokenStandard: "asa",
+    marketOverride: tinymanLpOverride("WAD / goBTC LP", "WAD/goBTC LP"),
     dataAddedAt: "2026-06-03T00:00:00.000Z",
   },
   // -----------------
@@ -3240,6 +3259,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     symbol: "TMPOOL2",
     logoPath: "/lovable-uploads/LP_TMPOOL2_USDC_ALGO.png",
     tokenStandard: "asa",
+    marketOverride: tinymanLpOverride("USDC / ALGO LP", "USDC/ALGO LP"),
     dataAddedAt: "2026-06-05T00:00:00.000Z",
   },
   // -----------------
@@ -3258,6 +3278,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     symbol: "TMPOOL2",
     logoPath: "/lovable-uploads/LP_TMPOOL2_TALGO_USDC.png",
     tokenStandard: "asa",
+    marketOverride: tinymanLpOverride("tALGO / USDC LP", "tALGO/USDC LP"),
     dataAddedAt: "2026-06-05T00:00:00.000Z",
   },
   // -----------------
@@ -3276,6 +3297,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     symbol: "TMPOOL2",
     logoPath: "/lovable-uploads/LP_TMPOOL2_HAY_USDC.png",
     tokenStandard: "asa",
+    marketOverride: tinymanLpOverride("HAY / USDC LP", "HAY/USDC LP"),
     dataAddedAt: "2026-06-05T00:00:00.000Z",
   },
   // -----------------
@@ -3294,6 +3316,7 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     symbol: "TMPOOL2",
     logoPath: "/lovable-uploads/LP_TMPOOL2_ALPHA_USDC.png",
     tokenStandard: "asa",
+    marketOverride: tinymanLpOverride("ALPHA / USDC LP", "ALPHA/USDC LP"),
     dataAddedAt: "2026-06-05T00:00:00.000Z",
   },
 };
@@ -4037,6 +4060,35 @@ export function getUsdcLpLendingWadBorrowMarketConfig(
   );
 }
 
+/** True when the config key is a Tinyman TMPOOL2 LP collateral market. */
+export function isLpTmpoolConfigKey(
+  configKey?: string | null
+): boolean {
+  return Boolean(configKey?.startsWith("LP_TMPOOL2_"));
+}
+
+/**
+ * WAD borrow/mint market paired with LP collateral on Pool C, E, or F.
+ * Used from Portfolio LP deposit rows and the Pools WAD section.
+ */
+export function getWadBorrowMarketConfigForPool(
+  networkId: NetworkId | string | null | undefined,
+  poolId: string | number | null | undefined
+): TokenConfig | null {
+  if (!networkId || poolId == null || String(poolId) === "") return null;
+  const pid = String(poolId);
+  if (pid === getPoolCLendingPoolId(networkId)) {
+    return getUnitLendingWadBorrowMarketConfig(networkId);
+  }
+  if (pid === getPoolELendingPoolId(networkId)) {
+    return getWadLpLendingWadBorrowMarketConfig(networkId);
+  }
+  if (pid === getPoolFLendingPoolId(networkId)) {
+    return getUsdcLpLendingWadBorrowMarketConfig(networkId);
+  }
+  return null;
+}
+
 /** WAD deposit markets on other pools (excludes TMPOOL collateral borrow rows and sToken mint). */
 export function getWadSupplyMarketConfigsExcludingPoolCBorrow(
   networkId: NetworkId | string | null | undefined
@@ -4148,8 +4200,28 @@ export function isMarketsTableExcludedPool(
 }
 
 /**
- * True when a configured market row should not appear on the Markets table (or matching portfolio market lists).
- * Pool C/E/F LP (`LP_TMPOOL2_*`) stays hidden; WAD borrow on those pools remains visible.
+ * Portfolio Positions groups Pool C/E/F (Tinyman LP collateral + WAD against it) as "LP".
+ * Markets table still uses A/B/D only.
+ */
+export function isLpPortfolioPool(
+  networkId: NetworkId | string | null | undefined,
+  poolId: string | number | null | undefined
+): boolean {
+  return isMarketsTableExcludedPool(networkId, poolId);
+}
+
+/** Positions / portfolio display label: LP for Pools C/E/F, else A/B/D. */
+export function getPortfolioMarketLabel(
+  networkId: NetworkId | string | null | undefined,
+  poolId: string | null | undefined
+): string | null {
+  if (isLpPortfolioPool(networkId, poolId)) return "LP";
+  return getMarketLabel(networkId, poolId);
+}
+
+/**
+ * True when a configured market row should not appear on the Markets table.
+ * Pool C/E/F LP (`LP_TMPOOL2_*`) stays on the Pools page; WAD borrow on those pools remains visible.
  */
 export function isMarketsTableExcludedMarket(
   networkId: NetworkId | string | null | undefined,
@@ -4179,39 +4251,30 @@ export function resolveDisplayTokenConfigKey(
   return token?.configKey ?? null;
 }
 
-/** True when a pool + market contract row should be hidden on Portfolio (same rules as Markets table). */
+/**
+ * Portfolio lists LP collateral and WAD borrow on Pool C/E/F.
+ * Markets table still hides LP rows ({@link isMarketsTableExcludedMarket}).
+ */
 export function isPortfolioExcludedMarketContract(
-  networkId: NetworkId | string | null | undefined,
-  poolId: string | number | null | undefined,
-  marketContractId: string | number | null | undefined
+  _networkId: NetworkId | string | null | undefined,
+  _poolId: string | number | null | undefined,
+  _marketContractId: string | number | null | undefined
 ): boolean {
-  if (!networkId || poolId == null || marketContractId == null) return false;
-  const configKey = resolveDisplayTokenConfigKey(
-    networkId as NetworkId,
-    poolId,
-    marketContractId
-  );
-  return isMarketsTableExcludedMarket(networkId, poolId, configKey);
+  return false;
 }
 
-/** Display tokens for Portfolio lists (Pool C/E LP hidden; WAD borrow on those pools stays visible). */
+/** Display tokens for Portfolio lists, including TMPOOL2 LP collateral. */
 export function getPortfolioVisibleTokens(
   networkId: NetworkId
 ): ReturnType<typeof getAllTokensWithDisplayInfo> {
-  return getAllTokensWithDisplayInfo(networkId).filter(
-    (token) =>
-      !isMarketsTableExcludedMarket(networkId, token.poolId, token.configKey)
-  );
+  return getAllTokensWithDisplayInfo(networkId);
 }
 
-/** Omit Pool C/E LP market rows from Portfolio market snapshots. */
+/** Keep LP market rows in Portfolio snapshots so deposit USD can be priced. */
 export function filterPortfolioVisibleMarketRows<
   T extends { poolId: string; marketId?: string },
->(networkId: NetworkId, rows: T[]): T[] {
-  return rows.filter(
-    (row) =>
-      !isPortfolioExcludedMarketContract(networkId, row.poolId, row.marketId)
-  );
+>(_networkId: NetworkId, rows: T[]): T[] {
+  return rows;
 }
 
 /**
@@ -4993,7 +5056,7 @@ export const getAllTokensWithDisplayInfo = (networkId: NetworkId) => {
 
 export type DisplayTokenInfo = ReturnType<typeof getAllTokensWithDisplayInfo>[number];
 
-/** Tokens shown on Markets / Portfolio (excludes Pool C/E/F TMPOOL2 LP rows; WAD borrow stays). */
+/** Tokens shown on the Markets table (excludes Pool C/E/F TMPOOL2 LP rows; WAD borrow stays). */
 export function getMarketsTableVisibleTokensWithDisplayInfo(
   networkId: NetworkId
 ): DisplayTokenInfo[] {

@@ -263,7 +263,7 @@ const NUMERIC_SORT_FIELDS: SortField[] = [
   "utilization",
 ];
 
-export type MarketFilter = "all" | "A" | "B" | "D";
+export type MarketFilter = "all" | "A" | "B" | "D" | "LP";
 
 function getRewardsMetaForTokenRow(
   networkId: NetworkId,
@@ -306,7 +306,7 @@ interface UseOnDemandMarketDataProps {
   pageSize?: number;
   autoLoad?: boolean; // Whether to automatically load markets when they come into view
   throttleMs?: number; // Throttle duration in milliseconds (default: 1 minute)
-  marketFilter?: MarketFilter; // "all" | "A" | "B" | "D" (third lending pool when configured)
+  marketFilter?: MarketFilter; // "all" | "A" | "B" | "D" | "LP"
   /** When true, only markets flagged as new (recent `dataAddedAt` in config) are shown. */
   newMarketsOnly?: boolean;
   /** When true, only markets with effective `hasRewards` (config + excess gate) are shown. */

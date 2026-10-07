@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { RefreshCw } from "lucide-react";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { getTokenConfig, getMarketLabel, type NetworkId } from "@/config";
+import { getTokenConfig, getPortfolioMarketLabel, type NetworkId } from "@/config";
 import { MarketRowTokenIcon } from "@/components/markets/MarketRowTokenIcon";
 import { resolveTokenIconBadgeUrl } from "@/utils/tokenImageUtils";
 
@@ -47,7 +47,7 @@ const AccruedInterestMobileCard = ({
     : tokenConfigRaw;
   const displayDecimals = Math.min((tokenConfig as { decimals?: number } | undefined)?.decimals ?? 6, 8);
 
-  const marketLabel = getMarketLabel(rowNetwork, poolId);
+  const marketLabel = getPortfolioMarketLabel(rowNetwork, poolId);
   const resolvedBadgeUrl =
     iconBadgeUrl ??
     resolveTokenIconBadgeUrl(
@@ -86,6 +86,7 @@ const AccruedInterestMobileCard = ({
               icon,
               asset,
               iconBadgeUrl: resolvedBadgeUrl,
+              network: rowNetwork,
             }}
             poolLetterLabel={marketLabel}
             imgClassName="h-12 w-12 flex-shrink-0 rounded-full object-contain"
