@@ -145,13 +145,27 @@ const PoolPairCard = ({
           </div>
           <div>
             <h3 className="text-lg font-semibold text-ink-blue dark:text-white">{label}</h3>
-            <p className="text-xs text-muted-foreground">{platformLabel} liquidity pool</p>
+            <p className="text-xs text-muted-foreground">
+              {pair.platform === "myth"
+                ? `${platformLabel} liquidity pool · beta`
+                : `${platformLabel} liquidity pool`}
+            </p>
           </div>
         </div>
-        <Badge variant="outline" className="shrink-0">
-          <Droplets className="mr-1 h-3 w-3" aria-hidden />
-          LP
-        </Badge>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <Badge variant="outline">
+            <Droplets className="mr-1 h-3 w-3" aria-hidden />
+            LP
+          </Badge>
+          {pair.platform === "myth" ? (
+            <Badge
+              variant="secondary"
+              className="border-amber-500/40 bg-amber-500/15 text-amber-900 dark:text-amber-100"
+            >
+              Beta
+            </Badge>
+          ) : null}
+        </div>
       </div>
 
       {displayApr != null ? (
@@ -272,6 +286,12 @@ const PoolPairCard = ({
         ))}
         {showLendingActions ? (
           <>
+            {pair.platform === "myth" && !lendingMarket ? (
+              <p className="text-xs text-muted-foreground">
+                DorkFi supply is in beta. Testers can list a market after
+                approval.
+              </p>
+            ) : null}
             {hasFarm ? <PoolFarmSupplyNotice /> : null}
             <div className="flex gap-2">
             <DorkFiButton

@@ -1043,6 +1043,11 @@ export interface GlobalConfig {
     enablePools: boolean;
     /** In-app Deposit / Withdraw LP actions on pool cards (off until Tinyman LP flows are production-ready). Supply / Withdraw lending stays enabled. */
     enablePoolDepositWithdraw: boolean;
+    /**
+     * Myth dualSTAKE Supply / Withdraw on Pools (beta). Off in production until testers
+     * set `VITE_ENABLE_MYTH_POOL_LENDING` and list markets via `VITE_LP_MYTH_*`.
+     */
+    enableMythPoolLending: boolean;
   };
 }
 
@@ -3297,6 +3302,113 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
     dataAddedAt: "2026-06-05T00:00:00.000Z",
   },
 };
+
+/** Positive integer app ids from tester env (`poolId,contractId,nTokenId`). */
+export function parseListedMythLpMarketEnv(
+  raw: string | undefined | null
+): { poolId: string; contractId: string; nTokenId: string } | null {
+  if (raw == null) return null;
+  const parts = String(raw)
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  if (parts.length !== 3) return null;
+  const [poolId, contractId, nTokenId] = parts;
+  if (
+    ![poolId, contractId, nTokenId].every(
+      (id) => /^\d+$/.test(id) && Number(id) > 0
+    )
+  ) {
+    return null;
+  }
+  return { poolId, contractId, nTokenId };
+}
+
+export function isMythLpConfigKey(key?: string | null): boolean {
+  return Boolean(key?.startsWith("LP_MYTH_"));
+}
+
+type MythLpTokenSpec = {
+  configKey: string;
+  assetId: string;
+  name: string;
+  symbol: string;
+  displaySymbol: string;
+  logoPath: string;
+};
+
+const MYTH_LP_TOKEN_SPECS: MythLpTokenSpec[] = [
+  {
+    configKey: "LP_MYTH_COOP_ALGO",
+    assetId: "2933499000",
+    name: "Myth coopALGO",
+    symbol: "coopALGO",
+    displaySymbol: "COOP / ALGO",
+    logoPath: "/lovable-uploads/COOP.webp",
+  },
+  {
+    configKey: "LP_MYTH_ALPHA_ALGO",
+    assetId: "2944427000",
+    name: "Myth alphaALGO",
+    symbol: "alphaALGO",
+    displaySymbol: "ALPHA / ALGO",
+    logoPath: "/lovable-uploads/ALPHA.webp",
+  },
+  {
+    configKey: "LP_MYTH_FINITE_ALGO",
+    assetId: "3012888000",
+    name: "Myth finiteALGO",
+    symbol: "finiteALGO",
+    displaySymbol: "FINITE / ALGO",
+    logoPath: "/lovable-uploads/FINITE.webp",
+  },
+];
+
+function mythLpTokenFromListing(
+  spec: MythLpTokenSpec,
+  listing: { poolId: string; contractId: string; nTokenId: string }
+): TokenConfig {
+  return {
+    assetId: spec.assetId,
+    contractId: listing.contractId,
+    poolId: listing.poolId,
+    nTokenId: listing.nTokenId,
+    decimals: 6,
+    name: spec.name,
+    symbol: spec.symbol,
+    logoPath: spec.logoPath,
+    tokenStandard: "asa",
+    iconBadgeFromSymbol: "ALGO",
+    marketOverride: {
+      displayName: spec.displaySymbol,
+      displaySymbol: spec.displaySymbol,
+      isSmartContract: false,
+    },
+  };
+}
+
+/**
+ * Tester-listed Myth dualSTAKE markets from env. Unset in production until a
+ * market is created. Format: `VITE_LP_MYTH_COOP_ALGO=poolId,contractId,nTokenId`
+ * (same for ALPHA / FINITE). Prefer Pool A (`3333688282`).
+ */
+export function listedMythLpTokensFromEnv(): {
+  [symbol: string]: TokenConfig;
+} {
+  const rawByKey: Record<string, string | undefined> = {
+    LP_MYTH_COOP_ALGO: import.meta.env.VITE_LP_MYTH_COOP_ALGO,
+    LP_MYTH_ALPHA_ALGO: import.meta.env.VITE_LP_MYTH_ALPHA_ALGO,
+    LP_MYTH_FINITE_ALGO: import.meta.env.VITE_LP_MYTH_FINITE_ALGO,
+  };
+  const tokens: { [symbol: string]: TokenConfig } = {};
+  for (const spec of MYTH_LP_TOKEN_SPECS) {
+    const listed = parseListedMythLpMarketEnv(rawByKey[spec.configKey]);
+    if (!listed) continue;
+    tokens[spec.configKey] = mythLpTokenFromListing(spec, listed);
+  }
+  return tokens;
+}
+
 const algorandMainnetProdConfig: NetworkConfig = {
   networkId: "algorand-mainnet",
   walletNetworkId: "mainnet",
@@ -3311,7 +3423,10 @@ const algorandMainnetProdConfig: NetworkConfig = {
   indexerUrl: "https://mainnet-idx.4160.nodely.dev",
   explorerUrl: "https://allo.info",
   contracts: algorandProdContracts,
-  tokens: algorandProdTokens,
+  tokens: {
+    ...algorandProdTokens,
+    ...listedMythLpTokensFromEnv(),
+  },
 };
 const algorandMainnetConfig = algorandMainnetProdConfig;
 
@@ -3580,6 +3695,7 @@ export const config: GlobalConfig = {
     bypassAgentClaimEligibility: false,
     enablePools: true,
     enablePoolDepositWithdraw: false,
+    enableMythPoolLending: false,
   },
 };
 
@@ -4150,16 +4266,28 @@ export function isMarketsTableExcludedPool(
 /**
  * True when a configured market row should not appear on the Markets table (or matching portfolio market lists).
  * Pool C/E/F LP (`LP_TMPOOL2_*`) stays hidden; WAD borrow on those pools remains visible.
+ * Myth dualSTAKE (`LP_MYTH_*`) is Pools/Portfolio-only even when listed on Pool A.
  */
 export function isMarketsTableExcludedMarket(
   networkId: NetworkId | string | null | undefined,
   poolId: string | number | null | undefined,
   configKey?: string | null
 ): boolean {
+  if (isMythLpConfigKey(configKey)) return true;
   if (!isMarketsTableExcludedPool(networkId, poolId)) return false;
   const key = configKey?.trim();
   if (key && MARKETS_TABLE_TMPOOL_VISIBLE_CONFIG_KEYS.has(key)) return false;
   return true;
+}
+
+/** Hide from Portfolio lists. Myth LP stays visible once a tester market is listed. */
+export function isPortfolioHiddenToken(
+  networkId: NetworkId | string | null | undefined,
+  poolId: string | number | null | undefined,
+  configKey?: string | null
+): boolean {
+  if (isMythLpConfigKey(configKey)) return false;
+  return isMarketsTableExcludedMarket(networkId, poolId, configKey);
 }
 
 /** Config `tokens` key for a pool + underlying market contract (from display token rows). */
@@ -4179,7 +4307,7 @@ export function resolveDisplayTokenConfigKey(
   return token?.configKey ?? null;
 }
 
-/** True when a pool + market contract row should be hidden on Portfolio (same rules as Markets table). */
+/** True when a pool + market contract row should be hidden on Portfolio. */
 export function isPortfolioExcludedMarketContract(
   networkId: NetworkId | string | null | undefined,
   poolId: string | number | null | undefined,
@@ -4191,16 +4319,16 @@ export function isPortfolioExcludedMarketContract(
     poolId,
     marketContractId
   );
-  return isMarketsTableExcludedMarket(networkId, poolId, configKey);
+  return isPortfolioHiddenToken(networkId, poolId, configKey);
 }
 
-/** Display tokens for Portfolio lists (Pool C/E LP hidden; WAD borrow on those pools stays visible). */
+/** Display tokens for Portfolio lists (Pool C/E LP hidden; WAD borrow and Myth LP stay visible). */
 export function getPortfolioVisibleTokens(
   networkId: NetworkId
 ): ReturnType<typeof getAllTokensWithDisplayInfo> {
   return getAllTokensWithDisplayInfo(networkId).filter(
     (token) =>
-      !isMarketsTableExcludedMarket(networkId, token.poolId, token.configKey)
+      !isPortfolioHiddenToken(networkId, token.poolId, token.configKey)
   );
 }
 
@@ -5264,12 +5392,19 @@ export const getEnvironmentConfig = (): Partial<GlobalConfig> => {
       import.meta.env.VITE_ENABLE_POOL_DEPOSIT_WITHDRAW === "1";
   }
 
+  if (typeof import.meta.env.VITE_ENABLE_MYTH_POOL_LENDING !== "undefined") {
+    envFeatures.enableMythPoolLending =
+      import.meta.env.VITE_ENABLE_MYTH_POOL_LENDING === "true" ||
+      import.meta.env.VITE_ENABLE_MYTH_POOL_LENDING === "1";
+  }
+
   if (env === "development") {
     return {
       defaultNetwork: "algorand-mainnet",
       features: {
         ...config.features,
         enableGovernance: true, // Enable governance in development for testing
+        enableMythPoolLending: true,
         ...envFeatures,
       },
     };

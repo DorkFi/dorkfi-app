@@ -48,8 +48,8 @@ export interface LiquidityPoolPairConfig {
   lpDecimals?: number;
   /**
    * nt200 market application id for the LP token (ASA deposit target).
-   * Omit until a DorkFi market exists — Supply/Withdraw still render, but
-   * Supply only completes when this is set.
+   * Myth pairs omit this until a tester lists `LP_MYTH_*` via env; then
+   * {@link getCuratedLiquidityPoolsForNetwork} hydrates it from token config.
    */
   lpContractId?: number;
   /** DEX pool account (Tinyman pool, or Myth dualSTAKE app account). */
@@ -225,7 +225,8 @@ export const MYTH_ALPHA_ALGO_APP_ADDR =
  * Select liquidity pairs exposed on the Pools page.
  * Use underlying ASA ids for asset1Id/asset2Id (ALGO = 0).
  * Tinyman: lpTokenId / lpContractId are TMPOOL2 + nt200.
- * Myth dualSTAKE: lpTokenId is the LST ASA; omit lpContractId until a DorkFi market exists.
+ * Myth dualSTAKE: lpTokenId is the LST ASA; lpContractId is hydrated from
+ * tester-listed `LP_MYTH_*` token config when present.
  */
 export const CURATED_LIQUIDITY_POOLS: LiquidityPoolPairConfig[] = [
   // TMPOOL2 3157974960 6 3577729953
@@ -423,10 +424,23 @@ export const CURATED_LIQUIDITY_POOLS: LiquidityPoolPairConfig[] = [
   },
 ];
 
+function hydrateMythLendingContract(
+  pair: LiquidityPoolPairConfig
+): LiquidityPoolPairConfig {
+  if (pair.platform !== "myth" || pairHasLendingContract(pair)) return pair;
+  const market = resolveLiquidityPoolLendingMarket(pair.networkId, pair);
+  if (!market?.marketId) return pair;
+  const contractId = Number(market.marketId);
+  if (!Number.isFinite(contractId) || contractId <= 0) return pair;
+  return { ...pair, lpContractId: contractId };
+}
+
 export function getCuratedLiquidityPoolsForNetwork(
   networkId: NetworkId
 ): LiquidityPoolPairConfig[] {
-  return CURATED_LIQUIDITY_POOLS.filter((p) => p.networkId === networkId);
+  return CURATED_LIQUIDITY_POOLS.filter((p) => p.networkId === networkId).map(
+    hydrateMythLendingContract
+  );
 }
 
 export function pairLpDecimals(pair: Pick<LiquidityPoolPairConfig, "lpDecimals">): number {
@@ -460,7 +474,8 @@ export function resolveLiquidityPoolLendingMarket(
   pair: LiquidityPoolPairConfig
 ): LiquidityPoolLendingMarket | null {
   const tokens = getNetworkConfig(networkId).tokens;
-  if (!tokens || pair.lpContractId == null) return null;
+  if (!tokens) return null;
+  if (pair.lpContractId == null && pair.platform !== "myth") return null;
 
   for (const [key, tokenConfig] of Object.entries(tokens)) {
     if (!key.startsWith("LP_")) continue;
@@ -468,12 +483,14 @@ export function resolveLiquidityPoolLendingMarket(
       ? tokenConfig[0]
       : tokenConfig;
     if (!tc?.assetId || !tc.contractId) continue;
+    if (String(tc.assetId) !== String(pair.lpTokenId)) continue;
     if (
-      String(tc.assetId) !== String(pair.lpTokenId) ||
+      pair.lpContractId != null &&
       String(tc.contractId) !== String(pair.lpContractId)
     ) {
       continue;
     }
+    if (pair.platform === "myth" && !key.startsWith("LP_MYTH_")) continue;
     const display = getTokenDisplayInfo(networkId, key);
     const poolId =
       tc.poolId != null
@@ -553,7 +570,7 @@ export function pairHasPoolsPageLendingPosition(
   return pairHasUnitLpLendingMarket(networkId, pair);
 }
 
-/** Lending market row for Pools page supply/withdraw (UNIT LP, WAD LP, or USDC LP markets). */
+/** Lending market row for Pools page supply/withdraw (UNIT/WAD/USDC Tinyman LP or Myth LST). */
 export function resolvePoolsPageLendingMarket(
   networkId: NetworkId,
   pair: LiquidityPoolPairConfig
@@ -561,9 +578,34 @@ export function resolvePoolsPageLendingMarket(
   const hasLending =
     pairHasPoolsPageLendingPosition(networkId, pair) ||
     pairHasWadLpLendingMarket(networkId, pair) ||
-    pairHasUsdcLpLendingMarket(networkId, pair);
+    pairHasUsdcLpLendingMarket(networkId, pair) ||
+    pairHasMythLpLendingMarket(networkId, pair);
   if (!hasLending) return null;
   return resolveLiquidityPoolLendingMarket(networkId, pair);
+}
+
+/** True when a tester-listed `LP_MYTH_*` market matches this Myth dualSTAKE pair. */
+export function pairHasMythLpLendingMarket(
+  networkId: NetworkId,
+  pair: LiquidityPoolPairConfig
+): boolean {
+  if (pair.platform !== "myth") return false;
+  const market = resolveLiquidityPoolLendingMarket(networkId, pair);
+  return market != null && market.configSymbol.startsWith("LP_MYTH_");
+}
+
+/** Lending pool app ids for listed Myth LST markets among the given curated pairs. */
+export function resolveMythLendingPoolIdsForFilter(
+  networkId: NetworkId,
+  filteredPairs: LiquidityPoolPairConfig[]
+): string[] {
+  const poolIds = new Set<string>();
+  for (const pair of filteredPairs) {
+    if (!pairHasMythLpLendingMarket(networkId, pair)) continue;
+    const market = resolveLiquidityPoolLendingMarket(networkId, pair);
+    if (market?.poolId) poolIds.add(market.poolId);
+  }
+  return [...poolIds];
 }
 
 /** Pool ids for UNIT LP global user reads on the Pools page. */

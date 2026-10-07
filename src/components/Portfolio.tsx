@@ -78,7 +78,7 @@ import {
   getFolksAdapterForPhase,
   getPortfolioVisibleTokens,
   filterPortfolioVisibleMarketRows,
-  isMarketsTableExcludedMarket,
+  isPortfolioHiddenToken,
   getAllTokensWithDisplayInfo,
 } from "@/config";
 import {
@@ -414,7 +414,7 @@ function isExcludedPortfolioPositionRow(pos: {
   if (!networkId || pos.poolId == null || String(pos.poolId) === "") {
     return false;
   }
-  return isMarketsTableExcludedMarket(
+  return isPortfolioHiddenToken(
     networkId,
     pos.poolId,
     pos.configSymbol ?? pos.configKey
@@ -1012,7 +1012,7 @@ const Portfolio = () => {
       for (const token of tokens) {
         if (token.underlyingContractId && token.poolId) {
           if (
-            isMarketsTableExcludedMarket(
+            isPortfolioHiddenToken(
               networkId as NetworkId,
               token.poolId,
               token.configKey
@@ -1304,7 +1304,7 @@ const Portfolio = () => {
           }
 
           if (
-            isMarketsTableExcludedMarket(
+            isPortfolioHiddenToken(
               networkId as NetworkId,
               appId,
               token.configKey
@@ -1546,7 +1546,7 @@ const Portfolio = () => {
           }
 
           if (
-            isMarketsTableExcludedMarket(
+            isPortfolioHiddenToken(
               networkId as NetworkId,
               appId,
               token.configKey

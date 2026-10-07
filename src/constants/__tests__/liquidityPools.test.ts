@@ -14,13 +14,16 @@ import {
   getDexAddButtonLabel,
   getDexAddLiquidityUrl,
   getMythAddLiquidityUrl,
+  getCuratedLiquidityPoolsForNetwork,
   pairHasLendingContract,
+  pairHasMythLpLendingMarket,
   pairHasPoolsPageLendingPosition,
   pairHasUsdcLpCollateralLendingMarket,
   pairHasUsdcLpLendingMarket,
   pairHasWadLpCollateralLendingMarket,
   pairHasWadLpLendingMarket,
   poolMatchesBaseTokenFilter,
+  resolveMythLendingPoolIdsForFilter,
   resolvePoolsPageLendingMarket,
   resolveUsdcLendingPoolIdsForFilter,
   resolveWadLendingPoolIdsForFilter,
@@ -200,6 +203,7 @@ describe("Myth dualSTAKE pairs", () => {
     expect(pair.lpTokenId).toBe(expected.lstId);
     expect(pair.poolAddr).toBe(expected.appAddr);
     expect(pairHasLendingContract(pair)).toBe(false);
+    expect(pairHasMythLpLendingMarket(NETWORK, pair)).toBe(false);
     expect(resolvePoolsPageLendingMarket(NETWORK, pair)).toBeNull();
     expect(getDexAddButtonLabel(pair.platform)).toBe("Add on Myth Finance");
     expect(getDexAddLiquidityUrl(pair)).toBe(
@@ -231,6 +235,26 @@ describe("Myth dualSTAKE pairs", () => {
       expect(poolMatchesBaseTokenFilter(pair, 3334160924)).toBe(false);
       expect(poolMatchesBaseTokenFilter(pair, 31566704)).toBe(false);
     }
+  });
+
+  it("does not hydrate a lending contract until testers list LP_MYTH_*", () => {
+    const pairs = getCuratedLiquidityPoolsForNetwork(NETWORK);
+    for (const id of [
+      "myth-coop-algo",
+      "myth-alpha-algo",
+      "myth-finite-algo",
+    ] as const) {
+      const pair = pairs.find((p) => p.id === id);
+      expect(pair).toBeDefined();
+      expect(pairHasLendingContract(pair!)).toBe(false);
+      expect(pairHasMythLpLendingMarket(NETWORK, pair!)).toBe(false);
+    }
+    expect(
+      resolveMythLendingPoolIdsForFilter(
+        NETWORK,
+        pairs.filter((p) => p.platform === "myth")
+      )
+    ).toEqual([]);
   });
 
   it("keeps Tinyman add URLs on existing pairs", () => {

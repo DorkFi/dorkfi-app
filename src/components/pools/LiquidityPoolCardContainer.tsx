@@ -10,7 +10,6 @@ import {
   useLiquidityPoolPosition,
   useLiquidityPoolSnapshot,
 } from "@/hooks/useLiquidityPoolData";
-import { useToast } from "@/hooks/use-toast";
 import { fetchUserDepositBalance } from "@/services/lendingService";
 import { isFeatureEnabled } from "@/config";
 import { pairLpAtomicToHuman } from "@/services/mythLiquidityService";
@@ -28,7 +27,6 @@ const LiquidityPoolCardContainer = ({
   onLendingSuccess,
 }: LiquidityPoolCardContainerProps) => {
   const { activeAccount } = useWallet();
-  const { toast } = useToast();
   const { data: snapshot, isLoading, refetch } = useLiquidityPoolSnapshot(pair);
   const { data: position, refetch: refetchPosition } = useLiquidityPoolPosition(
     pair,
@@ -43,10 +41,16 @@ const LiquidityPoolCardContainer = ({
   const [lendingWithdrawOpen, setLendingWithdrawOpen] = useState(false);
   const [suppliedBalance, setSuppliedBalance] = useState(0);
 
-  const lendingMarket = useMemo(
-    () => resolvePoolsPageLendingMarket(pair.networkId, pair),
-    [pair]
-  );
+  const lendingMarket = useMemo(() => {
+    const listed = resolvePoolsPageLendingMarket(pair.networkId, pair);
+    if (
+      pair.platform === "myth" &&
+      !isFeatureEnabled("enableMythPoolLending")
+    ) {
+      return null;
+    }
+    return listed;
+  }, [pair]);
 
   const walletLpBalanceHuman = useMemo(() => {
     const primary = position?.poolTokenBalance ?? 0n;
@@ -110,20 +114,14 @@ const LiquidityPoolCardContainer = ({
         onSupply={() => {
           if (lendingMarket) {
             setSupplyOpen(true);
-            return;
           }
-          toast({
-            title: "Market not listed yet",
-            description:
-              "Add liquidity on Myth Finance first. Supply to DorkFi lights once a market exists for this LP.",
-          });
         }}
         onLendingWithdraw={() => {
           if (lendingMarket) {
             setLendingWithdrawOpen(true);
           }
         }}
-        lendingSupplyDisabled={walletLpBalanceHuman <= 0}
+        lendingSupplyDisabled={walletLpBalanceHuman <= 0 || !lendingMarket}
         lendingWithdrawDisabled={suppliedBalance <= 0}
         suppliedLpBalance={suppliedBalance}
       />
