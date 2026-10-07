@@ -79,12 +79,14 @@ export function poolHasTinymanFarm(
 export const POOL_FARM_SUPPLY_NOTICE =
   "If pool has an active Tinyman farm. Supplying LP to the platform may disqualify your LP from farm rewards.";
 
-/** Base-token filters for the Pools page (UNIT / WAD / USDC / FINITE curated pairs). */
+/** Base-token filters for the Pools page. */
 export const POOL_BASE_TOKEN_FILTERS = [
   { id: "unit", symbol: "UNIT", assetId: 3121954282 },
   { id: "wad", symbol: "WAD", assetId: 3334160924 },
   { id: "usdc", symbol: "USDC", assetId: 31566704 },
   { id: "finite", symbol: "FINITE", assetId: 400593267 },
+  { id: "coop", symbol: "COOP", assetId: 796425061 },
+  { id: "alpha", symbol: "ALPHA", assetId: 2726252423 },
 ] as const;
 
 export type PoolBaseTokenFilterId =
@@ -130,6 +132,8 @@ export function countPoolsByBaseTokenFilter(
     wad: 0,
     usdc: 0,
     finite: 0,
+    coop: 0,
+    alpha: 0,
   };
 
   for (const filter of POOL_BASE_TOKEN_FILTERS) {
@@ -201,11 +205,21 @@ export function getDexFarmingProgramUrl(
 }
 
 export const FINITE_ASA_ID = 400593267;
+export const COOP_ASA_ID = 796425061;
+export const ALPHA_ASA_ID = 2726252423;
 /** Myth finiteALGO dualSTAKE LST (ALGO + FINITE). */
 export const MYTH_FINITE_ALGO_LST_ID = 3012888000;
 /** dualSTAKE app account that holds staked ALGO + paired FINITE. */
 export const MYTH_FINITE_ALGO_APP_ADDR =
   "QVNUOH7G6MZINPTVLHSLZL53SCXVFA3PTHDJUMGPS6GPBLI5GPZVUYYX6I";
+/** Myth coopALGO dualSTAKE LST (ALGO + COOP). */
+export const MYTH_COOP_ALGO_LST_ID = 2933499000;
+export const MYTH_COOP_ALGO_APP_ADDR =
+  "TWJNSHH6DMO2TA4P4Z6ENCSA37R2U3UDNHOYSRS6W6UZYBJWIS6EFD5PXQ";
+/** Myth alphaALGO dualSTAKE LST (ALGO + ALPHA). */
+export const MYTH_ALPHA_ALGO_LST_ID = 2944427000;
+export const MYTH_ALPHA_ALGO_APP_ADDR =
+  "HHOEDHJ7O4TECGRF4VRZIYEL374ESIIMIO6ASOZQV7WYLZGLJ3IOMN2ACM";
 
 /**
  * Select liquidity pairs exposed on the Pools page.
@@ -367,6 +381,32 @@ export const CURATED_LIQUIDITY_POOLS: LiquidityPoolPairConfig[] = [
     poolAddr:
       "J7CN6WTMUWXY2KODKAMM5BLZ42FEIQLM4D32FRQ23VOOJC2SEUHKE565T4",
     farms: [],
+  },
+  // Myth coopALGO dualSTAKE — LST 2933499000 (6). No DorkFi nt200 yet.
+  {
+    id: "myth-coop-algo",
+    platform: "myth",
+    networkId: "algorand-mainnet",
+    lpTokenId: MYTH_COOP_ALGO_LST_ID,
+    lpDecimals: 6,
+    asset1Id: COOP_ASA_ID,
+    asset2Id: 0,
+    label: "COOP / ALGO",
+    poolAddr: MYTH_COOP_ALGO_APP_ADDR,
+    addUrl: getMythAddLiquidityUrl(MYTH_COOP_ALGO_LST_ID),
+  },
+  // Myth alphaALGO dualSTAKE — LST 2944427000 (6). No DorkFi nt200 yet.
+  {
+    id: "myth-alpha-algo",
+    platform: "myth",
+    networkId: "algorand-mainnet",
+    lpTokenId: MYTH_ALPHA_ALGO_LST_ID,
+    lpDecimals: 6,
+    asset1Id: ALPHA_ASA_ID,
+    asset2Id: 0,
+    label: "ALPHA / ALGO",
+    poolAddr: MYTH_ALPHA_ALGO_APP_ADDR,
+    addUrl: getMythAddLiquidityUrl(MYTH_ALPHA_ALGO_LST_ID),
   },
   // Myth finiteALGO dualSTAKE — LST 3012888000 (6). No DorkFi nt200 yet.
   {

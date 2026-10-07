@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  ALPHA_ASA_ID,
+  COOP_ASA_ID,
   CURATED_LIQUIDITY_POOLS,
   FINITE_ASA_ID,
+  MYTH_ALPHA_ALGO_APP_ADDR,
+  MYTH_ALPHA_ALGO_LST_ID,
+  MYTH_COOP_ALGO_APP_ADDR,
+  MYTH_COOP_ALGO_LST_ID,
   MYTH_FINITE_ALGO_APP_ADDR,
   MYTH_FINITE_ALGO_LST_ID,
   countPoolsByBaseTokenFilter,
@@ -162,31 +168,69 @@ describe("resolveUsdcLendingPoolIdsForFilter", () => {
   });
 });
 
-describe("Myth FINITE/ALGO dualSTAKE pair", () => {
-  it("is curated as a Myth pool with an Add on Myth Finance link", () => {
-    const pair = pairById("myth-finite-algo");
+describe("Myth dualSTAKE pairs", () => {
+  it.each([
+    {
+      id: "myth-coop-algo",
+      label: "COOP / ALGO",
+      assetId: COOP_ASA_ID,
+      lstId: MYTH_COOP_ALGO_LST_ID,
+      appAddr: MYTH_COOP_ALGO_APP_ADDR,
+    },
+    {
+      id: "myth-alpha-algo",
+      label: "ALPHA / ALGO",
+      assetId: ALPHA_ASA_ID,
+      lstId: MYTH_ALPHA_ALGO_LST_ID,
+      appAddr: MYTH_ALPHA_ALGO_APP_ADDR,
+    },
+    {
+      id: "myth-finite-algo",
+      label: "FINITE / ALGO",
+      assetId: FINITE_ASA_ID,
+      lstId: MYTH_FINITE_ALGO_LST_ID,
+      appAddr: MYTH_FINITE_ALGO_APP_ADDR,
+    },
+  ] as const)("curates $label with an Add on Myth Finance link", (expected) => {
+    const pair = pairById(expected.id);
     expect(pair.platform).toBe("myth");
-    expect(pair.label).toBe("FINITE / ALGO");
-    expect(pair.asset1Id).toBe(FINITE_ASA_ID);
+    expect(pair.label).toBe(expected.label);
+    expect(pair.asset1Id).toBe(expected.assetId);
     expect(pair.asset2Id).toBe(0);
-    expect(pair.lpTokenId).toBe(MYTH_FINITE_ALGO_LST_ID);
-    expect(pair.poolAddr).toBe(MYTH_FINITE_ALGO_APP_ADDR);
+    expect(pair.lpTokenId).toBe(expected.lstId);
+    expect(pair.poolAddr).toBe(expected.appAddr);
     expect(pairHasLendingContract(pair)).toBe(false);
     expect(resolvePoolsPageLendingMarket(NETWORK, pair)).toBeNull();
     expect(getDexAddButtonLabel(pair.platform)).toBe("Add on Myth Finance");
     expect(getDexAddLiquidityUrl(pair)).toBe(
-      getMythAddLiquidityUrl(MYTH_FINITE_ALGO_LST_ID)
+      getMythAddLiquidityUrl(expected.lstId)
     );
   });
 
-  it("shows up on All and FINITE filters, not UNIT/WAD/USDC", () => {
-    const pair = pairById("myth-finite-algo");
+  it("shows Myth cards on All plus their ASA filters, not UNIT/WAD/USDC", () => {
     const counts = countPoolsByBaseTokenFilter(CURATED_LIQUIDITY_POOLS);
-    expect(counts.finite).toBeGreaterThanOrEqual(1);
-    expect(poolMatchesBaseTokenFilter(pair, FINITE_ASA_ID)).toBe(true);
-    expect(poolMatchesBaseTokenFilter(pair, 3121954282)).toBe(false);
-    expect(poolMatchesBaseTokenFilter(pair, 3334160924)).toBe(false);
-    expect(poolMatchesBaseTokenFilter(pair, 31566704)).toBe(false);
+    expect(counts.coop).toBe(1);
+    expect(counts.finite).toBe(1);
+    expect(counts.alpha).toBeGreaterThanOrEqual(2);
+    expect(poolMatchesBaseTokenFilter(pairById("myth-coop-algo"), COOP_ASA_ID)).toBe(
+      true
+    );
+    expect(
+      poolMatchesBaseTokenFilter(pairById("myth-alpha-algo"), ALPHA_ASA_ID)
+    ).toBe(true);
+    expect(
+      poolMatchesBaseTokenFilter(pairById("alpha-usdc"), ALPHA_ASA_ID)
+    ).toBe(true);
+    for (const id of [
+      "myth-coop-algo",
+      "myth-alpha-algo",
+      "myth-finite-algo",
+    ] as const) {
+      const pair = pairById(id);
+      expect(poolMatchesBaseTokenFilter(pair, 3121954282)).toBe(false);
+      expect(poolMatchesBaseTokenFilter(pair, 3334160924)).toBe(false);
+      expect(poolMatchesBaseTokenFilter(pair, 31566704)).toBe(false);
+    }
   });
 
   it("keeps Tinyman add URLs on existing pairs", () => {
