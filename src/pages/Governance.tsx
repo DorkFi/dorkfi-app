@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useWallet } from "@txnlab/use-wallet-react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { GovernanceDashboardCard } from "@/components/governance/GovernanceDashboardCard";
@@ -20,6 +21,7 @@ import {
 } from "@/config";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { useUserNFTs } from "@/hooks/useUserNFTs";
+import { useUserUnitInLpDeposits } from "@/hooks/useUserUnitInLpDeposits";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
@@ -61,6 +63,11 @@ const Governance = () => {
 
   const { proposals, stats, loading, error, userVotes, vote, batchVote, userVoterInfo, getVoteKey } =
     useGovernanceData(effectiveGovernanceNetwork);
+  const { activeAccount } = useWallet();
+  const unitInLp = useUserUnitInLpDeposits(
+    "algorand-mainnet",
+    activeAccount?.address
+  );
   const [selectedStatus, setSelectedStatus] = useState<ProposalStatus | "all">("all");
   const [proposalSearch, setProposalSearch] = useState("");
   const [batchMode, setBatchMode] = useState(false);
@@ -415,6 +422,10 @@ const Governance = () => {
               userVoterInfo={userVoterInfo}
               sourceTab={sourceTab}
               onSourceTabChange={setSourceTab}
+              unitInLpHuman={unitInLp.unitHuman}
+              unitInLpLoading={unitInLp.isLoading}
+              unitInLpRows={unitInLp.rows}
+              unitInLpEnabled={Boolean(activeAccount?.address)}
             />
 
             {sourceTab === "onchain" && loading ? (

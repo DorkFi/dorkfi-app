@@ -10,6 +10,7 @@ import { isFeatureEnabled } from "@/config";
 import { Voter } from "@/services/governanceService";
 import { useUserNFTs } from "@/hooks/useUserNFTs";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
+import type { UnitInLpDepositRow } from "@/hooks/useUserUnitInLpDeposits";
 
 interface GovernanceDashboardCardProps {
   stats: VotingStats | null;
@@ -18,6 +19,12 @@ interface GovernanceDashboardCardProps {
   userVoterInfo?: Voter | null;
   sourceTab: "onchain" | "api";
   onSourceTabChange: (tab: "onchain" | "api") => void;
+  /** UNIT inside deposited Tinyman LP (indexed from pool reserves). */
+  unitInLpHuman?: number;
+  unitInLpLoading?: boolean;
+  unitInLpRows?: UnitInLpDepositRow[];
+  /** Wallet connected — show the UNIT-in-LP line even when the indexed amount is 0. */
+  unitInLpEnabled?: boolean;
 }
 
 export const GovernanceDashboardCard = ({
@@ -27,6 +34,10 @@ export const GovernanceDashboardCard = ({
   userVoterInfo,
   sourceTab,
   onSourceTabChange,
+  unitInLpHuman = 0,
+  unitInLpLoading = false,
+  unitInLpRows = [],
+  unitInLpEnabled = false,
 }: GovernanceDashboardCardProps) => {
   const statuses: (ProposalStatus | "all")[] = ["all", "active", "passed", "rejected"];
   const nftBoostEnabled = isFeatureEnabled("enableNFTBoost");
@@ -98,6 +109,33 @@ export const GovernanceDashboardCard = ({
             {basePower > 0 ? formatNumber(basePower, { maximumFractionDigits: 0 }) : "—"}
           </div>
           <div className="text-sm text-muted-foreground mt-1">UNIT tokens</div>
+          {(unitInLpEnabled ||
+            unitInLpLoading ||
+            unitInLpHuman > 0 ||
+            unitInLpRows.length > 0) && (
+            <div className="mt-3 text-xs text-muted-foreground space-y-1">
+              <div>
+                UNIT in LP deposits:{" "}
+                <span className="font-medium text-foreground">
+                  {unitInLpLoading
+                    ? "…"
+                    : formatNumber(unitInLpHuman, {
+                        maximumFractionDigits: 2,
+                      })}
+                </span>
+                <span className="block text-[11px] text-muted-foreground/80 mt-0.5">
+                  Indexed from pool reserves; not added to on-chain vote power
+                  yet.
+                </span>
+              </div>
+              {unitInLpRows.map((row) => (
+                <div key={row.pairId} className="pl-2 text-muted-foreground/90">
+                  {row.label}:{" "}
+                  {formatNumber(row.unitHuman, { maximumFractionDigits: 2 })} UNIT
+                </div>
+              ))}
+            </div>
+          )}
           
           {/* Supply Progress Bar */}
           {totalSupply > 0 && (

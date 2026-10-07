@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CURATED_LIQUIDITY_POOLS,
+  pairContainsUnit,
   pairHasPoolsPageLendingPosition,
   pairHasUsdcLpCollateralLendingMarket,
   pairHasUsdcLpLendingMarket,
@@ -127,6 +128,19 @@ describe("resolvePoolsPageLendingMarket", () => {
         ...expected,
       });
     }
+  });
+});
+
+describe("pairContainsUnit", () => {
+  it("is true for UNIT/ALGO, UNIT/goBTC, and WAD/UNIT", () => {
+    for (const id of ["unit-algo", "unit-gobtc", "wad-unit"]) {
+      expect(pairContainsUnit(pairById(id))).toBe(true);
+    }
+  });
+
+  it("is false for pairs without UNIT (USDC/ALGO, WAD/USDC)", () => {
+    expect(pairContainsUnit(pairById("usdc-algo"))).toBe(false);
+    expect(pairContainsUnit(pairById("wad-usdc"))).toBe(false);
   });
 });
 

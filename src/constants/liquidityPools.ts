@@ -56,12 +56,22 @@ export function poolHasTinymanFarm(
 export const POOL_FARM_SUPPLY_NOTICE =
   "If pool has an active Tinyman farm. Supplying LP to the platform may disqualify your LP from farm rewards.";
 
+/** Algorand UNIT ASA id (governance token). */
+export const UNIT_ASA_ID = 3121954282;
+
 /** Base-token filters for the Pools page (UNIT / WAD / USDC curated pairs). */
 export const POOL_BASE_TOKEN_FILTERS = [
-  { id: "unit", symbol: "UNIT", assetId: 3121954282 },
+  { id: "unit", symbol: "UNIT", assetId: UNIT_ASA_ID },
   { id: "wad", symbol: "WAD", assetId: 3334160924 },
   { id: "usdc", symbol: "USDC", assetId: 31566704 },
 ] as const;
+
+/** True when the Tinyman pair holds UNIT as one of the two underlyings. */
+export function pairContainsUnit(
+  pair: Pick<LiquidityPoolPairConfig, "asset1Id" | "asset2Id">
+): boolean {
+  return pair.asset1Id === UNIT_ASA_ID || pair.asset2Id === UNIT_ASA_ID;
+}
 
 export type PoolBaseTokenFilterId =
   | (typeof POOL_BASE_TOKEN_FILTERS)[number]["id"]

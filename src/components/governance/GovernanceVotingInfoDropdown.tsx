@@ -50,7 +50,7 @@ export const GovernanceVotingInfoDropdown = () => {
                     <li>Risk controls and future protocol upgrades</li>
                   </ul>
                   <p>
-                    UNIT governance is fully on-chain and transparent. Voting power is calculated based on your UNIT balance, with optional boosts from Dork NFTs through the NFT Power Multiplier system.
+                    UNIT governance is fully on-chain and transparent. Voting power is calculated from your UNIT, with optional boosts from Dork NFTs through the NFT Power Multiplier system. UNIT inside deposited Tinyman LP is indexed from pool reserves (your share of the UNIT side) and listed under Base Power.
                   </p>
                   <p>
                     Proposals pass when yes votes reach at least {GOVERNANCE_PASS_THRESHOLD_DISPLAY} of the

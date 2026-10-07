@@ -63,6 +63,9 @@ export interface LiquidityPoolSnapshot {
   asset2: LiquidityPoolAssetMeta;
   poolTokenId: number;
   totalLiquidity: bigint;
+  /** Reserves in curated pair order (`pair.asset1Id` / `pair.asset2Id`). */
+  asset1ReserveAtomic: bigint;
+  asset2ReserveAtomic: bigint;
   asset1ReserveHuman: string;
   asset2ReserveHuman: string;
   apr: LiquidityPoolApr | null;
@@ -294,6 +297,8 @@ export async function fetchLiquidityPoolSnapshot(
     asset2: ordered.asset2,
     poolTokenId: pool.poolTokenID ?? pair.lpTokenId,
     totalLiquidity: reserves.issuedLiquidity,
+    asset1ReserveAtomic: ordered.asset1Reserve,
+    asset2ReserveAtomic: ordered.asset2Reserve,
     asset1ReserveHuman: fromAtomic(ordered.asset1Reserve, ordered.asset1.decimals),
     asset2ReserveHuman: fromAtomic(ordered.asset2Reserve, ordered.asset2.decimals),
     apr,
