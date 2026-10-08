@@ -186,7 +186,13 @@ import {
 import { ProposalCategory, Proposal as UIProposal, ProposalStatus } from "@/types/governanceTypes";
 import { createProposalWithCategory, getEvents, decodeProposalCreatedEvent, getProposal, Proposal as ServiceProposal, snapPower, getPowerSource, snapMultiplier, closeVotingEarly, addPowerSource } from "@/services/governanceService";
 import { deployUnitLpPowerSources, type DeployedUnitLpPowerApp } from "@/services/unitLpPowerSourceDeploy";
-import { UNIT_LP_POWER_MULTIPLIER, UNIT_LP_POWER_SUPPORTED_MODES } from "@/constants/unitLpPowerSource";
+import {
+  addPowerSourceOptionLabel,
+  assertRegisterablePowerSourceAppId,
+  converterPowerSourceAppIds,
+  UNIT_LP_POWER_MULTIPLIER,
+  UNIT_LP_POWER_SUPPORTED_MODES,
+} from "@/constants/unitLpPowerSource";
 import { getCategoryFromId, PROPOSAL_CATEGORY_DISPLAY_NAMES, isProposalBlacklisted } from "@/constants/governanceConstants";
 import { ProposalCard } from "@/components/governance/ProposalCard";
 import { VoterInfoLookup } from "@/components/governance/VoterInfoLookup";
@@ -16515,19 +16521,48 @@ export default function AdminDashboard() {
                   Add Power Source
                 </CardTitle>
                 <CardDescription>
-                  Owner-only. Registers a converter with the same params as UNIT nToken:
+                  {/*
+                    End state: Shelly deploys the three UnitLpPowerSource apps.
+                    Fill each converter appId into UNIT_LP_POWER_ADAPTERS and
+                    algorandProdGovernance.powerSources. Owner runs
+                    add_power_source(appId, 10000, 1) for each via this control.
+                    Admin only allows 3333783429 (existing UNIT nToken source)
+                    plus converter appIds set on UNIT_LP_POWER_ADAPTERS.
+                    Never register LP nt200 ids 3577729953 / 3577777819 / 3577783311.
+                    No free-typed app ids on this path.
+                  */}
+                  Owner-only. Registers an allowlisted converter with the same params as UNIT nToken:
                   multiplier {UNIT_LP_POWER_MULTIPLIER}, modes {UNIT_LP_POWER_SUPPORTED_MODES}.
+                  Dropdown is UNIT_LP_POWER_ADAPTERS entries that already have appId; locked until
+                  those ids are filled in. Never the three LP nt200 markets.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="add-power-source-id">Power source app ID</Label>
-                  <Input
-                    id="add-power-source-id"
-                    placeholder="Converter app id"
-                    value={addPowerSourceId}
-                    onChange={(e) => setAddPowerSourceId(e.target.value)}
-                  />
+                  <Label htmlFor="add-power-source-id">Power source</Label>
+                  {converterPowerSourceAppIds().length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      Locked until converter appIds are set on UNIT_LP_POWER_ADAPTERS. Deploy does
+                      not register sources. Do not type LP nt200 ids
+                      (3577729953 / 3577777819 / 3577783311).
+                    </p>
+                  ) : (
+                    <Select
+                      value={addPowerSourceId}
+                      onValueChange={setAddPowerSourceId}
+                    >
+                      <SelectTrigger id="add-power-source-id">
+                        <SelectValue placeholder="Select a converter app" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {converterPowerSourceAppIds().map((appId) => (
+                          <SelectItem key={appId} value={String(appId)}>
+                            {addPowerSourceOptionLabel(appId)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
                 {addPowerSourceError && (
                   <p className="text-sm text-red-600">{addPowerSourceError}</p>
@@ -16536,6 +16571,7 @@ export default function AdminDashboard() {
                   variant="primary"
                   disabled={
                     isAddingPowerSource ||
+                    converterPowerSourceAppIds().length === 0 ||
                     !addPowerSourceId.trim() ||
                     !activeAccount?.address ||
                     !signTransactions
@@ -16546,8 +16582,12 @@ export default function AdminDashboard() {
                       return;
                     }
                     const powerSourceId = Number(addPowerSourceId.trim());
-                    if (!Number.isFinite(powerSourceId) || powerSourceId <= 0) {
-                      toast.error("Enter a valid app id");
+                    try {
+                      assertRegisterablePowerSourceAppId(powerSourceId);
+                    } catch (error: any) {
+                      const message = error?.message || "App id is not allowed";
+                      setAddPowerSourceError(message);
+                      toast.error(message);
                       return;
                     }
                     setIsAddingPowerSource(true);

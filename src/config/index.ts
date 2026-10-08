@@ -2145,10 +2145,9 @@ const algorandProdGovernance = {
   appStorageId: 3333688254,
   powerSources: [
     3333783429, // UNIT nToken (Pool A). On-chain: add_power_source(id, 10000, 1)
-    // After UnitLpPowerSource deploy + owner add_power_source(appId, 10000, 1):
-    // UNIT/ALGO converter appId,
-    // UNIT/goBTC converter appId,
-    // WAD/UNIT converter appId,
+    // After Shelly deploys UnitLpPowerSource: fill converter appIds here and on
+    // UNIT_LP_POWER_ADAPTERS, then owner add_power_source(appId, 10000, 1).
+    // Never the LP nt200 ids 3577729953 / 3577777819 / 3577783311.
   ],
   powerMultipliers: [],
 }
