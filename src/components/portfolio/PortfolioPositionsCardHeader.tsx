@@ -25,6 +25,7 @@ interface PortfolioPositionsCardHeaderProps {
   searchTerm: string;
   onSearchTermChange: (value: string) => void;
   hasDMarketTab: boolean;
+  hasLpMarketTab?: boolean;
   isMobile: boolean;
 }
 
@@ -47,6 +48,7 @@ const PortfolioPositionsCardHeader = ({
   searchTerm,
   onSearchTermChange,
   hasDMarketTab,
+  hasLpMarketTab = false,
   isMobile,
 }: PortfolioPositionsCardHeaderProps) => {
   const showToggle = hasBothPositionTypes;
@@ -135,6 +137,7 @@ const PortfolioPositionsCardHeader = ({
         searchTerm={searchTerm}
         onSearchTermChange={onSearchTermChange}
         hasDMarketTab={hasDMarketTab}
+        hasLpMarketTab={hasLpMarketTab}
         isMobile={isMobile}
       />
     </div>

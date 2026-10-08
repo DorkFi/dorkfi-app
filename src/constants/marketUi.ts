@@ -76,5 +76,6 @@ export function marketPoolBadgeBgClassName(
   if (label === "D") return "bg-amber-500 dark:bg-amber-600";
   if (label === "E") return "bg-indigo-500 dark:bg-indigo-600";
   if (label === "F") return "bg-rose-500 dark:bg-rose-600";
+  if (label === "LP") return "bg-ocean-teal dark:bg-ocean-teal";
   return "bg-slate-500 dark:bg-slate-600";
 }

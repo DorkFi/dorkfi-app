@@ -40,12 +40,21 @@ export const MARKET_TIER_OPTIONS: {
     description:
       "Dynamic routing markets that optimize liquidity and yield across multiple pools.",
   },
+  {
+    value: "LP",
+    label: "LP Pools",
+    poolLetter: "LP",
+    description:
+      "Tinyman LP deposits on Pools (UNIT, WAD, and USDC pairs) and WAD borrowed against that LP.",
+  },
 ];
 
 interface MarketsTierFilterProps {
   value: MarketFilter;
   onChange: (value: MarketFilter) => void;
   hasDMarketTab: boolean;
+  /** Portfolio Positions only — Markets table stays A/B/D. */
+  hasLpMarketTab?: boolean;
   isMobile?: boolean;
   totalItems?: number;
   className?: string;
@@ -87,14 +96,17 @@ const MarketsTierFilter = ({
   value,
   onChange,
   hasDMarketTab,
+  hasLpMarketTab = false,
   isMobile = false,
   totalItems,
   className,
   hideLabel = false,
 }: MarketsTierFilterProps) => {
-  const options = MARKET_TIER_OPTIONS.filter(
-    (o) => o.value !== "D" || hasDMarketTab
-  );
+  const options = MARKET_TIER_OPTIONS.filter((o) => {
+    if (o.value === "D") return hasDMarketTab;
+    if (o.value === "LP") return hasLpMarketTab;
+    return true;
+  });
 
   const activeOption = options.find((o) => o.value === value);
 
@@ -120,6 +132,7 @@ const MarketsTierFilter = ({
         {options.map((o) => {
           const isActive = value === o.value;
           const isLetterOnly = !!o.poolLetter;
+          const isWideLetter = (o.poolLetter?.length ?? 0) > 1;
 
           return (
             <button
@@ -134,7 +147,10 @@ const MarketsTierFilter = ({
               className={cn(
                 "inline-flex shrink-0 items-center justify-center font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ocean-teal/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                 isLetterOnly
-                  ? "h-9 w-9 rounded-full border text-sm"
+                  ? cn(
+                      "h-9 rounded-full border text-sm",
+                      isWideLetter ? "min-w-9 px-1.5" : "w-9"
+                    )
                   : "rounded-full border px-3.5 py-2 text-sm",
                 isActive
                   ? "border-ocean-teal/60 bg-ocean-teal/15 text-foreground shadow-[0_0_0_1px_rgba(13,255,190,0.25)]"
@@ -147,7 +163,10 @@ const MarketsTierFilter = ({
               {o.poolLetter ? (
                 <span
                   className={cn(
-                    "flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold leading-none text-white",
+                    "flex items-center justify-center rounded-full font-bold leading-none text-white",
+                    isWideLetter
+                      ? "h-6 min-w-6 px-1 text-[10px]"
+                      : "h-6 w-6 text-[11px]",
                     marketPoolBadgeBgClassName(o.poolLetter)
                   )}
                 >

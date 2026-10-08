@@ -23,4 +23,13 @@ describe("shouldShowConfigSymbolUnderDisplayAsset", () => {
       false
     );
   });
+
+  it("hides TMPOOL2 config keys under pair display labels", () => {
+    expect(
+      shouldShowConfigSymbolUnderDisplayAsset(
+        "UNIT/ALGO LP",
+        "LP_TMPOOL2_UNIT_ALGO"
+      )
+    ).toBe(false);
+  });
 });

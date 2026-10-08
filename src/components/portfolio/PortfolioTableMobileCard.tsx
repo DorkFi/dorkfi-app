@@ -3,7 +3,7 @@ import { Plus, Minus, RefreshCw, Info } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import DorkFiCard from "@/components/ui/DorkFiCard";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { getTokenConfig, getMarketLabel, type NetworkId } from "@/config";
+import { getTokenConfig, getPortfolioMarketLabel, type NetworkId } from "@/config";
 import { MarketRowTokenIcon } from "@/components/markets/MarketRowTokenIcon";
 import { resolveTokenIconBadgeUrl } from "@/utils/tokenImageUtils";
 import { shouldShowConfigSymbolUnderDisplayAsset } from "@/utils/portfolioAssetSubline";
@@ -29,6 +29,7 @@ interface PortfolioTableMobileCardProps {
   poolId?: string;
   onDepositClick?: () => void;
   onWithdrawClick?: () => void;
+  onMintWadClick?: () => void;
   onDepositMouseEnter?: () => void;
   onWithdrawMouseEnter?: () => void;
   onRefreshClick?: () => void;
@@ -57,6 +58,7 @@ const PortfolioTableMobileCard = ({
   poolId,
   onDepositClick,
   onWithdrawClick,
+  onMintWadClick,
   onDepositMouseEnter,
   onWithdrawMouseEnter,
   onRefreshClick,
@@ -73,7 +75,7 @@ const PortfolioTableMobileCard = ({
     : tokenConfigRaw;
   const displayDecimals = Math.min((tokenConfig as { decimals?: number } | undefined)?.decimals ?? 6, 8);
 
-  const marketLabel = getMarketLabel(rowNetwork, poolId);
+  const marketLabel = getPortfolioMarketLabel(rowNetwork, poolId);
   const resolvedBadgeUrl =
     iconBadgeUrl ??
     resolveTokenIconBadgeUrl(
@@ -111,6 +113,8 @@ const PortfolioTableMobileCard = ({
               icon,
               asset,
               iconBadgeUrl: resolvedBadgeUrl,
+              configSymbol,
+              network: rowNetwork,
             }}
             poolLetterLabel={marketLabel}
             imgClassName="h-12 w-12 flex-shrink-0 rounded-full object-contain"
@@ -275,6 +279,17 @@ const PortfolioTableMobileCard = ({
             >
               <Minus className="w-4 h-4 mr-1" />
               {isDeposit ? "Withdraw" : "Repay"}
+            </DorkFiButton>
+          )}
+          {onMintWadClick && (
+            <DorkFiButton
+              variant="mint"
+              size="sm"
+              onClick={onMintWadClick}
+              className="flex-1 min-w-0"
+              title="Borrow (mint) WAD against this LP collateral"
+            >
+              Mint WAD
             </DorkFiButton>
           )}
         </div>

@@ -36,9 +36,15 @@ export type MissingConfiguredMarket = {
   marketId: string;
 };
 
-function bigintOrZero(value: string | number | undefined | null): bigint {
+/** Tolerant integer parse (#646). Decimal strings and junk must not crash Portfolio. */
+export function bigintOrZero(value: unknown): bigint {
   try {
-    return BigInt(String(value ?? 0));
+    if (typeof value === "bigint") return value;
+    const s = String(value ?? 0).trim().split(".")[0];
+    if (s === "" || s === "undefined" || s === "null" || s === "NaN") {
+      return 0n;
+    }
+    return BigInt(s);
   } catch {
     return 0n;
   }

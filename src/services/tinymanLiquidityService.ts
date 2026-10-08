@@ -63,6 +63,9 @@ export interface LiquidityPoolSnapshot {
   asset2: LiquidityPoolAssetMeta;
   poolTokenId: number;
   totalLiquidity: bigint;
+  /** Reserves in curated pair order (`pair.asset1Id` / `pair.asset2Id`). */
+  asset1ReserveAtomic: bigint;
+  asset2ReserveAtomic: bigint;
   asset1ReserveHuman: string;
   asset2ReserveHuman: string;
   apr: LiquidityPoolApr | null;
@@ -77,6 +80,19 @@ export interface LiquidityPoolUserPosition {
   /** LP committed to a Tinyman farm program (wallet-held, tracked by Tinyman). */
   farmLpBalance: bigint;
   poolSharePercent: number;
+}
+
+/** USD per 1 LP token from Tinyman pool TVL / issued LP supply (6 decimals). */
+export function usdPerLpTokenFromSnapshot(
+  snapshot: Pick<LiquidityPoolSnapshot, "apr" | "totalLiquidity"> | null | undefined
+): number | null {
+  const tvlUsd = snapshot?.apr?.liquidityUsd;
+  const issued = snapshot?.totalLiquidity;
+  if (tvlUsd == null || !Number.isFinite(tvlUsd) || tvlUsd <= 0) return null;
+  if (issued == null || issued <= 0n) return null;
+  const humanSupply = Number(issued) / 1e6;
+  if (!Number.isFinite(humanSupply) || humanSupply <= 0) return null;
+  return tvlUsd / humanSupply;
 }
 
 export function tinymanNetworkFromNetworkId(
@@ -281,6 +297,8 @@ export async function fetchLiquidityPoolSnapshot(
     asset2: ordered.asset2,
     poolTokenId: pool.poolTokenID ?? pair.lpTokenId,
     totalLiquidity: reserves.issuedLiquidity,
+    asset1ReserveAtomic: ordered.asset1Reserve,
+    asset2ReserveAtomic: ordered.asset2Reserve,
     asset1ReserveHuman: fromAtomic(ordered.asset1Reserve, ordered.asset1.decimals),
     asset2ReserveHuman: fromAtomic(ordered.asset2Reserve, ordered.asset2.decimals),
     apr,

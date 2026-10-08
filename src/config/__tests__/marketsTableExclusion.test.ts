@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   getMarketsTableVisibleTokensWithDisplayInfo,
+  getPortfolioMarketLabel,
   getPortfolioVisibleTokens,
+  getWadBorrowMarketConfigForPool,
+  isLpPortfolioPool,
+  isLpTmpoolConfigKey,
   isMarketsTableExcludedMarket,
   isMarketsTableExcludedPool,
   isPortfolioExcludedMarketContract,
@@ -89,5 +93,86 @@ describe("markets table Pool C exclusion", () => {
         String(token.configKey ?? "").startsWith("LP_TMPOOL2_")
       )
     ).toBe(false);
+  });
+});
+
+describe("portfolio LP visibility", () => {
+  it("includes TMPOOL2 LP deposits in portfolio token lists", () => {
+    const visible = getPortfolioVisibleTokens("algorand-mainnet");
+    expect(
+      visible.some(
+        (token) =>
+          token.configKey === "LP_TMPOOL2_UNIT_ALGO" &&
+          String(token.poolId) === POOL_C
+      )
+    ).toBe(true);
+    expect(
+      visible.some(
+        (token) =>
+          token.configKey === "LP_TMPOOL2_WAD_ALGO" &&
+          String(token.poolId) === POOL_E
+      )
+    ).toBe(true);
+    expect(
+      visible.some(
+        (token) =>
+          token.configKey === "LP_TMPOOL2_USDC_ALGO" &&
+          String(token.poolId) === POOL_F
+      )
+    ).toBe(true);
+  });
+
+  it("does not exclude LP market contracts from portfolio", () => {
+    expect(
+      isPortfolioExcludedMarketContract(
+        "algorand-mainnet",
+        POOL_C,
+        "3577729953"
+      )
+    ).toBe(false);
+    expect(
+      isPortfolioExcludedMarketContract(
+        "algorand-mainnet",
+        POOL_E,
+        "3578405588"
+      )
+    ).toBe(false);
+    expect(
+      isPortfolioExcludedMarketContract(
+        "algorand-mainnet",
+        POOL_F,
+        "3589026317"
+      )
+    ).toBe(false);
+  });
+
+  it("uses pair display labels instead of generic TMPOOL2", () => {
+    const unitAlgo = getPortfolioVisibleTokens("algorand-mainnet").find(
+      (token) => token.configKey === "LP_TMPOOL2_UNIT_ALGO"
+    );
+    expect(unitAlgo?.symbol).toBe("UNIT/ALGO LP");
+    expect(unitAlgo?.name).toBe("UNIT / ALGO LP");
+  });
+
+  it("labels Pool C/E/F as LP on Positions", () => {
+    expect(isLpPortfolioPool("algorand-mainnet", POOL_C)).toBe(true);
+    expect(getPortfolioMarketLabel("algorand-mainnet", POOL_C)).toBe("LP");
+    expect(getPortfolioMarketLabel("algorand-mainnet", POOL_E)).toBe("LP");
+    expect(getPortfolioMarketLabel("algorand-mainnet", POOL_F)).toBe("LP");
+    expect(getPortfolioMarketLabel("algorand-mainnet", "3333688282")).toBe("A");
+    expect(getPortfolioMarketLabel("algorand-mainnet", "3526240577")).toBe("D");
+  });
+
+  it("resolves WAD borrow/mint markets for LP collateral pools", () => {
+    expect(isLpTmpoolConfigKey("LP_TMPOOL2_UNIT_ALGO")).toBe(true);
+    expect(getWadBorrowMarketConfigForPool("algorand-mainnet", POOL_C)?.poolId).toBe(
+      POOL_C
+    );
+    expect(getWadBorrowMarketConfigForPool("algorand-mainnet", POOL_E)?.poolId).toBe(
+      POOL_E
+    );
+    expect(getWadBorrowMarketConfigForPool("algorand-mainnet", POOL_F)?.poolId).toBe(
+      POOL_F
+    );
   });
 });

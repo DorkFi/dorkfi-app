@@ -40,6 +40,7 @@ const Header = ({ activeTab, onTabChange }: HeaderProps = {}) => {
     if (location.pathname === "/governance") return "governance";
     if (location.pathname === "/portfolio" || location.pathname.startsWith("/portfolio/")) return "portfolio";
     if (location.pathname === "/market") return "markets";
+    if (location.pathname === "/start") return "";
     return "markets";
   })();
 
