@@ -518,6 +518,20 @@ const SHOW_LIQUIDATION_PRICE_IN_BORROWED = false;
 /** Supplied / borrowed asset lists: rows per page. */
 const ASSET_LIST_PAGE_SIZE = 10;
 
+/**
+ * Desktop Positions layout experiment (local only).
+ * Market (A/B/LP) is already on the asset icon. Accrued Interest has its own
+ * card below. Keep Network visible. Hide the rest until 2xl so Actions fit.
+ */
+const POSITIONS_DESKTOP_MARKET_COL = "hidden 2xl:table-cell";
+const POSITIONS_DESKTOP_ACCRUED_COL = "hidden 2xl:table-cell";
+const POSITIONS_APY_COL = "w-16 max-w-[4.5rem] text-center";
+const POSITIONS_ACTIONS_COL = "w-[1%] text-center";
+const POSITIONS_ACTIONS_CELL = "w-[1%] text-left";
+const POSITIONS_ROW_ACTION_BTN = "h-8 min-h-8 w-8 min-w-8 shrink-0 px-0";
+const POSITIONS_MINT_WAD_BTN =
+  "h-8 min-h-8 min-w-0 shrink-0 px-2 text-xs border-slate-400 text-slate-300 hover:bg-slate-500 hover:border-slate-400 hover:text-white";
+
 function sliceAssetListPage<T>(
   items: T[],
   currentPage: number,
@@ -6309,7 +6323,7 @@ const Portfolio = () => {
                       })()}
                     </div>
                   ) : (
-                    <div className="overflow-x-auto">
+                    <div className="overflow-x-hidden">
                       <Table>
                         <TableHeader>
                           <TableRow>
@@ -6348,7 +6362,9 @@ const Portfolio = () => {
                             <TableHead className="text-center">
                               Network
                             </TableHead>
-                            <TableHead className="text-center">
+                            <TableHead
+                              className={`text-center ${POSITIONS_DESKTOP_MARKET_COL}`}
+                            >
                               Market
                             </TableHead>
                             <TableHead>
@@ -6417,7 +6433,7 @@ const Portfolio = () => {
                                 )}
                               </button>
                             </TableHead>
-                            <TableHead className="text-right">
+                            <TableHead className={POSITIONS_APY_COL}>
                               <button
                                 onClick={() => {
                                   if (suppliedAssetsSort.column === "apy") {
@@ -6435,7 +6451,7 @@ const Portfolio = () => {
                                     });
                                   }
                                 }}
-                                className="flex w-full items-center justify-end gap-1 hover:text-foreground transition-colors"
+                                className="flex w-full items-center justify-center gap-1 hover:text-foreground transition-colors"
                               >
                                 APY
                                 {suppliedAssetsSort.column === "apy" ? (
@@ -6449,7 +6465,9 @@ const Portfolio = () => {
                                 )}
                               </button>
                             </TableHead>
-                            <TableHead className="text-right">
+                            <TableHead
+                              className={`text-right ${POSITIONS_DESKTOP_ACCRUED_COL}`}
+                            >
                               <button
                                 onClick={() => {
                                   if (
@@ -6485,7 +6503,7 @@ const Portfolio = () => {
                                 )}
                               </button>
                             </TableHead>
-                            <TableHead className="whitespace-nowrap w-[1%]">
+                            <TableHead className={POSITIONS_ACTIONS_COL}>
                               Actions
                             </TableHead>
                           </TableRow>
@@ -6825,7 +6843,9 @@ const Portfolio = () => {
                                   <TableCell className="font-medium text-center">
                                     {networkName}
                                   </TableCell>
-                                  <TableCell className="text-center">
+                                  <TableCell
+                                    className={`text-center ${POSITIONS_DESKTOP_MARKET_COL}`}
+                                  >
                                     {depositMarketLabel || "-"}
                                   </TableCell>
                                   <TableCell>
@@ -6840,8 +6860,8 @@ const Portfolio = () => {
                                       maximumFractionDigits: 2,
                                     })}
                                   </TableCell>
-                                  <TableCell className="text-right tabular-nums">
-                                    <div className="flex flex-col gap-0.5 items-end">
+                                  <TableCell className={`${POSITIONS_APY_COL} tabular-nums`}>
+                                    <div className="flex flex-col gap-0.5 items-center">
                                       <span className="text-green-600 dark:text-green-400">
                                         {formatPercent(deposit.apy / 100, {
                                           maximumFractionDigits: 2,
@@ -6859,7 +6879,9 @@ const Portfolio = () => {
                                       ) : null}
                                     </div>
                                   </TableCell>
-                                  <TableCell className="text-right tabular-nums">
+                                  <TableCell
+                                    className={`text-right tabular-nums ${POSITIONS_DESKTOP_ACCRUED_COL}`}
+                                  >
                                     {deposit.accruedInterest > 0 ? (
                                       <div className="flex flex-col items-end">
                                         <span className="text-sm font-medium text-amber-600 dark:text-amber-400">
@@ -6884,8 +6906,8 @@ const Portfolio = () => {
                                       </span>
                                     )}
                                   </TableCell>
-                                  <TableCell className="whitespace-nowrap w-[1%]">
-                                    <div className="flex items-center gap-2">
+                                  <TableCell className={POSITIONS_ACTIONS_CELL}>
+                                    <div className="flex w-full items-center justify-start gap-1 whitespace-nowrap">
                                       {!isViewOnly && (
                                         <>
                                           {!market?.isPaused && (
@@ -6919,15 +6941,14 @@ const Portfolio = () => {
                                                   : "Supply more of this asset to earn yield and use as collateral"
                                               }
                                               aria-label="Supply"
-                                              className="min-w-[92px] h-8 shrink-0 px-2 gap-1"
+                                              className={POSITIONS_ROW_ACTION_BTN}
                                             >
                                               <span className="text-base leading-none">+</span>
-                                              <span className="hidden lg:inline text-xs">Supply</span>
                                             </DorkFiButton>
                                           )}
                                           <DorkFiButton
                                             size="sm"
-                                            variant="withdraw"
+                                            variant="secondary"
                                             onMouseEnter={() =>
                                               prefetchWithdrawModalData(
                                                 deposit.asset,
@@ -6949,10 +6970,9 @@ const Portfolio = () => {
                                             }}
                                             title="Withdraw this asset back to your wallet"
                                             aria-label="Withdraw"
-                                            className="min-w-[92px] h-8 shrink-0 px-2 gap-1"
+                                            className={POSITIONS_ROW_ACTION_BTN}
                                           >
                                             <span className="text-base leading-none">−</span>
-                                            <span className="hidden lg:inline text-xs">Withdraw</span>
                                           </DorkFiButton>
                                           {lpWadBorrowTarget(
                                             (deposit as ItemWithNetwork).network,
@@ -6980,10 +7000,9 @@ const Portfolio = () => {
                                               }}
                                               title="Borrow (mint) WAD against this LP collateral"
                                               aria-label="Mint WAD"
-                                              className="min-w-[92px] h-8 shrink-0 px-2 gap-1"
+                                              className={POSITIONS_MINT_WAD_BTN}
                                             >
-                                              <span className="hidden lg:inline text-xs">Mint WAD</span>
-                                              <span className="lg:hidden text-xs">WAD</span>
+                                              Mint WAD
                                             </DorkFiButton>
                                           )}
                                         </>
@@ -7283,7 +7302,7 @@ const Portfolio = () => {
                       })()}
                     </div>
                   ) : (
-                    <div className="overflow-x-auto">
+                    <div className="overflow-x-hidden">
                       <Table>
                         <TableHeader>
                           <TableRow>
@@ -7322,7 +7341,9 @@ const Portfolio = () => {
                             <TableHead className="text-center">
                               Network
                             </TableHead>
-                            <TableHead className="text-center">
+                            <TableHead
+                              className={`text-center ${POSITIONS_DESKTOP_MARKET_COL}`}
+                            >
                               Market
                             </TableHead>
                             <TableHead>
@@ -7391,7 +7412,7 @@ const Portfolio = () => {
                                 )}
                               </button>
                             </TableHead>
-                            <TableHead className="text-right">
+                            <TableHead className={POSITIONS_APY_COL}>
                               <button
                                 onClick={() => {
                                   if (borrowedAssetsSort.column === "apy") {
@@ -7409,7 +7430,7 @@ const Portfolio = () => {
                                     });
                                   }
                                 }}
-                                className="flex w-full items-center justify-end gap-1 hover:text-foreground transition-colors"
+                                className="flex w-full items-center justify-center gap-1 hover:text-foreground transition-colors"
                               >
                                 APY
                                 {borrowedAssetsSort.column === "apy" ? (
@@ -7423,7 +7444,9 @@ const Portfolio = () => {
                                 )}
                               </button>
                             </TableHead>
-                            <TableHead className="text-right">
+                            <TableHead
+                              className={`text-right ${POSITIONS_DESKTOP_ACCRUED_COL}`}
+                            >
                               <button
                                 onClick={() => {
                                   if (
@@ -7491,7 +7514,7 @@ const Portfolio = () => {
                                 </div>
                               </TableHead>
                             )}
-                            <TableHead className="whitespace-nowrap w-[1%]">
+                            <TableHead className={POSITIONS_ACTIONS_COL}>
                               Actions
                             </TableHead>
                           </TableRow>
@@ -7713,7 +7736,9 @@ const Portfolio = () => {
                                   <TableCell className="font-medium text-center">
                                     {networkName}
                                   </TableCell>
-                                  <TableCell className="text-center">
+                                  <TableCell
+                                    className={`text-center ${POSITIONS_DESKTOP_MARKET_COL}`}
+                                  >
                                     {borrowMarketLabel || "-"}
                                   </TableCell>
                                   <TableCell>
@@ -7725,14 +7750,16 @@ const Portfolio = () => {
                                   <TableCell>
                                     {formatCurrency(borrow.value, "USD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </TableCell>
-                                  <TableCell className="text-right tabular-nums">
-                                    <div className="flex flex-col gap-0.5 items-end">
+                                  <TableCell className={`${POSITIONS_APY_COL} tabular-nums`}>
+                                    <div className="flex flex-col gap-0.5 items-center">
                                       <span className="text-red-600 dark:text-red-400">
                                         {formatPercent(borrow.apy / 100, { maximumFractionDigits: 2 })}
                                       </span>
                                     </div>
                                   </TableCell>
-                                  <TableCell className="text-right tabular-nums">
+                                  <TableCell
+                                    className={`text-right tabular-nums ${POSITIONS_DESKTOP_ACCRUED_COL}`}
+                                  >
                                     {borrow.accruedInterest > 0 ? (
                                       <div className="flex flex-col items-end">
                                         <span className="text-sm font-medium text-amber-600 dark:text-amber-400">
@@ -7768,8 +7795,8 @@ const Portfolio = () => {
                                         </span>
                                       </TableCell>
                                     )}
-                                  <TableCell className="whitespace-nowrap w-[1%]">
-                                    <div className="flex items-center gap-2">
+                                  <TableCell className={POSITIONS_ACTIONS_CELL}>
+                                    <div className="flex w-full items-center justify-start gap-1 whitespace-nowrap">
                                       {!isViewOnly && (
                                         <>
                                           {!market?.isPaused && (
@@ -7803,10 +7830,9 @@ const Portfolio = () => {
                                                   : "Borrow more of this asset against your collateral"
                                               }
                                               aria-label="Borrow"
-                                              className="min-w-[92px] h-8 shrink-0 px-2 gap-1"
+                                              className={POSITIONS_ROW_ACTION_BTN}
                                             >
                                               <span className="text-base leading-none">+</span>
-                                              <span className="hidden lg:inline text-xs">Borrow</span>
                                             </DorkFiButton>
                                           )}
                                           <DorkFiButton
@@ -7833,10 +7859,9 @@ const Portfolio = () => {
                                             }}
                                             title="Repay this debt to improve health factor"
                                             aria-label="Repay"
-                                            className="min-w-[92px] h-8 shrink-0 px-2 gap-1"
+                                            className={POSITIONS_ROW_ACTION_BTN}
                                           >
                                             <span className="text-base leading-none">−</span>
-                                            <span className="hidden lg:inline text-xs">Repay</span>
                                           </DorkFiButton>
                                         </>
                                       )}

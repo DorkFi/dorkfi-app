@@ -271,7 +271,7 @@ const PortfolioTableMobileCard = ({
           )}
           {onWithdrawClick && (
             <DorkFiButton
-              variant={isDeposit ? "withdraw" : "danger-outline"}
+              variant={isDeposit ? "secondary" : "danger-outline"}
               size="sm"
               onMouseEnter={onWithdrawMouseEnter}
               onClick={onWithdrawClick}
@@ -286,7 +286,7 @@ const PortfolioTableMobileCard = ({
               variant="mint"
               size="sm"
               onClick={onMintWadClick}
-              className="flex-1 min-w-0"
+              className="flex-1 min-w-0 border-slate-400 text-slate-300 hover:bg-slate-500 hover:border-slate-400 hover:text-white"
               title="Borrow (mint) WAD against this LP collateral"
             >
               Mint WAD
