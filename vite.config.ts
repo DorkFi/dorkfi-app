@@ -29,6 +29,8 @@ export default defineConfig(({ mode }) => {
     "PRIVY_APP_ID",
     "VITE_PRIVY_APP_ID",
     "PRIVY_APP_SECRET",
+    "DYNAMIC_ENVIRONMENT_ID",
+    "VITE_DYNAMIC_ENVIRONMENT_ID",
     "VITE_OFFRAMP_REDIRECT_URL",
     "OFFRAMP_REDIRECT_URL",
     "SPONSOR_ENABLED",
@@ -113,8 +115,6 @@ export default defineConfig(({ mode }) => {
       "wagmi",
       "@wagmi/core",
       "@rainbow-me/rainbowkit",
-      "@privy-io/react-auth",
-      "@privy-io/wagmi",
       "@moonpay/moonpay-react",
     ],
   },
@@ -124,7 +124,6 @@ export default defineConfig(({ mode }) => {
   optimizeDeps: {
     include: [
       "buffer",
-      "@privy-io/react-auth",
       "@moonpay/moonpay-react",
       "@txnlab/use-wallet-react",
       "@walletconnect/modal",

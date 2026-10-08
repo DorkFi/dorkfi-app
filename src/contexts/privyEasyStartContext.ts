@@ -11,10 +11,24 @@ export type PrivyEasyStartState = {
   displayName: string | null;
   login: ((options?: { loginMethods?: string[] }) => void) | null;
   logout: (() => Promise<void>) | null;
-  /** xChain EIP-712 signing for Algorand txn groups (Privy embedded wallet). */
+  /** xChain EIP-712 signing for Algorand txn groups (Dynamic embedded wallet). */
   signTransactions: ((txns: Uint8Array[]) => Promise<Uint8Array[]>) | null;
-  /** Privy access token for Easy Start APIs (sponsor, offramp). */
+  /** Dynamic access token for Easy Start APIs (sponsor, offramp). */
   getAccessToken: (() => Promise<string | null>) | null;
+  /** Base transaction sender used by cash-out and XO Swap. */
+  sendTransaction: ((
+    input: {
+      to: string;
+      value?: bigint;
+      data?: `0x${string}`;
+      chainId?: number;
+    },
+    options?: { address?: string }
+  ) => Promise<{ hash: `0x${string}` }>) | null;
+  /** EIP-1193 provider for the Allbridge Base leg. */
+  getEvmProvider: (() => Promise<{
+    request(args: { method: string; params?: unknown[] }): Promise<unknown>;
+  }>) | null;
   /** Why Easy Start cannot open (origin block, crash, or missing config). */
   blockReason: string | null;
 };
@@ -32,6 +46,8 @@ export const DEFAULT_PRIVY_EASY_START_STATE: PrivyEasyStartState = {
   logout: null,
   signTransactions: null,
   getAccessToken: null,
+  sendTransaction: null,
+  getEvmProvider: null,
   blockReason: null,
 };
 

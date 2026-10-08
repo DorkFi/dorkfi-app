@@ -25,7 +25,7 @@ export type SendUsdcFn = (
   options?: { address?: string }
 ) => Promise<{ hash: Hex }>;
 
-/** Build + send USDC transfer on Base via Privy `useSendTransaction`. */
+/** Build + send USDC transfer on Base via the Easy Start embedded wallet. */
 export async function sendBaseUsdc(args: {
   sendTransaction: SendUsdcFn;
   to: string;

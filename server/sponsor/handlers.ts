@@ -9,7 +9,8 @@
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getAddress } from "viem";
-import { AuthError, requirePrivyAuth } from "../offramp/privyAuth.ts";
+import { AuthError } from "../offramp/privyAuth.ts";
+import { requireEasyStartAuth } from "../offramp/sessionAuth.ts";
 import {
   createSponsorChain,
   type SponsorChain,
@@ -149,7 +150,11 @@ export async function handleSponsor(
   chain: SponsorChain = createSponsorChain(env)
 ): Promise<void> {
   try {
-    const { userId } = await requirePrivyAuth(req, env.privyAppId);
+    const session = await requireEasyStartAuth(req, {
+      privyAppId: env.privyAppId,
+      dynamicEnvironmentId: env.dynamicEnvironmentId,
+    });
+    const { userId } = session;
 
     if (!userRateLimit.allow(userId)) {
       sendJson(res, 429, { error: "Too many sponsor requests" });
@@ -169,16 +174,25 @@ export async function handleSponsor(
       return;
     }
 
-    if (!isSponsorConfigured(env) || !env.privyAppSecret) {
+    if (!isSponsorConfigured(env)) {
       sendJson(res, 503, { error: "Sponsor is not configured" });
       return;
     }
 
-    const owned = await fetchPrivyWalletAddresses({
-      userId,
-      privyAppId: env.privyAppId,
-      privyAppSecret: env.privyAppSecret,
-    });
+    let owned: string[];
+    if (session.provider === "dynamic") {
+      owned = session.walletAddresses;
+    } else {
+      if (!env.privyAppSecret) {
+        sendJson(res, 503, { error: "Sponsor is not configured" });
+        return;
+      }
+      owned = await fetchPrivyWalletAddresses({
+        userId,
+        privyAppId: env.privyAppId,
+        privyAppSecret: env.privyAppSecret,
+      });
+    }
     assertWalletOwnedByUser(evmAddress, owned);
 
     const result = await withInflightLock(evmAddress, () =>
@@ -206,7 +220,10 @@ async function handlePendingDeposit(
   env: SponsorEnv
 ): Promise<void> {
   try {
-    const { userId } = await requirePrivyAuth(req, env.privyAppId);
+    const { userId } = await requireEasyStartAuth(req, {
+      privyAppId: env.privyAppId,
+      dynamicEnvironmentId: env.dynamicEnvironmentId,
+    });
     if (!pendingDepositRateLimit.allow(userId)) {
       sendJson(res, 429, { error: "Too many pending deposit requests" });
       return;

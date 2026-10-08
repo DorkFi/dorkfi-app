@@ -5,11 +5,13 @@
  * Env (server-only, never VITE_*):
  *   CDP_API_KEY_ID / CDP_API_KEY_SECRET  (or COINBASE_CDP_API_KEY_ID / COINBASE_CDP_API_KEY_SECRET)
  *   MOONPAY_SECRET_KEY
- *   PRIVY_APP_ID (or VITE_PRIVY_APP_ID) — verifies user JWTs before Coinbase calls
+ *   PRIVY_APP_ID (or VITE_PRIVY_APP_ID) — verifies legacy Privy JWTs
+ *   DYNAMIC_ENVIRONMENT_ID (or VITE_DYNAMIC_ENVIRONMENT_ID) — verifies Dynamic JWTs
  */
 import { createHmac } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { AuthError, requirePrivyAuth } from "./privyAuth.js";
+import { AuthError } from "./privyAuth.js";
+import { requireEasyStartAuth } from "./sessionAuth.ts";
 import {
   buildCoinbaseOfframpSellUrl,
   buildCoinbaseOnrampBuyUrl,
@@ -33,6 +35,7 @@ export type OfframpEnv = {
   moonpaySecretKey?: string;
   privyAppId?: string;
   privyAppSecret?: string;
+  dynamicEnvironmentId?: string;
   redirectUrl?: string;
 };
 
@@ -56,6 +59,10 @@ export function loadOfframpEnv(
       env.VITE_PRIVY_APP_ID?.trim() ||
       DEFAULT_PRIVY_APP_ID,
     privyAppSecret: env.PRIVY_APP_SECRET?.trim() || undefined,
+    dynamicEnvironmentId:
+      env.DYNAMIC_ENVIRONMENT_ID?.trim() ||
+      env.VITE_DYNAMIC_ENVIRONMENT_ID?.trim() ||
+      undefined,
     redirectUrl:
       env.OFFRAMP_REDIRECT_URL?.trim() ||
       env.VITE_OFFRAMP_REDIRECT_URL?.trim() ||
@@ -91,7 +98,10 @@ async function ensurePrivyUser(
   env: OfframpEnv
 ): Promise<boolean> {
   try {
-    await requirePrivyAuth(req, env.privyAppId);
+    await requireEasyStartAuth(req, {
+      privyAppId: env.privyAppId,
+      dynamicEnvironmentId: env.dynamicEnvironmentId,
+    });
     return true;
   } catch (error) {
     const status = error instanceof AuthError ? error.status : 401;
@@ -129,7 +139,11 @@ export async function handleCoinbaseSession(
   env: OfframpEnv
 ): Promise<void> {
   try {
-    const { userId } = await requirePrivyAuth(req, env.privyAppId);
+    const session = await requireEasyStartAuth(req, {
+      privyAppId: env.privyAppId,
+      dynamicEnvironmentId: env.dynamicEnvironmentId,
+    });
+    const { userId } = session;
     const body = (await readJsonBody(req)) as {
       address?: string;
       redirectUrl?: string;
@@ -141,18 +155,23 @@ export async function handleCoinbaseSession(
       return;
     }
 
-    if (!env.privyAppSecret) {
-      sendJson(res, 503, {
-        error:
-          "PRIVY_APP_SECRET is required to bind Coinbase destinations to the signed-in wallet",
+    let owned: string[];
+    if (session.provider === "dynamic") {
+      owned = session.walletAddresses;
+    } else {
+      if (!env.privyAppSecret) {
+        sendJson(res, 503, {
+          error:
+            "PRIVY_APP_SECRET is required to bind Coinbase destinations to the signed-in wallet",
+        });
+        return;
+      }
+      owned = await fetchPrivyWalletAddresses({
+        userId,
+        privyAppId: env.privyAppId || DEFAULT_PRIVY_APP_ID,
+        privyAppSecret: env.privyAppSecret,
       });
-      return;
     }
-    const owned = await fetchPrivyWalletAddresses({
-      userId,
-      privyAppId: env.privyAppId || DEFAULT_PRIVY_APP_ID,
-      privyAppSecret: env.privyAppSecret,
-    });
     assertWalletOwnedByUser(address, owned);
 
     const path = "/onramp/v1/token";
@@ -302,7 +321,7 @@ export async function handleOfframpHealth(
     ok: true,
     coinbase: Boolean(env.cdpApiKeyId && env.cdpApiKeySecret),
     moonpay: Boolean(env.moonpaySecretKey),
-    walletBind: Boolean(env.privyAppSecret),
+    walletBind: Boolean(env.privyAppSecret || env.dynamicEnvironmentId),
   });
 }
 

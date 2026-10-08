@@ -1,10 +1,4 @@
 import { useCallback, useEffect, useState, lazy, Suspense } from "react";
-import {
-  useFundWallet,
-  usePrivy,
-  useSendTransaction,
-} from "@privy-io/react-auth";
-import { base } from "viem/chains";
 import type { Address } from "viem";
 import { CreditCard, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -46,8 +40,6 @@ const EasyStartMoonPaySellHost = lazy(() =>
   }))
 );
 
-const GAS_TOPUP_USD = "3";
-
 type CashOutPhase =
   | "idle"
   | "opening"
@@ -72,24 +64,14 @@ interface EasyStartOfframpCashOutProps {
   onResumeConsumed?: () => void;
 }
 
-function isUserCanceledFunding(message: string): boolean {
-  const lower = message.toLowerCase();
-  return (
-    lower.includes("cancel") ||
-    lower.includes("close") ||
-    lower.includes("exited") ||
-    lower.includes("dismiss")
-  );
-}
-
 /**
  * In-app cash-out after Base USDC arrives:
  * - Coinbase: CDP session → same-tab sell widget → return to /savings →
- *   poll to_address → Privy USDC transfer
- * - MoonPay: sell widget + signed URL → onInitiateDeposit → Privy USDC transfer
+ *   poll to_address → Dynamic USDC transfer
+ * - MoonPay: sell widget + signed URL → onInitiateDeposit → Dynamic USDC transfer
  *
  * MoonPay’s React SDK is lazy-mounted only while the sell overlay is open so it
- * cannot crash Privy during review, Coinbase cash-out, or gas top-up.
+ * cannot crash the session during review, Coinbase cash-out, or gas top-up.
  */
 export function EasyStartOfframpCashOut({
   evmAddress,
@@ -103,16 +85,14 @@ export function EasyStartOfframpCashOut({
   resumeSendTxHash = null,
   onResumeConsumed,
 }: EasyStartOfframpCashOutProps) {
-  const { sendTransaction } = useSendTransaction();
-  const { fundWallet } = useFundWallet();
-  const { getAccessToken } = usePrivy();
   const { toast } = useToast();
   const consumerCopy = useConsumerCopy();
   const privy = usePrivyEasyStart();
+  const { sendTransaction, getAccessToken } = privy;
   const { currentNetwork } = useNetwork();
 
   const requireAccessToken = useCallback(async (): Promise<string> => {
-    const token = await getAccessToken();
+    const token = await getAccessToken?.();
     if (!token) {
       throw new Error(
         consumerCopy
@@ -162,6 +142,9 @@ export function EasyStartOfframpCashOut({
 
   const sendUsdcTo = useCallback(
     async (to: string, cryptoAmount: string) => {
+      if (!sendTransaction) {
+        throw new Error("Easy Start wallet not ready");
+      }
       setPhase("sending");
       const hash = await sendBaseUsdc({
         sendTransaction,
@@ -360,33 +343,10 @@ export function EasyStartOfframpCashOut({
 
   const handleFundGas = async () => {
     if (!address) return;
-    setError(null);
-    setPhase("opening");
-    try {
-      await fundWallet({
-        address,
-        options: {
-          chain: base,
-          asset: "native-currency",
-          amount: GAS_TOPUP_USD,
-          defaultFundingMethod: "card",
-          card: { preferredProvider: "moonpay" },
-        },
-      });
-      if (await walletHasGas()) {
-        startProvider();
-        return;
-      }
-      setPhase("gas");
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      if (isUserCanceledFunding(message)) {
-        setPhase("gas");
-        return;
-      }
-      setError(message || "Couldn’t add processing fee");
-      setPhase("error");
-    }
+    setError(
+      "Card top-up isn’t available yet. A small ETH balance is sponsored after you sign in."
+    );
+    setPhase("error");
   };
 
   const retryGasCheck = async () => {

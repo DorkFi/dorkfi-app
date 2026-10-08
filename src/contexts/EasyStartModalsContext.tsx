@@ -39,7 +39,7 @@ import { recordAccountActivity } from "@/lib/easyStart/accountActivity";
 import type { CashOutLaunch } from "@/lib/easyStart/cashOutSources";
 
 /**
- * Lazy-load Easy Start sheets so `@privy-io/wagmi` stays out of first paint.
+ * Lazy-load Easy Start sheets so bridge UI stays out of first paint.
  * IsolateErrorBoundary keeps a failed sheet fetch from blanking the app.
  */
 const EasyStartDepositSheet = lazy(() =>

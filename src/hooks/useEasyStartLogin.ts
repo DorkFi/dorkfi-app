@@ -12,7 +12,7 @@ const READY_WAIT_MS = 15_000;
 const DROPDOWN_RELEASE_MS = 120;
 const OVERLAY_RELEASE_MS = 200;
 
-/** Let a Radix Dialog overlay unmount before opening the Privy modal. */
+/** Let a Radix Dialog overlay unmount before opening the login dialog. */
 export function afterOverlayClose(fn: () => void, ms = OVERLAY_RELEASE_MS) {
   window.setTimeout(fn, ms);
 }
@@ -23,12 +23,11 @@ function currentOrigin(): string {
 
 function refreshHint(): string {
   const origin = currentOrigin() || "this page";
-  return `Hard-refresh (Cmd+Shift+R) on ${origin}. If it persists, check the browser console for blocked requests to auth.privy.io.`;
+  return `Hard-refresh (Cmd+Shift+R) on ${origin}. If it persists, allowlist that origin in the Dynamic dashboard.`;
 }
 
 /**
- * Opens Privy login only after `ready` is true.
- * Calling `login()` while Privy is not ready waits forever (no modal).
+ * Opens the Easy Start email dialog only after Dynamic has finished init.
  */
 export function useEasyStartLogin() {
   const privy = usePrivyEasyStart();
@@ -90,7 +89,7 @@ export function useEasyStartLogin() {
     if (!loginRef.current) {
       if (hasQueuedEasyStartLogin()) {
         toast({
-          title: "Privy failed to load",
+          title: "Dynamic failed to load",
           description: refreshHint(),
           variant: "destructive",
         });
@@ -101,7 +100,7 @@ export function useEasyStartLogin() {
     if (!readyRef.current) {
       toast({
         title: "Starting Easy Start…",
-        description: "Waiting for Privy to finish loading.",
+        description: "Waiting for Dynamic to finish loading.",
       });
       const deadline = Date.now() + READY_WAIT_MS;
       while (!readyRef.current && Date.now() < deadline) {
@@ -110,13 +109,13 @@ export function useEasyStartLogin() {
     }
 
     if (!readyRef.current) {
-      const reloadKey = "easy-start-privy-reload";
+      const reloadKey = "easy-start-dynamic-reload";
       const alreadyReloaded = sessionStorage.getItem(reloadKey) === "1";
       toast({
-        title: "Privy failed to load",
+        title: "Dynamic failed to load",
         description: alreadyReloaded
           ? refreshHint()
-          : "Reloading once to recover Privy after hot-reload…",
+          : "Reloading once to recover Dynamic after hot-reload…",
         variant: "destructive",
       });
       if (!alreadyReloaded && import.meta.env.DEV) {
@@ -126,7 +125,7 @@ export function useEasyStartLogin() {
       return;
     }
 
-    sessionStorage.removeItem("easy-start-privy-reload");
+    sessionStorage.removeItem("easy-start-dynamic-reload");
 
     if (authenticatedRef.current) {
       toast({

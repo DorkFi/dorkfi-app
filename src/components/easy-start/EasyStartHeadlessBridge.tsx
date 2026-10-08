@@ -1,5 +1,4 @@
 import { useEffect, useRef } from "react";
-import { useSendTransaction } from "@privy-io/react-auth";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePrivyEasyStart } from "@/contexts/privyEasyStartContext";
 import {
@@ -29,7 +28,7 @@ interface EasyStartHeadlessBridgeProps {
 
 /**
  * Invisible XO Swap runner for Easy Start orchestrated deposit/withdraw.
- * Mount only while swapping; uses Privy sendTransaction + xChain Algorand signing.
+ * Mount only while swapping; uses the Dynamic wallet + xChain Algorand signing.
  */
 export function EasyStartHeadlessBridge({
   amount,
@@ -41,11 +40,11 @@ export function EasyStartHeadlessBridge({
   onPhaseChange,
   onComplete,
 }: EasyStartHeadlessBridgeProps) {
-  const { sendTransaction } = useSendTransaction();
   const {
     evmAddress,
     algorandAddress,
     signTransactions,
+    sendTransaction,
     authenticated,
   } = usePrivyEasyStart();
   const queryClient = useQueryClient();
@@ -53,7 +52,7 @@ export function EasyStartHeadlessBridge({
   const startedRef = useRef(false);
   const completedRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
-  // Privy replaces these callbacks after a signature. Reading them from refs
+  // The wallet client is replaced after a signature. Reading them from refs
   // keeps the in-flight swap alive; putting them in the effect deps aborted
   // the Exodus call right after the USDC opt-in and left the spinner up.
   const signTransactionsRef = useRef(signTransactions);
@@ -107,8 +106,11 @@ export function EasyStartHeadlessBridge({
           amount,
           evmAddress,
           algorandAddress,
-          sendTransaction: (input, options) =>
-            sendTransactionRef.current(input, options),
+          sendTransaction: (input, options) => {
+            const send = sendTransactionRef.current;
+            if (!send) throw new Error("Easy Start wallet not ready");
+            return send(input, options);
+          },
           signTransactions: (txns) => {
             const sign = signTransactionsRef.current;
             if (!sign) throw new Error("Easy Start wallet not ready");

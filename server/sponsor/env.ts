@@ -20,6 +20,7 @@ export type SponsorEnv = {
   enabled: boolean;
   privyAppId: string;
   privyAppSecret?: string;
+  dynamicEnvironmentId?: string;
   ethPrivateKey?: `0x${string}`;
   ethAmountWei: bigint;
   ethRpc: string;
@@ -75,6 +76,10 @@ export function loadSponsorEnv(
       env.VITE_PRIVY_APP_ID?.trim() ||
       DEFAULT_PRIVY_APP_ID,
     privyAppSecret: env.PRIVY_APP_SECRET?.trim() || undefined,
+    dynamicEnvironmentId:
+      env.DYNAMIC_ENVIRONMENT_ID?.trim() ||
+      env.VITE_DYNAMIC_ENVIRONMENT_ID?.trim() ||
+      undefined,
     ethPrivateKey: parseEthPrivateKey(env.SPONSOR_ETH_PRIVATE_KEY),
     ethAmountWei: parsePositiveBigInt(
       env.SPONSOR_ETH_AMOUNT_WEI,
@@ -95,9 +100,8 @@ export function loadSponsorEnv(
 
 /** Keys present so the endpoint can actually send. */
 export function isSponsorConfigured(env: SponsorEnv): boolean {
-  return Boolean(
-    env.privyAppSecret && env.ethPrivateKey && env.algoMnemonic
-  );
+  const canIdentify = Boolean(env.privyAppSecret || env.dynamicEnvironmentId);
+  return Boolean(canIdentify && env.ethPrivateKey && env.algoMnemonic);
 }
 
 export function isSponsorLive(env: SponsorEnv): boolean {

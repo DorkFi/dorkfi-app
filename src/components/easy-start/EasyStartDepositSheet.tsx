@@ -1,11 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useFiatOnramp, useFundWallet } from "@privy-io/react-auth";
 import { useQuery } from "@tanstack/react-query";
-import { base } from "viem/chains";
 import type { Address } from "viem";
 import {
   CheckCircle2,
-  CreditCard,
   Landmark,
   Loader2,
   Wallet,
@@ -17,13 +14,11 @@ import { useConsumerCopy } from "@/contexts/ProductFlavorContext";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
 import { useToast } from "@/hooks/use-toast";
 import {
-  BASE_MAINNET_USDC,
   fetchBaseEthBalance,
   fetchBaseUsdcBalance,
   hasEnoughBaseEth,
 } from "@/lib/easyStart/baseBalances";
 import { isXoGeoRestricted } from "@/lib/easyStart/xoSwap/errors";
-import type { DepositCardProvider } from "@/components/easy-start/EasyStartCardProviderPicker";
 import { createCoinbaseSession } from "@/lib/easyStart/offrampApi";
 import {
   BANK_DEPOSIT_MIN_GAIN_USDC,
@@ -37,13 +32,11 @@ import {
 import {
   AmountHero,
   AmountPresets,
-  ApplePayGlyph,
   ChooseSummary,
   ContinueLabel,
   EASY_START_FUNDING_DIALOG_CLASS,
   FundingPrimaryButton,
   FundingSheetHeader,
-  InstantTagIcon,
   PayMethodList,
   PrivySecureNote,
   ReviewBreakdown,
@@ -56,9 +49,6 @@ import {
 } from "@/components/easy-start/EasyStartFundingUi";
 
 const PRESET_AMOUNTS = ["50", "100", "250", "500"] as const;
-const PRIVY_MODAL_HANDOFF_MS = 200;
-/** Small USD native top-up so Base can pay gas when the user later Deposits to Earn. */
-const GAS_TOPUP_USD = "3";
 
 type DepositPhase =
   | "idle"
@@ -68,7 +58,7 @@ type DepositPhase =
   | "success"
   | "error";
 type DepositStep = "choose" | "review";
-type DepositPayMethod = "apple_pay" | "card" | "coinbase" | "balance";
+type DepositPayMethod = "coinbase" | "balance";
 
 interface EasyStartDepositSheetProps {
   open: boolean;
@@ -85,26 +75,10 @@ interface EasyStartDepositSheetProps {
   bankDepositArrived?: boolean;
 }
 
-function isUserCanceledFunding(message: string): boolean {
-  const lower = message.toLowerCase();
-  return (
-    lower.includes("cancel") ||
-    lower.includes("close") ||
-    lower.includes("exited") ||
-    lower.includes("dismiss")
-  );
-}
-
-function methodToProvider(method: DepositPayMethod): DepositCardProvider {
-  if (method === "apple_pay") return "stripe";
-  if (method === "coinbase") return "coinbase";
-  return "moonpay";
-}
-
 /**
- * Fiat on-ramp to Base USDC. Funds stay in the Easy Start Base wallet until
- * the user Deposit to Earn (XO Swap + supply).
- * Must render under PrivyProvider.
+ * Coinbase Onramp to Base USDC, using the existing CDP session API.
+ * Funds stay in the Easy Start Base wallet until Deposit to Earn
+ * (Exodus XO Swap + supply).
  */
 export function EasyStartDepositSheet({
   open,
@@ -115,8 +89,6 @@ export function EasyStartDepositSheet({
   onBankDepositDetected,
   bankDepositArrived = false,
 }: EasyStartDepositSheetProps) {
-  const { fundWallet } = useFundWallet();
-  const { fund: fundFiatOnramp } = useFiatOnramp();
   const { evmAddress, getAccessToken } = usePrivyEasyStart();
   const consumerCopy = useConsumerCopy();
   const { formatCurrency } = useNumberI18n();
@@ -137,7 +109,6 @@ export function EasyStartDepositSheet({
   const [popupBlocked, setPopupBlocked] = useState(false);
 
   const address = evmAddress as Address | null;
-  const cardProvider = methodToProvider(method);
   const skipFiat = method === "balance";
   const usdcBeforeRef = useRef(resumeBankDeposit?.usdcBefore ?? 0);
   const resumeAt = resumeBankDeposit?.at ?? null;
@@ -279,43 +250,6 @@ export function EasyStartDepositSheet({
     noteArrival();
   }, [bankDepositArrived, baseUsdcNum, noteArrival, phase]);
 
-  const fundWithCardProvider = async (options: {
-    asset: "USDC" | "native-currency";
-    amount: string;
-    preferredProvider?: "moonpay" | "coinbase";
-  }) => {
-    if (!address) return;
-    await fundWallet({
-      address,
-      options: {
-        chain: base,
-        asset: options.asset,
-        amount: options.amount,
-        defaultFundingMethod: "card",
-        ...(options.preferredProvider
-          ? { card: { preferredProvider: options.preferredProvider } }
-          : {}),
-      },
-    });
-  };
-
-  const fundWithStripeOnramp = async (usdAmount: string) => {
-    if (!address) return;
-    await fundFiatOnramp({
-      source: {
-        assets: ["usd"],
-        defaultAsset: "usd",
-      },
-      destination: {
-        asset: BASE_MAINNET_USDC,
-        chain: "eip155:8453",
-        address,
-      },
-      environment: import.meta.env.DEV ? "sandbox" : "production",
-      defaultAmount: usdAmount,
-    });
-  };
-
   const handleCoinbaseOnramp = async () => {
     if (!address) return;
     setError(null);
@@ -381,25 +315,20 @@ export function EasyStartDepositSheet({
   const handleFundGas = async () => {
     if (!address) return;
     setError(null);
-    onOpenChange(false);
-    await new Promise((r) => setTimeout(r, PRIVY_MODAL_HANDOFF_MS));
     try {
-      await fundWithCardProvider({
-        asset: "native-currency",
-        amount: GAS_TOPUP_USD,
-        preferredProvider: "moonpay",
-      });
-      await ensureGasThenFinish();
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      if (isUserCanceledFunding(message)) {
-        setPhase("gas");
-        onOpenChange(true);
+      const eth = await fetchBaseEthBalance(address);
+      if (hasEnoughBaseEth(eth.value)) {
+        markSuccess();
         return;
       }
-      setError(message || "Couldn’t add processing fee");
+      setPhase("gas");
+      setError(
+        "A small ETH balance is sponsored after you sign in. Wait a moment, then try again."
+      );
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message || "Couldn’t check processing fees");
       setPhase("error");
-      onOpenChange(true);
     }
   };
 
@@ -411,8 +340,8 @@ export function EasyStartDepositSheet({
       if (!hasUsdcOnBase) {
         setError(
           consumerCopy
-            ? "No funds in your account yet. Add money with a card first."
-            : "No USDC on Base yet. Deposit with a card first."
+            ? "No funds in your account yet. Add money with a bank deposit first."
+            : "No USDC on Base yet. Add money with a bank deposit first."
         );
         setPhase("error");
         return;
@@ -422,49 +351,7 @@ export function EasyStartDepositSheet({
       return;
     }
 
-    if (method === "coinbase") {
-      await handleCoinbaseOnramp();
-      return;
-    }
-
-    setPhase("funding");
-    onOpenChange(false);
-    await new Promise((r) => setTimeout(r, PRIVY_MODAL_HANDOFF_MS));
-
-    try {
-      if (cardProvider === "stripe") {
-        await fundWithStripeOnramp(amount);
-      } else {
-        await fundWithCardProvider({
-          asset: "USDC",
-          amount,
-          preferredProvider: "moonpay",
-        });
-      }
-      await new Promise((r) => setTimeout(r, 1500));
-      await refetchUsdc();
-      await ensureGasThenFinish();
-      toast({
-        title: "Payment received",
-        description: consumerCopy
-          ? "Funds are in your account."
-          : "USDC is in your Base wallet.",
-      });
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      if (isUserCanceledFunding(message)) {
-        resetLocal();
-        return;
-      }
-      setError(message || "Something went wrong opening payment");
-      setPhase("error");
-      onOpenChange(true);
-      toast({
-        title: "Payment couldn’t start",
-        description: message,
-        variant: "destructive",
-      });
-    }
+    await handleCoinbaseOnramp();
   };
 
   const selectMethod = (id: string) => {
@@ -487,18 +374,6 @@ export function EasyStartDepositSheet({
         icon: <Landmark className="h-5 w-5" />,
         badge: "Lowest Fees",
       },
-      {
-        id: "apple_pay",
-        title: "Apple Pay",
-        description: "Instant · Fee shown at checkout",
-        icon: <ApplePayGlyph />,
-      },
-      {
-        id: "card",
-        title: "Debit or credit card",
-        description: "Instant · Fee shown at checkout",
-        icon: <CreditCard className="h-5 w-5" />,
-      },
     ];
     if (hasUsdcOnBase) {
       methods.push({
@@ -516,13 +391,9 @@ export function EasyStartDepositSheet({
 
   const selectedMethod = payMethods.find((m) => m.id === method) ?? payMethods[0];
   const payCta =
-    method === "apple_pay"
-      ? `Pay ${amountDisplay} with Apple Pay`
-      : method === "coinbase"
-        ? `Pay ${amountDisplay} with bank deposit`
-        : method === "card"
-          ? `Pay ${amountDisplay} with card`
-          : `Continue with ${amountDisplay}`;
+    method === "coinbase"
+      ? `Pay ${amountDisplay} with bank deposit`
+      : `Continue with ${amountDisplay}`;
 
   const busy = phase === "funding";
   const canContinue = Boolean(address) && amountValid && !busy;
@@ -690,13 +561,8 @@ export function EasyStartDepositSheet({
                   tags={
                     method === "balance"
                       ? [{ label: "In your account" }]
-                      : method === "coinbase"
-                        ? [
+                      : [
                             { label: "Lowest fees" },
-                            { label: "Fee shown at checkout" },
-                          ]
-                        : [
-                            { label: "Instant", icon: <InstantTagIcon /> },
                             { label: "Fee shown at checkout" },
                           ]
                   }
@@ -726,12 +592,7 @@ export function EasyStartDepositSheet({
                   disabled={!canContinue}
                   onClick={() => void handleDeposit()}
                 >
-                  {method === "apple_pay" ? (
-                    <span className="inline-flex items-center gap-2">
-                      <ApplePayGlyph className="h-4 w-4 text-white" />
-                      {payCta}
-                    </span>
-                  ) : method === "coinbase" ? (
+                  {method === "coinbase" ? (
                     <span className="inline-flex items-center gap-2">
                       <Landmark className="h-4 w-4 text-white" />
                       {payCta}
@@ -747,7 +608,7 @@ export function EasyStartDepositSheet({
             <>
               <FundingSheetHeader
                 title={consumerCopy ? "Add money" : "Deposit"}
-                subtitle="Bank deposit is selected. Apple Pay and card are also available."
+                subtitle="Transfer from your bank with Coinbase."
               />
               <div className="px-6 pb-6 pt-3 space-y-5">
                 <div>
