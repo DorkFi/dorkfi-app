@@ -1,10 +1,25 @@
 import { describe, expect, it } from "vitest";
 import { getPortfolioVisibleTokens } from "@/config";
 import {
+  bigintOrZero,
   configuredMarketsMissingFromUserData,
   poolHasGlobalPosition,
   unionPortfolioPositionRows,
 } from "../portfolioMissingUserMarkets";
+
+describe("bigintOrZero", () => {
+  it("accepts integers, decimal strings, and junk without throwing", () => {
+    expect(bigintOrZero(12n)).toBe(12n);
+    expect(bigintOrZero("4035455192621")).toBe(4035455192621n);
+    expect(bigintOrZero("12.9")).toBe(12n);
+    expect(bigintOrZero(" 7 ")).toBe(7n);
+    expect(bigintOrZero("")).toBe(0n);
+    expect(bigintOrZero(null)).toBe(0n);
+    expect(bigintOrZero(undefined)).toBe(0n);
+    expect(bigintOrZero("not-a-number")).toBe(0n);
+    expect(bigintOrZero("NaN")).toBe(0n);
+  });
+});
 
 describe("poolHasGlobalPosition", () => {
   it("is true when collateral or borrow is non-zero", () => {
@@ -116,5 +131,49 @@ describe("unionPortfolioPositionRows", () => {
     expect(merged[0].asset).toBe("WAD");
     expect(merged[1].asset).toBe("ALGO");
     expect(merged[1].poolId).toBe("3345940978");
+  });
+
+  it("keeps an indexer-omitted borrow and an LP overlay when merged after fill", () => {
+    const apiRows = [
+      {
+        type: "borrow" as const,
+        network: "algorand-mainnet",
+        poolId: "3333688282",
+        marketId: "3333688448",
+        asset: "WAD",
+      },
+    ];
+    const filledOmittedBorrow = [
+      {
+        type: "borrow" as const,
+        network: "algorand-mainnet",
+        poolId: "3345940978",
+        marketId: "3207744109",
+        asset: "ALGO",
+      },
+    ];
+    const lpOverlay = [
+      {
+        type: "deposit" as const,
+        network: "algorand-mainnet",
+        poolId: "3589083110",
+        marketId: "3577729953",
+        asset: "UNIT-ALGO",
+      },
+    ];
+
+    const overlayOnOriginalUser = unionPortfolioPositionRows(apiRows, lpOverlay);
+    expect(overlayOnOriginalUser.map((r) => r.asset)).toEqual([
+      "WAD",
+      "UNIT-ALGO",
+    ]);
+
+    const afterFill = unionPortfolioPositionRows(apiRows, filledOmittedBorrow);
+    const afterOverlay = unionPortfolioPositionRows(afterFill, lpOverlay);
+    expect(afterOverlay.map((r) => r.asset)).toEqual([
+      "WAD",
+      "ALGO",
+      "UNIT-ALGO",
+    ]);
   });
 });

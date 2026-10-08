@@ -28,11 +28,6 @@ import type { LiquidityPoolApr } from "@/services/tinymanLiquidityService";
 
 const ALGORAND_MAINNET: NetworkId = "algorand-mainnet";
 
-/** User-provided Tinyman yield snapshots when analytics have not loaded yet. */
-const FALLBACK_WAD_USDC_YIELD = 5;
-const FALLBACK_WAD_ALGO_YIELD = 38;
-const FALLBACK_UNIT_ALGO_FARM_YIELD = 20;
-
 function requirePair(id: string): LiquidityPoolPairConfig {
   const pair = CURATED_LIQUIDITY_POOLS.find((item) => item.id === id);
   if (!pair?.poolAddr) {
@@ -56,21 +51,18 @@ function liveYieldPercent(apr: LiquidityPoolApr | null | undefined): number | nu
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+/** Hide hardcoded /start yield estimates until Tinyman analytics load. */
 function formatYield(
   formatPercent: (value: number, options?: { maximumFractionDigits: number }) => string,
-  live: number | null,
-  fallback: number
-): { label: string; isLive: boolean } {
+  live: number | null
+): { label: string | null; isLive: boolean } {
   if (live != null) {
     return {
       label: formatPercent(live / 100, { maximumFractionDigits: 2 }),
       isLive: true,
     };
   }
-  return {
-    label: `~${formatPercent(fallback / 100, { maximumFractionDigits: 0 })}`,
-    isLive: false,
-  };
+  return { label: null, isLive: false };
 }
 
 const Start = () => {
@@ -119,18 +111,15 @@ const Start = () => {
       : null;
   const wadUsdcYield = formatYield(
     formatPercent,
-    liveYieldPercent(wadUsdcSnap.data?.apr),
-    FALLBACK_WAD_USDC_YIELD
+    liveYieldPercent(wadUsdcSnap.data?.apr)
   );
   const wadAlgoYield = formatYield(
     formatPercent,
-    liveYieldPercent(wadAlgoSnap.data?.apr),
-    FALLBACK_WAD_ALGO_YIELD
+    liveYieldPercent(wadAlgoSnap.data?.apr)
   );
   const unitAlgoYield = formatYield(
     formatPercent,
-    liveYieldPercent(unitAlgoSnap.data?.apr),
-    FALLBACK_UNIT_ALGO_FARM_YIELD
+    liveYieldPercent(unitAlgoSnap.data?.apr)
   );
 
   const wadUsdcUrl = getTinymanAddLiquidityUrl(WAD_USDC_PAIR.poolAddr!);
@@ -210,20 +199,36 @@ const Start = () => {
                   <Body>
                     Mint WAD in the app, then pair it with USDC or ALGO on Tinyman
                     to earn LP yield. Search for WAD on Tinyman, or open the pools
-                    directly. Currently{" "}
-                    <span className="font-semibold text-ocean-teal">
-                      {wadUsdcYield.label}
-                    </span>{" "}
-                    with USDC and{" "}
-                    <span className="font-semibold text-ocean-teal">
-                      {wadAlgoYield.label}
-                    </span>{" "}
-                    with ALGO.
+                    directly.
+                    {wadUsdcYield.label || wadAlgoYield.label ? (
+                      <>
+                        {" "}
+                        Currently{" "}
+                        {wadUsdcYield.label ? (
+                          <>
+                            <span className="font-semibold text-ocean-teal">
+                              {wadUsdcYield.label}
+                            </span>{" "}
+                            with USDC
+                          </>
+                        ) : null}
+                        {wadUsdcYield.label && wadAlgoYield.label ? " and " : null}
+                        {wadAlgoYield.label ? (
+                          <>
+                            <span className="font-semibold text-ocean-teal">
+                              {wadAlgoYield.label}
+                            </span>{" "}
+                            with ALGO
+                          </>
+                        ) : null}
+                        .
+                      </>
+                    ) : null}
                   </Body>
                   <Caption className="block">
                     {wadUsdcYield.isLive || wadAlgoYield.isLive
                       ? "Live Tinyman pool yield."
-                      : "Approximate Tinyman LP yield until live data loads."}
+                      : "Tinyman pool yield loads from live analytics."}
                   </Caption>
                 </div>
                 <div className="mt-auto flex flex-wrap gap-2 pt-2">
@@ -260,17 +265,24 @@ const Start = () => {
                 <div className="space-y-2">
                   <H2 className="mb-0">Join with UNIT</H2>
                   <Body>
-                    Pair UNIT with ALGO to join the Tinyman farm currently producing{" "}
-                    <span className="font-semibold text-ocean-teal">
-                      {unitAlgoYield.label}
-                    </span>{" "}
-                    yields. This is the community pool — add liquidity, then stake
-                    LP in the farm.
+                    Pair UNIT with ALGO to join the Tinyman farm
+                    {unitAlgoYield.label ? (
+                      <>
+                        {" "}
+                        currently producing{" "}
+                        <span className="font-semibold text-ocean-teal">
+                          {unitAlgoYield.label}
+                        </span>{" "}
+                        yields
+                      </>
+                    ) : null}
+                    . This is the community pool — add liquidity, then stake LP in
+                    the farm.
                   </Body>
                   <Caption className="block">
                     {unitAlgoYield.isLive
                       ? "Live Tinyman farm + fee yield."
-                      : "Approximate farm yield until live data loads."}
+                      : "Farm yield loads from live Tinyman analytics."}
                   </Caption>
                 </div>
                 <div className="mt-auto flex flex-wrap gap-2 pt-2">

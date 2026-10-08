@@ -42,6 +42,8 @@ import {
 import {
   fetchPortfolioChainOverlay,
   mergeGlobalUserRowsPreferChain,
+  resolvePortfolioHeadlineTotals,
+  rowUsdByPoolKey,
 } from "@/utils/portfolioChainOverlay";
 import {
   hydratePortfolioNetworkMarketsPhaseA,
@@ -432,32 +434,6 @@ function lpWadBorrowTarget(
   const wad = getWadBorrowMarketConfigForPool(network, poolId);
   if (!wad?.poolId || !wad.contractId) return null;
   return { poolId: String(wad.poolId), contractId: String(wad.contractId) };
-}
-
-function portfolioPositionDedupeKey(pos: {
-  network?: string;
-  poolId?: string;
-  appId?: string;
-  marketId?: string;
-}): string {
-  return `${pos.network ?? ""}|${String(pos.poolId || pos.appId || "")}|${String(pos.marketId || "")}`;
-}
-
-function mergePortfolioPositions<T extends {
-  network?: string;
-  poolId?: string;
-  appId?: string;
-  marketId?: string;
-}>(primary: T[], extra: T[]): T[] {
-  const map = new Map<string, T>();
-  for (const pos of primary) {
-    map.set(portfolioPositionDedupeKey(pos), pos);
-  }
-  for (const pos of extra) {
-    const key = portfolioPositionDedupeKey(pos);
-    if (!map.has(key)) map.set(key, pos);
-  }
-  return [...map.values()];
 }
 
 function buildPortfolioComputed(
@@ -1946,30 +1922,21 @@ const Portfolio = () => {
     finalBorrowsCount: borrows.length,
   });
 
-  // API `get_global_user` / user index lags new LP pools. Visible rows (chain overlay)
-  // are the live floor so headline totals don't sit on stale $150 while LP is listed.
-  const depositsUsd = deposits.reduce(
-    (sum, deposit) => sum + (Number(deposit.value) || 0),
-    0
-  );
-  const borrowsUsd = borrows.reduce(
-    (sum, borrow) => sum + (Number(borrow.value) || 0),
-    0
-  );
-  const totalCollateral = Math.max(
-    Number(user?.computed?.globalCollateralValue ?? 0),
-    Number(userGlobalData?.totalCollateralValue ?? 0),
-    depositsUsd
-  );
-
-  console.log({
+  // Collateral: chain get_global_user per pool, then API, then row sums only for
+  // pools the chain/API did not return. Do not Math.max a stale-high API total.
+  // Debt may still take the max (conservative vs looking safer than on-chain).
+  const { totalCollateral, totalBorrowed } = resolvePortfolioHeadlineTotals({
+    apiPools: (user?.globalUserData as {
+      network?: string;
+      poolId?: string;
+      appId?: string;
+      totalCollateralValue?: unknown;
+      totalBorrowValue?: unknown;
+    }[]) ?? [],
+    rowCollateralUsdByPool: rowUsdByPoolKey(deposits),
+    rowBorrowUsdByPool: rowUsdByPoolKey(borrows),
+    rpcBorrowUsd: Number(userGlobalData?.totalBorrowValue ?? 0),
   });
-
-  const totalBorrowed = Math.max(
-    Number(user?.computed?.globalBorrowValue ?? 0),
-    Number(userGlobalData?.totalBorrowValue ?? 0),
-    borrowsUsd
-  );
 
   // Calculate weighted liquidation threshold based on borrowed assets only
   // This is more accurate because liquidation risk only applies to markets with active debt
@@ -3301,37 +3268,6 @@ const Portfolio = () => {
         return;
       }
 
-      try {
-        const overlay = await fetchPortfolioChainOverlay(displayAddress);
-        if (overlay.markets.length > 0) {
-          setMarketData((prev) =>
-            mergePortfolioMarketRows(prev, overlay.markets)
-          );
-        }
-        if (overlay.positions.length > 0) {
-          setUserPositions((prev) =>
-            mergePortfolioPositions(prev, overlay.positions)
-          );
-        }
-        setUser((prev) => {
-          if (!prev) return prev;
-          const next = buildPortfolioComputed({
-            ...(prev as Record<string, unknown>),
-            globalUserData: mergeGlobalUserRowsPreferChain(
-              ((prev as { globalUserData?: { network?: string; poolId?: string }[] })
-                .globalUserData) ?? [],
-              overlay.globalUserData
-            ),
-          });
-          return (next as typeof prev) ?? prev;
-        });
-      } catch (overlayError) {
-        console.warn(
-          "[Portfolio] Chain overlay on refresh failed:",
-          overlayError
-        );
-      }
-
       const freshGlobalData = await fetchUserGlobalData(
         displayAddress,
         currentNetwork,
@@ -3367,6 +3303,35 @@ const Portfolio = () => {
       setMarketData((prev) => mergePortfolioMarketRows(prev, marketData));
       setUserPositions(allPositions);
       setUserGlobalData(freshGlobalData);
+
+      try {
+        const overlay = await fetchPortfolioChainOverlay(displayAddress);
+        if (overlay.markets.length > 0) {
+          setMarketData((prev) =>
+            mergePortfolioMarketRows(prev, overlay.markets)
+          );
+        }
+        setUserPositions((prev) =>
+          unionPortfolioPositionRows(prev, overlay.positions)
+        );
+        setUser((prev) => {
+          if (!prev) return prev;
+          const next = buildPortfolioComputed({
+            ...(prev as Record<string, unknown>),
+            globalUserData: mergeGlobalUserRowsPreferChain(
+              ((prev as { globalUserData?: { network?: string; poolId?: string }[] })
+                .globalUserData) ?? [],
+              overlay.globalUserData
+            ),
+          });
+          return (next as typeof prev) ?? prev;
+        });
+      } catch (overlayError) {
+        console.warn(
+          "[Portfolio] Chain overlay on refresh failed:",
+          overlayError
+        );
+      }
     } catch (error) {
       console.error("Error refreshing positions:", error);
       setDataError("Failed to refresh positions data");
@@ -4197,11 +4162,9 @@ const Portfolio = () => {
             mergePortfolioMarketRows(prev, overlay.markets)
           );
         }
-        if (overlay.positions.length > 0) {
-          setUserPositions((prev) =>
-            mergePortfolioPositions(prev, overlay.positions)
-          );
-        }
+        setUserPositions((prev) =>
+          unionPortfolioPositionRows(prev, overlay.positions)
+        );
       } catch (error) {
         console.warn("[Portfolio] Chain overlay failed:", error);
       }
