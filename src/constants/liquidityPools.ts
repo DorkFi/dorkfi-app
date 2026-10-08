@@ -8,6 +8,7 @@ import {
   getNetworkConfig,
   getLendingPoolIdForMarketContract,
   getTokenDisplayInfo,
+  isRegisterableMythLpPoolId,
   isUnitLpCollateralMarketContract,
   isUsdcLpCollateralMarketContract,
   isWadLpCollateralMarketContract,
@@ -591,7 +592,10 @@ export function pairHasMythLpLendingMarket(
 ): boolean {
   if (pair.platform !== "myth") return false;
   const market = resolveLiquidityPoolLendingMarket(networkId, pair);
-  return market != null && market.configSymbol.startsWith("LP_MYTH_");
+  if (market == null || !market.configSymbol.startsWith("LP_MYTH_")) {
+    return false;
+  }
+  return isRegisterableMythLpPoolId(market.poolId);
 }
 
 /** Lending pool app ids for listed Myth LST markets among the given curated pairs. */

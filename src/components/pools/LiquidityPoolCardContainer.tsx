@@ -43,6 +43,8 @@ const LiquidityPoolCardContainer = ({
 
   const lendingMarket = useMemo(() => {
     const listed = resolvePoolsPageLendingMarket(pair.networkId, pair);
+    // Flag is UI-only. Tokens are not registered unless it is on, so Supply
+    // cannot point at a Myth market while lending looks "off".
     if (
       pair.platform === "myth" &&
       !isFeatureEnabled("enableMythPoolLending")

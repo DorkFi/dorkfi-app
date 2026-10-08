@@ -1044,8 +1044,9 @@ export interface GlobalConfig {
     /** In-app Deposit / Withdraw LP actions on pool cards (off until Tinyman LP flows are production-ready). Supply / Withdraw lending stays enabled. */
     enablePoolDepositWithdraw: boolean;
     /**
-     * Myth dualSTAKE Supply / Withdraw on Pools (beta). Off in production until testers
-     * set `VITE_ENABLE_MYTH_POOL_LENDING` and list markets via `VITE_LP_MYTH_*`.
+     * Myth dualSTAKE Supply / Withdraw on Pools (beta). UI-only — not on-chain
+     * access control. Off in production; keep `VITE_LP_MYTH_*` unset there too.
+     * Only register `LP_MYTH_*` tokens when this flag is on.
      */
     enableMythPoolLending: boolean;
   };
@@ -3303,6 +3304,51 @@ const algorandProdTokens: { [symbol: string]: TokenConfig | TokenConfig[] } = {
   },
 };
 
+/**
+ * Vite/DEV flag for Myth LST lending. Production stays off unless
+ * `VITE_ENABLE_MYTH_POOL_LENDING=true`. This is UI-only: once Admin
+ * `createMarket` exists on-chain, anyone can deposit.
+ */
+export function mythPoolLendingFlagFromViteEnv(): boolean {
+  const raw = import.meta.env.VITE_ENABLE_MYTH_POOL_LENDING;
+  if (raw === "true" || raw === "1") return true;
+  if (raw === "false" || raw === "0") return false;
+  if (import.meta.env.MODE === "test" || process.env.NODE_ENV === "test") {
+    return false;
+  }
+  return import.meta.env.DEV === true;
+}
+
+/** Pool A shared prime. Thin Myth LSTs must not share this market. */
+export function isAlgorandPoolALendingPoolId(poolId: string): boolean {
+  return String(poolId) === algorandProdAMarket;
+}
+
+const MYTH_LP_FORBIDDEN_SHARED_POOL_IDS = new Set([
+  algorandProdAMarket, // shared prime
+  algorandProdCMarket, // Tinyman UNIT LP
+  algorandProdEMarket, // Tinyman WAD LP
+  algorandProdFMarket, // Tinyman USDC LP
+]);
+
+export function isKnownAlgorandMainnetLendingPoolId(poolId: string): boolean {
+  return algorandProdLendingPools.some((id) => String(id) === String(poolId));
+}
+
+/**
+ * Supply may only point at a known lending pool that is not Pool A or a
+ * Tinyman LP isolated pool (C/E/F). Prefer a dedicated isolated pool, or
+ * strict deposit/borrow caps plus a written owner-oracle pricing rule, before
+ * any public Myth market. Prices are still owner-set; Entersoft Nov 2025
+ * covered LendingPool only and left caps / oracle-centralization open.
+ */
+export function isRegisterableMythLpPoolId(poolId: string): boolean {
+  return (
+    isKnownAlgorandMainnetLendingPoolId(poolId) &&
+    !MYTH_LP_FORBIDDEN_SHARED_POOL_IDS.has(String(poolId))
+  );
+}
+
 /** Positive integer app ids from tester env (`poolId,contractId,nTokenId`). */
 export function parseListedMythLpMarketEnv(
   raw: string | undefined | null
@@ -3388,25 +3434,44 @@ function mythLpTokenFromListing(
 }
 
 /**
- * Tester-listed Myth dualSTAKE markets from env. Unset in production until a
- * market is created. Format: `VITE_LP_MYTH_COOP_ALGO=poolId,contractId,nTokenId`
- * (same for ALPHA / FINITE). Prefer Pool A (`3333688282`).
+ * Tester-listed Myth dualSTAKE markets from env.
+ *
+ * End state before any public Myth market:
+ * - Keep `VITE_LP_MYTH_*` unset in production.
+ * - Only register tokens when the lending flag is on (UI hide is not access
+ *   control; listed tokens would otherwise show in Portfolio with lending off).
+ * - Never Pool A (`3333688282`) as a shared market. Tinyman LP pools C/E/F
+ *   are also rejected. Prefer a dedicated isolated pool added to
+ *   `lendingPools` first, or caps + a written owner-oracle pricing rule.
+ * - Format: `VITE_LP_MYTH_COOP_ALGO=poolId,contractId,nTokenId`
+ *   (same for ALPHA / FINITE). poolId must be a known lending pool.
+ *
+ * After #681 merges: reuse Portfolio `unionPortfolioPositionRows` /
+ * `bigintOrZero` / `resolvePortfolioHeadlineTotals` — do not fork a second overlay.
  */
-export function listedMythLpTokensFromEnv(): {
-  [symbol: string]: TokenConfig;
-} {
-  const rawByKey: Record<string, string | undefined> = {
-    LP_MYTH_COOP_ALGO: import.meta.env.VITE_LP_MYTH_COOP_ALGO,
-    LP_MYTH_ALPHA_ALGO: import.meta.env.VITE_LP_MYTH_ALPHA_ALGO,
-    LP_MYTH_FINITE_ALGO: import.meta.env.VITE_LP_MYTH_FINITE_ALGO,
-  };
+export function buildListedMythLpTokens(
+  enabled: boolean,
+  rawByKey: Record<string, string | undefined>
+): { [symbol: string]: TokenConfig } {
+  if (!enabled) return {};
   const tokens: { [symbol: string]: TokenConfig } = {};
   for (const spec of MYTH_LP_TOKEN_SPECS) {
     const listed = parseListedMythLpMarketEnv(rawByKey[spec.configKey]);
     if (!listed) continue;
+    if (!isRegisterableMythLpPoolId(listed.poolId)) continue;
     tokens[spec.configKey] = mythLpTokenFromListing(spec, listed);
   }
   return tokens;
+}
+
+export function listedMythLpTokensFromEnv(): {
+  [symbol: string]: TokenConfig;
+} {
+  return buildListedMythLpTokens(mythPoolLendingFlagFromViteEnv(), {
+    LP_MYTH_COOP_ALGO: import.meta.env.VITE_LP_MYTH_COOP_ALGO,
+    LP_MYTH_ALPHA_ALGO: import.meta.env.VITE_LP_MYTH_ALPHA_ALGO,
+    LP_MYTH_FINITE_ALGO: import.meta.env.VITE_LP_MYTH_FINITE_ALGO,
+  });
 }
 
 const algorandMainnetProdConfig: NetworkConfig = {
@@ -4266,7 +4331,7 @@ export function isMarketsTableExcludedPool(
 /**
  * True when a configured market row should not appear on the Markets table (or matching portfolio market lists).
  * Pool C/E/F LP (`LP_TMPOOL2_*`) stays hidden; WAD borrow on those pools remains visible.
- * Myth dualSTAKE (`LP_MYTH_*`) is Pools/Portfolio-only even when listed on Pool A.
+ * Myth dualSTAKE (`LP_MYTH_*`) is Pools/Portfolio-only. Do not list on Pool A.
  */
 export function isMarketsTableExcludedMarket(
   networkId: NetworkId | string | null | undefined,
@@ -4280,7 +4345,11 @@ export function isMarketsTableExcludedMarket(
   return true;
 }
 
-/** Hide from Portfolio lists. Myth LP stays visible once a tester market is listed. */
+/**
+ * Hide from Portfolio lists. Myth LP is visible only after it is registered
+ * (`enableMythPoolLending` + valid `VITE_LP_MYTH_*`). Flag-off must not leave
+ * listed tokens in Portfolio.
+ */
 export function isPortfolioHiddenToken(
   networkId: NetworkId | string | null | undefined,
   poolId: string | number | null | undefined,
@@ -5392,11 +5461,7 @@ export const getEnvironmentConfig = (): Partial<GlobalConfig> => {
       import.meta.env.VITE_ENABLE_POOL_DEPOSIT_WITHDRAW === "1";
   }
 
-  if (typeof import.meta.env.VITE_ENABLE_MYTH_POOL_LENDING !== "undefined") {
-    envFeatures.enableMythPoolLending =
-      import.meta.env.VITE_ENABLE_MYTH_POOL_LENDING === "true" ||
-      import.meta.env.VITE_ENABLE_MYTH_POOL_LENDING === "1";
-  }
+  envFeatures.enableMythPoolLending = mythPoolLendingFlagFromViteEnv();
 
   if (env === "development") {
     return {
@@ -5404,7 +5469,6 @@ export const getEnvironmentConfig = (): Partial<GlobalConfig> => {
       features: {
         ...config.features,
         enableGovernance: true, // Enable governance in development for testing
-        enableMythPoolLending: true,
         ...envFeatures,
       },
     };
