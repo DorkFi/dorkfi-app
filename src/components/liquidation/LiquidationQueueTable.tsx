@@ -70,7 +70,7 @@ export default function LiquidationQueueTable({ accounts, onAccountClick, onLiqu
             <Button
               variant="outline"
               size="sm"
-              onClick={() => window.open('https://docs.dork.fi/liquidations', '_blank', 'noopener,noreferrer')}
+              onClick={() => window.open('https://docs.dork.fi/liquidation-markets', '_blank', 'noopener,noreferrer')}
               className="flex items-center gap-2 bg-ocean-teal/5 border-ocean-teal/20 hover:bg-ocean-teal/10 text-ocean-teal"
             >
               Learn More
