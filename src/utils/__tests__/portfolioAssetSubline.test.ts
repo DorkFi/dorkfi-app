@@ -23,4 +23,16 @@ describe("shouldShowConfigSymbolUnderDisplayAsset", () => {
       false
     );
   });
+
+  it("hides LP config keys under pair display labels", () => {
+    expect(
+      shouldShowConfigSymbolUnderDisplayAsset("COOP / ALGO", "LP_MYTH_COOP_ALGO")
+    ).toBe(false);
+    expect(
+      shouldShowConfigSymbolUnderDisplayAsset(
+        "UNIT / ALGO",
+        "LP_TMPOOL2_UNIT_ALGO"
+      )
+    ).toBe(false);
+  });
 });

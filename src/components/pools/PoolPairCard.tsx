@@ -3,9 +3,11 @@ import DorkFiButton from "@/components/ui/DorkFiButton";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  getDexAddButtonLabel,
   getDexAddLiquidityUrl,
   getDexFarmingProgramUrl,
   LIQUIDITY_PLATFORM_LABELS,
+  pairLpDecimals,
   poolHasTinymanFarm,
   type LiquidityPoolLendingMarket,
   type LiquidityPoolPairConfig,
@@ -93,34 +95,37 @@ const PoolPairCard = ({
   const hasPosition = Boolean(
     position &&
       (position.poolTokenBalance > 0n ||
+        position.alternatePoolTokenBalance > 0n ||
         position.farmLpBalance > 0n ||
         suppliedLpBalance > 0)
   );
+  const lpDecimals = pairLpDecimals(pair);
   const apr = snapshot?.apr;
   const displayApr = apr?.totalAprPercent ?? apr?.feeAprPercent ?? null;
   const platformLabel = LIQUIDITY_PLATFORM_LABELS[pair.platform];
+  const showLendingActions = Boolean(lendingMarket) || pair.platform === "myth";
+  const extraAddLinks = pair.extraAddLinks ?? [];
   const dexLink = useMemo(() => {
-    if (!pair.poolAddr) return null;
-
     const farmId = farms[0];
-    if (farmId != null) {
+    if (farmId != null && pair.poolAddr) {
       const farmUrl = getDexFarmingProgramUrl(pair.platform, pair.poolAddr, farmId);
-      if (!farmUrl) return null;
-      return {
-        url: farmUrl,
-        label: `Farm on ${platformLabel}`,
-        isFarm: true,
-      };
+      if (farmUrl) {
+        return {
+          url: farmUrl,
+          label: `Farm on ${platformLabel}`,
+          isFarm: true,
+        };
+      }
     }
 
-    const addUrl = getDexAddLiquidityUrl(pair.platform, pair.poolAddr);
+    const addUrl = getDexAddLiquidityUrl(pair);
     if (!addUrl) return null;
     return {
       url: addUrl,
-      label: `Add on ${platformLabel}`,
+      label: getDexAddButtonLabel(pair.platform),
       isFarm: false,
     };
-  }, [farms, pair.platform, pair.poolAddr, platformLabel]);
+  }, [farms, pair, platformLabel]);
 
   return (
     <DorkFiCard className="flex flex-col gap-4 p-5 transition-shadow">
@@ -140,13 +145,27 @@ const PoolPairCard = ({
           </div>
           <div>
             <h3 className="text-lg font-semibold text-ink-blue dark:text-white">{label}</h3>
-            <p className="text-xs text-muted-foreground">{platformLabel} liquidity pool</p>
+            <p className="text-xs text-muted-foreground">
+              {pair.platform === "myth"
+                ? `${platformLabel} liquidity pool · beta`
+                : `${platformLabel} liquidity pool`}
+            </p>
           </div>
         </div>
-        <Badge variant="outline" className="shrink-0">
-          <Droplets className="mr-1 h-3 w-3" aria-hidden />
-          LP
-        </Badge>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <Badge variant="outline">
+            <Droplets className="mr-1 h-3 w-3" aria-hidden />
+            LP
+          </Badge>
+          {pair.platform === "myth" ? (
+            <Badge
+              variant="secondary"
+              className="border-amber-500/40 bg-amber-500/15 text-amber-900 dark:text-amber-100"
+            >
+              Beta
+            </Badge>
+          ) : null}
+        </div>
       </div>
 
       {displayApr != null ? (
@@ -164,10 +183,10 @@ const PoolPairCard = ({
                   {formatPercent(apr.feeAprPercent / 100, {
                     maximumFractionDigits: 2,
                   })}
-                  ) plus active Tinyman staking rewards. Sourced from Tinyman analytics.
+                  ) plus active staking rewards. Sourced from {platformLabel} analytics.
                 </>
               ) : (
-                <>Estimated APR from Tinyman analytics (fees and rewards).</>
+                <>Estimated APR from {platformLabel} analytics (fees and rewards).</>
               )}
             </TooltipContent>
           </Tooltip>
@@ -188,11 +207,15 @@ const PoolPairCard = ({
       ) : snapshot ? (
         <div className="grid grid-cols-2 gap-3 text-sm">
           <div>
-            <p className="text-xs text-muted-foreground">{asset1.symbol} in pool</p>
+            <p className="text-xs text-muted-foreground">
+              {asset1.symbol} {pair.platform === "myth" ? "staked" : "in pool"}
+            </p>
             <p className="font-medium tabular-nums">{snapshot.asset1ReserveHuman}</p>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground">{asset2.symbol} in pool</p>
+            <p className="text-xs text-muted-foreground">
+              {asset2.symbol} {pair.platform === "myth" ? "staked" : "in pool"}
+            </p>
             <p className="font-medium tabular-nums">{snapshot.asset2ReserveHuman}</p>
           </div>
           <div className="col-span-2 min-h-[5.75rem]">
@@ -200,7 +223,7 @@ const PoolPairCard = ({
               <div className="rounded-lg border border-ocean-teal/20 bg-ocean-teal/5 px-3 py-2 space-y-1">
                 <p className="text-xs text-muted-foreground">Your position</p>
                 <p className="font-medium tabular-nums text-sm">
-                  {formatLiquidityAtomic(position.poolTokenBalance, 6)} LP in wallet
+                  {formatLiquidityAtomic(position.poolTokenBalance, lpDecimals)} LP in wallet
                 </p>
                 {suppliedLpBalance > 0 ? (
                   <p className="font-medium tabular-nums text-sm">
@@ -221,8 +244,9 @@ const PoolPairCard = ({
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">
-          Pool data unavailable. Confirm the pair uses underlying ASA ids (not the LP
-          token id) and that the Tinyman v2 pool is bootstrapped.
+          {pair.platform === "myth"
+            ? "Myth dualSTAKE data unavailable. Confirm the LST ASA and app account."
+            : "Pool data unavailable. Confirm the pair uses underlying ASA ids (not the LP token id) and that the Tinyman v2 pool is bootstrapped."}
         </p>
       )}
 
@@ -245,8 +269,29 @@ const PoolPairCard = ({
             {dexLink.label}
           </DorkFiButton>
         ) : null}
-        {lendingMarket ? (
+        {extraAddLinks.map((link) => (
+          <DorkFiButton
+            key={`${link.platform}-${link.url}`}
+            variant="secondary"
+            type="button"
+            className="w-full"
+            onClick={(e) => {
+              e.stopPropagation();
+              window.open(link.url, "_blank", "noopener,noreferrer");
+            }}
+          >
+            <ExternalLink className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+            {getDexAddButtonLabel(link.platform)}
+          </DorkFiButton>
+        ))}
+        {showLendingActions ? (
           <>
+            {pair.platform === "myth" && !lendingMarket ? (
+              <p className="text-xs text-muted-foreground">
+                DorkFi supply is in beta. Testers can list a market after
+                approval.
+              </p>
+            ) : null}
             {hasFarm ? <PoolFarmSupplyNotice /> : null}
             <div className="flex gap-2">
             <DorkFiButton
