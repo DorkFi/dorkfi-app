@@ -1,0 +1,72 @@
+name: PR kanban sync
+
+# Files one tracking issue per pull request on the DorkFi Development Kanban
+# (org project 2) and keeps its Status in step with review.
+#
+# pull_request_target is what makes PROJECT_TOKEN available for fork PRs.
+# This job checks out the base commit only. It must not check out the pull
+# request head or run any file from that branch.
+#
+# workflow_dispatch backfills every open pull request. Nothing runs it automatically.
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - review_requested
+      - review_request_removed
+      - assigned
+      - unassigned
+      - converted_to_draft
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One queue so a backfill and a pull_request event cannot file two tickets.
+concurrency:
+  group: pr-kanban
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PROJECT_TOKEN
+        id: token
+        env:
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        run: |
+          if [ -z "${PROJECT_TOKEN}" ]; then
+            echo "PROJECT_TOKEN is not set. Skipping kanban sync so this pull request is not failed."
+            echo "An org admin needs to create a classic PAT with the project and repo scopes, or a fine-grained token or GitHub App with organization Projects read/write and this repository's Issues and Pull requests write."
+            echo "Save it as the PROJECT_TOKEN Actions secret on DorkFi/dorkfi-app (Settings → Secrets and variables → Actions)."
+            echo "::notice title=Kanban sync skipped::PROJECT_TOKEN secret is missing. The log explains how to add it."
+            echo "ok=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "ok=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Checkout base branch
+        if: steps.token.outputs.ok == 'true'
+        uses: actions/checkout@v4
+        with:
+          # Base commit for pull_request_target. workflow_dispatch uses the
+          # branch selected in the Actions UI. Never the pull request head.
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - name: Sync pull request to the kanban
+        if: steps.token.outputs.ok == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: |
+            const path = require("path");
+            const script = path.join(
+              process.env.GITHUB_WORKSPACE,
+              ".github/scripts/pr-kanban-sync.cjs"
+            );
+            const { run } = require(script);
+            await run({ github, context, core });
