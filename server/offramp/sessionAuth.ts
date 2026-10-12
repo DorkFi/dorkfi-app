@@ -7,6 +7,8 @@ export type EasyStartSession = {
   provider: "privy" | "dynamic";
   /** Present for Dynamic sessions when the access token lists wallets. */
   walletAddresses: string[];
+  /** Strings attested by a Dynamic access token. Empty for legacy Privy sessions. */
+  credentialValues: ReadonlySet<string>;
 };
 
 function issuerOf(token: string): string {
@@ -36,8 +38,14 @@ export async function requireEasyStartAuth(
       userId: session.userId,
       provider: "dynamic",
       walletAddresses: session.walletAddresses,
+      credentialValues: session.credentialValues,
     };
   }
   const privy = await requirePrivyAuth(req, opts.privyAppId);
-  return { userId: privy.userId, provider: "privy", walletAddresses: [] };
+  return {
+    userId: privy.userId,
+    provider: "privy",
+    walletAddresses: [],
+    credentialValues: new Set(),
+  };
 }

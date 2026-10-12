@@ -10,9 +10,11 @@ export type OfframpHealth = {
 export type CoinbaseSessionResult = {
   sessionToken: string;
   partnerUserRef: string;
-  /** Coinbase-hosted Onramp (buy USDC on Base). */
+  /** Coinbase-hosted Onramp (buy with fiat). */
   buyUrl: string;
-  /** Coinbase-hosted Offramp (sell USDC). */
+  /** Coinbase-hosted transfer from an existing Coinbase balance. */
+  sendUrl?: string;
+  /** Coinbase-hosted Offramp (sell). */
   sellUrl: string;
 };
 
@@ -82,6 +84,10 @@ export async function createCoinbaseSession(args: {
   accessToken: string;
   amount?: string;
   redirectUrl?: string;
+  /** `algorand` buys ALGO into the derived account. Omitted keeps Base USDC. */
+  destination?: "base" | "algorand";
+  /** Solana address the Algorand destination was derived from. Required for ALGO. */
+  solanaAddress?: string;
 }): Promise<CoinbaseSessionResult> {
   const res = await fetch(`${offrampBase()}/coinbase/session`, {
     method: "POST",
@@ -89,6 +95,8 @@ export async function createCoinbaseSession(args: {
     body: JSON.stringify({
       address: args.address,
       amount: args.amount,
+      destination: args.destination,
+      solanaAddress: args.solanaAddress,
       redirectUrl:
         args.redirectUrl ||
         import.meta.env.VITE_OFFRAMP_REDIRECT_URL ||

@@ -26,6 +26,10 @@ import type { Address, Hex } from "viem";
 import { base } from "viem/chains";
 import { isFeatureEnabled } from "@/config";
 import { EasyStartLoginDialog } from "@/components/easy-start/EasyStartLoginDialog";
+import {
+  AlgoOnrampTestSheet,
+  AlgoOnrampTestUnavailable,
+} from "@/components/easy-start/AlgoOnrampTestSheet";
 import { dynamicClient, dynamicEnvironmentId } from "@/dynamic/dynamicClient";
 import { deriveAlgorandXchainAddress } from "@/services/xchainAddressService";
 import { useSyncPendingEarnDeposit } from "@/hooks/usePendingEarnDeposit";
@@ -66,40 +70,52 @@ function displayNameFromUser(
 
 function WaasBootstrap() {
   const { toast } = useToast();
+  const { data: user } = useUser();
   const creatingRef = useRef(false);
+  const ensureRef = useRef<() => Promise<void>>(async () => {});
+
+  ensureRef.current = async () => {
+    if (creatingRef.current) return;
+    let missingChains: ReturnType<typeof getChainsMissingWaasWalletAccounts>;
+    try {
+      missingChains = getChainsMissingWaasWalletAccounts().filter(
+        (chain) => chain === "EVM"
+      );
+    } catch (err) {
+      console.error("[Easy Start] could not check embedded wallets", err);
+      return;
+    }
+    if (missingChains.length === 0) return;
+    creatingRef.current = true;
+    try {
+      await createWaasWalletAccounts({ chains: missingChains });
+    } catch (err) {
+      console.error("[Easy Start] embedded wallet creation failed", err);
+      toast({
+        title: "Wallet wasn’t created",
+        description:
+          err instanceof Error
+            ? err.message
+            : "Dynamic couldn’t create an embedded wallet. Check that embedded wallets and Base are enabled.",
+        variant: "destructive",
+      });
+    } finally {
+      creatingRef.current = false;
+    }
+  };
 
   useOnEvent({
     event: "userChanged",
-    listener: async ({ user }) => {
-      if (!user || creatingRef.current) return;
-      let missingChains: ReturnType<typeof getChainsMissingWaasWalletAccounts>;
-      try {
-        missingChains = getChainsMissingWaasWalletAccounts().filter(
-          (chain) => chain === "EVM"
-        );
-      } catch (err) {
-        console.error("[Easy Start] could not check embedded wallets", err);
-        return;
-      }
-      if (missingChains.length === 0) return;
-      creatingRef.current = true;
-      try {
-        await createWaasWalletAccounts({ chains: missingChains });
-      } catch (err) {
-        console.error("[Easy Start] embedded wallet creation failed", err);
-        toast({
-          title: "Wallet wasn’t created",
-          description:
-            err instanceof Error
-              ? err.message
-              : "Dynamic couldn’t create an embedded wallet. Check that embedded wallets and Base are enabled.",
-          variant: "destructive",
-        });
-      } finally {
-        creatingRef.current = false;
-      }
+    listener: async ({ user: nextUser }) => {
+      if (!nextUser) return;
+      await ensureRef.current();
     },
   });
+
+  useEffect(() => {
+    if (!user) return;
+    void ensureRef.current();
+  }, [user]);
 
   return null;
 }
@@ -348,6 +364,7 @@ function DynamicEasyStartBridge({ children }: { children: ReactNode }) {
     <PrivyEasyStartContext.Provider value={value}>
       <WaasBootstrap />
       <EasyStartLoginDialog open={loginOpen} onOpenChange={setLoginOpen} />
+      <AlgoOnrampTestSheet />
       {children}
     </PrivyEasyStartContext.Provider>
   );
@@ -433,6 +450,7 @@ export function PrivySessionProvider({ children }: PrivySessionProviderProps) {
   const fallback = (
     <PrivyEasyStartContext.Provider value={disabledValue}>
       {children}
+      <AlgoOnrampTestUnavailable />
     </PrivyEasyStartContext.Provider>
   );
 

@@ -465,7 +465,7 @@ export function PrivySecureNote() {
   return (
     <p className="flex items-center justify-center gap-1.5 text-center text-[11px] text-muted-foreground">
       <Lock className="h-3 w-3" />
-      Powered by Privy. Your payment details are secure.
+      Powered by Dynamic. Your payment details are secure.
     </p>
   );
 }
@@ -474,7 +474,7 @@ export function SecuredByPrivy() {
   return (
     <p className="flex items-center justify-center gap-1.5 text-center text-[11px] text-muted-foreground">
       <Lock className="h-3 w-3" />
-      Secured by Privy
+      Secured by Dynamic
     </p>
   );
 }

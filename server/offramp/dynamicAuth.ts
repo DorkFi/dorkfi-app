@@ -23,7 +23,35 @@ const jwksCache = new Map<string, { expiresAt: number; keys: Jwk[] }>();
 export type DynamicSession = {
   userId: string;
   walletAddresses: string[];
+  /** Strings Dynamic signed into the access token (wallet addresses, ids). */
+  credentialValues: ReadonlySet<string>;
 };
+
+const MAX_CREDENTIAL_STRINGS = 200;
+const MAX_CREDENTIAL_DEPTH = 8;
+
+/** Collect short strings from a JWT payload so derived addresses can be bound to it. */
+export function collectCredentialValues(value: unknown): Set<string> {
+  const found = new Set<string>();
+  const walk = (node: unknown, depth: number) => {
+    if (found.size >= MAX_CREDENTIAL_STRINGS || depth > MAX_CREDENTIAL_DEPTH) {
+      return;
+    }
+    if (typeof node === "string") {
+      if (node.length > 0 && node.length < 200) found.add(node);
+      return;
+    }
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item, depth + 1);
+      return;
+    }
+    if (node && typeof node === "object") {
+      for (const item of Object.values(node)) walk(item, depth + 1);
+    }
+  };
+  walk(value, 0);
+  return found;
+}
 
 function b64urlJson(part: string): Record<string, unknown> {
   const json = Buffer.from(part, "base64url").toString("utf8");
@@ -142,5 +170,6 @@ export async function requireDynamicAuth(
   return {
     userId,
     walletAddresses: walletAddressesFromPayload(payload),
+    credentialValues: collectCredentialValues(payload),
   };
 }

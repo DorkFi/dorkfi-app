@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildCoinbaseOfframpSellUrl,
   buildCoinbaseOnrampBuyUrl,
+  coinbaseSessionTokenBody,
+  COINBASE_ALGORAND_ALGO,
   parseCoinbaseOfframpReturnSearch,
   withCoinbaseOfframpReturnQuery,
 } from "./coinbaseUrls";
@@ -29,6 +31,42 @@ describe("buildCoinbaseOnrampBuyUrl", () => {
     expect(url.searchParams.get("redirectUrl")).toBe(
       "https://beta.simplfi.xyz/savings"
     );
+  });
+
+  it("can pin the test buy to Algorand ALGO", () => {
+    const url = new URL(
+      buildCoinbaseOnrampBuyUrl(args, COINBASE_ALGORAND_ALGO)
+    );
+    expect(url.searchParams.get("defaultNetwork")).toBe("algorand");
+    expect(url.searchParams.get("defaultAsset")).toBe("ALGO");
+    expect(url.searchParams.get("defaultExperience")).toBe("buy");
+  });
+
+  it("opens a Coinbase balance transfer without a fiat amount", () => {
+    const url = new URL(
+      buildCoinbaseOnrampBuyUrl(args, COINBASE_ALGORAND_ALGO, "send")
+    );
+    expect(url.searchParams.get("defaultExperience")).toBe("send");
+    expect(url.searchParams.get("defaultAsset")).toBe("ALGO");
+    expect(url.searchParams.get("defaultNetwork")).toBe("algorand");
+    expect(url.searchParams.get("presetFiatAmount")).toBeNull();
+    expect(url.searchParams.get("fiatCurrency")).toBeNull();
+    expect(
+      coinbaseSessionTokenBody({
+        address: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAY5HFKQ",
+        clientIp: "203.0.113.5",
+        target: COINBASE_ALGORAND_ALGO,
+      })
+    ).toEqual({
+      addresses: [
+        {
+          address: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAY5HFKQ",
+          blockchains: ["algorand"],
+        },
+      ],
+      clientIp: "203.0.113.5",
+      assets: ["ALGO"],
+    });
   });
 });
 

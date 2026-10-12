@@ -15,8 +15,16 @@ import { requireEasyStartAuth } from "./sessionAuth.ts";
 import {
   buildCoinbaseOfframpSellUrl,
   buildCoinbaseOnrampBuyUrl,
+  COINBASE_ALGORAND_ALGO,
+  COINBASE_BASE_USDC,
+  coinbaseSessionTokenBody,
+  type CoinbaseAssetTarget,
   withCoinbaseOfframpReturnQuery,
 } from "./coinbaseUrls.ts";
+import {
+  AlgoOnrampBindError,
+  assertSolanaOwnsAlgorandAddress,
+} from "../../src/lib/easyStart/algorandFromSolana.ts";
 import { endUserIp, partnerUserRefFromUserId } from "./clientIp.ts";
 import { resolveCoinbaseRedirectUrl } from "./redirectUrl.ts";
 import { cdpFailureMessage, parseCdpBody } from "./cdpResponse.ts";
@@ -148,31 +156,60 @@ export async function handleCoinbaseSession(
       address?: string;
       redirectUrl?: string;
       amount?: string | number;
+      destination?: string;
+      solanaAddress?: string;
     };
-    const address = body.address?.trim();
-    if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
-      sendJson(res, 400, { error: "Valid Base wallet address required" });
-      return;
-    }
+    const wantsAlgo = body.destination === "algorand";
+    let address = body.address?.trim() ?? "";
+    let target: CoinbaseAssetTarget = COINBASE_BASE_USDC;
 
-    let owned: string[];
-    if (session.provider === "dynamic") {
-      owned = session.walletAddresses;
-    } else {
-      if (!env.privyAppSecret) {
-        sendJson(res, 503, {
-          error:
-            "PRIVY_APP_SECRET is required to bind Coinbase destinations to the signed-in wallet",
+    if (wantsAlgo) {
+      if (session.provider !== "dynamic") {
+        sendJson(res, 400, {
+          error: "ALGO on-ramp requires a Dynamic session",
         });
         return;
       }
-      owned = await fetchPrivyWalletAddresses({
-        userId,
-        privyAppId: env.privyAppId || DEFAULT_PRIVY_APP_ID,
-        privyAppSecret: env.privyAppSecret,
-      });
+      try {
+        const bound = assertSolanaOwnsAlgorandAddress({
+          solanaAddress: body.solanaAddress ?? "",
+          algorandAddress: address,
+          credentialValues: session.credentialValues,
+        });
+        address = bound.algorandAddress;
+      } catch (error) {
+        if (error instanceof AlgoOnrampBindError) {
+          sendJson(res, error.status, { error: error.message });
+          return;
+        }
+        throw error;
+      }
+      target = COINBASE_ALGORAND_ALGO;
+    } else {
+      if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
+        sendJson(res, 400, { error: "Valid Base wallet address required" });
+        return;
+      }
+
+      let owned: string[];
+      if (session.provider === "dynamic") {
+        owned = session.walletAddresses;
+      } else {
+        if (!env.privyAppSecret) {
+          sendJson(res, 503, {
+            error:
+              "PRIVY_APP_SECRET is required to bind Coinbase destinations to the signed-in wallet",
+          });
+          return;
+        }
+        owned = await fetchPrivyWalletAddresses({
+          userId,
+          privyAppId: env.privyAppId || DEFAULT_PRIVY_APP_ID,
+          privyAppSecret: env.privyAppSecret,
+        });
+      }
+      assertWalletOwnedByUser(address, owned);
     }
-    assertWalletOwnedByUser(address, owned);
 
     const path = "/onramp/v1/token";
     const jwt = await cdpBearer(env, "POST", path);
@@ -184,11 +221,9 @@ export async function handleCoinbaseSession(
         Authorization: `Bearer ${jwt}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        addresses: [{ address, blockchains: ["base"] }],
-        clientIp: ip,
-        assets: ["USDC"],
-      }),
+      body: JSON.stringify(
+        coinbaseSessionTokenBody({ address, clientIp: ip, target })
+      ),
     });
 
     const data = parseCdpBody(await upstream.text());
@@ -218,14 +253,18 @@ export async function handleCoinbaseSession(
     sendJson(res, 200, {
       sessionToken: data.token,
       partnerUserRef,
-      buyUrl: buildCoinbaseOnrampBuyUrl(widgetArgs),
-      sellUrl: buildCoinbaseOfframpSellUrl({
-        ...widgetArgs,
-        redirectUrl: withCoinbaseOfframpReturnQuery(
-          redirectUrl,
-          partnerUserRef
-        ),
-      }),
+      buyUrl: buildCoinbaseOnrampBuyUrl(widgetArgs, target, "buy"),
+      sendUrl: buildCoinbaseOnrampBuyUrl(widgetArgs, target, "send"),
+      sellUrl: buildCoinbaseOfframpSellUrl(
+        {
+          ...widgetArgs,
+          redirectUrl: withCoinbaseOfframpReturnQuery(
+            redirectUrl,
+            partnerUserRef
+          ),
+        },
+        target
+      ),
     });
   } catch (e: unknown) {
     if (e instanceof AuthError) {
