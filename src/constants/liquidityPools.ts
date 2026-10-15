@@ -18,8 +18,8 @@ import {
 /**
  * External DEX integrations shown on the Pools page.
  * Card subtitles and bottom actions use {@link LIQUIDITY_PLATFORM_LABELS}
- * (`Add on Tinyman`, `Add on Pact`, …). Add a platform id here when wiring a new
- * source (e.g. Myth dualSTAKE on a separate PR).
+ * (`Add on Tinyman`, `Add on Pact`, `Add on Myth`, …). Add a platform id and
+ * label here when wiring a new DEX (Myth dualSTAKE, etc.).
  */
 export type LiquidityPlatformId = "tinyman" | "pact";
 
@@ -52,8 +52,8 @@ export interface LiquidityPoolPairConfig {
   /** Swap fee in basis points. Pact ALGO/WAD tiers share one card and differ here. */
   feeBps?: number;
   /**
-   * Pairs that share this id render as one card (one Pool E row, one supply
-   * button per fee tier).
+   * Pairs that share this id render as one card (one supply/withdraw row per
+   * fee tier or variant, then one shared Add-on link).
    */
   cardGroupId?: string;
   /** LP farm program ids on the platform — uses {@link poolAddr}. */

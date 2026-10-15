@@ -139,7 +139,7 @@ Pool id live; inactive in UI until USDC nToken id is numeric.
 |-----|------|-----------------|--------|
 | USDC | Deposit + borrow (Markets) | `3210682240` (same underlying as A/B) | `TBD_ALGORAND_PROD_G_USDC_NTOKEN` |
 
-Tinyman pair metadata for the Pools UI also lives in `src/constants/liquidityPools.ts` (`CURATED_LIQUIDITY_POOLS`).
+Curated pair metadata for the Pools UI lives in `src/constants/liquidityPools.ts` (`CURATED_LIQUIDITY_POOLS`). Each row sets `platform` (`tinyman`, `pact`, …) and drives the subtitle (`{Platform} liquidity pool`) plus the bottom **Add on {Platform}** / **Farm on {Platform}** button via `LIQUIDITY_PLATFORM_LABELS`. **Supply / Withdraw** for DorkFi lending always sit above that external link. Multi-fee DEX rows (Pact today; similar patterns possible elsewhere) can share one card via `cardGroupId`.
 
 ---
 
