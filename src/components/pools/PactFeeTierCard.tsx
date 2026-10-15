@@ -107,21 +107,6 @@ const PactFeeTierCard = ({ tiers, onSupply, onWithdraw }: PactFeeTierCardProps) 
       </div>
 
       <div className="mt-auto flex flex-col gap-2">
-        {addOnPactUrl ? (
-          <DorkFiButton
-            variant="secondary"
-            type="button"
-            className="w-full"
-            onClick={(event) => {
-              event.stopPropagation();
-              window.open(addOnPactUrl, "_blank", "noopener,noreferrer");
-            }}
-          >
-            <ExternalLink className="mr-2 h-4 w-4 shrink-0" aria-hidden />
-            Add on {platformLabel}
-          </DorkFiButton>
-        ) : null}
-
         {tiers.map((tier, index) => {
           const feeBps = tier.snapshot?.feeBps ?? tier.pair.feeBps ?? 0;
           const feeLabel = formatLiquidityFeeLabel(feeBps);
@@ -229,6 +214,20 @@ const PactFeeTierCard = ({ tiers, onSupply, onWithdraw }: PactFeeTierCardProps) 
             </div>
           );
         })}
+        {addOnPactUrl ? (
+          <DorkFiButton
+            variant="secondary"
+            type="button"
+            className="w-full"
+            onClick={(event) => {
+              event.stopPropagation();
+              window.open(addOnPactUrl, "_blank", "noopener,noreferrer");
+            }}
+          >
+            <ExternalLink className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+            Add on {platformLabel}
+          </DorkFiButton>
+        ) : null}
       </div>
     </DorkFiCard>
   );
