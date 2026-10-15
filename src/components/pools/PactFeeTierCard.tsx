@@ -15,7 +15,7 @@ import {
   type PactTierSnapshot,
 } from "@/services/pactLiquidityService";
 import { useNumberI18n } from "@/contexts/LocaleSettingsContext";
-import { ArrowDownToLine, ArrowUpFromLine, ExternalLink } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, Droplets, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 
 export interface PactFeeTierRow {
@@ -56,6 +56,22 @@ function PoolAssetIcon({
   );
 }
 
+/** Highest-TVl tier for the shared Add on Pact link. */
+function pactAddLiquidityUrl(tiers: PactFeeTierRow[]): string | null {
+  let best: { tvl: number; appId: number } | null = null;
+  for (const tier of tiers) {
+    const appId = pactAppIdFromPair(tier.pair);
+    if (appId == null) continue;
+    const tvl = tier.snapshot?.tvlUsd ?? 0;
+    if (!best || tvl > best.tvl) {
+      best = { tvl, appId };
+    }
+  }
+  if (best) return getPactPoolUrl(best.appId);
+  const fallback = pactAppIdFromPair(tiers[0]?.pair);
+  return fallback != null ? getPactPoolUrl(fallback) : null;
+}
+
 const PactFeeTierCard = ({ tiers, onSupply, onWithdraw }: PactFeeTierCardProps) => {
   const { formatPercent, formatCurrency } = useNumberI18n();
   const first = tiers[0]?.pair;
@@ -69,9 +85,10 @@ const PactFeeTierCard = ({ tiers, onSupply, onWithdraw }: PactFeeTierCardProps) 
     resolveLiquidityAssetMeta(first.networkId, first.asset2Id);
   const label = first.label ?? `${asset1.symbol} / ${asset2.symbol}`;
   const platformLabel = LIQUIDITY_PLATFORM_LABELS.pact;
+  const addOnPactUrl = pactAddLiquidityUrl(tiers);
 
   return (
-    <DorkFiCard className="flex h-full flex-col gap-4 p-5 md:col-span-2">
+    <DorkFiCard className="flex flex-col gap-3 p-5 transition-shadow">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="flex -space-x-2">
@@ -80,21 +97,34 @@ const PactFeeTierCard = ({ tiers, onSupply, onWithdraw }: PactFeeTierCardProps) 
           </div>
           <div>
             <h3 className="text-lg font-semibold text-ink-blue dark:text-white">{label}</h3>
-            <p className="text-xs text-muted-foreground">
-              {platformLabel} liquidity pool · Pool E
-            </p>
+            <p className="text-xs text-muted-foreground">{platformLabel} liquidity pool</p>
           </div>
         </div>
         <Badge variant="outline" className="shrink-0">
-          Two fee tiers
+          <Droplets className="mr-1 h-3 w-3" aria-hidden />
+          LP
         </Badge>
       </div>
 
-      <div className="flex flex-col gap-3">
-        {tiers.map((tier) => {
+      <div className="mt-auto flex flex-col gap-2">
+        {addOnPactUrl ? (
+          <DorkFiButton
+            variant="secondary"
+            type="button"
+            className="w-full"
+            onClick={(event) => {
+              event.stopPropagation();
+              window.open(addOnPactUrl, "_blank", "noopener,noreferrer");
+            }}
+          >
+            <ExternalLink className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+            Add on {platformLabel}
+          </DorkFiButton>
+        ) : null}
+
+        {tiers.map((tier, index) => {
           const feeBps = tier.snapshot?.feeBps ?? tier.pair.feeBps ?? 0;
           const feeLabel = formatLiquidityFeeLabel(feeBps);
-          const appId = pactAppIdFromPair(tier.pair);
           const listed = tier.lendingMarket != null;
           const supplyDisabled = listed && (tier.walletLpBalance ?? 0) <= 0;
           const withdrawDisabled = !listed || (tier.suppliedLpBalance ?? 0) <= 0;
@@ -103,23 +133,34 @@ const PactFeeTierCard = ({ tiers, onSupply, onWithdraw }: PactFeeTierCardProps) 
           return (
             <div
               key={tier.pair.id}
-              className="rounded-lg border border-border/70 bg-background/40 p-3"
+              className={index > 0 ? "border-t border-border/60 pt-2" : undefined}
             >
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm font-semibold">{feeLabel} fee</p>
+              <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                <p className="text-xs font-semibold text-muted-foreground">{feeLabel} fee</p>
                 {tier.loading ? (
-                  <Skeleton className="h-5 w-16" />
+                  <Skeleton className="h-5 w-14" />
                 ) : apr != null ? (
                   <Badge className="border-ocean-teal/30 bg-ocean-teal/15 text-ocean-teal hover:bg-ocean-teal/20">
                     {formatPercent(apr / 100, { maximumFractionDigits: 2 })} APR
                   </Badge>
                 ) : null}
+                {!tier.loading && tier.snapshot?.tvlUsd != null ? (
+                  <span className="text-xs text-muted-foreground tabular-nums">
+                    {formatCurrency(tier.snapshot.tvlUsd, "USD", {
+                      maximumFractionDigits: 0,
+                    })}{" "}
+                    TVL
+                  </span>
+                ) : null}
               </div>
 
               {tier.loading ? (
-                <Skeleton className="mb-3 h-10 w-full" />
+                <div className="mb-2 space-y-1">
+                  <Skeleton className="h-3 w-full" />
+                  <Skeleton className="h-3 w-2/3" />
+                </div>
               ) : tier.snapshot ? (
-                <div className="mb-3 grid grid-cols-2 gap-2 text-sm">
+                <div className="mb-2 grid grid-cols-2 gap-2 text-sm">
                   <div>
                     <p className="text-xs text-muted-foreground">{asset1.symbol} in pool</p>
                     <p className="font-medium tabular-nums">{tier.snapshot.asset1ReserveHuman}</p>
@@ -128,32 +169,32 @@ const PactFeeTierCard = ({ tiers, onSupply, onWithdraw }: PactFeeTierCardProps) 
                     <p className="text-xs text-muted-foreground">{asset2.symbol} in pool</p>
                     <p className="font-medium tabular-nums">{tier.snapshot.asset2ReserveHuman}</p>
                   </div>
-                  {tier.snapshot.tvlUsd != null ? (
+                  {(tier.walletLpBalance ?? 0) > 0 || (tier.suppliedLpBalance ?? 0) > 0 ? (
                     <p className="col-span-2 text-xs text-muted-foreground tabular-nums">
-                      {formatCurrency(tier.snapshot.tvlUsd, "USD", {
-                        maximumFractionDigits: 0,
-                      })}{" "}
-                      TVL
                       {(tier.walletLpBalance ?? 0) > 0
-                        ? ` · ${tier.walletLpBalance?.toLocaleString(undefined, {
+                        ? `${tier.walletLpBalance?.toLocaleString(undefined, {
                             maximumFractionDigits: 6,
                           })} LP in wallet`
-                        : ""}
+                        : null}
+                      {(tier.walletLpBalance ?? 0) > 0 &&
+                      (tier.suppliedLpBalance ?? 0) > 0
+                        ? " · "
+                        : null}
                       {(tier.suppliedLpBalance ?? 0) > 0
-                        ? ` · ${tier.suppliedLpBalance?.toLocaleString(undefined, {
+                        ? `${tier.suppliedLpBalance?.toLocaleString(undefined, {
                             maximumFractionDigits: 6,
-                          })} LP in Pool E`
-                        : ""}
+                          })} LP supplied`
+                        : null}
                     </p>
                   ) : null}
                 </div>
               ) : (
-                <p className="mb-3 text-sm text-muted-foreground">
-                  Pact data is unavailable for the {feeLabel} tier.
+                <p className="mb-2 text-xs text-muted-foreground">
+                  Pool data unavailable for the {feeLabel} tier.
                 </p>
               )}
 
-              <div className="flex flex-col gap-2 sm:flex-row">
+              <div className="flex gap-2">
                 <DorkFiButton
                   variant="secondary"
                   className="flex-1"
@@ -162,7 +203,7 @@ const PactFeeTierCard = ({ tiers, onSupply, onWithdraw }: PactFeeTierCardProps) 
                     event.stopPropagation();
                     if (!listed) {
                       toast(
-                        `${feeLabel} Pact LP is not listed on Pool E yet. Supply will deposit LP ASA ${tier.pair.lpTokenId} once that market exists. Withdrawing later returns the same LP, including fees earned while it was supplied.`
+                        `${feeLabel} Pact LP lending is not enabled yet. Supply will deposit LP ASA ${tier.pair.lpTokenId} once that market is listed. Withdrawing later returns the same LP, including fees earned while it was supplied.`
                       );
                       return;
                     }
@@ -170,7 +211,7 @@ const PactFeeTierCard = ({ tiers, onSupply, onWithdraw }: PactFeeTierCardProps) 
                   }}
                 >
                   <ArrowDownToLine className="mr-2 h-4 w-4" aria-hidden />
-                  Supply {feeLabel}
+                  Supply
                 </DorkFiButton>
                 <DorkFiButton
                   variant="borrow-outline"
@@ -185,28 +226,10 @@ const PactFeeTierCard = ({ tiers, onSupply, onWithdraw }: PactFeeTierCardProps) 
                   Withdraw
                 </DorkFiButton>
               </div>
-              {appId != null ? (
-                <button
-                  type="button"
-                  className="mt-2 inline-flex items-center text-xs font-medium text-ocean-teal hover:underline"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    window.open(getPactPoolUrl(appId), "_blank", "noopener,noreferrer");
-                  }}
-                >
-                  <ExternalLink className="mr-1 h-3 w-3" aria-hidden />
-                  Add {feeLabel} on {platformLabel}
-                </button>
-              ) : null}
             </div>
           );
         })}
       </div>
-
-      <p className="text-xs text-muted-foreground">
-        Each fee tier is its own Pool E collateral market. Supplied LP stays in the Pact pool,
-        so trading fees keep accruing. Withdraw returns that same LP ASA.
-      </p>
     </DorkFiCard>
   );
 };
