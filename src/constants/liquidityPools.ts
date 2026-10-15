@@ -15,7 +15,12 @@ import {
   type TokenConfig,
 } from "@/config";
 
-/** Supported liquidity DEX integrations on the Pools page. */
+/**
+ * External DEX integrations shown on the Pools page.
+ * Card subtitles and bottom actions use {@link LIQUIDITY_PLATFORM_LABELS}
+ * (`Add on Tinyman`, `Add on Pact`, …). Add a platform id here when wiring a new
+ * source (e.g. Myth dualSTAKE on a separate PR).
+ */
 export type LiquidityPlatformId = "tinyman" | "pact";
 
 export const LIQUIDITY_PLATFORM_LABELS: Record<LiquidityPlatformId, string> = {
@@ -220,8 +225,9 @@ export function getDexFarmingProgramUrl(
 }
 
 /**
- * Select liquidity pairs exposed on the Pools page.
- * Use underlying ASA ids for asset1Id/asset2Id (ALGO = 0); lpTokenId / lpContractId are Tinyman LP metadata.
+ * Curated liquidity pairs on the Pools page.
+ * Use underlying ASA ids for asset1Id/asset2Id (ALGO = 0). lpTokenId / lpContractId
+ * are per-platform collateral metadata (Tinyman TMPOOL2, Pact MWPT, etc.).
  */
 export const CURATED_LIQUIDITY_POOLS: LiquidityPoolPairConfig[] = [
   // TMPOOL2 3157974960 6 3577729953

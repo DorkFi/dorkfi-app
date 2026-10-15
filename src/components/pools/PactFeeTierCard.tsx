@@ -56,7 +56,7 @@ function PoolAssetIcon({
   );
 }
 
-/** Highest-TVl tier for the shared Add on Pact link. */
+/** Highest-TVL tier for this card’s shared `Add on {platform}` link. */
 function pactAddLiquidityUrl(tiers: PactFeeTierRow[]): string | null {
   let best: { tvl: number; appId: number } | null = null;
   for (const tier of tiers) {
