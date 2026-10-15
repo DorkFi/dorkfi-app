@@ -175,6 +175,7 @@ Items below are **not** fully live or are incomplete in config. Treat as directi
 | **Pool G USDC** | Isolated USDC deposit/borrow on Algorand | Pool `3697602173` set; `algorandProdGUsdcNTokenId` still TBD — auto-wires when nToken ID is numeric |
 | **Pool D Folks expansion** | Broader Folks-wrapped / isolated assets on D | Label + pool live; only fALGO, fUSDC, WAD configured |
 | **Additional C/E/F LP markets** | More Tinyman TMPOOL2 pairs as LP collateral → WAD | Pattern established; new rows need token config + `liquidityPools` + borrow helpers |
+| **Pact ALGO/WAD on Pool E** | One Pools card, two collateral markets (0.10% app `3733127886` / LP `3733127889`, and 1.00% app `3738225809` / LP `3738225812`) borrowing WAD on Pool E | Card is on the Pools page. nt200 markets are not created yet, so Supply explains that and does not send a transaction |
 | **Pool deposit / withdraw on Pools page** | Direct LP market supply UX | `enablePoolDepositWithdraw: false` |
 | **MONKO (Algorand B)** | Community asset on B | Present but commented out in `algorandProdTokens` |
 | **Liquidation engine / treasury** | Full Algorand prod contract set | `undefined` on `algorandProdContracts` |

@@ -16,10 +16,11 @@ import {
 } from "@/config";
 
 /** Supported liquidity DEX integrations on the Pools page. */
-export type LiquidityPlatformId = "tinyman";
+export type LiquidityPlatformId = "tinyman" | "pact";
 
 export const LIQUIDITY_PLATFORM_LABELS: Record<LiquidityPlatformId, string> = {
   tinyman: "Tinyman",
+  pact: "Pact",
 };
 
 /** Curated liquidity pair on a supported AVM network + DEX platform. */
@@ -39,8 +40,17 @@ export interface LiquidityPoolPairConfig {
   lpTokenId: number;
   /** nt200 market application id for the LP token (ASA deposit target). */
   lpContractId: number;
-  /** DEX pool account address (add liquidity / farm deep links). */
+  /** DEX pool account address (add liquidity / farm deep links). For Pact, the pool app id. */
   poolAddr?: string;
+  /** Pact pool application id. Add-liquidity links use this when `platform` is `pact`. */
+  pactAppId?: number;
+  /** Swap fee in basis points. Pact ALGO/WAD tiers share one card and differ here. */
+  feeBps?: number;
+  /**
+   * Pairs that share this id render as one card (one Pool E row, one supply
+   * button per fee tier).
+   */
+  cardGroupId?: string;
   /** LP farm program ids on the platform — uses {@link poolAddr}. */
   farms?: number[];
 }
@@ -97,26 +107,70 @@ export function pairIncludesWad(pair: LiquidityPoolPairConfig): boolean {
   );
 }
 
+/** Card identity. Fee tiers that share `cardGroupId` count as one pool card. */
+export function liquidityPoolCardKey(pair: LiquidityPoolPairConfig): string {
+  return pair.cardGroupId ?? pair.id;
+}
+
+export function countPoolCards(pairs: LiquidityPoolPairConfig[]): number {
+  return new Set(pairs.map(liquidityPoolCardKey)).size;
+}
+
+export interface LiquidityPoolCardGroup {
+  id: string;
+  pairs: LiquidityPoolPairConfig[];
+}
+
+/** Collapse fee-tier rows that share a card, keeping the first card's sort position. */
+export function groupLiquidityPoolCards(
+  pairs: LiquidityPoolPairConfig[]
+): LiquidityPoolCardGroup[] {
+  const order: string[] = [];
+  const groups = new Map<string, LiquidityPoolPairConfig[]>();
+  for (const pair of pairs) {
+    const key = liquidityPoolCardKey(pair);
+    const existing = groups.get(key);
+    if (!existing) {
+      groups.set(key, [pair]);
+      order.push(key);
+    } else {
+      existing.push(pair);
+    }
+  }
+  return order.map((id) => ({
+    id,
+    pairs: [...(groups.get(id) ?? [])].sort(
+      (a, b) => (a.feeBps ?? 0) - (b.feeBps ?? 0)
+    ),
+  }));
+}
+
+/** `10` → `0.10%`, `100` → `1.00%`. */
+export function formatLiquidityFeeLabel(feeBps: number): string {
+  return `${(feeBps / 100).toFixed(2)}%`;
+}
+
 export function countPoolsByBaseTokenFilter(
   pairs: LiquidityPoolPairConfig[]
 ): Record<PoolBaseTokenFilterId, number> {
   const counts: Record<PoolBaseTokenFilterId, number> = {
-    all: pairs.length,
+    all: countPoolCards(pairs),
     unit: 0,
     wad: 0,
     usdc: 0,
   };
 
   for (const filter of POOL_BASE_TOKEN_FILTERS) {
-    counts[filter.id] = pairs.filter((pair) =>
-      poolMatchesBaseTokenFilter(pair, filter.assetId)
-    ).length;
+    counts[filter.id] = countPoolCards(
+      pairs.filter((pair) => poolMatchesBaseTokenFilter(pair, filter.assetId))
+    );
   }
 
   return counts;
 }
 
 export const TINYMAN_APP_POOL_BASE = "https://app.tinyman.org/pool";
+export const PACT_APP_POOL_BASE = "https://app.pact.fi/pool";
 
 export function getTinymanPoolUrl(poolAddr: string): string {
   return `${TINYMAN_APP_POOL_BASE}/${poolAddr}`;
@@ -134,6 +188,10 @@ export function getTinymanFarmingProgramUrl(
   return `${TINYMAN_APP_POOL_BASE}/${poolAddr}/farming-programs/${farmId}`;
 }
 
+export function getPactPoolUrl(appId: number | string): string {
+  return `${PACT_APP_POOL_BASE}/${appId}`;
+}
+
 export function getDexAddLiquidityUrl(
   platform: LiquidityPlatformId,
   poolAddr: string
@@ -141,6 +199,8 @@ export function getDexAddLiquidityUrl(
   switch (platform) {
     case "tinyman":
       return getTinymanAddLiquidityUrl(poolAddr);
+    case "pact":
+      return getPactPoolUrl(poolAddr);
     default:
       return null;
   }
@@ -316,6 +376,39 @@ export const CURATED_LIQUIDITY_POOLS: LiquidityPoolPairConfig[] = [
     label: "ALPHA / USDC",
     poolAddr:
       "J7CN6WTMUWXY2KODKAMM5BLZ42FEIQLM4D32FRQ23VOOJC2SEUHKE565T4",
+    farms: [],
+  },
+  // Pact managed weighted ALGO/WAD, 0.10% fee. One card with the 1.00% tier.
+  // lpContractId stays 0 until an nt200 market is created on Pool E.
+  {
+    id: "pact-algo-wad-10bps",
+    cardGroupId: "pact-algo-wad",
+    platform: "pact",
+    networkId: "algorand-mainnet",
+    feeBps: 10,
+    lpTokenId: 3733127889,
+    lpContractId: 0,
+    asset1Id: 0,
+    asset2Id: 3334160924,
+    label: "ALGO / WAD",
+    pactAppId: 3733127886,
+    poolAddr: "3733127886",
+    farms: [],
+  },
+  // Pact managed weighted ALGO/WAD, 1.00% fee.
+  {
+    id: "pact-algo-wad-100bps",
+    cardGroupId: "pact-algo-wad",
+    platform: "pact",
+    networkId: "algorand-mainnet",
+    feeBps: 100,
+    lpTokenId: 3738225812,
+    lpContractId: 0,
+    asset1Id: 0,
+    asset2Id: 3334160924,
+    label: "ALGO / WAD",
+    pactAppId: 3738225809,
+    poolAddr: "3738225809",
     farms: [],
   },
 ];
