@@ -1901,6 +1901,97 @@ export const fillMissingUserMarketRowsFromChain = async (
   return extra;
 };
 
+/**
+ * One pool's `get_global_user` plus one market's `get_user`, read from algod
+ * with no RPC cache. Used to paint a position immediately after a confirmed
+ * transaction, before the API user snapshot sweep includes it.
+ */
+export async function fetchUserPositionSnapshotFromChain(
+  userAddress: string,
+  networkId: NetworkId,
+  poolId: string,
+  marketId: string
+): Promise<{
+  userRow: ChainUserDataRow | null;
+  globalRow: ChainGlobalUserRow | null;
+}> {
+  if (!isAlgorandCompatibleNetwork(networkId)) {
+    return { userRow: null, globalRow: null };
+  }
+
+  try {
+    const networkConfig = getNetworkConfig(networkId);
+    const clients = await algorandService.initializeClientsForReads(
+      networkConfig.walletNetworkId as AlgorandNetwork
+    );
+    const poolIdNum = Number(poolId);
+    const marketIdNum = Number(marketId);
+    if (!Number.isFinite(poolIdNum) || !Number.isFinite(marketIdNum)) {
+      return { userRow: null, globalRow: null };
+    }
+
+    const ci = new CONTRACT(
+      poolIdNum,
+      clients.algod,
+      undefined,
+      { ...LendingPoolAppSpec.contract, events: [] },
+      {
+        addr: algosdk.encodeAddress(
+          algosdk.getApplicationAddress(poolIdNum).publicKey
+        ),
+        sk: new Uint8Array(),
+      }
+    );
+    ci.setFee(2000);
+
+    let globalRow: ChainGlobalUserRow | null = null;
+    let userRow: ChainUserDataRow | null = null;
+
+    try {
+      const globalUserR = await ci.get_global_user(userAddress);
+      if (globalUserR.success) {
+        const globalUser = GlobalUserData(globalUserR.returnValue);
+        globalRow = {
+          network: networkId,
+          poolId: String(poolId),
+          totalCollateralValue: globalUser.totalCollateralValue.toString(),
+          totalBorrowValue: globalUser.totalBorrowValue.toString(),
+        };
+      }
+    } catch (error) {
+      console.warn(
+        "[fetchUserPositionSnapshotFromChain] get_global_user",
+        error
+      );
+    }
+
+    try {
+      const userDataR = await ci.get_user(userAddress, marketIdNum);
+      if (userDataR.success) {
+        const ud = UserData(userDataR.returnValue);
+        userRow = {
+          network: networkId,
+          marketId: String(marketId),
+          underlyingContractId: String(marketId),
+          appId: String(poolId),
+          poolId: String(poolId),
+          scaledDeposits: (ud.scaledDeposits ?? 0n).toString(),
+          scaledBorrows: (ud.scaledBorrows ?? 0n).toString(),
+          depositIndex: (ud.depositIndex ?? 0n).toString(),
+          borrowIndex: (ud.borrowIndex ?? 0n).toString(),
+        };
+      }
+    } catch (error) {
+      console.warn("[fetchUserPositionSnapshotFromChain] get_user", error);
+    }
+
+    return { userRow, globalRow };
+  } catch (error) {
+    console.warn("[fetchUserPositionSnapshotFromChain]", error);
+    return { userRow: null, globalRow: null };
+  }
+}
+
 /** Debt split from scaled borrows and borrow indices (matches pool accounting). */
 export type BorrowDebtFromIndices = {
   /** Underlying at user's last borrow-index snapshot: scaled × I_user ÷ SCALE */

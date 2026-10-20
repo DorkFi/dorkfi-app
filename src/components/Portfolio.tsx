@@ -35,6 +35,7 @@ import {
   repayOnBehalf,
   liquidateCrossMarket,
   fetchUserDataFromChain,
+  fetchUserPositionSnapshotFromChain,
   fillMissingUserMarketRowsFromChain,
   postRefreshMarketDataSnapshot,
   type MarketInfo,
@@ -114,6 +115,14 @@ import {
   resolveWithLastGoodPortfolioUsd,
 } from "@/utils/portfolioUsdCache";
 import { unionPortfolioPositionRows } from "@/utils/portfolioMissingUserMarkets";
+import {
+  mergeChainPositionIntoApiSnapshot,
+  readPortfolioChainRefresh,
+  rememberPortfolioChainRefresh,
+  type PortfolioChainRefreshHint,
+  type PortfolioPositionRefreshScope,
+} from "@/utils/portfolioChainRefresh";
+import { invalidateUserPositionRpcCache } from "@/utils/rpcReadCache";
 import {
   createDebouncedPrefetch,
   warmRepayModalRpc,
@@ -697,9 +706,13 @@ const Portfolio = () => {
   const [userProfileAvatar, setUserProfileAvatar] = useState<string | null>(
     null
   );
-  // Guards for fetchUser: prevent concurrent fetches and stale-address races
+  // Guards for fetchUser: coalesce overlapping loads and ignore stale responses.
   const fetchUserInFlight = useRef(false);
+  const fetchUserQueued = useRef(false);
+  const fetchUserGeneration = useRef(0);
   const fetchUserAddressRef = useRef<string | null>(null);
+  /** Algod overlay for the market touched by the latest confirmed position tx. */
+  const postTxChainRefreshRef = useRef<PortfolioChainRefreshHint | null>(null);
 
   // Compute final avatar: prioritize user profile avatar > resolver avatar
   // If neither exists, components will show placeholder
@@ -4027,13 +4040,39 @@ const Portfolio = () => {
     toast,
   ]);
 
-  const fetchUser = async (userAddress: string) => {
-    // Deduplicate concurrent calls for the same address; cancel stale-address results
-    if (fetchUserInFlight.current && fetchUserAddressRef.current === userAddress) return;
-    fetchUserInFlight.current = true;
+  const fetchUser = async (
+    userAddress: string,
+    scope?: PortfolioPositionRefreshScope
+  ) => {
+    if (scope?.network && scope.poolId && scope.marketId) {
+      const hint: PortfolioChainRefreshHint = {
+        address: userAddress,
+        network: scope.network,
+        poolId: String(scope.poolId),
+        marketId: String(scope.marketId),
+        until: Date.now() + 60_000,
+      };
+      postTxChainRefreshRef.current = hint;
+      rememberPortfolioChainRefresh(hint);
+      invalidateUserPositionRpcCache(scope.network, userAddress);
+    } else {
+      const stored = readPortfolioChainRefresh(userAddress);
+      if (stored) {
+        postTxChainRefreshRef.current = stored;
+        invalidateUserPositionRpcCache(stored.network, userAddress);
+      }
+    }
+
+    const generation = ++fetchUserGeneration.current;
     fetchUserAddressRef.current = userAddress;
+    if (fetchUserInFlight.current) {
+      fetchUserQueued.current = true;
+      return;
+    }
+    fetchUserInFlight.current = true;
 
     const isCurrentFetchUser = () =>
+      fetchUserGeneration.current === generation &&
       fetchUserAddressRef.current === userAddress;
 
     const applyPortfolioComputed = (user: Record<string, unknown>) => {
@@ -4143,7 +4182,16 @@ const Portfolio = () => {
       console.log(
         `[Portfolio] Attempting to fetch user data from API for ${userAddress}`
       );
-      const apiResponse = await dorkfiAPIService.getUser(userAddress);
+      let apiResponse: Awaited<ReturnType<typeof dorkfiAPIService.getUser>>;
+      try {
+        apiResponse = await dorkfiAPIService.getUser(userAddress);
+      } catch (firstError) {
+        if (!isCurrentFetchUser()) return;
+        console.warn("[Portfolio] getUser failed, retrying once:", firstError);
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        if (!isCurrentFetchUser()) return;
+        apiResponse = await dorkfiAPIService.getUser(userAddress);
+      }
 
       console.log("[Portfolio] API response:", apiResponse);
 
@@ -4161,15 +4209,61 @@ const Portfolio = () => {
           setUserProfileAvatar(null);
         }
 
-        const apiUserData = Array.isArray(user.userData)
-          ? (user.userData as unknown[])
+        let apiUserData = Array.isArray(user.userData)
+          ? (user.userData as Record<string, unknown>[])
           : [];
-        const apiGlobalUserData = Array.isArray(user.globalUserData)
-          ? (user.globalUserData as unknown[])
+        let apiGlobalUserData = Array.isArray(user.globalUserData)
+          ? (user.globalUserData as Record<string, unknown>[])
           : [];
-        // Paint indexer rows first so chain fill cannot block / crash the page.
+
+        const chainHint = postTxChainRefreshRef.current;
+        if (
+          chainHint &&
+          chainHint.address === userAddress &&
+          chainHint.until >= Date.now() &&
+          isCurrentFetchUser()
+        ) {
+          try {
+            const snap = await fetchUserPositionSnapshotFromChain(
+              userAddress,
+              chainHint.network as NetworkId,
+              chainHint.poolId,
+              chainHint.marketId
+            );
+            if (isCurrentFetchUser() && (snap.userRow || snap.globalRow)) {
+              const merged = mergeChainPositionIntoApiSnapshot(
+                apiUserData,
+                apiGlobalUserData,
+                snap.userRow,
+                snap.globalRow
+              );
+              apiUserData = merged.userData;
+              apiGlobalUserData = merged.globalUserData;
+              console.log(
+                "[Portfolio] Overlaid algod position on API snapshot:",
+                `${chainHint.network} ${chainHint.poolId}:${chainHint.marketId}`,
+                snap.userRow
+                  ? `scaledDeposits=${snap.userRow.scaledDeposits}`
+                  : "no user row"
+              );
+            }
+          } catch (chainOverlayError) {
+            console.warn(
+              "[Portfolio] post-tx chain overlay failed:",
+              chainOverlayError
+            );
+          }
+        }
+
+        if (!isCurrentFetchUser()) return;
+
+        // Paint rows first so chain fill cannot block / crash the page.
         try {
-          applyPortfolioComputed({ ...user, userData: apiUserData });
+          applyPortfolioComputed({
+            ...user,
+            userData: apiUserData,
+            globalUserData: apiGlobalUserData,
+          });
         } catch (applyError) {
           console.error("[Portfolio] applyPortfolioComputed failed:", applyError);
         }
@@ -4187,6 +4281,7 @@ const Portfolio = () => {
             applyPortfolioComputed({
               ...user,
               userData: [...apiUserData, ...filled],
+              globalUserData: apiGlobalUserData,
             });
           }
         } catch (fillError) {
@@ -4226,19 +4321,19 @@ const Portfolio = () => {
         });
       }
     } finally {
-      // Only clear the in-flight flag if this call is still the current one
-      if (fetchUserAddressRef.current === userAddress) {
-        fetchUserInFlight.current = false;
+      // This invocation holds the lock. A newer call only sets the queued flag.
+      fetchUserInFlight.current = false;
+      if (fetchUserQueued.current && fetchUserAddressRef.current) {
+        fetchUserQueued.current = false;
+        const nextAddress = fetchUserAddressRef.current;
+        void fetchUser(nextAddress);
       }
     }
   };
 
   useEffect(() => {
     if (!displayAddress) return;
-    // Reset in-flight state when address changes so new address always fetches
-    fetchUserInFlight.current = false;
-    fetchUserAddressRef.current = null;
-    fetchUser(displayAddress);
+    void fetchUser(displayAddress);
   }, [displayAddress]);
 
   // Fast market hydrate: session cache → bulk Phase A (no oracle) → gap-fill
@@ -9164,7 +9259,10 @@ const Portfolio = () => {
           })
         }
         onRefreshWalletBalance={refreshWalletBalance}
-        onRefreshMarket={() => displayAddress && fetchUser(displayAddress)}
+        onRefreshMarket={(scope) => {
+          if (!displayAddress) return;
+          void fetchUser(displayAddress, scope);
+        }}
       />
 
       <Dialog

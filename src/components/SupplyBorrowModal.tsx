@@ -69,6 +69,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useTokenPrice } from "@/hooks/useTokenPrice";
 import { calculateMaxBorrowAmount } from "@/services/adminService";
 import dorkfiAPIService from "@/services/dorkfiAPIService";
+import { rememberPortfolioChainRefresh } from "@/utils/portfolioChainRefresh";
+import { invalidateUserPositionRpcCache } from "@/utils/rpcReadCache";
 import {
   TX_CONFIRMATION_WAIT_ROUNDS,
   scheduleTransactionMetadataUpdate,
@@ -2144,6 +2146,15 @@ const SupplyBorrowModal = ({
     }
 
     const apiNet = pending.actualNetwork;
+    if (activeAccount?.address && pending.poolAppId && pending.marketContractId) {
+      invalidateUserPositionRpcCache(apiNet, activeAccount.address);
+      rememberPortfolioChainRefresh({
+        address: activeAccount.address,
+        network: apiNet,
+        poolId: pending.poolAppId,
+        marketId: pending.marketContractId,
+      });
+    }
     Promise.all([
       dorkfiAPIService.fetchFreshUserData(
         activeAccount.address,
