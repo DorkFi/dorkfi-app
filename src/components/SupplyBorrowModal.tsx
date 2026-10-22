@@ -69,6 +69,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useTokenPrice } from "@/hooks/useTokenPrice";
 import { calculateMaxBorrowAmount } from "@/services/adminService";
 import dorkfiAPIService from "@/services/dorkfiAPIService";
+import { rememberPortfolioChainRefresh } from "@/utils/portfolioChainRefresh";
+import { invalidateUserPositionRpcCache } from "@/utils/rpcReadCache";
 import {
   TX_CONFIRMATION_WAIT_ROUNDS,
   scheduleTransactionMetadataUpdate,
@@ -316,6 +318,15 @@ interface SupplyBorrowModalProps {
   } | null;
   userBorrowBalance?: number;
   onTransactionSuccess?: () => void;
+  /**
+   * Fired as soon as a supply or borrow confirms, before the API snapshot
+   * refresh. Portfolio uses this to paint the market from algod.
+   */
+  onChainPositionConfirmed?: (scope: {
+    network: string;
+    poolId: string;
+    marketId: string;
+  }) => void;
   onRefreshWalletBalance?: () => void;
   /** Refetch wallet / market balances when the user picks a different deposit route (e.g. fALGO vs ALGO). */
   onDepositRouteChange?: () => void | Promise<void>;
@@ -365,6 +376,7 @@ const SupplyBorrowModal = ({
   userGlobalData,
   userBorrowBalance = 0,
   onTransactionSuccess,
+  onChainPositionConfirmed,
   onRefreshWalletBalance,
   onDepositRouteChange,
   availableAssets,
@@ -2144,6 +2156,20 @@ const SupplyBorrowModal = ({
     }
 
     const apiNet = pending.actualNetwork;
+    if (activeAccount?.address && pending.poolAppId && pending.marketContractId) {
+      invalidateUserPositionRpcCache(apiNet, activeAccount.address);
+      rememberPortfolioChainRefresh({
+        address: activeAccount.address,
+        network: apiNet,
+        poolId: pending.poolAppId,
+        marketId: pending.marketContractId,
+      });
+      onChainPositionConfirmed?.({
+        network: apiNet,
+        poolId: pending.poolAppId,
+        marketId: pending.marketContractId,
+      });
+    }
     Promise.all([
       dorkfiAPIService.fetchFreshUserData(
         activeAccount.address,

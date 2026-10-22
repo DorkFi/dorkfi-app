@@ -74,6 +74,7 @@ import { usdPerTokenFromPortfolioMarketRow } from "@/utils/assetDecimals";
 import { portfolioWalletBalanceCacheKey } from "@/utils/portfolioWalletBalanceCacheKey";
 import { warmWithdrawModalRpc } from "@/utils/modalPrefetchHeavy";
 import { withRainbowkitHostDialogDismissed } from "@/wallet/xchainSignUi";
+import { invalidateUserPositionRpcCache } from "@/utils/rpcReadCache";
 
 /**
  * `buildPoolCollateralMarketRows` yields `liquidationThresholdPercent` as 0–100 (e.g. 85) or rarely
@@ -187,7 +188,11 @@ interface PortfolioModalsProps {
     networkId?: string,
     opts?: { poolId?: string; marketId?: string; configSymbol?: string }
   ) => void;
-  onRefreshMarket?: () => void;
+  onRefreshMarket?: (scope?: {
+    network: string;
+    poolId: string;
+    marketId: string;
+  }) => void;
   prefetchWithdrawIndicesRef?: React.MutableRefObject<
     | ((
         asset: string,
@@ -234,6 +239,36 @@ const PortfolioModals = ({
   const { activeAccount, signTransactions, activeWallet } = useWallet();
   const { currentNetwork } = useNetwork();
   const { toast } = useToast();
+
+  const refreshPositionFromChain = useCallback(
+    (
+      network: string | undefined,
+      poolId: string | number | undefined,
+      marketId: string | number | undefined
+    ) => {
+      if (!onRefreshMarket) return;
+      if (
+        !network ||
+        poolId == null ||
+        poolId === "" ||
+        marketId == null ||
+        marketId === ""
+      ) {
+        onRefreshMarket();
+        return;
+      }
+      if (activeAccount?.address) {
+        invalidateUserPositionRpcCache(network, activeAccount.address);
+      }
+      onRefreshMarket({
+        network,
+        poolId: String(poolId),
+        marketId: String(marketId),
+      });
+    },
+    [activeAccount?.address, onRefreshMarket]
+  );
+
   const [repayRainbowkitOverlaySuppressed, setRepayRainbowkitOverlaySuppressed] =
     useState(false);
 
@@ -1562,6 +1597,11 @@ const PortfolioModals = ({
         }
 
         if (activeAccount?.address) {
+          refreshPositionFromChain(
+            networkToUse,
+            token.poolId,
+            token.underlyingContractId
+          );
           Promise.all([
             dorkfiAPIService.fetchFreshUserData(
               activeAccount.address,
@@ -1581,16 +1621,21 @@ const PortfolioModals = ({
             ),
           ])
             .then(() => {
-              if (onRefreshMarket) {
-                setTimeout(() => {
-                  onRefreshMarket();
-                }, 1000);
-              }
+              refreshPositionFromChain(
+                networkToUse,
+                token.poolId,
+                token.underlyingContractId
+              );
             })
             .catch((error) => {
               console.error(
                 "Error calling fetchFreshUserData after withdraw:",
                 error
+              );
+              refreshPositionFromChain(
+                networkToUse,
+                token.poolId,
+                token.underlyingContractId
               );
             });
         }
@@ -1620,6 +1665,7 @@ const PortfolioModals = ({
       currentNetwork,
       onRefreshWalletBalance,
       onRefreshMarket,
+      refreshPositionFromChain,
     ]
   );
 
@@ -1962,10 +2008,13 @@ const PortfolioModals = ({
         onRefreshWalletBalance(repayModal.asset, networkToUse);
       }
 
-      // Wait for chain/indexer + API to catch up, then market + user; another beat before full portfolio fetch
-      // (so Borrowed + marketData reflect the repay; does not block returning txid below)
+      // Algod read paints the repay immediately. API snapshot refresh follows.
+      refreshPositionFromChain(
+        networkToUse,
+        token.poolId,
+        token.underlyingContractId
+      );
       const REPAY_SETTLE_BEFORE_API_MS = 2_000;
-      const REPAY_WAIT_AFTER_API_BEFORE_USER_FETCH_MS = 2_500;
       setTimeout(() => {
         void Promise.all([
           postRefreshMarketDataSnapshot(
@@ -1986,13 +2035,19 @@ const PortfolioModals = ({
           ),
         ])
           .then(() => {
-            setTimeout(() => {
-              onRefreshMarket();
-            }, REPAY_WAIT_AFTER_API_BEFORE_USER_FETCH_MS);
+            refreshPositionFromChain(
+              networkToUse,
+              token.poolId,
+              token.underlyingContractId
+            );
           })
           .catch((error) => {
             console.error("Error calling fetchFreshUserData after repay:", error);
-            setTimeout(() => onRefreshMarket(), REPAY_WAIT_AFTER_API_BEFORE_USER_FETCH_MS);
+            refreshPositionFromChain(
+              networkToUse,
+              token.poolId,
+              token.underlyingContractId
+            );
           });
       }, REPAY_SETTLE_BEFORE_API_MS);
 
@@ -2143,6 +2198,13 @@ const PortfolioModals = ({
                     )
                 : undefined
             }
+            onChainPositionConfirmed={(scope) => {
+              refreshPositionFromChain(
+                scope.network,
+                scope.poolId,
+                scope.marketId
+              );
+            }}
             onTransactionSuccess={async () => {
               // Refresh wallet balance immediately after successful transaction
               if (depositModal.asset && onRefreshWalletBalance) {
@@ -2203,6 +2265,9 @@ const PortfolioModals = ({
                       marketId: marketIdNum,
                     });
 
+                    // Paint from algod immediately; the API snapshot sweep can lag
+                    // many minutes and already stores a zero row for this market.
+                    refreshPositionFromChain(networkToUse, appIdNum, marketIdNum);
                     Promise.all([
                       dorkfiAPIService.fetchFreshUserData(
                         activeAccount.address,
@@ -2222,12 +2287,21 @@ const PortfolioModals = ({
                       ),
                     ])
                       .then(() => {
-                        onRefreshMarket();
+                        refreshPositionFromChain(
+                          networkToUse,
+                          appIdNum,
+                          marketIdNum
+                        );
                       })
                       .catch((error) => {
                         console.error(
                           "Error calling fetchFreshUserData after deposit:",
                           error
+                        );
+                        refreshPositionFromChain(
+                          networkToUse,
+                          appIdNum,
+                          marketIdNum
                         );
                       });
                   } else {
@@ -2241,20 +2315,22 @@ const PortfolioModals = ({
                         marketId: marketIdResolved,
                       }
                     );
+                    refreshPositionFromChain(
+                      networkToUse,
+                      depositModal.poolId,
+                      depositModal.marketId
+                    );
                   }
                 } catch (error) {
                   console.error(
                     "Error calling fetchFreshUserData after deposit:",
                     error
                   );
-                  // Don't throw - this is a background refresh, shouldn't block the UI
-                }
-
-                // Refresh market data after successful deposit
-                if (onRefreshMarket) {
-                  setTimeout(() => {
-                    onRefreshMarket();
-                  }, 1000); // Small delay to ensure transaction is fully processed
+                  refreshPositionFromChain(
+                    depositModal.network || currentNetwork,
+                    depositModal.poolId,
+                    depositModal.marketId
+                  );
                 }
               }
             }}
@@ -2462,11 +2538,11 @@ const PortfolioModals = ({
             userBorrowBalance={userBorrowBalance || 0}
             isLoadingBorrowGlobalData={isLoadingBorrowGlobalData}
             onTransactionSuccess={() => {
-              if (onRefreshMarket) {
-                setTimeout(() => {
-                  onRefreshMarket();
-                }, 1000);
-              }
+              refreshPositionFromChain(
+                borrowModal.network || currentNetwork,
+                borrowModal.poolId,
+                borrowModal.marketId
+              );
             }}
           />
         ) : (
@@ -2493,12 +2569,19 @@ const PortfolioModals = ({
             userBorrowBalance={userBorrowBalance || 0}
             isLoadingBorrowGlobalData={isLoadingBorrowGlobalData}
             poolCollateralMarkets={borrowPoolCollateralMarkets}
+            onChainPositionConfirmed={(scope) => {
+              refreshPositionFromChain(
+                scope.network,
+                scope.poolId,
+                scope.marketId
+              );
+            }}
             onTransactionSuccess={() => {
-              if (onRefreshMarket) {
-                setTimeout(() => {
-                  onRefreshMarket();
-                }, 1000);
-              }
+              refreshPositionFromChain(
+                borrowModal.network || currentNetwork,
+                borrowModal.poolId,
+                borrowModal.marketId
+              );
             }}
           />
         ))}
